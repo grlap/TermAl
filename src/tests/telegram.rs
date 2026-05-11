@@ -6069,3 +6069,78 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
     );
     assert_eq!(value["chatId"], json!(123));
 }
+
+#[test]
+fn kill_session_prunes_telegram_state_and_config_references() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-session-prune-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("state path should have a parent"))
+        .expect("settings dir should create");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "config": {
+                "enabled": true,
+                "botToken": "123456:secret",
+                "subscribedProjectIds": [project_id.clone()],
+                "defaultProjectId": project_id,
+                "defaultSessionId": session_id.clone()
+            },
+            "selectedSessionId": session_id.clone(),
+            "lastDigestHash": "old-digest",
+            "lastDigestMessageId": 44,
+            "forwardNextAssistantMessageSessionIds": [session_id.clone(), "other-session"],
+            "forwardNextAssistantMessageSessionId": session_id.clone(),
+            "assistantForwardingCursors": {
+                (session_id.clone()): {
+                    "messageId": "message-1",
+                    "textChars": 10
+                },
+                "other-session": {
+                    "messageId": "message-2",
+                    "textChars": 20
+                }
+            },
+            "chatId": 123
+        }))
+        .expect("fixture should encode"),
+    )
+    .expect("fixture should write");
+
+    state
+        .kill_session(&session_id)
+        .expect("session should kill");
+
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert!(value["config"].get("defaultSessionId").is_none());
+    assert!(value.get("selectedSessionId").is_none());
+    assert!(value.get("lastDigestHash").is_none());
+    assert!(value.get("lastDigestMessageId").is_none());
+    assert_eq!(
+        value["forwardNextAssistantMessageSessionIds"],
+        json!(["other-session"])
+    );
+    assert_eq!(
+        value["forwardNextAssistantMessageSessionId"],
+        json!("other-session")
+    );
+    assert!(
+        value["assistantForwardingCursors"]
+            .get(&session_id)
+            .is_none()
+    );
+    assert_eq!(
+        value["assistantForwardingCursors"]["other-session"]["messageId"],
+        json!("message-2")
+    );
+    assert_eq!(value["chatId"], json!(123));
+}

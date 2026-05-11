@@ -185,6 +185,13 @@ impl AppState {
             )
         };
 
+        if let Err(err) = self.prune_telegram_state_for_deleted_session(session_id) {
+            eprintln!(
+                "telegram settings> failed to prune deleted session `{session_id}`: {}",
+                err.message
+            );
+        }
+
         if let Some(runtime) = runtime_to_kill {
             if let Err(err) =
                 shutdown_removed_runtime(runtime, &format!("session `{session_id}`"))

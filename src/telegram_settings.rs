@@ -278,6 +278,35 @@ impl AppState {
         Ok(())
     }
 
+    fn prune_telegram_state_for_deleted_session(&self, session_id: &str) -> Result<(), ApiError> {
+        let _guard = telegram_settings_file_guard();
+        let mut file = self.load_telegram_bot_file()?;
+        let mut changed = false;
+
+        changed |= file
+            .state
+            .assistant_forwarding_cursors
+            .remove(session_id)
+            .is_some();
+        changed |= clear_forward_next_assistant_message_session_id(&mut file.state, session_id);
+        if file.state.selected_session_id.as_deref() == Some(session_id) {
+            changed |= clear_telegram_project_scoped_state(&mut file.state);
+        }
+        if file.config.default_session_id.as_deref() == Some(session_id) {
+            file.config.default_session_id = None;
+            changed = true;
+        }
+
+        if !changed {
+            return Ok(());
+        }
+
+        self.persist_telegram_bot_file(&file)?;
+        #[cfg(not(test))]
+        self.reconcile_telegram_relay_for_loaded_file(&file);
+        Ok(())
+    }
+
     fn sanitize_telegram_config_for_current_state(
         &self,
         mut config: TelegramUiConfig,
