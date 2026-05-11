@@ -651,6 +651,145 @@ describe("conversation overview map", () => {
     );
   });
 
+  it("falls back when a tail-window layout snapshot cannot be translated", () => {
+    const messages = Array.from({ length: 100 }, (_, index) =>
+      textMessage(`m${index + 1}`, {
+        text: `message ${index + 1}`,
+      }),
+    );
+    const layoutSnapshot = tailWindowLayoutSnapshot({
+      messages,
+      startIndex: 80,
+      count: 20,
+    });
+    const cases: Array<{
+      name: string;
+      layoutSnapshot: VirtualizedConversationLayoutSnapshot | null;
+    }> = [
+      {
+        name: "missing layout snapshot",
+        layoutSnapshot: null,
+      },
+      {
+        name: "full transcript snapshot",
+        layoutSnapshot: tailWindowLayoutSnapshot({
+          messages,
+          startIndex: 0,
+          count: messages.length,
+        }),
+      },
+      {
+        name: "empty layout message window",
+        layoutSnapshot: {
+          ...layoutSnapshot,
+          messages: [],
+        },
+      },
+      {
+        name: "first layout message missing from estimated rows",
+        layoutSnapshot: {
+          ...layoutSnapshot,
+          messages: [
+            {
+              ...layoutSnapshot.messages[0]!,
+              messageId: "missing-message",
+            },
+            ...layoutSnapshot.messages.slice(1),
+          ],
+        },
+      },
+      {
+        name: "non-contiguous layout message window",
+        layoutSnapshot: {
+          ...layoutSnapshot,
+          messages: layoutSnapshot.messages.map((message, index) =>
+            index === 1 ? { ...message, messageId: "m100" } : message,
+          ),
+        },
+      },
+    ];
+
+    cases.forEach(({ name, layoutSnapshot }) => {
+      expect(
+        buildConversationOverviewProjection({
+          layoutSnapshot,
+          maxHeightPx: 1_000,
+          messages,
+        }).viewportSnapshotTranslation,
+        name,
+      ).toBeNull();
+    });
+  });
+
+  it("translates a matching live viewport snapshot with a different top offset", () => {
+    const messages = Array.from({ length: 100 }, (_, index) =>
+      textMessage(`m${index + 1}`, {
+        text: `message ${index + 1}`,
+      }),
+    );
+    const layoutSnapshot = tailWindowLayoutSnapshot({
+      messages,
+      startIndex: 80,
+      count: 20,
+    });
+    const liveViewportSnapshot = {
+      ...viewportSnapshotFromLayout(layoutSnapshot),
+      viewportTopPx: 250,
+    };
+    const projection = buildConversationOverviewProjection({
+      layoutSnapshot,
+      maxHeightPx: 1_000,
+      messages,
+    });
+    const viewportProjection = projectConversationOverviewViewport(
+      projection,
+      liveViewportSnapshot,
+    );
+    const tailFirstItem = projection.items.find((item) => item.messageId === "m81");
+
+    expect(viewportProjection.viewportTopPx).toBeCloseTo(
+      ((tailFirstItem?.documentTopPx ?? 0) + liveViewportSnapshot.viewportTopPx) *
+        projection.scale,
+    );
+    expect(viewportProjection.viewportHeightPx).toBeCloseTo(
+      liveViewportSnapshot.viewportHeightPx * projection.scale,
+    );
+  });
+
+  it("falls back when a live viewport snapshot count drifts from its translation", () => {
+    const messages = Array.from({ length: 100 }, (_, index) =>
+      textMessage(`m${index + 1}`, {
+        text: `message ${index + 1}`,
+      }),
+    );
+    const layoutSnapshot = tailWindowLayoutSnapshot({
+      messages,
+      startIndex: 80,
+      count: 20,
+    });
+    const driftedViewportSnapshot = {
+      ...viewportSnapshotFromLayout(layoutSnapshot),
+      messageCount: layoutSnapshot.messageCount - 1,
+    };
+    const projection = buildConversationOverviewProjection({
+      layoutSnapshot,
+      maxHeightPx: 1_000,
+      messages,
+    });
+
+    expect(
+      projectConversationOverviewViewport(projection, driftedViewportSnapshot),
+    ).toEqual(
+      projectConversationOverviewViewport(
+        {
+          ...projection,
+          viewportSnapshotTranslation: null,
+        },
+        driftedViewportSnapshot,
+      ),
+    );
+  });
+
   it("hit-tests against true scaled bounds when visual minimum heights overlap", () => {
     const messages = Array.from({ length: 10 }, (_, index) =>
       textMessage(`m${index + 1}`, {
