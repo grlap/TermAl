@@ -119,6 +119,8 @@ type UseSessionRenderCallbacksParams = {
   latestAssistantMessageId: string | null;
   streamingAssistantTextMessageId: string | null;
   modelOptionsError: string | null;
+  // Local delegation affordances are intentionally all-or-nothing: Open,
+  // Insert, and Cancel share the same local-runtime routing gate.
   enableLocalDelegationActions: boolean;
   onArchiveCodexThread: (sessionId: string) => void;
   onCompactCodexThread: (sessionId: string) => void;

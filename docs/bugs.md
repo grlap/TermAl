@@ -347,32 +347,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 - Assert `console.error` was not called with "act"/"unmounted" warnings during the test.
 - Or stub `setIsDelegationSpawning` via spy and verify it isn't invoked post-unmount.
 
-## `createComposerDelegationRequest` is composer-scoped but generic name
-
-**Severity:** Note - `ui/src/delegation-commands.ts:254-268`. The helper accepts `Pick<Session, "agent" | "model">` and emits a fixed `mode: "reviewer"` / `writePolicy: { kind: "readOnly" }`. The current name implies "any composer-driven delegation" but the request shape is read-only-reviewer-only. A future consumer (e.g., MCP wrapper) wanting a non-reviewer or write-policy variant would mis-name intent if they reused this builder.
-
-**Current behavior:**
-- Composer-scoped name.
-- Fixed reviewer/readOnly request shape.
-- No comment guiding alternative builders.
-
-**Proposal:**
-- Keep the composer-scoped naming and add a note that other delegation kinds should add their own builder.
-- Or rename to `createReadOnlyReviewerDelegationRequest` to make the constraint explicit.
-
-## `enableLocalDelegationActions` is binary all-or-nothing without contract doc
-
-**Severity:** Note - `enableLocalDelegationActions` is passed as a single all-or-nothing boolean at `ui/src/SessionPaneView.render-callbacks.tsx:107,154,400`. The wire/docs/UX could grow to allow Open without Cancel (e.g., "view but don't mutate" remote sessions); the binary flag forecloses that. No comment captures the design intent of "all three are routed together by construction."
-
-**Current behavior:**
-- One boolean gates all three actions (open, insert, cancel).
-- Future contributors will be tempted to thread separate flags.
-- Symmetry intent not documented.
-
-**Proposal:**
-- Document the all-or-nothing semantic in a comment.
-- Or restructure as an action-config object the parent fills.
-
 ## Round 71 boundary helpers `ascii_word_boundary_at` and `ascii_word_boundary_after` are now byte-identical
 
 **Severity:** Low - round 71 unified both helpers around `ascii_word_boundary_between(value[index-1], value[index])` (closing the round-67 ledger entry "no longer mirror each other"). However, the two functions now have **identical** call shapes — they differ only in their name. A reader sees `ascii_word_boundary_at(haystack, idx)` and `ascii_word_boundary_after(haystack, idx + needle.len())` and assumes different semantics, but the bodies are byte-identical.

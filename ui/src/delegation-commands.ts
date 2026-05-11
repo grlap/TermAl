@@ -305,6 +305,8 @@ export function createComposerDelegationRequest(
   // The composer Delegate action defaults to read-only reviewer mode. Resolved
   // commands can override mode/write policy when the backend provides explicit
   // delegation defaults.
+  // Other delegation entry points should add their own builder instead of
+  // treating this composer default as a generic request factory.
   return {
     title: options.title?.trim() || delegationTitleFromPrompt(prompt),
     prompt,
