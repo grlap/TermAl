@@ -6416,6 +6416,46 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
 }
 
 #[test]
+fn delete_project_leaves_unrelated_telegram_config_file_unchanged() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-unrelated-project-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (deleted_project_id, _deleted_session_id) =
+        create_telegram_settings_project_and_session(&state);
+    let (remaining_project_id, remaining_session_id) =
+        create_telegram_settings_project_and_session(&state);
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("state path should have a parent"))
+        .expect("settings dir should create");
+    let fixture = serde_json::to_string(&json!({
+        "chatId": 123,
+        "config": {
+            "botToken": "123456:secret",
+            "defaultProjectId": remaining_project_id.clone(),
+            "defaultSessionId": remaining_session_id,
+            "enabled": true,
+            "subscribedProjectIds": [remaining_project_id]
+        }
+    }))
+    .expect("fixture should encode");
+    fs::write(&path, fixture.as_bytes()).expect("fixture should write");
+
+    state
+        .delete_project(&deleted_project_id)
+        .expect("project should delete");
+
+    assert_eq!(
+        fs::read(&path).expect("settings file should read"),
+        fixture.as_bytes()
+    );
+}
+
+#[test]
 fn kill_session_prunes_telegram_state_and_config_references() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let home = std::env::temp_dir().join(format!(
