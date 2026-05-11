@@ -597,21 +597,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 **Proposal:**
 - Attach a `Retry-After: 2` header, or add a stable `retryAfterSeconds` field to the error contract.
 
-## `subscribed_project_ids: Option<Vec<String>>` lacks `deserialize_nullable_marker_field` — `null` no-ops
-
-**Severity:** Medium - inconsistent with sibling PATCH fields. With default serde, `null` deserializes to `None` (treated identically to "field absent"), so `{"subscribedProjectIds": null}` silently means "do not update".
-
-`src/wire.rs:1063`. There is no test asserting the `null`-as-no-op behavior.
-
-**Current behavior:**
-- Other PATCH fields use `deserialize_nullable_marker_field`.
-- `subscribed_project_ids` does not.
-- `null` and absent are indistinguishable.
-
-**Proposal:**
-- Add a regression test asserting `{"subscribedProjectIds": null}` is no-op, OR
-- Switch to `deserialize_nullable_marker_field` with `Vec::new()` interpretation for explicit-null for symmetry.
-
 ## `get_session_tail` skips remote-proxy hydration that `get_session` performs
 
 **Severity:** High - the new tail-first path silently degrades for remote-proxy sessions, returning an empty tail instead of triggering upstream hydration.

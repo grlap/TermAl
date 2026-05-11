@@ -5031,9 +5031,15 @@ fn telegram_settings_request_nulls_clear_optional_fields() {
     assert_eq!(request.default_project_id, Some(None));
     assert_eq!(request.default_session_id, Some(None));
 
+    let null_project_list: UpdateTelegramConfigRequest =
+        serde_json::from_value(json!({ "subscribedProjectIds": null }))
+            .expect("request should deserialize");
+    assert_eq!(null_project_list.subscribed_project_ids, None);
+
     let missing: UpdateTelegramConfigRequest =
         serde_json::from_value(json!({})).expect("request should deserialize");
     assert_eq!(missing.bot_token, None);
+    assert_eq!(missing.subscribed_project_ids, None);
     assert_eq!(missing.default_project_id, None);
     assert_eq!(missing.default_session_id, None);
 
