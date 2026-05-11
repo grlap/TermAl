@@ -966,8 +966,22 @@ fn ascii_bytes_contains_word_ignore_case(haystack: &[u8], needle: &[u8]) -> bool
         .windows(needle.len())
         .enumerate()
         .any(|(index, candidate)| {
-            ascii_word_boundary_at(haystack, index)
-                && ascii_word_boundary_after(haystack, index + needle.len())
+            let end_index = index + needle.len();
+            let starts_on_boundary = ascii_word_boundary_between(
+                index
+                    .checked_sub(1)
+                    .and_then(|index| haystack.get(index).copied()),
+                haystack.get(index).copied(),
+            );
+            let ends_on_boundary = ascii_word_boundary_between(
+                end_index
+                    .checked_sub(1)
+                    .and_then(|index| haystack.get(index).copied()),
+                haystack.get(end_index).copied(),
+            );
+
+            starts_on_boundary
+                && ends_on_boundary
                 && candidate
                     .iter()
                     .zip(needle.iter())
@@ -975,22 +989,8 @@ fn ascii_bytes_contains_word_ignore_case(haystack: &[u8], needle: &[u8]) -> bool
         })
 }
 
-fn ascii_word_boundary_at(value: &[u8], index: usize) -> bool {
-    ascii_word_boundary_between(
-        index
-            .checked_sub(1)
-            .and_then(|index| value.get(index).copied()),
-        value.get(index).copied(),
-    )
-}
-
-fn ascii_word_boundary_after(value: &[u8], index: usize) -> bool {
-    ascii_word_boundary_between(
-        index.checked_sub(1).and_then(|index| value.get(index).copied()),
-        value.get(index).copied(),
-    )
-}
-
+// Call sites pass the neighboring bytes around ASCII-alphanumeric words. A
+// non-alphanumeric byte on either side is therefore a word boundary.
 fn ascii_word_boundary_between(before: Option<u8>, after: Option<u8>) -> bool {
     match (before, after) {
         (None, _) | (_, None) => true,

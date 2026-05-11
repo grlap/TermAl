@@ -268,21 +268,6 @@ Comments are documentation-only mitigation — they don't fail when the contract
 - Or refactor `wire_session_summary_from_record` to call `wire_session_from_record` and then strip messages/messages_loaded.
 - Or introduce a separate `SessionSummary` wire struct that omits `messages`/`messages_loaded` (eliminates the duplicate field list naturally).
 
-## `ascii_word_boundary_between` widens accept set vs. pre-refactor helpers
-
-**Severity:** Low - `src/telegram.rs:508-521`. `ascii_word_boundary_between` returns `true` whenever EITHER `before` or `after` is non-alphanumeric. The pre-refactor `ascii_word_boundary_at` returned false when `before` was alphanumeric AND `current` was non-alphanumeric.
-
-In practice `windows().enumerate()` only matches alphanumeric needles ("telegram"/"bot"), so the new `value[index]` byte will be alphanumeric and there's no current call-site regression — but the helper's name suggests a generic boundary check that no longer matches the original specialized behavior.
-
-**Current behavior:**
-- New helper widens the accept set.
-- No current call-site regression.
-- Helper name overstates generality.
-
-**Proposal:**
-- Document that this helper assumes the needle starts and ends with alphanumeric bytes.
-- Or keep call-site-specific helpers.
-
 ## Test bypasses internal mutation invariants for `wire_sessions_expose_remote_owner_metadata`
 
 **Severity:** Note - `src/state_accessors.rs:200-242`. The new test reaches into `state.inner.lock()` and directly mutates `inner.sessions[index].remote_id`. The test bypasses any normal mutation path (`session_mut_*`), so it doesn't exercise the mutation-stamp bookkeeping that real remote-proxy ingestion goes through.
@@ -346,34 +331,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 **Proposal:**
 - Assert `console.error` was not called with "act"/"unmounted" warnings during the test.
 - Or stub `setIsDelegationSpawning` via spy and verify it isn't invoked post-unmount.
-
-## Round 71 boundary helpers `ascii_word_boundary_at` and `ascii_word_boundary_after` are now byte-identical
-
-**Severity:** Low - round 71 unified both helpers around `ascii_word_boundary_between(value[index-1], value[index])` (closing the round-67 ledger entry "no longer mirror each other"). However, the two functions now have **identical** call shapes — they differ only in their name. A reader sees `ascii_word_boundary_at(haystack, idx)` and `ascii_word_boundary_after(haystack, idx + needle.len())` and assumes different semantics, but the bodies are byte-identical.
-
-`src/telegram.rs:492-521`. `ascii_word_boundary_after`'s `before`/`after` reference the byte BEFORE the call's `index` — the same pair as `ascii_word_boundary_at(value, index)`.
-
-**Current behavior:**
-- Both helpers delegate to `ascii_word_boundary_between` with identical argument shapes.
-- Names suggest distinct semantics; bodies are identical.
-- Misleading for future contributors.
-
-**Proposal:**
-- Inline both helpers into a single call at `ascii_bytes_contains_word_ignore_case`.
-- Or keep one helper and have the other delegate with an explanatory comment about intent at the call site.
-
-## `ascii_word_boundary_after` camelCase only handles lower→upper transitions
-
-**Severity:** Low - `src/telegram.rs:502-510`. The boundary detection treats `botX` as separable but not `BOTx` — `BOTtoken` (a 3-letter uppercase tag followed by a lowercase tail) would not be recognized as a context match. A construct like `TELEGRAMbot ...` or `BOTtoken=...` would not match `bot` or `telegram` context. Unlikely in real config, but worth pinning.
-
-**Current behavior:**
-- `botToken` matches (lower→upper).
-- `BOTtoken` does NOT match (upper→lower).
-- Asymmetric camelCase handling.
-
-**Proposal:**
-- Either accept and document the asymmetry (camelCase boundaries are conventionally lower→upper).
-- Or extend to also accept upper→lower and add a corresponding test case.
 
 ## Round 67 added 3 more bundled cases to `telegram_generic_token_redaction_requires_telegram_or_bot_word_context`
 
