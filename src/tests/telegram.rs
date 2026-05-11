@@ -5410,6 +5410,26 @@ fn telegram_test_rate_limit_rejects_immediate_retry_with_different_token() {
     reset_telegram_test_rate_limit_for_tests();
 }
 
+#[test]
+fn telegram_test_rate_limit_allows_retry_after_cooldown_expires() {
+    let _rate_limit_lock = TELEGRAM_TEST_RATE_LIMIT_TEST_LOCK
+        .lock()
+        .expect("telegram test rate-limit test mutex poisoned");
+    reset_telegram_test_rate_limit_for_tests();
+    let token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
+
+    check_telegram_test_rate_limit(&token).expect("first attempt should pass");
+    age_telegram_test_rate_limit_for_tests(
+        TELEGRAM_TEST_COOLDOWN + Duration::from_millis(1),
+    );
+    check_telegram_test_rate_limit(&token).expect("retry after cooldown should pass");
+    let err = check_telegram_test_rate_limit(&token)
+        .expect_err("successful retry should re-prime the cooldown");
+
+    assert_eq!(err.status, StatusCode::TOO_MANY_REQUESTS);
+    reset_telegram_test_rate_limit_for_tests();
+}
+
 #[tokio::test]
 async fn telegram_test_route_rate_limit_includes_retry_after_header() {
     let _rate_limit_lock = TELEGRAM_TEST_RATE_LIMIT_TEST_LOCK

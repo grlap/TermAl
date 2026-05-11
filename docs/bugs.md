@@ -1994,8 +1994,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   five separate skip conditions (lines 767-783): `allowDivergentTextRepairAfterNewerRevision === true`, session not found, `messagesLoaded !== false`, `messages.length > 0`, `messageCount` below threshold. Add at least one test per skip condition.
 - [ ] P2: Verify partial-adoption preserves `messageCount`:
   add `expect(sessionsRef.current[0]?.messageCount).toBe(150)` after the partial-adoption assertion in `app-live-state.test.ts`. A regression that drops or zeros `messageCount` in the partial path would still let the `messages.length === 100` assertion pass while breaking message-count rendering.
-- [ ] P2: Cover `check_telegram_test_rate_limit` cooldown expiration:
-  current tests cover same-token and different-token immediate retry rejection. Add a deterministic case proving a third call after >2s passes, using an injected clock or `tokio::time::pause`.
 - [ ] P2: Cover `prune_telegram_config_for_deleted_project` no-op early-return:
   call against a config that doesn't reference the target project; assert no disk write happens (file mtime unchanged or `Ok(())` returned without invoking persistence). The `telegram_configs_equal` early-return is currently uncovered.
 - [ ] P2: Strengthen forwarder armed-priority assertion:

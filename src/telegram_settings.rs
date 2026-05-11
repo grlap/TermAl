@@ -521,6 +521,14 @@ fn reset_telegram_test_rate_limit_for_tests() {
         .expect("telegram test rate limit mutex poisoned") = None;
 }
 
+#[cfg(test)]
+fn age_telegram_test_rate_limit_for_tests(age: Duration) {
+    *TELEGRAM_TEST_RATE_LIMIT
+        .lock()
+        .expect("telegram test rate limit mutex poisoned") =
+        Some(std::time::Instant::now() - age);
+}
+
 fn telegram_test_connection_error(err: anyhow::Error) -> ApiError {
     let detail = sanitize_telegram_log_detail(&err.to_string());
     let message = format!("Telegram connection test failed: {detail}");
