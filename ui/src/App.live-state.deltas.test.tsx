@@ -1799,6 +1799,165 @@ describe("App live state - delta-gap core", () => {
     });
   });
 
+  it.each([
+    {
+      label: "stopped",
+      status: "idle" as const,
+      terminalText: "Turn stopped by user.",
+    },
+    {
+      label: "failed",
+      status: "error" as const,
+      terminalText: "Turn failed: runtime channel closed.",
+    },
+  ])(
+    "keeps $label terminal message deltas visible across equal-revision state snapshots",
+    async ({ status, terminalText }) => {
+      await withSuppressedActWarnings(async () => {
+        const originalFetch = globalThis.fetch;
+        const originalEventSource = globalThis.EventSource;
+        const originalResizeObserver = globalThis.ResizeObserver;
+        const initialSession = makeSession("session-1", {
+          name: "Codex Session",
+          status: "active",
+          preview: "Partial output",
+          messagesLoaded: true,
+          messageCount: 2,
+          sessionMutationStamp: 10,
+          messages: [
+            {
+              id: "message-user-1",
+              type: "text",
+              timestamp: "10:00",
+              author: "you",
+              text: "Run the task",
+            },
+            {
+              id: "message-assistant-1",
+              type: "text",
+              timestamp: "10:01",
+              author: "assistant",
+              text: "Partial output",
+            },
+          ],
+        });
+        const terminalMessage = {
+          id: "message-terminal",
+          type: "text" as const,
+          timestamp: "10:02",
+          author: "assistant" as const,
+          text: terminalText,
+        };
+        const equalRevisionSummary = makeSession("session-1", {
+          ...initialSession,
+          status,
+          preview: terminalText,
+          messagesLoaded: false,
+          messageCount: 3,
+          sessionMutationStamp: 11,
+          messages: [],
+        });
+        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse(
+              makeStateResponse({
+                revision: 1,
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [initialSession],
+              }),
+            );
+          }
+          if (requestUrl.pathname === "/api/git/status") {
+            return jsonResponse({
+              ahead: 0,
+              behind: 0,
+              branch: "main",
+              files: [],
+              isClean: true,
+              repoRoot: "/tmp",
+              upstream: "origin/main",
+              workdir: "/tmp",
+            });
+          }
+
+          throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        vi.stubGlobal(
+          "EventSource",
+          EventSourceMock as unknown as typeof EventSource,
+        );
+        vi.stubGlobal(
+          "ResizeObserver",
+          ResizeObserverMock as unknown as typeof ResizeObserver,
+        );
+        const scrollIntoViewSpy = stubScrollIntoView();
+
+        try {
+          await renderApp();
+          const eventSource = latestEventSource();
+          await dispatchOpenedStateEvent(
+            eventSource,
+            makeStateResponse({
+              revision: 1,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [initialSession],
+            }),
+          );
+          await openSessionByName("Codex Session");
+          expect(screen.getAllByText("Partial output").length).toBeGreaterThan(0);
+
+          await act(async () => {
+            eventSource.dispatchNamedEvent("delta", {
+              type: "messageCreated",
+              revision: 2,
+              sessionId: "session-1",
+              messageId: terminalMessage.id,
+              messageIndex: 2,
+              messageCount: 3,
+              message: terminalMessage,
+              preview: terminalText,
+              status,
+              sessionMutationStamp: 11,
+            });
+            await flushUiWork();
+          });
+          await waitFor(() => {
+            expect(screen.getAllByText(terminalText).length).toBeGreaterThan(0);
+          });
+
+          await dispatchStateEvent(
+            eventSource,
+            makeStateResponse({
+              revision: 2,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [equalRevisionSummary],
+            }),
+          );
+
+          await waitFor(() => {
+            expect(screen.getAllByText(terminalText).length).toBeGreaterThan(0);
+            expect(
+              document.querySelector(".session-conversation-page")?.textContent,
+            ).toContain(terminalText);
+          });
+        } finally {
+          scrollIntoViewSpy.mockRestore();
+          restoreGlobal("fetch", originalFetch);
+          restoreGlobal("EventSource", originalEventSource);
+          restoreGlobal("ResizeObserver", originalResizeObserver);
+        }
+      });
+    },
+  );
+
   it("requests state resync when session hydration is ahead of the announced summary", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
