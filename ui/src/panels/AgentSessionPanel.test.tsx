@@ -3735,6 +3735,14 @@ describe("AgentSessionPanel conversation caching", () => {
       });
 
       expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
+      expect(screen.getByText("message-600")).toBeInTheDocument();
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
+      expect(screen.getByText("message-600")).toBeInTheDocument();
       expect(screen.queryByText("message-1")).not.toBeInTheDocument();
 
       await act(async () => {
