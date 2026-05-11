@@ -185,6 +185,25 @@ fn git_stage_action_supports_unstaged_edit_on_staged_rename() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
+// Pins that staging copy/rename status rows includes both the original and
+// current path; otherwise `git add -A -- <new>` can miss the source-side
+// metadata that turns a delete/add pair into the intended copy/rename update.
+#[test]
+fn git_stage_pathspecs_include_original_paths_for_copy_and_rename() {
+    assert_eq!(
+        collect_git_stage_pathspecs("docs/new.md", Some("docs/old.md"), Some("R")),
+        vec!["docs/old.md".to_owned(), "docs/new.md".to_owned()]
+    );
+    assert_eq!(
+        collect_git_stage_pathspecs("docs/copy.md", Some("docs/source.md"), Some("C")),
+        vec!["docs/source.md".to_owned(), "docs/copy.md".to_owned()]
+    );
+    assert_eq!(
+        collect_git_stage_pathspecs("docs/new.md", Some("docs/old.md"), Some(" R100 ")),
+        vec!["docs/old.md".to_owned(), "docs/new.md".to_owned()]
+    );
+}
+
 // Pins the staged/unstaged side mapping for Markdown enrichment:
 // staged reads HEAD → index, unstaged reads index → worktree, and a
 // staged view is marked read-only when the worktree has unstaged

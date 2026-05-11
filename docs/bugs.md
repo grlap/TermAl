@@ -867,21 +867,6 @@ The new design fixes the false-positive Low (verified by `accessToken=` and `csr
 - Add a comment to `redact_standalone_telegram_bot_tokens` explaining the precision-over-recall choice and listing the formats that intentionally leak so future contributors understand the design intent.
 - Reconsider if telemetry shows real leaks.
 
-## Copy/rename Git staging pathspec branch lacks coverage
-
-**Severity:** Low - the new staging helper includes original paths only for `C` and `R` status codes, but the added regression test covers only the non-rename modified-file path.
-
-`src/git.rs:273`. A regression that stops including the original path for copy/rename staging can leave source deletes or rename metadata unstaged without failing the current test.
-
-**Current behavior:**
-- `collect_git_stage_pathspecs` branches on the first status-code character.
-- Tests cover the `M` behavior.
-- Copy/rename behavior is not pinned.
-
-**Proposal:**
-- Add focused coverage for `Some("R")` and `Some("C")`.
-- Prefer a real repo staging scenario that proves both old and new paths are staged together.
-
 ## Tail-window size policy is duplicated across frontend layers
 
 **Severity:** Low - tail-first hydration and active transcript tail rendering both encode the same 20-message policy in separate private constants.
@@ -2801,8 +2786,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   click an async action, unmount before the promise settles, resolve/reject the promise, and assert the pending-state cleanup cannot update after unmount.
 - [ ] P2: Cover Git literal pathspec handling:
   after forcing literal pathspec behavior, add regression coverage for filenames containing `*`, `?`, `[]`, and `:(top)` so single-file Git actions cannot expand to other files.
-- [ ] P2: Cover copy/rename staging pathspecs:
-  add focused coverage for `collect_git_stage_pathspecs(..., Some("R"))` and `Some("C")`, preferably through a real repo scenario proving old and new paths are staged together.
 - [ ] P2: Cover production-path tool/delegation id collision:
   add a Rust test that drives both the Claude task path and the delegation creation path with overlapping ids (or document the assumption that uuid id spaces don't collide deterministically). The current test manually inserts the collision.
 - [ ] P2: Clean up AgentSessionPanel `act(...)` warnings:
