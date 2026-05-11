@@ -611,7 +611,7 @@ describe("App live state — reconnect", () => {
               // `isEqualRevisionAutomaticReconnectSnapshot`). A lower revision
               // here would be rejected as a backwards rollback because
               // same-server-instance revisions are monotonic.
-              revision: 2,
+              revision: 4,
               projects: [],
               sessions: [
                 makeSession("session-1", {
@@ -670,6 +670,7 @@ describe("App live state — reconnect", () => {
               name: "Codex Session",
               status: "active",
               preview: "test",
+              sessionMutationStamp: 1,
               messages: [
                 {
                   id: "message-user-1",
@@ -677,6 +678,13 @@ describe("App live state — reconnect", () => {
                   timestamp: "10:00",
                   author: "you",
                   text: "test",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "",
                 },
               ],
             }),
@@ -713,21 +721,15 @@ describe("App live state — reconnect", () => {
         // Intentionally omit dispatchOpen(): the pre-reopen gap delta should trigger
         // a resync while the 400 ms reconnect fallback remains armed behind it.
         eventSource.dispatchNamedEvent("delta", {
-          type: "messageCreated",
+          type: "textDelta",
           revision: 4,
           sessionId: "session-1",
           messageId: "message-assistant-1",
           messageIndex: 1,
           messageCount: 2,
-          message: {
-            id: "message-assistant-1",
-            type: "text",
-            timestamp: "10:01",
-            author: "assistant",
-            text: "",
-          },
+          delta: "Buffered preview",
           preview: "Buffered preview",
-          status: "active",
+          sessionMutationStamp: 2,
         });
       });
       await settleAsyncUi();
