@@ -331,6 +331,126 @@ describe("MessageCard", () => {
     expect(cancelButton).not.toBeDisabled();
   });
 
+  it("disables only the open-session parallel-agent action while pending", async () => {
+    const message: ParallelAgentsMessage = {
+      id: "message-parallel-agents-open-pending",
+      type: "parallelAgents",
+      author: "assistant",
+      timestamp: "10:02",
+      agents: [
+        {
+          id: "delegation-running",
+          source: "delegation",
+          title: "Review backend",
+          status: "running",
+          detail: "Checking Rust changes",
+        },
+      ],
+    };
+    let resolveAction!: () => void;
+    const pendingAction = new Promise<void>((resolve) => {
+      resolveAction = resolve;
+    });
+    const onOpenParallelAgentSession = vi.fn(() => pendingAction);
+    const onCancelParallelAgent = vi.fn();
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        onOpenParallelAgentSession={onOpenParallelAgentSession}
+        onCancelParallelAgent={onCancelParallelAgent}
+      />,
+    );
+
+    const openButton = screen.getByRole("button", { name: "Open session" });
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    fireEvent.click(openButton);
+    fireEvent.click(openButton);
+
+    expect(onOpenParallelAgentSession).toHaveBeenCalledTimes(1);
+    expect(openButton).toBeDisabled();
+    expect(openButton).toHaveAttribute("aria-busy", "true");
+    expect(cancelButton).not.toBeDisabled();
+
+    fireEvent.click(cancelButton);
+    expect(onCancelParallelAgent).toHaveBeenCalledWith("delegation-running");
+
+    await act(async () => {
+      resolveAction();
+      await pendingAction;
+    });
+
+    expect(openButton).not.toBeDisabled();
+  });
+
+  it("disables only the insert-result parallel-agent action while pending", async () => {
+    const message: ParallelAgentsMessage = {
+      id: "message-parallel-agents-insert-pending",
+      type: "parallelAgents",
+      author: "assistant",
+      timestamp: "10:02",
+      agents: [
+        {
+          id: "delegation-completed",
+          source: "delegation",
+          title: "Review frontend",
+          status: "completed",
+          detail: "No issues found",
+        },
+        {
+          id: "delegation-running",
+          source: "delegation",
+          title: "Review backend",
+          status: "running",
+          detail: "Checking Rust changes",
+        },
+      ],
+    };
+    let resolveAction!: () => void;
+    const pendingAction = new Promise<void>((resolve) => {
+      resolveAction = resolve;
+    });
+    const onInsertParallelAgentResult = vi.fn(() => pendingAction);
+    const onCancelParallelAgent = vi.fn();
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        onInsertParallelAgentResult={onInsertParallelAgentResult}
+        onCancelParallelAgent={onCancelParallelAgent}
+      />,
+    );
+
+    const rows = screen.getAllByRole("listitem");
+    const insertButton = within(rows[0]!).getByRole("button", {
+      name: "Insert result",
+    });
+    const cancelButton = within(rows[1]!).getByRole("button", {
+      name: "Cancel",
+    });
+    fireEvent.click(insertButton);
+    fireEvent.click(insertButton);
+
+    expect(onInsertParallelAgentResult).toHaveBeenCalledTimes(1);
+    expect(insertButton).toBeDisabled();
+    expect(insertButton).toHaveAttribute("aria-busy", "true");
+    expect(cancelButton).not.toBeDisabled();
+
+    fireEvent.click(cancelButton);
+    expect(onCancelParallelAgent).toHaveBeenCalledWith("delegation-running");
+
+    await act(async () => {
+      resolveAction();
+      await pendingAction;
+    });
+
+    expect(insertButton).not.toBeDisabled();
+  });
+
   it("keeps parallel-agent pending state scoped per action", async () => {
     const message: ParallelAgentsMessage = {
       id: "message-parallel-agents-pending-scoped",
