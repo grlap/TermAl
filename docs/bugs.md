@@ -911,19 +911,6 @@ The in-flight map suppresses duplicate `/api/sessions/{id}` fetches, but it does
 - After the first hydration completes, re-check the session transcript watermark before applying queued or retried deltas.
 - Add burst/concurrent same-session delta coverage proving only one remote fetch occurs and duplicate deltas do not mutate unloaded transcripts.
 
-## Text-repair hydration lacks live rendering regression coverage
-
-**Severity:** Medium - the lower-revision text-repair adoption path is covered only by a classifier unit test.
-
-The new adoption rule is intended to fix the user-visible bug where the latest assistant message stays hidden until an unrelated focus, scroll, or prompt rerender. The current coverage proves the pure classifier returns `adopted`, but it does not prove the live hook requests the flagged hydration, adopts the lower-revision session response after an unrelated newer live revision, flushes the session slice, and renders the repaired text immediately.
-
-**Current behavior:**
-- `classifyFetchedSessionAdoption` has a unit test for divergent text repair after a newer revision.
-- No hook or app-level regression drives `/api/sessions/{id}` through the live-state path and asserts immediate transcript rendering.
-
-**Proposal:**
-- Add a `useAppLiveState` or `App.live-state.reconnect` regression where text-repair hydration is requested, a newer unrelated live event advances `latestStateRevisionRef`, the session response resolves at the original request revision, and the active transcript updates without any extra user action.
-
 ## Timer-driven reconnect fallback can stop after `/api/state` progress before SSE proves recovery
 
 **Severity:** Medium - a fallback snapshot can refresh visible UI while the live EventSource transport is still unhealthy.
@@ -1694,8 +1681,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   force the final shutdown persist attempt to fail once and then succeed, and assert the worker does not exit before the successful write.
 - [ ] P2: Add non-send action restart live-stream delta-on-recreated-stream coverage:
   the round-13 fix proves `forceSseReconnect()` is called on cross-instance `adoptActionState` recovery, but does not dispatch live deltas through the recreated EventSource. Submit an approval/input-style action after backend restart, then dispatch assistant deltas on the new `EventSourceMock` and assert they render in the active transcript bubble.
-- [ ] P2: Add live text-repair hydration rendering regression:
-  drive the live-state hook or app through text-repair hydration after an unrelated newer live revision and assert the active transcript renders the repaired assistant text without scroll, focus, or another prompt.
 - [ ] P2: Add remote hydration dedupe production-path coverage:
   drive bursty same-session remote deltas through the production hydration path, assert only one remote session fetch is issued, and assert the in-flight guard is cleared after successful hydration.
 - [ ] P2: Add failed manual retry reconnect-rearm regression:

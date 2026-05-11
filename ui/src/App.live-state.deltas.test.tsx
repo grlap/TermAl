@@ -1003,6 +1003,181 @@ describe("App live state - delta-gap core", () => {
     });
   });
 
+  it("adopts lower-revision text-repair hydration after a newer unrelated live event", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const initialSession = makeSession("session-1", {
+        name: "Codex Session",
+        status: "active",
+        preview: "Source-F",
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 10,
+        messages: [
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Source-F",
+          },
+        ],
+      });
+      const repairedSession = makeSession("session-1", {
+        ...initialSession,
+        preview: "Source-Focused",
+        sessionMutationStamp: 12,
+        messages: [
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Source-Focused",
+          },
+        ],
+      });
+      const stateResync = createDeferred<Response>();
+      const sessionHydration = createDeferred<Response>();
+      let stateRequestCount = 0;
+      let sessionHydrationRequestCount = 0;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          stateRequestCount += 1;
+          if (stateRequestCount === 1) {
+            return jsonResponse(
+              makeStateResponse({
+                revision: 1,
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [initialSession],
+              }),
+            );
+          }
+          return stateResync.promise;
+        }
+        if (requestUrl.pathname === "/api/sessions/session-1") {
+          sessionHydrationRequestCount += 1;
+          return sessionHydration.promise;
+        }
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/tmp",
+            upstream: "origin/main",
+            workdir: "/tmp",
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [initialSession],
+          }),
+        );
+        await openSessionByName("Codex Session");
+        expect(screen.getAllByText("Source-F").length).toBeGreaterThan(0);
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "codexUpdated",
+            revision: 2,
+            codex: { notices: [] },
+          });
+          eventSource.dispatchNamedEvent("delta", {
+            type: "textDelta",
+            revision: 4,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 0,
+            messageCount: 1,
+            delta: "ocussed",
+            preview: "Source-Focussed",
+            sessionMutationStamp: 12,
+          });
+          await flushUiWork();
+        });
+
+        expect(screen.getAllByText("Source-Focussed").length).toBeGreaterThan(
+          0,
+        );
+        expect(screen.queryByText("Source-Focused")).not.toBeInTheDocument();
+        await waitFor(() => {
+          expect(sessionHydrationRequestCount).toBe(1);
+        });
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "codexUpdated",
+            revision: 5,
+            codex: { notices: [] },
+          });
+          sessionHydration.resolve(
+            jsonResponse({
+              revision: 4,
+              serverInstanceId: "test-instance",
+              session: repairedSession,
+            }),
+          );
+          await flushUiWork();
+        });
+        await waitFor(() => {
+          expect(screen.getAllByText("Source-Focused").length).toBeGreaterThan(
+            0,
+          );
+        });
+        expect(screen.queryByText("Source-Focussed")).not.toBeInTheDocument();
+
+        await act(async () => {
+          stateResync.resolve(
+            jsonResponse(
+              makeStateResponse({
+                revision: 5,
+                projects: [],
+                orchestrators: [],
+                workspaces: [],
+                sessions: [repairedSession],
+              }),
+            ),
+          );
+          await flushUiWork();
+        });
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("keeps streamed markdown table chunks intact across repeated revision gaps", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
