@@ -921,41 +921,133 @@ describe("SessionPaneView render callbacks", () => {
     expect(params.onComposerError).not.toHaveBeenCalled();
   });
 
-  it("renders remote delegation progress as display-only when local actions are disabled", () => {
-    const { hook } = renderCallbacks({ enableLocalDelegationActions: false });
-    const element = hook.result.current.renderSessionMessageCard(
-      {
-        id: "remote-delegations",
-        type: "parallelAgents",
-        author: "assistant",
-        timestamp: "10:10",
-        agents: [
-          {
-            id: "remote-delegation-running",
-            source: "delegation",
-            title: "Remote review",
-            status: "running",
-            detail: "Running on remote host",
-          },
-          {
-            id: "remote-delegation-completed",
-            source: "delegation",
-            title: "Remote completed review",
-            status: "completed",
-            detail: "Done on remote host",
-          },
-        ],
-      },
-      false,
-      vi.fn(),
-      vi.fn(),
-      vi.fn(),
-      vi.fn(),
+  it("renders remote delegation progress as display-only when local actions are disabled", async () => {
+    const message: Message = {
+      id: "remote-delegations",
+      type: "parallelAgents",
+      author: "assistant",
+      timestamp: "10:10",
+      agents: [
+        {
+          id: "remote-delegation-running",
+          source: "delegation",
+          title: "Remote review",
+          status: "running",
+          detail: "Running on remote host",
+        },
+        {
+          id: "remote-delegation-completed",
+          source: "delegation",
+          title: "Remote completed review",
+          status: "completed",
+          detail: "Done on remote host",
+        },
+        {
+          id: "remote-delegation-error",
+          source: "delegation",
+          title: "Remote failed review",
+          status: "error",
+          detail: "Failed on remote host",
+        },
+        {
+          id: "tool-agent",
+          source: "tool",
+          title: "Tool task",
+          status: "running",
+          detail: "Display-only task agent",
+        },
+      ],
+    };
+    const params = makeRenderCallbackParams({
+      enableLocalDelegationActions: false,
+    });
+    const hook = renderHook(
+      ({
+        enableLocalDelegationActions,
+      }: {
+        enableLocalDelegationActions: boolean;
+      }) =>
+        useSessionRenderCallbacks({
+          ...params,
+          enableLocalDelegationActions,
+        }),
+      { initialProps: { enableLocalDelegationActions: false } },
     );
-    render(element);
+    const renderCard = () =>
+      hook.result.current.renderSessionMessageCard(
+        message,
+        false,
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+      );
+    const rendered = render(renderCard());
 
     expect(screen.queryByRole("button", { name: "Open session" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Insert result" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(getDelegationStatusCommand).not.toHaveBeenCalled();
+    expect(getDelegationResultCommand).not.toHaveBeenCalled();
+    expect(cancelDelegationCommand).not.toHaveBeenCalled();
+    expect(params.onOpenConversationFromDiff).not.toHaveBeenCalled();
+    expect(params.onInsertReviewIntoPrompt).not.toHaveBeenCalled();
+    expect(params.onComposerError).not.toHaveBeenCalled();
+
+    act(() => {
+      hook.rerender({ enableLocalDelegationActions: true });
+    });
+    rendered.rerender(renderCard());
+
+    const rows = screen.getAllByRole("listitem");
+    expect(within(rows[3]!).queryByRole("button")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Open session" })).toHaveLength(
+      3,
+    );
+    expect(
+      screen.getAllByRole("button", { name: "Insert result" }),
+    ).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Cancel" })).toHaveLength(1);
+
+    vi.mocked(getDelegationStatusCommand).mockResolvedValueOnce(
+      makeDelegationStatusResponse(),
+    );
+    vi.mocked(getDelegationResultCommand).mockResolvedValueOnce(
+      makeDelegationResultPacket(),
+    );
+    vi.mocked(cancelDelegationCommand).mockResolvedValueOnce(
+      makeDelegationStatusResponse({ status: "running" }),
+    );
+
+    await act(async () => {
+      fireEvent.click(
+        within(rows[0]!).getByRole("button", { name: "Open session" }),
+      );
+      fireEvent.click(
+        within(rows[1]!).getByRole("button", { name: "Insert result" }),
+      );
+      fireEvent.click(within(rows[0]!).getByRole("button", { name: "Cancel" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(getDelegationStatusCommand).toHaveBeenCalledWith(
+      "session-1",
+      "remote-delegation-running",
+    );
+    expect(getDelegationResultCommand).toHaveBeenCalledWith(
+      "session-1",
+      "remote-delegation-completed",
+    );
+    expect(cancelDelegationCommand).toHaveBeenCalledWith(
+      "session-1",
+      "remote-delegation-running",
+    );
+    expect(params.onOpenConversationFromDiff).toHaveBeenCalledWith(
+      "child-1",
+      "pane-1",
+    );
+    expect(params.onInsertReviewIntoPrompt).toHaveBeenCalled();
+    expect(params.onComposerError).toHaveBeenLastCalledWith(null);
   });
 });

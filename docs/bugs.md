@@ -345,20 +345,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 - Memoize the three "disabled" undefined values as a single object.
 - Or pass the flag itself through and let the consumer decide.
 
-## "Renders remote delegation progress as display-only" test under-covers regression surface
-
-**Severity:** Low - `ui/src/SessionPaneView.render-callbacks.test.ts:586-622`. The new test only asserts no buttons render. It doesn't assert that the parent's three handler functions were never invoked, doesn't switch the flag mid-render, and doesn't test mixed-row scenarios. A regression that dropped only one action's guard would still pass — all three render no buttons together.
-
-**Current behavior:**
-- Single "no buttons rendered" assertion.
-- No per-action regression coverage.
-- No mid-render flag-flip test.
-
-**Proposal:**
-- Add an assertion `expect(params.onComposerError).not.toHaveBeenCalled()` after rendering.
-- Exercise a flag flip mid-test.
-- Or split into per-action coverage.
-
 ## `debug_assert_eq!` for `agent.source` clobber check is no-op in release builds
 
 **Severity:** Low - round-65 swapped the unconditional clobber for `debug_assert_eq!` at `src/claude.rs:581-585`. Production builds (release mode) will silently let a non-`Tool` value persist if a future code path ever drops a `Delegation`-sourced agent into this update branch. The contract is encoded but not enforced for release-mode users.
