@@ -962,6 +962,8 @@ fn ascii_bytes_contains_word_ignore_case(haystack: &[u8], needle: &[u8]) -> bool
         return false;
     }
 
+    // This scans a capped context window (`TOKEN_CONTEXT_WINDOW_BYTES`, 96 bytes)
+    // for two tiny ASCII needles, so the simple O(n*m) walk stays bounded.
     haystack
         .windows(needle.len())
         .enumerate()

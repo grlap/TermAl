@@ -416,19 +416,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Add a sibling test that drives both the Claude task path and the delegation creation path with overlapping ids.
 - Or document the assumption that uuid id spaces don't collide deterministically.
 
-## `ascii_bytes_contains_word_ignore_case` is O(n×m) byte scanning per candidate
-
-**Severity:** Low - `src/telegram.rs:474-490`. The 96-byte window keeps the cost bounded, but the function runs over every prefix containing a generic `token=` substring inside log detail strings up to `MAX_LOG_DETAIL_CHARS = 256`. Practical cost is negligible today; flagging because the helper is now load-bearing for the Telegram redaction allowlist gate.
-
-**Current behavior:**
-- Per-candidate O(n×m) byte scan.
-- 96-byte cap bounds the cost.
-- No `memchr` or vectorized comparison.
-
-**Proposal:**
-- Document the O(n×m) bound and the 96-byte cap.
-- Or use `memchr`/`bytes_eq_ignore_ascii_case` patterns if input ever grows.
-
 ## `cancelDelegation` `it.each` test pins running/completed/canceled as identical
 
 **Severity:** Note - `ui/src/SessionPaneView.render-callbacks.test.ts:493-527` `it.each(["canceled", "completed", "running"])` lumps three statuses behind a single assertion. The user-visible UX for `running` (cancel acknowledged, child still running) deserves a different message than `completed` or `canceled`, but the test pins them as identical no-error outcomes — locking in the bugs.md-flagged inconsistency.
