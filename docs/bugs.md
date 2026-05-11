@@ -1964,8 +1964,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   current test exercises only `wheel` of seven listeners (scroll, wheel, keydown, touchstart, touchmove, touchend, touchcancel). Add scroll-near-top (scrollTop = 50, fire scroll, expect hydration), keydown (ArrowUp/Home/PageUp dispatch), touchstart+touchmove with positive deltaY (pull-down) producing hydration, and a NEGATIVE control: `event.ctrlKey` wheel with `deltaY: -120` should NOT hydrate.
 - [ ] P2: Assert one-shot hydration in demand-driven hydration test:
   after the wheel triggers hydration, fire wheel again and assert no further state churn (e.g., rendering doesn't re-mount, listeners are torn down because the effect's early-return fires after `hydrated` is true).
-- [ ] P2: Assert listeners removed on unmount in demand-driven hydration test:
-  spy on `node.removeEventListener` and assert each event name is removed on unmount/sessionId change. A leak that retains a listener on a detached scrollNode would not be caught.
 - [ ] P2: Cover touch hydration semantics in `AgentSessionPanel.test.tsx`:
   dispatch touchstart at clientY=100, then touchmove at clientY=50 (negative delta, pull-up) → no hydration. Then touchstart at clientY=100, touchmove at clientY=200 (pull-down) → hydration. Verify touchend resets `lastTouchClientY` so the next touchstart starts fresh.
 - [ ] P2: Cover same-size tail-window overview translation shifts:

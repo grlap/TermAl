@@ -4074,7 +4074,7 @@ describe("AgentSessionPanel conversation caching", () => {
     window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
     try {
       const initialMessages = makeTextMessages(600);
-      renderSessionPanelWithDefaults({
+      const { unmount } = renderSessionPanelWithDefaults({
         activeSession: makeSession("active-session", {
           status: "idle",
           messages: initialMessages,
@@ -4127,6 +4127,17 @@ describe("AgentSessionPanel conversation caching", () => {
       });
       expect(documentKeydownAdds).toBe(baselineDocumentKeydownAdds);
       expect(documentKeydownRemoves).toBe(baselineDocumentKeydownRemoves);
+
+      unmount();
+
+      scrollNodeDemandEvents.forEach((eventName) => {
+        expect(removeCounts.get(eventName)).toBeGreaterThanOrEqual(
+          (baselineRemoveCounts.get(eventName) ?? 0) + 1,
+        );
+      });
+      expect(documentKeydownRemoves).toBeGreaterThanOrEqual(
+        baselineDocumentKeydownRemoves + 1,
+      );
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       document.addEventListener = originalDocumentAdd;
