@@ -569,20 +569,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 **Proposal:**
 - Split into `pure_validate_telegram_config(...) -> Result<TelegramConfigNormalization, ApiError>` + `apply_telegram_config_normalization(...)` outside the lock.
 
-## `SESSION_TAIL_HYDRATION_MAX_MESSAGES = 500` silent cap with no signal to caller
-
-**Severity:** Medium - `message_limit.min(SESSION_TAIL_HYDRATION_MAX_MESSAGES)` truncates without a status code, header, or response field. Future callers cannot detect that they got a different prefix than they asked for.
-
-`src/state_accessors.rs:213`. Today the only caller hard-codes 100, so dormant. But the contract is "you can ask for any N; you get back min(N, 500) messages with no indication you were capped." A future caller (Telegram digest, mobile, batch export, or the same UI raised to 1000 for richer first-paint) cannot distinguish "I asked for 800, got 500 because cap" from "I asked for 800, the session has 500" without recomputing from `message_count` minus `messages.length` minus a guess at where `start_index` landed.
-
-**Current behavior:**
-- `tail=600` returns 500 messages with no diagnostic.
-- No `Content-Range`-style header or response field.
-- Frontend has no way to detect the cap was applied.
-
-**Proposal:**
-- Either (a) reflect the cap in the response (e.g., `messages_window: { offset, limit, total }` field on `SessionResponse`), (b) reject `tail` values above the cap with `ApiError::bad_request` naming the limit so callers know to coordinate, or (c) at minimum cross-reference the cap constant in the frontend constant's doc-comment so a bump on either side prompts review.
-
 ## Wire projection layer owns `messages_loaded` SEMANTIC field for partial case
 
 **Severity:** Medium - `wire_session_tail_from_record` decides `messages_loaded` based on whether the slice covers the whole transcript AND the source is loaded. This is wire-semantics decision (UI uses `messagesLoaded: false` to mean "still adopt me, but don't trust messages.length === messageCount") that lives in the projection helper.
@@ -2086,7 +2072,7 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Add intermediate-checkpoint assertion to the deferred-tail-window test:
   `AgentSessionPanel.test.tsx:1493-1525` asserts only that the rail is absent immediately and present after 1.5s of advanced timers. A regression that made the rail render *immediately* (defeating the deferral) would still pass the post-advance assertion. Add an intermediate `act(() => vi.advanceTimersByTime(100))` checkpoint asserting the rail is *still* absent. Or assert directly on a transcript-hydration symptom (count of mounted message slots is small at t=0 and large at t=1500ms).
 - [ ] P2: Add `get_session_tail` boundary and error coverage:
-  `src/tests/http_routes.rs:138` covers only happy path (`tail=3` on 5 messages). Add cases for (a) `tail=0` on a populated session asserting `messages: [], messages_loaded: false`, (b) `tail >= len(messages)` where `start_index == 0` asserting `messages_loaded` propagates from the source, (c) `tail > SESSION_TAIL_HYDRATION_MAX_MESSAGES = 500` asserting the silent cap (and ideally fail-loud after the cap-disclosure fix lands), (d) missing session id 404, (e) hidden session, (f) `?tail=abc` malformed value, (g) tail-then-full id-overlap proving the wire-level guarantee.
+  `src/tests/http_routes.rs:138` covers the happy path, `tail=0`, malformed `?tail=abc`, and `tail > SESSION_TAIL_HYDRATION_MAX_MESSAGES = 500`. Add remaining cases for (a) `tail >= len(messages)` where `start_index == 0` asserting `messages_loaded` propagates from the source, (b) missing session id 404, (c) hidden session, (d) tail-then-full id-overlap proving the wire-level guarantee.
 - [ ] P2: Cover the four uncovered `tailAdoptOutcome` branches in `app-live-state.test.ts`:
   the new "adopts a large-session tail" test exercises only `partial`. Add one focused case per remaining outcome: (a) `adopted` (tail returns full transcript when backend has fewer than 100 messages with `messages_loaded: true` — short-circuits the full fetch), (b) `restartResync` (different `serverInstanceId`), (c) `stateResync` (revision gap), (d) `stale` (lower revision). Each branch has distinct side effects (`hydratedSessionIdsRef.add`, `hydrationRestartResyncPendingRef.current = true`, `requestActionRecoveryResyncRef`, fall through to full fetch).
 - [ ] P2: Cover the tail-fetch mismatch path in `app-live-state.test.ts`:

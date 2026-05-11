@@ -241,6 +241,51 @@ async fn get_session_route_rejects_zero_tail_limit() {
     );
 }
 
+// Pins `GET /api/sessions/{id}?tail=N` above the backend cap: callers must get
+// an explicit validation error instead of an unannounced truncated window.
+#[tokio::test]
+async fn get_session_route_rejects_tail_limit_above_cap() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let app = app_router(state.clone());
+    let created = state
+        .create_session(CreateSessionRequest {
+            name: Some("Route Session Oversized Tail".to_owned()),
+            agent: None,
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("session should be created");
+
+    let (status, response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/sessions/{}?tail={}",
+                created.session_id,
+                SESSION_TAIL_HYDRATION_MAX_MESSAGES + 1
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response.get("error").and_then(Value::as_str),
+        Some("session tail must be at most 500")
+    );
+}
+
 // Pins malformed query handling on routes that opt into the project envelope:
 // Axum query extractor rejections must be returned as JSON `{ "error": ... }`
 // instead of the default plain-text body.

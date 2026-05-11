@@ -2,9 +2,9 @@
 // rendering aligned so partial hydration and visible transcript slicing do not
 // disagree about how many recent messages are immediately available.
 //
-// Backend `/api/sessions/{id}?tail=N` currently caps requests at
+// Backend `/api/sessions/{id}?tail=N` rejects requests above
 // `SESSION_TAIL_HYDRATION_MAX_MESSAGES` in `src/state_accessors.rs`; keep this
-// window below that cap unless the API starts reporting the effective limit.
+// window below that cap unless the API contract changes.
 export const SESSION_TAIL_WINDOW_MESSAGE_COUNT = 20;
 
 // Tail-first hydration adds a round trip before the full transcript fetch, so

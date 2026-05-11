@@ -134,9 +134,17 @@ async fn get_session(
     AxumPath(session_id): AxumPath<String>,
     query: Result<Query<GetSessionQuery>, QueryRejection>,
 ) -> Result<Response, ApiError> {
-    let Query(query) = query.map_err(|rejection| api_query_rejection("session query", rejection))?;
+    let Query(query) =
+        query.map_err(|rejection| api_query_rejection("session query", rejection))?;
     if matches!(query.tail, Some(0)) {
         return Err(ApiError::bad_request("session tail must be at least 1"));
+    }
+    if let Some(message_limit) = query.tail {
+        if message_limit > SESSION_TAIL_HYDRATION_MAX_MESSAGES {
+            return Err(ApiError::bad_request(format!(
+                "session tail must be at most {SESSION_TAIL_HYDRATION_MAX_MESSAGES}"
+            )));
+        }
     }
 
     let body = run_blocking_api(move || {
@@ -544,13 +552,10 @@ impl AppState {
 }
 
 fn latest_project_prompt_target_session(sessions: &[SessionRecord]) -> Option<&SessionRecord> {
-    sessions
-        .iter()
-        .rev()
-        .find(|record| {
-            record.session.parent_delegation_id.is_none()
-                && record.session.status != SessionStatus::Error
-        })
+    sessions.iter().rev().find(|record| {
+        record.session.parent_delegation_id.is_none()
+            && record.session.status != SessionStatus::Error
+    })
 }
 
 /// Runs blocking API.
@@ -599,7 +604,8 @@ async fn create_session_delegation(
     State(state): State<AppState>,
     request: Result<Json<CreateDelegationRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<DelegationResponse>), ApiError> {
-    let Json(request) = request.map_err(|rejection| api_json_rejection("delegation request", rejection))?;
+    let Json(request) =
+        request.map_err(|rejection| api_json_rejection("delegation request", rejection))?;
     let response =
         run_blocking_api(move || state.create_read_only_delegation(&parent_session_id, request))
             .await?;
@@ -646,10 +652,8 @@ async fn create_delegation_wait(
 ) -> Result<(StatusCode, Json<DelegationWaitResponse>), ApiError> {
     let Json(request) =
         request.map_err(|rejection| api_json_rejection("delegation wait request", rejection))?;
-    let response = run_blocking_api(move || {
-        state.create_delegation_wait(&parent_session_id, request)
-    })
-    .await?;
+    let response =
+        run_blocking_api(move || state.create_delegation_wait(&parent_session_id, request)).await?;
     Ok((StatusCode::CREATED, Json(response)))
 }
 
@@ -658,8 +662,7 @@ async fn list_session_markers(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ConversationMarkersResponse>, ApiError> {
-    let response =
-        run_blocking_api(move || state.list_conversation_markers(&session_id)).await?;
+    let response = run_blocking_api(move || state.list_conversation_markers(&session_id)).await?;
     Ok(Json(response))
 }
 
@@ -669,8 +672,8 @@ async fn create_session_marker(
     State(state): State<AppState>,
     request: Result<Json<CreateConversationMarkerRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ConversationMarkerResponse>), ApiError> {
-    let Json(request) =
-        request.map_err(|rejection| api_json_rejection("conversation marker request", rejection))?;
+    let Json(request) = request
+        .map_err(|rejection| api_json_rejection("conversation marker request", rejection))?;
     let response =
         run_blocking_api(move || state.create_conversation_marker(&session_id, request)).await?;
     Ok((StatusCode::CREATED, Json(response)))
@@ -682,11 +685,12 @@ async fn update_session_marker(
     State(state): State<AppState>,
     request: Result<Json<UpdateConversationMarkerRequest>, JsonRejection>,
 ) -> Result<Json<ConversationMarkerResponse>, ApiError> {
-    let Json(request) =
-        request.map_err(|rejection| api_json_rejection("conversation marker request", rejection))?;
-    let response =
-        run_blocking_api(move || state.update_conversation_marker(&session_id, &marker_id, request))
-            .await?;
+    let Json(request) = request
+        .map_err(|rejection| api_json_rejection("conversation marker request", rejection))?;
+    let response = run_blocking_api(move || {
+        state.update_conversation_marker(&session_id, &marker_id, request)
+    })
+    .await?;
     Ok(Json(response))
 }
 

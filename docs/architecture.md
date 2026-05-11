@@ -231,9 +231,9 @@ unloaded and retry later rather than treating HTTP success as full transcript
 hydration.
 
 `GET /api/sessions/{id}?tail=N` is the local tail-first hydration shortcut. It
-requires `N >= 1`, silently caps `N` at
-`SESSION_TAIL_HYDRATION_MAX_MESSAGES = 500`, and returns the newest messages
-while preserving the full `messageCount`. Tail responses keep
+requires `1 <= N <= SESSION_TAIL_HYDRATION_MAX_MESSAGES` (`500`); out-of-range
+values return `400` instead of silently changing the requested window. Valid
+tail requests return the newest messages while preserving the full `messageCount`. Tail responses keep
 `messagesLoaded: false` unless the returned window covers the whole loaded
 transcript; clients must treat that shape as a partial tail window and still
 fetch the full session. The tail response and the later full response are
