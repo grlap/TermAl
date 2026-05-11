@@ -358,21 +358,6 @@ A regression that left the button stuck in "Delegating..." after a thrown error 
 **Proposal:**
 - Add `expect(screen.queryByRole("button", { name: "Delegating..." })).not.toBeInTheDocument()` or assert "Delegate" is back as the button name.
 
-## `delegation-commands.ts` header comment doesn't reflect new composer helpers
-
-**Severity:** Note - `ui/src/delegation-commands.ts:1-4`. Round 69 extracted composer-delegation helpers (`delegationTitleFromPrompt`, `createComposerDelegationRequest`, `resolveComposerDelegationAvailability`) into this file, but the file header still scopes the file to "Phase 2/3 delegation command surface that UI/MCP wrappers can bind to" — composer wiring helpers are not strictly transport.
-
-Per CLAUDE.md the project enforces split-file headers describing what each file owns vs. doesn't own. The new public API surface is a distinct contract from "MCP wrapper command bindings".
-
-**Current behavior:**
-- Header still scopes file to MCP wrapper bindings.
-- Composer-side helpers added without header update.
-- Future readers won't know whether to add new composer helpers here or in the panel.
-
-**Proposal:**
-- Extend the file header to call out "composer-side delegation availability/title/request helpers".
-- Link the consumer (`SessionPaneView.tsx`).
-
 ## `resolveComposerDelegationAvailability` round-trips `parentSession` in success outcome
 
 **Severity:** Note - `ui/src/delegation-commands.ts:274-297`. The function accepts `parentSession: Session` and returns it back via the success branch (`{ outcome: "available", parentSession }`). The caller already holds a `Session`. This reads like the helper is producing data, but it's just a type-narrowing convenience. Future callers who already hold a `Session` may shadow it confusingly.
