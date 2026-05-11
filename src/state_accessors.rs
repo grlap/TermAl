@@ -284,7 +284,7 @@ impl AppState {
 
     fn wire_session_summary_from_record(record: &SessionRecord) -> Session {
         let session = &record.session;
-        Session {
+        let summary = Session {
             id: session.id.clone(),
             name: session.name.clone(),
             emoji: session.emoji.clone(),
@@ -315,7 +315,58 @@ impl AppState {
             pending_prompts: session.pending_prompts.clone(),
             session_mutation_stamp: Some(record.mutation_stamp),
             parent_delegation_id: session.parent_delegation_id.clone(),
-        }
+        };
+        Self::debug_assert_session_summary_matches_full_projection(record, &summary);
+        summary
+    }
+
+    #[cfg(debug_assertions)]
+    fn debug_assert_session_summary_matches_full_projection(
+        record: &SessionRecord,
+        summary: &Session,
+    ) {
+        let full = Self::wire_session_from_record(record);
+        debug_assert_eq!(summary.id, full.id);
+        debug_assert_eq!(summary.name, full.name);
+        debug_assert_eq!(summary.emoji, full.emoji);
+        debug_assert_eq!(summary.agent, full.agent);
+        debug_assert_eq!(summary.workdir, full.workdir);
+        debug_assert_eq!(summary.project_id, full.project_id);
+        debug_assert_eq!(summary.remote_id, full.remote_id);
+        debug_assert_eq!(summary.model, full.model);
+        debug_assert_eq!(summary.model_options, full.model_options);
+        debug_assert_eq!(summary.approval_policy, full.approval_policy);
+        debug_assert_eq!(summary.reasoning_effort, full.reasoning_effort);
+        debug_assert_eq!(summary.sandbox_mode, full.sandbox_mode);
+        debug_assert_eq!(summary.cursor_mode, full.cursor_mode);
+        debug_assert_eq!(summary.claude_effort, full.claude_effort);
+        debug_assert_eq!(summary.claude_approval_mode, full.claude_approval_mode);
+        debug_assert_eq!(summary.gemini_approval_mode, full.gemini_approval_mode);
+        debug_assert_eq!(summary.external_session_id, full.external_session_id);
+        debug_assert_eq!(
+            summary.agent_commands_revision,
+            full.agent_commands_revision
+        );
+        debug_assert_eq!(summary.codex_thread_state, full.codex_thread_state);
+        debug_assert_eq!(summary.status, full.status);
+        debug_assert_eq!(summary.preview, full.preview);
+        debug_assert_eq!(summary.message_count, full.message_count);
+        debug_assert_eq!(summary.markers, full.markers);
+        debug_assert_eq!(
+            serde_json::to_value(&summary.pending_prompts)
+                .expect("summary pending prompts should serialize"),
+            serde_json::to_value(&full.pending_prompts)
+                .expect("full pending prompts should serialize")
+        );
+        debug_assert_eq!(summary.session_mutation_stamp, full.session_mutation_stamp);
+        debug_assert_eq!(summary.parent_delegation_id, full.parent_delegation_id);
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn debug_assert_session_summary_matches_full_projection(
+        _record: &SessionRecord,
+        _summary: &Session,
+    ) {
     }
 
     /// Builds a metadata-first state snapshot with guaranteed-fresh agent readiness.

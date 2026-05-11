@@ -175,22 +175,6 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 - Move the token to an OS secret store, or keep token configuration env-only until protected storage exists.
 - If file persistence stays, add explicit Windows ACL handling and document backup/sync exposure.
 
-## `wire_session_from_record` and `wire_session_summary_from_record` parallel paths still risk drift
-
-**Severity:** Note - `src/state_accessors.rs:285-318`. Round 72 added comments to both helpers reminding callers to keep them in sync, but the structural risk remains: any new field added to wire `Session` must be remembered in the explicit struct literal at `wire_session_summary_from_record`. The first proposal (refactor to a single field list) was not adopted; the second (debug-assert summary equals full for shared fields) was also not adopted.
-
-Comments are documentation-only mitigation — they don't fail when the contract drifts.
-
-**Current behavior:**
-- Round 72 added sync-reminder comments at both call sites.
-- Summary form still lists fields explicitly; full form uses clone-and-modify.
-- New `record.foo` fields can silently miss the summary path.
-
-**Proposal:**
-- Add a debug-assert that the summary form's output equals the full form's output for shared fields.
-- Or refactor `wire_session_summary_from_record` to call `wire_session_from_record` and then strip messages/messages_loaded.
-- Or introduce a separate `SessionSummary` wire struct that omits `messages`/`messages_loaded` (eliminates the duplicate field list naturally).
-
 ## Test bypasses internal mutation invariants for `wire_sessions_expose_remote_owner_metadata`
 
 **Severity:** Note - `src/state_accessors.rs:200-242`. The new test reaches into `state.inner.lock()` and directly mutates `inner.sessions[index].remote_id`. The test bypasses any normal mutation path (`session_mut_*`), so it doesn't exercise the mutation-stamp bookkeeping that real remote-proxy ingestion goes through.
