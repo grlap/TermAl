@@ -299,6 +299,42 @@ describe("telegram API helpers", () => {
     });
   });
 
+  it("posts Telegram config updates without omitted optional keys", async () => {
+    const fetchMock = stubJsonFetch();
+
+    await updateTelegramConfig({
+      enabled: false,
+      subscribedProjectIds: [],
+    });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      enabled: false,
+      subscribedProjectIds: [],
+    });
+  });
+
+  it("posts Telegram config updates with explicit token and session strings", async () => {
+    const fetchMock = stubJsonFetch();
+
+    await updateTelegramConfig({
+      enabled: true,
+      botToken: "123:abc",
+      subscribedProjectIds: ["project-1"],
+      defaultProjectId: "project-1",
+      defaultSessionId: "session-1",
+    });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      enabled: true,
+      botToken: "123:abc",
+      subscribedProjectIds: ["project-1"],
+      defaultProjectId: "project-1",
+      defaultSessionId: "session-1",
+    });
+  });
+
   it("posts Telegram connection tests to the test route", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
       new Response(
