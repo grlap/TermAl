@@ -77,6 +77,86 @@ function makeTextMessages(count: number): Message[] {
   }));
 }
 
+function installLongTranscriptScrollNodeMocks(scrollNode: HTMLElement) {
+  const originalGetBoundingClientRect =
+    Element.prototype.getBoundingClientRect;
+  let scrollTop = 20_000;
+
+  Object.defineProperty(scrollNode, "clientHeight", {
+    configurable: true,
+    get: () => 600,
+  });
+  Object.defineProperty(scrollNode, "clientWidth", {
+    configurable: true,
+    get: () => 1000,
+  });
+  Object.defineProperty(scrollNode, "scrollHeight", {
+    configurable: true,
+    get: () => 24_000,
+  });
+  Object.defineProperty(scrollNode, "scrollTop", {
+    configurable: true,
+    get: () => scrollTop,
+    set: (nextValue: number) => {
+      scrollTop = nextValue;
+    },
+  });
+
+  Element.prototype.getBoundingClientRect =
+    function getBoundingClientRectMock() {
+      const element = this as HTMLElement;
+      if (element === scrollNode) {
+        return {
+          bottom: 600,
+          height: 600,
+          left: 0,
+          right: 1000,
+          top: 0,
+          width: 1000,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+      if (element.classList.contains("virtualized-message-page")) {
+        return {
+          bottom: 600,
+          height: 600,
+          left: 0,
+          right: 1000,
+          top: 0,
+          width: 1000,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+      if (element.classList.contains("virtualized-message-slot")) {
+        return {
+          bottom: 80,
+          height: 80,
+          left: 0,
+          right: 1000,
+          top: 0,
+          width: 1000,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+      return originalGetBoundingClientRect.call(this);
+    };
+
+  return {
+    cleanup() {
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    },
+    setScrollTop(nextValue: number) {
+      scrollTop = nextValue;
+    },
+  };
+}
+
 function makeCommandMessages(count: number): CommandMessage[] {
   return Array.from({ length: count }, (_, index) => ({
     id: `command-${index + 1}`,
@@ -3622,10 +3702,8 @@ describe("AgentSessionPanel conversation caching", () => {
     vi.useFakeTimers();
     const OriginalResizeObserver = window.ResizeObserver;
     const OriginalTouchEvent = window.TouchEvent;
-    const originalGetBoundingClientRect =
-      Element.prototype.getBoundingClientRect;
     const scrollNode = document.createElement("section");
-    let scrollTop = 20_000;
+    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
 
     class ResizeObserverMock {
       observe() {}
@@ -3643,72 +3721,8 @@ describe("AgentSessionPanel conversation caching", () => {
       }
     }
 
-    Object.defineProperty(scrollNode, "clientHeight", {
-      configurable: true,
-      get: () => 600,
-    });
-    Object.defineProperty(scrollNode, "clientWidth", {
-      configurable: true,
-      get: () => 1000,
-    });
-    Object.defineProperty(scrollNode, "scrollHeight", {
-      configurable: true,
-      get: () => 24_000,
-    });
-    Object.defineProperty(scrollNode, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (nextValue: number) => {
-        scrollTop = nextValue;
-      },
-    });
-
     window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
     window.TouchEvent = TouchEventMock as unknown as typeof TouchEvent;
-    Element.prototype.getBoundingClientRect =
-      function getBoundingClientRectMock() {
-        const element = this as HTMLElement;
-        if (element === scrollNode) {
-          return {
-            bottom: 600,
-            height: 600,
-            left: 0,
-            right: 1000,
-            top: 0,
-            width: 1000,
-            x: 0,
-            y: 0,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (element.classList.contains("virtualized-message-page")) {
-          return {
-            bottom: 600,
-            height: 600,
-            left: 0,
-            right: 1000,
-            top: 0,
-            width: 1000,
-            x: 0,
-            y: 0,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (element.classList.contains("virtualized-message-slot")) {
-          return {
-            bottom: 80,
-            height: 80,
-            left: 0,
-            right: 1000,
-            top: 0,
-            width: 1000,
-            x: 0,
-            y: 0,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        return originalGetBoundingClientRect.call(this);
-      };
     try {
       const messages = makeTextMessages(600);
       document.body.append(scrollNode);
@@ -3731,7 +3745,7 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.queryByText("message-1")).not.toBeInTheDocument();
 
       act(() => {
-        scrollTop = 50;
+        scrollNodeMocks.setScrollTop(50);
         fireEvent.scroll(scrollNode);
       });
       await act(async () => {
@@ -3756,7 +3770,7 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.queryByText("message-561")).not.toBeInTheDocument();
 
       act(() => {
-        scrollTop = 160;
+        scrollNodeMocks.setScrollTop(160);
         fireEvent.wheel(scrollNode, { deltaY: -7 });
       });
       await act(async () => {
@@ -3765,7 +3779,7 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.queryByText("message-561")).not.toBeInTheDocument();
 
       act(() => {
-        scrollTop = 161;
+        scrollNodeMocks.setScrollTop(161);
         fireEvent.wheel(scrollNode, { deltaY: -8 });
       });
       await act(async () => {
@@ -3774,7 +3788,7 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.queryByText("message-561")).not.toBeInTheDocument();
 
       act(() => {
-        scrollTop = 20_000;
+        scrollNodeMocks.setScrollTop(20_000);
         fireEvent.wheel(scrollNode, { deltaY: -120 });
       });
       await act(async () => {
@@ -3832,7 +3846,7 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.queryByText("message-193")).not.toBeInTheDocument();
 
       act(() => {
-        scrollTop = 160;
+        scrollNodeMocks.setScrollTop(160);
         fireEvent.wheel(scrollNode, { deltaY: -8 });
       });
       await act(async () => {
@@ -3842,7 +3856,7 @@ describe("AgentSessionPanel conversation caching", () => {
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       window.TouchEvent = OriginalTouchEvent;
-      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      scrollNodeMocks.cleanup();
       scrollNode.remove();
       vi.useRealTimers();
     }
@@ -3851,81 +3865,15 @@ describe("AgentSessionPanel conversation caching", () => {
   it("hydrates a long-session tail after a native-scrollbar mousedown", async () => {
     vi.useFakeTimers();
     const OriginalResizeObserver = window.ResizeObserver;
-    const originalGetBoundingClientRect =
-      Element.prototype.getBoundingClientRect;
     const scrollNode = document.createElement("section");
-    let scrollTop = 20_000;
+    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
 
     class ResizeObserverMock {
       observe() {}
       disconnect() {}
     }
 
-    Object.defineProperty(scrollNode, "clientHeight", {
-      configurable: true,
-      get: () => 600,
-    });
-    Object.defineProperty(scrollNode, "clientWidth", {
-      configurable: true,
-      get: () => 1000,
-    });
-    Object.defineProperty(scrollNode, "scrollHeight", {
-      configurable: true,
-      get: () => 24_000,
-    });
-    Object.defineProperty(scrollNode, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (nextValue: number) => {
-        scrollTop = nextValue;
-      },
-    });
-
     window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-    Element.prototype.getBoundingClientRect =
-      function getBoundingClientRectMock() {
-        const element = this as HTMLElement;
-        if (element === scrollNode) {
-          return {
-            bottom: 600,
-            height: 600,
-            left: 0,
-            right: 1000,
-            top: 0,
-            width: 1000,
-            x: 0,
-            y: 0,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (element.classList.contains("virtualized-message-page")) {
-          return {
-            bottom: 600,
-            height: 600,
-            left: 0,
-            right: 1000,
-            top: 0,
-            width: 1000,
-            x: 0,
-            y: 0,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (element.classList.contains("virtualized-message-slot")) {
-          return {
-            bottom: 80,
-            height: 80,
-            left: 0,
-            right: 1000,
-            top: 0,
-            width: 1000,
-            x: 0,
-            y: 0,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        return originalGetBoundingClientRect.call(this);
-      };
 
     try {
       const messages = makeTextMessages(600);
@@ -3947,7 +3895,7 @@ describe("AgentSessionPanel conversation caching", () => {
 
       act(() => {
         fireEvent.mouseDown(scrollNode);
-        scrollTop = 50;
+        scrollNodeMocks.setScrollTop(50);
         fireEvent.scroll(scrollNode);
       });
       await act(async () => {
@@ -3957,7 +3905,7 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.getByText("message-1")).toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
-      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      scrollNodeMocks.cleanup();
       scrollNode.remove();
       vi.useRealTimers();
     }

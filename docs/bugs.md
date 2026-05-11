@@ -450,21 +450,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 **Proposal:**
 - Document the partial-information loss in `agent-delegation-sessions.md` so wrappers know `status-fetch-failed` may hide a concurrent server restart.
 
-## `~70` lines of `getBoundingClientRect` mock setup duplicated between adjacent `AgentSessionPanel.test.tsx` tests
-
-**Severity:** Low - the new "hydrates a long-session tail after a native-scrollbar mousedown" test duplicates ~70 lines of `Object.defineProperty` and `getBoundingClientRect` boilerplate from the prior sibling test. Future changes to the rect contract need parallel edits in both tests.
-
-`ui/src/panels/AgentSessionPanel.test.tsx:2193-2306`. Small drifts can produce silent test divergence.
-
-**Current behavior:**
-- Two adjacent tests duplicate the rect/scrollNode mock setup.
-- Future contract changes require parallel edits.
-
-**Proposal:**
-- Extract a shared helper `installLongTranscriptScrollNodeMocks(scrollNode)` returning a cleanup function.
-
-
-
 ## `validate_and_normalize_telegram_config` clones bot token into snapshot copy
 
 **Severity:** Note - the snapshot+restore fix uses `let mut normalized = config.clone()`, which clones the entire `TelegramUiConfig` including `bot_token: Option<String>`. The token now exists twice on the heap until `normalized` drops at function return. Validation never zeroes it. Consistent with the rest of the codebase but worth noting if you ever introduce a `Zeroizing<String>` wrapper for the bot token elsewhere.
