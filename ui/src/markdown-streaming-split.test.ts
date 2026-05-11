@@ -246,6 +246,111 @@ describe("splitStreamingMarkdownForRendering", () => {
     });
   });
 
+  describe("deferAllBlocks", () => {
+    function splitWithDeferredBlocks(text: string) {
+      return splitStreamingMarkdownForRendering(text, { deferAllBlocks: true });
+    }
+
+    it("keeps inputs without block constructs fully settled", () => {
+      const text = "Intro with the | character.\n\nMore prose with `code`.";
+      expect(splitWithDeferredBlocks(text)).toEqual({
+        settled: text,
+        pending: "",
+      });
+    });
+
+    it("defers a closed pipe table and following prose", () => {
+      const text = [
+        "Intro.",
+        "",
+        "| A | B |",
+        "| --- | --- |",
+        "| 1 | 2 |",
+        "",
+        "After the table.",
+      ].join("\n");
+      expect(splitStreamingMarkdownForRendering(text)).toEqual({
+        settled: text,
+        pending: "",
+      });
+      expect(splitWithDeferredBlocks(text)).toEqual({
+        settled: "Intro.\n\n",
+        pending: "| A | B |\n| --- | --- |\n| 1 | 2 |\n\nAfter the table.",
+      });
+    });
+
+    it("defers a closed fence and following prose", () => {
+      const text = [
+        "Intro.",
+        "",
+        "```ts",
+        "const value = 1;",
+        "```",
+        "",
+        "After the fence.",
+      ].join("\n");
+      expect(splitWithDeferredBlocks(text)).toEqual({
+        settled: "Intro.\n\n",
+        pending: "```ts\nconst value = 1;\n```\n\nAfter the fence.",
+      });
+    });
+
+    it("defers a closed math block and following prose", () => {
+      const text = [
+        "Intro.",
+        "",
+        "$$",
+        "x^2 + y^2 = z^2",
+        "$$",
+        "",
+        "After the math.",
+      ].join("\n");
+      expect(splitWithDeferredBlocks(text)).toEqual({
+        settled: "Intro.\n\n",
+        pending: "$$\nx^2 + y^2 = z^2\n$$\n\nAfter the math.",
+      });
+    });
+
+    it("cuts at the earliest block start when multiple blocks are closed", () => {
+      const text = [
+        "Intro.",
+        "",
+        "```md",
+        "fenced",
+        "```",
+        "",
+        "| A | B |",
+        "| --- | --- |",
+        "| 1 | 2 |",
+        "",
+        "After both blocks.",
+      ].join("\n");
+      expect(splitWithDeferredBlocks(text)).toEqual({
+        settled: "Intro.\n\n",
+        pending:
+          "```md\nfenced\n```\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nAfter both blocks.",
+      });
+    });
+
+    it("treats nested-looking constructs inside fences as part of the first block", () => {
+      const text = [
+        "Intro.",
+        "",
+        "```md",
+        "| A | B |",
+        "$$",
+        "```",
+        "",
+        "After the nested-looking block.",
+      ].join("\n");
+      expect(splitWithDeferredBlocks(text)).toEqual({
+        settled: "Intro.\n\n",
+        pending:
+          "```md\n| A | B |\n$$\n```\n\nAfter the nested-looking block.",
+      });
+    });
+  });
+
   describe("round-trip", () => {
     it("preserves the original input under plain settled + pending concatenation", () => {
       // The boundary newline between the last settled line and the
