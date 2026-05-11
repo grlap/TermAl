@@ -121,20 +121,6 @@ This means the effect "consumes" the previous-message-content-signature once per
 - Compute `onlyPendingPromptsChanged` BEFORE writing the next ref value.
 - Or add a test asserting the predicate fires on the second render in a row when only the assistant text grew.
 
-## anyhow chain in user-visible Telegram error messages may leak filesystem layout
-
-**Severity:** Low - `src/telegram.rs:2299-2305`. `telegram_action_error_text` puts the (sanitized but possibly long) anyhow detail directly into the user-visible Telegram message after "Could not run X.\n". Anyhow error chains can include filesystem paths, internal session ids, project ids, and other state-shape information.
-
-The sanitizer only redacts Telegram tokens. A backend error like `"failed to load session 7af3-...: file not found at /Users/foo/.termal/sessions/7af3.json"` ships filesystem layout to a Telegram chat. The Phase 1 trust model accepts local users, but the Telegram chat is by definition not local.
-
-**Current behavior:**
-- Full anyhow chain forwarded to Telegram chat.
-- Sanitizer only redacts tokens.
-
-**Proposal:**
-- Either curate user-visible error text per ApiError kind (mapping known kinds to safe text).
-- Or document the trust assumption in `docs/features/telegram-ui-integration.md`.
-
 ## Live-tail `null` transition not tested
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1291-1298`. When neither `liveTurnCard` nor `pendingPromptCards` is present, `liveTail` is `null`. The `position: sticky` element is removed from the DOM when becoming null. Without a test that asserts no reflow loop, a regression that recreates the wrapper on every render (e.g., changing the `liveTail` ternary to always render the wrapper) is undetectable.

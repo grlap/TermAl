@@ -17,6 +17,7 @@ const TELEGRAM_GET_UPDATES_LIMIT: i64 = 25;
 const TELEGRAM_RELAY_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const TELEGRAM_USER_ERROR_MAX_CHARS: usize = 240;
 const TELEGRAM_CALLBACK_ERROR_MAX_CHARS: usize = 180;
+const TELEGRAM_SAFE_USER_ERROR_DETAIL: &str = "Check TermAl for details, then try again.";
 const TELEGRAM_CALLBACK_DATA_MAX_BYTES: usize = 64;
 
 /// Runs Telegram bot.
@@ -3716,9 +3717,8 @@ fn telegram_prompt_error_text(err: &anyhow::Error) -> String {
     )
 }
 
-fn telegram_user_error_detail(err: &anyhow::Error, max_chars: usize) -> String {
-    let detail = sanitize_telegram_log_detail(&err.to_string());
-    truncate_telegram_user_error_detail(&detail, max_chars)
+fn telegram_user_error_detail(_err: &anyhow::Error, max_chars: usize) -> String {
+    truncate_telegram_user_error_detail(TELEGRAM_SAFE_USER_ERROR_DETAIL, max_chars)
 }
 
 fn truncate_telegram_user_error_detail(detail: &str, max_chars: usize) -> String {

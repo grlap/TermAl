@@ -419,16 +419,18 @@ fn telegram_command_parser_rejects_unknown_slash_commands() {
 }
 
 #[test]
-fn telegram_action_error_text_sanitizes_detail_and_points_to_status() {
+fn telegram_action_error_text_uses_safe_detail_and_points_to_status() {
     let token = telegram_redaction_token();
-    let err = anyhow!("action `ask-agent-to-commit` is not currently available; bot token={token}");
+    let err =
+        anyhow!("failed to load C:\\Users\\grzeg\\.termal\\sessions\\abc.json; bot token={token}");
 
     let text = telegram_action_error_text(ProjectActionId::AskAgentToCommit, &err);
 
     assert!(text.contains("Could not run Ask Agent to Commit."));
-    assert!(text.contains("not currently available"));
+    assert!(text.contains("Check TermAl for details"));
     assert!(text.contains("Send /status"));
-    assert!(text.contains("<redacted>"));
+    assert!(!text.contains("C:\\Users"));
+    assert!(!text.contains("<redacted>"));
     assert!(!text.contains(&token));
 }
 
@@ -476,16 +478,18 @@ fn telegram_callback_action_failure_answers_and_sends_error_without_digest_refre
     assert_eq!(telegram.answered_callbacks.borrow().len(), 1);
     let (_, callback_text) = &telegram.answered_callbacks.borrow()[0];
     assert!(callback_text.contains("Ask Agent to Commit failed"));
-    assert!(callback_text.contains("action is unavailable"));
-    assert!(callback_text.contains("<redacted>"));
+    assert!(callback_text.contains("Check TermAl for details"));
+    assert!(!callback_text.contains("action is unavailable"));
+    assert!(!callback_text.contains("<redacted>"));
     assert!(!callback_text.contains(&token));
 
     let sent_texts = telegram.sent_texts.borrow();
     assert_eq!(sent_texts.len(), 1);
     assert!(sent_texts[0].contains("Could not run Ask Agent to Commit."));
-    assert!(sent_texts[0].contains("action is unavailable"));
+    assert!(sent_texts[0].contains("Check TermAl for details"));
     assert!(sent_texts[0].contains("Send /status"));
-    assert!(sent_texts[0].contains("<redacted>"));
+    assert!(!sent_texts[0].contains("action is unavailable"));
+    assert!(!sent_texts[0].contains("<redacted>"));
     assert!(!sent_texts[0].contains(&token));
     assert!(telegram.edited_messages.borrow().is_empty());
     assert_eq!(state.last_digest_hash.as_deref(), Some("previous-digest"));
@@ -725,17 +729,17 @@ fn telegram_callback_rejects_project_tokens_that_are_no_longer_subscribed() {
 }
 
 #[test]
-fn telegram_prompt_error_text_sanitizes_and_truncates_detail() {
+fn telegram_prompt_error_text_uses_safe_generic_detail() {
     let token = telegram_redaction_token();
-    let err = anyhow!("bot token={token} {}", "x".repeat(400));
+    let err = anyhow!("failed to load /Users/me/.termal/session.json; bot token={token}");
 
     let text = telegram_prompt_error_text(&err);
 
     assert!(text.starts_with("Could not forward that message."));
-    assert!(text.contains("..."));
-    assert!(text.contains("<redacted>"));
+    assert!(text.contains("Check TermAl for details"));
+    assert!(!text.contains("/Users/me"));
+    assert!(!text.contains("<redacted>"));
     assert!(!text.contains(&token));
-    assert!(text.chars().count() <= "Could not forward that message.\n".chars().count() + 243);
 }
 
 #[test]
