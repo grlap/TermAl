@@ -569,6 +569,9 @@ describe("VirtualizedConversationMessageList foundation", () => {
         hydrationScrollWriteStart,
       );
       expect(hydrationScrollWrites.length).toBeGreaterThan(0);
+      expect(hydrationScrollWrites).not.toContain(
+        tailBottomScrollTop - wheelDeltaPx,
+      );
       expect(
         hydrationScrollWrites.every(
           (scrollTop) => Math.abs(scrollTop - harness.scrollTop) < 1,

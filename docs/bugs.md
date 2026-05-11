@@ -302,51 +302,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Clear `lastUserScrollKindRef` on bottom re-entry, or expire the one-tick override with a short timestamp/timer.
 - Add a regression that returns to bottom, then performs a native scroll with no preceding wheel/key/touch input.
 
-## `resolveViewportSnapshotTranslation` only happy-path tested
-
-**Severity:** Medium - the new translation helper has six negative branches (`layoutSnapshot === null`, `layoutSnapshot.messageCount >= estimatedRows.length` (full-transcript no-op), `layoutSnapshot.messages.length === 0`, `firstRowIndex < 0` (orphan tail message id absent from full transcript), `!hasContiguousWindow`, drift case where `viewportSnapshot.messageCount !== snapshotMessageCount`). The new test at `conversation-overview-map.test.ts:452-506` covers only the happy path and reuses the layout snapshot as the viewport snapshot.
-
-`ui/src/panels/conversation-overview-map.test.ts:452-506`. Each negative branch silently returns null and falls through to the legacy projection. The current happy-path test also does not prove that `projectConversationOverviewViewport` handles a newer live viewport snapshot independently from the layout snapshot. A regression that flipped any of these guards or stale-live-viewport handling would only surface as misaligned viewport markers in production.
-
-**Current behavior:**
-- One happy-path test exercises contiguous tail window with `messageCount < estimatedRows.length`.
-- That test passes the same snapshot as both layout and viewport input.
-- Negative branches silently fall through.
-- Drift case (where viewport snapshot count differs from translation snapshot count) is uncovered.
-
-**Proposal:**
-- Add focused tests for each negative branch via `buildConversationOverviewProjection` then probing `projection.viewportSnapshotTranslation` for null in each case.
-- Add a separate live viewport snapshot case with a different `viewportTopPx`.
-- Add a drift-case test where viewport snapshot count differs from translation snapshot count and the legacy projection path is exercised.
-
-## `resolvePrependedMessageCount` only happy path tested
-
-**Severity:** Medium - the new pure helper has six branches (cross-session, empty previous window, no growth, partial overlap, no first-message match, contiguous match at index 0). Only the happy path (genuine prepend at startIndex>0) is exercised end-to-end via the prepend integration test.
-
-`ui/src/panels/VirtualizedConversationMessageList.tsx:413-441`. The integration test combines layout, scroll, and DOM behavior, so a regression in the matcher (off-by-one in `maxStartIndex`, accepting a non-contiguous overlap) might be masked by the looser scroll-position assertion.
-
-**Current behavior:**
-- Helper is not exported; no direct unit test.
-- Edge cases (empty before/after, single message, all messages new vs. all stale, partial overlap, session change) unverified.
-
-**Proposal:**
-- Export `resolvePrependedMessageCount` (or move it to a sibling module) and add unit tests for each branch with `MessageWindowSnapshot` fixtures.
-
-## `mountedRangeWillChange` early-return not pinned by test
-
-**Severity:** Medium - the new `mountedRangeWillChange || !preservedAnchorSlot` early-return at `VirtualizedConversationMessageList.tsx:1561-1567` is the load-bearing fix for the "single-frame visual jump" issue (which was removed from bugs.md by this round). The integration test was simultaneously rewritten to drop `await waitFor(...)` in favor of a synchronous assertion. There is no test that pins the new condition — i.e., that when a prepend forces a range change AND the anchor is mounted, no stale-rect scroll write is emitted before the followup effect re-anchors.
-
-`ui/src/panels/VirtualizedConversationMessageList.test.tsx:484-492`. The test asserts the post-flush position, not the absence of the intermediate stale write. A regression that flipped back to the old `!preservedAnchorSlot` gate would still pass the new test (the followup effect catches up either way).
-
-**Current behavior:**
-- New test asserts post-flush scroll position synchronously.
-- No assertion verifies the absence of an intermediate stale-rect scroll write.
-- A regression to the prior gate would not be caught.
-
-**Proposal:**
-- Assert `harness.scrollWrites` between the prepend and the followup effect — specifically, that no scroll write lands at the stale `targetScrollTop` value computed from pre-mutation rects.
-- Or use `hydrationScrollWrites.every(...)` to assert all writes track the final scroll position.
-
 ## rAF-coalesced `messageCount` refresh now lags `layoutSnapshot.messageCount` behind `messageCount` by one frame
 
 **Severity:** Medium - the round-62 fix routes the `messageCount`-driven `refreshLayoutSnapshot` through the same rAF-coalesced scheduler as the steady-state effect. Coalescing is correct, but downstream consumers reading `layoutSnapshot.messageCount` synchronously inside the same React render now see a stale snapshot until the rAF flushes.
@@ -1920,8 +1875,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   `docs/architecture.md` now documents that session creation advances the main revision, and `ui/src/app-live-state.ts` cross-links that contract. Add a coverage test that (a) sets the client up with a session list missing `session-X`, (b) dispatches a same-revision session delta for `session-X` (where `latestStateRevisionRef.current === delta.revision`) — asserting NO immediate `/api/state` fetch, then (c) dispatches the next authoritative `state` event including `session-X` and asserts it adopts cleanly.
 - [ ] P2: Finish splitting the remaining marker-menu create/remove test:
   the marker-menu coverage now has focused cases for keyboard trigger, portal cleanup, scroll/resize close, explicit trigger contract, and clamp fallback. The original create/remove test still combines add/remove, Escape focus restore, ArrowDown navigation, and rect-based clamp behavior; split the remaining assertions if it grows again.
-- [ ] P2: Pin `mountedRangeWillChange` early-return absence of stale-rect scroll write:
-  during the prepend integration test, capture `harness.scrollWrites` between the prepend and the followup effect and assert no scroll write lands at the stale `targetScrollTop` value computed from pre-mutation rects.
 - [ ] P2: Cover Telegram relay active-project reconciliation:
   start an in-process relay with subscribed projects but no default and assert startup fails or status exposes the effective `activeProjectId`; delete a project used by a running relay and assert the relay is stopped or restarted without the deleted id.
 - [ ] P2: Cover Telegram relay runtime lifecycle seam:
