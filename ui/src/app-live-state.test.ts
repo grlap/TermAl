@@ -2140,6 +2140,140 @@ describe("hydration adoption side effects", () => {
     );
   });
 
+  it.each([
+    [
+      "the target session is missing",
+      {
+        sessionsRef: [] as Session[],
+        expectFullFetch: false,
+      },
+    ],
+    [
+      "the current session is already loaded",
+      {
+        sessionsRef: [
+          makeSession({
+            messagesLoaded: true,
+            messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+            sessionMutationStamp: 1,
+          }),
+        ],
+        expectFullFetch: true,
+      },
+    ],
+    [
+      "the current session already has retained messages",
+      {
+        sessionsRef: [
+          makeSession({
+            messages: makeHydrationMessages(1),
+            messagesLoaded: false,
+            messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+            sessionMutationStamp: 1,
+          }),
+        ],
+        expectFullFetch: true,
+      },
+    ],
+    [
+      "the current session is below the tail-first threshold",
+      {
+        sessionsRef: [
+          makeSession({
+            messagesLoaded: false,
+            messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES - 1,
+            sessionMutationStamp: 1,
+          }),
+        ],
+        expectFullFetch: true,
+      },
+    ],
+  ])("skips tail-first hydration when %s", async (_, scenario) => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const fetchSessionTail = vi
+      .spyOn(api, "fetchSessionTail")
+      .mockImplementation(() => new Promise(() => {}));
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    const triggerSession = makeSession({
+      messagesLoaded: false,
+      messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+      sessionMutationStamp: 1,
+    });
+    const params = makeLiveStateParams(triggerSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = scenario.sessionsRef;
+
+    renderLiveStateHarness(params, () => {});
+
+    if (scenario.expectFullFetch) {
+      await waitFor(() => expect(fetchSession).toHaveBeenCalledTimes(1));
+    } else {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(fetchSession).not.toHaveBeenCalled();
+    }
+    expect(fetchSessionTail).not.toHaveBeenCalled();
+  });
+
+  it("skips tail-first hydration for divergent text-repair hydration", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const fetchSessionTail = vi
+      .spyOn(api, "fetchSessionTail")
+      .mockImplementation(() => new Promise(() => {}));
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    const messages = makeHydrationMessages(1);
+    const session = makeSession({
+      messages,
+      messagesLoaded: true,
+      messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+      sessionMutationStamp: 1,
+    });
+    const params = makeLiveStateParams(session);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [session];
+
+    renderLiveStateHarness(params, () => {}, () => [
+      { id: session.id, messagesLoaded: true },
+    ]);
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "textDelta",
+        revision: 7,
+        sessionId: session.id,
+        messageId: "message-1",
+        messageIndex: 0,
+        messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+        delta: " repaired",
+        preview: "Message 1 repaired",
+        sessionMutationStamp: 2,
+      });
+    });
+
+    await waitFor(() => expect(fetchSession).toHaveBeenCalledTimes(1));
+    expect(fetchSessionTail).not.toHaveBeenCalled();
+  });
+
   it("starts tail-first hydration only at the large-session threshold", async () => {
     vi.stubGlobal(
       "EventSource",
