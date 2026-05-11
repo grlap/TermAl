@@ -306,17 +306,6 @@ The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but
 **Proposal:**
 - Add a Rust test that simulates a remote snapshot sending `Session` with `remote_id: Some("OTHER-REMOTE")` and asserts the resulting `record.remote_id` is the trusted connection id while embedded wire metadata is cleared.
 
-## New active-color test still pins literal hex `#22c55e` indirectly
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:404-411`. Round 71 changed the test to assert `normalizeConversationMarkerColor("#22c55e")` rather than the literal hex (closes prior brittleness finding). But the test still passes the literal `"#22c55e"` to the normalizer, so the test fails if the normalizer is changed to reject `#22c55e`. The fix moved the brittleness one layer deep.
-
-**Current behavior:**
-- Test asserts via `normalizeConversationMarkerColor("#22c55e")`.
-- Still hard-codes `"#22c55e"` as input.
-
-**Proposal:**
-- Construct a marker with a color produced by `DEFAULT_CONVERSATION_MARKER_COLOR` (the contract value) and assert that color round-trips through normalization.
-
 ## Unmount race test relies on console error suppression for `act` warnings
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7102-7129`. "Ignores delegation completion after the footer unmounts" exercises only the unmount-during-await path. It does NOT verify (a) `setIsDelegationSpawning(false)` is gated by `isMountedRef.current` so the React `act` warning never appears (covered indirectly by lack of console error), or (b) `focusComposerInput()` is not called after unmount (a pending rAF could try to focus a detached node).

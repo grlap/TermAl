@@ -31,7 +31,10 @@ import {
   resetSessionStoreForTesting,
   syncComposerSessionsStore,
 } from "../session-store";
-import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
+import {
+  DEFAULT_CONVERSATION_MARKER_COLOR,
+  normalizeConversationMarkerColor,
+} from "../conversation-marker-colors";
 import {
   VIRTUALIZED_MESSAGE_GAP_PX,
   buildVirtualizedMessageLayout,
@@ -687,7 +690,7 @@ describe("AgentSessionPanel conversation caching", () => {
           messageId: "message-1",
           name: "Accepted direction",
           kind: "decision",
-          color: "#22c55e",
+          color: DEFAULT_CONVERSATION_MARKER_COLOR,
           messageIndexHint: 0,
         }),
       ],
@@ -732,7 +735,7 @@ describe("AgentSessionPanel conversation caching", () => {
           .closest(".conversation-message-marker-shell"),
       ).toHaveStyle({
         "--conversation-active-marker-color":
-          normalizeConversationMarkerColor("#22c55e"),
+          normalizeConversationMarkerColor(DEFAULT_CONVERSATION_MARKER_COLOR),
       });
       expect(
         screen
