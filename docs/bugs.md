@@ -3439,8 +3439,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover delegation status/result polling edge contracts:
-  add tests for `any`-mode sibling freshness, no-op status/result GET revision stability, missing-child reconciliation through polling, and the result-GET `409` path still publishing any observed refresh side effects.
 - [ ] P2: Cover real composer-to-overview focus detection:
   render the real composer/overview path or assert the real composer emits `data-conversation-composer-input`, so `ConversationOverviewRail` deferral does not depend only on synthetic test fixtures.
 - [ ] P2: Cover first-chunk Telegram forward failure:

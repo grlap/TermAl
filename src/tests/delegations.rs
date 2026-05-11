@@ -4042,6 +4042,44 @@ fn delegation_status_get_refreshes_child_state() {
 }
 
 #[test]
+fn delegation_status_and_unavailable_result_poll_preserve_revision_without_refresh() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Stay running.".to_owned(),
+                title: Some("No-op Poll".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    let revision_before_poll = state.snapshot().revision;
+
+    let status_response = state
+        .get_delegation(&parent_session_id, &created.delegation.id)
+        .expect("status should be readable");
+
+    assert_eq!(status_response.revision, revision_before_poll);
+    assert_eq!(state.snapshot().revision, revision_before_poll);
+
+    let err = match state.get_delegation_result(&parent_session_id, &created.delegation.id) {
+        Ok(_) => panic!("running delegation should not expose a result"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::CONFLICT);
+    assert_eq!(state.snapshot().revision, revision_before_poll);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn delegation_status_poll_consumes_satisfied_wait_for_busy_parent() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);
@@ -4173,6 +4211,310 @@ fn delegation_result_poll_consumes_satisfied_wait_for_busy_parent() {
     let resume_prompt = &parent.queued_prompts[0].pending_prompt.text;
     assert!(resume_prompt.contains("Result poll fan-in"));
     assert!(resume_prompt.contains("Result polling should observe this result."));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn delegation_status_poll_any_wait_uses_cached_sibling_state_until_polled() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let polled = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Poll this running delegation first.".to_owned(),
+                title: Some("Polled Running Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("polled delegation should be created");
+    let sibling = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Finish before the wait is evaluated.".to_owned(),
+                title: Some("Sibling Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("sibling delegation should be created");
+
+    let wait = state
+        .create_delegation_wait(
+            &parent_session_id,
+            CreateDelegationWaitRequest {
+                delegation_ids: vec![polled.delegation.id.clone(), sibling.delegation.id.clone()],
+                mode: DelegationWaitMode::Any,
+                title: Some("Any-mode sibling fan-in".to_owned()),
+            },
+        )
+        .expect("running any-mode wait should be accepted");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let parent_index = inner
+            .find_visible_session_index(&parent_session_id)
+            .expect("parent should exist");
+        let parent = inner
+            .session_mut_by_index(parent_index)
+            .expect("parent session index should be valid");
+        parent.session.status = SessionStatus::Active;
+    }
+
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &sibling.delegation.child_session_id,
+        "## Result\n\nStatus: completed\n\nSummary:\nSibling completed first.",
+    );
+
+    let response = state
+        .get_delegation(&parent_session_id, &polled.delegation.id)
+        .expect("polling the running delegation should succeed");
+
+    assert_eq!(response.delegation.status, DelegationStatus::Running);
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(inner.delegation_waits.len(), 1);
+        assert_eq!(inner.delegation_waits[0].id, wait.wait.id);
+        let sibling_record = inner
+            .delegations
+            .iter()
+            .find(|delegation| delegation.id == sibling.delegation.id)
+            .expect("sibling delegation should exist");
+        assert_eq!(sibling_record.status, DelegationStatus::Running);
+        let parent = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == parent_session_id)
+            .expect("parent should exist");
+        assert!(parent.queued_prompts.is_empty());
+    }
+
+    let sibling_response = state
+        .get_delegation(&parent_session_id, &sibling.delegation.id)
+        .expect("polling the sibling should refresh it");
+
+    assert_eq!(
+        sibling_response.delegation.status,
+        DelegationStatus::Completed
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(inner.delegation_waits.is_empty());
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_session_id)
+        .expect("parent should exist");
+    assert_eq!(parent.queued_prompts.len(), 1);
+    assert!(
+        parent.queued_prompts[0]
+            .pending_prompt
+            .text
+            .contains("Any-mode sibling fan-in")
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn delegation_status_poll_reconciles_missing_child_and_consumes_wait() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "The child will disappear before polling.".to_owned(),
+                title: Some("Missing Child Poll".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    state
+        .create_delegation_wait(
+            &parent_session_id,
+            CreateDelegationWaitRequest {
+                delegation_ids: vec![created.delegation.id.clone()],
+                mode: DelegationWaitMode::All,
+                title: Some("Missing child poll fan-in".to_owned()),
+            },
+        )
+        .expect("wait should be accepted");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let parent_index = inner
+            .find_visible_session_index(&parent_session_id)
+            .expect("parent should exist");
+        let parent = inner
+            .session_mut_by_index(parent_index)
+            .expect("parent session index should be valid");
+        parent.session.status = SessionStatus::Active;
+        let child_index = inner
+            .find_session_index(&created.delegation.child_session_id)
+            .expect("child session should exist");
+        inner.remove_session_at(child_index);
+        state
+            .commit_locked(&mut inner)
+            .expect("manual child removal should persist");
+    }
+
+    let response = state
+        .get_delegation(&parent_session_id, &created.delegation.id)
+        .expect("status polling should reconcile the missing child");
+
+    assert_eq!(response.delegation.status, DelegationStatus::Failed);
+    assert_eq!(
+        response
+            .delegation
+            .result
+            .as_ref()
+            .expect("missing child should produce a result")
+            .summary,
+        "delegation child session no longer exists"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(inner.delegation_waits.is_empty());
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_session_id)
+        .expect("parent should exist");
+    assert_eq!(parent.queued_prompts.len(), 1);
+    assert!(
+        parent.queued_prompts[0]
+            .pending_prompt
+            .text
+            .contains("Missing child poll fan-in")
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn delegation_result_poll_conflict_still_publishes_wait_side_effects() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let polled = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Remain running while another child satisfies any-mode wait.".to_owned(),
+                title: Some("Running Result Poll".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("polled delegation should be created");
+    let completed = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Complete before result polling.".to_owned(),
+                title: Some("Completed Sibling".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("completed delegation should be created");
+    let wait = state
+        .create_delegation_wait(
+            &parent_session_id,
+            CreateDelegationWaitRequest {
+                delegation_ids: vec![
+                    polled.delegation.id.clone(),
+                    completed.delegation.id.clone(),
+                ],
+                mode: DelegationWaitMode::Any,
+                title: Some("Result-conflict fan-in".to_owned()),
+            },
+        )
+        .expect("any-mode wait should be accepted");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let parent_index = inner
+            .find_visible_session_index(&parent_session_id)
+            .expect("parent should exist");
+        let parent = inner
+            .session_mut_by_index(parent_index)
+            .expect("parent session index should be valid");
+        parent.session.status = SessionStatus::Active;
+    }
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &completed.delegation.child_session_id,
+        "## Result\n\nStatus: completed\n\nSummary:\nCompleted sibling satisfies any-mode wait.",
+    );
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_delegation_index(&completed.delegation.id)
+            .expect("completed sibling should exist");
+        assert!(refresh_delegation_from_child_locked(&mut inner, index).is_some());
+        state
+            .commit_locked(&mut inner)
+            .expect("manual sibling refresh should persist");
+    }
+    let mut delta_events = state.subscribe_delta_events();
+
+    let err = match state.get_delegation_result(&parent_session_id, &polled.delegation.id) {
+        Ok(_) => panic!("running delegation result should remain unavailable"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.status, StatusCode::CONFLICT);
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(inner.delegation_waits.is_empty());
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_session_id)
+        .expect("parent should exist");
+    assert_eq!(parent.queued_prompts.len(), 1);
+    assert!(
+        parent.queued_prompts[0]
+            .pending_prompt
+            .text
+            .contains("Result-conflict fan-in")
+    );
+    drop(inner);
+
+    let mut saw_wait_consumed = false;
+    while let Ok(payload) = delta_events.try_recv() {
+        let event: DeltaEvent =
+            serde_json::from_str(&payload).expect("delta event should deserialize");
+        if matches!(
+            event,
+            DeltaEvent::DelegationWaitConsumed {
+                wait_id,
+                reason: DelegationWaitConsumedReason::Completed,
+                ..
+            } if wait_id == wait.wait.id
+        ) {
+            saw_wait_consumed = true;
+        }
+    }
+    assert!(
+        saw_wait_consumed,
+        "result polling should publish wait consumption before returning 409"
+    );
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
