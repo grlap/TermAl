@@ -94,30 +94,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 - Hoist `paneMessageContentSignaturesRef` to App.tsx and pass it through alongside `paneContentSignaturesRef`.
 - Or document why the divergence is intentional with a header comment.
 
-## `start_telegram_relay_runtime` parallel `spawning`/`running` booleans should be a state enum
-
-**Severity:** Note - `src/telegram.rs:222-302`. Round 74 consolidated the relay state into `TelegramRelayRuntime` with parallel `spawning` and `running` booleans. The snapshot rule `running && !spawning` is implicit. A future contributor adding a new flag (e.g., `stopping`) needs to remember to combine all three correctly in the snapshot.
-
-**Current behavior:**
-- Two parallel booleans for state.
-- Snapshot rule encoded inline.
-- No enforcement of valid state transitions.
-
-**Proposal:**
-- Replace the two booleans with a `RelayState` enum (`Idle | Spawning | Running`) and centralize the `running()` accessor on it.
-
-## `start_telegram_relay_runtime` `else` branch redundantly clears `spawning` after spawn succeeds
-
-**Severity:** Low - `src/telegram.rs:294-301`. In the `else` branch (`spawn` succeeded), the parent thread re-acquires the mutex purely to clear `spawning = false`. The spawned thread can have already cleaned up state if it ran to completion before this branch fires; the parent's write is then redundant. Additionally, if the spawned thread starts running BEFORE this `else` branch acquires the lock, the snapshot reports `running && !spawning` momentarily.
-
-**Current behavior:**
-- Parent thread re-acquires mutex post-spawn to clear `spawning`.
-- Spawned thread may have already completed full cleanup.
-- Brief window where snapshot can show `running` true based on lock acquisition order.
-
-**Proposal:**
-- Move the `spawning = false` write into the spawned thread's first action (before the run loop starts) and drop the parent's `else` branch entirely.
-
 ## `from_ui_file` returns `Option<Self>` for three distinct disabled-relay reasons
 
 **Severity:** Note - `src/telegram.rs:181-213`. The function returns `Option<Self>` for THREE distinct disabled-relay reasons (disabled flag, missing/empty token, missing/empty default project). The caller cannot tell why the relay isn't started. A typed reason would help diagnostics and let the UI surface a more accurate "Stopped" reason.

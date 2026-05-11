@@ -304,14 +304,33 @@ struct TelegramRelayStatusSnapshot {
 }
 
 #[cfg(not(test))]
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+enum TelegramRelayRuntimeState {
+    #[default]
+    Idle,
+    Spawning,
+    Running,
+}
+
+#[cfg(not(test))]
+impl TelegramRelayRuntimeState {
+    fn is_active(self) -> bool {
+        matches!(self, Self::Spawning | Self::Running)
+    }
+
+    fn is_running(self) -> bool {
+        matches!(self, Self::Running)
+    }
+}
+
+#[cfg(not(test))]
 #[derive(Default)]
 struct TelegramRelayRuntime {
     config_fingerprint: Option<String>,
     generation: u64,
     handle: Option<std::thread::JoinHandle<()>>,
-    running: bool,
     shutdown: Option<Arc<AtomicBool>>,
-    spawning: bool,
+    state: TelegramRelayRuntimeState,
 }
 
 #[cfg(not(test))]
@@ -325,7 +344,7 @@ fn start_telegram_relay_runtime(config: TelegramBotConfig) {
         .lock()
         .expect("telegram relay runtime mutex poisoned");
     if runtime.config_fingerprint.as_deref() == Some(fingerprint.as_str())
-        && (runtime.running || runtime.spawning)
+        && runtime.state.is_active()
     {
         return;
     }
@@ -338,8 +357,7 @@ fn start_telegram_relay_runtime(config: TelegramBotConfig) {
     runtime.config_fingerprint = Some(fingerprint);
     runtime.generation = runtime.generation.saturating_add(1);
     let generation = runtime.generation;
-    runtime.running = true;
-    runtime.spawning = true;
+    runtime.state = TelegramRelayRuntimeState::Spawning;
     drop(runtime);
 
     if let Some(previous_shutdown) = previous_shutdown {
@@ -365,8 +383,7 @@ fn start_telegram_relay_runtime(config: TelegramBotConfig) {
                 if runtime.generation == generation
                     && !shutdown.load(Ordering::Relaxed)
                 {
-                    runtime.running = true;
-                    runtime.spawning = false;
+                    runtime.state = TelegramRelayRuntimeState::Running;
                     true
                 } else {
                     false
@@ -387,8 +404,7 @@ fn start_telegram_relay_runtime(config: TelegramBotConfig) {
                 .lock()
                 .expect("telegram relay runtime mutex poisoned");
             if runtime.generation == generation {
-                runtime.running = false;
-                runtime.spawning = false;
+                runtime.state = TelegramRelayRuntimeState::Idle;
                 runtime.shutdown = None;
             }
         })
@@ -406,8 +422,7 @@ fn start_telegram_relay_runtime(config: TelegramBotConfig) {
                 .lock()
                 .expect("telegram relay runtime mutex poisoned");
             if runtime.generation == generation {
-                runtime.running = false;
-                runtime.spawning = false;
+                runtime.state = TelegramRelayRuntimeState::Idle;
                 runtime.shutdown = None;
                 runtime.config_fingerprint = None;
             }
@@ -429,8 +444,7 @@ fn stop_telegram_relay_runtime() {
     }
     runtime.config_fingerprint = None;
     runtime.generation = runtime.generation.saturating_add(1);
-    runtime.running = false;
-    runtime.spawning = false;
+    runtime.state = TelegramRelayRuntimeState::Idle;
 }
 
 #[cfg(not(test))]
@@ -439,7 +453,7 @@ fn telegram_relay_status_snapshot() -> TelegramRelayStatusSnapshot {
         .lock()
         .expect("telegram relay runtime mutex poisoned");
     TelegramRelayStatusSnapshot {
-        running: runtime.running && !runtime.spawning,
+        running: runtime.state.is_running(),
         lifecycle: TelegramLifecycle::InProcess,
     }
 }
