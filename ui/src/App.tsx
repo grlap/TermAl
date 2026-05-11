@@ -519,6 +519,9 @@ export default function App() {
   const paneContentSignaturesRef = useRef<
     Record<string, Record<string, string>>
   >({});
+  const paneMessageContentSignaturesRef = useRef<
+    Record<string, Record<string, string>>
+  >({});
   const forceSessionScrollToBottomRef = useRef<
     Record<string, true | undefined>
   >({});
@@ -2024,6 +2027,9 @@ export default function App() {
               paneShouldStickToBottomRef={paneShouldStickToBottomRef}
               paneScrollPositionsRef={paneScrollPositionsRef}
               paneContentSignaturesRef={paneContentSignaturesRef}
+              paneMessageContentSignaturesRef={
+                paneMessageContentSignaturesRef
+              }
               forceSessionScrollToBottomRef={forceSessionScrollToBottomRef}
               pendingScrollToBottomRequest={pendingScrollToBottomRequest}
               windowId={windowId}

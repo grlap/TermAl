@@ -72,18 +72,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 - Consider splitting once the test grows further.
 - Current 6-in-1 is acceptable but the pattern should not expand.
 
-## `paneMessageContentSignaturesRef` lifetime divergence vs `paneContentSignaturesRef`
-
-**Severity:** Note - `ui/src/SessionPaneView.tsx:672`. `paneMessageContentSignaturesRef` is a per-instance ref while `paneContentSignaturesRef` is hoisted to App.tsx and threaded through. When `SessionPaneView` remounts (e.g., on a layout split), `paneMessageContentSignaturesRef` resets to `{}` while `paneContentSignaturesRef` persists. After remount, `previousMessageContentSignature` will be `undefined` for one render but `previousSignature` will be the prior live value.
-
-**Current behavior:**
-- Two refs with divergent lifetimes for related concerns.
-- Mismatch may be invisible today but the lifetime divergence is a footgun.
-
-**Proposal:**
-- Hoist `paneMessageContentSignaturesRef` to App.tsx and pass it through alongside `paneContentSignaturesRef`.
-- Or document why the divergence is intentional with a header comment.
-
 ## `from_ui_file` returns `Option<Self>` for three distinct disabled-relay reasons
 
 **Severity:** Note - `src/telegram.rs:181-213`. The function returns `Option<Self>` for THREE distinct disabled-relay reasons (disabled flag, missing/empty token, missing/empty default project). The caller cannot tell why the relay isn't started. A typed reason would help diagnostics and let the UI surface a more accurate "Stopped" reason.

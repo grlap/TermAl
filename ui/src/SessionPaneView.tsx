@@ -239,6 +239,7 @@ export function SessionPaneView({
   paneShouldStickToBottomRef,
   paneScrollPositionsRef,
   paneContentSignaturesRef,
+  paneMessageContentSignaturesRef,
   forceSessionScrollToBottomRef,
   pendingScrollToBottomRequest,
   windowId,
@@ -325,6 +326,9 @@ export function SessionPaneView({
     Record<string, Record<string, { top: number; shouldStick: boolean }>>
   >;
   paneContentSignaturesRef: React.MutableRefObject<
+    Record<string, Record<string, string>>
+  >;
+  paneMessageContentSignaturesRef: React.MutableRefObject<
     Record<string, Record<string, string>>
   >;
   forceSessionScrollToBottomRef: React.MutableRefObject<
@@ -708,7 +712,6 @@ export function SessionPaneView({
   const messageStackRef = useRef<HTMLElement | null>(null);
   const paneRootRef = useRef<HTMLElement | null>(null);
   const settledScrollToBottomCancelRef = useRef<(() => void) | null>(null);
-  const paneMessageContentSignaturesRef = useRef<Record<string, string>>({});
   const previousShowWaitingIndicatorByKeyRef = useRef<
     Record<string, boolean | undefined>
   >({});
@@ -1028,6 +1031,9 @@ export function SessionPaneView({
   const paneContentSignatures =
     paneContentSignaturesRef.current[pane.id] ??
     (paneContentSignaturesRef.current[pane.id] = {});
+  const paneMessageContentSignatures =
+    paneMessageContentSignaturesRef.current[pane.id] ??
+    (paneMessageContentSignaturesRef.current[pane.id] = {});
   const savedScrollPosition = paneScrollPositions[scrollStateKey];
   const waitingIndicatorShouldStick = savedScrollPosition?.shouldStick === true;
 
@@ -2224,12 +2230,12 @@ export function SessionPaneView({
 
     const previousSignature = paneContentSignatures[scrollStateKey];
     const previousMessageContentSignature =
-      paneMessageContentSignaturesRef.current[scrollStateKey];
+      paneMessageContentSignatures[scrollStateKey];
     if (previousSignature === visibleContentSignature) {
       return;
     }
     paneContentSignatures[scrollStateKey] = visibleContentSignature;
-    paneMessageContentSignaturesRef.current[scrollStateKey] =
+    paneMessageContentSignatures[scrollStateKey] =
       visibleMessageContentSignature;
     if (previousSignature === undefined) {
       // First content after mount. The useLayoutEffect already tried to

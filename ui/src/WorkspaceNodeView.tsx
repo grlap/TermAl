@@ -103,6 +103,7 @@ export function WorkspaceNodeView({
   paneShouldStickToBottomRef,
   paneScrollPositionsRef,
   paneContentSignaturesRef,
+  paneMessageContentSignaturesRef,
   forceSessionScrollToBottomRef,
   pendingScrollToBottomRequest,
   windowId,
@@ -190,6 +191,9 @@ export function WorkspaceNodeView({
     Record<string, Record<string, { top: number; shouldStick: boolean }>>
   >;
   paneContentSignaturesRef: React.MutableRefObject<
+    Record<string, Record<string, string>>
+  >;
+  paneMessageContentSignaturesRef: React.MutableRefObject<
     Record<string, Record<string, string>>
   >;
   forceSessionScrollToBottomRef: React.MutableRefObject<
@@ -446,6 +450,7 @@ export function WorkspaceNodeView({
         paneShouldStickToBottomRef={paneShouldStickToBottomRef}
         paneScrollPositionsRef={paneScrollPositionsRef}
         paneContentSignaturesRef={paneContentSignaturesRef}
+        paneMessageContentSignaturesRef={paneMessageContentSignaturesRef}
         forceSessionScrollToBottomRef={forceSessionScrollToBottomRef}
         pendingScrollToBottomRequest={pendingScrollToBottomRequest}
         windowId={windowId}
@@ -574,6 +579,7 @@ export function WorkspaceNodeView({
           paneShouldStickToBottomRef={paneShouldStickToBottomRef}
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
+          paneMessageContentSignaturesRef={paneMessageContentSignaturesRef}
           forceSessionScrollToBottomRef={forceSessionScrollToBottomRef}
           pendingScrollToBottomRequest={pendingScrollToBottomRequest}
           windowId={windowId}
@@ -669,6 +675,7 @@ export function WorkspaceNodeView({
           paneShouldStickToBottomRef={paneShouldStickToBottomRef}
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
+          paneMessageContentSignaturesRef={paneMessageContentSignaturesRef}
           forceSessionScrollToBottomRef={forceSessionScrollToBottomRef}
           pendingScrollToBottomRequest={pendingScrollToBottomRequest}
           windowId={windowId}

@@ -217,6 +217,7 @@ function renderSessionPaneView({
     paneShouldStickToBottomRef: { current: {} },
     paneScrollPositionsRef: { current: {} },
     paneContentSignaturesRef: { current: {} },
+    paneMessageContentSignaturesRef: { current: {} },
     forceSessionScrollToBottomRef: { current: {} },
     pendingScrollToBottomRequest: null,
     windowId: "window-1",
