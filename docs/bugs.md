@@ -59,21 +59,6 @@ A delegated `/review-local` build or review can run against a child worktree mis
 - Include `git ls-files --others --exclude-standard` files with path validation and size limits.
 - Or reject isolated-worktree delegation while unsupported untracked files are present and explain the limitation.
 
-## Isolated delegation patch capture has no cumulative size cap
-
-**Severity:** Medium - `src/delegations.rs:1764-1772`. The isolated-worktree path captures repository-wide binary diffs into memory before applying them to the child worktree.
-
-Large tracked binary changes can make the delegation endpoint allocate large patch buffers, spend substantial CPU in `git apply`, and consume disk in the generated worktree.
-
-**Current behavior:**
-- `git diff --cached --binary` output is collected into a `Vec<u8>`.
-- `git diff --binary` output is collected into a second `Vec<u8>`.
-- No cumulative byte limit is enforced before patch application.
-
-**Proposal:**
-- Enforce a cumulative patch byte limit before creating or applying an isolated worktree.
-- Return a clear 4xx error when dirty state is too large to materialize safely.
-
 ## Delegation action generation guard can drop the first action after a session switch
 
 **Severity:** Low - `ui/src/SessionPaneView.render-callbacks.tsx:194`. `activeSessionGenerationRef` is advanced in a passive `useEffect`, so a delegation action started immediately after mount or session switch can capture the pre-effect generation.

@@ -30,6 +30,8 @@ const MAX_DELEGATION_DEPTH: usize = 3;
 const MAX_DELEGATION_WAIT_IDS: usize = 10;
 // The synthesized parent fan-in prompt is persisted and sent to a model.
 const MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES: usize = 64 * 1024;
+// Isolated worktrees materialize dirty tracked state through binary patches.
+const MAX_ISOLATED_WORKTREE_PATCH_BYTES: usize = 16 * 1024 * 1024;
 const DELEGATION_WAIT_RESUME_TRUNCATED_MARKER: &str =
     "\n\n[TermAl truncated this delegation fan-in prompt. Open the child sessions for full results.]";
 // Shared conflict text for create/cancel races before child dispatch starts.
@@ -2534,6 +2536,7 @@ fn prepare_isolated_delegation_worktree(
         &["diff", "--binary"],
         "failed to collect unstaged git diff for isolated worktree",
     )?;
+    validate_isolated_worktree_patch_size(&staged_patch, &unstaged_patch)?;
 
     create_detached_git_worktree(&source_repo_root, &worktree_root)?;
     let mut cleanup_guard = IsolatedWorktreeCleanupGuard::new(&source_repo_root, &worktree_root);
@@ -2710,6 +2713,32 @@ fn run_git_repo_command_with_input(
 
 fn git_patch_has_content(patch: &[u8]) -> bool {
     patch.iter().any(|byte| !byte.is_ascii_whitespace())
+}
+
+fn validate_isolated_worktree_patch_size(
+    staged_patch: &[u8],
+    unstaged_patch: &[u8],
+) -> Result<(), ApiError> {
+    validate_isolated_worktree_patch_size_bytes(staged_patch.len(), unstaged_patch.len())
+}
+
+fn validate_isolated_worktree_patch_size_bytes(
+    staged_patch_bytes: usize,
+    unstaged_patch_bytes: usize,
+) -> Result<(), ApiError> {
+    let total = staged_patch_bytes
+        .checked_add(unstaged_patch_bytes)
+        .ok_or_else(|| {
+            ApiError::bad_request(format!(
+                "isolated worktree dirty-state patch is too large; limit is {MAX_ISOLATED_WORKTREE_PATCH_BYTES} bytes"
+            ))
+        })?;
+    if total > MAX_ISOLATED_WORKTREE_PATCH_BYTES {
+        return Err(ApiError::bad_request(format!(
+            "isolated worktree dirty-state patch is {total} bytes; limit is {MAX_ISOLATED_WORKTREE_PATCH_BYTES} bytes"
+        )));
+    }
+    Ok(())
 }
 
 enum DelegationChildOutcome {

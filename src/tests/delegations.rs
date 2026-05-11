@@ -2907,6 +2907,41 @@ fn isolated_worktree_max_fanout_rejection_does_not_leave_worktree() {
 }
 
 #[test]
+fn isolated_worktree_patch_size_limit_rejects_oversized_dirty_state() {
+    validate_isolated_worktree_patch_size_bytes(MAX_ISOLATED_WORKTREE_PATCH_BYTES, 0)
+        .expect("exact patch limit should be accepted");
+
+    let err =
+        match validate_isolated_worktree_patch_size_bytes(MAX_ISOLATED_WORKTREE_PATCH_BYTES, 1) {
+            Ok(_) => panic!("patch one byte over the limit should be rejected"),
+            Err(err) => err,
+        };
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(
+        err.message.contains("isolated worktree dirty-state patch"),
+        "unexpected patch-size error: {}",
+        err.message
+    );
+    assert!(
+        err.message
+            .contains(&MAX_ISOLATED_WORKTREE_PATCH_BYTES.to_string()),
+        "patch-size error should include the configured limit: {}",
+        err.message
+    );
+
+    let overflow_err = match validate_isolated_worktree_patch_size_bytes(usize::MAX, 1) {
+        Ok(_) => panic!("overflowing patch size should be rejected"),
+        Err(err) => err,
+    };
+    assert_eq!(overflow_err.status, StatusCode::BAD_REQUEST);
+    assert!(
+        overflow_err.message.contains("too large"),
+        "overflow should use a size-limit error: {}",
+        overflow_err.message
+    );
+}
+
+#[test]
 fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
     let (state, input_rx) =
         test_app_state_with_delegation_codex_runtime("delegation-terminal-dispatch");
