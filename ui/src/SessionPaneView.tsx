@@ -2223,14 +2223,14 @@ export function SessionPaneView({
     }
 
     const previousSignature = paneContentSignatures[scrollStateKey];
-    paneContentSignatures[scrollStateKey] = visibleContentSignature;
     const previousMessageContentSignature =
       paneMessageContentSignaturesRef.current[scrollStateKey];
-    paneMessageContentSignaturesRef.current[scrollStateKey] =
-      visibleMessageContentSignature;
     if (previousSignature === visibleContentSignature) {
       return;
     }
+    paneContentSignatures[scrollStateKey] = visibleContentSignature;
+    paneMessageContentSignaturesRef.current[scrollStateKey] =
+      visibleMessageContentSignature;
     if (previousSignature === undefined) {
       // First content after mount. The useLayoutEffect already tried to
       // scroll, but messages may not have been available yet (SSE loads

@@ -94,20 +94,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 - Hoist `paneMessageContentSignaturesRef` to App.tsx and pass it through alongside `paneContentSignaturesRef`.
 - Or document why the divergence is intentional with a header comment.
 
-## `useEffect` consumes `paneMessageContentSignaturesRef` before predicate fires
-
-**Severity:** Low - `ui/src/SessionPaneView.tsx:1979-2076`. The lookup at line 1986-1989 is ref-based, so it doesn't trigger re-runs. But the assignment back-writes `paneMessageContentSignaturesRef.current[scrollStateKey] = visibleMessageContentSignature` happens BEFORE the early-return check at line 1990. If the early return fires, the back-write happened, but the side-effect logic that reads it is in a later branch.
-
-This means the effect "consumes" the previous-message-content-signature once per call regardless of whether the predicate ran.
-
-**Current behavior:**
-- Back-write happens before predicate evaluation.
-- Consecutive same-signature renders lose the previous value.
-
-**Proposal:**
-- Compute `onlyPendingPromptsChanged` BEFORE writing the next ref value.
-- Or add a test asserting the predicate fires on the second render in a row when only the assistant text grew.
-
 ## `start_telegram_relay_runtime` parallel `spawning`/`running` booleans should be a state enum
 
 **Severity:** Note - `src/telegram.rs:222-302`. Round 74 consolidated the relay state into `TelegramRelayRuntime` with parallel `spawning` and `running` booleans. The snapshot rule `running && !spawning` is implicit. A future contributor adding a new flag (e.g., `stopping`) needs to remember to combine all three correctly in the snapshot.
