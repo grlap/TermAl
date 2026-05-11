@@ -339,7 +339,15 @@ fn finish_active_turn_file_change_tracking(record: &mut SessionRecord) {
     record.active_turn_file_change_grace_deadline = None;
 }
 
-/// Clears active turn file-change tracking.
+/// Clears active turn file-change tracking without opening the post-turn grace window.
+///
+/// Used by normal non-turn-completion cleanup paths (`session_interaction`,
+/// `state_accessors`) and by persist-failure rollback paths
+/// (`session_lifecycle`, `turn_lifecycle`). Keep this as an unconditional wipe:
+/// callers use it when any pending watcher summary/grace deadline would be
+/// misleading, either because no completed turn should be summarized or because
+/// a failed persistence step rolled back the terminal message that would have
+/// owned the summary.
 fn clear_active_turn_file_change_tracking(record: &mut SessionRecord) {
     record.active_turn_start_message_count = None;
     record.active_turn_file_changes.clear();
