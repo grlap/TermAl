@@ -1787,7 +1787,29 @@ describe("hydration adoption side effects", () => {
     thresholdParams.adoptionRefs.latestStateRevisionRef.current = 5;
     thresholdParams.adoptionRefs.sessionsRef.current = [thresholdSession];
 
-    renderLiveStateHarness(thresholdParams, () => {});
+    const thresholdHarness = renderLiveStateHarness(thresholdParams, () => {});
+
+    await waitFor(() => expect(fetchSessionTail).toHaveBeenCalledTimes(1));
+    expect(fetchSessionTail).toHaveBeenCalledWith(
+      "session-1",
+      SESSION_TAIL_WINDOW_MESSAGE_COUNT,
+    );
+
+    thresholdHarness.unmount();
+    fetchSessionTail.mockClear();
+
+    const aboveThresholdSession = makeSession({
+      messagesLoaded: false,
+      messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES + 1,
+      sessionMutationStamp: 1,
+    });
+    const aboveThresholdParams = makeLiveStateParams(aboveThresholdSession);
+    aboveThresholdParams.adoptionRefs.latestStateRevisionRef.current = 5;
+    aboveThresholdParams.adoptionRefs.sessionsRef.current = [
+      aboveThresholdSession,
+    ];
+
+    renderLiveStateHarness(aboveThresholdParams, () => {});
 
     await waitFor(() => expect(fetchSessionTail).toHaveBeenCalledTimes(1));
     expect(fetchSessionTail).toHaveBeenCalledWith(

@@ -1986,8 +1986,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   app-live-state.ts:1333 (`attemptedTailHydration && !sessionStillNeedsHydration`) handles a real race but is uncovered. Simulate: tail mock resolves; during `act`, dispatch a delta or other path that completes hydration before the full fetch runs. Assert no full fetch is issued and the session is added to `hydratedSessionIdsRef`.
 - [ ] P2: Cover concurrent SSE delta during tail-then-full window:
   between the tail response and the full fetch, dispatch a synthetic `messageCreated`/`textDelta` MessageEvent. Assert: (a) the delta is correctly applied to the partial-tail messages (or correctly degrades to needs-resync if the delta targets a missing-prefix message), (b) the full fetch eventually adopts and the resulting transcript reflects both the delta and the full-load.
-- [ ] P2: Cover threshold boundaries for `shouldStartTailFirstHydration`:
-  test at `messageCount = 100` (no tail), `101` (tail), `102` (tail). Today the only test creates 150 messages. A regression flipping `>=` to `>` or dropping the `messageCount === undefined` fallback would not be caught.
 - [ ] P2: Cover `shouldStartTailFirstHydration` skip predicates:
   five separate skip conditions (lines 767-783): `allowDivergentTextRepairAfterNewerRevision === true`, session not found, `messagesLoaded !== false`, `messages.length > 0`, `messageCount` below threshold. Add at least one test per skip condition.
 - [ ] P2: Cover `backup_corrupt_telegram_bot_file` cross-fs fallback:
