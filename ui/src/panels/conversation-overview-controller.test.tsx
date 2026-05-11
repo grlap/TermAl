@@ -155,20 +155,22 @@ function OverviewNavigateHarness({
 function OverviewGrowthHarness({
   messageCount,
   readCallbacks,
+  sessionId = "session-a",
 }: {
   messageCount: number;
   readCallbacks?: VirtualizerReadCallbacks;
+  sessionId?: string;
 }) {
   const scrollContainerRef = useRef<HTMLElement | null>(
     document.createElement("section"),
   );
-  const snapshot = makeLayoutSnapshot("session-a", messageCount);
+  const snapshot = makeLayoutSnapshot(sessionId, messageCount);
   const overview = useConversationOverviewController({
     agent: "Codex",
     isActive: true,
     messageCount,
     scrollContainerRef,
-    sessionId: "session-a",
+    sessionId,
     showWaitingIndicator: false,
     waitingIndicatorPrompt: null,
   });
@@ -184,8 +186,10 @@ function OverviewGrowthHarness({
   }, [overview.virtualizerHandleRef, readCallbacks, snapshot]);
 
   return (
-    <output data-testid="layout-message-count">
-      {overview.layoutSnapshot?.messageCount ?? "none"}
+    <output data-testid="layout-snapshot">
+      {overview.layoutSnapshot
+        ? `${overview.layoutSnapshot.sessionId}:${overview.layoutSnapshot.messageCount}`
+        : "none"}
     </output>
   );
 }
@@ -385,16 +389,14 @@ describe("useConversationOverviewController", () => {
         />,
       );
 
-      expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
-        "none",
-      );
+      expect(screen.getByTestId("layout-snapshot")).toHaveTextContent("none");
 
       act(flushNextFrame);
       act(flushNextFrame);
       act(flushNextIdle);
 
-      expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
-        "90",
+      expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
+        "session-a:90",
       );
       expect(readCallbacks.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
       expect(readCallbacks.onGetViewportSnapshot).not.toHaveBeenCalled();
@@ -412,8 +414,8 @@ describe("useConversationOverviewController", () => {
           );
         });
 
-        expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
-          "90",
+        expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
+          "session-a:90",
         );
         expect(frameCallbacks.size).toBe(1);
         expect(readCallbacks.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
@@ -422,12 +424,144 @@ describe("useConversationOverviewController", () => {
 
       act(flushNextFrame);
 
-      expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
-        "300",
+      expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
+        "session-a:300",
       );
       expect(readCallbacks.onGetLayoutSnapshot).toHaveBeenCalledTimes(2);
       expect(readCallbacks.onGetViewportSnapshot).not.toHaveBeenCalled();
       expect(frameCallbacks.size).toBe(0);
+    } finally {
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      idleWindow.requestIdleCallback = originalRequestIdleCallback;
+      idleWindow.cancelIdleCallback = originalCancelIdleCallback;
+    }
+  });
+
+  it("ignores queued layout refresh callbacks after the session id changes", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const idleWindow = window as Window &
+      typeof globalThis & {
+        requestIdleCallback?: (
+          callback: IdleRequestCallback,
+          options?: IdleRequestOptions,
+        ) => number;
+        cancelIdleCallback?: (handle: number) => void;
+      };
+    const originalRequestIdleCallback = idleWindow.requestIdleCallback;
+    const originalCancelIdleCallback = idleWindow.cancelIdleCallback;
+    const frameCallbacks = new Map<number, FrameRequestCallback>();
+    const idleCallbacks = new Map<number, IdleRequestCallback>();
+    let nextFrameId = 1;
+    let nextIdleId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      frameCallbacks.set(frameId, callback);
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = ((frameId: number) => {
+      frameCallbacks.delete(frameId);
+    }) as typeof cancelAnimationFrame;
+    idleWindow.requestIdleCallback = ((callback: IdleRequestCallback) => {
+      const idleId = nextIdleId;
+      nextIdleId += 1;
+      idleCallbacks.set(idleId, callback);
+      return idleId;
+    }) as typeof requestIdleCallback;
+    idleWindow.cancelIdleCallback = ((idleId: number) => {
+      idleCallbacks.delete(idleId);
+    }) as typeof cancelIdleCallback;
+    const flushNextFrame = () => {
+      const nextFrame = frameCallbacks.entries().next().value as
+        | [number, FrameRequestCallback]
+        | undefined;
+      expect(nextFrame).toBeDefined();
+      if (!nextFrame) {
+        return;
+      }
+      const [frameId, callback] = nextFrame;
+      frameCallbacks.delete(frameId);
+      callback(performance.now());
+    };
+    const flushNextIdle = () => {
+      const nextIdle = idleCallbacks.entries().next().value as
+        | [number, IdleRequestCallback]
+        | undefined;
+      expect(nextIdle).toBeDefined();
+      if (!nextIdle) {
+        return;
+      }
+      const [idleId, callback] = nextIdle;
+      idleCallbacks.delete(idleId);
+      callback({
+        didTimeout: false,
+        timeRemaining: () => 16,
+      });
+    };
+
+    try {
+      const sessionAReads = {
+        onGetLayoutSnapshot: vi.fn(),
+        onGetViewportSnapshot: vi.fn(),
+      };
+      const sessionBReads = {
+        onGetLayoutSnapshot: vi.fn(),
+        onGetViewportSnapshot: vi.fn(),
+      };
+      const { rerender } = render(
+        <OverviewGrowthHarness
+          messageCount={90}
+          readCallbacks={sessionAReads}
+          sessionId="session-a"
+        />,
+      );
+
+      act(flushNextFrame);
+      act(flushNextFrame);
+      act(flushNextIdle);
+
+      expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
+        "session-a:90",
+      );
+      expect(frameCallbacks.size).toBe(1);
+      const staleLayoutRefresh = frameCallbacks.values().next().value;
+      expect(staleLayoutRefresh).toBeDefined();
+
+      act(() => {
+        rerender(
+          <OverviewGrowthHarness
+            messageCount={95}
+            readCallbacks={sessionBReads}
+            sessionId="session-b"
+          />,
+        );
+      });
+
+      expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
+        "session-a:90",
+      );
+      expect(frameCallbacks.size).toBeGreaterThanOrEqual(1);
+
+      act(() => {
+        staleLayoutRefresh?.(performance.now());
+      });
+
+      expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
+        "session-a:90",
+      );
+      expect(sessionAReads.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
+      expect(sessionBReads.onGetLayoutSnapshot).not.toHaveBeenCalled();
+
+      act(flushNextFrame);
+      act(flushNextFrame);
+      act(flushNextIdle);
+
+      expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
+        "session-b:95",
+      );
+      expect(sessionBReads.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
     } finally {
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
@@ -494,9 +628,7 @@ describe("useConversationOverviewController", () => {
         rerender(<OverviewGrowthHarness messageCount={1} />);
       });
 
-      expect(screen.getByTestId("layout-message-count")).toHaveTextContent(
-        "none",
-      );
+      expect(screen.getByTestId("layout-snapshot")).toHaveTextContent("none");
       expect(frameCallbacks.size).toBe(0);
       expect(idleCallbacks.size).toBe(0);
     } finally {

@@ -440,21 +440,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - If yes: add a fast-track path — when `messageCount - layoutSnapshot.messageCount > N`, refresh synchronously to avoid >1 rAF lag.
 - Otherwise document the lag explicitly so future consumers know the snapshot lags by up to one rAF behind `messageCount`.
 
-## Session-id guard inside scheduled refresh callbacks unverified
-
-**Severity:** Medium - the new `scheduleLayoutRefresh` / `scheduleViewportRefresh` callbacks at `ui/src/panels/conversation-overview-controller.ts:247-274` capture `expectedSessionId = overviewSessionIdRef.current` and compare on dispatch. The guard is correct in principle but no test exercises a session change mid-rAF.
-
-A regression that dropped the guard would still pass every existing test, but a session switch between schedule and flush would clobber the new session's snapshot with a stale read from the previous session. Additionally, the cleanup path only cancels via `cancelLayoutRefreshFrame` / `cancelViewportRefreshFrame`; if a `scheduleLayoutRefresh` was queued but already entered the rAF callback, only the session-id guard prevents a stale write.
-
-**Current behavior:**
-- Session-id captured at schedule time, compared at flush time.
-- No test crosses the session-id boundary mid-rAF.
-- A regression dropping the guard would still pass.
-
-**Proposal:**
-- Extend the controller test harness so a `rerender({ sessionId: "session-b", messageCount: 90 })` between the schedule and the flush asserts the layout snapshot is NOT updated to the stale session-a result.
-- Document the lifetime contract for `overviewSessionIdRef` vs `isRailReady`.
-
 ## `markUserScroll` anchor speculation captures approximate touch offsets
 
 **Severity:** Medium - speculative offset adjustment `viewportOffsetPx - inputScrollDeltaY` applied unconditionally on every input event. For touch events, `touchDeltaY` is the FINGER delta (not the scroll delta). When user touches a non-scrollable region, swipes within an iframe, or hits a scroll boundary, the anchor's `viewportOffsetPx` ends up off by the would-be delta.
@@ -2874,8 +2859,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   in addition to the existing "no buttons rendered" assertion, also assert that `onCancelParallelAgent` / `onOpenParallelAgentSession` / `onInsertParallelAgentResult` were NOT called with the tool agent's id (defense in depth).
 - [ ] P2: Add `ParallelAgentsCard` pending-action unmount coverage:
   click an async action, unmount before the promise settles, resolve/reject the promise, and assert the pending-state cleanup cannot update after unmount.
-- [ ] P2: Pin session-id guard in scheduled refresh callbacks:
-  extend the controller test harness so a `rerender({ sessionId: "session-b", messageCount: 90 })` between a schedule and the flush asserts the layout snapshot is NOT updated to the stale session-a result, and the new session's later flush wins.
 - [ ] P2: Add unmount-while-pending tests for new rAF schedulers:
   schedule a refresh, unmount before flushing, and assert `cancelAnimationFrame` was called for the pending frame id. Same for a `sessionId` change mid-pending.
 - [ ] P2: Stabilize `telegram_settings_load_defaults_only_for_missing_file` against platform `io::ErrorKind`:
