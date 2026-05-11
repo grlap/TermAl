@@ -60,18 +60,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 **Proposal:**
 - Extract the active-baseline transition into a helper `transition_active_baseline_to_settled` that returns either the new cursor + position or an `OutcomeShortCircuit`.
 
-## Marker dialog-semantics test bundles 6+ behaviors in one `it()`
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:1024-1121`. The new "uses dialog semantics and local keyboard behavior" test combines six behaviors (dialog role, input focus/select, codepoint truncation, whitespace-disabled submit, button-keydown short-circuit, resize-doesn't-close-during-edit, trim, cancel restores focus, escape restores focus). One test asserting six behaviors fails opaquely.
-
-**Current behavior:**
-- 6+ assertions in one `it()`.
-- Failure messages cluster at one line.
-
-**Proposal:**
-- Consider splitting once the test grows further.
-- Current 6-in-1 is acceptable but the pattern should not expand.
-
 ## `from_ui_file` returns `Option<Self>` for three distinct disabled-relay reasons
 
 **Severity:** Note - `src/telegram.rs:181-213`. The function returns `Option<Self>` for THREE distinct disabled-relay reasons (disabled flag, missing/empty token, missing/empty default project). The caller cannot tell why the relay isn't started. A typed reason would help diagnostics and let the UI surface a more accurate "Stopped" reason.

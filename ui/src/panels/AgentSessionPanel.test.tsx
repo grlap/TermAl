@@ -1692,7 +1692,7 @@ describe("AgentSessionPanel conversation caching", () => {
     });
   });
 
-  it("uses dialog semantics and local keyboard behavior for marker label creation", async () => {
+  function renderMarkerCreationHarness() {
     const onCreateConversationMarker = vi.fn();
     const activeSession = makeSession("session-1", {
       messages: makeTextMessages(2),
@@ -1720,6 +1720,11 @@ describe("AgentSessionPanel conversation caching", () => {
     const trigger = screen
       .getByText("Agent message-2")
       .closest("[data-conversation-marker-menu-trigger='true']") as HTMLElement;
+
+    return { onCreateConversationMarker, trigger };
+  }
+
+  function openMarkerCreateDialog(trigger: HTMLElement) {
     fireEvent.contextMenu(trigger);
     fireEvent.click(
       screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
@@ -1731,25 +1736,35 @@ describe("AgentSessionPanel conversation caching", () => {
     const dialog = screen.getByRole("dialog", {
       name: "Create conversation marker",
     });
-    expect(dialog).toBeInTheDocument();
     const markerLabelInput = screen.getByLabelText(
       "Marker label",
     ) as HTMLInputElement;
+    const submitButton = screen.getByRole("button", { name: "Create marker" });
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+
+    return { cancelButton, dialog, markerLabelInput, submitButton };
+  }
+
+  it("opens marker label creation as a focused dialog with selected default text", async () => {
+    const { trigger } = renderMarkerCreationHarness();
+    const { dialog, markerLabelInput } = openMarkerCreateDialog(trigger);
+
+    expect(dialog).toBeInTheDocument();
     await waitFor(() => {
       expect(markerLabelInput).toHaveFocus();
     });
     expect(markerLabelInput.selectionStart).toBe(0);
     expect(markerLabelInput.selectionEnd).toBe("Checkpoint".length);
+  });
 
-    const submitButton = screen.getByRole("button", { name: "Create marker" });
+  it("validates and submits trimmed marker labels without closing on resize", () => {
+    const { onCreateConversationMarker, trigger } = renderMarkerCreationHarness();
+    const { markerLabelInput, submitButton } = openMarkerCreateDialog(trigger);
+
     fireEvent.change(markerLabelInput, { target: { value: "🙂".repeat(121) } });
     expect(Array.from(markerLabelInput.value)).toHaveLength(120);
     fireEvent.change(markerLabelInput, { target: { value: "   " } });
     expect(submitButton).toBeDisabled();
-    const cancelButton = screen.getByRole("button", { name: "Cancel" });
-    cancelButton.focus();
-    fireEvent.keyDown(cancelButton, { key: "ArrowDown" });
-    expect(cancelButton).toHaveFocus();
 
     fireEvent.change(markerLabelInput, {
       target: { value: "  Review later  " },
@@ -1765,22 +1780,33 @@ describe("AgentSessionPanel conversation caching", () => {
       "message-2",
       { name: "Review later" },
     );
+  });
 
-    fireEvent.contextMenu(trigger);
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
-    );
+  it("keeps marker create dialog keyboard handling local to dialog controls", () => {
+    const { trigger } = renderMarkerCreationHarness();
+    const { cancelButton } = openMarkerCreateDialog(trigger);
+
+    cancelButton.focus();
+    fireEvent.keyDown(cancelButton, { key: "ArrowDown" });
+    expect(cancelButton).toHaveFocus();
+  });
+
+  it("restores marker trigger focus after canceling marker label creation", async () => {
+    const { onCreateConversationMarker, trigger } = renderMarkerCreationHarness();
+    openMarkerCreateDialog(trigger);
+
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(onCreateConversationMarker).toHaveBeenCalledTimes(1);
+    expect(onCreateConversationMarker).not.toHaveBeenCalled();
     await waitFor(() => {
       expect(trigger).toHaveFocus();
     });
+  });
 
-    fireEvent.contextMenu(trigger);
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: "Add checkpoint marker" }),
-    );
+  it("restores marker trigger focus after escaping marker label creation", async () => {
+    const { trigger } = renderMarkerCreationHarness();
+    openMarkerCreateDialog(trigger);
+
     fireEvent.keyDown(screen.getByLabelText("Marker label"), { key: "Escape" });
 
     expect(
