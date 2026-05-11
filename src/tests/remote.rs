@@ -4677,6 +4677,68 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
 }
 
 #[test]
+fn inbound_remote_session_remote_id_is_replaced_by_connection_metadata() {
+    let state = test_app_state();
+    let remote = local_replay_test_remote();
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let mut remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    remote_session.remote_id = Some("attacker-remote".to_owned());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let local_session_id = upsert_remote_proxy_session_record(
+            &mut inner,
+            &remote.id,
+            &remote_session,
+            Some(local_project_id),
+        );
+        let index = inner
+            .find_remote_session_index(&remote.id, &remote_session.id)
+            .expect("remote proxy session should exist");
+        let record = &inner.sessions[index];
+
+        assert_eq!(record.session.id, local_session_id);
+        assert_eq!(record.remote_id.as_deref(), Some(remote.id.as_str()));
+        assert_eq!(
+            record.remote_session_id.as_deref(),
+            Some(remote_session.id.as_str())
+        );
+        assert!(
+            record.session.remote_id.is_none(),
+            "embedded session state must not retain untrusted inbound remote_id"
+        );
+
+        let summary = AppState::wire_session_summary_from_record(record);
+        let full = AppState::wire_session_from_record(record);
+        assert_eq!(summary.remote_id.as_deref(), Some(remote.id.as_str()));
+        assert_eq!(full.remote_id.as_deref(), Some(remote.id.as_str()));
+        assert_ne!(summary.remote_id.as_deref(), Some("attacker-remote"));
+        assert_ne!(full.remote_id.as_deref(), Some("attacker-remote"));
+
+        state
+            .commit_locked(&mut inner)
+            .expect("remote proxy session should persist");
+    }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn remote_delta_replay_key_isolates_individual_fingerprinted_fields() {
     let remote_id = "ssh-lab";
     let replay_key = |event: DeltaEvent| {

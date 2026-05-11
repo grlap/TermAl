@@ -189,18 +189,6 @@ The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but
 - When serving wire Sessions to remotes (vs. to local UI), strip the `remote_id` field.
 - Or explicitly document that local remote aliases/session-to-remote ownership are non-sensitive shared metadata under the Phase 1 trust model.
 
-## No test for inbound attacker-chosen `remote_id` in `localize_remote_session`
-
-**Severity:** Note - `src/remote_sync.rs:534`. The defensive clear of inbound wire `remote_id` is correct, but no test covers the case where a remote snapshot sends `remote_id` set to an attacker-chosen value. The `apply_remote_session_to_record` path should overwrite with the trusted `remote_id` from the connection, so this is safe only if that production ingestion path is exercised.
-
-**Current behavior:**
-- Defensive clear is correct.
-- Existing coverage can set record metadata directly instead of feeding an inbound remote snapshot.
-- No test exercises the attacker-claim case through the production localization/ingestion path.
-
-**Proposal:**
-- Add a Rust test that simulates a remote snapshot sending `Session` with `remote_id: Some("OTHER-REMOTE")` and asserts the resulting `record.remote_id` is the trusted connection id while embedded wire metadata is cleared.
-
 ## Unmount race test relies on console error suppression for `act` warnings
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7102-7129`. "Ignores delegation completion after the footer unmounts" exercises only the unmount-during-await path. It does NOT verify (a) `setIsDelegationSpawning(false)` is gated by `isMountedRef.current` so the React `act` warning never appears (covered indirectly by lack of console error), or (b) `focusComposerInput()` is not called after unmount (a pending rAF could try to focus a detached node).
@@ -1730,8 +1718,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add an injectable or testable relay runtime so startup from saved settings, implicit first subscribed-project fallback, invalid/missing config stop, config-save start/stop/restart, deleted-project reconciliation, runtime status `running: true` + `inProcess`, and graceful-shutdown stop are covered despite the production path's `#[cfg(not(test))]` guards.
 - [ ] P2: Cover Telegram relay stop/restart quiescence:
   simulate disable or config retarget while an old relay is in flight and assert stale-generation polling/action handling cannot continue after status reports the replacement or stopped state.
-- [ ] P2: Cover remote-sync embedded remote-owner clearing:
-  seed a remote snapshot session with attacker-chosen `remoteId`, localize it, and assert trusted `SessionRecord.remote_id` metadata is preserved while the embedded `record.session.remote_id` is cleared and local wire projections re-emit only trusted ownership.
 - [ ] P2: Cover production-path tool/delegation id collision:
   add a Rust test that drives both the Claude task path and the delegation creation path with overlapping ids (or document the assumption that uuid id spaces don't collide deterministically). The current test manually inserts the collision.
 - [ ] P2: Clean up AgentSessionPanel `act(...)` warnings:
