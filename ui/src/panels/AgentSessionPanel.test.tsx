@@ -833,10 +833,11 @@ describe("AgentSessionPanel conversation caching", () => {
 
   it("jumps to the cached marker slot when scroll-root lookup cannot see the panel", () => {
     let scrolledNode: Element | null = null;
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = function scrollIntoView() {
-      scrolledNode = this;
-    };
+    const scrollIntoViewSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(function scrollIntoView(this: HTMLElement) {
+        scrolledNode = this;
+      });
     const detachedScrollRoot = document.createElement("section");
     const onConversationSearchItemMount = vi.fn();
     const activeSession = makeSession("session-1", {
@@ -878,11 +879,7 @@ describe("AgentSessionPanel conversation caching", () => {
         "message:message-1",
       );
     } finally {
-      if (originalScrollIntoView) {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      } else {
-        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
-      }
+      scrollIntoViewSpy.mockRestore();
     }
   });
 
@@ -891,13 +888,17 @@ describe("AgentSessionPanel conversation caching", () => {
       itemKey: string | null;
       options: ScrollIntoViewOptions | boolean | undefined;
     }> = [];
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = function scrollIntoView(options) {
-      scrollIntoViewCalls.push({
-        itemKey: this.getAttribute("data-session-search-item-key"),
-        options,
+    const scrollIntoViewSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(function scrollIntoView(
+        this: HTMLElement,
+        options?: ScrollIntoViewOptions | boolean,
+      ) {
+        scrollIntoViewCalls.push({
+          itemKey: this.getAttribute("data-session-search-item-key"),
+          options,
+        });
       });
-    };
     const messages = makeTextMessages(5);
     const activeSession = makeSession("session-1", {
       messages,
@@ -928,20 +929,22 @@ describe("AgentSessionPanel conversation caching", () => {
         },
       ]);
     } finally {
-      if (originalScrollIntoView) {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      } else {
-        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
-      }
+      scrollIntoViewSpy.mockRestore();
     }
   });
 
   it("jumps to a virtualized marker target in one click without redundant correction", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const scrollIntoViewTargets: Array<string | null> = [];
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     const scrollNode = document.createElement("section");
     let scrollTop = 80_000;
+    const scrollIntoViewSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(function scrollIntoView(this: HTMLElement) {
+        scrollIntoViewTargets.push(
+          this.getAttribute("data-session-search-item-key"),
+        );
+      });
 
     class ResizeObserverMock {
       observe() {}
@@ -967,11 +970,6 @@ describe("AgentSessionPanel conversation caching", () => {
         scrollTop = nextValue;
       },
     });
-    HTMLElement.prototype.scrollIntoView = function scrollIntoView() {
-      scrollIntoViewTargets.push(
-        this.getAttribute("data-session-search-item-key"),
-      );
-    };
     window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
 
     const activeSession = makeSession("session-1", {
@@ -1018,20 +1016,17 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(screen.getByText("message-1")).toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
-      if (originalScrollIntoView) {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      } else {
-        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
-      }
+      scrollIntoViewSpy.mockRestore();
     }
   });
 
   it("keeps marker jumps working after switching sessions with the same message ids", () => {
     let scrolledText = "";
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = function scrollIntoView() {
-      scrolledText = this.textContent ?? "";
-    };
+    const scrollIntoViewSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(function scrollIntoView(this: HTMLElement) {
+        scrolledText = this.textContent ?? "";
+      });
     const detachedScrollRoot = document.createElement("section");
     const firstSession = makeSession("session-a", {
       messages: [
@@ -1135,20 +1130,17 @@ describe("AgentSessionPanel conversation caching", () => {
       act(() => {
         resetSessionStoreForTesting();
       });
-      if (originalScrollIntoView) {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      } else {
-        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
-      }
+      scrollIntoViewSpy.mockRestore();
     }
   });
 
   it("scopes marker fallback lookup to the active panel scroll root", () => {
     let scrolledText = "";
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = function scrollIntoView() {
-      scrolledText = this.textContent ?? "";
-    };
+    const scrollIntoViewSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(function scrollIntoView(this: HTMLElement) {
+        scrolledText = this.textContent ?? "";
+      });
     const leftRoot = document.createElement("section");
     const rightRoot = document.createElement("section");
     leftRoot.innerHTML =
@@ -1181,11 +1173,7 @@ describe("AgentSessionPanel conversation caching", () => {
 
       expect(scrolledText).toBe("right pane");
     } finally {
-      if (originalScrollIntoView) {
-        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-      } else {
-        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
-      }
+      scrollIntoViewSpy.mockRestore();
       leftRoot.remove();
       rightRoot.remove();
     }
