@@ -1433,6 +1433,8 @@ export function useAppLiveState(
           hydratedSessionIdsRef.current.add(sessionId);
           return;
         }
+        // Recapture so the full-fetch classifier sees metadata mutated by
+        // partial tail adoption above.
         const fullRequestContext =
           captureHydrationRequestContext(sessionId, options) ?? requestContext;
         const response = await fetchSession(sessionId);

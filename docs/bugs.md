@@ -672,19 +672,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 **Proposal:**
 - Either (a) extract a small `markFullyHydrated(sessionId)` helper that wraps the add + clearHydrationRetry pair (already paired at all three sites), OR (b) compute "is this session fully hydrated" from session state at use sites and stop tracking it in a separate ref.
 
-## `fullRequestContext` recapture pattern is silently load-bearing but undocumented
-
-**Severity:** Low - line 1338 recaptures the request context after partial adoption mutated `sessionsRef`. Without this recapture, the full fetch would compare against pre-tail metadata and likely classify as `stale`. A future "simplification" back to the original `requestContext` would silently break the classifier.
-
-`ui/src/app-live-state.ts:1338-1339`. The metadata fields (`messageCount`, `sessionMutationStamp`) on the new local state come from the partial-adopted tail. The full fetch's `classifyFetchedSessionAdoption` needs the post-partial values. No comment explains this.
-
-**Current behavior:**
-- `fullRequestContext = captureHydrationRequestContext(sessionId, options) ?? requestContext;`
-- The recapture is needed for correctness but undocumented.
-
-**Proposal:**
-- Add a one-line comment: "// Recapture so the classifier sees post-tail-adoption metadata; partial-adoption mutated sessionsRef."
-
 ## Tail-then-full sequence doubles HTTP request volume for sessions ≥101 messages
 
 **Severity:** Low - the frontend always pairs `fetchSessionTail(SESSION_TAIL_WINDOW_MESSAGE_COUNT)` with `fetchSession(...)` for sessions where `messageCount >= 101`. Phase 1 local-only is fast. Future remote-host or flaky-network scenarios pay this tax.
