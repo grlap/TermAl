@@ -347,19 +347,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Add a sibling test that drives both the Claude task path and the delegation creation path with overlapping ids.
 - Or document the assumption that uuid id spaces don't collide deterministically.
 
-## `docs/features/telegram-ui-integration.md` 422 disambiguation paragraph depends on human-readable error text
-
-**Severity:** Medium - the 422 disambiguation paragraph at `:261-267` asks clients to branch on `error.message` text. The new compatibility note at `:269-273` describes a behavior change where validation now reports `unknown default Telegram session project` instead of `default Telegram session must belong to the default project` - exactly the kind of message-text change the prior paragraph warns clients about.
-
-**Current behavior:**
-- Paragraph 1: "Clients should use the error message".
-- Paragraph 2: "We changed the error message; clients depending on the old text break."
-- `ApiError` exposes only `{ error }`, with no stable machine-readable kind.
-
-**Proposal:**
-- Add a separate machine-readable error-code field.
-- Or use distinct statuses for local request-shape failures versus Telegram token/auth failures.
-
 ## `scheduleLayoutRefresh` callback double-refreshes viewport snapshot per flush
 
 **Severity:** Medium - the rAF callback at `ui/src/panels/conversation-overview-controller.ts:241-252` calls `refreshLayoutSnapshot()` (which already updates `viewportSnapshot` via `extractConversationOverviewViewportSnapshot(nextSnapshot)`) AND THEN `refreshViewportSnapshot()` (which makes a separate `getViewportSnapshot()` call and updates the same `viewportSnapshot` again). Two consecutive `setViewportSnapshot` calls per flush.
@@ -555,21 +542,6 @@ A regression that dropped the guard would still pass every existing test, but a 
 **Proposal:**
 - Throttle via rAF.
 - OR only capture when prepend is imminent.
-
-## `validate_and_normalize_telegram_config` orphan-session error message reorder is wire-visible
-
-**Severity:** Medium - same input now produces a different error message. Round 60 reordered the `known_projects` check to run before the project-mismatch check; the user-visible error message changes from `"default Telegram session must belong to the default project"` to `"unknown default Telegram session project P_unknown"` for the case where session points to an unknown project.
-
-`src/telegram_settings.rs:204-208`. Wrappers that case-match on the previous error string see different output.
-
-**Current behavior:**
-- Validation error precedence reordered.
-- Error message changes for the same input.
-- No documentation of the wire-shape change.
-
-**Proposal:**
-- Add a wire-shape change note in `docs/features/telegram-ui-integration.md`.
-- Document the validation error precedence: known_projects > project-mismatch.
 
 ## `status-fetch-failed` priority drops mixed-instance signal silently
 
@@ -2944,8 +2916,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   after forcing literal pathspec behavior, add regression coverage for filenames containing `*`, `?`, `[]`, and `:(top)` so single-file Git actions cannot expand to other files.
 - [ ] P2: Cover copy/rename staging pathspecs:
   add focused coverage for `collect_git_stage_pathspecs(..., Some("R"))` and `Some("C")`, preferably through a real repo scenario proving old and new paths are staged together.
-- [ ] P2: Stabilize `/api/telegram/test` 422 discrimination:
-  add a stable error code/kind or distinct statuses for local JSON-shape failures versus Telegram token/auth failures, then update the feature brief and tests to avoid message-text parsing.
 - [ ] P2: Pin the 1024-char error message in token validation test:
   the new 1024-char case asserts only `status == BAD_REQUEST`. Add `assert!(long_err.message.contains("at most 256 characters"));` to ensure the limit is named even on extreme oversize.
 - [ ] P2: Cover the `kind: "request-failed"` doc gap:

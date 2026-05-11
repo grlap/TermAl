@@ -116,6 +116,17 @@ The relay itself uses existing TermAl routes:
 | GET | `/api/sessions/{id}` | Read settled assistant messages for forwarding |
 | POST | `/api/sessions/{id}/messages` | Forward Telegram free text into TermAl |
 
+Telegram endpoints return the standard TermAl API error shape, `{ "error":
+"..." }`, with a human-readable diagnostic. Treat that message as
+presentation text, not a stable discriminator. In particular,
+`/api/telegram/test` can return `422` for both local config validation failures
+and Telegram `getMe` validation/auth failures; clients should present the
+message and branch on request context or status, not parse English text.
+Config validation also checks that referenced projects/sessions still exist
+before checking default-project membership, so orphaned defaults can report
+`unknown ... project/session` wording instead of an older membership-specific
+message.
+
 ## Legacy CLI Mode
 
 `cargo run -- telegram` still works for debugging and reads:
