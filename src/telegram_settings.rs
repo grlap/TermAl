@@ -15,10 +15,12 @@ must release app state before writing to disk.
 
 const TELEGRAM_BOT_TOKEN_MAX_CHARS: usize = 256;
 const TELEGRAM_TEST_COOLDOWN: Duration = Duration::from_secs(2);
+const TELEGRAM_TEST_COOLDOWN_RETRY_AFTER: &str = "2";
+const TELEGRAM_TEST_RATE_LIMIT_MESSAGE: &str =
+    "Telegram connection tests are rate-limited. Try again in a moment.";
 const TELEGRAM_TEST_RATE_LIMIT_RETAIN: Duration = Duration::from_secs(60);
 
-static TELEGRAM_SETTINGS_FILE_LOCK: LazyLock<Mutex<()>> =
-    LazyLock::new(|| Mutex::new(()));
+static TELEGRAM_SETTINGS_FILE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 static TELEGRAM_TEST_RATE_LIMITS: LazyLock<Mutex<HashMap<String, std::time::Instant>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -47,7 +49,10 @@ impl TelegramStatusResponse {
             running: relay.running,
             lifecycle: relay.lifecycle,
             linked_chat_id: state.chat_id,
-            bot_token_masked: config.bot_token.as_deref().and_then(mask_telegram_bot_token),
+            bot_token_masked: config
+                .bot_token
+                .as_deref()
+                .and_then(mask_telegram_bot_token),
             subscribed_project_ids: config.subscribed_project_ids,
             default_project_id: config.default_project_id,
             default_session_id: config.default_session_id,
@@ -115,7 +120,9 @@ impl AppState {
                 .ok_or_else(|| ApiError::bad_request("Telegram bot token is required"))?,
             None if request.use_saved_token => {
                 let _guard = telegram_settings_file_guard();
-                self.load_telegram_bot_file()?.config.bot_token
+                self.load_telegram_bot_file()?
+                    .config
+                    .bot_token
                     .ok_or_else(|| ApiError::bad_request("Telegram bot token is required"))?
             }
             None => return Err(ApiError::bad_request("Telegram bot token is required")),
@@ -193,8 +200,7 @@ impl AppState {
             }
         }
 
-        if default_project_id.is_none() && subscribed_project_ids.len() == 1
-        {
+        if default_project_id.is_none() && subscribed_project_ids.len() == 1 {
             default_project_id = subscribed_project_ids.first().cloned();
         }
 
@@ -218,7 +224,9 @@ impl AppState {
                 .iter()
                 .find(|record| record.session.id == session_id)
                 .ok_or_else(|| {
-                    ApiError::bad_request(format!("unknown default Telegram session `{session_id}`"))
+                    ApiError::bad_request(format!(
+                        "unknown default Telegram session `{session_id}`"
+                    ))
                 })?;
             let session_project_id = session.session.project_id.as_deref().ok_or_else(|| {
                 ApiError::bad_request("default Telegram session must belong to a project")
@@ -348,9 +356,7 @@ impl AppState {
             .retain(|project_id| known_projects.contains(project_id.as_str()));
         changed |= config.subscribed_project_ids.len() != old_subscription_count;
 
-        if config.default_project_id.is_none()
-            && config.subscribed_project_ids.len() == 1
-        {
+        if config.default_project_id.is_none() && config.subscribed_project_ids.len() == 1 {
             config.default_project_id = config.subscribed_project_ids.first().cloned();
             changed = true;
         }
@@ -428,11 +434,24 @@ async fn update_telegram_config(
 async fn test_telegram_connection(
     State(state): State<AppState>,
     request: Result<Json<TelegramTestRequest>, JsonRejection>,
-) -> Result<Json<TelegramTestResponse>, ApiError> {
+) -> Result<Response, ApiError> {
     let Json(request) =
         request.map_err(|rejection| api_json_rejection("Telegram test request", rejection))?;
-    let response = run_blocking_api(move || state.test_telegram_connection(request)).await?;
-    Ok(Json(response))
+    match run_blocking_api(move || state.test_telegram_connection(request)).await {
+        Ok(response) => Ok(Json(response).into_response()),
+        Err(err)
+            if err.status == StatusCode::TOO_MANY_REQUESTS
+                && err.message == TELEGRAM_TEST_RATE_LIMIT_MESSAGE =>
+        {
+            let mut response = err.into_response();
+            response.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                HeaderValue::from_static(TELEGRAM_TEST_COOLDOWN_RETRY_AFTER),
+            );
+            Ok(response)
+        }
+        Err(err) => Err(err),
+    }
 }
 
 fn telegram_settings_file_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -468,13 +487,15 @@ fn check_telegram_test_rate_limit(token: &str) -> Result<(), ApiError> {
     let mut limits = TELEGRAM_TEST_RATE_LIMITS
         .lock()
         .expect("telegram test rate limit mutex poisoned");
-    limits.retain(|_, last_attempt| now.duration_since(*last_attempt) <= TELEGRAM_TEST_RATE_LIMIT_RETAIN);
+    limits.retain(|_, last_attempt| {
+        now.duration_since(*last_attempt) <= TELEGRAM_TEST_RATE_LIMIT_RETAIN
+    });
 
     if let Some(last_attempt) = limits.get(&key) {
         if now.duration_since(*last_attempt) < TELEGRAM_TEST_COOLDOWN {
             return Err(ApiError::from_status(
                 StatusCode::TOO_MANY_REQUESTS,
-                "Telegram connection tests are rate-limited. Try again in a moment.",
+                TELEGRAM_TEST_RATE_LIMIT_MESSAGE,
             ));
         }
     }

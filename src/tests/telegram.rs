@@ -5385,6 +5385,45 @@ fn telegram_test_rate_limit_rejects_immediate_retry() {
     assert_eq!(err.status, StatusCode::TOO_MANY_REQUESTS);
 }
 
+#[tokio::test]
+async fn telegram_test_route_rate_limit_includes_retry_after_header() {
+    let token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
+    check_telegram_test_rate_limit(&token).expect("first attempt should prime rate limit");
+
+    let response = request_response(
+        &app_router(test_app_state()),
+        Request::post("/api/telegram/test")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                    "botToken": token,
+                    "useSavedToken": false
+                })
+                .to_string(),
+            ))
+            .expect("request should build"),
+    )
+    .await;
+    let status = response.status();
+    let retry_after = response
+        .headers()
+        .get(axum::http::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should read");
+    let error: ErrorResponse =
+        serde_json::from_slice(&body).expect("rate-limit response should be JSON");
+
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        retry_after.as_deref(),
+        Some(TELEGRAM_TEST_COOLDOWN_RETRY_AFTER)
+    );
+    assert_eq!(error.error, TELEGRAM_TEST_RATE_LIMIT_MESSAGE);
+}
+
 #[test]
 fn telegram_token_validation_enforces_max_length_boundary() {
     validate_telegram_bot_token(&"x".repeat(TELEGRAM_BOT_TOKEN_MAX_CHARS - 1))

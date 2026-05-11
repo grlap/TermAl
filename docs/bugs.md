@@ -569,20 +569,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 **Proposal:**
 - Split into `pure_validate_telegram_config(...) -> Result<TelegramConfigNormalization, ApiError>` + `apply_telegram_config_normalization(...)` outside the lock.
 
-## `POST /api/telegram/test` 429 missing `Retry-After` header / cooldown duration
-
-**Severity:** Low - body says "Try again in a moment." but doesn't include a numeric duration nor an HTTP `Retry-After` header.
-
-`src/telegram_settings.rs:361`. The cooldown is `TELEGRAM_TEST_COOLDOWN = Duration::from_secs(2)`; HTTP-aware clients can't act on a structured rate-limit signal.
-
-**Current behavior:**
-- 429 status.
-- Body: "Telegram connection tests are rate-limited. Try again in a moment."
-- No `Retry-After` header.
-
-**Proposal:**
-- Attach a `Retry-After: 2` header, or add a stable `retryAfterSeconds` field to the error contract.
-
 ## `SESSION_TAIL_HYDRATION_MAX_MESSAGES = 500` silent cap with no signal to caller
 
 **Severity:** Medium - `message_limit.min(SESSION_TAIL_HYDRATION_MAX_MESSAGES)` truncates without a status code, header, or response field. Future callers cannot detect that they got a different prefix than they asked for.
