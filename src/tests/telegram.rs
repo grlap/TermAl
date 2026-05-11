@@ -13,6 +13,9 @@ use super::*;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 
+static TELEGRAM_TEST_RATE_LIMIT_TEST_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
 struct FakeTelegramSender {
     answered_callbacks: RefCell<Vec<(String, String)>>,
     edited_messages: RefCell<Vec<(i64, i64, String, TelegramTextFormat)>>,
@@ -5377,16 +5380,42 @@ fn telegram_token_mask_contract_limits_visible_suffix() {
 
 #[test]
 fn telegram_test_rate_limit_rejects_immediate_retry() {
+    let _rate_limit_lock = TELEGRAM_TEST_RATE_LIMIT_TEST_LOCK
+        .lock()
+        .expect("telegram test rate-limit test mutex poisoned");
+    reset_telegram_test_rate_limit_for_tests();
     let token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
 
     check_telegram_test_rate_limit(&token).expect("first attempt should pass");
     let err = check_telegram_test_rate_limit(&token).expect_err("retry should be rate-limited");
 
     assert_eq!(err.status, StatusCode::TOO_MANY_REQUESTS);
+    reset_telegram_test_rate_limit_for_tests();
+}
+
+#[test]
+fn telegram_test_rate_limit_rejects_immediate_retry_with_different_token() {
+    let _rate_limit_lock = TELEGRAM_TEST_RATE_LIMIT_TEST_LOCK
+        .lock()
+        .expect("telegram test rate-limit test mutex poisoned");
+    reset_telegram_test_rate_limit_for_tests();
+    let first_token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
+    let second_token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
+
+    check_telegram_test_rate_limit(&first_token).expect("first attempt should pass");
+    let err = check_telegram_test_rate_limit(&second_token)
+        .expect_err("endpoint-level retry should be rate-limited");
+
+    assert_eq!(err.status, StatusCode::TOO_MANY_REQUESTS);
+    reset_telegram_test_rate_limit_for_tests();
 }
 
 #[tokio::test]
 async fn telegram_test_route_rate_limit_includes_retry_after_header() {
+    let _rate_limit_lock = TELEGRAM_TEST_RATE_LIMIT_TEST_LOCK
+        .lock()
+        .expect("telegram test rate-limit test mutex poisoned");
+    reset_telegram_test_rate_limit_for_tests();
     let token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
     check_telegram_test_rate_limit(&token).expect("first attempt should prime rate limit");
 
@@ -5422,6 +5451,7 @@ async fn telegram_test_route_rate_limit_includes_retry_after_header() {
         Some(TELEGRAM_TEST_COOLDOWN_RETRY_AFTER)
     );
     assert_eq!(error.error, TELEGRAM_TEST_RATE_LIMIT_MESSAGE);
+    reset_telegram_test_rate_limit_for_tests();
 }
 
 #[test]

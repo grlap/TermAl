@@ -657,23 +657,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 - Split UI config and runtime cursor/chat state into separate files, or guard all writers with an OS-level file lock.
 - Add cross-process interleaving coverage proving config and runtime state both survive competing writes.
 
-## `POST /api/telegram/test` rate limiting is per token and can be bypassed
-
-**Severity:** Medium - a script can rotate bogus token values to fan out outbound requests and grow the rate-limit cache.
-
-`src/telegram_settings.rs:355` keys the cooldown by token hash. Phase 1 single-user local mitigates the practical risk, but a local caller can submit many unique invalid tokens and bypass the per-token cooldown while causing repeated outbound requests to Telegram.
-
-**Current behavior:**
-- Token validation enforces maximum length but not Telegram token shape before the network call.
-- Repeated tests of the same token are throttled.
-- Unique token values bypass the cooldown.
-- The in-memory rate-limit map can grow until retention cleanup.
-
-**Proposal:**
-- Validate Telegram token shape before network calls.
-- Add a global/concurrent cap and a bounded cache.
-- Rate-limit the endpoint independently of token identity.
-
 ## Telegram settings UI belongs behind a focused module boundary
 
 **Severity:** Low - the Telegram panel adds a large independent API workflow to the already broad preferences panel module.
@@ -1923,7 +1906,7 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Cover first-settled active-baseline same-message growth policy:
   pin the current conservative behavior and, if a future turn-boundary signal lands, add the positive forwarding case for same-message reply text already present on first settled poll.
 - [ ] P2: Add Telegram settings API/security regressions:
-  cover plaintext token-at-rest exposure, corrupt-backup permission hardening, Windows ACL/secret-store fallback behavior, global/concurrent rate limiting that cannot be bypassed by rotating token strings, and bounded rate-limit cache retention.
+  cover plaintext token-at-rest exposure, corrupt-backup permission hardening, and Windows ACL/secret-store fallback behavior.
 - [ ] P2: Cover post-validation Telegram settings sanitization:
   delete a project/session after validation but before the second sanitize path, or extract a deterministic helper seam, and assert the persisted response cannot retain stale references. The current stale-reference test at `src/tests/telegram.rs:1573` seeds invalid state before validation, so removing the post-validation sanitize in `src/telegram_settings.rs:73` would still pass.
 - [ ] P2: Cover Telegram project-target invariant boundaries:
@@ -2058,8 +2041,8 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   five separate skip conditions (lines 767-783): `allowDivergentTextRepairAfterNewerRevision === true`, session not found, `messagesLoaded !== false`, `messages.length > 0`, `messageCount` below threshold. Add at least one test per skip condition.
 - [ ] P2: Verify partial-adoption preserves `messageCount`:
   add `expect(sessionsRef.current[0]?.messageCount).toBe(150)` after the partial-adoption assertion in `app-live-state.test.ts`. A regression that drops or zeros `messageCount` in the partial path would still let the `messages.length === 100` assertion pass while breaking message-count rendering.
-- [ ] P2: Cover `check_telegram_test_rate_limit` cooldown expiration and 60s retain TTL:
-  current test covers only "first OK, second rejected". Add cases for (a) third call after >2s passes (cooldown actually expires), (b) entries pruned after 60s `TELEGRAM_TEST_RATE_LIMIT_RETAIN`. Use injected clock or `tokio::time::pause`.
+- [ ] P2: Cover `check_telegram_test_rate_limit` cooldown expiration:
+  current tests cover same-token and different-token immediate retry rejection. Add a deterministic case proving a third call after >2s passes, using an injected clock or `tokio::time::pause`.
 - [ ] P2: Cover `prune_telegram_config_for_deleted_project` no-op early-return:
   call against a config that doesn't reference the target project; assert no disk write happens (file mtime unchanged or `Ok(())` returned without invoking persistence). The `telegram_configs_equal` early-return is currently uncovered.
 - [ ] P2: Strengthen forwarder armed-priority assertion:

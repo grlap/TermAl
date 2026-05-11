@@ -20,11 +20,10 @@ const TELEGRAM_TEST_COOLDOWN: Duration = Duration::from_secs(2);
 const TELEGRAM_TEST_COOLDOWN_RETRY_AFTER: &str = "2";
 const TELEGRAM_TEST_RATE_LIMIT_MESSAGE: &str =
     "Telegram connection tests are rate-limited. Try again in a moment.";
-const TELEGRAM_TEST_RATE_LIMIT_RETAIN: Duration = Duration::from_secs(60);
 
 static TELEGRAM_SETTINGS_FILE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-static TELEGRAM_TEST_RATE_LIMITS: LazyLock<Mutex<HashMap<String, std::time::Instant>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+static TELEGRAM_TEST_RATE_LIMIT: LazyLock<Mutex<Option<std::time::Instant>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -496,18 +495,14 @@ fn validate_telegram_bot_token(token: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-fn check_telegram_test_rate_limit(token: &str) -> Result<(), ApiError> {
-    let key = telegram_test_rate_limit_key(token);
+fn check_telegram_test_rate_limit(_token: &str) -> Result<(), ApiError> {
     let now = std::time::Instant::now();
-    let mut limits = TELEGRAM_TEST_RATE_LIMITS
+    let mut last_attempt = TELEGRAM_TEST_RATE_LIMIT
         .lock()
         .expect("telegram test rate limit mutex poisoned");
-    limits.retain(|_, last_attempt| {
-        now.duration_since(*last_attempt) <= TELEGRAM_TEST_RATE_LIMIT_RETAIN
-    });
 
-    if let Some(last_attempt) = limits.get(&key) {
-        if now.duration_since(*last_attempt) < TELEGRAM_TEST_COOLDOWN {
+    if let Some(last_attempt) = *last_attempt {
+        if now.duration_since(last_attempt) < TELEGRAM_TEST_COOLDOWN {
             return Err(ApiError::from_status(
                 StatusCode::TOO_MANY_REQUESTS,
                 TELEGRAM_TEST_RATE_LIMIT_MESSAGE,
@@ -515,14 +510,15 @@ fn check_telegram_test_rate_limit(token: &str) -> Result<(), ApiError> {
         }
     }
 
-    limits.insert(key, now);
+    *last_attempt = Some(now);
     Ok(())
 }
 
-fn telegram_test_rate_limit_key(token: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(token.as_bytes());
-    format!("{:x}", hasher.finalize())
+#[cfg(test)]
+fn reset_telegram_test_rate_limit_for_tests() {
+    *TELEGRAM_TEST_RATE_LIMIT
+        .lock()
+        .expect("telegram test rate limit mutex poisoned") = None;
 }
 
 fn telegram_test_connection_error(err: anyhow::Error) -> ApiError {
