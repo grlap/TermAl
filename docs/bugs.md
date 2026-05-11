@@ -1720,5 +1720,3 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add a Rust test that drives both the Claude task path and the delegation creation path with overlapping ids (or document the assumption that uuid id spaces don't collide deterministically). The current test manually inserts the collision.
 - [ ] P2: Clean up AgentSessionPanel `act(...)` warnings:
   targeted AgentSessionPanel Vitest still emits React `act(...)` warnings around async rerenders/events; identify the warned updates and wrap or await them so timing-sensitive failures are not hidden by noisy test output.
-- [ ] P2: Strengthen unmount race-condition delegation test:
-  assert `console.error` was not called with `act`/`unmounted` warnings, or stub `setIsDelegationSpawning` to verify it isn't invoked post-unmount.

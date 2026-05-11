@@ -10469,30 +10469,43 @@ describe("AgentSessionPanelFooter", () => {
   it("ignores delegation completion after the footer unmounts", async () => {
     const pendingSpawn = deferredValue<boolean>();
     const onDraftCommit = vi.fn();
-    const { unmount } = render(
-      renderFooter({
-        session: makeSession("session-a"),
-        canSpawnDelegation: true,
-        onSpawnDelegation: vi.fn(() => pendingSpawn.promise),
-        onDraftCommit,
-      }),
-    );
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
 
-    fireEvent.change(screen.getByLabelText("Message session-a"), {
-      target: { value: "Unmount before completion." },
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    try {
+      const { unmount } = render(
+        renderFooter({
+          session: makeSession("session-a"),
+          canSpawnDelegation: true,
+          onSpawnDelegation: vi.fn(() => pendingSpawn.promise),
+          onDraftCommit,
+        }),
+      );
 
-    unmount();
-    await act(async () => {
-      pendingSpawn.resolve(true);
-      await pendingSpawn.promise;
-    });
+      fireEvent.change(screen.getByLabelText("Message session-a"), {
+        target: { value: "Unmount before completion." },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+        await Promise.resolve();
+      });
 
-    expect(onDraftCommit).not.toHaveBeenCalledWith("session-a", "");
+      unmount();
+      await act(async () => {
+        pendingSpawn.resolve(true);
+        await pendingSpawn.promise;
+      });
+
+      expect(onDraftCommit).not.toHaveBeenCalledWith("session-a", "");
+      expect(
+        consoleErrorSpy.mock.calls
+          .map((args) => args.map(String).join(" "))
+          .filter((message) => /act|unmount/i.test(message)),
+      ).toEqual([]);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 
   it("does not recompute the composer slash palette during assistant-only session churn", () => {
