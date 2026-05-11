@@ -339,6 +339,17 @@ errored delegation. `completed` and `canceled` are idempotent terminal no-ops,
 while `queued` and `running` can occur while the cancel request has been accepted
 but follow-up state is still arriving through SSE.
 
+UI messages that mention an unavailable child session derive their wording from
+the same wire status: terminal states use "already ..." (`completed`, `failed`,
+`canceled`) and in-flight states use "still ..." (`queued`, `running`). The
+phrases are display text only; callers should branch on the wire status, not the
+rendered message text.
+
+In the current REST runtime, `running` delegations are expected to have a
+`childSessionId`; a `running` response without one is treated as an unexpected
+unavailable-child state. Childless `queued` records are reserved for the future
+scheduler/throttle layer described above.
+
 ### 6. Delegate Agent Commands
 
 Delegating a slash command or future skill must not bypass command-template

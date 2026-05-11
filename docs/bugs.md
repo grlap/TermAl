@@ -387,30 +387,6 @@ The pending-state contract `agent.source:agent.id:cancel` is the load-bearing fi
 - Exercise a flag flip mid-test.
 - Or split into per-action coverage.
 
-## `agent-delegation-sessions.md` cancel doc doesn't link wire status to UX phrases
-
-**Severity:** Note - round-67's new paragraph at `docs/features/agent-delegation-sessions.md:213-217` documents that cancel responses can return `queued` and `running`, but doesn't mention that the wire-format status string is reused as the user-visible label inside the UI's "Delegation child session is unavailable (...)" message. The previous docs explicitly warned against branching on user-visible message text; this change moves to a curated set of phrases ("already X" / "still X") but the protocol-vs-UX relationship is undocumented. The mapping lives only in the TS source.
-
-**Current behavior:**
-- Wire status table updated.
-- UX phrase mapping not cross-linked.
-
-**Proposal:**
-- Cross-link the wire `status` table to the UX label table.
-- Or document the verb-form mapping ("queued / running → 'still'; completed / failed / canceled → 'already'") in the same section.
-
-## "running with no child session" protocol contract unclear
-
-**Severity:** Note - `ui/src/SessionPaneView.render-callbacks.tsx:213-238`. When `getDelegationStatusCommand` returns a missing `childSessionId`, the UI dispatches `onComposerError("...still running")`. The wire contract today is that delegations in `running` state DO have a child session, so the "still running" phrase implies an unexpected backend state.
-
-**Current behavior:**
-- UI surfaces "still running" for missing child session.
-- Protocol contract unclear: is this state legitimate?
-
-**Proposal:**
-- Pin the protocol contract in `agent-delegation-sessions.md` (running implies childSessionId is present) and treat the case as a 5xx-equivalent UX.
-- Or document the legitimate "running but child not yet attached" case.
-
 ## `clears pending parallel-agent actions when an action rejects` test doesn't verify rejection suppression
 
 **Severity:** Low - the test at `ui/src/MessageCard.test.tsx:321-365` asserts the visible UI side-effect (button re-enabled) which is satisfied by the `.finally()` alone. Removing the `.catch(() => undefined)` would still pass this test (the `.finally()` runs and resets the pending state). The test silently observes the finally's side-effect, not the catch's noise-suppression role.
