@@ -78,7 +78,7 @@ The invariant is also expressed in separate frontend/backend predicates and mess
 
 ## Telegram inline callbacks can dispatch actions to the wrong active project
 
-**Severity:** High - `src/telegram.rs:1699` and `src/telegram.rs:2893`. Telegram digest inline buttons only carry the action id as `callback_data`, while the callback handler resolves the currently active project at click time.
+**Severity:** High - `src/telegram.rs` (`handle_telegram_callback_query`, `build_telegram_digest_keyboard`). Telegram digest inline buttons only carry the action id as `callback_data`, while the callback handler resolves the currently active project at click time.
 
 If the linked chat opens a digest for project A, switches to project B, and then taps an older project-A action button, the action can be dispatched against project B. Approval, stop, fix, or review actions can therefore operate on a different project than the message the user clicked.
 
@@ -90,6 +90,24 @@ If the linked chat opens a digest for project A, switches to project B, and then
 **Proposal:**
 - Bind callback data to its digest context with a short server-side token or validated project/action payload.
 - Reject stale or mismatched callbacks and refresh the digest for the project that produced the clicked message.
+
+## Telegram-originated prompts do not live-update the active UI tab
+
+**Severity:** High - reproduced from the Telegram relay; suspected boundary spans `src/telegram.rs` prompt forwarding, SSE/session adoption, `ui/src/session-store.ts`, and `ui/src/SessionPaneView.tsx` live-pane rendering. Sending a prompt from Telegram reaches the backend/agent, but the currently visible TermAl session tab does not show the user prompt or the resulting assistant response until the user switches away from the tab and back.
+
+This makes the live session appear idle or stale while work is actually happening, and the manual tab switch implies the data exists but a live update/store subscription path is not invalidating the visible pane.
+
+This is distinct from the stale callback-context issue above: callbacks can target the wrong project, while this bug is about the correct target session not repainting live in the already-open UI tab.
+
+**Current behavior:**
+- Telegram free text can trigger work in the target session.
+- The active UI tab does not render the Telegram prompt or response live.
+- Switching out of the tab and back forces the UI to display the missing content.
+
+**Proposal:**
+- Add a regression that sends a Telegram-originated prompt into the active session and asserts the visible session pane updates without tab churn.
+- Trace whether the missing invalidation is in SSE delta emission, app state adoption, session-store publication, or visible-pane subscription.
+- Fix the smallest broken link, then keep the test at the app/pane level because this is a user-visible live-update contract.
 
 ## Isolated delegation worktree creation is not transactional
 
@@ -2477,20 +2495,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 **Proposal:**
 - Add a reactive signal (e.g., a derived `nearBottomAtSendStart` captured into the effect's deps via a ref-based subscription).
 - Or update the comment to match the actual behavior ("when the user is near bottom AT THE TIME isSending toggled, defer entirely to the post-message-land effect").
-
-## `src/tests/telegram.rs` header documents fewer pinned axes than the file currently covers
-
-**Severity:** Note - test ownership header is stale relative to the +285-line additions.
-
-`src/tests/telegram.rs:1-12` describes test ownership as "pin two pieces of that adapter: `parse_telegram_command` ... and `render_telegram_digest` / `build_telegram_digest_keyboard`". The +285-line additions now cover assistant-forwarding partial-progress, no-baseline forwarding, unknown char-count re-forwarding, unknown-session-status gating, error classification, log sanitization, and prompt byte-limit — these go beyond what the header claims.
-
-**Current behavior:**
-- Header at lines 1-12 covers two pinned axes.
-- File now pins many additional axes.
-
-**Proposal:**
-- Update the header to enumerate the additional pinned axes (or summarize as "Telegram relay test surface: command parsing, digest rendering, assistant forwarding, error classification, log sanitization, prompt limits").
-- Or split the file if the assistant-forwarding family becomes its own pinned axis.
 
 ## `messageCreatedDeltaIsNoOp` lacks semantic-change negative coverage
 

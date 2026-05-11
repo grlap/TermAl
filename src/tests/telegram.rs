@@ -15,9 +15,10 @@ use std::collections::VecDeque;
 
 struct FakeTelegramSender {
     answered_callbacks: RefCell<Vec<(String, String)>>,
-    edited_messages: RefCell<Vec<(i64, i64, String)>>,
+    edited_messages: RefCell<Vec<(i64, i64, String, TelegramTextFormat)>>,
     fail_on_attempt: Option<usize>,
     send_attempts: Cell<usize>,
+    sent_formats: RefCell<Vec<TelegramTextFormat>>,
     sent_texts: RefCell<Vec<String>>,
 }
 
@@ -28,23 +29,26 @@ impl FakeTelegramSender {
             edited_messages: RefCell::new(Vec::new()),
             fail_on_attempt,
             send_attempts: Cell::new(0),
+            sent_formats: RefCell::new(Vec::new()),
             sent_texts: RefCell::new(Vec::new()),
         }
     }
 }
 
 impl TelegramMessageSender for FakeTelegramSender {
-    fn send_message(
+    fn send_message_with_format(
         &self,
         chat_id: i64,
         text: &str,
         _reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+        format: TelegramTextFormat,
     ) -> Result<TelegramChatMessage> {
         let attempt = self.send_attempts.get() + 1;
         self.send_attempts.set(attempt);
         if self.fail_on_attempt == Some(attempt) {
             bail!("forced send failure");
         }
+        self.sent_formats.borrow_mut().push(format);
         self.sent_texts.borrow_mut().push(text.to_owned());
         Ok(TelegramChatMessage {
             message_id: attempt as i64,
@@ -58,16 +62,17 @@ impl TelegramMessageSender for FakeTelegramSender {
 }
 
 impl TelegramDigestMessageSender for FakeTelegramSender {
-    fn edit_message(
+    fn edit_message_with_format(
         &self,
         chat_id: i64,
         message_id: i64,
         text: &str,
         _reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+        format: TelegramTextFormat,
     ) -> Result<i64> {
         self.edited_messages
             .borrow_mut()
-            .push((chat_id, message_id, text.to_owned()));
+            .push((chat_id, message_id, text.to_owned(), format));
         Ok(message_id)
     }
 }
@@ -1490,12 +1495,14 @@ fn telegram_digest_renderer_includes_actions_and_public_link() {
         source_message_ids: vec!["message-1".to_owned()],
     };
 
-    let rendered = render_telegram_digest(&digest, Some("https://termal.local"));
-    assert!(rendered.contains("Project: termal"));
-    assert!(rendered.contains("Next: Review in TermAl, Ask Agent to Commit"));
-    assert!(
-        rendered.contains("Open: https://termal.local/?projectId=project-1&sessionId=session-1")
-    );
+    let (rendered, format) = render_telegram_digest_message(&digest, Some("https://termal.local"));
+    assert_eq!(format, TelegramTextFormat::Html);
+    assert!(rendered.contains("<b>Project digest</b>"));
+    assert!(rendered.contains("Project  termal"));
+    assert!(rendered.contains("Next     Review in TermAl, Ask Agent to Commit"));
+    assert!(rendered.contains(
+        "<a href=\"https://termal.local/?projectId=project-1&amp;sessionId=session-1\">Open in TermAl</a>"
+    ));
 
     let keyboard = build_telegram_digest_keyboard(&digest).expect("keyboard should exist");
     assert_eq!(keyboard.inline_keyboard.len(), 1);
@@ -1506,6 +1513,236 @@ fn telegram_digest_renderer_includes_actions_and_public_link() {
     assert_eq!(
         keyboard.inline_keyboard[0][1].callback_data,
         "ask-agent-to-commit"
+    );
+}
+
+#[test]
+fn telegram_digest_html_renderer_escapes_fields() {
+    let digest = ProjectDigestResponse {
+        project_id: "project-1".to_owned(),
+        headline: "TermAl <dev> & docs".to_owned(),
+        done_summary: "Escaped \"quotes\" and <tags>.".to_owned(),
+        current_status: "Ready > waiting.".to_owned(),
+        primary_session_id: Some("session-1".to_owned()),
+        proposed_actions: vec![ProjectDigestAction {
+            id: "ask-fix".to_owned(),
+            label: "Ask & <fix>".to_owned(),
+            prompt: None,
+            requires_confirmation: false,
+        }],
+        deep_link: Some("https://termal.local/?projectId=project-1&sessionId=<session>".to_owned()),
+        source_message_ids: vec![],
+    };
+
+    let rendered = render_telegram_digest_html(&digest, None);
+
+    assert!(rendered.starts_with("<b>Project digest</b>\n<pre>"));
+    assert!(rendered.contains("Project  TermAl &lt;dev&gt; &amp; docs"));
+    assert!(rendered.contains("Status   Ready &gt; waiting."));
+    assert!(rendered.contains("Done     Escaped &quot;quotes&quot; and &lt;tags&gt;."));
+    assert!(rendered.contains("Next     Ask &amp; &lt;fix&gt;"));
+    assert!(rendered.contains(
+        "<a href=\"https://termal.local/?projectId=project-1&amp;sessionId=&lt;session&gt;\">Open in TermAl</a>"
+    ));
+    assert!(rendered.contains("</pre>\n<a href="));
+}
+
+#[test]
+fn telegram_digest_send_uses_html_parse_mode() {
+    let telegram = FakeTelegramSender::new(None);
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+    let digest = ProjectDigestResponse {
+        project_id: "project-1".to_owned(),
+        headline: "termal <dev>".to_owned(),
+        done_summary: "Updated the digest API.".to_owned(),
+        current_status: "Changes are ready for review.".to_owned(),
+        primary_session_id: Some("session-1".to_owned()),
+        proposed_actions: vec![],
+        deep_link: None,
+        source_message_ids: vec![],
+    };
+
+    let changed =
+        send_fresh_telegram_digest_from_response(&telegram, &config, &mut state, 42, &digest)
+            .expect("digest send should succeed");
+
+    assert!(changed);
+    assert_eq!(
+        telegram.sent_formats.borrow().as_slice(),
+        [TelegramTextFormat::Html]
+    );
+    assert!(telegram.sent_texts.borrow()[0].contains("<pre>"));
+    assert!(telegram.sent_texts.borrow()[0].contains("termal &lt;dev&gt;"));
+}
+
+#[test]
+fn telegram_digest_edit_uses_html_parse_mode() {
+    let telegram = FakeTelegramSender::new(None);
+    let config = telegram_test_config();
+    let digest = ProjectDigestResponse {
+        project_id: "project-1".to_owned(),
+        headline: "termal <dev>".to_owned(),
+        done_summary: "Updated the digest API.".to_owned(),
+        current_status: "Changes are ready for review.".to_owned(),
+        primary_session_id: Some("session-1".to_owned()),
+        proposed_actions: vec![],
+        deep_link: None,
+        source_message_ids: vec![],
+    };
+
+    let message_id = edit_or_send_telegram_digest(&telegram, &config, 42, Some(99), &digest)
+        .expect("digest edit should succeed");
+
+    assert_eq!(message_id, 99);
+    assert!(telegram.sent_texts.borrow().is_empty());
+    let edited_messages = telegram.edited_messages.borrow();
+    assert_eq!(edited_messages.len(), 1);
+    assert_eq!(edited_messages[0].3, TelegramTextFormat::Html);
+    assert!(edited_messages[0].2.contains("<pre>"));
+    assert!(edited_messages[0].2.contains("termal &lt;dev&gt;"));
+}
+
+#[test]
+fn telegram_digest_html_renderer_collapses_and_bounds_table_values() {
+    let digest = ProjectDigestResponse {
+        project_id: "project-1".to_owned(),
+        headline: "termal".to_owned(),
+        done_summary: format!("first line\n  second line {}", "x".repeat(400)),
+        current_status: "ready".to_owned(),
+        primary_session_id: Some("session-1".to_owned()),
+        proposed_actions: vec![],
+        deep_link: None,
+        source_message_ids: vec![],
+    };
+
+    let rendered = render_telegram_digest_html(&digest, None);
+
+    assert!(rendered.contains("Done     first line second line "));
+    assert!(rendered.contains("..."));
+    assert!(rendered.encode_utf16().count() <= TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS);
+}
+
+#[test]
+fn telegram_digest_hash_includes_rendered_html_format() {
+    let digest = ProjectDigestResponse {
+        project_id: "project-1".to_owned(),
+        headline: "termal".to_owned(),
+        done_summary: "done".to_owned(),
+        current_status: "ready".to_owned(),
+        primary_session_id: Some("session-1".to_owned()),
+        proposed_actions: vec![ProjectActionId::ReviewInTermal.into_digest_action()],
+        deep_link: None,
+        source_message_ids: vec![],
+    };
+
+    let (text, format) = render_telegram_digest_message(&digest, Some("https://termal.local"));
+    let payload = json!({
+        "format": format.parse_mode(),
+        "text": text,
+        "actions": ["review-in-termal"],
+    });
+    let expected = stable_text_hash(
+        &serde_json::to_string(&payload).expect("expected hash payload should encode"),
+    );
+    let plain_format_payload = json!({
+        "format": Option::<&str>::None,
+        "text": text,
+        "actions": ["review-in-termal"],
+    });
+    let plain_format_hash = stable_text_hash(
+        &serde_json::to_string(&plain_format_payload)
+            .expect("plain-format hash payload should encode"),
+    );
+    let actual = telegram_digest_hash(&digest, Some("https://termal.local"))
+        .expect("digest hash should compute");
+
+    assert_eq!(actual, expected);
+    assert_ne!(actual, plain_format_hash);
+}
+
+#[test]
+fn telegram_text_message_body_omits_parse_mode_for_plain_text_with_or_without_markup() {
+    let body = telegram_send_message_body(42, "plain text", None, TelegramTextFormat::Plain)
+        .expect("plain send body should build");
+
+    assert_eq!(body["chat_id"], json!(42));
+    assert_eq!(body["text"], json!("plain text"));
+    assert_eq!(body["disable_web_page_preview"], json!(true));
+    assert!(body.get("parse_mode").is_none());
+    assert!(body.get("reply_markup").is_none());
+
+    let keyboard = TelegramInlineKeyboardMarkup {
+        inline_keyboard: vec![vec![TelegramInlineKeyboardButton {
+            text: "Review".to_owned(),
+            callback_data: "review".to_owned(),
+        }]],
+    };
+    let plain_with_markup =
+        telegram_send_message_body(42, "plain text", Some(&keyboard), TelegramTextFormat::Plain)
+            .expect("plain send body with markup should build");
+    assert!(plain_with_markup.get("parse_mode").is_none());
+    assert_eq!(
+        plain_with_markup["reply_markup"]["inline_keyboard"][0][0]["callback_data"],
+        json!("review")
+    );
+}
+
+#[test]
+fn telegram_message_sender_default_uses_plain_text_format() {
+    let telegram = FakeTelegramSender::new(None);
+
+    telegram
+        .send_message(42, "plain text", None)
+        .expect("default sender should send plain text");
+
+    assert_eq!(
+        telegram.sent_formats.borrow().as_slice(),
+        [TelegramTextFormat::Plain]
+    );
+}
+
+#[test]
+fn telegram_text_message_bodies_include_html_parse_mode_and_markup() {
+    let keyboard = TelegramInlineKeyboardMarkup {
+        inline_keyboard: vec![vec![TelegramInlineKeyboardButton {
+            text: "Review".to_owned(),
+            callback_data: "review".to_owned(),
+        }]],
+    };
+
+    let send_without_markup =
+        telegram_send_message_body(42, "<b>digest</b>", None, TelegramTextFormat::Html)
+            .expect("html send body without markup should build");
+    assert_eq!(send_without_markup["parse_mode"], json!("HTML"));
+    assert!(send_without_markup.get("reply_markup").is_none());
+
+    let send_body = telegram_send_message_body(
+        42,
+        "<b>digest</b>",
+        Some(&keyboard),
+        TelegramTextFormat::Html,
+    )
+    .expect("html send body should build");
+    assert_eq!(send_body["parse_mode"], json!("HTML"));
+    assert_eq!(
+        send_body["reply_markup"]["inline_keyboard"][0][0]["callback_data"],
+        json!("review")
+    );
+
+    let edit_body = telegram_edit_message_body(
+        42,
+        99,
+        "<b>digest</b>",
+        Some(&keyboard),
+        TelegramTextFormat::Html,
+    )
+    .expect("html edit body should build");
+    assert_eq!(edit_body["message_id"], json!(99));
+    assert_eq!(edit_body["parse_mode"], json!("HTML"));
+    assert_eq!(
+        edit_body["reply_markup"]["inline_keyboard"][0][0]["text"],
+        json!("Review")
     );
 }
 

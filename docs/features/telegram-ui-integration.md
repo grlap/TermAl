@@ -23,7 +23,10 @@ Implemented:
   for locally-entered TermAl prompts in the selected Telegram session.
 - Digest actions through `/approve`, `/reject`, `/continue`, `/fix`,
   `/commit`, `/iterate`, `/stop`, and `/review`.
-- Token redaction in logs/errors and bounded Telegram message chunking.
+- Digest messages use Telegram HTML parse mode with escaped content and a
+  preformatted table-like layout for readability.
+- Token redaction in logs/errors and bounded chunking for long forwarded/chat
+  text. Digest messages are intentionally compact single messages.
 
 Not implemented yet:
 
@@ -132,6 +135,10 @@ same bot token.
 - Replace manual chat binding with a one-time link-code wizard.
 - Surface relay errors and poll health in Settings.
 - Add a "test send" action.
+- Evaluate richer digest formatting beyond the current `<pre>` table. Telegram
+  Bot API HTML does not support real `<table>` markup, so future options
+  include generated PNG/SVG snapshots or attached HTML files for wider tables
+  and richer report layouts.
 - Add per-chat prompt/action rate limiting.
 - Decide whether to deprecate or remove the legacy CLI relay.
 - Consider multi-chat or multi-bot support only after the one-chat path is

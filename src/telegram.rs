@@ -1075,6 +1075,21 @@ struct TelegramApiClient {
     client: BlockingHttpClient,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TelegramTextFormat {
+    Plain,
+    Html,
+}
+
+impl TelegramTextFormat {
+    fn parse_mode(self) -> Option<&'static str> {
+        match self {
+            Self::Plain => None,
+            Self::Html => Some("HTML"),
+        }
+    }
+}
+
 impl TelegramApiClient {
     /// Creates a new instance.
     fn new(bot_token: &str, poll_timeout_secs: u64) -> Result<Self> {
@@ -1109,49 +1124,27 @@ impl TelegramApiClient {
         self.request_json("getUpdates", Some(Value::Object(body)))
     }
 
-    fn send_message(
+    fn send_message_with_format(
         &self,
         chat_id: i64,
         text: &str,
         reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+        format: TelegramTextFormat,
     ) -> Result<TelegramChatMessage> {
-        // Telegram rejects `reply_markup: null` with
-        // `Bad Request: object expected as reply markup` — the field
-        // must either contain a markup object or be omitted entirely.
-        // Build the body so absent markup is dropped instead of
-        // serialized as JSON null.
-        let mut body = json!({
-            "chat_id": chat_id,
-            "text": text,
-            "disable_web_page_preview": true,
-        });
-        if let Some(keyboard) = reply_markup {
-            body["reply_markup"] = serde_json::to_value(keyboard)
-                .context("failed to serialize Telegram reply_markup")?;
-        }
+        let body = telegram_send_message_body(chat_id, text, reply_markup, format)?;
         self.request_json("sendMessage", Some(body))
     }
 
-    fn edit_message(
+    fn edit_message_with_format(
         &self,
         chat_id: i64,
         message_id: i64,
         text: &str,
         reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+        format: TelegramTextFormat,
     ) -> Result<i64> {
-        // Same `reply_markup` omission discipline as `send_message`
-        // above — Telegram rejects an explicit JSON null.
-        let mut body = json!({
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "text": text,
-            "disable_web_page_preview": true,
-        });
-        if let Some(keyboard) = reply_markup {
-            body["reply_markup"] = serde_json::to_value(keyboard)
-                .context("failed to serialize Telegram reply_markup")?;
-        }
-
+        let body =
+            telegram_edit_message_body(chat_id, message_id, text, reply_markup, format)?;
         let outcome: Result<Value> = self.request_json("editMessageText", Some(body));
         match outcome {
             Ok(result) => Ok(result
@@ -1226,45 +1219,114 @@ impl TelegramApiClient {
     }
 }
 
+fn telegram_send_message_body(
+    chat_id: i64,
+    text: &str,
+    reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+    format: TelegramTextFormat,
+) -> Result<Value> {
+    let mut body = json!({
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": true,
+    });
+    apply_telegram_text_message_options(&mut body, reply_markup, format)?;
+    Ok(body)
+}
+
+fn telegram_edit_message_body(
+    chat_id: i64,
+    message_id: i64,
+    text: &str,
+    reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+    format: TelegramTextFormat,
+) -> Result<Value> {
+    let mut body = json!({
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+        "disable_web_page_preview": true,
+    });
+    apply_telegram_text_message_options(&mut body, reply_markup, format)?;
+    Ok(body)
+}
+
+fn apply_telegram_text_message_options(
+    body: &mut Value,
+    reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+    format: TelegramTextFormat,
+) -> Result<()> {
+    if let Some(parse_mode) = format.parse_mode() {
+        body["parse_mode"] = json!(parse_mode);
+    }
+    // Telegram rejects `reply_markup: null` with
+    // `Bad Request: object expected as reply markup`; omit absent markup.
+    if let Some(keyboard) = reply_markup {
+        body["reply_markup"] =
+            serde_json::to_value(keyboard).context("failed to serialize Telegram reply_markup")?;
+    }
+    Ok(())
+}
+
 trait TelegramMessageSender {
-    fn send_message(
+    fn send_message_with_format(
         &self,
         chat_id: i64,
         text: &str,
         reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+        format: TelegramTextFormat,
     ) -> Result<TelegramChatMessage>;
-}
 
-impl TelegramMessageSender for TelegramApiClient {
     fn send_message(
         &self,
         chat_id: i64,
         text: &str,
         reply_markup: Option<&TelegramInlineKeyboardMarkup>,
     ) -> Result<TelegramChatMessage> {
-        TelegramApiClient::send_message(self, chat_id, text, reply_markup)
+        self.send_message_with_format(chat_id, text, reply_markup, TelegramTextFormat::Plain)
+    }
+}
+
+impl TelegramMessageSender for TelegramApiClient {
+    fn send_message_with_format(
+        &self,
+        chat_id: i64,
+        text: &str,
+        reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+        format: TelegramTextFormat,
+    ) -> Result<TelegramChatMessage> {
+        TelegramApiClient::send_message_with_format(self, chat_id, text, reply_markup, format)
     }
 }
 
 trait TelegramDigestMessageSender: TelegramMessageSender {
-    fn edit_message(
+    fn edit_message_with_format(
         &self,
         chat_id: i64,
         message_id: i64,
         text: &str,
         reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+        format: TelegramTextFormat,
     ) -> Result<i64>;
 }
 
 impl TelegramDigestMessageSender for TelegramApiClient {
-    fn edit_message(
+    fn edit_message_with_format(
         &self,
         chat_id: i64,
         message_id: i64,
         text: &str,
         reply_markup: Option<&TelegramInlineKeyboardMarkup>,
+        format: TelegramTextFormat,
     ) -> Result<i64> {
-        TelegramApiClient::edit_message(self, chat_id, message_id, text, reply_markup)
+        TelegramApiClient::edit_message_with_format(
+            self,
+            chat_id,
+            message_id,
+            text,
+            reply_markup,
+            format,
+        )
     }
 }
 
@@ -2720,6 +2782,7 @@ fn telegram_turn_settled_footer(status: &TelegramSessionStatus) -> &'static str 
 /// Telegram's `sendMessage` rejects bodies over 4096 UTF-16 code
 /// units. Stay below that limit using the same unit Telegram counts.
 const TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS: usize = 3500;
+const TELEGRAM_DIGEST_FIELD_MAX_CHARS: usize = 120;
 
 /// Splits `text` into chunks no longer than
 /// `TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS`, preferring to break at the
@@ -3022,9 +3085,9 @@ fn send_fresh_telegram_digest_from_response(
     chat_id: i64,
     digest: &ProjectDigestResponse,
 ) -> Result<bool> {
-    let text = render_telegram_digest(digest, config.public_base_url.as_deref());
+    let (text, format) = render_telegram_digest_message(digest, config.public_base_url.as_deref());
     let keyboard = build_telegram_digest_keyboard(digest);
-    let sent = telegram.send_message(chat_id, &text, keyboard.as_ref())?;
+    let sent = telegram.send_message_with_format(chat_id, &text, keyboard.as_ref(), format)?;
     remember_telegram_digest(
         state,
         digest,
@@ -3060,10 +3123,16 @@ fn edit_or_send_telegram_digest(
     message_id: Option<i64>,
     digest: &ProjectDigestResponse,
 ) -> Result<i64> {
-    let text = render_telegram_digest(digest, config.public_base_url.as_deref());
+    let (text, format) = render_telegram_digest_message(digest, config.public_base_url.as_deref());
     let keyboard = build_telegram_digest_keyboard(digest);
     if let Some(message_id) = message_id {
-        match telegram.edit_message(chat_id, message_id, &text, keyboard.as_ref()) {
+        match telegram.edit_message_with_format(
+            chat_id,
+            message_id,
+            &text,
+            keyboard.as_ref(),
+            format,
+        ) {
             Ok(message_id) => return Ok(message_id),
             Err(err) => {
                 log_telegram_error("failed to edit digest message", &err);
@@ -3071,7 +3140,7 @@ fn edit_or_send_telegram_digest(
         }
     }
 
-    let sent = telegram.send_message(chat_id, &text, keyboard.as_ref())?;
+    let sent = telegram.send_message_with_format(chat_id, &text, keyboard.as_ref(), format)?;
     Ok(sent.message_id)
 }
 
@@ -3095,8 +3164,12 @@ fn telegram_digest_hash(
     digest: &ProjectDigestResponse,
     public_base_url: Option<&str>,
 ) -> Result<String> {
+    let (text, format) = render_telegram_digest_message(digest, public_base_url);
+    // Include the rendered format so changing Telegram presentation forces the
+    // cached digest message to be edited once rather than leaving stale markup.
     let payload = json!({
-        "text": render_telegram_digest(digest, public_base_url),
+        "format": format.parse_mode(),
+        "text": text,
         "actions": digest
             .proposed_actions
             .iter()
@@ -3135,31 +3208,110 @@ fn build_telegram_digest_keyboard(
     Some(TelegramInlineKeyboardMarkup { inline_keyboard: rows })
 }
 
-/// Renders Telegram digest.
-fn render_telegram_digest(
+fn render_telegram_digest_message(
+    digest: &ProjectDigestResponse,
+    public_base_url: Option<&str>,
+) -> (String, TelegramTextFormat) {
+    (
+        render_telegram_digest_html(digest, public_base_url),
+        TelegramTextFormat::Html,
+    )
+}
+
+fn telegram_html_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn render_telegram_digest_html(
     digest: &ProjectDigestResponse,
     public_base_url: Option<&str>,
 ) -> String {
-    let mut lines = vec![
-        format!("Project: {}", digest.headline),
-        format!("Status: {}", digest.current_status),
-        format!("Done: {}", digest.done_summary),
+    let mut rows = vec![
+        ("Project", telegram_digest_table_value(&digest.headline)),
+        ("Status", telegram_digest_table_value(&digest.current_status)),
+        ("Done", telegram_digest_table_value(&digest.done_summary)),
     ];
 
     if !digest.proposed_actions.is_empty() {
-        lines.push(format!(
-            "Next: {}",
-            digest
-                .proposed_actions
-                .iter()
-                .map(|action| action.label.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
+        rows.push((
+            "Next",
+            telegram_digest_table_value(
+                &digest
+                    .proposed_actions
+                    .iter()
+                    .map(|action| action.label.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
         ));
     }
 
-    if let Some(url) = telegram_deep_link_url(digest, public_base_url) {
-        lines.push(format!("Open: {url}"));
+    let open_link = telegram_deep_link_url(digest, public_base_url).map(|url| {
+        format!(
+            "\n<a href=\"{}\">Open in TermAl</a>",
+            telegram_html_escape(&url)
+        )
+    });
+
+    format!(
+        "<b>Project digest</b>\n<pre>{}</pre>{}",
+        telegram_html_escape(&render_telegram_preformatted_table(&rows)),
+        open_link.unwrap_or_default()
+    )
+}
+
+fn telegram_digest_table_value(value: &str) -> String {
+    let collapsed = value
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    truncate_telegram_text_chars(&collapsed, TELEGRAM_DIGEST_FIELD_MAX_CHARS)
+}
+
+fn truncate_telegram_text_chars(value: &str, max_chars: usize) -> String {
+    let char_count = value.chars().count();
+    if char_count <= max_chars {
+        return value.to_owned();
+    }
+    if max_chars <= 3 {
+        return value.chars().take(max_chars).collect();
+    }
+    let mut truncated = value
+        .chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
+    truncated.push_str("...");
+    truncated
+}
+
+// Emits plain text only. Callers must HTML-escape the returned table before
+// splicing it into a Telegram HTML message.
+fn render_telegram_preformatted_table(rows: &[(&str, String)]) -> String {
+    let label_width = rows
+        .iter()
+        .map(|(label, _)| label.chars().count())
+        .chain(std::iter::once("Field".chars().count()))
+        .max()
+        .unwrap_or(0);
+    let mut lines = vec![
+        format!("{:<label_width$}  Value", "Field"),
+        format!("{:-<label_width$}  -----", ""),
+    ];
+
+    for (label, value) in rows {
+        lines.push(format!("{label:<label_width$}  {value}"));
     }
 
     lines.join("\n")
