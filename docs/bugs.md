@@ -2833,8 +2833,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   after forcing literal pathspec behavior, add regression coverage for filenames containing `*`, `?`, `[]`, and `:(top)` so single-file Git actions cannot expand to other files.
 - [ ] P2: Cover copy/rename staging pathspecs:
   add focused coverage for `collect_git_stage_pathspecs(..., Some("R"))` and `Some("C")`, preferably through a real repo scenario proving old and new paths are staged together.
-- [ ] P2: Cover the `kind: "request-failed"` doc gap:
-  document `ApiRequestErrorKind` post-round-58: round 58's `preserveGatewayErrorBody` makes `kind: "request-failed"` no longer a strict status-class signal — it can now appear with status 502/503/504 alongside non-5xx status codes. Update `ApiRequestErrorKind` JSDoc and feature-brief contract for wrappers using `error.status` for status-class triage.
 - [ ] P2: Add 5xx empty-body fallback to `extractError` for `preserveGatewayErrorBody` callers:
   for empty 502 body, `extractError` returns `"Request failed with status 502."` — more confusing than the prior `"The TermAl backend is unavailable."`. Either fall through to backend-unavailable copy when `raw` is empty AND `status >= 502`, or have `extractError` return a sentinel that the caller can detect for a fallback.
 - [ ] P2: Cover production-path tool/delegation id collision:

@@ -503,6 +503,14 @@ export type DelegationWaitResponse = {
   serverInstanceId: string;
 };
 
+/**
+ * High-level request failure category for UI recovery paths.
+ *
+ * Do not treat `"request-failed"` as a non-5xx guarantee. Routes that opt into
+ * `preserveGatewayErrorBody` intentionally keep 502/503/504 bodies as
+ * `"request-failed"` so callers can surface actionable upstream diagnostics.
+ * Branch on `status` and `restartRequired` when status-class behavior matters.
+ */
 export type ApiRequestErrorKind = "backend-unavailable" | "request-failed";
 
 export class ApiRequestError extends Error {
