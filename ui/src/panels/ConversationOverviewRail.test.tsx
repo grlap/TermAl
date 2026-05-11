@@ -1101,4 +1101,49 @@ describe("ConversationOverviewRail", () => {
       expect.objectContaining({ messageId: "message-2" }),
     );
   });
+
+  it("does not suppress later item clicks after an item-started drag is cancelled", () => {
+    const messages = textMessages(5);
+    const onNavigate = vi.fn();
+
+    render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={layoutSnapshot(messages)}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const rail = screen.getByLabelText("Conversation overview");
+    vi.spyOn(rail, "getBoundingClientRect").mockReturnValue({
+      bottom: 250,
+      height: 250,
+      left: 0,
+      right: 24,
+      top: 0,
+      width: 24,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(screen.getByLabelText(/User prompt 1/), {
+      button: 0,
+      clientY: 10,
+      pointerId: 7,
+    });
+    fireEvent.pointerCancel(rail, {
+      pointerId: 7,
+    });
+    onNavigate.mockClear();
+
+    fireEvent.click(screen.getByLabelText(/Assistant response 2/));
+
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "message-2" }),
+    );
+  });
 });
