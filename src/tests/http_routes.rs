@@ -199,6 +199,48 @@ async fn get_session_route_can_return_tail_only() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Pins `GET /api/sessions/{id}?tail=0`: zero-length tails are rejected
+// instead of returning an ambiguous empty, not-loaded session snapshot that
+// would make clients retry forever.
+#[tokio::test]
+async fn get_session_route_rejects_zero_tail_limit() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let app = app_router(state.clone());
+    let created = state
+        .create_session(CreateSessionRequest {
+            name: Some("Route Session Zero Tail".to_owned()),
+            agent: None,
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("session should be created");
+
+    let (status, response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/sessions/{}?tail=0", created.session_id))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response.get("error").and_then(Value::as_str),
+        Some("session tail must be at least 1")
+    );
+}
+
 // Pins `messageCount` on full snapshot-bearing routes. The count is computed
 // from the transcript at wire-projection time so reconnect/state adoption can
 // keep summary metadata without waiting for the next delta.

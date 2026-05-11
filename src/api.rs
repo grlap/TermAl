@@ -134,6 +134,10 @@ async fn get_session(
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<GetSessionQuery>,
 ) -> Result<Json<SessionResponse>, ApiError> {
+    if matches!(query.tail, Some(0)) {
+        return Err(ApiError::bad_request("session tail must be at least 1"));
+    }
+
     let response = run_blocking_api(move || match query.tail {
         Some(message_limit) => state.get_session_tail(&session_id, message_limit),
         None => state.get_session(&session_id),

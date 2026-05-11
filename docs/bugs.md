@@ -672,22 +672,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 **Proposal:**
 - Either (a) extract a small `markFullyHydrated(sessionId)` helper that wraps the add + clearHydrationRetry pair (already paired at all three sites), OR (b) compute "is this session fully hydrated" from session state at use sites and stop tracking it in a separate ref.
 
-## `?tail=0` returns an empty array with `messages_loaded: false`, indistinguishable from "still loading"
-
-**Severity:** Medium - for a populated session, response is `messages: [], messages_loaded: false, message_count: N>0` — the frontend treats this as the metadata-only/awaiting-hydration case and schedules a retry. So `?tail=0` is a no-op DOS pattern: the caller gets nothing useful and triggers refetch loops.
-
-`src/api.rs:127-128` + `src/state_accessors.rs:212-217`. There is no test or documentation defining whether `tail=0` is intended (sane: "give me just the metadata", invalid: "rejected as `bad_request`", or oversight). Frontend's `Math.max(0, Math.floor(messageLimit))` clamp at `ui/src/api.ts:528` defensively allows it.
-
-**Current behavior:**
-- `tail=0` accepted at the route boundary.
-- Backend returns empty array with `messages_loaded: false` for populated sessions.
-- Frontend classifier treats response as "stale" (since `messages.length > 0` guard fails).
-- A retry is scheduled, calling tail=0 again — refetch loop.
-
-**Proposal:**
-- Decide and document: either treat `tail=0` as "metadata only, messages_loaded: false" explicitly (add a test pinning the shape), or reject `tail=0` as `bad_request` so callers do not accidentally enter a refetch loop.
-- Tighten `fetchSessionTail` clamp to `Math.max(1, Math.floor(messageLimit))` if the latter.
-
 ## `Query<GetSessionQuery>` parse failure bypasses project `ApiError` envelope
 
 **Severity:** Medium - `?tail=foo` / `?tail=-1` / `?tail=99999999999999999999` returns Axum's default plain-text rejection, not the project's `{ "error": ... }` shape.

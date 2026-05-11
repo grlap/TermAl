@@ -599,7 +599,7 @@ export function fetchSession(sessionId: string) {
 
 export function fetchSessionTail(sessionId: string, messageLimit: number) {
   const query = new URLSearchParams({
-    tail: String(Math.max(0, Math.floor(messageLimit))),
+    tail: String(Math.max(1, Math.floor(messageLimit))),
   });
   return request<SessionResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}?${query.toString()}`,

@@ -10,6 +10,7 @@ import {
   deleteWorkspaceLayout,
   fetchDelegationResult,
   fetchDelegationStatus,
+  fetchSessionTail,
   fetchTelegramStatus,
   fetchWorkspaceLayout,
   fetchState,
@@ -178,6 +179,42 @@ describe("delegation API helpers", () => {
           "Content-Type": "application/json",
         }),
         method: "POST",
+      }),
+    );
+  });
+});
+
+describe("session API helpers", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  it("clamps session tail fetches to at least one message", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({ session: {}, revision: 1 }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchSessionTail("session/one", 0);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/session%2Fone?tail=1",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
       }),
     );
   });
