@@ -5168,7 +5168,7 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
-  it("renders the new window immediately after a parent-owned scroll write", () => {
+  it("renders the new window immediately after a parent-owned scroll write", async () => {
     // Regression guard for flicker during pane-level scroll writes. The
     // parent pane owns wheel scrolling, saved-position restores, and
     // scroll-to-boundary jumps; those writes move the same scroll container
@@ -5251,19 +5251,21 @@ describe("AgentSessionPanel conversation caching", () => {
       expect(scrollTop).toBe(estimatedLayout.totalHeight - clientHeight);
       expect(screen.queryByText("message-120")).toBeInTheDocument();
 
-      act(() => {
+      await act(async () => {
         scrollTop = 0;
         notifyMessageStackScrollWrite(scrollNode);
+        await Promise.resolve();
       });
 
       expect(screen.queryByText("message-1")).toBeInTheDocument();
       expect(screen.queryByText("message-120")).not.toBeInTheDocument();
 
-      act(() => {
+      await act(async () => {
         scrollTop = estimatedLayout.totalHeight - clientHeight;
         notifyMessageStackScrollWrite(scrollNode, {
           scrollKind: "bottom_boundary",
         });
+        await Promise.resolve();
       });
 
       expect(screen.queryByText("message-120")).toBeInTheDocument();
@@ -7368,10 +7370,11 @@ describe("AgentSessionPanel conversation caching", () => {
         });
         const firstMountedBeforeWheel = getFirstMountedMessageIndex(container);
 
-        act(() => {
+        await act(async () => {
           fireEvent.wheel(scrollNode, wheelInput);
           scrollTop = Math.max(3600 + resolveWheelDelta(wheelInput), 0);
           notifyMessageStackScrollWrite(scrollNode);
+          await Promise.resolve();
         });
 
         await waitFor(() => {
@@ -7399,10 +7402,11 @@ describe("AgentSessionPanel conversation caching", () => {
       });
       const firstMountedBeforeStaleTouchMove = getFirstMountedMessageIndex(container);
 
-      act(() => {
+      await act(async () => {
         dispatchTouch("touchstart", [100], [100]);
         dispatchTouch("touchend", [], [100]);
         dispatchTouch("touchmove", [1900], [1900]);
+        await Promise.resolve();
       });
 
       expect(getFirstMountedMessageIndex(container)).toBe(
@@ -7411,13 +7415,14 @@ describe("AgentSessionPanel conversation caching", () => {
 
       const firstMountedBeforeMultiTouch = getFirstMountedMessageIndex(container);
 
-      act(() => {
+      await act(async () => {
         // If the first finger lifts while another finger remains down,
         // touchend must keep tracking the remaining touch. The following
         // touchmove should still prewarm before native scroll writes.
         dispatchTouch("touchstart", [100, 300], [100, 300]);
         dispatchTouch("touchend", [300], [100]);
         dispatchTouch("touchmove", [1900], [1900]);
+        await Promise.resolve();
       });
 
       expect(getFirstMountedMessageIndex(container)).toBeLessThan(
@@ -7445,13 +7450,14 @@ describe("AgentSessionPanel conversation caching", () => {
       });
       const firstMountedBeforeTouch = getFirstMountedMessageIndex(container);
 
-      act(() => {
+      await act(async () => {
         // Finger moving down by 1800 px scrolls content upward by the same
         // magnitude, so the touch path should prewarm the pages above before
         // the browser's native scroll write paints.
         dispatchTouchGesture(100, 1900);
         scrollTop = 1800;
         notifyMessageStackScrollWrite(scrollNode);
+        await Promise.resolve();
       });
 
       await waitFor(() => {
@@ -7480,22 +7486,23 @@ describe("AgentSessionPanel conversation caching", () => {
       });
       const firstMountedBeforeLargeWrite = getFirstMountedMessageIndex(container);
 
-      act(() => {
+      await act(async () => {
         fireEvent.wheel(scrollNode, { deltaY: -1 });
         scrollTop = 1800;
         notifyMessageStackScrollWrite(scrollNode, {
           scrollKind: "incremental",
           scrollSource: "user",
         });
-
-        expect(getFirstMountedMessageIndex(container)).toBeLessThan(
-          firstMountedBeforeLargeWrite,
-        );
-        const firstMountedPage = container.querySelector<HTMLElement>(
-          ".virtualized-message-page",
-        );
-        expect(firstMountedPage?.getBoundingClientRect().top).toBeLessThanOrEqual(0);
+        await Promise.resolve();
       });
+
+      expect(getFirstMountedMessageIndex(container)).toBeLessThan(
+        firstMountedBeforeLargeWrite,
+      );
+      const firstMountedPage = container.querySelector<HTMLElement>(
+        ".virtualized-message-page",
+      );
+      expect(firstMountedPage?.getBoundingClientRect().top).toBeLessThanOrEqual(0);
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       window.TouchEvent = OriginalTouchEvent;
@@ -10578,16 +10585,20 @@ describe("AgentSessionPanelFooter", () => {
       }),
     );
 
-    fireEvent.change(screen.getByLabelText("Message session-a"), {
-      target: { value: "carry this draft" },
+    act(() => {
+      fireEvent.change(screen.getByLabelText("Message session-a"), {
+        target: { value: "carry this draft" },
+      });
     });
 
-    rerender(
-      renderFooter({
-        onDraftCommit,
-        session: makeSession("session-b"),
-      }),
-    );
+    act(() => {
+      rerender(
+        renderFooter({
+          onDraftCommit,
+          session: makeSession("session-b"),
+        }),
+      );
+    });
 
     expect(onDraftCommit).toHaveBeenCalledWith("session-a", "carry this draft");
   });
@@ -11612,31 +11623,35 @@ describe("AgentSessionPanelFooter", () => {
       }),
     );
 
-    fireEvent.change(screen.getByLabelText("Message session-a"), {
-      target: { value: "/" },
+    act(() => {
+      fireEvent.change(screen.getByLabelText("Message session-a"), {
+        target: { value: "/" },
+      });
     });
     expect(onRefreshAgentCommands).not.toHaveBeenCalled();
 
-    rerender(
-      renderFooter({
-        onRefreshAgentCommands,
-        hasLoadedAgentCommands: true,
-        session: makeSession("session-a", {
-          agent: "Claude",
-          model: "sonnet",
-          agentCommandsRevision: 1,
+    act(() => {
+      rerender(
+        renderFooter({
+          onRefreshAgentCommands,
+          hasLoadedAgentCommands: true,
+          session: makeSession("session-a", {
+            agent: "Claude",
+            model: "sonnet",
+            agentCommandsRevision: 1,
+          }),
+          agentCommands: [
+            {
+              kind: "promptTemplate",
+              name: "review-local",
+              description: "Review local changes.",
+              content: "Review local changes.",
+              source: ".claude/commands/review-local.md",
+            },
+          ],
         }),
-        agentCommands: [
-          {
-            kind: "promptTemplate",
-            name: "review-local",
-            description: "Review local changes.",
-            content: "Review local changes.",
-            source: ".claude/commands/review-local.md",
-          },
-        ],
-      }),
-    );
+      );
+    });
 
     await waitFor(() => {
       expect(onRefreshAgentCommands).toHaveBeenCalledWith("session-a");
@@ -12070,8 +12085,10 @@ Please add tests.`,
     );
 
     const textarea = screen.getByLabelText("Message session-a");
-    fireEvent.change(textarea, { target: { value: "/model" } });
-    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    act(() => {
+      fireEvent.change(textarea, { target: { value: "/model" } });
+      fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    });
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(onSessionSettingsChange).toHaveBeenCalledWith("session-a", "model", "gpt-5.3-codex");
@@ -12435,18 +12452,20 @@ Please add tests.`,
       "true",
     );
 
-    rerender(
-      renderFooter({
-        session: makeSession("session-a", {
-          agent: "Codex",
-          model: "gpt-5.3-codex",
-          modelOptions: [
-            { label: "gpt-5.4", value: "gpt-5.4" },
-            { label: "gpt-5.3-codex", value: "gpt-5.3-codex" },
-          ],
+    act(() => {
+      rerender(
+        renderFooter({
+          session: makeSession("session-a", {
+            agent: "Codex",
+            model: "gpt-5.3-codex",
+            modelOptions: [
+              { label: "gpt-5.4", value: "gpt-5.4" },
+              { label: "gpt-5.3-codex", value: "gpt-5.3-codex" },
+            ],
+          }),
         }),
-      }),
-    );
+      );
+    });
 
     await waitFor(() => {
       expect(screen.getByRole("option", { name: /gpt-5\.3-codex/i })).toHaveAttribute(
