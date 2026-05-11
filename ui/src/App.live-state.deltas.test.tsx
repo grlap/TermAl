@@ -293,26 +293,47 @@ describe("App live state - delta-gap core", () => {
     await clickAndSettle(sessionRowButton);
   }
 
-  function expectRenderedMarkdownTableContains(expectedCells: string[]) {
-    // The streaming pipeline now defers any table/fence/math block
-    // for the entire duration of `isStreaming` (see
-    // `markdown-streaming-split.ts::deferAllBlocks`). That means a
-    // streamed table's cells live in the
-    // `.markdown-streaming-fragment` placeholder (an ASCII `<pre>`)
-    // until `isStreaming` flips false at turn-end, at which point
-    // react-markdown produces a real `<table>` inside
-    // `.markdown-table-scroll`. The data-presence assertion below
-    // therefore accepts EITHER container — these revision-gap tests
-    // care that all table cells reached the bubble, not which
-    // rendering shape they currently sit in.
-    const table = document.querySelector(".markdown-table-scroll table");
-    const fragment = document.querySelector(".markdown-streaming-fragment");
-    expect(table || fragment).not.toBeNull();
-    const containerText = table?.textContent ?? fragment?.textContent ?? "";
+  function expectContainerTextContains(
+    container: Element | null,
+    expectedCells: string[],
+  ) {
+    expect(container).not.toBeNull();
+    const containerText = container?.textContent ?? "";
     for (const cell of expectedCells) {
       expect(containerText).toContain(cell);
     }
   }
+
+  function expectStreamingTableFragmentContains(expectedCells: string[]) {
+    expect(document.querySelector(".markdown-table-scroll table")).toBeNull();
+    expectContainerTextContains(
+      document.querySelector(".markdown-streaming-fragment"),
+      expectedCells,
+    );
+  }
+
+  function expectSettledTableContains(expectedCells: string[]) {
+    expect(document.querySelector(".markdown-streaming-fragment")).toBeNull();
+    expectContainerTextContains(
+      document.querySelector(".markdown-table-scroll table"),
+      expectedCells,
+    );
+  }
+
+  const expectedMarkdownTableCells = [
+    "Backend",
+    "107",
+    "87,395",
+    "3.19 MiB",
+    "Frontend",
+    "280",
+    "173,265",
+    "5.52 MiB",
+    "Total",
+    "452",
+    "278,043",
+    "9.55 MiB",
+  ];
 
   it("coalesces live session delta renders through one animation frame", async () => {
     await withSuppressedActWarnings(async () => {
@@ -1017,6 +1038,7 @@ describe("App live state - delta-gap core", () => {
       });
       const finalSession = makeSession("session-1", {
         ...initialSession,
+        status: "idle",
         preview: "Tracked Project Total",
         sessionMutationStamp: 26,
         messages: [
@@ -1150,23 +1172,35 @@ describe("App live state - delta-gap core", () => {
         });
 
         await waitFor(() => {
-          expectRenderedMarkdownTableContains([
-            "Backend",
-            "107",
-            "87,395",
-            "3.19 MiB",
-            "Frontend",
-            "280",
-            "173,265",
-            "5.52 MiB",
-            "Total",
-            "452",
-            "278,043",
-            "9.55 MiB",
-          ]);
+          expectStreamingTableFragmentContains(expectedMarkdownTableCells);
         });
         await waitFor(() => {
           expect(sessionHydrationRequestCount).toBe(1);
+        });
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "messageUpdated",
+            revision: 11,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 0,
+            messageCount: 1,
+            message: {
+              id: "message-assistant-1",
+              type: "text",
+              timestamp: "10:01",
+              author: "assistant",
+              text: finalTable,
+            },
+            preview: "Tracked Project Total",
+            status: "idle",
+            sessionMutationStamp: 27,
+          });
+          await flushUiWork();
+        });
+        await waitFor(() => {
+          expectSettledTableContains(expectedMarkdownTableCells);
         });
 
         await act(async () => {
@@ -1235,6 +1269,7 @@ describe("App live state - delta-gap core", () => {
       });
       const finalSession = makeSession("session-1", {
         ...initialSession,
+        status: "idle",
         sessionMutationStamp: 32,
         messages: [
           {
@@ -1327,22 +1362,34 @@ describe("App live state - delta-gap core", () => {
         });
 
         await waitFor(() => {
-          expectRenderedMarkdownTableContains([
-            "Backend",
-            "107",
-            "87,395",
-            "3.19 MiB",
-            "Frontend",
-            "280",
-            "173,265",
-            "5.52 MiB",
-            "Total",
-            "452",
-            "278,043",
-            "9.55 MiB",
-          ]);
+          expectStreamingTableFragmentContains(expectedMarkdownTableCells);
         });
         expect(document.body.textContent).not.toContain("3.19B");
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "messageUpdated",
+            revision: 5,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 0,
+            messageCount: 1,
+            message: {
+              id: "message-assistant-1",
+              type: "text",
+              timestamp: "10:01",
+              author: "assistant",
+              text: finalTable,
+            },
+            preview: "Tracked Project Total",
+            status: "idle",
+            sessionMutationStamp: 33,
+          });
+          await flushUiWork();
+        });
+        await waitFor(() => {
+          expectSettledTableContains(expectedMarkdownTableCells);
+        });
 
         await act(async () => {
           stateResync.resolve(
