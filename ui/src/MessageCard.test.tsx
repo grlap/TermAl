@@ -176,7 +176,7 @@ describe("MessageCard", () => {
     expect(within(rows[4]!).queryByRole("button")).toBeNull();
   });
 
-  it("keeps mixed-source parallel-agent rows distinct when ids collide", () => {
+  it("keeps mixed-source parallel-agent rows distinct when ids collide", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const message: ParallelAgentsMessage = {
       id: "message-parallel-agents-same-id",
@@ -200,16 +200,22 @@ describe("MessageCard", () => {
         },
       ],
     };
-    const onCancelParallelAgent = vi.fn();
+    let resolveCancel!: () => void;
+    const pendingCancel = new Promise<void>((resolve) => {
+      resolveCancel = resolve;
+    });
+    const onCancelParallelAgent = vi.fn(() => pendingCancel);
 
     try {
-      render(
-        <MessageCard
-          message={message}
-          onApprovalDecision={vi.fn()}
-          onUserInputSubmit={vi.fn()}
-          onCancelParallelAgent={onCancelParallelAgent}
-        />,
+      const { rerender } = render(
+        <DeferredHeavyContentActivationProvider allowActivation={false}>
+          <MessageCard
+            message={message}
+            onApprovalDecision={vi.fn()}
+            onUserInputSubmit={vi.fn()}
+            onCancelParallelAgent={onCancelParallelAgent}
+          />
+        </DeferredHeavyContentActivationProvider>,
       );
 
       const rows = screen.getAllByRole("listitem");
@@ -217,8 +223,39 @@ describe("MessageCard", () => {
       fireEvent.click(
         within(rows[1]!).getByRole("button", { name: "Cancel" }),
       );
+      fireEvent.click(
+        within(rows[1]!).getByRole("button", { name: "Cancel" }),
+      );
 
       expect(onCancelParallelAgent).toHaveBeenCalledWith("shared-agent-id");
+      expect(onCancelParallelAgent).toHaveBeenCalledTimes(1);
+      expect(
+        within(rows[1]!).getByRole("button", { name: "Cancel" }),
+      ).toBeDisabled();
+
+      rerender(
+        <DeferredHeavyContentActivationProvider allowActivation={false}>
+          <MessageCard
+            message={{
+              ...message,
+              agents: message.agents.map((agent) => ({
+                ...agent,
+                detail: `${agent.detail ?? ""} after rerender`,
+              })),
+            }}
+            onApprovalDecision={vi.fn()}
+            onUserInputSubmit={vi.fn()}
+            onCancelParallelAgent={onCancelParallelAgent}
+          />
+        </DeferredHeavyContentActivationProvider>,
+      );
+
+      const rerenderedRows = screen.getAllByRole("listitem");
+      expect(rerenderedRows[0]).toHaveTextContent("Tool row after rerender");
+      expect(within(rerenderedRows[0]!).queryByRole("button")).toBeNull();
+      expect(
+        within(rerenderedRows[1]!).getByRole("button", { name: "Cancel" }),
+      ).toBeDisabled();
       expect(
         consoleError.mock.calls.some((call) =>
           call.some(
@@ -228,6 +265,15 @@ describe("MessageCard", () => {
           ),
         ),
       ).toBe(false);
+
+      await act(async () => {
+        resolveCancel();
+        await pendingCancel;
+      });
+
+      expect(
+        within(rerenderedRows[1]!).getByRole("button", { name: "Cancel" }),
+      ).not.toBeDisabled();
     } finally {
       consoleError.mockRestore();
     }

@@ -345,21 +345,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 - Memoize the three "disabled" undefined values as a single object.
 - Or pass the flag itself through and let the consumer decide.
 
-## Mixed-source same-id MessageCard test doesn't pin pending-key composite contract
-
-**Severity:** Low - `ui/src/MessageCard.test.tsx:179-234`. The test asserts cancel works on the delegation row but does NOT assert: (a) no React duplicate-key warning across re-renders, (b) the tool row is unaffected by clicks on the delegation row, (c) the pending-action key disambiguates so a stale tool-source key doesn't interfere with the delegation cancel.
-
-The pending-state contract `agent.source:agent.id:cancel` is the load-bearing fix but only the React-key collision is verified — a regression that flipped the pending-key composite back to bare id but kept the React `key` composite would still pass. Also: the test renders without `DeferredHeavyContentActivationProvider`.
-
-**Current behavior:**
-- React key collision verified.
-- Pending-key disambiguation unverified.
-- Test missing DeferredHeavyContentActivationProvider wrapper.
-
-**Proposal:**
-- Trigger two sequential actions on the same source/id pair, assert one is rejected as pending.
-- Mirror the wrapping pattern from sibling tests for the provider.
-
 ## "Renders remote delegation progress as display-only" test under-covers regression surface
 
 **Severity:** Low - `ui/src/SessionPaneView.render-callbacks.test.ts:586-622`. The new test only asserts no buttons render. It doesn't assert that the parent's three handler functions were never invoked, doesn't switch the flag mid-render, and doesn't test mixed-row scenarios. A regression that dropped only one action's guard would still pass — all three render no buttons together.
