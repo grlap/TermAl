@@ -3463,6 +3463,287 @@ describe("App live state - delta-gap core", () => {
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
   });
+
+  it.each([
+    {
+      label: "messageUpdated",
+      preview: "Stable answer",
+      markerState: "present",
+      replayDelta: {
+        type: "messageUpdated",
+        revision: 1,
+        sessionId: "session-1",
+        messageId: "message-assistant-1",
+        messageIndex: 3,
+        messageCount: 4,
+        message: {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:03",
+          author: "assistant",
+          text: "Stable answer",
+        },
+        preview: "Stable answer",
+        status: "active",
+        sessionMutationStamp: 41,
+      },
+    },
+    {
+      label: "commandUpdate",
+      preview: "/tmp",
+      markerState: "present",
+      replayDelta: {
+        type: "commandUpdate",
+        revision: 1,
+        sessionId: "session-1",
+        messageId: "command-1",
+        messageIndex: 1,
+        messageCount: 4,
+        command: "pwd",
+        commandLanguage: "powershell",
+        output: "/tmp",
+        outputLanguage: "text",
+        status: "success",
+        preview: "/tmp",
+        sessionMutationStamp: 41,
+      },
+    },
+    {
+      label: "parallelAgentsUpdate",
+      preview: "Running reviewer",
+      markerState: "present",
+      replayDelta: {
+        type: "parallelAgentsUpdate",
+        revision: 1,
+        sessionId: "session-1",
+        messageId: "parallel-1",
+        messageIndex: 2,
+        messageCount: 4,
+        agents: [
+          {
+            id: "reviewer",
+            source: "tool",
+            title: "Reviewer",
+            status: "running",
+            detail: "Checking diffs",
+          },
+        ],
+        preview: "Running reviewer",
+        sessionMutationStamp: 41,
+      },
+    },
+    {
+      label: "conversationMarkerUpdated",
+      preview: "Stable answer",
+      markerState: "present",
+      replayDelta: {
+        type: "conversationMarkerUpdated",
+        revision: 1,
+        sessionId: "session-1",
+        marker: {
+          id: "marker-1",
+          sessionId: "session-1",
+          kind: "decision",
+          name: "Decision",
+          color: "#3b82f6",
+          messageId: "message-assistant-1",
+          messageIndexHint: 3,
+          createdAt: "10:04:00",
+          updatedAt: "10:04:00",
+          createdBy: "user",
+        },
+        sessionMutationStamp: 41,
+      },
+    },
+    {
+      label: "conversationMarkerDeleted",
+      preview: "Stable answer",
+      markerState: "deleted",
+      replayDelta: {
+        type: "conversationMarkerDeleted",
+        revision: 1,
+        sessionId: "session-1",
+        markerId: "marker-1",
+        sessionMutationStamp: 41,
+      },
+    },
+  ] as const)(
+    "watchdog-resyncs when repeated $label appliedNoOp replays arrive for an active session",
+    async ({ markerState, preview, replayDelta }) => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalVisibilityState = document.visibilityState;
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-02T09:00:00.000Z"));
+      const marker = {
+        id: "marker-1",
+        sessionId: "session-1",
+        kind: "decision",
+        name: "Decision",
+        color: "#3b82f6",
+        messageId: "message-assistant-1",
+        messageIndexHint: 3,
+        createdAt: "10:04:00",
+        updatedAt: "10:04:00",
+        createdBy: "user",
+      } as const;
+      const initialSession = makeSession("session-1", {
+        name: "Codex Session",
+        status: "active",
+        preview,
+        messagesLoaded: true,
+        messageCount: 4,
+        sessionMutationStamp: 41,
+        markers: markerState === "present" ? [marker] : [],
+        messages: [
+          {
+            id: "message-user-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "you",
+            text: "test",
+          },
+          {
+            id: "command-1",
+            type: "command",
+            timestamp: "10:01",
+            author: "assistant",
+            command: "pwd",
+            commandLanguage: "powershell",
+            output: "/tmp",
+            outputLanguage: "text",
+            status: "success",
+          },
+          {
+            id: "parallel-1",
+            type: "parallelAgents",
+            timestamp: "10:02",
+            author: "assistant",
+            agents: [
+              {
+                id: "reviewer",
+                source: "tool",
+                title: "Reviewer",
+                status: "running",
+                detail: "Checking diffs",
+              },
+            ],
+          },
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:03",
+            author: "assistant",
+            text: "Stable answer",
+          },
+        ],
+      });
+      let stateRequestCount = 0;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/state") {
+          stateRequestCount += 1;
+          return jsonResponse({
+            revision: 2,
+            projects: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Codex Session",
+                status: "idle",
+                preview: "Recovered after appliedNoOp replays.",
+                messages: [
+                  {
+                    id: "message-user-1",
+                    type: "text",
+                    timestamp: "10:00",
+                    author: "you",
+                    text: "test",
+                  },
+                  {
+                    id: "message-assistant-1",
+                    type: "text",
+                    timestamp: "10:03",
+                    author: "assistant",
+                    text: "Recovered after appliedNoOp replays.",
+                  },
+                ],
+              }),
+            ],
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      const stateFetchCallCount = () => stateRequestCount;
+      setDocumentVisibilityState("visible");
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        act(() => {
+          eventSource.dispatchOpen();
+          eventSource.dispatchNamedEvent("state", {
+            revision: 1,
+            projects: [],
+            sessions: [initialSession],
+          });
+        });
+        await settleAsyncUi();
+
+        await openSessionByName("Codex Session");
+        expect(
+          screen.getByText("Waiting for the next chunk of output..."),
+        ).toBeInTheDocument();
+        fetchMock.mockClear();
+        stateRequestCount = 0;
+
+        let watchdogTriggered = false;
+        for (
+          let elapsed = 0;
+          elapsed < LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 3000;
+          elapsed += 1000
+        ) {
+          act(() => {
+            eventSource.dispatchNamedEvent("delta", replayDelta);
+          });
+          await advanceTimers(1000);
+          if (stateFetchCallCount() > 0) {
+            watchdogTriggered = true;
+            break;
+          }
+        }
+
+        await settleAsyncUi();
+
+        expect(watchdogTriggered).toBe(true);
+        expect(stateFetchCallCount()).toBe(1);
+        expect(
+          screen.getAllByText("Recovered after appliedNoOp replays."),
+        ).toHaveLength(2);
+        expect(
+          screen.queryByText("Waiting for the next chunk of output..."),
+        ).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+        setDocumentVisibilityState(originalVisibilityState);
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    },
+  );
+
   it("watchdog-resyncs when only orchestrator deltas arrive during stale live transport", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
