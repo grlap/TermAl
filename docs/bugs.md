@@ -797,22 +797,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 **Proposal:**
 - Add an `App.scroll-behavior.test.tsx` case that starts near bottom, sends with a pending POST, grows `scrollHeight`, and asserts no old-target smooth scroll occurs before the prompt lands.
 
-## Telegram command suffix parsing conflates foreign-bot commands with unknown commands
-
-**Severity:** Medium - commands addressed to another bot can make TermAl respond, while valid suffixed setup commands can be ignored.
-
-`src/telegram.rs:790` treats `parse_telegram_command_for_bot` returning `None` as an unknown command and sends help, even when the reason is "this command was addressed to a different bot." The unlinked setup branch still uses `parse_telegram_command(text)` without the resolved bot username, so `/start@termal_bot` and `/help@termal_bot` can be ignored in standard Telegram group-command form.
-
-**Current behavior:**
-- Foreign-bot suffixes and unknown commands share the same `None` outcome.
-- Linked chats can receive TermAl help for commands addressed to another bot.
-- Unlinked suffixed `/start@termal_bot` / `/help@termal_bot` are not parsed with the bot-aware parser.
-
-**Proposal:**
-- Return a typed command parse outcome such as parsed / unknown / foreign-bot.
-- Ignore foreign-bot commands.
-- Use the bot-aware parser in the unlinked `/start` / `/help` path once the username is known.
-
 ## Telegram-forwarded text has no per-chat rate cap
 
 **Severity:** Medium - any linked chat can still fan out prompt submissions quickly enough to create a burst of local backend and agent work.

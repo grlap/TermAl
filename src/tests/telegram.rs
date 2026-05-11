@@ -801,6 +801,79 @@ fn telegram_unlinked_start_message_points_to_trusted_chat_binding() {
 }
 
 #[test]
+fn telegram_unlinked_start_accepts_matching_bot_suffix() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    );
+    let mut config = telegram_test_config();
+    config.chat_id = None;
+    let mut state = TelegramBotState::default();
+
+    handle_telegram_message(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        TelegramChatMessage {
+            message_id: 1,
+            chat: TelegramChat {
+                id: 123,
+                _kind: "private".to_owned(),
+            },
+            text: Some("/start@termal_bot".to_owned()),
+        },
+    )
+    .expect("matching suffixed startup command should send guidance");
+
+    assert_eq!(telegram.sent_texts.borrow().len(), 1);
+    assert!(
+        telegram.sent_texts.borrow()[0].contains("TERMAL_TELEGRAM_CHAT_ID=123")
+    );
+}
+
+#[test]
+fn telegram_linked_foreign_bot_command_is_ignored() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    );
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+
+    let changed = handle_telegram_message(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        TelegramChatMessage {
+            message_id: 1,
+            chat: TelegramChat {
+                id: 42,
+                _kind: "private".to_owned(),
+            },
+            text: Some("/start@other_bot".to_owned()),
+        },
+    )
+    .expect("foreign bot command should be ignored");
+
+    assert!(!changed);
+    assert!(telegram.sent_texts.borrow().is_empty());
+}
+
+#[test]
 fn truncate_telegram_user_error_detail_respects_tiny_limits() {
     assert_eq!(truncate_telegram_user_error_detail("abcdef", 0), "");
     assert_eq!(truncate_telegram_user_error_detail("abcdef", 1), "a");
