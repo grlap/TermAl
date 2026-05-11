@@ -613,21 +613,6 @@ Acceptable today; flagging for future re-use when N grows.
 - Add a cleanup to the messageCount effect that calls `cancelLayoutRefreshFrame()`.
 - Document the guard semantics around `overviewSessionIdRef`.
 
-## Standalone Telegram redaction excludes generic `token` key context
-
-**Severity:** Low - the standalone Telegram-token sanitizer no longer treats bare `token=` / `token:` as a token-bearing marker.
-
-`src/telegram.rs:421-431` now allowlists Telegram-specific key names and bearer contexts, while `src/tests/telegram.rs:717-721` pins `token=<telegram-shaped-token>` as unredacted. Generic `token` keys are common in error payloads and debug logs; if Telegram returns or wraps a bot token under that key, `sanitize_telegram_log_detail` can expose it in stderr or `/api/telegram/test` error text.
-
-**Current behavior:**
-- `botToken=`, `telegramBotToken=`, `telegram_bot_token=`, and `TERMAL_TELEGRAM_BOT_TOKEN=` redact.
-- `token=<telegram-shaped-token>` does not redact.
-- The behavior improves false-positive precision but weakens secret-redaction recall for a common key name.
-
-**Proposal:**
-- Either restore bare `token` redaction in this Telegram-specific sanitizer.
-- Or require an additional Telegram-adjacent context while still covering `token=` / `token:` payloads that can carry bot tokens.
-
 ## Wheel/scrollTop demand-hydration thresholds lack boundary-exact test coverage
 
 **Severity:** Low - the wheel test fires `deltaY: -4` (below threshold) and asserts no hydration, then `deltaY: -120` with `scrollTop: 20_000` (above scrollTop ceiling) and asserts no hydration. The exact threshold boundary — `deltaY: -8` (should trigger) vs `-7` (should not), and `scrollTop: 160` vs `161` — is not pinned.
@@ -835,23 +820,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 - Pass `delegationActions: { open, insert, cancel }` as hook props (defaulting to the production wrappers in `SessionPaneView.tsx`).
 - Move `DelegationResultPacket` to a neutral shared module such as `types.ts` or `delegation-result-types.ts`.
 - Or expose a `DelegationActionContext` provider so consumers can override.
-
-## Standalone redactor precision-vs-recall trade-off documented for future reviewers
-
-**Severity:** Note - round-63 fundamentally inverted the standalone-token redactor: from "redact everything matching the shape" (round 62) to "redact only with key-context or bearer-context." The new gate trades recall for precision. The bug ledger pre-round-63 noted the prior behavior leaked under foreign-token false positives (Low) and unanticipated formats (Medium).
-
-The new design fixes the false-positive Low (verified by `accessToken=` and `csrfToken =` tests) but leaves the Medium concern partially open: tokens still leak when they appear in unanticipated structures (JSON arrays without keys, free-prose mentions, code spans, YAML lists, anything where the standalone token isn't preceded by `=`/`:` + approved key, or the alphabetic word "bearer"). The `unanchored = "trace value <token>"` test fixture documents this as deliberate.
-
-`src/telegram.rs:353-388`.
-
-**Current behavior:**
-- Closed-allowlist redaction.
-- Tokens in unanticipated formats (no key context, no Bearer prefix) leak by design.
-- Test fixture `unanchored` pins the trade-off.
-
-**Proposal:**
-- Add a comment to `redact_standalone_telegram_bot_tokens` explaining the precision-over-recall choice and listing the formats that intentionally leak so future contributors understand the design intent.
-- Reconsider if telemetry shows real leaks.
 
 ## `useInitialActiveTranscriptMessages` mutates `hydrationRef` during render
 

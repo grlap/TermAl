@@ -834,6 +834,11 @@ fn redact_telegram_bot_url_tokens(detail: &str) -> String {
     output
 }
 
+/// Redacts standalone Telegram-shaped tokens only when nearby context says the
+/// value is likely a Telegram bot token. Unanchored digit/secret pairs, JSON
+/// arrays without key names, free-prose mentions, code spans, and unrelated
+/// token keys intentionally remain visible to avoid high-volume false positives
+/// for benign `123456:abcdef...`-shaped values.
 fn redact_standalone_telegram_bot_tokens(detail: &str) -> String {
     let bytes = detail.as_bytes();
     let mut output = String::with_capacity(detail.len());
