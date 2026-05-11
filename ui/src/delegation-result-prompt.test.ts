@@ -293,7 +293,7 @@ describe("formatDelegationResultPrompt", () => {
     );
   });
 
-  it("scans findings, commands, and notes for the longest indented tilde fence", () => {
+  it("scans findings for the longest indented tilde fence", () => {
     expect(
       formatPrompt({
         childSessionId: "child-1",
@@ -306,8 +306,6 @@ describe("formatDelegationResultPrompt", () => {
             message: "Finding text\n ~~~~~",
           },
         ],
-        commandsRun: [{ command: "npm test\n ~~~~", status: "success" }],
-        notes: ["Note text\n ~~~~~"],
       }),
     ).toBe(
       expectedPrompt(
@@ -320,11 +318,53 @@ describe("formatDelegationResultPrompt", () => {
           "Findings:",
           "- Low src/app.ts: Finding text",
           "   ~~~~~",
+        ],
+        "~~~~~~",
+      ),
+    );
+  });
+
+  it("scans commands for the longest indented tilde fence", () => {
+    expect(
+      formatPrompt({
+        childSessionId: "child-1",
+        status: "completed",
+        summary: "Reviewed changes.",
+        commandsRun: [{ command: "npm test\n ~~~~", status: "success" }],
+      }),
+    ).toBe(
+      expectedPrompt(
+        "completed",
+        "child-1",
+        [
+          "Summary:",
+          "Reviewed changes.",
           "",
           "Commands run:",
           "- npm test",
           "   ~~~~",
           "  Status: success",
+        ],
+        "~~~~~",
+      ),
+    );
+  });
+
+  it("scans notes for the longest indented tilde fence", () => {
+    expect(
+      formatPrompt({
+        childSessionId: "child-1",
+        status: "completed",
+        summary: "Reviewed changes.",
+        notes: ["Note text\n ~~~~~"],
+      }),
+    ).toBe(
+      expectedPrompt(
+        "completed",
+        "child-1",
+        [
+          "Summary:",
+          "Reviewed changes.",
           "",
           "Notes:",
           "- Note text",

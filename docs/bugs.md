@@ -170,17 +170,6 @@ A backend refactor (e.g., adding a `failed: bool` field) cannot consult the wire
 - Add a derived `state: "stopped" | "polling" | "linked" | "configured" | "notConfigured"` to the wire response (single source of truth).
 - Or document the derivation rules in the `TelegramStatusResponse` JSDoc.
 
-## `delegation-result-prompt.test.ts` "scans findings, commands, and notes" bundles 3 field types
-
-**Severity:** Note - `ui/src/delegation-result-prompt.test.ts:296-336`. The new "scans findings, commands, and notes for the longest indented tilde fence" test is good but bundles three field types (findings, commandsRun, notes) plus the `~~~~~~` outer fence assertion in one `it()`.
-
-**Current behavior:**
-- Three field types bundled.
-- Per-field signal lost on regression.
-
-**Proposal:**
-- Split into per-field `it()` blocks.
-
 ## `TelegramRelayStatusSnapshot` directly maps to wire shape with no transformation layer
 
 **Severity:** Note - `src/telegram.rs:216-220, 318-335`. The new `TelegramRelayStatusSnapshot` is internal but its fields directly populate the wire shape `TelegramStatusResponse { running, lifecycle, ... }`. The struct sits between the runtime accessor and the wire serializer with no transformation layer, so any change to the snapshot fields cascades into the wire contract.
