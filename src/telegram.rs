@@ -872,7 +872,7 @@ fn standalone_telegram_bot_token_end(detail: &str, start: usize) -> Option<usize
     }
 
     let bytes = detail.as_bytes();
-    if start > 0 && telegram_token_boundary_byte(bytes[start - 1]) {
+    if start > 0 && telegram_token_continuation_byte(bytes[start - 1]) {
         return None;
     }
 
@@ -886,14 +886,14 @@ fn standalone_telegram_bot_token_end(detail: &str, start: usize) -> Option<usize
 
     index += 1;
     let secret_start = index;
-    while index < bytes.len() && telegram_token_secret_byte(bytes[index]) {
+    while index < bytes.len() && telegram_token_continuation_byte(bytes[index]) {
         index += 1;
     }
     if index - secret_start < MIN_TOKEN_SECRET_CHARS {
         return None;
     }
 
-    if index < bytes.len() && telegram_token_boundary_byte(bytes[index]) {
+    if index < bytes.len() && telegram_token_continuation_byte(bytes[index]) {
         return None;
     }
 
@@ -1021,7 +1021,7 @@ fn standalone_telegram_bot_token_has_bearer_context(detail: &str, cursor: usize)
     }
     let word = &detail[word_start..cursor];
     word.eq_ignore_ascii_case("bearer")
-        && (word_start == 0 || !telegram_token_boundary_byte(bytes[word_start - 1]))
+        && (word_start == 0 || !telegram_token_continuation_byte(bytes[word_start - 1]))
 }
 
 fn trim_telegram_token_quote_left(bytes: &[u8], mut end: usize) -> usize {
@@ -1051,11 +1051,12 @@ fn telegram_token_key_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
 }
 
-fn telegram_token_boundary_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
-}
-
-fn telegram_token_secret_byte(byte: u8) -> bool {
+/// Returns true for bytes that may continue a Telegram bot token candidate.
+///
+/// The same set must be used for both candidate-body scanning and adjacent-byte
+/// boundary checks; otherwise the redactor can stop before a byte that the
+/// boundary check still considers part of a token-like run.
+fn telegram_token_continuation_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
 }
 

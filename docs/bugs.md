@@ -758,29 +758,14 @@ Acceptable for the current N≤10ish parallel-agent count; flagging because the 
 - Add a short comment explaining the intended layering (e.g., "Validate user input strictly, then sanitize against any state that may have changed since the user clicked save").
 - Or merge the two passes if the use cases have converged.
 
-## `telegram_token_boundary_byte` and `telegram_token_secret_byte` are byte-for-byte identical predicates
+## `standalone_telegram_bot_token_end` treats non-ASCII letters as delimiters
 
-**Severity:** Note - both predicates resolve to `is_alphanumeric || _ | -`. The duplication is functionally correct (the secret loop greedily consumes every byte, so the post-loop boundary check is trivially satisfied) but is an attractive nuisance — a future contributor may try to tighten one without the other and reintroduce a redaction gap. The two predicates serve conceptually different roles (delimiter detection vs. content matching).
+**Severity:** Note - `telegram_token_continuation_byte` excludes `:` (fixing the colon-delimited case), but the boundary check remains ASCII-byte based — non-ASCII alphanumeric prefix bytes (e.g., a Cyrillic letter immediately preceding the digit run from a Telegram error or interpolated chat title) are NOT boundary bytes, so a token whose left boundary is a multi-byte UTF-8 letter would still redact.
 
-`src/telegram.rs:385-390`.
-
-**Current behavior:**
-- Boundary and secret predicates accept identical byte sets.
-- No documentation of the subset/equality requirement.
-- A change to one without the other would silently break redaction.
-
-**Proposal:**
-- Collapse into a single predicate with an explanatory `///` comment.
-- Or add comments noting that the boundary and secret byte sets must remain a subset/equal for correctness.
-
-## `standalone_telegram_bot_token_end` boundary uses `is_ascii_alphanumeric` only
-
-**Severity:** Note - the new `telegram_token_boundary_byte` excludes `:` (fixing the colon-delimited case), but the boundary check uses `is_ascii_alphanumeric` only — non-ASCII alphanumeric prefix bytes (e.g., a Cyrillic letter immediately preceding the digit run from a Telegram error or interpolated chat title) are NOT boundary bytes, so a token whose left boundary is a multi-byte UTF-8 letter would still redact.
-
-`src/telegram.rs:353-383`. Mostly defense-in-depth for log shapes that may not exist today; if an upstream library ever interpolates a chat title with a non-ASCII letter, the redactor will treat it as a delimiter.
+`src/telegram.rs:866-897`. Mostly defense-in-depth for log shapes that may not exist today; if an upstream library ever interpolates a chat title with a non-ASCII letter, the redactor will treat it as a delimiter.
 
 **Current behavior:**
-- Boundary detection accepts only ASCII alphanumeric.
+- Boundary detection uses the same ASCII token-continuation byte set as candidate scanning.
 - Non-ASCII letters before/after a candidate are treated as delimiters.
 - Tightening only `:` was the targeted fix; not all callers were considered.
 
