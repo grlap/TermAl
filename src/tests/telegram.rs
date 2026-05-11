@@ -137,6 +137,21 @@ impl TelegramSessionReader for FakeTelegramSessionReaderById {
     }
 }
 
+struct RecordingTelegramSessionReaderById {
+    requests: RefCell<Vec<String>>,
+    responses: HashMap<String, TelegramSessionFetchResponse>,
+}
+
+impl TelegramSessionReader for RecordingTelegramSessionReaderById {
+    fn get_session(&self, session_id: &str) -> Result<TelegramSessionFetchResponse> {
+        self.requests.borrow_mut().push(session_id.to_owned());
+        self.responses
+            .get(session_id)
+            .cloned()
+            .with_context(|| format!("missing fake session `{session_id}`"))
+    }
+}
+
 struct FakeTelegramPromptClient {
     digests: RefCell<VecDeque<std::result::Result<ProjectDigestResponse, String>>>,
     digest_project_ids: RefCell<Vec<String>>,
@@ -3300,7 +3315,8 @@ fn telegram_unknown_first_status_preserves_old_turn_boundary_until_known_reply()
 #[test]
 fn telegram_forwarder_drains_armed_session_before_digest_primary() {
     let telegram = FakeTelegramSender::new(None);
-    let termal = FakeTelegramSessionReaderById {
+    let termal = RecordingTelegramSessionReaderById {
+        requests: RefCell::new(Vec::new()),
         responses: HashMap::from([
             (
                 "session-1".to_owned(),
@@ -3346,6 +3362,7 @@ fn telegram_forwarder_drains_armed_session_before_digest_primary() {
             telegram_turn_settled_footer(&TelegramSessionStatus::Idle).to_owned()
         ]
     );
+    assert_eq!(termal.requests.borrow().as_slice(), ["session-1"]);
     assert_eq!(
         state
             .assistant_forwarding_cursors
@@ -5419,9 +5436,7 @@ fn telegram_test_rate_limit_allows_retry_after_cooldown_expires() {
     let token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
 
     check_telegram_test_rate_limit(&token).expect("first attempt should pass");
-    age_telegram_test_rate_limit_for_tests(
-        TELEGRAM_TEST_COOLDOWN + Duration::from_millis(1),
-    );
+    age_telegram_test_rate_limit_for_tests(TELEGRAM_TEST_COOLDOWN + Duration::from_millis(1));
     check_telegram_test_rate_limit(&token).expect("retry after cooldown should pass");
     let err = check_telegram_test_rate_limit(&token)
         .expect_err("successful retry should re-prime the cooldown");

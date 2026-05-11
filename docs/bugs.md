@@ -1992,8 +1992,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   test at `messageCount = 100` (no tail), `101` (tail), `102` (tail). Today the only test creates 150 messages. A regression flipping `>=` to `>` or dropping the `messageCount === undefined` fallback would not be caught.
 - [ ] P2: Cover `shouldStartTailFirstHydration` skip predicates:
   five separate skip conditions (lines 767-783): `allowDivergentTextRepairAfterNewerRevision === true`, session not found, `messagesLoaded !== false`, `messages.length > 0`, `messageCount` below threshold. Add at least one test per skip condition.
-- [ ] P2: Strengthen forwarder armed-priority assertion:
-  the `telegram_forwarder_drains_armed_session_before_digest_primary` test asserts only `sent_texts == ["Telegram-originated reply", footer]`. This indirectly proves session-2 wasn't sent, but doesn't track which `session_id` values were passed to `get_session`. Track in the fake and assert exclusion explicitly.
 - [ ] P2: Cover `backup_corrupt_telegram_bot_file` cross-fs fallback:
   current `telegram_state_persist_backs_up_malformed_existing_file` covers the rename success path but does NOT cover the `fs::copy` + `fs::remove_file` fallback. Extract `corrupt_telegram_bot_file_backup_path` + the rename-then-copy fallback to a helper accepting a `rename_fn: impl Fn(...)` and inject a forced-failure rename in a unit test.
 - [ ] P2: Cover `write_telegram_bot_file` atomic-rename + temp-cleanup:
