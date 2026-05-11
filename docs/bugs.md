@@ -616,20 +616,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 - Or refuse to enter partial state — keep the tail-first response but immediately invalidate it if any `messageUpdated`/`textDelta` for an unloaded-prefix index arrives before the full fetch lands.
 - Add coverage where (a) tail adopts partial, (b) `messageUpdated` for `message-30` (in gap) is dispatched, (c) full fetch lands with the updated message-30 text. Today the textual update is lost; verify the full fetch carries the correct text.
 
-## Dead code: full-fetch `"partial"` outcome in `startSessionHydration` is unreachable
-
-**Severity:** High - the runtime branch at `app-live-state.ts:1361-1366` is unreachable; the type-level exhaustiveness check passes, but a future maintainer reasoning about it has no signal that the code is dead.
-
-`ui/src/app-live-state.ts:1278-1390`. `allowPartialTranscript` is only set on the tail-fetch request context (line 1305 spreads `requestContext` and adds `allowPartialTranscript: true`). The full-fetch path uses `fullRequestContext` which never sets `allowPartialTranscript` (line 1338 captures from `captureHydrationRequestContext`). `classifyFetchedSessionAdoption` at `session-hydration-adoption.ts:290-297` only returns `"partial"` when `requestContext.allowPartialTranscript === true`. So the full fetch can never produce `"partial"`. The current `case "partial": shouldRetryHydration = true; break;` is misleading defensive code that the exhaustiveness `_exhaustive: never` validates but no test ever exercises.
-
-**Current behavior:**
-- `case "partial":` arm in the full-fetch outcome switch sets `shouldRetryHydration = true` and breaks.
-- The arm cannot fire because `allowPartialTranscript` is never set on the full-fetch context.
-- Type system passes because both switches share the same return type.
-
-**Proposal:**
-- Either (a) add a `console.warn` + `assert.fail`-style early dev-mode signal so a future contract change surfaces immediately, (b) split `AdoptFetchedSessionOutcome` into a tail-only and full-only variant so the type system enforces unreachability (e.g., `type FullFetchOutcome = Exclude<AdoptFetchedSessionOutcome, "partial">`), or (c) add an explanatory comment naming why this is dead today and what would make it live.
-
 ## `SESSION_TAIL_HYDRATION_MAX_MESSAGES = 500` silent cap with no signal to caller
 
 **Severity:** Medium - `message_limit.min(SESSION_TAIL_HYDRATION_MAX_MESSAGES)` truncates without a status code, header, or response field. Future callers cannot detect that they got a different prefix than they asked for.

@@ -187,6 +187,23 @@ import {
 // workspace pane }`) opened a phantom on protocol mismatch.
 export type AdoptCreatedSessionOutcome = "adopted" | "stale" | "recovering";
 
+type FullFetchAdoptFetchedSessionOutcome = Exclude<
+  AdoptFetchedSessionOutcome,
+  "partial"
+>;
+
+function fullFetchAdoptFetchedSessionOutcome(
+  outcome: AdoptFetchedSessionOutcome,
+): FullFetchAdoptFetchedSessionOutcome {
+  if (outcome === "partial") {
+    console.warn(
+      "session hydration> full fetch unexpectedly produced a partial transcript adoption; retrying full hydration",
+    );
+    return "stale";
+  }
+  return outcome;
+}
+
 type DelegationDeltaEvent = Extract<
   DeltaEvent,
   {
@@ -1431,19 +1448,18 @@ export function useAppLiveState(
           }
           return;
         }
-        const adoptOutcome = adoptFetchedSession(
-          response.session,
-          response.revision,
-          response.serverInstanceId,
-          fullRequestContext,
+        const adoptOutcome = fullFetchAdoptFetchedSessionOutcome(
+          adoptFetchedSession(
+            response.session,
+            response.revision,
+            response.serverInstanceId,
+            fullRequestContext,
+          ),
         );
         switch (adoptOutcome) {
           case "adopted":
             clearHydrationRetry(sessionId);
             hydratedSessionIdsRef.current.add(sessionId);
-            break;
-          case "partial":
-            shouldRetryHydration = true;
             break;
           case "restartResync":
             hydrationRestartResyncPendingRef.current = true;
