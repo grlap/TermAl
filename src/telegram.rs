@@ -479,8 +479,9 @@ fn telegram_relay_config_fingerprint(config: &TelegramBotConfig) -> String {
         "publicBaseUrl": &config.public_base_url,
         "subscribedProjectIds": &config.subscribed_project_ids,
     });
-    let encoded = serde_json::to_vec(&payload).expect("telegram relay fingerprint should encode");
-    hasher.update(encoded);
+    let mut encoded = serde_json::to_vec(&payload).expect("telegram relay fingerprint should encode");
+    hasher.update(&encoded);
+    zeroize::Zeroize::zeroize(&mut encoded);
     format!("{:x}", hasher.finalize())
 }
 

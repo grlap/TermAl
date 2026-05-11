@@ -107,19 +107,6 @@ The new "Stopped" UI label is broad. If the user thinks they enabled the relay b
 **Proposal:**
 - Return a `Result<Self, RelayDisabledReason>` and route the reason through to status / preferences UI.
 
-## SHA-256 fingerprint JSON intermediate held in memory until end-of-function
-
-**Severity:** Note - `src/telegram.rs:338-352`. The SHA-256 fingerprint includes `bot_token` in its JSON-encoded input. The hash is one-way, but the JSON intermediate (`encoded`) is held in `Vec<u8>` until the `hasher.update(encoded)` call returns. A heap dump or coredump could expose the token in JSON form briefly.
-
-**Current behavior:**
-- JSON intermediate buffer holds the bot token until end-of-function.
-- No `Zeroize` on the buffer.
-- Marginal degradation of process secret hygiene.
-
-**Proposal:**
-- Either zeroize the `encoded` buffer after `hasher.update`.
-- Or revert to per-field byte feeds (no intermediate JSON buffer) for the secret-bearing fields.
-
 ## `prune_telegram_config_for_deleted_project` reconcile path is `#[cfg(not(test))]`
 
 **Severity:** Low - `src/telegram_settings.rs:243-264`. Round 74 wired the relay reconcile into `prune_telegram_config_for_deleted_project` (closes the round-73 deleted-project entry) but the reconcile path is `#[cfg(not(test))]`. The persistence side is tested, the reconcile side is not.
