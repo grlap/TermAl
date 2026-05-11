@@ -314,6 +314,76 @@ describe("useConversationOverviewController", () => {
     }
   });
 
+  it("activates long-session rails with the timeout fallback when idle callbacks are unavailable", async () => {
+    vi.useFakeTimers();
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const idleWindow = window as Window &
+      typeof globalThis & {
+        requestIdleCallback?: (
+          callback: IdleRequestCallback,
+          options?: IdleRequestOptions,
+        ) => number;
+        cancelIdleCallback?: (handle: number) => void;
+      };
+    const originalRequestIdleCallback = idleWindow.requestIdleCallback;
+    const originalCancelIdleCallback = idleWindow.cancelIdleCallback;
+    const frameCallbacks = new Map<number, FrameRequestCallback>();
+    let nextFrameId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      frameCallbacks.set(frameId, callback);
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = ((frameId: number) => {
+      frameCallbacks.delete(frameId);
+    }) as typeof cancelAnimationFrame;
+    delete idleWindow.requestIdleCallback;
+    delete idleWindow.cancelIdleCallback;
+    const flushNextFrame = () => {
+      const nextFrame = frameCallbacks.entries().next().value as
+        | [number, FrameRequestCallback]
+        | undefined;
+      expect(nextFrame).toBeDefined();
+      if (!nextFrame) {
+        return;
+      }
+      const [frameId, callback] = nextFrame;
+      frameCallbacks.delete(frameId);
+      callback(performance.now());
+    };
+
+    try {
+      render(<OverviewControllerHarness sessionId="session-a" />);
+
+      expect(screen.getByTestId("overview-session-a")).toHaveTextContent(
+        "pending",
+      );
+
+      act(flushNextFrame);
+      act(flushNextFrame);
+
+      expect(screen.getByTestId("overview-session-a")).toHaveTextContent(
+        "pending",
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      expect(screen.getByTestId("overview-session-a")).toHaveTextContent(
+        "ready",
+      );
+    } finally {
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      idleWindow.requestIdleCallback = originalRequestIdleCallback;
+      idleWindow.cancelIdleCallback = originalCancelIdleCallback;
+      vi.useRealTimers();
+    }
+  });
+
   it("coalesces ready layout refreshes when the transcript message count grows", () => {
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
