@@ -7,16 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## `AppPreferences` `PartialEq` now allocates string compares
-
-**Severity:** Note - `src/turns.rs:354-361`. Adding 4 owned `String` fields means every `AppPreferences` comparison now performs four byte-by-byte string compares instead of trivial enum/discriminant compares. The struct is compared in update flows to detect "no-op update" and rebroadcast suppression. Negligible at human cadence but the cost characteristic flips from O(1) to O(N strings).
-
-**Current behavior:**
-- `PartialEq` derived; comparison cost grew with the new fields.
-
-**Proposal:**
-- None needed; flag if `AppPreferences` ever ends up in a tight loop comparison.
-
 ## Command-file regular-file gate is check-then-open
 
 **Severity:** Note - `src/api_files.rs:418, 562, 597`. Command discovery and resolver metadata now reject stable symlinks and non-regular files before opening, but the check is still separate from the subsequent file open. A command file swapped between the check and open can still be followed/read.
