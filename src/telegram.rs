@@ -513,7 +513,8 @@ struct TelegramBotState {
     /// The two legacy fields above are read as a compatibility fallback for
     /// older state files, but new cursor writes stay session-scoped. On disk
     /// this is `assistantForwardingCursors: { "<session-id>": { messageId,
-    /// textChars, resendIfGrown?, sentChunks?, baselineWhileActive? } }`.
+    /// textChars, resendIfGrown?, sentChunks?, failedChunkSendAttempts?,
+    /// footerPending?, baselineWhileActive? } }`.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     assistant_forwarding_cursors: HashMap<String, TelegramAssistantForwardingCursor>,
     /// Session ids whose next settled assistant reply should be forwarded even
@@ -545,6 +546,15 @@ struct TelegramAssistantForwardingCursor {
     /// complete, not partially delivered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sent_chunks: Option<usize>,
+    /// Failed delivery attempts for the next chunk after `sent_chunks`.
+    /// This lets the relay bound retries for chunks Telegram repeatedly
+    /// rejects before any visible content can be delivered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    failed_chunk_send_attempts: Option<usize>,
+    /// True when assistant content was delivered but the final footer marker
+    /// failed. The next poll retries the footer without replaying content.
+    #[serde(default, skip_serializing_if = "is_false")]
+    footer_pending: bool,
     /// Holds the boundary for a Telegram prompt queued behind an already
     /// running or approval-paused local turn. Older binaries ignore this field;
     /// after a downgrade, one settled old-turn reply can be misattributed.
@@ -560,6 +570,8 @@ impl TelegramAssistantForwardingCursor {
                 text_chars: Some(text_chars),
                 resend_if_grown,
                 sent_chunks: None,
+                failed_chunk_send_attempts: None,
+                footer_pending: false,
                 baseline_while_active: false,
             })
             .unwrap_or_default()
@@ -577,6 +589,8 @@ impl TelegramAssistantForwardingCursor {
             && self.text_chars.is_none()
             && !self.resend_if_grown
             && self.sent_chunks.is_none()
+            && self.failed_chunk_send_attempts.is_none()
+            && !self.footer_pending
             && !self.baseline_while_active
     }
 }
@@ -2245,6 +2259,8 @@ fn resolve_assistant_forwarding_cursor(
                 text_chars: state.last_forwarded_assistant_message_text_chars,
                 resend_if_grown: state.last_forwarded_assistant_message_text_chars.is_none(),
                 sent_chunks: None,
+                failed_chunk_send_attempts: None,
+                footer_pending: false,
                 baseline_while_active: false,
             };
         }
@@ -2264,6 +2280,16 @@ fn forward_next_assistant_message_session_ids(state: &TelegramBotState) -> Vec<S
     if let Some(session_id) = state.forward_next_assistant_message_session_id.as_ref() {
         if seen.insert(session_id.clone()) {
             session_ids.push(session_id.clone());
+        }
+    }
+    for session_id in state
+        .assistant_forwarding_cursors
+        .iter()
+        .filter_map(|(session_id, cursor)| cursor.footer_pending.then_some(session_id))
+        .collect::<BTreeSet<_>>()
+    {
+        if seen.insert(session_id.to_owned()) {
+            session_ids.push(session_id.to_owned());
         }
     }
     session_ids
@@ -2297,6 +2323,23 @@ fn remember_assistant_forwarding_cursor(
     }
 
     changed
+}
+
+fn remember_assistant_forwarding_footer_pending(
+    state: &mut TelegramBotState,
+    session_id: &str,
+    pending: bool,
+) -> bool {
+    let mut cursor = state
+        .assistant_forwarding_cursors
+        .get(session_id)
+        .cloned()
+        .unwrap_or_default();
+    cursor.footer_pending = pending;
+    if !pending {
+        cursor.failed_chunk_send_attempts = None;
+    }
+    remember_assistant_forwarding_cursor(state, session_id, cursor)
 }
 
 fn clear_forward_next_assistant_message_session_id(
@@ -2507,6 +2550,26 @@ fn forward_new_assistant_message_outcome(
         return Ok(TelegramAssistantForwardingOutcome::default());
     }
 
+    let mut sent_visible_content = false;
+    let mut pre_forward_dirty = false;
+    if cursor.footer_pending {
+        if let Err(err) = telegram.send_message(
+            chat_id,
+            telegram_turn_settled_footer(&response.session.status),
+            None,
+        ) {
+            log_telegram_error("failed to retry assistant message footer", &err);
+            return Ok(TelegramAssistantForwardingOutcome {
+                dirty: true,
+                sent_visible_content: false,
+                delivery_failed: true,
+            });
+        }
+        sent_visible_content = true;
+        pre_forward_dirty |=
+            remember_assistant_forwarding_footer_pending(state, session_id, false);
+    }
+
     let mut position_of_last = cursor
         .message_id
         .as_deref()
@@ -2520,7 +2583,6 @@ fn forward_new_assistant_message_outcome(
             })
         });
 
-    let mut pre_forward_dirty = false;
     if forward_without_existing_baseline && cursor.baseline_while_active {
         if let Some(pos) = position_of_last {
             let text_chars = match &messages[pos] {
@@ -2531,6 +2593,8 @@ fn forward_new_assistant_message_outcome(
                 baseline_while_active: false,
                 resend_if_grown: true,
                 sent_chunks: None,
+                failed_chunk_send_attempts: None,
+                footer_pending: false,
                 text_chars,
                 ..cursor.clone()
             };
@@ -2612,10 +2676,7 @@ fn forward_new_assistant_message_outcome(
         });
     }
 
-    let partial_message_position = cursor
-        .sent_chunks
-        .filter(|sent_chunks| *sent_chunks > 0)
-        .and_then(|_| position_of_last);
+    let partial_message_position = cursor.sent_chunks.and_then(|_| position_of_last);
 
     // If the prior forward stopped mid-message, restart at that same message
     // and skip only the already-sent chunks below. If the prior forward was
@@ -2658,14 +2719,15 @@ fn forward_new_assistant_message_outcome(
             false
         };
         return Ok(TelegramAssistantForwardingOutcome {
-            dirty: cleared,
-            sent_visible_content: false,
+            dirty: pre_forward_dirty || cleared,
+            sent_visible_content,
             delivery_failed: false,
         });
     }
 
-    let mut sent_visible_content = partial_message_position.is_some();
+    sent_visible_content |= cursor.sent_chunks.is_some_and(|sent_chunks| sent_chunks > 0);
     let mut changed = pre_forward_dirty;
+    let mut delivery_failed = false;
     for (id, text) in &to_forward {
         let trimmed = text.trim();
         // Empty messages still bump the baseline so the next sync
@@ -2673,8 +2735,9 @@ fn forward_new_assistant_message_outcome(
         // Telegram send.
         if !trimmed.is_empty() {
             let chunks = chunk_telegram_message_text(trimmed);
+            let text_chars = text.chars().count();
             let resume_sent_chunks = if cursor.message_id.as_deref() == Some(id.as_str())
-                && cursor.text_chars == Some(text.chars().count())
+                && cursor.text_chars == Some(text_chars)
             {
                 cursor.sent_chunks.unwrap_or(0).min(chunks.len())
             } else {
@@ -2683,36 +2746,84 @@ fn forward_new_assistant_message_outcome(
             for (chunk_index, chunk) in chunks.iter().enumerate().skip(resume_sent_chunks) {
                 if let Err(err) = telegram.send_message(chat_id, chunk, None) {
                     log_telegram_error("failed to forward assistant message", &err);
-                    if sent_visible_content {
-                        // Remaining entries in `to_forward` are rediscovered on
-                        // the next poll because the cursor advanced only through
-                        // the last successfully forwarded message/chunk.
+                    delivery_failed = true;
+                    let failed_attempts = if cursor.message_id.as_deref() == Some(id.as_str())
+                        && cursor.text_chars == Some(text_chars)
+                        && cursor.sent_chunks == Some(chunk_index)
+                    {
+                        cursor.failed_chunk_send_attempts.unwrap_or(0) + 1
+                    } else {
+                        1
+                    };
+                    let failed_cursor = TelegramAssistantForwardingCursor {
+                        message_id: Some(id.clone()),
+                        text_chars: Some(text_chars),
+                        resend_if_grown: true,
+                        sent_chunks: Some(chunk_index),
+                        failed_chunk_send_attempts: Some(failed_attempts),
+                        footer_pending: false,
+                        baseline_while_active: false,
+                    };
+                    changed |= remember_assistant_forwarding_cursor(
+                        state,
+                        session_id,
+                        failed_cursor.clone(),
+                    );
+
+                    if failed_attempts < TELEGRAM_ASSISTANT_CHUNK_SEND_FAILURE_LIMIT {
                         return Ok(TelegramAssistantForwardingOutcome {
                             dirty: true,
-                            sent_visible_content: true,
+                            sent_visible_content,
                             delivery_failed: true,
                         });
                     }
-                    return Ok(TelegramAssistantForwardingOutcome {
-                        dirty: true,
-                        sent_visible_content: false,
-                        delivery_failed: true,
-                    });
+
+                    let notice = telegram_assistant_chunk_skipped_notice(
+                        chunk_index,
+                        chunks.len(),
+                        failed_attempts,
+                    );
+                    if let Err(err) = telegram.send_message(chat_id, &notice, None) {
+                        log_telegram_error("failed to forward assistant chunk skip notice", &err);
+                    } else {
+                        sent_visible_content = true;
+                    }
+                    let sent_chunks = chunk_index + 1;
+                    let skipped_cursor = TelegramAssistantForwardingCursor {
+                        message_id: Some(id.clone()),
+                        text_chars: Some(text_chars),
+                        resend_if_grown: true,
+                        sent_chunks: Some(sent_chunks),
+                        failed_chunk_send_attempts: None,
+                        footer_pending: false,
+                        baseline_while_active: false,
+                    };
+                    changed |= remember_assistant_forwarding_cursor(
+                        state,
+                        session_id,
+                        skipped_cursor.clone(),
+                    );
+                    cursor = skipped_cursor;
+                    continue;
                 }
                 sent_visible_content = true;
                 let sent_chunks = chunk_index + 1;
                 if sent_chunks < chunks.len() {
+                    let chunk_cursor = TelegramAssistantForwardingCursor {
+                        message_id: Some(id.clone()),
+                        text_chars: Some(text_chars),
+                        resend_if_grown: true,
+                        sent_chunks: Some(sent_chunks),
+                        failed_chunk_send_attempts: None,
+                        footer_pending: false,
+                        baseline_while_active: false,
+                    };
                     changed |= remember_assistant_forwarding_cursor(
                         state,
                         session_id,
-                        TelegramAssistantForwardingCursor {
-                            message_id: Some(id.clone()),
-                            text_chars: Some(text.chars().count()),
-                            resend_if_grown: true,
-                            sent_chunks: Some(sent_chunks),
-                            baseline_while_active: false,
-                        },
+                        chunk_cursor.clone(),
                     );
+                    cursor = chunk_cursor;
                 }
             }
         }
@@ -2722,17 +2833,21 @@ fn forward_new_assistant_message_outcome(
         // retrying a long message resumes without duplicating delivered chunks.
         // Capture the char count alongside the id so a streaming-then-settled
         // re-send can be detected by length growth.
+        let complete_cursor = TelegramAssistantForwardingCursor {
+            message_id: Some(id.clone()),
+            text_chars: Some(text.chars().count()),
+            resend_if_grown: true,
+            sent_chunks: None,
+            failed_chunk_send_attempts: None,
+            footer_pending: false,
+            baseline_while_active: false,
+        };
         changed |= remember_assistant_forwarding_cursor(
             state,
             session_id,
-            TelegramAssistantForwardingCursor {
-                message_id: Some(id.clone()),
-                text_chars: Some(text.chars().count()),
-                resend_if_grown: true,
-                sent_chunks: None,
-                baseline_while_active: false,
-            },
+            complete_cursor.clone(),
         );
+        cursor = complete_cursor;
         changed |= clear_forward_next_assistant_message_session_id(state, session_id);
     }
 
@@ -2752,6 +2867,7 @@ fn forward_new_assistant_message_outcome(
     // stopped but not because the work is done. See
     // `telegram_turn_settled_footer`.
     if sent_visible_content {
+        changed |= remember_assistant_forwarding_footer_pending(state, session_id, true);
         if let Err(err) = telegram.send_message(
             chat_id,
             telegram_turn_settled_footer(&response.session.status),
@@ -2764,12 +2880,13 @@ fn forward_new_assistant_message_outcome(
                 delivery_failed: true,
             });
         }
+        changed |= remember_assistant_forwarding_footer_pending(state, session_id, false);
     }
 
     Ok(TelegramAssistantForwardingOutcome {
         dirty: changed,
         sent_visible_content,
-        delivery_failed: false,
+        delivery_failed,
     })
 }
 
@@ -2806,6 +2923,20 @@ fn telegram_turn_settled_footer(status: &TelegramSessionStatus) -> &'static str 
 /// units. Stay below that limit using the same unit Telegram counts.
 const TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS: usize = 3500;
 const TELEGRAM_DIGEST_FIELD_MAX_CHARS: usize = 120;
+const TELEGRAM_ASSISTANT_CHUNK_SEND_FAILURE_LIMIT: usize = 3;
+
+fn telegram_assistant_chunk_skipped_notice(
+    chunk_index: usize,
+    chunk_count: usize,
+    failed_attempts: usize,
+) -> String {
+    format!(
+        "[Telegram skipped assistant reply chunk {}/{} after {} failed delivery attempts.]",
+        chunk_index + 1,
+        chunk_count,
+        failed_attempts
+    )
+}
 
 /// Splits `text` into chunks no longer than
 /// `TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS`, preferring to break at the

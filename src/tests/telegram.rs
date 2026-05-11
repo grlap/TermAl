@@ -17,6 +17,7 @@ struct FakeTelegramSender {
     answered_callbacks: RefCell<Vec<(String, String)>>,
     edited_messages: RefCell<Vec<(i64, i64, String, TelegramTextFormat)>>,
     fail_edits: bool,
+    fail_first_attempts: Option<usize>,
     fail_on_attempt: Option<usize>,
     send_attempts: Cell<usize>,
     sent_formats: RefCell<Vec<TelegramTextFormat>>,
@@ -29,6 +30,7 @@ impl FakeTelegramSender {
             answered_callbacks: RefCell::new(Vec::new()),
             edited_messages: RefCell::new(Vec::new()),
             fail_edits: false,
+            fail_first_attempts: None,
             fail_on_attempt,
             send_attempts: Cell::new(0),
             sent_formats: RefCell::new(Vec::new()),
@@ -39,6 +41,13 @@ impl FakeTelegramSender {
     fn with_edit_failure() -> Self {
         Self {
             fail_edits: true,
+            ..Self::new(None)
+        }
+    }
+
+    fn failing_first_attempts(count: usize) -> Self {
+        Self {
+            fail_first_attempts: Some(count),
             ..Self::new(None)
         }
     }
@@ -54,7 +63,11 @@ impl TelegramMessageSender for FakeTelegramSender {
     ) -> Result<TelegramChatMessage> {
         let attempt = self.send_attempts.get() + 1;
         self.send_attempts.set(attempt);
-        if self.fail_on_attempt == Some(attempt) {
+        if self.fail_on_attempt == Some(attempt)
+            || self
+                .fail_first_attempts
+                .is_some_and(|attempts| attempt <= attempts)
+        {
             bail!("forced send failure");
         }
         self.sent_formats.borrow_mut().push(format);
@@ -2084,8 +2097,10 @@ fn telegram_forward_records_partial_progress_when_later_send_fails() {
         .assistant_forwarding_cursors
         .get("session-1")
         .expect("partial progress should persist cursor");
-    assert_eq!(cursor.message_id.as_deref(), Some("message-1"));
-    assert_eq!(cursor.text_chars, Some("First reply".chars().count()));
+    assert_eq!(cursor.message_id.as_deref(), Some("message-2"));
+    assert_eq!(cursor.text_chars, Some("Second reply".chars().count()));
+    assert_eq!(cursor.sent_chunks, Some(0));
+    assert_eq!(cursor.failed_chunk_send_attempts, Some(1));
 }
 
 #[test]
@@ -3380,6 +3395,8 @@ fn telegram_forwarder_checks_digest_primary_when_armed_session_makes_no_progress
                 text_chars: Some("Baseline".chars().count()),
                 resend_if_grown: false,
                 sent_chunks: None,
+                failed_chunk_send_attempts: None,
+                footer_pending: false,
                 baseline_while_active: false,
             },
         )]),
@@ -3454,6 +3471,8 @@ fn telegram_forwarder_checks_digest_primary_when_armed_session_only_updates_base
                     text_chars: None,
                     resend_if_grown: false,
                     sent_chunks: None,
+                    failed_chunk_send_attempts: None,
+                    footer_pending: false,
                     baseline_while_active: true,
                 },
             ),
@@ -3464,6 +3483,8 @@ fn telegram_forwarder_checks_digest_primary_when_armed_session_only_updates_base
                     text_chars: Some("Baseline".chars().count()),
                     resend_if_grown: false,
                     sent_chunks: None,
+                    failed_chunk_send_attempts: None,
+                    footer_pending: false,
                     baseline_while_active: false,
                 },
             ),
@@ -3545,6 +3566,8 @@ fn telegram_forwarder_keeps_armed_session_across_digest_primary_switch() {
                     text_chars: None,
                     resend_if_grown: false,
                     sent_chunks: None,
+                    failed_chunk_send_attempts: None,
+                    footer_pending: false,
                     baseline_while_active: true,
                 },
             ),
@@ -3555,6 +3578,8 @@ fn telegram_forwarder_keeps_armed_session_across_digest_primary_switch() {
                     text_chars: Some("Baseline B".chars().count()),
                     resend_if_grown: false,
                     sent_chunks: None,
+                    failed_chunk_send_attempts: None,
+                    footer_pending: false,
                     baseline_while_active: false,
                 },
             ),
@@ -3650,6 +3675,8 @@ fn telegram_forwarder_checks_digest_primary_when_armed_session_errors() {
                 text_chars: Some("Baseline".chars().count()),
                 resend_if_grown: false,
                 sent_chunks: None,
+                failed_chunk_send_attempts: None,
+                footer_pending: false,
                 baseline_while_active: false,
             },
         )]),
@@ -3719,6 +3746,8 @@ fn telegram_forwarder_suppresses_digest_primary_after_visible_armed_footer_send_
                 text_chars: Some("Baseline".chars().count()),
                 resend_if_grown: false,
                 sent_chunks: None,
+                failed_chunk_send_attempts: None,
+                footer_pending: false,
                 baseline_while_active: false,
             },
         )]),
@@ -3733,11 +3762,34 @@ fn telegram_forwarder_suppresses_digest_primary_after_visible_armed_footer_send_
         telegram.sent_texts.borrow().as_slice(),
         ["Armed reply".to_owned()]
     );
+    let armed_cursor = state
+        .assistant_forwarding_cursors
+        .get("session-1")
+        .expect("footer retry should keep armed session cursor");
+    assert!(armed_cursor.footer_pending);
     assert!(
         state
             .assistant_forwarding_cursors
             .get("session-2")
             .is_some_and(|cursor| cursor.message_id.as_deref() == Some("baseline"))
+    );
+
+    let changed =
+        forward_relevant_assistant_messages(&telegram, &termal, &mut state, 42, Some("session-2"));
+
+    assert!(changed);
+    assert_eq!(
+        telegram.sent_texts.borrow().as_slice(),
+        [
+            "Armed reply".to_owned(),
+            telegram_turn_settled_footer(&TelegramSessionStatus::Idle).to_owned()
+        ]
+    );
+    assert!(
+        state
+            .assistant_forwarding_cursors
+            .get("session-1")
+            .is_some_and(|cursor| !cursor.footer_pending)
     );
 }
 
@@ -3791,6 +3843,8 @@ fn telegram_forwarder_suppresses_digest_primary_after_armed_first_chunk_send_err
                 text_chars: Some("Baseline".chars().count()),
                 resend_if_grown: false,
                 sent_chunks: None,
+                failed_chunk_send_attempts: None,
+                footer_pending: false,
                 baseline_while_active: false,
             },
         )]),
@@ -3803,6 +3857,13 @@ fn telegram_forwarder_suppresses_digest_primary_after_armed_first_chunk_send_err
     assert!(changed);
     assert!(telegram.sent_texts.borrow().is_empty());
     assert_eq!(telegram.send_attempts.get(), 1);
+    let armed_cursor = state
+        .assistant_forwarding_cursors
+        .get("session-1")
+        .expect("failed first chunk should keep retry cursor");
+    assert_eq!(armed_cursor.message_id.as_deref(), Some("message-1"));
+    assert_eq!(armed_cursor.sent_chunks, Some(0));
+    assert_eq!(armed_cursor.failed_chunk_send_attempts, Some(1));
     assert!(
         state
             .assistant_forwarding_cursors
@@ -3815,6 +3876,75 @@ fn telegram_forwarder_suppresses_digest_primary_after_armed_first_chunk_send_err
             .iter()
             .any(|session_id| session_id == "session-1")
     );
+}
+
+#[test]
+fn telegram_forwarder_skips_first_chunk_after_repeated_send_failures() {
+    let telegram =
+        FakeTelegramSender::failing_first_attempts(TELEGRAM_ASSISTANT_CHUNK_SEND_FAILURE_LIMIT);
+    let termal = FakeTelegramSessionReaderById {
+        responses: HashMap::from([(
+            "session-1".to_owned(),
+            TelegramSessionFetchResponse {
+                session: TelegramSessionFetchSession {
+                    status: TelegramSessionStatus::Idle,
+                    messages: vec![TelegramSessionFetchMessage::Text {
+                        id: "message-1".to_owned(),
+                        author: "assistant".to_owned(),
+                        text: "Armed reply".to_owned(),
+                    }],
+                },
+            },
+        )]),
+    };
+    let mut state = TelegramBotState {
+        forward_next_assistant_message_session_ids: vec!["session-1".to_owned()],
+        forward_next_assistant_message_session_id: Some("session-1".to_owned()),
+        ..TelegramBotState::default()
+    };
+
+    for expected_attempts in 1..TELEGRAM_ASSISTANT_CHUNK_SEND_FAILURE_LIMIT {
+        let changed = forward_relevant_assistant_messages(&telegram, &termal, &mut state, 42, None);
+
+        assert!(changed);
+        assert!(telegram.sent_texts.borrow().is_empty());
+        let cursor = state
+            .assistant_forwarding_cursors
+            .get("session-1")
+            .expect("failed chunk should persist retry cursor");
+        assert_eq!(cursor.sent_chunks, Some(0));
+        assert_eq!(cursor.failed_chunk_send_attempts, Some(expected_attempts));
+        assert!(
+            state
+                .forward_next_assistant_message_session_ids
+                .contains(&"session-1".to_owned())
+        );
+    }
+
+    let changed = forward_relevant_assistant_messages(&telegram, &termal, &mut state, 42, None);
+
+    assert!(changed);
+    assert_eq!(
+        telegram.sent_texts.borrow().as_slice(),
+        [
+            telegram_assistant_chunk_skipped_notice(
+                0,
+                1,
+                TELEGRAM_ASSISTANT_CHUNK_SEND_FAILURE_LIMIT,
+            ),
+            telegram_turn_settled_footer(&TelegramSessionStatus::Idle).to_owned()
+        ]
+    );
+    let cursor = state
+        .assistant_forwarding_cursors
+        .get("session-1")
+        .expect("skipped message should persist completed cursor");
+    assert_eq!(cursor.message_id.as_deref(), Some("message-1"));
+    assert_eq!(cursor.sent_chunks, None);
+    assert_eq!(cursor.failed_chunk_send_attempts, None);
+    assert!(!cursor.footer_pending);
+    assert!(state.forward_next_assistant_message_session_ids.is_empty());
+    assert_eq!(state.forward_next_assistant_message_session_id, None);
 }
 
 #[test]
@@ -3875,6 +4005,8 @@ fn telegram_forwarder_resumes_long_armed_reply_after_content_chunk_failure() {
                 text_chars: Some("Baseline".chars().count()),
                 resend_if_grown: false,
                 sent_chunks: None,
+                failed_chunk_send_attempts: None,
+                footer_pending: false,
                 baseline_while_active: false,
             },
         )]),
@@ -4075,6 +4207,8 @@ fn telegram_assistant_forwarding_cursors_are_scoped_per_session() {
                 text_chars: Some("Session one baseline".chars().count()),
                 resend_if_grown: false,
                 sent_chunks: None,
+                failed_chunk_send_attempts: None,
+                footer_pending: false,
                 baseline_while_active: false,
             },
         )]),
@@ -4950,6 +5084,8 @@ fn telegram_assistant_forwarding_cursor_state_uses_documented_wire_shape() {
                 text_chars: Some(42),
                 resend_if_grown: true,
                 sent_chunks: Some(3),
+                failed_chunk_send_attempts: Some(2),
+                footer_pending: true,
                 baseline_while_active: true,
             },
         )]),
@@ -4977,6 +5113,14 @@ fn telegram_assistant_forwarding_cursor_state_uses_documented_wire_shape() {
         json!(3)
     );
     assert_eq!(
+        value["assistantForwardingCursors"]["session-1"]["failedChunkSendAttempts"],
+        json!(2)
+    );
+    assert_eq!(
+        value["assistantForwardingCursors"]["session-1"]["footerPending"],
+        json!(true)
+    );
+    assert_eq!(
         value["assistantForwardingCursors"]["session-1"]["baselineWhileActive"],
         json!(true)
     );
@@ -5000,6 +5144,8 @@ fn telegram_assistant_forwarding_cursor_state_uses_documented_wire_shape() {
     assert_eq!(round_tripped_cursor.text_chars, Some(42));
     assert!(round_tripped_cursor.resend_if_grown);
     assert_eq!(round_tripped_cursor.sent_chunks, Some(3));
+    assert_eq!(round_tripped_cursor.failed_chunk_send_attempts, Some(2));
+    assert!(round_tripped_cursor.footer_pending);
     assert!(round_tripped_cursor.baseline_while_active);
     assert!(
         round_tripped

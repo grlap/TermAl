@@ -44,33 +44,9 @@ Operators and the UI cannot tell that fan-in resume should have happened but did
 - Emit a structured warning event or retain dispatch error metadata.
 - Or document the best-effort policy and recovery expectations.
 
-## Footer-send failure permanently loses the close marker with no retry
-
-**Severity:** Medium - `src/telegram.rs:2208-2223`. Footer-send failure is converted to `Ok(sent_visible_content: true)` and logged. The footer is for visual closure. If a transient failure swallows the footer once, it is permanently lost for that turn. The footer's stated purpose ("user has no easy way to tell 'is the agent still typing or done?'") is silently undermined.
-
-**Current behavior:**
-- Footer-send failure → `Ok(sent_visible_content: true)`, log only.
-- No retry on next poll.
-- Permanent loss of close marker for that turn.
-
-**Proposal:**
-- Either persist a "footer pending" flag in the cursor so the next poll can retry.
-- Or accept the loss but emit a heads-up message ("[turn complete; footer delivery failed]") on the success path.
-
-## First-chunk failure can cause permanent retry loops
-
-**Severity:** Low - `src/telegram.rs:2452-2466`. The chunk loop records a delivery failure when `sent_visible_content` is false (no chunks were successfully sent), but the cursor is NOT advanced. On retry, the relay will replay the first chunk. If the first chunk's send always fails (e.g., the chunk is malformed), the user will see permanent retry loops with no progress and no bounded escalation.
-
-**Current behavior:**
-- First-chunk failure -> no cursor update -> infinite retry.
-- Digest-primary fallback is suppressed for the poll, but the armed session remains stuck on the same failed first chunk.
-
-**Proposal:**
-- After N failed first-chunk attempts for the same `(message_id, chunk_index)`, advance the cursor anyway and surface a "[chunk N skipped: send failed]" line in chat.
-
 ## First-settled active-baseline same-message growth lacks a safe turn boundary
 
-**Severity:** Medium - `src/telegram.rs:2294-2327`. When a Telegram prompt is armed behind an active/approval-paused turn, the relay baselines the current assistant message while `baseline_while_active=true`. If the tracked message id has already grown by the first settled poll, the relay cannot distinguish "old turn finished after the last active poll" from "the Telegram reply was appended to the same message id."
+**Severity:** Medium - `src/telegram.rs:2583-2637`. When a Telegram prompt is armed behind an active/approval-paused turn, the relay baselines the current assistant message while `baseline_while_active=true`. If the tracked message id has already grown by the first settled poll, the relay cannot distinguish "old turn finished after the last active poll" from "the Telegram reply was appended to the same message id."
 
 Forwarding the grown same message immediately can leak the pre-existing active turn into Telegram and consume the arm. Baseline-only behavior avoids that leak but can miss producers that append the actual Telegram reply to the same assistant message before the first settled poll.
 
@@ -83,12 +59,12 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 - Add a stronger turn-boundary signal from the session/agent layer, then forward only text known to belong to the Telegram-originated prompt.
 - Or document that same-message append before the first settled poll is unsupported for queued Telegram prompts.
 
-## `forward_new_assistant_message_outcome` is now ~256 lines with interleaved early-returns
+## `forward_new_assistant_message_outcome` is now ~400 lines with interleaved early-returns
 
-**Severity:** Note - `src/telegram.rs:1916-2007`. The new pre-forward block has 3 separate `Active baseline` early returns and one merge into the main path; future contributors will struggle to trace which baseline shape is preserved across the merge.
+**Severity:** Note - `src/telegram.rs:2512-2912`. The forwarding path now mixes active-baseline transitions, footer retry, chunk retry/skip state, and visible-content suppression. Future contributors will struggle to trace which baseline shape is preserved across the merge.
 
 **Current behavior:**
-- Single function ~256 lines.
+- Single function ~400 lines.
 - Multiple interleaved early-return branches.
 
 **Proposal:**
