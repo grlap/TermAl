@@ -844,15 +844,34 @@ describe("VirtualizedConversationMessageList foundation", () => {
   });
 
   it("bottom-pin mounts the bottom range without starting a boundary reveal", async () => {
-    const messages = makeTextMessages(48);
+    const messages = makeTextMessages(160);
     const harness = renderVirtualizedHarness({
       clientHeight: 240,
       messages,
+      preferInitialEstimatedBottomViewport: true,
     });
 
     try {
       await waitFor(() => {
-        expect(screen.getByText("message-48")).toBeInTheDocument();
+        expect(screen.getByText("message-160")).toBeInTheDocument();
+      });
+
+      vi.useFakeTimers();
+      act(() => {
+        harness.setScrollTop(0);
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "page_jump",
+          scrollSource: "user",
+        });
+      });
+
+      expect(screen.getByText("message-1")).toBeInTheDocument();
+
+      await advanceIdleMountedRangeCompaction();
+      expect(screen.queryByText("message-160")).not.toBeInTheDocument();
+
+      act(() => {
+        vi.useRealTimers();
       });
 
       act(() => {
@@ -863,7 +882,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText("message-48")).toBeInTheDocument();
+        expect(screen.getByText("message-160")).toBeInTheDocument();
       });
       expect(
         harness.scrollNode.dataset.virtualizedBottomBoundaryReveal,
