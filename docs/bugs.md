@@ -345,19 +345,6 @@ This is already on the bug-ledger backlog as a P2 split task. Round 71 made the 
 **Proposal:**
 - Construct a marker with a color produced by `DEFAULT_CONVERSATION_MARKER_COLOR` (the contract value) and assert that color round-trips through normalization.
 
-## "keeps the draft when delegation spawn throws" doesn't assert busy state was cleared
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7101-7128`. The `finally` arm clears `setIsDelegationSpawning(false)` only when mounted. The test exercises the throw path but does not assert `screen.queryByRole("button", { name: "Delegating..." })` is gone — only that the textarea retained the draft.
-
-A regression that left the button stuck in "Delegating..." after a thrown error would not be caught here.
-
-**Current behavior:**
-- Tests draft preservation.
-- Doesn't assert button label flipped back.
-
-**Proposal:**
-- Add `expect(screen.queryByRole("button", { name: "Delegating..." })).not.toBeInTheDocument()` or assert "Delegate" is back as the button name.
-
 ## `resolveComposerDelegationAvailability` round-trips `parentSession` in success outcome
 
 **Severity:** Note - `ui/src/delegation-commands.ts:274-297`. The function accepts `parentSession: Session` and returns it back via the success branch (`{ outcome: "available", parentSession }`). The caller already holds a `Session`. This reads like the helper is producing data, but it's just a type-narrowing convenience. Future callers who already hold a `Session` may shadow it confusingly.

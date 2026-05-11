@@ -8690,6 +8690,12 @@ describe("AgentSessionPanelFooter", () => {
       "Keep this if spawn rejects.",
     );
     expect(textarea).toHaveValue("Keep this if spawn rejects.");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Delegating..." }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Delegate" })).toBeEnabled();
   });
 
   it("disables delegation for session-control slash palette choices", () => {
