@@ -402,21 +402,6 @@ The previous round-64 review entry called out the clobber as future-proofing ris
 - Upgrade to a release-mode guard that warns and resets, or errors before a mismatched source can drive UI routing.
 - Keep the debug assertion only as a supplemental development check.
 
-## SSE-envelope test only asserts the second `parallelAgentsUpdate` event, skips the first
-
-**Severity:** Low - `src/tests/http_routes.rs:586-662` `state_events_route_streams_parallel_agents_update_sources` consumes the first `upsert` event via `let _ = next_sse_event(&mut body).await` and only asserts the second update event. The first publish (the `create` event) is silently swallowed.
-
-A regression where source serialization works for updates but not creates would still pass.
-
-**Current behavior:**
-- First create event consumed without assertion.
-- Second update event asserted (`tool` and `delegation` source).
-- Create-path serialization regression would not surface.
-
-**Proposal:**
-- Also assert the first event's source values (parse it instead of `let _ = ...`).
-- Or add a sibling test for the create path.
-
 ## `delegation_parent_card_update_ignores_tool_source_id_collision` only manually constructs the collision
 
 **Severity:** Low - the new test at `src/tests/delegations.rs:655-746` constructs the collision by manually inserting a tool-source row with the same id as the delegation. The production paths that could create such a collision (Claude task path emitting a tool-source row with a delegation-id-overlapping uuid) are not exercised.
@@ -3096,8 +3081,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   document `ApiRequestErrorKind` post-round-58: round 58's `preserveGatewayErrorBody` makes `kind: "request-failed"` no longer a strict status-class signal — it can now appear with status 502/503/504 alongside non-5xx status codes. Update `ApiRequestErrorKind` JSDoc and feature-brief contract for wrappers using `error.status` for status-class triage.
 - [ ] P2: Add 5xx empty-body fallback to `extractError` for `preserveGatewayErrorBody` callers:
   for empty 502 body, `extractError` returns `"Request failed with status 502."` — more confusing than the prior `"The TermAl backend is unavailable."`. Either fall through to backend-unavailable copy when `raw` is empty AND `status >= 502`, or have `extractError` return a sentinel that the caller can detect for a fallback.
-- [ ] P2: Assert SSE-envelope source in the `parallelAgentsUpdate` create event:
-  parse the first event in `state_events_route_streams_parallel_agents_update_sources` instead of consuming via `let _ = ...`, asserting `agents[0].source` and `agents[1].source`. Or add a sibling test scoped to the create path.
 - [ ] P2: Cover production-path tool/delegation id collision:
   add a Rust test that drives both the Claude task path and the delegation creation path with overlapping ids (or document the assumption that uuid id spaces don't collide deterministically). The current test manually inserts the collision.
 - [ ] P2: Split `cancelDelegation` `it.each` running/completed/canceled identical-pin into focused tests:

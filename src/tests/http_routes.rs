@@ -624,7 +624,18 @@ async fn state_events_route_streams_parallel_agents_update_sources() {
             ],
         )
         .expect("parallel agents message should be created");
-    let _ = next_sse_event(&mut body).await;
+    let create_event = next_sse_event(&mut body).await;
+    let (event_name, event_data) = parse_sse_event(&create_event);
+    assert_eq!(event_name, "delta");
+    let delta: Value = serde_json::from_str(&event_data).expect("delta SSE payload should parse");
+    assert_eq!(delta["type"], "messageCreated");
+    assert_eq!(delta["sessionId"], session_id);
+    assert_eq!(delta["messageId"], "agents-source-wire");
+    assert_eq!(delta["message"]["type"], "parallelAgents");
+    assert_eq!(delta["message"]["agents"][0]["source"], "tool");
+    assert_eq!(delta["message"]["agents"][0]["status"], "running");
+    assert_eq!(delta["message"]["agents"][1]["source"], "delegation");
+    assert_eq!(delta["message"]["agents"][1]["status"], "running");
 
     state
         .upsert_parallel_agents_message(
