@@ -125,6 +125,58 @@ fn git_status_file_actions_support_paths_with_spaces() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
+// Pins that selected file paths are passed to Git as literals, not pathspec
+// globs. `docs/[ab].txt` would otherwise stage `docs/a.txt` on Git's pathspec
+// matcher instead of the selected file.
+#[test]
+fn git_status_file_actions_treat_bracket_pathspecs_as_literals() {
+    let repo_root =
+        std::env::temp_dir().join(format!("termal-git-literal-pathspec-{}", Uuid::new_v4()));
+    let docs_dir = repo_root.join("docs");
+    let tracked_match = docs_dir.join("a.txt");
+    let literal_file = docs_dir.join("[ab].txt");
+
+    fs::create_dir_all(&docs_dir).unwrap();
+    fs::write(&tracked_match, "base\n").unwrap();
+
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "docs/a.txt"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    fs::write(&tracked_match, "modified\n").unwrap();
+    fs::write(&literal_file, "literal\n").unwrap();
+
+    let pathspecs = collect_git_pathspecs("docs/[ab].txt", None);
+    run_git_pathspec_command(
+        &repo_root,
+        &["add", "-A"],
+        &pathspecs,
+        "failed to stage git changes",
+    )
+    .unwrap();
+
+    let status = load_git_status_for_path(&repo_root).unwrap();
+    let literal_status = status
+        .files
+        .iter()
+        .find(|entry| entry.path == "docs/[ab].txt")
+        .expect("status should include the literal bracket path");
+    assert_eq!(literal_status.index_status.as_deref(), Some("A"));
+    assert_eq!(literal_status.worktree_status, None);
+
+    let matched_status = status
+        .files
+        .iter()
+        .find(|entry| entry.path == "docs/a.txt")
+        .expect("status should include the pathspec-matching tracked file");
+    assert_eq!(matched_status.index_status, None);
+    assert_eq!(matched_status.worktree_status.as_deref(), Some("M"));
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
 // Pins staging a worktree edit made after a staged rename. Git reports
 // this as `RM old -> new`, but `git add` must receive only the current
 // path for the unstaged modification; the old path no longer matches.

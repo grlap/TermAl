@@ -655,21 +655,6 @@ Acceptable for the current N≤10ish parallel-agent count; flagging because the 
 **Proposal:**
 - Extract a shared helper `installLongTranscriptScrollNodeMocks(scrollNode)` returning a cleanup function.
 
-## Git file actions treat user paths as Git pathspecs instead of literals
-
-**Severity:** Medium - file actions pass user-controlled path strings to Git pathspec commands. The `--` separator prevents option injection, but Git still expands pathspec magic and glob syntax.
-
-`src/git.rs:275, 944`. A crafted filename such as `:(top)*.txt`, `*.rs`, or a path containing `[]` can make a single-file stage/revert/clean action affect more files than the selected row.
-
-**Current behavior:**
-- User-derived paths are collected as pathspec strings.
-- `run_git_pathspec_command` appends them after `--`.
-- Git pathspec magic and glob matching remain enabled.
-
-**Proposal:**
-- Force literal pathspec handling for all user-derived Git path args, for example via `GIT_LITERAL_PATHSPECS=1` or `:(literal)` wrapping.
-- Add regression coverage for `*`, `?`, `[]`, and `:(top)` filenames.
-
 
 ## `validate_and_normalize_telegram_config` and `sanitize_telegram_config_for_current_state` have overlapping responsibilities with implicit ordering
 
@@ -2633,8 +2618,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   in addition to the existing "no buttons rendered" assertion, also assert that `onCancelParallelAgent` / `onOpenParallelAgentSession` / `onInsertParallelAgentResult` were NOT called with the tool agent's id (defense in depth).
 - [ ] P2: Add `ParallelAgentsCard` pending-action unmount coverage:
   click an async action, unmount before the promise settles, resolve/reject the promise, and assert the pending-state cleanup cannot update after unmount.
-- [ ] P2: Cover Git literal pathspec handling:
-  after forcing literal pathspec behavior, add regression coverage for filenames containing `*`, `?`, `[]`, and `:(top)` so single-file Git actions cannot expand to other files.
 - [ ] P2: Cover production-path tool/delegation id collision:
   add a Rust test that drives both the Claude task path and the delegation creation path with overlapping ids (or document the assumption that uuid id spaces don't collide deterministically). The current test manually inserts the collision.
 - [ ] P2: Clean up AgentSessionPanel `act(...)` warnings:

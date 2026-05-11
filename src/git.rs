@@ -289,7 +289,7 @@ fn load_git_file_diff_text(
     }
 
     let pathspecs = collect_git_pathspecs(current_path, original_path);
-    let mut command = git_command();
+    let mut command = git_literal_pathspec_command();
     command
         .arg("-C")
         .arg(repo_root)
@@ -434,7 +434,7 @@ fn git_path_has_unstaged_worktree_changes(
     original_path: Option<&str>,
 ) -> Result<bool, ApiError> {
     let pathspecs = collect_git_pathspecs(current_path, original_path);
-    let output = git_command()
+    let output = git_literal_pathspec_command()
         .arg("-C")
         .arg(repo_root)
         .arg("diff")
@@ -889,6 +889,13 @@ fn git_command() -> Command {
     command
 }
 
+/// Builds a Git command that treats caller-provided pathspecs as literal paths.
+fn git_literal_pathspec_command() -> Command {
+    let mut command = git_command();
+    command.env("GIT_LITERAL_PATHSPECS", "1");
+    command
+}
+
 /// Normalizes a repository-relative path for Git object lookups.
 fn normalize_git_object_path(path: &str) -> String {
     path.replace('\\', "/")
@@ -936,7 +943,7 @@ fn run_git_pathspec_command(
     pathspecs: &[String],
     error_context: &str,
 ) -> Result<(), ApiError> {
-    let output = git_command()
+    let output = git_literal_pathspec_command()
         .arg("-C")
         .arg(repo_root)
         .args(args)
