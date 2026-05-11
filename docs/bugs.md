@@ -670,21 +670,6 @@ Acceptable for the current N≤10ish parallel-agent count; flagging because the 
 - Force literal pathspec handling for all user-derived Git path args, for example via `GIT_LITERAL_PATHSPECS=1` or `:(literal)` wrapping.
 - Add regression coverage for `*`, `?`, `[]`, and `:(top)` filenames.
 
-## `ConversationOverviewViewportSnapshotTranslation` is not exported despite appearing on public projection shape
-
-**Severity:** Note - the new local `type ConversationOverviewViewportSnapshotTranslation` is referenced by the public `ConversationOverviewProjection` interface (which IS exported), but the type itself is not exported. External consumers can read `projection.viewportSnapshotTranslation` only via inference and cannot import the type by name. There is also no contract comment explaining when translation is used vs the legacy path, what the units of `sourceTopOffsetPx` are, or the `messageCount` keying contract.
-
-`ui/src/panels/conversation-overview-map.ts:85-91`.
-
-**Current behavior:**
-- Type is declared as a local `type`, not `export type`.
-- No JSDoc on `viewportSnapshotTranslation`, `resolveViewportSnapshotTranslation`, or `projectConversationOverviewViewport`.
-- Downstream callers in `ConversationOverviewRail.tsx` and tests must reach in via projection.
-
-**Proposal:**
-- Export the type to mirror the visibility of its container.
-- Add a short module-level contract comment explaining "translation captures `documentTop − layoutTop` for a contiguous window so a viewport snapshot from the windowed virtualizer can map onto the full-transcript overview".
-- Document the `snapshotMessageCount` re-use rule.
 
 ## `validate_and_normalize_telegram_config` and `sanitize_telegram_config_for_current_state` have overlapping responsibilities with implicit ordering
 

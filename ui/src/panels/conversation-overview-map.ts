@@ -82,10 +82,17 @@ export type ConversationOverviewProjection = {
   scale: number;
   viewportTopPx: number;
   viewportHeightPx: number;
+  /** Maps a windowed virtualizer snapshot onto full-transcript overview coordinates. */
   viewportSnapshotTranslation: ConversationOverviewViewportSnapshotTranslation | null;
 };
 
-type ConversationOverviewViewportSnapshotTranslation = {
+/**
+ * Captures the full-document offset for a contiguous windowed layout snapshot.
+ * `sourceTopOffsetPx` is `fullDocumentTop - windowedEstimatedTop` for the
+ * first snapshot message; `snapshotMessageCount` prevents reusing the
+ * translation after the virtualizer snapshot drifts.
+ */
+export type ConversationOverviewViewportSnapshotTranslation = {
   snapshotMessageCount: number;
   sourceTopOffsetPx: number;
 };
@@ -296,6 +303,7 @@ export function buildConversationOverviewProjection({
   };
 }
 
+/** Projects a live viewport snapshot, using translation only for matching snapshots. */
 export function projectConversationOverviewViewport(
   projection: Pick<
     ConversationOverviewProjection,
@@ -900,6 +908,8 @@ function buildEstimatedRows(
   });
 }
 
+// Returns null for full snapshots, empty windows, missing rows, or non-contiguous
+// windows so callers fall back to the legacy viewport projection path.
 function resolveViewportSnapshotTranslation(
   layoutSnapshot: VirtualizedConversationLayoutSnapshot | null,
   estimatedRows: ReturnType<typeof buildEstimatedRows>,
