@@ -24,6 +24,10 @@ import {
   resetSessionStoreForTesting,
   upsertSessionStoreSession,
 } from "./session-store";
+import {
+  SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+  SESSION_TAIL_WINDOW_MESSAGE_COUNT,
+} from "./session-tail-policy";
 import type { StateResponse } from "./api";
 import type { DelegationSummary, Message, Session } from "./types";
 import type { WorkspaceState } from "./workspace";
@@ -1556,10 +1560,13 @@ describe("hydration adoption side effects", () => {
     renderLiveStateHarness(params, () => {});
 
     await waitFor(() => expect(api.fetchSessionTail).toHaveBeenCalledTimes(1));
-    expect(api.fetchSessionTail).toHaveBeenCalledWith("session-1", 20);
+    expect(api.fetchSessionTail).toHaveBeenCalledWith(
+      "session-1",
+      SESSION_TAIL_WINDOW_MESSAGE_COUNT,
+    );
     await waitFor(() =>
       expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toHaveLength(
-        20,
+        SESSION_TAIL_WINDOW_MESSAGE_COUNT,
       ),
     );
     expect(params.adoptionRefs.sessionsRef.current[0]?.messages[0]?.id).toBe(
@@ -1586,6 +1593,65 @@ describe("hydration adoption side effects", () => {
     );
     expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toHaveLength(
       150,
+    );
+  });
+
+  it("starts tail-first hydration only at the large-session threshold", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    const fetchSessionTail = vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: makeSession({
+        messagesLoaded: false,
+        messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+      }),
+    });
+
+    const belowThresholdSession = makeSession({
+      messagesLoaded: false,
+      messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES - 1,
+      sessionMutationStamp: 1,
+    });
+    const belowThresholdParams = makeLiveStateParams(belowThresholdSession);
+    belowThresholdParams.adoptionRefs.latestStateRevisionRef.current = 5;
+    belowThresholdParams.adoptionRefs.sessionsRef.current = [
+      belowThresholdSession,
+    ];
+    const belowThresholdHarness = renderLiveStateHarness(
+      belowThresholdParams,
+      () => {},
+    );
+
+    await waitFor(() => expect(fetchSession).toHaveBeenCalledTimes(1));
+    expect(fetchSessionTail).not.toHaveBeenCalled();
+
+    belowThresholdHarness.unmount();
+    fetchSession.mockClear();
+
+    const thresholdSession = makeSession({
+      messagesLoaded: false,
+      messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+      sessionMutationStamp: 1,
+    });
+    const thresholdParams = makeLiveStateParams(thresholdSession);
+    thresholdParams.adoptionRefs.latestStateRevisionRef.current = 5;
+    thresholdParams.adoptionRefs.sessionsRef.current = [thresholdSession];
+
+    renderLiveStateHarness(thresholdParams, () => {});
+
+    await waitFor(() => expect(fetchSessionTail).toHaveBeenCalledTimes(1));
+    expect(fetchSessionTail).toHaveBeenCalledWith(
+      "session-1",
+      SESSION_TAIL_WINDOW_MESSAGE_COUNT,
     );
   });
 });

@@ -67,6 +67,10 @@ import {
   upsertSessionStoreSession,
 } from "./session-store";
 import {
+  SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+  SESSION_TAIL_WINDOW_MESSAGE_COUNT,
+} from "./session-tail-policy";
+import {
   ApiRequestError,
   fetchSession,
   fetchSessionTail,
@@ -274,8 +278,6 @@ const SESSION_HYDRATION_RETRY_DELAYS_MS = [
   1000,
   3000,
 ] as const;
-const SESSION_TAIL_FIRST_HYDRATION_MESSAGE_COUNT = 20;
-const SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101;
 const SLOW_STATE_EVENT_WARNING_MS = 50;
 const STATE_EVENT_METADATA_PEEK_CHARS = 4096;
 
@@ -1362,7 +1364,7 @@ export function useAppLiveState(
           attemptedTailHydration = true;
           const tailResponse = await fetchSessionTail(
             sessionId,
-            SESSION_TAIL_FIRST_HYDRATION_MESSAGE_COUNT,
+            SESSION_TAIL_WINDOW_MESSAGE_COUNT,
           );
           if (!isMountedRef.current) {
             return;

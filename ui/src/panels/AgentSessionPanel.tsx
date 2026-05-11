@@ -67,6 +67,7 @@ import {
 } from "../search-highlight";
 import { resolvePaneScrollCommand } from "../pane-keyboard";
 import { findLastUserPrompt } from "../app-utils";
+import { SESSION_TAIL_WINDOW_MESSAGE_COUNT } from "../session-tail-policy";
 import {
   useComposerSessionSnapshot,
   useSessionRecordSnapshot,
@@ -416,7 +417,6 @@ function spawnDelegationOptionsFromResolvedCommand(
 const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES =
   CONVERSATION_OVERVIEW_MIN_MESSAGES;
 const INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES = 512;
-const INITIAL_ACTIVE_TRANSCRIPT_TAIL_MESSAGE_COUNT = 20;
 const INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX = 160;
 const INITIAL_ACTIVE_TRANSCRIPT_WHEEL_DEMAND_THRESHOLD_PX = 8;
 const INITIAL_ACTIVE_TRANSCRIPT_TOUCH_PULL_DEMAND_THRESHOLD_PX = 8;
@@ -717,7 +717,7 @@ function useInitialActiveTranscriptMessages({
   const windowedMessages = useMemo(
     () =>
       isWindowed
-        ? messages.slice(-INITIAL_ACTIVE_TRANSCRIPT_TAIL_MESSAGE_COUNT)
+        ? messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT)
         : messages,
     [isWindowed, messages],
   );

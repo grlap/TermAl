@@ -529,9 +529,9 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 
 ## Tail-window thresholds drift apart: 101-message hydration vs 512-message render mode
 
-**Severity:** Low - `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` triggers backend tail hydration of `SESSION_TAIL_FIRST_HYDRATION_MESSAGE_COUNT = 20`, but the UI tail-window only activates when `INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES = 512`. Sessions in [101, 512] messages get a 20-message tail hydration response while the conversation page does not enter tail-window mode.
+**Severity:** Low - `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` triggers backend tail hydration of `SESSION_TAIL_WINDOW_MESSAGE_COUNT = 20`, but the UI tail-window only activates when `INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES = 512`. Sessions in [101, 512] messages get a 20-message tail hydration response while the conversation page does not enter tail-window mode.
 
-`ui/src/panels/AgentSessionPanel.tsx:129-130`, `ui/src/app-live-state.ts:272-273`. The 101/512 asymmetry is undocumented; future tuning lands inconsistently.
+`ui/src/panels/AgentSessionPanel.tsx:417`, `ui/src/session-tail-policy.ts:13`. The 101/512 asymmetry is documented only as a tail-first round-trip threshold; future tuning can still land inconsistently.
 
 **Current behavior:**
 - Sessions ≥101 messages get a 20-message tail hydration.
@@ -642,20 +642,6 @@ Acceptable today; flagging for future re-use when N grows.
 **Proposal:**
 - Add `deltaY: -8` (just at threshold) and `deltaY: -7` cases.
 - Add `scrollTop: 160` (at ceiling) vs `161` (above) cases.
-
-## `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` boundary not tested
-
-**Severity:** Low - `app-live-state.test.ts:1509-1547` was updated to pin the new `SESSION_TAIL_FIRST_HYDRATION_MESSAGE_COUNT = 20` count, but no test pins the boundary at `MIN_MESSAGES = 101`. A 100-message session should NOT trigger tail hydration; a 101-message session should.
-
-`ui/src/app-live-state.ts:272`, `ui/src/app-live-state.test.ts:1509-1547`. A regression that lowered the trigger threshold to 21 (mistaking `MESSAGE_COUNT` for `MIN_MESSAGES`) would not be caught.
-
-**Current behavior:**
-- Test confirms tail hydration uses the new count.
-- Boundary value (100 vs 101) is not exercised.
-
-**Proposal:**
-- Add a 100-message session test asserting `fetchSessionTail` is NOT called.
-- Add a 101-message session test asserting it IS called.
 
 ## `update_telegram_config` pre-sanitize means response can drop fields the client never touched
 
@@ -866,21 +852,6 @@ The new design fixes the false-positive Low (verified by `accessToken=` and `csr
 **Proposal:**
 - Add a comment to `redact_standalone_telegram_bot_tokens` explaining the precision-over-recall choice and listing the formats that intentionally leak so future contributors understand the design intent.
 - Reconsider if telemetry shows real leaks.
-
-## Tail-window size policy is duplicated across frontend layers
-
-**Severity:** Low - tail-first hydration and active transcript tail rendering both encode the same 20-message policy in separate private constants.
-
-`ui/src/app-live-state.ts:272` and `ui/src/panels/AgentSessionPanel.tsx:130`. If `SESSION_TAIL_FIRST_HYDRATION_MESSAGE_COUNT` and `INITIAL_ACTIVE_TRANSCRIPT_TAIL_MESSAGE_COUNT` diverge, partial hydration and active transcript rendering can unexpectedly add or drop visible tail messages.
-
-**Current behavior:**
-- The hydration layer requests a 20-message tail.
-- The active transcript render path slices a 20-message tail independently.
-- No shared policy or cross-reference ties the two values together.
-
-**Proposal:**
-- Centralize the tail-window size in a shared UI policy module.
-- Or add explicit comments documenting why the two constants must match or may intentionally differ.
 
 ## `useInitialActiveTranscriptMessages` mutates `hydrationRef` during render
 
@@ -1101,21 +1072,6 @@ The new design fixes the false-positive Low (verified by `accessToken=` and `csr
 **Proposal:**
 - Either (a) reflect the cap in the response (e.g., `messages_window: { offset, limit, total }` field on `SessionResponse`), (b) reject `tail` values above the cap with `ApiError::bad_request` naming the limit so callers know to coordinate, or (c) at minimum cross-reference the cap constant in the frontend constant's doc-comment so a bump on either side prompts review.
 
-## Three hard-coded constants encode the same architectural invariant with no cross-references
-
-**Severity:** Medium - `SESSION_TAIL_HYDRATION_MAX_MESSAGES = 500` (backend cap), `SESSION_TAIL_FIRST_HYDRATION_MESSAGE_COUNT = 100` (frontend request size), `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` (frontend trigger threshold) live in different files with no cross-references.
-
-`src/state_accessors.rs:38` and `ui/src/app-live-state.ts:272-273`. Implicit relationships: the threshold (101) is "MESSAGE_COUNT + 1" so we only tail-first for sessions where tailing actually saves bytes. The backend cap is silent — if the frontend ever asks for tail=600, the backend silently truncates to 500 and the frontend learns nothing about the cap. A future change to MESSAGE_COUNT might forget to update MIN_MESSAGES (breaks the "only tail if it would actually shorten" invariant) or might exceed MAX_MESSAGES (silently capped without diagnostic).
-
-**Current behavior:**
-- Three hard-coded constants with implicit relationships.
-- No comment cross-references between them.
-- A change to one risks silently breaking the others.
-
-**Proposal:**
-- Either derive `MIN_MESSAGES = MESSAGE_COUNT + 1` from `MESSAGE_COUNT` in code, OR add JSDoc cross-references naming the related constants and the architectural invariant.
-- Have the backend report the cap in the response (see entry above).
-
 ## Wire projection layer owns `messages_loaded` SEMANTIC field for partial case
 
 **Severity:** Medium - `wire_session_tail_from_record` decides `messages_loaded` based on whether the slice covers the whole transcript AND the source is loaded. This is wire-semantics decision (UI uses `messagesLoaded: false` to mean "still adopt me, but don't trust messages.length === messageCount") that lives in the projection helper.
@@ -1229,24 +1185,9 @@ The new design fixes the false-positive Low (verified by `accessToken=` and `csr
 **Proposal:**
 - Add a one-line comment: "// Recapture so the classifier sees post-tail-adoption metadata; partial-adoption mutated sessionsRef."
 
-## `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` undocumented "why 101?"
-
-**Severity:** Low - reading the file in isolation, "why 101?" is not obvious. The threshold is "fetch the tail when fetching the full transcript would be ≥1 message wasteful". Note the marginal benefit at 101 messages: tail saves 1 message but adds a round-trip.
-
-`ui/src/app-live-state.ts:272-273`. Future maintainers may bump this to a "round number" without realizing the constant of 100 in the message count is what makes 101 the natural threshold. Bigger question: at exactly 101 messages, is the round-trip cost worth saving 1 message? Probably not — a more pragmatic threshold (e.g., 300+) would amortize the round-trip cost over much more saved data.
-
-**Current behavior:**
-- `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` is undocumented.
-- The relationship to `MESSAGE_COUNT = 100` is implicit.
-- At 101 messages, the round-trip arguably costs more than tailing saves.
-
-**Proposal:**
-- Add a one-line comment: "// Trigger tail-first when at least one message would be saved by skipping it (i.e. message count exceeds the tail's window)."
-- Consider raising the threshold (e.g., `>=300`) where the round-trip cost is amortized over much more saved data.
-
 ## Tail-then-full sequence doubles HTTP request volume for sessions ≥101 messages
 
-**Severity:** Low - the frontend always pairs `fetchSessionTail(100)` with `fetchSession(...)` for sessions where `messageCount >= 101`. Phase 1 local-only is fast. Future remote-host or flaky-network scenarios pay this tax.
+**Severity:** Low - the frontend always pairs `fetchSessionTail(SESSION_TAIL_WINDOW_MESSAGE_COUNT)` with `fetchSession(...)` for sessions where `messageCount >= 101`. Phase 1 local-only is fast. Future remote-host or flaky-network scenarios pay this tax.
 
 `ui/src/app-live-state.ts:1278-1390`. Over SSH this matters more than over HTTP loopback. Combined with the High-severity "remote-proxy hydration skipped" entry, the worst case is: tail-first (returns empty for unhydrated remote proxy) + full-fetch (triggers remote hydration, returns full transcript) — two round-trips for what could have been one.
 
@@ -2764,8 +2705,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   during the prepend integration test, capture `harness.scrollWrites` between the prepend and the followup effect and assert no scroll write lands at the stale `targetScrollTop` value computed from pre-mutation rects.
 - [ ] P2: Add wheel/scrollTop demand-hydration boundary tests:
   add `deltaY: -7` (below threshold) and `deltaY: -8` (at threshold) cases, plus `scrollTop: 160` vs `161` cases to pin the constants.
-- [ ] P2: Add `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` boundary test:
-  add a 100-message session test asserting `fetchSessionTail` is NOT called, and a 101-message session test asserting it IS called.
 - [ ] P2: Cover Telegram relay active-project reconciliation:
   start an in-process relay with subscribed projects but no default and assert startup fails or status exposes the effective `activeProjectId`; delete a project used by a running relay and assert the relay is stopped or restarted without the deleted id.
 - [ ] P2: Cover Telegram relay runtime lifecycle seam:
