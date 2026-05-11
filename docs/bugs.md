@@ -145,17 +145,6 @@ The protocol contract is unwritten in code — only the comment in `types.ts:290
 **Proposal:**
 - Add a non-`cfg`-gated abstraction so a Rust test can verify the reconcile is invoked after a successful prune.
 
-## `telegram_ui_file_requires_default_project_for_relay_config` bundles 3 scenarios
-
-**Severity:** Low - `src/tests/telegram.rs:1058-1097`. Bundles three scenarios (no default, blank-only default, valid trimmed default) into one `it()`. Same anti-pattern flagged elsewhere in the bug ledger. Also missing: `bot_token` blank/missing variant; `enabled = false` with valid token + project; bot_token being whitespace-only.
-
-**Current behavior:**
-- Three scenarios bundled.
-- Coverage gaps for the bot_token disable path.
-
-**Proposal:**
-- Split into per-case tests (`it.each` over `(file_config, expected_outcome)` pairs).
-
 ## Supervised in-process Telegram relay status is untestable in production due to `#[cfg(test)]` fallback
 
 **Severity:** Medium - `src/telegram.rs:220-331`. `telegram_relay_status_snapshot()` has a production implementation backed by the live relay runtime and a test fallback that always returns `running: false` / `lifecycle: Manual`. The wire-shape tests can assert `InProcess` serialization statically, but no integration test exercises the live status endpoint while the in-process relay is running.
