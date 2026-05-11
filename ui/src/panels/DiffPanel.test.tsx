@@ -800,8 +800,7 @@ describe("DiffPanel", () => {
   });
 
   it("scrolls the lone Markdown diff change into view when prev/next wraps to the same index", async () => {
-    // Bug ledger: "Rendered Markdown diff navigation does not scroll
-    // when there is exactly one change". With `changeCount === 1`,
+    // Regression: with `changeCount === 1`,
     // prev/next compute the same index (0 -> 0); React bails on the
     // no-op state set, the scroll effect does not re-run, and the
     // controls appear dead. The fix advances a `navigationTick` on

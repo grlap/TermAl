@@ -1066,21 +1066,6 @@ A future fourth recovery branch would need to update three sites; collapsing int
 - Add a per-session cooldown timestamp ("don't re-hydrate the same session within Nms of the last completed hydration unless the new delta carries a revision strictly greater than the one that started the previous hydration").
 - Or document the burst as intentional given the local-only deployment cost; add a comment naming the trade-off so future reviewers don't keep flagging it.
 
-## Rendered Markdown diff navigation does not scroll when there is exactly one change
-
-**Severity:** Low - prev/next buttons can appear to do nothing for the common "one changed block" case.
-
-`MarkdownDiffView` and `RenderedDiffView` intentionally skip the initial scroll so restored parent scroll position is preserved. Navigation scrolls from a `useEffect` keyed on the current index. When there is exactly one change/region, pressing next or previous computes the same index, React bails out of the state update, and the scroll effect does not run. The controls remain enabled but cannot bring the lone target into view.
-
-**Current behavior:**
-- Initial mount skips scrolling by design.
-- One-change/one-region navigation resolves to the same index.
-- No separate "navigation requested" signal exists to force a scroll to the same target.
-
-**Proposal:**
-- Drive the scroll side effect from a navigation request counter, or call an explicit scroll helper from the prev/next handlers.
-- Cover both `MarkdownDiffView` and `RenderedDiffView` one-target cases.
-
 ## Rendered diff region navigation has no explicit scroll-container layout contract
 
 **Severity:** Low - the new region-navigation ref may target a wrapper that is not the actual scroll container.
