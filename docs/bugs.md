@@ -158,19 +158,6 @@ The protocol contract is unwritten in code — only the comment in `types.ts:290
 - Add a non-`cfg(test)` "test mode" environment variable that lets a Rust integration test boot the runtime in a no-op mode and assert `running` flips.
 - Or refactor the runtime so the status accessors take a `&Self` parameter that tests can inject.
 
-## CLI `termal telegram` mode and in-process relay are not mutually exclusive
-
-**Severity:** Note - `src/main.rs:75-77, 115-116`. The `Mode::Telegram` (CLI) path invokes `run_telegram_bot()` directly, NOT the in-process runtime. If a user starts both `termal server` and `termal telegram`, both would race against `~/.termal/telegram-bot.json` state file with no coordination. Two separate processes hitting Telegram polling against the same `next_update_id` cursor will alternately leapfrog and lose updates.
-
-**Current behavior:**
-- `termal server` boots the in-process relay.
-- `termal telegram` starts a separate bot directly.
-- No mutual-exclusion check.
-
-**Proposal:**
-- Document the mutual-exclusion contract in `docs/features/telegram-ui-integration.md`.
-- Or detect a running in-process relay (via the state file) and refuse to start the CLI mode.
-
 ## `TelegramRelayRuntime` is a file-level global rather than `AppState`-owned state
 
 **Severity:** Note - `src/telegram.rs:220-331`. `TelegramRelayRuntime` and `TELEGRAM_RELAY_RUNTIME` are file-level globals (`LazyLock<Mutex<...>>`). `AppState` has no visibility into the relay's running state, so any future health-monitor, restart-on-error, or readiness-signaling logic ends up reading globals instead of methods on `AppState`.
