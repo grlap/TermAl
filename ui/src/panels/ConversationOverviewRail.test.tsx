@@ -686,6 +686,30 @@ describe("ConversationOverviewRail", () => {
     });
   });
 
+  it("keeps the viewport indicator visible when the live viewport height is zero", () => {
+    const messages = textMessages(5);
+    const snapshot = layoutSnapshot(messages);
+    const { messages: _layoutMessages, ...viewportSnapshot } = snapshot;
+
+    render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={snapshot}
+        viewportSnapshot={{
+          ...viewportSnapshot,
+          viewportHeightPx: 0,
+        }}
+        minMessages={4}
+        maxHeightPx={250}
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("conversation-overview-viewport")).toHaveStyle({
+      height: "8px",
+    });
+  });
+
   it("navigates to the clicked overview item", () => {
     const messages = textMessages(5);
     const onNavigate = vi.fn();
