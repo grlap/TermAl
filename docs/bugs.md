@@ -898,19 +898,6 @@ The new design fixes the false-positive Low (verified by `accessToken=` and `csr
 **Proposal:**
 - Consolidate on one pattern. `isMountedRef` reads cleaner for fire-and-forget click handlers; `cancelled` flags read cleaner for effect-scoped fetches; both are fine, but pick one per file.
 
-## PATCH docstring does not cover `subscribed_project_ids`
-
-**Severity:** Medium - round 56's docstring at `src/wire.rs:1056-1060` reads "Nullable string fields use the same tri-state PATCH convention". `subscribed_project_ids: Option<Vec<String>>` (line 1067) is NOT a string field, has NO `deserialize_nullable_marker_field`, and silently accepts `null` as no-op. A reader of just the docstring + struct will conclude all `Option<...>` fields share tri-state semantics.
-
-**Current behavior:**
-- Docstring documents tri-state for "string fields".
-- `subscribed_project_ids` is `Option<Vec<String>>` and behaves differently.
-- Round 56's docstring widens the surface for confusion rather than narrowing it.
-
-**Proposal:**
-- Tighten the docstring to "string fields decorated with `deserialize_nullable_marker_field`" + an explicit note that `subscribed_project_ids` differs, OR
-- Migrate `subscribed_project_ids` to the marker pattern.
-
 ## `prepare_assistant_forwarding_for_telegram_prompt` race window between cursor capture and POST send
 
 **Severity:** Medium - the new prepare/apply split correctly avoids mutate-before-success, but widens the cursor-capture-to-apply window across a network round-trip. If the agent emits new assistant text between T0 (capture) and T1 (POST returns), the T0 baseline marks the freshly-emitted message as already-forwarded.
