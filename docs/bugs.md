@@ -450,21 +450,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 **Proposal:**
 - Document the partial-information loss in `agent-delegation-sessions.md` so wrappers know `status-fetch-failed` may hide a concurrent server restart.
 
-## `resolveViewportSnapshotTranslation` does an O(N+M) full-transcript pass per layout snapshot rebuild
-
-**Severity:** Low - the helper uses `Array.prototype.findIndex` to find the first layout-snapshot message in `estimatedRows`, then `.every` to verify a contiguous window. For a 1000-message transcript with a 100-message tail, `findIndex` scans up to 900 entries and `.every` walks up to 100. Acceptable for current sizes, but `buildConversationOverviewProjection` runs on every layout snapshot change.
-
-`ui/src/panels/conversation-overview-map.ts:903-942`. The active "messageCount-driven refreshLayoutSnapshot" effect (already in bugs.md as Medium) makes this snowball with the streaming layout-refresh cadence.
-
-**Current behavior:**
-- O(N) `findIndex` over full estimatedRows.
-- O(M) `.every` over layoutSnapshot.messages.
-- Runs on every layout snapshot rebuild during streaming.
-
-**Proposal:**
-- Build a `Map<messageId, rowIndex>` once for `estimatedRows` and reuse for the lookup.
-- Or compare `layoutSnapshot.messages[0].messageId` to the trailing-N message ids (since the layout window is always near the end).
-
 ## `handleInsertParallelAgentResult` accepts any status without warning
 
 **Severity:** Low - the handler at `ui/src/SessionPaneView.render-callbacks.tsx:217-250` accepts any `result.status` (including `"failed"`, `"canceled"`) and inserts the formatted prompt without warning. The formatter prefixes `Delegation result (failed) from child-1:` as a status disclaimer in the prompt body, but the user has no UI-level confirmation they're inserting a failed result.

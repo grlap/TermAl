@@ -178,7 +178,7 @@ export function buildConversationOverviewProjection({
   });
   const messageSourceHeightPx = Math.max(
     0,
-    estimatedRows.reduce((total, row) => total + row.documentHeightPx, 0),
+    estimatedRows.rows.reduce((total, row) => total + row.documentHeightPx, 0),
   );
   const tailSourceHeightPx = tailItems.reduce(
     (total, item) => total + Math.max(1, item.estimatedHeightPx),
@@ -225,41 +225,45 @@ export function buildConversationOverviewProjection({
         );
 
   const projectedMarkers: ConversationOverviewMarkerProjection[] = [];
-  const items: ConversationOverviewItem[] = estimatedRows.map((row, itemIndex) => {
-    const itemMarkers = (markersByMessageId.get(row.message.id) ?? []).map((marker) => {
-      const projection = {
-        ...marker,
-        itemIndex,
-        mapTopPx: row.documentTopPx * scale,
-      };
-      projectedMarkers.push(projection);
-      return projection;
-    });
+  const items: ConversationOverviewItem[] = estimatedRows.rows.map(
+    (row, itemIndex) => {
+      const itemMarkers = (markersByMessageId.get(row.message.id) ?? []).map(
+        (marker) => {
+          const projection = {
+            ...marker,
+            itemIndex,
+            mapTopPx: row.documentTopPx * scale,
+          };
+          projectedMarkers.push(projection);
+          return projection;
+        },
+      );
 
-    return {
-      messageId: row.message.id,
-      messageIndex: row.messageIndex,
-      type: row.message.type,
-      author: row.message.author,
-      kind: row.metadata.kind,
-      status: row.metadata.status,
-      estimatedTopPx: row.estimatedTopPx,
-      estimatedHeightPx: row.estimatedHeightPx,
-      measuredHeightPx: row.measuredHeightPx,
-      measuredPageHeightPx: row.measuredPageHeightPx,
-      documentTopPx: row.documentTopPx,
-      documentHeightPx: row.documentHeightPx,
-      mapTopPx: row.documentTopPx * scale,
-      mapHeightPx: Math.max(minItemHeightPx, row.documentHeightPx * scale),
-      markerIds: itemMarkers.map((marker) => marker.id),
-      markers: itemMarkers,
-      textSample: row.metadata.textSample,
-    };
-  });
+      return {
+        messageId: row.message.id,
+        messageIndex: row.messageIndex,
+        type: row.message.type,
+        author: row.message.author,
+        kind: row.metadata.kind,
+        status: row.metadata.status,
+        estimatedTopPx: row.estimatedTopPx,
+        estimatedHeightPx: row.estimatedHeightPx,
+        measuredHeightPx: row.measuredHeightPx,
+        measuredPageHeightPx: row.measuredPageHeightPx,
+        documentTopPx: row.documentTopPx,
+        documentHeightPx: row.documentHeightPx,
+        mapTopPx: row.documentTopPx * scale,
+        mapHeightPx: Math.max(minItemHeightPx, row.documentHeightPx * scale),
+        markerIds: itemMarkers.map((marker) => marker.id),
+        markers: itemMarkers,
+        textSample: row.metadata.textSample,
+      };
+    },
+  );
   let tailDocumentTopPx = messageSourceHeightPx;
   let tailEstimatedTopPx =
     layoutSnapshot?.estimatedTotalHeightPx ??
-    estimatedRows.reduce((total, row) => total + row.estimatedHeightPx, 0);
+    estimatedRows.rows.reduce((total, row) => total + row.estimatedHeightPx, 0);
   tailItems.forEach((tailItem, tailIndex) => {
     const estimatedHeightPx = Math.max(1, tailItem.estimatedHeightPx);
     items.push({
@@ -876,8 +880,12 @@ function buildEstimatedRows(
 ) {
   let estimatedTopPx = 0;
   let documentTopPx = 0;
+  const rowIndexByMessageId = new Map<string, number>();
 
-  return messages.map((message, messageIndex) => {
+  const rows = messages.map((message, messageIndex) => {
+    if (!rowIndexByMessageId.has(message.id)) {
+      rowIndexByMessageId.set(message.id, messageIndex);
+    }
     const metadata = getConversationOverviewMessageMetadata(message, {
       availableWidthPx: options.availableWidthPx,
       maxSampleLength: options.maxSampleLength,
@@ -906,6 +914,11 @@ function buildEstimatedRows(
     documentTopPx += documentHeightPx;
     return row;
   });
+
+  return {
+    rows,
+    rowIndexByMessageId,
+  };
 }
 
 // Returns null for full snapshots, empty windows, missing rows, or non-contiguous
@@ -916,7 +929,7 @@ function resolveViewportSnapshotTranslation(
 ): ConversationOverviewViewportSnapshotTranslation | null {
   if (
     !layoutSnapshot ||
-    layoutSnapshot.messageCount >= estimatedRows.length ||
+    layoutSnapshot.messageCount >= estimatedRows.rows.length ||
     layoutSnapshot.messages.length === 0
   ) {
     return null;
@@ -927,16 +940,16 @@ function resolveViewportSnapshotTranslation(
     return null;
   }
 
-  const firstRowIndex = estimatedRows.findIndex(
-    (row) => row.message.id === firstLayoutMessage.messageId,
+  const firstRowIndex = estimatedRows.rowIndexByMessageId.get(
+    firstLayoutMessage.messageId,
   );
-  if (firstRowIndex < 0) {
+  if (firstRowIndex === undefined) {
     return null;
   }
 
   const hasContiguousWindow = layoutSnapshot.messages.every(
     (layoutMessage, offset) =>
-      estimatedRows[firstRowIndex + offset]?.message.id ===
+      estimatedRows.rows[firstRowIndex + offset]?.message.id ===
       layoutMessage.messageId,
   );
   if (!hasContiguousWindow) {
@@ -946,7 +959,7 @@ function resolveViewportSnapshotTranslation(
   return {
     snapshotMessageCount: layoutSnapshot.messageCount,
     sourceTopOffsetPx:
-      estimatedRows[firstRowIndex].documentTopPx -
+      estimatedRows.rows[firstRowIndex].documentTopPx -
       firstLayoutMessage.estimatedTopPx,
   };
 }
