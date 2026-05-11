@@ -2,7 +2,11 @@ import { render, screen, act } from "@testing-library/react";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { useConversationOverviewController } from "./conversation-overview-controller";
+import {
+  pendingConversationOverviewRailBuildTaskCountForTests,
+  resetConversationOverviewRailBuildStateForTests,
+  useConversationOverviewController,
+} from "./conversation-overview-controller";
 import type { ConversationOverviewItem } from "./conversation-overview-map";
 import type {
   VirtualizedConversationLayoutSnapshot,
@@ -85,7 +89,13 @@ function makeOverviewItem(
   };
 }
 
-function OverviewControllerHarness({ sessionId }: { sessionId: string }) {
+function OverviewControllerHarness({
+  onRailReadyChange,
+  sessionId,
+}: {
+  onRailReadyChange?: (isReady: boolean) => void;
+  sessionId: string;
+}) {
   const scrollContainerRef = useRef<HTMLElement | null>(
     document.createElement("section"),
   );
@@ -107,6 +117,10 @@ function OverviewControllerHarness({ sessionId }: { sessionId: string }) {
       overview.virtualizerHandleRef.current = null;
     };
   }, [overview.virtualizerHandleRef, sessionId]);
+
+  useEffect(() => {
+    onRailReadyChange?.(overview.shouldRenderRail);
+  }, [onRailReadyChange, overview.shouldRenderRail]);
 
   return (
     <output data-testid={`overview-${sessionId}`}>
@@ -196,6 +210,7 @@ function OverviewGrowthHarness({
 
 describe("useConversationOverviewController", () => {
   afterEach(() => {
+    resetConversationOverviewRailBuildStateForTests();
     vi.restoreAllMocks();
   });
 
@@ -306,6 +321,95 @@ describe("useConversationOverviewController", () => {
       expect(screen.getByTestId("overview-session-b")).toHaveTextContent(
         "ready",
       );
+    } finally {
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      idleWindow.requestIdleCallback = originalRequestIdleCallback;
+      idleWindow.cancelIdleCallback = originalCancelIdleCallback;
+    }
+  });
+
+  it("cancels queued rail activation work when the controller unmounts", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const idleWindow = window as Window &
+      typeof globalThis & {
+        requestIdleCallback?: (
+          callback: IdleRequestCallback,
+          options?: IdleRequestOptions,
+        ) => number;
+        cancelIdleCallback?: (handle: number) => void;
+      };
+    const originalRequestIdleCallback = idleWindow.requestIdleCallback;
+    const originalCancelIdleCallback = idleWindow.cancelIdleCallback;
+    const frameCallbacks = new Map<number, FrameRequestCallback>();
+    const idleCallbacks = new Map<number, IdleRequestCallback>();
+    let nextFrameId = 1;
+    let nextIdleId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      frameCallbacks.set(frameId, callback);
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = ((frameId: number) => {
+      frameCallbacks.delete(frameId);
+    }) as typeof cancelAnimationFrame;
+    idleWindow.requestIdleCallback = ((callback: IdleRequestCallback) => {
+      const idleId = nextIdleId;
+      nextIdleId += 1;
+      idleCallbacks.set(idleId, callback);
+      return idleId;
+    }) as typeof requestIdleCallback;
+    idleWindow.cancelIdleCallback = ((idleId: number) => {
+      idleCallbacks.delete(idleId);
+    }) as typeof cancelIdleCallback;
+    const flushNextFrame = () => {
+      const nextFrame = frameCallbacks.entries().next().value as
+        | [number, FrameRequestCallback]
+        | undefined;
+      expect(nextFrame).toBeDefined();
+      if (!nextFrame) {
+        return;
+      }
+      const [frameId, callback] = nextFrame;
+      frameCallbacks.delete(frameId);
+      callback(performance.now());
+    };
+
+    try {
+      const onRailReadyChange = vi.fn();
+      const { unmount } = render(
+        <OverviewControllerHarness
+          onRailReadyChange={onRailReadyChange}
+          sessionId="session-a"
+        />,
+      );
+
+      act(flushNextFrame);
+      act(flushNextFrame);
+
+      expect(pendingConversationOverviewRailBuildTaskCountForTests()).toBe(1);
+      const queuedIdle = idleCallbacks.entries().next().value as
+        | [number, IdleRequestCallback]
+        | undefined;
+      expect(queuedIdle).toBeDefined();
+      const queuedIdleCallback = queuedIdle?.[1];
+
+      unmount();
+
+      expect(pendingConversationOverviewRailBuildTaskCountForTests()).toBe(0);
+      expect(idleCallbacks.size).toBe(0);
+
+      act(() => {
+        queuedIdleCallback?.({
+          didTimeout: false,
+          timeRemaining: () => 16,
+        });
+      });
+
+      expect(onRailReadyChange).toHaveBeenCalledWith(false);
+      expect(onRailReadyChange).not.toHaveBeenCalledWith(true);
     } finally {
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;

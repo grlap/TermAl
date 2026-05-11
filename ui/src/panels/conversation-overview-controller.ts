@@ -51,6 +51,19 @@ let cancelConversationOverviewRailBuildDrain: (() => void) | null = null;
 const pendingConversationOverviewRailBuildTasks: ConversationOverviewRailBuildTask[] =
   [];
 
+export function resetConversationOverviewRailBuildStateForTests() {
+  if (cancelConversationOverviewRailBuildDrain !== null) {
+    cancelConversationOverviewRailBuildDrain();
+    cancelConversationOverviewRailBuildDrain = null;
+  }
+  pendingConversationOverviewRailBuildTasks.splice(0);
+  nextConversationOverviewRailBuildTaskId = 1;
+}
+
+export function pendingConversationOverviewRailBuildTaskCountForTests() {
+  return pendingConversationOverviewRailBuildTasks.length;
+}
+
 function canUseMessageIndexFallback(
   handle: VirtualizedConversationMessageListHandle,
   item: ConversationOverviewItem,
