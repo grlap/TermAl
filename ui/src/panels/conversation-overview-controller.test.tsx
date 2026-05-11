@@ -488,7 +488,7 @@ describe("useConversationOverviewController", () => {
     }
   });
 
-  it("coalesces ready layout refreshes when the transcript message count grows", () => {
+  it("refreshes ready layout snapshots synchronously when message count grows", () => {
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
     const idleWindow = window as Window &
@@ -582,9 +582,10 @@ describe("useConversationOverviewController", () => {
         | undefined;
       expect(pendingFrameId).toBeDefined();
 
-      for (const messageCount of [
+      const messageCounts = [
         120, 140, 160, 180, 200, 220, 240, 260, 280, 300,
-      ]) {
+      ];
+      messageCounts.forEach((messageCount, index) => {
         const previousFrameId = pendingFrameId;
         act(() => {
           rerender(
@@ -596,27 +597,16 @@ describe("useConversationOverviewController", () => {
         });
 
         expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
-          "session-a:90",
+          `session-a:${messageCount}`,
         );
-        expect(frameCallbacks.size).toBe(1);
-        expect(cancelledFrameIds).toContain(previousFrameId);
-        pendingFrameId = frameCallbacks.keys().next().value as
-          | number
-          | undefined;
-        expect(pendingFrameId).toBeDefined();
-        expect(pendingFrameId).not.toBe(previousFrameId);
-        expect(readCallbacks.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
+        if (previousFrameId !== undefined) {
+          expect(cancelledFrameIds).toContain(previousFrameId);
+        }
+        expect(frameCallbacks.size).toBe(0);
+        pendingFrameId = undefined;
+        expect(readCallbacks.onGetLayoutSnapshot).toHaveBeenCalledTimes(index + 2);
         expect(readCallbacks.onGetViewportSnapshot).not.toHaveBeenCalled();
-      }
-
-      act(flushNextFrame);
-
-      expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
-        "session-a:300",
-      );
-      expect(readCallbacks.onGetLayoutSnapshot).toHaveBeenCalledTimes(2);
-      expect(readCallbacks.onGetViewportSnapshot).not.toHaveBeenCalled();
-      expect(frameCallbacks.size).toBe(0);
+      });
     } finally {
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
@@ -736,20 +726,20 @@ describe("useConversationOverviewController", () => {
       });
 
       expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
-        "session-a:90",
+        "session-b:95",
       );
       expect(cancelledFrameIds).toContain(staleFrameId);
-      expect(frameCallbacks.size).toBeGreaterThanOrEqual(1);
+      expect(sessionBReads.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
 
       act(() => {
         staleLayoutRefresh?.(performance.now());
       });
 
       expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
-        "session-a:90",
+        "session-b:95",
       );
       expect(sessionAReads.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
-      expect(sessionBReads.onGetLayoutSnapshot).not.toHaveBeenCalled();
+      expect(sessionBReads.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
 
       act(flushNextFrame);
       act(flushNextFrame);
@@ -758,7 +748,7 @@ describe("useConversationOverviewController", () => {
       expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
         "session-b:95",
       );
-      expect(sessionBReads.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
+      expect(sessionBReads.onGetLayoutSnapshot).toHaveBeenCalledTimes(2);
     } finally {
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;

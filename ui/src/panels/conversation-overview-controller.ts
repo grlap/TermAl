@@ -192,6 +192,8 @@ export function useConversationOverviewController({
     useState<VirtualizedConversationLayoutSnapshot | null>(null);
   const [viewportSnapshot, setViewportSnapshot] =
     useState<VirtualizedConversationViewportSnapshot | null>(null);
+  const layoutSnapshotMessageCount = layoutSnapshot?.messageCount ?? null;
+  const layoutSnapshotSessionId = layoutSnapshot?.sessionId ?? null;
   const overviewSessionIdRef = useRef(sessionId);
   const navigationFrameIdsRef = useRef<Set<number>>(new Set());
   overviewSessionIdRef.current = sessionId;
@@ -462,17 +464,26 @@ export function useConversationOverviewController({
   ]);
 
   useEffect(() => {
-    if (!isActive || !shouldRender || !isRailReady) {
-      return undefined;
+    if (
+      !isActive ||
+      !shouldRender ||
+      !isRailReady ||
+      (layoutSnapshotSessionId === sessionId &&
+        layoutSnapshotMessageCount === messageCount)
+    ) {
+      return;
     }
-    scheduleLayoutRefresh();
-    return cancelLayoutRefreshFrame;
+    cancelLayoutRefreshFrame();
+    refreshLayoutSnapshot();
   }, [
     cancelLayoutRefreshFrame,
     isActive,
     isRailReady,
+    layoutSnapshotMessageCount,
+    layoutSnapshotSessionId,
     messageCount,
-    scheduleLayoutRefresh,
+    refreshLayoutSnapshot,
+    sessionId,
     shouldRender,
   ]);
 

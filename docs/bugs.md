@@ -302,22 +302,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Clear `lastUserScrollKindRef` on bottom re-entry, or expire the one-tick override with a short timestamp/timer.
 - Add a regression that returns to bottom, then performs a native scroll with no preceding wheel/key/touch input.
 
-## rAF-coalesced `messageCount` refresh now lags `layoutSnapshot.messageCount` behind `messageCount` by one frame
-
-**Severity:** Medium - the round-62 fix routes the `messageCount`-driven `refreshLayoutSnapshot` through the same rAF-coalesced scheduler as the steady-state effect. Coalescing is correct, but downstream consumers reading `layoutSnapshot.messageCount` synchronously inside the same React render now see a stale snapshot until the rAF flushes.
-
-`ui/src/panels/conversation-overview-controller.ts:241-274`. The new "coalesces ready layout refreshes" test pins this behavior — `expect(layout-message-count).toHaveTextContent("90")` immediately after rerender to 120/140, then 140 only after `flushNextFrame`. The active-streaming case (per-chunk delta increments) is the most sensitive — every assistant chunk leaves snapshot consumers one rAF behind.
-
-**Current behavior:**
-- All `refreshLayoutSnapshot` calls go through rAF scheduling.
-- Synchronous consumers see stale snapshots within the same React frame.
-- The new test codifies the lag.
-
-**Proposal:**
-- Confirm whether downstream consumers (rail tail items, viewport projection) rely on synchronous freshness.
-- If yes: add a fast-track path — when `messageCount - layoutSnapshot.messageCount > N`, refresh synchronously to avoid >1 rAF lag.
-- Otherwise document the lag explicitly so future consumers know the snapshot lags by up to one rAF behind `messageCount`.
-
 ## `markUserScroll` anchor speculation captures approximate touch offsets
 
 **Severity:** Medium - speculative offset adjustment `viewportOffsetPx - inputScrollDeltaY` applied unconditionally on every input event. For touch events, `touchDeltaY` is the FINGER delta (not the scroll delta). When user touches a non-scrollable region, swipes within an iframe, or hits a scroll boundary, the anchor's `viewportOffsetPx` ends up off by the would-be delta.
