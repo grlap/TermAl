@@ -515,6 +515,79 @@ describe("ConversationOverviewRail", () => {
     );
   });
 
+  it("supports compact keyboard navigation from the live viewport segment", () => {
+    const messages = commandMessages(220);
+    const onNavigate = vi.fn();
+    const snapshot = {
+      ...layoutSnapshot(messages),
+      viewportTopPx: 250,
+    };
+    const { container } = render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={snapshot}
+        minMessages={4}
+        maxHeightPx={1024}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const rail = screen.getByLabelText("Conversation overview");
+    expect(container.querySelectorAll(".conversation-overview-segment")).toHaveLength(
+      0,
+    );
+    expect(rail).toHaveAttribute("aria-valuenow", "3");
+
+    fireEvent.keyDown(rail, { key: "Enter" });
+
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageId: "command-message-3",
+        messageIndex: 2,
+      }),
+    );
+    expect(rail).toHaveAttribute("aria-valuenow", "3");
+
+    fireEvent.keyDown(rail, { key: " " });
+
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageId: "command-message-3",
+        messageIndex: 2,
+      }),
+    );
+
+    fireEvent.keyDown(rail, { key: "ArrowDown" });
+
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageId: "command-message-4",
+        messageIndex: 3,
+      }),
+    );
+    expect(rail).toHaveAttribute("aria-valuenow", "4");
+
+    fireEvent.keyDown(rail, { key: "ArrowUp" });
+
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageId: "command-message-3",
+        messageIndex: 2,
+      }),
+    );
+    expect(rail).toHaveAttribute("aria-valuenow", "3");
+
+    fireEvent.keyDown(rail, { key: "Home" });
+
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageId: "command-message-1",
+        messageIndex: 0,
+      }),
+    );
+    expect(rail).toHaveAttribute("aria-valuenow", "1");
+  });
+
   it("releases compact keyboard navigation state if the viewport never confirms", () => {
     vi.useFakeTimers();
     try {
