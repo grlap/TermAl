@@ -345,17 +345,6 @@ The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but
 - Consider dropping `aria-busy` and relying on the text flip + `disabled`.
 - If kept, this is fine.
 
-## Session-switch race test doesn't assert no commit on the new session
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7149`. The "does not clear the original draft when a delegation resolves after a session switch" test verifies the absence of `onDraftCommit("session-a", "")`. It does NOT assert that the new active session ("session-b") was NOT spuriously committed either. A regression that committed `("session-b", "")` to the wrong session would still pass.
-
-**Current behavior:**
-- Negative assertion on original session id.
-- No assertion on new session id.
-
-**Proposal:**
-- Add `expect(onDraftCommit).not.toHaveBeenCalledWith("session-b", "")`.
-
 ## Unmount race test relies on console error suppression for `act` warnings
 
 **Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7102-7129`. "Ignores delegation completion after the footer unmounts" exercises only the unmount-during-await path. It does NOT verify (a) `setIsDelegationSpawning(false)` is gated by `isMountedRef.current` so the React `act` warning never appears (covered indirectly by lack of console error), or (b) `focusComposerInput()` is not called after unmount (a pending rAF could try to focus a detached node).
@@ -370,17 +359,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 **Proposal:**
 - Assert `console.error` was not called with "act"/"unmounted" warnings during the test.
 - Or stub `setIsDelegationSpawning` via spy and verify it isn't invoked post-unmount.
-
-## Busy-state test relies on `Promise.resolve()` flush timing
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.test.tsx:6974-7008`. "Marks the delegation action busy while the spawn is in flight" relies on `await act(async () => { fireEvent.click(...); await Promise.resolve() })` to flush the busy-state commit. This is brittle to React batching changes; if a future React version delays the `setState` commit one more microtask, the test will assert the busy button before it appears.
-
-**Current behavior:**
-- Single `Promise.resolve()` flush.
-- Synchronous `expect` after click.
-
-**Proposal:**
-- Use `await waitFor(() => expect(busyButton).toHaveAttribute("aria-busy", "true"))` instead of the immediate `expect`.
 
 ## `createComposerDelegationRequest` is composer-scoped but generic name
 
@@ -3265,7 +3243,5 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add `expect(params.onComposerError).not.toHaveBeenCalled()` after rendering, exercise a flag flip mid-test, or split into per-action coverage so a regression that drops only one of the three guards surfaces.
 - [ ] P2: Clean up AgentSessionPanel `act(...)` warnings:
   targeted AgentSessionPanel Vitest still emits React `act(...)` warnings around async rerenders/events; identify the warned updates and wrap or await them so timing-sensitive failures are not hidden by noisy test output.
-- [ ] P2: Strengthen race-condition delegation tests:
-  the session-switch race test should also assert `expect(onDraftCommit).not.toHaveBeenCalledWith("session-b", "")` (negative on new session id). The unmount race test should assert `console.error` was not called with `act`/`unmounted` warnings, or stub `setIsDelegationSpawning` to verify it isn't invoked post-unmount.
-- [ ] P2: Replace immediate `expect` with `waitFor` in busy-state delegation test:
-  `await waitFor(() => expect(busyButton).toHaveAttribute("aria-busy", "true"))` instead of the synchronous expect after `Promise.resolve()`. Removes brittleness against future React batching changes.
+- [ ] P2: Strengthen unmount race-condition delegation test:
+  assert `console.error` was not called with `act`/`unmounted` warnings, or stub `setIsDelegationSpawning` to verify it isn't invoked post-unmount.

@@ -8645,12 +8645,13 @@ describe("AgentSessionPanelFooter", () => {
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
     });
 
-    const busyButton = screen.getByRole("button", { name: "Delegating..." });
+    const busyButton = await screen.findByRole("button", {
+      name: "Delegating...",
+    });
     expect(busyButton).toBeDisabled();
-    expect(busyButton).toHaveAttribute("aria-busy", "true");
+    await waitFor(() => expect(busyButton).toHaveAttribute("aria-busy", "true"));
     expect(busyButton).toHaveAttribute(
       "title",
       "Spawn read-only delegation from current draft",
@@ -9774,6 +9775,7 @@ describe("AgentSessionPanelFooter", () => {
       "Review after switch.",
     );
     expect(onDraftCommit).not.toHaveBeenCalledWith("session-a", "");
+    expect(onDraftCommit).not.toHaveBeenCalledWith("session-b", "");
   });
 
   it("ignores delegation completion after the footer unmounts", async () => {
