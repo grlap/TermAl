@@ -261,6 +261,76 @@ fn claude_task_tool_result_updates_parallel_agents_and_records_subagent_result()
     );
 }
 
+// Pins Claude task-result updates reclaiming an existing progress row as
+// tool-sourced. This is a release-mode guard: a source mismatch must not
+// silently preserve a delegation-routable id on a Claude Task row.
+#[test]
+fn claude_task_tool_result_resets_existing_non_tool_progress_source() {
+    let mut turn_state = ClaudeTurnState {
+        parallel_agent_group_key: Some("group-1".to_owned()),
+        parallel_agent_order: vec!["task-1".to_owned()],
+        parallel_agents: HashMap::from([(
+            "task-1".to_owned(),
+            ParallelAgentProgress {
+                detail: Some("Running".to_owned()),
+                id: "task-1".to_owned(),
+                source: ParallelAgentSource::Delegation,
+                status: ParallelAgentStatus::Running,
+                title: "Task agent".to_owned(),
+            },
+        )]),
+        pending_tools: HashMap::from([(
+            "task-1".to_owned(),
+            ClaudeToolUse {
+                command: None,
+                description: Some("Rust code review".to_owned()),
+                file_path: None,
+                name: "Task".to_owned(),
+                subagent_type: Some("general-purpose".to_owned()),
+            },
+        )]),
+        ..ClaudeTurnState::default()
+    };
+    let mut recorder = TestRecorder::default();
+    let mut session_id = None;
+
+    handle_claude_event(
+        &json!({
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "task-1",
+                        "content": "Reviewer finished."
+                    }
+                ]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    let latest = recorder
+        .parallel_agents
+        .last()
+        .expect("parallel agent source repair should be recorded");
+    assert_eq!(latest.len(), 1);
+    assert_eq!(latest[0].id, "task-1");
+    assert_eq!(latest[0].source, ParallelAgentSource::Tool);
+    assert_eq!(latest[0].status, ParallelAgentStatus::Completed);
+    assert_eq!(
+        turn_state
+            .parallel_agents
+            .get("task-1")
+            .expect("task row should remain")
+            .source,
+        ParallelAgentSource::Tool,
+    );
+}
+
 // Pins `handle_claude_task_tool_error` flipping the progress entry to
 // `Error` with the first failure line as the preview detail, while handing
 // the full multi-line payload (stack trace and all) to the recorder via

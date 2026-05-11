@@ -345,21 +345,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 - Memoize the three "disabled" undefined values as a single object.
 - Or pass the flag itself through and let the consumer decide.
 
-## `debug_assert_eq!` for `agent.source` clobber check is no-op in release builds
-
-**Severity:** Low - round-65 swapped the unconditional clobber for `debug_assert_eq!` at `src/claude.rs:581-585`. Production builds (release mode) will silently let a non-`Tool` value persist if a future code path ever drops a `Delegation`-sourced agent into this update branch. The contract is encoded but not enforced for release-mode users.
-
-The previous round-64 review entry called out the clobber as future-proofing risk. Round-65's fix preserves the runtime behavior in release while documenting the intent in debug.
-
-**Current behavior:**
-- `debug_assert_eq!(agent.source, ParallelAgentSource::Tool, ...)`.
-- Release builds skip the assertion.
-- Future regression scenario silently succeeds in release.
-
-**Proposal:**
-- Upgrade to a release-mode guard that warns and resets, or errors before a mismatched source can drive UI routing.
-- Keep the debug assertion only as a supplemental development check.
-
 ## `delegation_parent_card_update_ignores_tool_source_id_collision` only manually constructs the collision
 
 **Severity:** Low - the new test at `src/tests/delegations.rs:655-746` constructs the collision by manually inserting a tool-source row with the same id as the delegation. The production paths that could create such a collision (Claude task path emitting a tool-source row with a delegation-id-overlapping uuid) are not exercised.
