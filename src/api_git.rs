@@ -23,8 +23,10 @@
 /// Reads Git status.
 async fn read_git_status(
     State(state): State<AppState>,
-    Query(query): Query<FileQuery>,
+    query: Result<Query<FileQuery>, QueryRejection>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
+    let Query(query) =
+        query.map_err(|rejection| api_query_rejection("git status query", rejection))?;
     // Check remote scope first (brief mutex access).
     if let Some(scope) =
         state.remote_scope_for_request(query.session_id.as_deref(), query.project_id.as_deref())?

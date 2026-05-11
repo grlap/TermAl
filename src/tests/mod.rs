@@ -2418,11 +2418,11 @@ async fn read_directory_accepts_project_id_without_session() {
 
     let Json(response) = read_directory(
         State(state),
-        Query(FileQuery {
+        Ok(Query(FileQuery {
             path: root.to_string_lossy().into_owned(),
             project_id: Some(project.project_id),
             session_id: None,
-        }),
+        })),
     )
     .await
     .unwrap();
@@ -2528,11 +2528,11 @@ async fn read_and_write_file_accept_project_id_without_session() {
 
     let Json(read_response) = read_file(
         State(state.clone()),
-        Query(FileQuery {
+        Ok(Query(FileQuery {
             path: existing_file.to_string_lossy().into_owned(),
             project_id: Some(project.project_id.clone()),
             session_id: None,
-        }),
+        })),
     )
     .await
     .unwrap();
@@ -2662,11 +2662,11 @@ async fn write_file_rejects_stale_base_hash() {
 
     let Json(read_response) = read_file(
         State(state.clone()),
-        Query(FileQuery {
+        Ok(Query(FileQuery {
             path: existing_file.to_string_lossy().into_owned(),
             project_id: Some(project.project_id.clone()),
             session_id: None,
-        }),
+        })),
     )
     .await
     .unwrap();
@@ -2745,11 +2745,11 @@ async fn read_file_returns_not_found_for_missing_project_file() {
 
     let error = match read_file(
         State(state),
-        Query(FileQuery {
+        Ok(Query(FileQuery {
             path: missing_file.to_string_lossy().into_owned(),
             project_id: Some(project.project_id),
             session_id: None,
-        }),
+        })),
     )
     .await
     {
@@ -2785,11 +2785,11 @@ async fn read_directory_returns_not_found_for_missing_project_path() {
 
     let error = match read_directory(
         State(state),
-        Query(FileQuery {
+        Ok(Query(FileQuery {
             path: missing_dir.to_string_lossy().into_owned(),
             project_id: Some(project.project_id),
             session_id: None,
-        }),
+        })),
     )
     .await
     {
@@ -2824,11 +2824,11 @@ async fn read_file_rejects_content_over_size_limit() {
 
     let error = match read_file(
         State(state),
-        Query(FileQuery {
+        Ok(Query(FileQuery {
             path: oversized_file.to_string_lossy().into_owned(),
             project_id: Some(project.project_id),
             session_id: None,
-        }),
+        })),
     )
     .await
     {

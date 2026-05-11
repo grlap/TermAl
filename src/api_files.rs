@@ -32,8 +32,10 @@
 /// Reads file.
 async fn read_file(
     State(state): State<AppState>,
-    Query(query): Query<FileQuery>,
+    query: Result<Query<FileQuery>, QueryRejection>,
 ) -> Result<Json<FileResponse>, ApiError> {
+    let Query(query) =
+        query.map_err(|rejection| api_query_rejection("file read query", rejection))?;
     // Step 1: resolve the path (needs brief mutex access). Use a small blocking
     // scope so we don't compete with streaming delta persists for pool time.
     let resolved_path = {
@@ -253,8 +255,10 @@ async fn write_file(
 /// Reads directory.
 async fn read_directory(
     State(state): State<AppState>,
-    Query(query): Query<FileQuery>,
+    query: Result<Query<FileQuery>, QueryRejection>,
 ) -> Result<Json<DirectoryResponse>, ApiError> {
+    let Query(query) =
+        query.map_err(|rejection| api_query_rejection("directory query", rejection))?;
     let response = run_blocking_api(move || {
         if let Some(scope) = state
             .remote_scope_for_request(query.session_id.as_deref(), query.project_id.as_deref())?
@@ -384,9 +388,11 @@ async fn resolve_agent_command(
 
 /// Searches instructions.
 async fn search_instructions(
-    Query(query): Query<InstructionSearchQuery>,
+    query: Result<Query<InstructionSearchQuery>, QueryRejection>,
     State(state): State<AppState>,
 ) -> Result<Json<InstructionSearchResponse>, ApiError> {
+    let Query(query) =
+        query.map_err(|rejection| api_query_rejection("instruction search query", rejection))?;
     let response =
         run_blocking_api(move || state.search_instructions(&query.session_id, &query.q)).await?;
     Ok(Json(response))

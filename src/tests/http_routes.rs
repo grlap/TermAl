@@ -241,6 +241,50 @@ async fn get_session_route_rejects_zero_tail_limit() {
     );
 }
 
+// Pins malformed query handling on routes that opt into the project envelope:
+// Axum query extractor rejections must be returned as JSON `{ "error": ... }`
+// instead of the default plain-text body.
+#[tokio::test]
+async fn get_session_route_query_rejection_uses_api_error_envelope() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let app = app_router(state.clone());
+    let created = state
+        .create_session(CreateSessionRequest {
+            name: Some("Route Session Bad Tail".to_owned()),
+            agent: None,
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("session should be created");
+
+    let (status, response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/sessions/{}?tail=abc", created.session_id))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let message = response
+        .get("error")
+        .and_then(Value::as_str)
+        .expect("query rejection should use the API error envelope");
+    assert!(message.starts_with("invalid session query:"));
+    assert!(message.contains("tail"));
+}
+
 // Pins `messageCount` on full snapshot-bearing routes. The count is computed
 // from the transcript at wire-projection time so reconnect/state adoption can
 // keep summary metadata without waiting for the next delta.

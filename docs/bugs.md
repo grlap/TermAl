@@ -672,21 +672,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 **Proposal:**
 - Either (a) extract a small `markFullyHydrated(sessionId)` helper that wraps the add + clearHydrationRetry pair (already paired at all three sites), OR (b) compute "is this session fully hydrated" from session state at use sites and stop tracking it in a separate ref.
 
-## `Query<GetSessionQuery>` parse failure bypasses project `ApiError` envelope
-
-**Severity:** Medium - `?tail=foo` / `?tail=-1` / `?tail=99999999999999999999` returns Axum's default plain-text rejection, not the project's `{ "error": ... }` shape.
-
-`src/api.rs:135`. Pre-existing pattern across `Query<T>` handlers (`api_review.rs`, `api_files.rs`, `api_git.rs`); same as the already-tracked Telegram JSON body rejection. The new endpoint inherits the gap. Frontend `createResponseError` in `ui/src/api.ts` falls back to a generic message.
-
-**Current behavior:**
-- Malformed `?tail` value triggers Axum's default `400 Failed to deserialize query string: ...` plaintext.
-- Frontend cannot parse this through the project's error envelope.
-- Pre-existing pattern across many `Query<T>` handlers.
-
-**Proposal:**
-- Add an `api_query_rejection` helper analogous to `api_json_rejection` and switch all `Query<T>` handlers to `Result<Query<T>, QueryRejection>` to match the project envelope.
-- Track separately if scope-expansion concern.
-
 ## `get_session_tail` JSON serialization runs on tokio worker, not `spawn_blocking`
 
 **Severity:** Medium - the `get_state` handler at `src/api.rs:107-122` documents why it serializes inside `spawn_blocking`. The new tail path reintroduces the anti-pattern.

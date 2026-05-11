@@ -132,8 +132,9 @@ struct GetSessionQuery {
 async fn get_session(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<String>,
-    Query(query): Query<GetSessionQuery>,
+    query: Result<Query<GetSessionQuery>, QueryRejection>,
 ) -> Result<Json<SessionResponse>, ApiError> {
+    let Query(query) = query.map_err(|rejection| api_query_rejection("session query", rejection))?;
     if matches!(query.tail, Some(0)) {
         return Err(ApiError::bad_request("session tail must be at least 1"));
     }
@@ -562,6 +563,13 @@ fn api_json_rejection(label: &str, rejection: JsonRejection) -> ApiError {
     ApiError::from_status(
         status,
         format!("invalid {label} JSON: {}", rejection.body_text()),
+    )
+}
+
+fn api_query_rejection(label: &str, rejection: QueryRejection) -> ApiError {
+    ApiError::from_status(
+        rejection.status(),
+        format!("invalid {label}: {}", rejection.body_text()),
     )
 }
 

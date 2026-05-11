@@ -23,9 +23,10 @@
 /// Gets review.
 async fn get_review(
     AxumPath(change_set_id): AxumPath<String>,
-    Query(query): Query<ReviewQuery>,
+    query: Result<Query<ReviewQuery>, QueryRejection>,
     State(state): State<AppState>,
 ) -> Result<Json<ReviewDocumentResponse>, ApiError> {
+    let Query(query) = query.map_err(|rejection| api_query_rejection("review query", rejection))?;
     validate_review_change_set_id(&change_set_id)?;
     let response = run_blocking_api(move || {
         if let Some(scope) = state
@@ -63,10 +64,11 @@ async fn get_review(
 /// Stores review.
 async fn put_review(
     AxumPath(change_set_id): AxumPath<String>,
-    Query(query): Query<ReviewQuery>,
+    query: Result<Query<ReviewQuery>, QueryRejection>,
     State(state): State<AppState>,
     Json(review): Json<ReviewDocument>,
 ) -> Result<Json<ReviewDocumentResponse>, ApiError> {
+    let Query(query) = query.map_err(|rejection| api_query_rejection("review query", rejection))?;
     validate_review_change_set_id(&change_set_id)?;
     let response = run_blocking_api(move || {
         state.ensure_read_only_delegation_allows_session_write_action(
@@ -121,9 +123,10 @@ async fn put_review(
 /// Gets review summary.
 async fn get_review_summary(
     AxumPath(change_set_id): AxumPath<String>,
-    Query(query): Query<ReviewQuery>,
+    query: Result<Query<ReviewQuery>, QueryRejection>,
     State(state): State<AppState>,
 ) -> Result<Json<ReviewSummaryResponse>, ApiError> {
+    let Query(query) = query.map_err(|rejection| api_query_rejection("review query", rejection))?;
     validate_review_change_set_id(&change_set_id)?;
     let response = run_blocking_api(move || {
         if let Some(scope) = state

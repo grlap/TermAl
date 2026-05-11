@@ -243,10 +243,10 @@ async fn review_handlers_validate_change_set_ids_before_remote_proxying() {
 
     let error = get_review(
         AxumPath(" change-set-remote ".to_owned()),
-        Query(ReviewQuery {
+        Ok(Query(ReviewQuery {
             project_id: Some(project_id),
             session_id: None,
-        }),
+        })),
         State(state),
     )
     .await
