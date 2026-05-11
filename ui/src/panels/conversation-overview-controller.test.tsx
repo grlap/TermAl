@@ -453,6 +453,7 @@ describe("useConversationOverviewController", () => {
     const originalCancelIdleCallback = idleWindow.cancelIdleCallback;
     const frameCallbacks = new Map<number, FrameRequestCallback>();
     const idleCallbacks = new Map<number, IdleRequestCallback>();
+    const cancelledFrameIds: number[] = [];
     let nextFrameId = 1;
     let nextIdleId = 1;
     window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
@@ -462,6 +463,7 @@ describe("useConversationOverviewController", () => {
       return frameId;
     }) as typeof requestAnimationFrame;
     window.cancelAnimationFrame = ((frameId: number) => {
+      cancelledFrameIds.push(frameId);
       frameCallbacks.delete(frameId);
     }) as typeof cancelAnimationFrame;
     idleWindow.requestIdleCallback = ((callback: IdleRequestCallback) => {
@@ -526,7 +528,14 @@ describe("useConversationOverviewController", () => {
         "session-a:90",
       );
       expect(frameCallbacks.size).toBe(1);
-      const staleLayoutRefresh = frameCallbacks.values().next().value;
+      const staleFrame = frameCallbacks.entries().next().value as
+        | [number, FrameRequestCallback]
+        | undefined;
+      expect(staleFrame).toBeDefined();
+      const [staleFrameId, staleLayoutRefresh] = staleFrame ?? [
+        -1,
+        undefined,
+      ];
       expect(staleLayoutRefresh).toBeDefined();
 
       act(() => {
@@ -542,6 +551,7 @@ describe("useConversationOverviewController", () => {
       expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
         "session-a:90",
       );
+      expect(cancelledFrameIds).toContain(staleFrameId);
       expect(frameCallbacks.size).toBeGreaterThanOrEqual(1);
 
       act(() => {
@@ -562,6 +572,99 @@ describe("useConversationOverviewController", () => {
         "session-b:95",
       );
       expect(sessionBReads.onGetLayoutSnapshot).toHaveBeenCalledTimes(1);
+    } finally {
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      idleWindow.requestIdleCallback = originalRequestIdleCallback;
+      idleWindow.cancelIdleCallback = originalCancelIdleCallback;
+    }
+  });
+
+  it("cancels pending layout refresh frames on unmount", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const idleWindow = window as Window &
+      typeof globalThis & {
+        requestIdleCallback?: (
+          callback: IdleRequestCallback,
+          options?: IdleRequestOptions,
+        ) => number;
+        cancelIdleCallback?: (handle: number) => void;
+      };
+    const originalRequestIdleCallback = idleWindow.requestIdleCallback;
+    const originalCancelIdleCallback = idleWindow.cancelIdleCallback;
+    const frameCallbacks = new Map<number, FrameRequestCallback>();
+    const idleCallbacks = new Map<number, IdleRequestCallback>();
+    const cancelledFrameIds: number[] = [];
+    let nextFrameId = 1;
+    let nextIdleId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      frameCallbacks.set(frameId, callback);
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = ((frameId: number) => {
+      cancelledFrameIds.push(frameId);
+      frameCallbacks.delete(frameId);
+    }) as typeof cancelAnimationFrame;
+    idleWindow.requestIdleCallback = ((callback: IdleRequestCallback) => {
+      const idleId = nextIdleId;
+      nextIdleId += 1;
+      idleCallbacks.set(idleId, callback);
+      return idleId;
+    }) as typeof requestIdleCallback;
+    idleWindow.cancelIdleCallback = ((idleId: number) => {
+      idleCallbacks.delete(idleId);
+    }) as typeof cancelIdleCallback;
+    const flushNextFrame = () => {
+      const nextFrame = frameCallbacks.entries().next().value as
+        | [number, FrameRequestCallback]
+        | undefined;
+      expect(nextFrame).toBeDefined();
+      if (!nextFrame) {
+        return;
+      }
+      const [frameId, callback] = nextFrame;
+      frameCallbacks.delete(frameId);
+      callback(performance.now());
+    };
+    const flushNextIdle = () => {
+      const nextIdle = idleCallbacks.entries().next().value as
+        | [number, IdleRequestCallback]
+        | undefined;
+      expect(nextIdle).toBeDefined();
+      if (!nextIdle) {
+        return;
+      }
+      const [idleId, callback] = nextIdle;
+      idleCallbacks.delete(idleId);
+      callback({
+        didTimeout: false,
+        timeRemaining: () => 16,
+      });
+    };
+
+    try {
+      const { unmount } = render(<OverviewGrowthHarness messageCount={90} />);
+
+      act(flushNextFrame);
+      act(flushNextFrame);
+      act(flushNextIdle);
+
+      expect(screen.getByTestId("layout-snapshot")).toHaveTextContent(
+        "session-a:90",
+      );
+      expect(frameCallbacks.size).toBe(1);
+      const pendingFrameId = frameCallbacks.keys().next().value as
+        | number
+        | undefined;
+      expect(pendingFrameId).toBeDefined();
+
+      unmount();
+
+      expect(cancelledFrameIds).toContain(pendingFrameId);
+      expect(frameCallbacks.size).toBe(0);
     } finally {
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
