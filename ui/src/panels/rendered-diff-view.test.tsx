@@ -62,6 +62,12 @@ describe("RenderedDiffView", () => {
       />,
     );
 
+    expect(screen.getByLabelText("Rendered diff preview")).toHaveClass(
+      "source-editor-shell",
+      "source-editor-shell-with-statusbar",
+      "diff-rendered-view",
+    );
+    expect(document.querySelector(".diff-rendered-view-scroll")).not.toBeNull();
     const sections = document.querySelectorAll<HTMLElement>(
       "[data-rendered-diff-region-index]",
     );

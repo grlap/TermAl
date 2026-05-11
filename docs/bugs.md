@@ -1066,21 +1066,6 @@ A future fourth recovery branch would need to update three sites; collapsing int
 - Add a per-session cooldown timestamp ("don't re-hydrate the same session within Nms of the last completed hydration unless the new delta carries a revision strictly greater than the one that started the previous hydration").
 - Or document the burst as intentional given the local-only deployment cost; add a comment naming the trade-off so future reviewers don't keep flagging it.
 
-## Rendered diff region navigation has no explicit scroll-container layout contract
-
-**Severity:** Low - the new region-navigation ref may target a wrapper that is not the actual scroll container.
-
-`RenderedDiffView` introduces `.diff-rendered-view-scroll` and queries it for `data-rendered-diff-region-index` targets, but the changed CSS does not give that wrapper an explicit flex/overflow contract, and the component does not adopt the existing `source-editor-shell source-editor-shell-with-statusbar` layout used by the Monaco and Markdown diff modes. If the parent remains the real scroller, `scrollIntoView()` may work inconsistently and the statusbar can diverge from the rest of the diff editor surface.
-
-**Current behavior:**
-- `RenderedDiffView` owns a new internal scroll ref.
-- `.diff-rendered-view-scroll` has no explicit overflow/flex sizing.
-- The rendered diff footer is not wrapped in the established editor shell/statusbar structure.
-
-**Proposal:**
-- Either adopt the existing editor-shell/statusbar layout contract or add explicit CSS that makes `.diff-rendered-view-scroll` the intended scroll container.
-- Add a focused layout/navigation regression for rendered-region scrolling.
-
 ## Post-commit hardening helpers have no automated production-path coverage
 
 **Severity:** Low - `src/persist.rs:213-227`. `verify_persist_commit_integrity` is `#[cfg(not(test))]`-only because it depends on production SQLite path hardening. The post-commit contract - redirection remains fatal, owner-only chmod/mode verification remains fatal unless `TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS` is set - has no direct automated coverage.

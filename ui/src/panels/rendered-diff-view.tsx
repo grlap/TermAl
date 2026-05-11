@@ -236,7 +236,7 @@ export function RenderedDiffView({
 
   return (
     <div
-      className="diff-rendered-view"
+      className="source-editor-shell source-editor-shell-with-statusbar diff-rendered-view"
       aria-label="Rendered diff preview"
     >
       {!isCompleteDocument ? (
