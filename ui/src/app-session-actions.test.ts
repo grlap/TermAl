@@ -175,6 +175,17 @@ function expectRequestErrorDeferredUpdatesOnly(
   expect(setRequestError).not.toHaveBeenCalledWith(null);
   expect(calls.length).toBeGreaterThan(0);
   expect(calls.every(([next]) => typeof next === "function")).toBe(true);
+  let nextFlags: Record<string, boolean> = { "other-session": true };
+  for (const [next] of calls) {
+    const applyDeferredUpdate = next as (
+      previousFlags: Record<string, boolean>,
+    ) => Record<string, boolean>;
+    nextFlags = applyDeferredUpdate(nextFlags);
+    expect(nextFlags).toEqual(
+      expect.objectContaining({ "other-session": true }),
+    );
+  }
+  expect(nextFlags).toEqual({ "other-session": true });
 }
 
 type DefaultModelKey =
