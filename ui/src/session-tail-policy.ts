@@ -11,3 +11,9 @@ export const SESSION_TAIL_WINDOW_MESSAGE_COUNT = 20;
 // use it only for larger transcripts rather than immediately above the
 // `SESSION_TAIL_WINDOW_MESSAGE_COUNT` boundary.
 export const SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101;
+
+// The active transcript only starts in render-window mode for substantially
+// larger histories. Sessions between the hydration threshold and this render
+// threshold still hydrate a small tail first, then render the full visible
+// transcript normally once the full session response arrives.
+export const SESSION_TAIL_RENDER_MIN_MESSAGES = 512;

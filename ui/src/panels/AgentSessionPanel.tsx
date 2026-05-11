@@ -67,7 +67,10 @@ import {
 } from "../search-highlight";
 import { resolvePaneScrollCommand } from "../pane-keyboard";
 import { findLastUserPrompt } from "../app-utils";
-import { SESSION_TAIL_WINDOW_MESSAGE_COUNT } from "../session-tail-policy";
+import {
+  SESSION_TAIL_RENDER_MIN_MESSAGES,
+  SESSION_TAIL_WINDOW_MESSAGE_COUNT,
+} from "../session-tail-policy";
 import {
   useComposerSessionSnapshot,
   useSessionRecordSnapshot,
@@ -416,7 +419,6 @@ function spawnDelegationOptionsFromResolvedCommand(
 // need the virtualizer handle as soon as the transcript itself virtualizes.
 const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES =
   CONVERSATION_OVERVIEW_MIN_MESSAGES;
-const INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES = 512;
 const INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX = 160;
 const INITIAL_ACTIVE_TRANSCRIPT_WHEEL_DEMAND_THRESHOLD_PX = 8;
 const INITIAL_ACTIVE_TRANSCRIPT_TOUCH_PULL_DEMAND_THRESHOLD_PX = 8;
@@ -484,7 +486,7 @@ function shouldUseInitialActiveTranscriptTailWindow({
 }) {
   return (
     isActive &&
-    messageCount > INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES &&
+    messageCount > SESSION_TAIL_RENDER_MIN_MESSAGES &&
     !hasConversationMarkers &&
     !hasConversationSearch
   );
@@ -564,7 +566,10 @@ function useInitialActiveTranscriptMessages({
     isActive,
     messageCount: messages.length,
   });
-  if (!isTailEligible && messages.length > INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES) {
+  if (
+    !isTailEligible &&
+    messages.length > SESSION_TAIL_RENDER_MIN_MESSAGES
+  ) {
     hydrationRef.current.hydrated = true;
   }
   const isWindowed = isTailEligible && !hydrationRef.current.hydrated;

@@ -450,20 +450,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 **Proposal:**
 - Document the partial-information loss in `agent-delegation-sessions.md` so wrappers know `status-fetch-failed` may hide a concurrent server restart.
 
-## Tail-window thresholds drift apart: 101-message hydration vs 512-message render mode
-
-**Severity:** Low - `SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101` triggers backend tail hydration of `SESSION_TAIL_WINDOW_MESSAGE_COUNT = 20`, but the UI tail-window only activates when `INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES = 512`. Sessions in [101, 512] messages get a 20-message tail hydration response while the conversation page does not enter tail-window mode.
-
-`ui/src/panels/AgentSessionPanel.tsx:417`, `ui/src/session-tail-policy.ts:13`. The 101/512 asymmetry is documented only as a tail-first round-trip threshold; future tuning can still land inconsistently.
-
-**Current behavior:**
-- Sessions ≥101 messages get a 20-message tail hydration.
-- Sessions <512 messages render in normal (non-tail-window) mode.
-- For sessions in [101, 512], demand-hydration UX is unreachable because tail-window is not active.
-
-**Proposal:**
-- Align the two thresholds, or add a contract comment explaining the deliberate asymmetry (e.g. why 101 is the hydration-shape threshold and 512 is the rendering-window threshold).
-
 ## `previousMessageWindowRef` lazy-init makes early-return unreachable
 
 **Severity:** Low - the new lazy-init at `VirtualizedConversationMessageList.tsx:525-531` unconditionally sets `previousMessageWindowRef.current` to a non-null `MessageWindowSnapshot` during the first render. By the time the `useLayoutEffect` runs at line 1406, the ref is already non-null, so the `if (previousWindow === null) return;` early-return at line 1414 is unreachable.
