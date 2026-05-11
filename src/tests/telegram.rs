@@ -6360,6 +6360,138 @@ fn telegram_config_update_rejects_too_many_subscribed_projects() {
 }
 
 #[test]
+fn telegram_config_update_allows_enabled_without_token_or_project_target() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-enabled-unconfigured-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+
+    let response = state
+        .update_telegram_config(UpdateTelegramConfigRequest {
+            enabled: Some(true),
+            bot_token: None,
+            subscribed_project_ids: Some(Vec::new()),
+            default_project_id: None,
+            default_session_id: None,
+        })
+        .expect("enabled-but-unconfigured relay settings should save");
+
+    assert!(response.enabled);
+    assert!(!response.configured);
+    assert_eq!(response.subscribed_project_ids, Vec::<String>::new());
+    assert_eq!(response.default_project_id, None);
+
+    let path = state.telegram_bot_file_path();
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert_eq!(value["config"]["enabled"], json!(true));
+    assert!(value["config"].get("botToken").is_none());
+    assert!(value["config"].get("subscribedProjectIds").is_none());
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn telegram_config_update_blank_token_clears_saved_token_before_project_target_check() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-blank-token-clears-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
+        .expect("settings dir should create");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "config": {
+                "enabled": false,
+                "botToken": "123456:secret"
+            },
+            "chatId": 123
+        }))
+        .expect("fixture should encode"),
+    )
+    .expect("fixture should write");
+
+    let response = state
+        .update_telegram_config(UpdateTelegramConfigRequest {
+            enabled: Some(true),
+            bot_token: Some(Some("   ".to_owned())),
+            subscribed_project_ids: Some(Vec::new()),
+            default_project_id: None,
+            default_session_id: None,
+        })
+        .expect("blank token clears saved token before project-target validation");
+
+    assert!(response.enabled);
+    assert!(!response.configured);
+    assert_eq!(response.subscribed_project_ids, Vec::<String>::new());
+    assert_eq!(response.linked_chat_id, Some(123));
+
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert_eq!(value["config"]["enabled"], json!(true));
+    assert!(value["config"].get("botToken").is_none());
+    assert!(value["config"].get("subscribedProjectIds").is_none());
+    assert_eq!(value["chatId"], json!(123));
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn telegram_config_update_rejects_saved_token_without_project_target() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-saved-token-no-project-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
+        .expect("settings dir should create");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "config": {
+                "enabled": false,
+                "botToken": "123456:secret"
+            },
+            "chatId": 123
+        }))
+        .expect("fixture should encode"),
+    )
+    .expect("fixture should write");
+
+    let err = state
+        .update_telegram_config(UpdateTelegramConfigRequest {
+            enabled: Some(true),
+            bot_token: None,
+            subscribed_project_ids: Some(Vec::new()),
+            default_project_id: None,
+            default_session_id: None,
+        })
+        .expect_err("saved token plus enabled empty project target should fail");
+
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(err.message.contains("choose at least one Telegram project"));
+
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert_eq!(value["config"]["enabled"], json!(false));
+    assert_eq!(value["config"]["botToken"], json!("123456:secret"));
+    assert_eq!(value["chatId"], json!(123));
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
 fn telegram_settings_validation_rejects_orphan_session_project() {
     let state = test_app_state();
     let session_id = {

@@ -1741,8 +1741,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   cover plaintext token-at-rest exposure, corrupt-backup permission hardening, and Windows ACL/secret-store fallback behavior.
 - [ ] P2: Cover post-validation Telegram settings sanitization:
   delete a project/session after validation but before the second sanitize path, or extract a deterministic helper seam, and assert the persisted response cannot retain stale references. The current stale-reference test at `src/tests/telegram.rs:1573` seeds invalid state before validation, so removing the post-validation sanitize in `src/telegram_settings.rs:73` would still pass.
-- [ ] P2: Cover Telegram project-target invariant boundaries:
-  pin `enabled + no token + []`, blank-token rejection precedence, and saved-token/no-project saves so the UI/backend/prune paths share one enabled-relay target contract.
 - [ ] P2: Add Telegram settings file concurrency regressions:
   simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
