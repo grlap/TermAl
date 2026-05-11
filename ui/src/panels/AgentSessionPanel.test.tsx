@@ -4346,6 +4346,150 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
+  it("tears down demand-hydration listeners after the first full render", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const scrollNode = document.createElement("section");
+    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
+    const scrollNodeDemandEvents = [
+      "scroll",
+      "wheel",
+      "mousedown",
+      "touchstart",
+      "touchmove",
+      "touchend",
+      "touchcancel",
+    ] as const;
+    const addCounts = new Map<string, number>();
+    const removeCounts = new Map<string, number>();
+    let documentKeydownAdds = 0;
+    let documentKeydownRemoves = 0;
+    const originalAdd = scrollNode.addEventListener.bind(scrollNode);
+    const originalRemove = scrollNode.removeEventListener.bind(scrollNode);
+    const originalDocumentAdd = document.addEventListener.bind(document);
+    const originalDocumentRemove = document.removeEventListener.bind(document);
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    scrollNode.addEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: AddEventListenerOptions | boolean,
+    ) => {
+      if (
+        scrollNodeDemandEvents.includes(
+          type as (typeof scrollNodeDemandEvents)[number],
+        )
+      ) {
+        addCounts.set(type, (addCounts.get(type) ?? 0) + 1);
+      }
+      return originalAdd(type, listener, options);
+    }) as typeof scrollNode.addEventListener;
+    scrollNode.removeEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: EventListenerOptions | boolean,
+    ) => {
+      if (
+        scrollNodeDemandEvents.includes(
+          type as (typeof scrollNodeDemandEvents)[number],
+        )
+      ) {
+        removeCounts.set(type, (removeCounts.get(type) ?? 0) + 1);
+      }
+      return originalRemove(type, listener, options);
+    }) as typeof scrollNode.removeEventListener;
+    document.addEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: AddEventListenerOptions | boolean,
+    ) => {
+      if (type === "keydown") {
+        documentKeydownAdds += 1;
+      }
+      return originalDocumentAdd(type, listener, options);
+    }) as typeof document.addEventListener;
+    document.removeEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: EventListenerOptions | boolean,
+    ) => {
+      if (type === "keydown") {
+        documentKeydownRemoves += 1;
+      }
+      return originalDocumentRemove(type, listener, options);
+    }) as typeof document.removeEventListener;
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+
+    try {
+      const tailFirstPageSelector =
+        '.virtualized-message-page[data-page-key="0:8:message-581:message-588"]';
+      document.body.append(scrollNode);
+      const { container } = renderSessionPanelWithDefaults({
+        activeSession: makeSession("active-session", {
+          status: "idle",
+          messages: makeTextMessages(600),
+        }),
+        scrollContainerRef: { current: scrollNode },
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const baselineRemoveCounts = new Map(removeCounts);
+      const baselineDocumentKeydownRemoves = documentKeydownRemoves;
+      scrollNodeDemandEvents.forEach((eventName) => {
+        expect(addCounts.get(eventName)).toBeGreaterThan(0);
+      });
+      expect(documentKeydownAdds).toBeGreaterThan(0);
+      expect(container.querySelector(tailFirstPageSelector)).not.toBeNull();
+
+      act(() => {
+        scrollNodeMocks.setScrollTop(50);
+        fireEvent.wheel(scrollNode, { deltaY: -120 });
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector(tailFirstPageSelector)).toBeNull();
+      scrollNodeDemandEvents.forEach((eventName) => {
+        expect(removeCounts.get(eventName), eventName).toBeGreaterThanOrEqual(
+          (baselineRemoveCounts.get(eventName) ?? 0) + 1,
+        );
+      });
+      expect(documentKeydownRemoves).toBeGreaterThanOrEqual(
+        baselineDocumentKeydownRemoves + 1,
+      );
+
+      const postHydrationRemoveCounts = new Map(removeCounts);
+      const postHydrationDocumentKeydownRemoves = documentKeydownRemoves;
+      act(() => {
+        fireEvent.wheel(scrollNode, { deltaY: -120 });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      scrollNodeDemandEvents.forEach((eventName) => {
+        expect(removeCounts.get(eventName)).toBe(
+          postHydrationRemoveCounts.get(eventName),
+        );
+      });
+      expect(documentKeydownRemoves).toBe(postHydrationDocumentKeydownRemoves);
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      document.addEventListener = originalDocumentAdd;
+      document.removeEventListener = originalDocumentRemove;
+      scrollNodeMocks.cleanup();
+      scrollNode.remove();
+    }
+  });
+
   it.each([
     ["Claude", "new prompt", "Claude is working — Waiting for output"],
     ["Cursor", "new prompt", "Cursor is working — Waiting for output"],

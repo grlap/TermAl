@@ -597,7 +597,8 @@ function useInitialActiveTranscriptMessages({
   useEffect(() => {
     if (
       hydrationRef.current.sessionId !== sessionId ||
-      hydrationRef.current.hydrated
+      hydrationRef.current.hydrated ||
+      !isWindowed
     ) {
       return undefined;
     }
@@ -719,6 +720,7 @@ function useInitialActiveTranscriptMessages({
     hasConversationSearch,
     hasMessages,
     isActive,
+    isWindowed,
     requestFullTranscriptRender,
     scrollContainerRef,
     sessionId,

@@ -1900,8 +1900,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   drive the live-state hook or app through text-repair hydration after an unrelated newer live revision and assert the active transcript renders the repaired assistant text without scroll, focus, or another prompt.
 - [ ] P2: Add AgentSessionPanel deferred-tail component regressions:
   cover switching from a non-empty deferred transcript to an empty current session, and same-id updated assistant text through the rendered component path (`useDeferredValue`, pending-prompt filtering, and the virtualized list), not only the exported helper.
-- [ ] P2: Cover full-transcript demand inputs beyond upward wheel:
-  add table-style cases for `scrollTop <= 160`, `ArrowUp`/`Home`/`PageUp`, touch drag-up demand, and the ctrl-wheel negative branch on the long-session tail-window path.
 - [ ] P2: Add lagged-marker EventSource reconnect-boundary regression:
   dispatch `lagged`, trigger EventSource error/reconnect, then send a lower/same-instance state on the new stream and assert the old marker cannot force-adopt it.
 - [ ] P2: Add remote hydration dedupe production-path coverage:
@@ -1960,8 +1958,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   mount an overview-controller harness, flush one or two frames so a queued second-rAF or FIFO task is alive, then unmount and flush the remaining frames asserting that `setIsRailReady(true)` was never observed and the FIFO is empty. The current test never unmounts mid-pending so the rAF cancellation paths and FIFO splice-by-task-id are unexercised.
 - [ ] P2: Finish splitting the remaining marker-menu create/remove test:
   the marker-menu coverage now has focused cases for keyboard trigger, portal cleanup, scroll/resize close, explicit trigger contract, and clamp fallback. The original create/remove test still combines add/remove, Escape focus restore, ArrowDown navigation, and rect-based clamp behavior; split the remaining assertions if it grows again.
-- [ ] P2: Assert one-shot hydration in demand-driven hydration test:
-  after the wheel triggers hydration, fire wheel again and assert no further state churn (e.g., rendering doesn't re-mount, listeners are torn down because the effect's early-return fires after `hydrated` is true).
 - [ ] P2: Cover same-size tail-window overview translation shifts:
   build or render two different 20-message tail windows with the same `messageCount` and assert stale viewport translation is not reused across first/last message id changes. Include a cross-session case where one session's snapshot is queried against another's projection at the same `messageCount`.
 - [ ] P2: Cover `resolveViewportSnapshotTranslation` negative branches:
