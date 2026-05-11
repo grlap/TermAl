@@ -17,6 +17,7 @@ const TELEGRAM_GET_UPDATES_LIMIT: i64 = 25;
 const TELEGRAM_RELAY_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const TELEGRAM_USER_ERROR_MAX_CHARS: usize = 240;
 const TELEGRAM_CALLBACK_ERROR_MAX_CHARS: usize = 180;
+const TELEGRAM_CALLBACK_DATA_MAX_BYTES: usize = 64;
 
 /// Runs Telegram bot.
 fn run_telegram_bot() -> Result<()> {
@@ -1903,7 +1904,7 @@ fn handle_telegram_callback_query(
         return Ok(false);
     }
 
-    let Some(raw_action_id) = callback_query
+    let Some(raw_callback_data) = callback_query
         .data
         .as_deref()
         .map(str::trim)
@@ -1912,14 +1913,32 @@ fn handle_telegram_callback_query(
         let _ = telegram.answer_callback_query(&callback_query.id, "That action is empty.");
         return Ok(false);
     };
-    let action_id = match ProjectActionId::parse(raw_action_id) {
+    let Some((project_token, raw_action_id)) =
+        parse_telegram_digest_callback_data(raw_callback_data)
+    else {
+        let text = if ProjectActionId::parse(raw_callback_data).is_ok() {
+            "That action is from an older digest. Send /status to refresh."
+        } else {
+            "Unknown action."
+        };
+        let _ = telegram.answer_callback_query(&callback_query.id, text);
+        return Ok(false);
+    };
+    let Some(project_id) = resolve_telegram_digest_callback_project(config, &project_token) else {
+        let _ = telegram.answer_callback_query(
+            &callback_query.id,
+            "That project is no longer available to this relay.",
+        );
+        return Ok(false);
+    };
+    let action_id = match ProjectActionId::parse(&raw_action_id) {
         Ok(action_id) => action_id,
         Err(_) => {
             let _ = telegram.answer_callback_query(&callback_query.id, "Unknown action.");
             return Ok(false);
         }
     };
-    let (project_id, mut dirty) = resolve_telegram_active_project_id(config, state);
+    let mut dirty = false;
     let digest = match termal.dispatch_project_action(&project_id, action_id.as_str()) {
         Ok(digest) => digest,
         Err(err) => {
@@ -1940,14 +1959,18 @@ fn handle_telegram_callback_query(
         }
     };
     let _ = telegram.answer_callback_query(&callback_query.id, action_id.label());
-    dirty |= send_or_edit_telegram_digest_from_response(
-        telegram,
-        config,
-        state,
-        chat_id,
-        Some(message.message_id),
-        &digest,
-    )?;
+    if project_id == telegram_active_project_id(config, state) {
+        dirty |= send_or_edit_telegram_digest_from_response(
+            telegram,
+            config,
+            state,
+            chat_id,
+            Some(message.message_id),
+            &digest,
+        )?;
+    } else {
+        edit_telegram_digest_message(telegram, config, chat_id, message.message_id, &digest)?;
+    }
     Ok(dirty)
 }
 
@@ -3086,7 +3109,7 @@ fn send_fresh_telegram_digest_from_response(
     digest: &ProjectDigestResponse,
 ) -> Result<bool> {
     let (text, format) = render_telegram_digest_message(digest, config.public_base_url.as_deref());
-    let keyboard = build_telegram_digest_keyboard(digest);
+    let keyboard = build_telegram_digest_keyboard(digest)?;
     let sent = telegram.send_message_with_format(chat_id, &text, keyboard.as_ref(), format)?;
     remember_telegram_digest(
         state,
@@ -3124,7 +3147,7 @@ fn edit_or_send_telegram_digest(
     digest: &ProjectDigestResponse,
 ) -> Result<i64> {
     let (text, format) = render_telegram_digest_message(digest, config.public_base_url.as_deref());
-    let keyboard = build_telegram_digest_keyboard(digest);
+    let keyboard = build_telegram_digest_keyboard(digest)?;
     if let Some(message_id) = message_id {
         match telegram.edit_message_with_format(
             chat_id,
@@ -3142,6 +3165,23 @@ fn edit_or_send_telegram_digest(
 
     let sent = telegram.send_message_with_format(chat_id, &text, keyboard.as_ref(), format)?;
     Ok(sent.message_id)
+}
+
+fn edit_telegram_digest_message(
+    telegram: &impl TelegramDigestMessageSender,
+    config: &TelegramBotConfig,
+    chat_id: i64,
+    message_id: i64,
+    digest: &ProjectDigestResponse,
+) -> Result<()> {
+    let (text, format) = render_telegram_digest_message(digest, config.public_base_url.as_deref());
+    let keyboard = build_telegram_digest_keyboard(digest)?;
+    if let Err(err) =
+        telegram.edit_message_with_format(chat_id, message_id, &text, keyboard.as_ref(), format)
+    {
+        log_telegram_error("failed to edit non-active project digest message", &err);
+    }
+    Ok(())
 }
 
 /// Remembers Telegram digest.
@@ -3169,6 +3209,8 @@ fn telegram_digest_hash(
     // cached digest message to be edited once rather than leaving stale markup.
     let payload = json!({
         "format": format.parse_mode(),
+        "callbackScheme": 1,
+        "projectId": digest.project_id.as_str(),
         "text": text,
         "actions": digest
             .proposed_actions
@@ -3184,9 +3226,9 @@ fn telegram_digest_hash(
 /// Builds Telegram digest keyboard.
 fn build_telegram_digest_keyboard(
     digest: &ProjectDigestResponse,
-) -> Option<TelegramInlineKeyboardMarkup> {
+) -> Result<Option<TelegramInlineKeyboardMarkup>> {
     if digest.proposed_actions.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     let mut rows = Vec::new();
@@ -3194,7 +3236,7 @@ fn build_telegram_digest_keyboard(
     for action in &digest.proposed_actions {
         current_row.push(TelegramInlineKeyboardButton {
             text: action.label.clone(),
-            callback_data: action.id.clone(),
+            callback_data: telegram_digest_callback_data(&digest.project_id, &action.id)?,
         });
         if current_row.len() == 2 {
             rows.push(current_row);
@@ -3205,7 +3247,67 @@ fn build_telegram_digest_keyboard(
         rows.push(current_row);
     }
 
-    Some(TelegramInlineKeyboardMarkup { inline_keyboard: rows })
+    Ok(Some(TelegramInlineKeyboardMarkup { inline_keyboard: rows }))
+}
+
+fn telegram_digest_callback_data(project_id: &str, action_id: &str) -> Result<String> {
+    let callback_data = format!("p:{}:{action_id}", telegram_digest_project_token(project_id));
+    if callback_data.len() > TELEGRAM_CALLBACK_DATA_MAX_BYTES {
+        bail!(
+            "Telegram callback_data for action `{action_id}` exceeds {TELEGRAM_CALLBACK_DATA_MAX_BYTES} bytes"
+        );
+    }
+    Ok(callback_data)
+}
+
+fn parse_telegram_digest_callback_data(value: &str) -> Option<(String, String)> {
+    let payload = value.strip_prefix("p:")?;
+    let (project_token, action_id) = payload.split_once(':')?;
+    if project_token.len() != 16
+        || !project_token
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+        || action_id.is_empty()
+    {
+        return None;
+    }
+    Some((project_token.to_owned(), action_id.to_owned()))
+}
+
+fn telegram_digest_project_token(project_id: &str) -> String {
+    stable_text_hash(project_id)
+}
+
+fn resolve_telegram_digest_callback_project(
+    config: &TelegramBotConfig,
+    project_token: &str,
+) -> Option<String> {
+    // The token is only a compact routing hint to stay under Telegram's
+    // callback_data cap. It is not an auth secret; dispatch still requires
+    // the project to be available in this relay's subscribed/default set.
+    let mut matched_project_id = None;
+    for project_id in config
+        .subscribed_project_ids
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once(config.project_id.as_str()))
+    {
+        if telegram_digest_project_token(project_id) != project_token {
+            continue;
+        }
+        if matched_project_id.as_deref() == Some(project_id) {
+            continue;
+        }
+        if matched_project_id.is_some() {
+            log_telegram_error(
+                "Telegram callback project token collision",
+                &anyhow!("multiple subscribed projects matched token `{project_token}`"),
+            );
+            return None;
+        }
+        matched_project_id = Some(project_id.to_owned());
+    }
+    matched_project_id
 }
 
 fn render_telegram_digest_message(

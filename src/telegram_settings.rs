@@ -242,13 +242,7 @@ impl AppState {
             }
         }
 
-        if normalized.enabled
-            && normalized
-                .bot_token
-                .as_deref()
-                .is_some_and(|token| !token.trim().is_empty())
-            && normalized.subscribed_project_ids.is_empty()
-        {
+        if telegram_config_is_enabled_without_project_target(&normalized) {
             return Err(ApiError::bad_request(
                 "choose at least one Telegram project before enabling the relay",
             ));
@@ -269,6 +263,9 @@ impl AppState {
         if file.config.default_project_id.as_deref() == Some(project_id) {
             file.config.default_project_id = None;
             file.config.default_session_id = None;
+        }
+        if telegram_config_is_enabled_without_project_target(&file.config) {
+            file.config.enabled = false;
         }
 
         if telegram_configs_equal(&before, &file.config) {
@@ -505,6 +502,17 @@ fn telegram_configs_equal(left: &TelegramUiConfig, right: &TelegramUiConfig) -> 
         && left.subscribed_project_ids == right.subscribed_project_ids
         && left.default_project_id == right.default_project_id
         && left.default_session_id == right.default_session_id
+}
+
+fn telegram_config_is_enabled_without_project_target(config: &TelegramUiConfig) -> bool {
+    // Keep this predicate shared with prune paths so project deletion cannot
+    // persist a relay shape the normal settings save path would reject.
+    config.enabled
+        && config
+            .bot_token
+            .as_deref()
+            .is_some_and(|token| !token.trim().is_empty())
+        && config.subscribed_project_ids.is_empty()
 }
 
 fn mask_telegram_bot_token(token: &str) -> Option<String> {

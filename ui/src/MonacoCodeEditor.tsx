@@ -232,7 +232,11 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
       insertSpaces: true,
       lineNumbersMinChars: 4,
       matchBrackets: "always",
-      minimap: { enabled: false },
+      minimap: {
+        enabled: true,
+        renderCharacters: false,
+        showSlider: "always",
+      },
       occurrencesHighlight: "singleFile",
       padding: { top: 8, bottom: 8 },
       readOnly,

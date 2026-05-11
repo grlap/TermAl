@@ -519,6 +519,14 @@ export function canNestedScrollableConsumeWheel(
   let current = target instanceof HTMLElement ? target : null;
 
   while (current && current !== container) {
+    if (isMonacoEditorEventTarget(current, container)) {
+      // Monaco owns scrolling through custom DOM/canvas layers rather than a
+      // plain `overflow: auto` ancestor. Treat it as a nested scroll owner so
+      // the pane-level non-passive wheel handler does not steal minimap or
+      // editor scroll gestures.
+      return true;
+    }
+
     const style = window.getComputedStyle(current);
     const overflowY = style.overflowY;
     const canScrollY =
@@ -539,6 +547,24 @@ export function canNestedScrollableConsumeWheel(
   }
 
   return false;
+}
+
+export function isMonacoEditorEventTarget(
+  target: EventTarget | null,
+  container?: HTMLElement | null,
+) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const editorRoot = target.closest(
+    ".monaco-editor, .monaco-code-editor, .monaco-diff-editor",
+  );
+  if (!(editorRoot instanceof HTMLElement)) {
+    return false;
+  }
+
+  return !container || container.contains(editorRoot);
 }
 
 export function dropLabelForPlacement(placement: TabDropPlacement) {

@@ -155,6 +155,7 @@ import {
   findLastUserPrompt,
   formatByteSize,
   getErrorMessage,
+  isMonacoEditorEventTarget,
   isPointerWithinPaneTopArea,
   labelForPaneViewMode,
   normalizeWheelDelta,
@@ -1599,6 +1600,9 @@ export function SessionPaneView({
 
   function handlePaneKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
     if (event.defaultPrevented) {
+      return;
+    }
+    if (isMonacoEditorEventTarget(event.target, paneRootRef.current)) {
       return;
     }
 

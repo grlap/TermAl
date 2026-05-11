@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { messageChangeMarker } from "./app-utils";
+import {
+  canNestedScrollableConsumeWheel,
+  isMonacoEditorEventTarget,
+  messageChangeMarker,
+} from "./app-utils";
 import type { ParallelAgentsMessage } from "./types";
 
 describe("messageChangeMarker", () => {
@@ -69,4 +73,40 @@ describe("messageChangeMarker", () => {
       );
     },
   );
+});
+
+describe("isMonacoEditorEventTarget", () => {
+  it("detects events from Monaco editor descendants within the pane boundary", () => {
+    const pane = document.createElement("section");
+    const editor = document.createElement("div");
+    editor.className = "monaco-editor";
+    const target = document.createElement("canvas");
+    editor.appendChild(target);
+    pane.appendChild(editor);
+
+    expect(isMonacoEditorEventTarget(target, pane)).toBe(true);
+  });
+
+  it("ignores Monaco-looking nodes outside the pane boundary", () => {
+    const pane = document.createElement("section");
+    const editor = document.createElement("div");
+    editor.className = "monaco-editor";
+    const target = document.createElement("canvas");
+    editor.appendChild(target);
+
+    expect(isMonacoEditorEventTarget(target, pane)).toBe(false);
+  });
+});
+
+describe("canNestedScrollableConsumeWheel", () => {
+  it("lets Monaco consume wheel gestures even without a native overflow scroller", () => {
+    const paneScroller = document.createElement("section");
+    const editor = document.createElement("div");
+    editor.className = "monaco-code-editor";
+    const target = document.createElement("canvas");
+    editor.appendChild(target);
+    paneScroller.appendChild(editor);
+
+    expect(canNestedScrollableConsumeWheel(target, paneScroller, 120)).toBe(true);
+  });
 });

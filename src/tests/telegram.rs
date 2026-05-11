@@ -16,6 +16,7 @@ use std::collections::VecDeque;
 struct FakeTelegramSender {
     answered_callbacks: RefCell<Vec<(String, String)>>,
     edited_messages: RefCell<Vec<(i64, i64, String, TelegramTextFormat)>>,
+    fail_edits: bool,
     fail_on_attempt: Option<usize>,
     send_attempts: Cell<usize>,
     sent_formats: RefCell<Vec<TelegramTextFormat>>,
@@ -27,10 +28,18 @@ impl FakeTelegramSender {
         Self {
             answered_callbacks: RefCell::new(Vec::new()),
             edited_messages: RefCell::new(Vec::new()),
+            fail_edits: false,
             fail_on_attempt,
             send_attempts: Cell::new(0),
             sent_formats: RefCell::new(Vec::new()),
             sent_texts: RefCell::new(Vec::new()),
+        }
+    }
+
+    fn with_edit_failure() -> Self {
+        Self {
+            fail_edits: true,
+            ..Self::new(None)
         }
     }
 }
@@ -70,6 +79,9 @@ impl TelegramDigestMessageSender for FakeTelegramSender {
         _reply_markup: Option<&TelegramInlineKeyboardMarkup>,
         format: TelegramTextFormat,
     ) -> Result<i64> {
+        if self.fail_edits {
+            bail!("forced edit failure");
+        }
         self.edited_messages
             .borrow_mut()
             .push((chat_id, message_id, text.to_owned(), format));
@@ -214,6 +226,13 @@ struct FakeTelegramActionClient {
 }
 
 impl FakeTelegramActionClient {
+    fn succeeded(digest: ProjectDigestResponse) -> Self {
+        Self {
+            dispatches: RefCell::new(Vec::new()),
+            result: Ok(digest),
+        }
+    }
+
     fn failed(error: &str) -> Self {
         Self {
             dispatches: RefCell::new(Vec::new()),
@@ -420,7 +439,10 @@ fn telegram_callback_action_failure_answers_and_sends_error_without_digest_refre
         &mut state,
         TelegramCallbackQuery {
             id: "callback-1".to_owned(),
-            data: Some("ask-agent-to-commit".to_owned()),
+            data: Some(
+                telegram_digest_callback_data("project-1", "ask-agent-to-commit")
+                    .expect("callback data should fit"),
+            ),
             message: Some(TelegramChatMessage {
                 message_id: 123,
                 chat: TelegramChat {
@@ -455,6 +477,238 @@ fn telegram_callback_action_failure_answers_and_sends_error_without_digest_refre
     assert!(telegram.edited_messages.borrow().is_empty());
     assert_eq!(state.last_digest_hash.as_deref(), Some("previous-digest"));
     assert_eq!(state.last_digest_message_id, Some(99));
+}
+
+#[test]
+fn telegram_callback_dispatches_against_digest_project_not_active_project() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramActionClient::succeeded(ProjectDigestResponse {
+        project_id: "project-1".to_owned(),
+        headline: "termal".to_owned(),
+        done_summary: "Action dispatched.".to_owned(),
+        current_status: "Ready.".to_owned(),
+        primary_session_id: Some("session-1".to_owned()),
+        proposed_actions: vec![],
+        deep_link: None,
+        source_message_ids: vec![],
+    });
+    let mut config = telegram_test_config();
+    config.subscribed_project_ids = vec!["project-1".to_owned(), "project-2".to_owned()];
+    let mut state = TelegramBotState {
+        selected_project_id: Some("project-2".to_owned()),
+        last_digest_hash: Some("project-2-digest".to_owned()),
+        last_digest_message_id: Some(200),
+        ..TelegramBotState::default()
+    };
+
+    let changed = handle_telegram_callback_query(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        TelegramCallbackQuery {
+            id: "callback-1".to_owned(),
+            data: Some(
+                telegram_digest_callback_data("project-1", "review-in-termal")
+                    .expect("callback data should fit"),
+            ),
+            message: Some(TelegramChatMessage {
+                message_id: 123,
+                chat: TelegramChat {
+                    id: 42,
+                    _kind: "private".to_owned(),
+                },
+                text: Some("Project digest".to_owned()),
+            }),
+        },
+    )
+    .expect("callback should dispatch against its digest project");
+
+    assert!(!changed);
+    assert_eq!(
+        termal.dispatches.borrow().as_slice(),
+        &[("project-1".to_owned(), "review-in-termal".to_owned())]
+    );
+    assert_eq!(state.selected_project_id.as_deref(), Some("project-2"));
+    assert_eq!(state.last_digest_hash.as_deref(), Some("project-2-digest"));
+    assert_eq!(state.last_digest_message_id, Some(200));
+    assert_eq!(telegram.answered_callbacks.borrow().len(), 1);
+    assert_eq!(
+        telegram.answered_callbacks.borrow()[0].1,
+        "Review in TermAl"
+    );
+    assert_eq!(telegram.edited_messages.borrow().len(), 1);
+}
+
+#[test]
+fn telegram_callback_does_not_send_untracked_fallback_for_non_active_digest_edit_failure() {
+    let telegram = FakeTelegramSender::with_edit_failure();
+    let termal = FakeTelegramActionClient::succeeded(ProjectDigestResponse {
+        project_id: "project-1".to_owned(),
+        headline: "termal".to_owned(),
+        done_summary: "Action dispatched.".to_owned(),
+        current_status: "Ready.".to_owned(),
+        primary_session_id: Some("session-1".to_owned()),
+        proposed_actions: vec![],
+        deep_link: None,
+        source_message_ids: vec![],
+    });
+    let mut config = telegram_test_config();
+    config.subscribed_project_ids = vec!["project-1".to_owned(), "project-2".to_owned()];
+    let mut state = TelegramBotState {
+        selected_project_id: Some("project-2".to_owned()),
+        last_digest_hash: Some("project-2-digest".to_owned()),
+        last_digest_message_id: Some(200),
+        ..TelegramBotState::default()
+    };
+
+    let changed = handle_telegram_callback_query(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        TelegramCallbackQuery {
+            id: "callback-1".to_owned(),
+            data: Some(
+                telegram_digest_callback_data("project-1", "review-in-termal")
+                    .expect("callback data should fit"),
+            ),
+            message: Some(TelegramChatMessage {
+                message_id: 123,
+                chat: TelegramChat {
+                    id: 42,
+                    _kind: "private".to_owned(),
+                },
+                text: Some("Project digest".to_owned()),
+            }),
+        },
+    )
+    .expect("non-active callback edit failure should not fail dispatch");
+
+    assert!(!changed);
+    assert_eq!(
+        termal.dispatches.borrow().as_slice(),
+        &[("project-1".to_owned(), "review-in-termal".to_owned())]
+    );
+    assert_eq!(state.last_digest_hash.as_deref(), Some("project-2-digest"));
+    assert_eq!(state.last_digest_message_id, Some(200));
+    assert!(telegram.edited_messages.borrow().is_empty());
+    assert!(telegram.sent_texts.borrow().is_empty());
+}
+
+#[test]
+fn telegram_callback_resolves_default_project_even_when_not_in_subscribed_list() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramActionClient::succeeded(telegram_project_digest(Some("session-1")));
+    let mut config = telegram_test_config();
+    config.subscribed_project_ids = vec!["project-2".to_owned()];
+    let mut state = TelegramBotState::default();
+
+    let changed = handle_telegram_callback_query(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        TelegramCallbackQuery {
+            id: "callback-1".to_owned(),
+            data: Some(
+                telegram_digest_callback_data("project-1", "review-in-termal")
+                    .expect("callback data should fit"),
+            ),
+            message: Some(TelegramChatMessage {
+                message_id: 123,
+                chat: TelegramChat {
+                    id: 42,
+                    _kind: "private".to_owned(),
+                },
+                text: Some("Project digest".to_owned()),
+            }),
+        },
+    )
+    .expect("default-project callback should dispatch");
+
+    assert!(changed);
+    assert_eq!(
+        termal.dispatches.borrow().as_slice(),
+        &[("project-1".to_owned(), "review-in-termal".to_owned())]
+    );
+}
+
+#[test]
+fn telegram_callback_rejects_legacy_unscoped_action_payload() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramActionClient::succeeded(telegram_project_digest(Some("session-1")));
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+
+    let changed = handle_telegram_callback_query(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        TelegramCallbackQuery {
+            id: "callback-1".to_owned(),
+            data: Some("review-in-termal".to_owned()),
+            message: Some(TelegramChatMessage {
+                message_id: 123,
+                chat: TelegramChat {
+                    id: 42,
+                    _kind: "private".to_owned(),
+                },
+                text: Some("Project digest".to_owned()),
+            }),
+        },
+    )
+    .expect("legacy callback should be rejected without dispatching");
+
+    assert!(!changed);
+    assert!(termal.dispatches.borrow().is_empty());
+    assert_eq!(telegram.answered_callbacks.borrow().len(), 1);
+    assert_eq!(
+        telegram.answered_callbacks.borrow()[0].1,
+        "That action is from an older digest. Send /status to refresh."
+    );
+    assert!(telegram.edited_messages.borrow().is_empty());
+}
+
+#[test]
+fn telegram_callback_rejects_project_tokens_that_are_no_longer_subscribed() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramActionClient::succeeded(telegram_project_digest(Some("session-1")));
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+
+    let changed = handle_telegram_callback_query(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        TelegramCallbackQuery {
+            id: "callback-1".to_owned(),
+            data: Some(
+                telegram_digest_callback_data("removed-project", "review-in-termal")
+                    .expect("callback data should fit"),
+            ),
+            message: Some(TelegramChatMessage {
+                message_id: 123,
+                chat: TelegramChat {
+                    id: 42,
+                    _kind: "private".to_owned(),
+                },
+                text: Some("Project digest".to_owned()),
+            }),
+        },
+    )
+    .expect("removed-project callback should be rejected without dispatching");
+
+    assert!(!changed);
+    assert!(termal.dispatches.borrow().is_empty());
+    assert_eq!(telegram.answered_callbacks.borrow().len(), 1);
+    assert_eq!(
+        telegram.answered_callbacks.borrow()[0].1,
+        "That project is no longer available to this relay."
+    );
+    assert!(telegram.edited_messages.borrow().is_empty());
 }
 
 #[test]
@@ -1476,9 +1730,9 @@ fn telegram_selected_session_sync_baselines_persisted_selection_before_local_rep
 // headline, a `Next: ...` line listing proposed action labels, and an
 // `Open: ...` line resolving the relative deep link against the public
 // base URL, while the inline keyboard emits one button per action with
-// `callback_data` matching the `ProjectActionId` kebab-case. Without this
-// the phone UI would either lose tap-to-act buttons or fire callbacks the
-// server cannot parse, silently breaking remote control.
+// `callback_data` bound to both the digest project and action. Without this
+// the phone UI would either lose tap-to-act buttons or fire callbacks against
+// whichever project is active when the user taps an older digest.
 #[test]
 fn telegram_digest_renderer_includes_actions_and_public_link() {
     let digest = ProjectDigestResponse {
@@ -1504,16 +1758,49 @@ fn telegram_digest_renderer_includes_actions_and_public_link() {
         "<a href=\"https://termal.local/?projectId=project-1&amp;sessionId=session-1\">Open in TermAl</a>"
     ));
 
-    let keyboard = build_telegram_digest_keyboard(&digest).expect("keyboard should exist");
+    let keyboard = build_telegram_digest_keyboard(&digest)
+        .expect("keyboard should build")
+        .expect("keyboard should exist");
     assert_eq!(keyboard.inline_keyboard.len(), 1);
     assert_eq!(
         keyboard.inline_keyboard[0][0].callback_data,
-        "review-in-termal"
+        telegram_digest_callback_data("project-1", "review-in-termal")
+            .expect("callback data should fit")
     );
     assert_eq!(
         keyboard.inline_keyboard[0][1].callback_data,
-        "ask-agent-to-commit"
+        telegram_digest_callback_data("project-1", "ask-agent-to-commit")
+            .expect("callback data should fit")
     );
+    assert!(
+        keyboard.inline_keyboard[0]
+            .iter()
+            .all(|button| button.callback_data.len() <= 64)
+    );
+}
+
+#[test]
+fn telegram_digest_keyboard_rejects_oversized_callback_data() {
+    let digest = ProjectDigestResponse {
+        project_id: "project-1".to_owned(),
+        headline: "termal".to_owned(),
+        done_summary: "Updated the digest API.".to_owned(),
+        current_status: "Changes are ready for review.".to_owned(),
+        primary_session_id: Some("session-1".to_owned()),
+        proposed_actions: vec![ProjectDigestAction {
+            id: "x".repeat(46),
+            label: "Too Long".to_owned(),
+            prompt: None,
+            requires_confirmation: false,
+        }],
+        deep_link: None,
+        source_message_ids: vec![],
+    };
+
+    let err = build_telegram_digest_keyboard(&digest)
+        .expect_err("oversized callback data should fail before Telegram send");
+
+    assert!(err.to_string().contains("exceeds 64 bytes"));
 }
 
 #[test]
@@ -1639,6 +1926,8 @@ fn telegram_digest_hash_includes_rendered_html_format() {
     let (text, format) = render_telegram_digest_message(&digest, Some("https://termal.local"));
     let payload = json!({
         "format": format.parse_mode(),
+        "callbackScheme": 1,
+        "projectId": "project-1",
         "text": text,
         "actions": ["review-in-termal"],
     });
@@ -1647,6 +1936,8 @@ fn telegram_digest_hash_includes_rendered_html_format() {
     );
     let plain_format_payload = json!({
         "format": Option::<&str>::None,
+        "callbackScheme": 1,
+        "projectId": "project-1",
         "text": text,
         "actions": ["review-in-termal"],
     });
@@ -5535,7 +5826,7 @@ fn telegram_config_update_sanitizes_stale_persisted_references_before_validation
 }
 
 #[test]
-fn delete_project_prunes_telegram_config_on_disk() {
+fn delete_project_prunes_telegram_config_and_disables_relay_without_project_target() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let home = std::env::temp_dir().join(format!("termal-telegram-home-{}", Uuid::new_v4()));
     fs::create_dir_all(&home).expect("test home should exist");
@@ -5567,6 +5858,7 @@ fn delete_project_prunes_telegram_config_on_disk() {
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
+    assert_eq!(value["config"]["enabled"], json!(false));
     assert_eq!(value["config"]["botToken"], json!("123456:secret"));
     assert!(
         value["config"].get("subscribedProjectIds").is_none()
@@ -5574,5 +5866,60 @@ fn delete_project_prunes_telegram_config_on_disk() {
     );
     assert!(value["config"].get("defaultProjectId").is_none());
     assert!(value["config"].get("defaultSessionId").is_none());
+    assert_eq!(value["chatId"], json!(123));
+}
+
+#[test]
+fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_target() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-multi-project-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (deleted_project_id, _deleted_session_id) =
+        create_telegram_settings_project_and_session(&state);
+    let (remaining_project_id, remaining_session_id) =
+        create_telegram_settings_project_and_session(&state);
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("state path should have a parent"))
+        .expect("settings dir should create");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "config": {
+                "enabled": true,
+                "botToken": "123456:secret",
+                "subscribedProjectIds": [deleted_project_id.clone(), remaining_project_id.clone()],
+                "defaultProjectId": remaining_project_id.clone(),
+                "defaultSessionId": remaining_session_id
+            },
+            "chatId": 123
+        }))
+        .expect("fixture should encode"),
+    )
+    .expect("fixture should write");
+
+    state
+        .delete_project(&deleted_project_id)
+        .expect("project should delete");
+
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert_eq!(value["config"]["enabled"], json!(true));
+    assert_eq!(
+        value["config"]["subscribedProjectIds"],
+        json!([remaining_project_id.clone()])
+    );
+    assert_eq!(
+        value["config"]["defaultProjectId"],
+        json!(remaining_project_id)
+    );
+    assert_eq!(
+        value["config"]["defaultSessionId"],
+        json!(remaining_session_id)
+    );
     assert_eq!(value["chatId"], json!(123));
 }

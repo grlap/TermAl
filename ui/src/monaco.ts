@@ -4,6 +4,12 @@ import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
+// `editor.api` exposes the creation API but does not register editor
+// contributions such as Ctrl+F find, find-result marker navigation, or goto
+// marker widgets. Keep these side-effect imports so source/diff editors behave
+// like full Monaco instances instead of falling back to browser find.
+import "monaco-editor/esm/vs/editor/contrib/find/browser/findController";
+import "monaco-editor/esm/vs/editor/contrib/gotoError/browser/gotoError";
 import "monaco-editor/esm/vs/language/css/monaco.contribution";
 import "monaco-editor/esm/vs/language/html/monaco.contribution";
 import "monaco-editor/esm/vs/language/json/monaco.contribution";

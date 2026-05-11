@@ -132,7 +132,9 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
       lineNumbersMinChars: 4,
       matchBrackets: "always",
       minimap: {
-        enabled: false,
+        enabled: true,
+        renderCharacters: false,
+        showSlider: "always",
       },
       originalEditable: false,
       padding: { top: 8, bottom: 8 },

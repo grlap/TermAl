@@ -60,55 +60,6 @@ The same effect also gates on `paneScrollPositions[scrollStateKey]?.shouldStick`
 - Derive a narrow `shouldStick` value for the effect or document why the stable `paneScrollPositions` map is intentionally non-reactive.
 - Reuse the virtualizer-aware bottom-follow helper, or add a comment explaining why direct `scrollToLatestMessage` is safe for the waiting-indicator edge.
 
-## Telegram project-target invariant is not enforced on prune paths
-
-**Severity:** Medium - `src/telegram_settings.rs:245-255,261-282` and `ui/src/preferences-panels.tsx:1484-1493`. The save path now rejects an enabled, configured Telegram relay with no subscribed project, and the UI blocks the same shape before POST. Project deletion pruning is a separate write path, though: deleting the last subscribed project removes the target and persists the file without running the new invariant or disabling the relay.
-
-The invariant is also expressed in separate frontend/backend predicates and messages (`canTestToken` + capitalized copy in the UI, normalized `bot_token` + lowercase copy in Rust), so future edits can drift even when the direct save path works.
-
-**Current behavior:**
-- `validate_and_normalize_telegram_config` rejects `enabled + token + []` during settings saves.
-- `prune_telegram_config_for_deleted_project` can persist `enabled + token + []` after deleting the last subscribed project.
-- Frontend and backend gate/copy are duplicated instead of sharing one contract.
-
-**Proposal:**
-- Enforce the same post-prune invariant, either by disabling the relay when its last project target is removed or by routing prune writes through a shared normalization helper.
-- Canonicalize the user-facing validation copy.
-- Add regression coverage for saved-token/no-project updates and delete-last-project pruning.
-
-## Telegram inline callbacks can dispatch actions to the wrong active project
-
-**Severity:** High - `src/telegram.rs` (`handle_telegram_callback_query`, `build_telegram_digest_keyboard`). Telegram digest inline buttons only carry the action id as `callback_data`, while the callback handler resolves the currently active project at click time.
-
-If the linked chat opens a digest for project A, switches to project B, and then taps an older project-A action button, the action can be dispatched against project B. Approval, stop, fix, or review actions can therefore operate on a different project than the message the user clicked.
-
-**Current behavior:**
-- Digest keyboards store only `action.id` in Telegram callback data.
-- Callback handling calls `resolve_telegram_active_project_id` before dispatch.
-- Project switches between message render and callback click can retarget old buttons.
-
-**Proposal:**
-- Bind callback data to its digest context with a short server-side token or validated project/action payload.
-- Reject stale or mismatched callbacks and refresh the digest for the project that produced the clicked message.
-
-## Telegram-originated prompts do not live-update the active UI tab
-
-**Severity:** High - reproduced from the Telegram relay; suspected boundary spans `src/telegram.rs` prompt forwarding, SSE/session adoption, `ui/src/session-store.ts`, and `ui/src/SessionPaneView.tsx` live-pane rendering. Sending a prompt from Telegram reaches the backend/agent, but the currently visible TermAl session tab does not show the user prompt or the resulting assistant response until the user switches away from the tab and back.
-
-This makes the live session appear idle or stale while work is actually happening, and the manual tab switch implies the data exists but a live update/store subscription path is not invalidating the visible pane.
-
-This is distinct from the stale callback-context issue above: callbacks can target the wrong project, while this bug is about the correct target session not repainting live in the already-open UI tab.
-
-**Current behavior:**
-- Telegram free text can trigger work in the target session.
-- The active UI tab does not render the Telegram prompt or response live.
-- Switching out of the tab and back forces the UI to display the missing content.
-
-**Proposal:**
-- Add a regression that sends a Telegram-originated prompt into the active session and asserts the visible session pane updates without tab churn.
-- Trace whether the missing invalidation is in SSE delta emission, app state adoption, session-store publication, or visible-pane subscription.
-- Fix the smallest broken link, then keep the test at the app/pane level because this is a user-visible live-update contract.
-
 ## Isolated delegation worktree creation is not transactional
 
 **Severity:** Medium - `src/delegations.rs:336` and `src/delegations.rs:1775`. The API creates a detached git worktree before later fallible validation and before patch application is known to succeed.
@@ -3536,7 +3487,7 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Cover post-validation Telegram settings sanitization:
   delete a project/session after validation but before the second sanitize path, or extract a deterministic helper seam, and assert the persisted response cannot retain stale references. The current stale-reference test at `src/tests/telegram.rs:1573` seeds invalid state before validation, so removing the post-validation sanitize in `src/telegram_settings.rs:73` would still pass.
 - [ ] P2: Cover Telegram project-target invariant boundaries:
-  pin `enabled + no token + []`, blank-token rejection precedence, saved-token/no-project saves, and deleting the last subscribed project so the UI/backend/prune paths share one enabled-relay target contract.
+  pin `enabled + no token + []`, blank-token rejection precedence, and saved-token/no-project saves so the UI/backend/prune paths share one enabled-relay target contract.
 - [ ] P2: Add Telegram settings file concurrency regressions:
   simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:

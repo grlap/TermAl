@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -4486,18 +4487,292 @@ describe("Backend connection state", () => {
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
   });
+
+  it("renders externally queued prompts from live state without a tab switch", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return jsonResponse(
+          makeBackendStateResponse({
+            revision: 1,
+            sessionName: "Telegram Session",
+            preview: "Original preview",
+            session: {
+              sessionMutationStamp: 1,
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "Original prompt",
+                },
+              ],
+              messageCount: 1,
+            },
+          }),
+        );
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", { status: 404 });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState(
+          makeBackendStateResponse({
+            revision: 1,
+            sessionName: "Telegram Session",
+            preview: "Original preview",
+            session: {
+              sessionMutationStamp: 1,
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "Original prompt",
+                },
+              ],
+              messageCount: 1,
+            },
+          }),
+        );
+      });
+      expect(await screen.findByText("Telegram Session")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+      const sessionRowButton = screen
+        .getByText("Telegram Session")
+        .closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Telegram session row button not found");
+      }
+      fireEvent.click(sessionRowButton);
+      expect(
+        await within(activeConversationPage()).findByText("Original prompt"),
+      ).toBeInTheDocument();
+
+      act(() => {
+        eventSource.dispatchState(
+          makeBackendStateResponse({
+            revision: 2,
+            sessionName: "Telegram Session",
+            preview: "Streaming reply...",
+            session: {
+              status: "active",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "Original prompt",
+                },
+              ],
+              messagesLoaded: true,
+              messageCount: 1,
+              pendingPrompts: [
+                {
+                  id: "pending-telegram-1",
+                  timestamp: "10:01",
+                  text: "Queued from mobile Telegram",
+                },
+              ],
+              sessionMutationStamp: 2,
+            },
+          }),
+        );
+      });
+
+      expect(
+        await within(activeConversationPage()).findByText(
+          "Queued from mobile Telegram",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(activeConversationPage()).getAllByText("Original prompt").length,
+      ).toBeGreaterThan(0);
+      expect(
+        fetchMock.mock.calls.some(
+          ([input]) => String(input) === "/api/sessions/session-1",
+        ),
+      ).toBe(false);
+    } finally {
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("renders externally created prompt deltas without a tab switch", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      if (target === "/api/state") {
+        return jsonResponse(
+          makeBackendStateResponse({
+            revision: 1,
+            sessionName: "Telegram Session",
+            preview: "Ready",
+            session: { sessionMutationStamp: 1 },
+          }),
+        );
+      }
+      if (target.startsWith("/api/workspaces/")) {
+        if (init?.method === "PUT") {
+          return jsonResponse({
+            layout: {
+              id: "workspace-live",
+              revision: 1,
+              updatedAt: "2026-04-04 21:15:00",
+              controlPanelSide: "left",
+              workspace: { panes: [] },
+            },
+          });
+        }
+        return new Response("", { status: 404 });
+      }
+
+      throw new Error(`Unexpected fetch: ${target}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+
+    try {
+      render(<App />);
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchState(
+          makeBackendStateResponse({
+            revision: 1,
+            sessionName: "Telegram Session",
+            preview: "Ready",
+            session: { sessionMutationStamp: 1 },
+          }),
+        );
+      });
+      expect(await screen.findByText("Telegram Session")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+      const sessionRowButton = screen
+        .getByText("Telegram Session")
+        .closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Telegram session row button not found");
+      }
+      fireEvent.click(sessionRowButton);
+
+      const requestAnimationFrameMock = vi.fn(() => 1);
+      window.requestAnimationFrame = requestAnimationFrameMock;
+      window.cancelAnimationFrame = vi.fn();
+
+      act(() => {
+        eventSource.dispatchDelta({
+          type: "messageCreated",
+          revision: 2,
+          sessionId: "session-1",
+          messageId: "telegram-prompt-1",
+          messageIndex: 0,
+          messageCount: 1,
+          message: {
+            id: "telegram-prompt-1",
+            type: "text",
+            timestamp: "10:02",
+            author: "you",
+            text: "Prompt from mobile Telegram",
+          },
+          preview: "Prompt from mobile Telegram",
+          status: "active",
+          sessionMutationStamp: 2,
+        });
+      });
+
+      expect(
+        await within(activeConversationPage()).findByText(
+          "Prompt from mobile Telegram",
+        ),
+      ).toBeInTheDocument();
+      expect(requestAnimationFrameMock).toHaveBeenCalled();
+      expect(
+        fetchMock.mock.calls.some(
+          ([input]) => String(input) === "/api/sessions/session-1",
+        ),
+      ).toBe(false);
+    } finally {
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
 });
+
+function activeConversationPage() {
+  const page = document.querySelector(".session-conversation-page.is-active");
+  if (!(page instanceof HTMLElement)) {
+    throw new Error("Active conversation page not found");
+  }
+  return page;
+}
 
 function makeBackendStateResponse({
   revision,
   serverInstanceId = "test-instance",
   sessionName,
   preview,
+  session = {},
 }: {
   revision: number;
   serverInstanceId?: string;
   sessionName: string;
   preview: string;
+  session?: Partial<StateResponse["sessions"][number]>;
 }): StateResponse {
   return {
     revision,
@@ -4530,6 +4805,7 @@ function makeBackendStateResponse({
         messages: [],
         messagesLoaded: true,
         pendingPrompts: [],
+        ...session,
       },
     ],
   };

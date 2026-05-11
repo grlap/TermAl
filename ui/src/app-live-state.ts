@@ -675,6 +675,11 @@ export function useAppLiveState(
   const pendingSessionRenderFrameRef = useRef<number | null>(null);
   const hasPendingSessionRenderRef = useRef(false);
   const pendingSessionStoreSyncIdsRef = useRef<Set<string>>(new Set());
+  // Session panes subscribe through session-store. Session deltas publish their
+  // changed slices immediately, while the pending-id queue stays armed so the
+  // coalesced frame can still prune ids that disappear before the broad
+  // `sessions` render flushes.
+  const eagerlyPublishedSessionStoreIdsRef = useRef<Set<string>>(new Set());
   const pendingCodexStateRenderFrameRef = useRef<number | null>(null);
   const hasPendingCodexStateRenderRef = useRef(false);
 
@@ -689,9 +694,10 @@ export function useAppLiveState(
 
   function queueSessionSliceForRender(sessionId: string) {
     pendingSessionStoreSyncIdsRef.current.add(sessionId);
+    eagerlyPublishedSessionStoreIdsRef.current.delete(sessionId);
   }
 
-  function flushPendingSessionStoreSync(sessionSnapshot = sessionsRef.current) {
+  function publishQueuedSessionSlices(sessionSnapshot = sessionsRef.current) {
     const pendingSessionIds = pendingSessionStoreSyncIdsRef.current;
     if (pendingSessionIds.size === 0) {
       return;
@@ -704,10 +710,43 @@ export function useAppLiveState(
       const session = sessionsById.get(sessionId);
       return session ? [session] : [];
     });
+    if (changedSessions.length === 0) {
+      return;
+    }
+    changedSessions.forEach((session) => {
+      eagerlyPublishedSessionStoreIdsRef.current.add(session.id);
+    });
+
+    syncComposerSessionsStoreIncremental({
+      changedSessions,
+      draftsBySessionId: draftsBySessionIdRef.current,
+      draftAttachmentsBySessionId: draftAttachmentsBySessionIdRef.current,
+      removedSessionIds: [],
+    });
+  }
+
+  function flushPendingSessionStoreSync(sessionSnapshot = sessionsRef.current) {
+    const pendingSessionIds = pendingSessionStoreSyncIdsRef.current;
+    if (pendingSessionIds.size === 0) {
+      return;
+    }
+
+    const sessionsById = new Map(
+      sessionSnapshot.map((session) => [session.id, session]),
+    );
+    const eagerlyPublishedSessionIds = eagerlyPublishedSessionStoreIdsRef.current;
+    const changedSessions = [...pendingSessionIds].flatMap((sessionId) => {
+      const session = sessionsById.get(sessionId);
+      if (!session || eagerlyPublishedSessionIds.has(sessionId)) {
+        return [];
+      }
+      return [session];
+    });
     const removedSessionIds = [...pendingSessionIds].filter(
       (sessionId) => !sessionsById.has(sessionId),
     );
     pendingSessionIds.clear();
+    eagerlyPublishedSessionIds.clear();
     if (changedSessions.length === 0 && removedSessionIds.length === 0) {
       return;
     }
@@ -733,6 +772,7 @@ export function useAppLiveState(
     }
     hasPendingSessionRenderRef.current = false;
     pendingSessionStoreSyncIdsRef.current.clear();
+    eagerlyPublishedSessionStoreIdsRef.current.clear();
   }
 
   function cancelPendingCodexStateRender() {
@@ -2784,6 +2824,7 @@ export function useAppLiveState(
                 ) ?? null;
               if (updatedSession) {
                 queueSessionSliceForRender(updatedSession.id);
+                publishQueuedSessionSlices(result.sessions);
               }
               scheduleSessionRender();
               setBackendConnectionIssueDetail(null);
@@ -2888,6 +2929,7 @@ export function useAppLiveState(
                 ) ?? null;
               if (updatedSession) {
                 queueSessionSliceForRender(updatedSession.id);
+                publishQueuedSessionSlices(result.sessions);
               }
               scheduleSessionRender();
               setBackendConnectionIssueDetail(null);
@@ -2959,6 +3001,7 @@ export function useAppLiveState(
           deltaSessionIds.forEach((sessionId) => {
             queueSessionSliceForRender(sessionId);
           });
+          publishQueuedSessionSlices(nextSessions);
           orchestratorsRef.current = delta.orchestrators;
           startTransition(() => {
             setOrchestrators(delta.orchestrators);
@@ -2999,6 +3042,7 @@ export function useAppLiveState(
             null;
           if (updatedSession) {
             queueSessionSliceForRender(updatedSession.id);
+            publishQueuedSessionSlices(result.sessions);
           }
           scheduleSessionRender();
           setBackendConnectionIssueDetail(null);
