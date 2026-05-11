@@ -761,6 +761,46 @@ fn telegram_prompt_error_text_uses_safe_generic_detail() {
 }
 
 #[test]
+fn telegram_unlinked_start_message_points_to_trusted_chat_binding() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    );
+    let mut config = telegram_test_config();
+    config.chat_id = None;
+    let mut state = TelegramBotState::default();
+
+    let changed = handle_telegram_message(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        TelegramChatMessage {
+            message_id: 1,
+            chat: TelegramChat {
+                id: 123,
+                _kind: "private".to_owned(),
+            },
+            text: Some("/start".to_owned()),
+        },
+    )
+    .expect("unlinked startup message should send guidance");
+
+    assert!(!changed);
+    assert_eq!(
+        telegram.sent_texts.borrow().as_slice(),
+        ["This TermAl relay is not linked. Set TERMAL_TELEGRAM_CHAT_ID=123 before starting the relay.".to_owned()]
+    );
+    assert_eq!(state.chat_id, None);
+}
+
+#[test]
 fn truncate_telegram_user_error_detail_respects_tiny_limits() {
     assert_eq!(truncate_telegram_user_error_detail("abcdef", 0), "");
     assert_eq!(truncate_telegram_user_error_detail("abcdef", 1), "a");

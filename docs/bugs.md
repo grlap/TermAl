@@ -1781,8 +1781,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   start near bottom, send with a pending POST, grow `scrollHeight`, and assert no old-target smooth scroll fires before the prompt lands.
 - [ ] P2: Add waiting-indicator bottom-follow negative coverage:
   cover no duplicate scroll while the live indicator remains visible, far-from-bottom no-op, inactive pane/view not consuming the rising edge, and virtualized-transcript bottom-follow behavior.
-- [ ] P2: Add Telegram startup-message coverage:
-  assert the no-chat startup message points to `TERMAL_TELEGRAM_CHAT_ID` / trusted state binding rather than first-touch `/start`.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
 - [ ] P2: Add equal-revision gap repair snapshot adoption coverage:
