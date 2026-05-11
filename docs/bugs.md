@@ -1960,8 +1960,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   mount an overview-controller harness, flush one or two frames so a queued second-rAF or FIFO task is alive, then unmount and flush the remaining frames asserting that `setIsRailReady(true)` was never observed and the FIFO is empty. The current test never unmounts mid-pending so the rAF cancellation paths and FIFO splice-by-task-id are unexercised.
 - [ ] P2: Finish splitting the remaining marker-menu create/remove test:
   the marker-menu coverage now has focused cases for keyboard trigger, portal cleanup, scroll/resize close, explicit trigger contract, and clamp fallback. The original create/remove test still combines add/remove, Escape focus restore, ArrowDown navigation, and rect-based clamp behavior; split the remaining assertions if it grows again.
-- [ ] P2: Cover the tail-then-full race-detection early-return:
-  app-live-state.ts:1333 (`attemptedTailHydration && !sessionStillNeedsHydration`) handles a real race but is uncovered. Simulate: tail mock resolves; during `act`, dispatch a delta or other path that completes hydration before the full fetch runs. Assert no full fetch is issued and the session is added to `hydratedSessionIdsRef`.
 - [ ] P2: Cover concurrent SSE delta during tail-then-full window:
   between the tail response and the full fetch, dispatch a synthetic `messageCreated`/`textDelta` MessageEvent. Assert: (a) the delta is correctly applied to the partial-tail messages (or correctly degrades to needs-resync if the delta targets a missing-prefix message), (b) the full fetch eventually adopts and the resulting transcript reflects both the delta and the full-load.
 - [ ] P2: Cover `shouldStartTailFirstHydration` skip predicates:

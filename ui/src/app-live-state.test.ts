@@ -1814,6 +1814,63 @@ describe("hydration adoption side effects", () => {
     expect(fetchState).not.toHaveBeenCalled();
   });
 
+  it("skips full hydration when another path completes during partial tail adoption", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+
+    const messages = makeHydrationMessages(150);
+    const initialSession = makeSession({
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: makeSession({
+        messages: messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT),
+        messagesLoaded: false,
+        messageCount: messages.length,
+        sessionMutationStamp: 1,
+      }),
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+    params.stateSetters.setSessions = vi.fn((nextSessions: Session[]) => {
+      params.adoptionRefs.sessionsRef.current = nextSessions.map((session) =>
+        session.id === initialSession.id
+          ? {
+              ...session,
+              messages,
+              messagesLoaded: true,
+              messageCount: messages.length,
+              sessionMutationStamp: 1,
+            }
+          : session,
+      );
+    }) as typeof params.stateSetters.setSessions;
+    let hook: UseAppLiveStateReturn | null = null;
+
+    renderLiveStateHarness(params, (nextHook) => {
+      hook = nextHook;
+    });
+
+    await waitFor(() => expect(api.fetchSessionTail).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(hook?.hydratedSessionIdsRef.current.has("session-1")).toBe(true),
+    );
+    expect(fetchSession).not.toHaveBeenCalled();
+  });
+
   it("refetches after a missing-prefix delta races with tail-then-full hydration", async () => {
     vi.stubGlobal(
       "EventSource",
