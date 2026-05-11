@@ -1229,6 +1229,27 @@ describe("Backend connection state", () => {
       ).toBeInTheDocument();
 
       act(() => {
+        eventSource.dispatchNamedEvent("workspaceFilesChanged", {
+          revision: 2,
+          changes: [
+            {
+              path: "/tmp/src/main.rs",
+              kind: "modified",
+              rootPath: "/tmp",
+              sessionId: "session-1",
+            },
+          ],
+        });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+      expect(countStateFetches()).toBe(hydratedStateFetchCount);
+
+      act(() => {
         eventSource.dispatchDelta({
           type: "messageCreated",
           revision: 0,
@@ -1245,17 +1266,6 @@ describe("Backend connection state", () => {
           },
           preview: "Stale ignored delta.",
           status: "active",
-        });
-        eventSource.dispatchNamedEvent("workspaceFilesChanged", {
-          revision: 2,
-          changes: [
-            {
-              path: "/tmp/src/main.rs",
-              kind: "modified",
-              rootPath: "/tmp",
-              sessionId: "session-1",
-            },
-          ],
         });
       });
       await act(async () => {

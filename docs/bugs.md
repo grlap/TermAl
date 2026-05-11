@@ -1918,8 +1918,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   assert prev/next scrolls the only Markdown diff change and the only rendered diff region even though the selected index does not change.
 - [ ] P2: Route the new lagged-recovery reconnect test through the textDelta fast-path it documents:
   the new `App.live-state.reconnect.test.tsx` test exercises the revision-gap branch (the `messageCreated` delta omits `sessionMutationStamp` so it falls into the resync fallback). Add `sessionMutationStamp` so the delta routes through the matched-stamp fast-path that the surrounding `handleDeltaEvent` comment is most concerned about, OR rename the test to clarify it covers the revision-gap branch specifically and add a sibling test for the textDelta fast-path.
-- [ ] P2: Split the bad-live-event + workspaceFilesChanged test into isolated arrange-act-assert phases:
-  `ui/src/backend-connection.test.tsx:1225-1261` co-fires the stale `delta` and the `workspaceFilesChanged` event in one `act()`. The assertion `countStateFetches() === hydratedStateFetchCount` is satisfied if either side skips confirmation, so the test cannot pinpoint which side regressed. Dispatch `workspaceFilesChanged` alone first and assert no fetch fired; then add the stale delta separately and re-assert.
 - [ ] P2: Add frontend stop/failure delta-before-snapshot terminal-message coverage:
   dispatch cancellation/update deltas before the same-revision snapshot and assert appended stop/failure terminal messages remain rendered without relying on a later unrelated refresh.
 - [ ] P1: Add Telegram-relay unit tests for the pure helpers introduced in `src/telegram.rs`:
