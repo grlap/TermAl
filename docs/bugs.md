@@ -1968,8 +1968,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   spy on `node.removeEventListener` and assert each event name is removed on unmount/sessionId change. A leak that retains a listener on a detached scrollNode would not be caught.
 - [ ] P2: Cover touch hydration semantics in `AgentSessionPanel.test.tsx`:
   dispatch touchstart at clientY=100, then touchmove at clientY=50 (negative delta, pull-up) → no hydration. Then touchstart at clientY=100, touchmove at clientY=200 (pull-down) → hydration. Verify touchend resets `lastTouchClientY` so the next touchstart starts fresh.
-- [ ] P2: Cover post-arrival demand hydration:
-  in `AgentSessionPanel.test.tsx`, fire a demand gesture after message arrival to prove the retained listener still hydrates the transcript.
 - [ ] P2: Cover same-size tail-window overview translation shifts:
   build or render two different 20-message tail windows with the same `messageCount` and assert stale viewport translation is not reused across first/last message id changes. Include a cross-session case where one session's snapshot is queried against another's projection at the same `messageCount`.
 - [ ] P2: Cover `resolveViewportSnapshotTranslation` negative branches:

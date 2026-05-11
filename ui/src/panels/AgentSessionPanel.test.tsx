@@ -4134,6 +4134,75 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
+  it("hydrates from retained demand listeners after a message arrives", async () => {
+    vi.useFakeTimers();
+    const OriginalResizeObserver = window.ResizeObserver;
+    const scrollNode = document.createElement("section");
+    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+
+    try {
+      const initialMessages = makeTextMessages(600);
+      document.body.append(scrollNode);
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("active-session", {
+          status: "idle",
+          messages: initialMessages,
+        }),
+        scrollContainerRef: { current: scrollNode },
+      });
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+
+      act(() => {
+        syncComposerSessionsStore({
+          sessions: [
+            makeSession("active-session", {
+              status: "idle",
+              messages: [
+                ...initialMessages,
+                {
+                  author: "assistant",
+                  id: "message-601",
+                  text: "message-601",
+                  timestamp: "10:00",
+                  type: "text",
+                },
+              ],
+            }),
+          ],
+          draftsBySessionId: {},
+          draftAttachmentsBySessionId: {},
+        });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
+
+      act(() => {
+        scrollNodeMocks.setScrollTop(50);
+        fireEvent.wheel(scrollNode, { deltaY: -120 });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      scrollNodeMocks.cleanup();
+      scrollNode.remove();
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["Claude", "new prompt", "Claude is working — Waiting for output"],
     ["Cursor", "new prompt", "Cursor is working — Waiting for output"],
