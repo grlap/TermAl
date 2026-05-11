@@ -672,20 +672,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 **Proposal:**
 - Either (a) extract a small `markFullyHydrated(sessionId)` helper that wraps the add + clearHydrationRetry pair (already paired at all three sites), OR (b) compute "is this session fully hydrated" from session state at use sites and stop tracking it in a separate ref.
 
-## `?tail=N` query parameter is not documented in `docs/architecture.md`
-
-**Severity:** Medium - the new parameter, the `messages_loaded` invariant, the silent cap at 500, and the local-only scope are nowhere documented.
-
-`src/api.rs:121-141`. `docs/architecture.md:191` describes `GET /api/sessions/{id}` without mentioning the query parameter. `docs/metadata-first-state-plan.md:758` even says "Pagination of `GET /api/sessions/{id}` is a non-goal" — contradicting the new tail parameter without an update. Frontend's `classifyFetchedSessionAdoption` and `adoptFetchedSession` treat tail responses as "partial" via `allowPartialTranscript: true` — this contract should be pinned in docs.
-
-**Current behavior:**
-- `?tail=N` query parameter implemented but undocumented.
-- `metadata-first-state-plan.md` still claims pagination is a non-goal.
-
-**Proposal:**
-- Update `docs/architecture.md` to document `?tail=N`, the messages_loaded invariant, the silent cap at `SESSION_TAIL_HYDRATION_MAX_MESSAGES = 500`, the local-only scope, and the tail/full revision-may-differ contract.
-- Update `docs/metadata-first-state-plan.md` to clarify the tail-first hydration carve-out is not pagination.
-
 ## `fullRequestContext` recapture pattern is silently load-bearing but undocumented
 
 **Severity:** Low - line 1338 recaptures the request context after partial adoption mutated `sessionsRef`. Without this recapture, the full fetch would compare against pre-tail metadata and likely classify as `stale`. A future "simplification" back to the original `requestContext` would silently break the classifier.

@@ -755,9 +755,11 @@ Required updates:
   - Add a **Version negotiation** note referencing
     `HealthResponse.supportsMetadataFirstState` and the fallback path for
     legacy remotes during the transitional window.
-  - Explicitly mark pagination of `GET /api/sessions/{id}` as a non-goal
-    for this plan (a long Codex thread still pays a full-transcript parse
-    on hydration; a `?offset=` endpoint is a separate project).
+  - Explicitly mark general pagination of `GET /api/sessions/{id}` as a
+    non-goal for this plan. Tail-first hydration may use
+    `GET /api/sessions/{id}?tail=N` as a bounded newest-message shortcut, but a
+    random-access `?offset=` or cursor pagination endpoint is a separate
+    project.
 
 - Security review
   - Run the `security-review` lens against the implementation PR. Accepted

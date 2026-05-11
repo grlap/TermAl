@@ -190,7 +190,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/projects/{id}/actions/{action_id}` | Dispatch a digest action such as approve, continue, or stop |
 | POST | `/api/projects/pick` | Pick a local project root |
 | POST | `/api/sessions` | Create session |
-| GET | `/api/sessions/{id}` | Fetch one session -> `SessionResponse { revision, serverInstanceId, session }`. Local sessions return full transcripts; remote-proxy sessions can return an unloaded cached summary (`messagesLoaded: false`) on recoverable hydration fallback. |
+| GET | `/api/sessions/{id}` | Fetch one session -> `SessionResponse { revision, serverInstanceId, session }`. Local sessions return full transcripts unless `?tail=N` is supplied; remote-proxy sessions can return an unloaded cached summary (`messagesLoaded: false`) on recoverable hydration fallback. |
 | POST | `/api/sessions/{id}/settings` | Update session config |
 | POST | `/api/sessions/{id}/model-options/refresh` | Refresh live model list/options |
 | POST | `/api/sessions/{id}/codex/thread/fork` | Fork the live Codex thread into a new session |
@@ -229,6 +229,16 @@ snapshot, TermAl can return the cached local summary with
 `messagesLoaded: false`. Frontend targeted hydration must keep that response
 unloaded and retry later rather than treating HTTP success as full transcript
 hydration.
+
+`GET /api/sessions/{id}?tail=N` is the local tail-first hydration shortcut. It
+requires `N >= 1`, silently caps `N` at
+`SESSION_TAIL_HYDRATION_MAX_MESSAGES = 500`, and returns the newest messages
+while preserving the full `messageCount`. Tail responses keep
+`messagesLoaded: false` unless the returned window covers the whole loaded
+transcript; clients must treat that shape as a partial tail window and still
+fetch the full session. The tail response and the later full response are
+separate HTTP reads, so their `revision` values may differ if the session
+changes between requests.
 
 `GET /api/health` currently returns `{ ok: true, supportsInlineOrchestratorTemplates: true }`. Remote launchers use `supportsInlineOrchestratorTemplates` during health probes to decide whether a remote can accept inline local orchestrator templates or must be upgraded first.
 
