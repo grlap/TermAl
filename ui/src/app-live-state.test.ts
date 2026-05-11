@@ -1596,6 +1596,146 @@ describe("hydration adoption side effects", () => {
     );
   });
 
+  it("refetches after a missing-prefix delta races with tail-then-full hydration", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+
+    const messages: Message[] = Array.from({ length: 150 }, (_, index) => ({
+      id: `message-${index + 1}`,
+      type: "text",
+      author: index % 2 === 0 ? "you" : "assistant",
+      timestamp: `10:${String(index).padStart(2, "0")}`,
+      text: `Message ${index + 1}`,
+    }));
+    const updatedMessages = messages.map((message) =>
+      message.id === "message-30"
+        ? { ...message, text: "Message 30 updated" }
+        : message,
+    );
+    const initialSession = makeSession({
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    const tailSession = makeSession({
+      messages: messages.slice(-20),
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    const staleFullSession = makeSession({
+      messages,
+      messagesLoaded: true,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    const updatedFullSession = makeSession({
+      messages: updatedMessages,
+      messagesLoaded: true,
+      messageCount: updatedMessages.length,
+      sessionMutationStamp: 2,
+    });
+
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: tailSession,
+    });
+    let resolveStaleFullHydration!: (
+      response: Awaited<ReturnType<typeof api.fetchSession>>,
+    ) => void;
+    const staleFullHydration = new Promise<
+      Awaited<ReturnType<typeof api.fetchSession>>
+    >((resolve) => {
+      resolveStaleFullHydration = resolve;
+    });
+    let resolveUpdatedFullHydration!: (
+      response: Awaited<ReturnType<typeof api.fetchSession>>,
+    ) => void;
+    const updatedFullHydration = new Promise<
+      Awaited<ReturnType<typeof api.fetchSession>>
+    >((resolve) => {
+      resolveUpdatedFullHydration = resolve;
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementationOnce(() => staleFullHydration)
+      .mockImplementationOnce(() => updatedFullHydration);
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    renderLiveStateHarness(params, () => {});
+
+    await waitFor(() =>
+      expect(params.adoptionRefs.sessionsRef.current[0]?.messages[0]?.id).toBe(
+        "message-131",
+      ),
+    );
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "messageUpdated",
+        revision: 6,
+        sessionId: "session-1",
+        messageId: "message-30",
+        messageIndex: 29,
+        messageCount: updatedMessages.length,
+        message: updatedMessages[29],
+        preview: "Message 30 updated",
+        status: "idle",
+        sessionMutationStamp: 2,
+      });
+    });
+
+    await waitFor(() =>
+      expect(params.adoptionRefs.sessionsRef.current[0]?.sessionMutationStamp).toBe(
+        2,
+      ),
+    );
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveStaleFullHydration({
+        revision: 5,
+        serverInstanceId: "server-a",
+        session: staleFullSession,
+      });
+      await staleFullHydration;
+    });
+
+    await waitFor(() => expect(fetchSession).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      resolveUpdatedFullHydration({
+        revision: 6,
+        serverInstanceId: "server-a",
+        session: updatedFullSession,
+      });
+      await updatedFullHydration;
+    });
+
+    await waitFor(() =>
+      expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
+        true,
+      ),
+    );
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages[29]).toMatchObject(
+      {
+        id: "message-30",
+        text: "Message 30 updated",
+      },
+    );
+  });
+
   it("starts tail-first hydration only at the large-session threshold", async () => {
     vi.stubGlobal(
       "EventSource",

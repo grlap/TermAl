@@ -631,6 +631,7 @@ export function useAppLiveState(
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
   const hydratedSessionIdsRef = useRef<Set<string>>(new Set());
   const hydrationMismatchSessionIdsRef = useRef<Set<string>>(new Set());
+  const queuedHydrationSessionIdsRef = useRef<Set<string>>(new Set());
   const queuedTextRepairHydrationSessionIdsRef = useRef<Set<string>>(
     new Set(),
   );
@@ -1139,6 +1140,11 @@ export function useAppLiveState(
           (sessionId) => availableSessionIds.has(sessionId),
         ),
       );
+      queuedHydrationSessionIdsRef.current = new Set(
+        [...queuedHydrationSessionIdsRef.current].filter((sessionId) =>
+          availableSessionIds.has(sessionId),
+        ),
+      );
       for (const sessionId of hydrationRetryTimersRef.current.keys()) {
         if (!availableSessionIds.has(sessionId)) {
           clearHydrationRetry(sessionId);
@@ -1358,9 +1364,15 @@ export function useAppLiveState(
 
   function startSessionHydration(
     sessionId: string,
-    options?: { allowDivergentTextRepairAfterNewerRevision?: boolean },
+    options?: {
+      allowDivergentTextRepairAfterNewerRevision?: boolean;
+      queueAfterCurrent?: boolean;
+    },
   ) {
     if (hydratingSessionIdsRef.current.has(sessionId)) {
+      if (options?.queueAfterCurrent === true) {
+        queuedHydrationSessionIdsRef.current.add(sessionId);
+      }
       if (options?.allowDivergentTextRepairAfterNewerRevision === true) {
         queuedTextRepairHydrationSessionIdsRef.current.add(sessionId);
       }
@@ -1565,6 +1577,13 @@ export function useAppLiveState(
           });
           return;
         }
+        if (
+          queuedHydrationSessionIdsRef.current.delete(sessionId) &&
+          isMountedRef.current
+        ) {
+          startSessionHydration(sessionId);
+          return;
+        }
         if (shouldRetryHydration) {
           scheduleHydrationRetry(sessionId);
         }
@@ -1670,6 +1689,7 @@ export function useAppLiveState(
     if (fullStateServerInstanceChanged) {
       hydratingSessionIdsRef.current.clear();
       hydratedSessionIdsRef.current.clear();
+      queuedHydrationSessionIdsRef.current.clear();
       queuedTextRepairHydrationSessionIdsRef.current.clear();
       // Caller-requested EventSource recreation on instance change. See
       // `forceSseReconnect` for the full context. The flag is set
@@ -2855,7 +2875,9 @@ export function useAppLiveState(
                   forceAdoptEqualOrNewerRevision: delta.revision,
                   rearmOnFailure: true,
                 });
-                startSessionHydration(delta.sessionId);
+                startSessionHydration(delta.sessionId, {
+                  queueAfterCurrent: true,
+                });
               }
               return;
             }
@@ -2965,6 +2987,7 @@ export function useAppLiveState(
                 startSessionHydration(delta.sessionId, {
                   allowDivergentTextRepairAfterNewerRevision:
                     delta.type === "textDelta",
+                  queueAfterCurrent: result.kind === "appliedNeedsResync",
                 });
               }
               return;
@@ -2982,7 +3005,7 @@ export function useAppLiveState(
           // `messagesLoaded: true`. `hydratingSessionIdsRef` deduplicates so
           // a no-op when hydration is already in flight or queued.
           if (isSessionDeltaEvent(delta)) {
-            startSessionHydration(delta.sessionId);
+            startSessionHydration(delta.sessionId, { queueAfterCurrent: true });
           }
           return;
         }
@@ -3084,7 +3107,7 @@ export function useAppLiveState(
             // the full transcript via `/api/sessions/{id}` so the missing
             // message body actually appears. See bugs.md "Stuck assistant
             // reply visible only after refresh".
-            startSessionHydration(delta.sessionId);
+            startSessionHydration(delta.sessionId, { queueAfterCurrent: true });
           }
           return;
         }

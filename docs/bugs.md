@@ -583,23 +583,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 **Proposal:**
 - Attach a `Retry-After: 2` header, or add a stable `retryAfterSeconds` field to the error contract.
 
-## `messageUpdated`/`textDelta`/`textReplace` for missing-prefix message IDs silently degrade to `appliedNeedsResync` after partial adoption
-
-**Severity:** High - the partial-tail post-condition (`messagesLoaded: false`, `messages.length: N`, `messageCount: M > N`) creates a real gap window where deltas targeting messages in the unloaded prefix are silently dropped on the floor as metadata-only.
-
-`ui/src/live-updates.ts:472-512, 530-540, 589-599, 644-654`. After tail adoption, the local session has, e.g., `messages.length: 100`, `messageCount: 150` — gap between messages 1-50 (missing) and 51-150 (present). When a `messageUpdated` SSE delta arrives for `message-30`, `findMessageIndex` returns -1, the code calls `applyMetadataOnlySessionDelta` and returns `appliedNeedsResync`. The metadata advances but the textual update is dropped. The classifier no longer distinguishes "message id missing because session not yet hydrated" (the pre-tail-first invariant: `messages.length === 0`) from "message id missing because it's in the partial-tail prefix gap." Before this change, that branch was reachable only when zero messages were loaded; the comment-on-record relied on the assumption "no messages → resync recovers." Now the partial tail keeps the gap permanently arming this codepath until the full fetch lands, and during active streaming with retries failing the text update on `message-30` may be lost in a new risk window.
-
-**Current behavior:**
-- After partial tail adoption, the local session has a real prefix gap.
-- Deltas targeting missing-prefix message IDs degrade to `appliedNeedsResync`.
-- Resync schedules eventually recover, but during active streaming the textual update is dropped during the recovery window.
-- No explicit tracking of "this message ID is in our gap, not just generally missing".
-
-**Proposal:**
-- Track which message IDs are present in the local transcript explicitly (or the transcript-coverage range as a `[startIndex, endIndex)` tuple), so the "this index is in our gap, ignore" branch is tested directly rather than inferred from `findMessageIndex === -1 + messagesLoaded === false`.
-- Or refuse to enter partial state — keep the tail-first response but immediately invalidate it if any `messageUpdated`/`textDelta` for an unloaded-prefix index arrives before the full fetch lands.
-- Add coverage where (a) tail adopts partial, (b) `messageUpdated` for `message-30` (in gap) is dispatched, (c) full fetch lands with the updated message-30 text. Today the textual update is lost; verify the full fetch carries the correct text.
-
 ## `SESSION_TAIL_HYDRATION_MAX_MESSAGES = 500` silent cap with no signal to caller
 
 **Severity:** Medium - `message_limit.min(SESSION_TAIL_HYDRATION_MAX_MESSAGES)` truncates without a status code, header, or response field. Future callers cannot detect that they got a different prefix than they asked for.
