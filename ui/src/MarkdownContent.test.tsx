@@ -1547,6 +1547,37 @@ describe("MarkdownContent", () => {
       ).toBeNull();
     });
 
+    it("preserves settled prefix DOM nodes when a streaming table settles", () => {
+      const markdown = [
+        "Here is the result:",
+        "",
+        "| Col A | Col B |",
+        "| --- | --- |",
+        "| 1 | 2 |",
+        "",
+      ].join("\n");
+      const { container, rerender } = render(
+        <MarkdownContent isStreaming markdown={markdown} />,
+      );
+      const settledParagraph = container.querySelector(".markdown-copy p");
+      expect(settledParagraph).not.toBeNull();
+      expect(settledParagraph?.textContent).toBe("Here is the result:");
+      expect(
+        container.querySelector(".markdown-streaming-fragment"),
+      ).not.toBeNull();
+
+      rerender(<MarkdownContent markdown={markdown} />);
+
+      expect(container.contains(settledParagraph)).toBe(true);
+      expect(container.querySelector(".markdown-copy p")).toBe(
+        settledParagraph,
+      );
+      expect(
+        container.querySelector(".markdown-table-scroll table"),
+      ).not.toBeNull();
+      expect(container.querySelector(".markdown-streaming-fragment")).toBeNull();
+    });
+
     it("renders the settled prefix as Markdown alongside a deferred trailing partial table", () => {
       // Realistic mid-stream shape: a paragraph has settled, then a
       // table starts streaming. The paragraph must render through

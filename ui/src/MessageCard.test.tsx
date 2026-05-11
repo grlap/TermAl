@@ -952,6 +952,55 @@ describe("MessageCard", () => {
     );
   });
 
+  it("preserves settled prefix DOM nodes when active streaming markdown settles", () => {
+    const message: TextMessage = {
+      id: "message-streaming-table-settles",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: [
+        "Tracked Project Total",
+        "",
+        "| Group | Files | Lines | Size |",
+        "| --- | ---: | ---: | ---: |",
+        "| Backend | 107 | 87,395 | 3.19 MiB |",
+        "",
+      ].join("\n"),
+    };
+
+    const { container, rerender } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        isStreamingAssistantTextMessage
+      />,
+    );
+    const settledParagraph = container.querySelector(".markdown-copy p");
+    expect(settledParagraph).not.toBeNull();
+    expect(settledParagraph?.textContent).toBe("Tracked Project Total");
+    expect(
+      container.querySelector(".markdown-streaming-fragment"),
+    ).not.toBeNull();
+
+    rerender(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(container.contains(settledParagraph)).toBe(true);
+    expect(container.querySelector(".markdown-copy p")).toBe(
+      settledParagraph,
+    );
+    expect(
+      container.querySelector(".markdown-table-scroll table"),
+    ).not.toBeNull();
+    expect(container.querySelector(".markdown-streaming-fragment")).toBeNull();
+  });
+
   it("routes active streaming standalone display math through the pending markdown placeholder", () => {
     const message: TextMessage = {
       id: "message-streaming-display-math",

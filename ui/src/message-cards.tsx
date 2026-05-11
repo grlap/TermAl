@@ -3739,6 +3739,31 @@ export function MarkdownContent({
         : { settled: markdown, pending: "" },
     [isStreaming, markdown],
   );
+  // Preserve the already-rendered prefix across the streaming -> settled flip.
+  // The prefix exists only before the first deferred block, so block-level
+  // budgets still apply to the remainder. Line-numbered callers need a single
+  // source-position document, so they intentionally skip this preservation path.
+  const streamingSettledPrefixRef = useRef<string | null>(null);
+  const previousStreamingSettledPrefix = streamingSettledPrefixRef.current;
+  const shouldPreserveStreamingSettledPrefix =
+    !isStreaming &&
+    !showLineNumbers &&
+    previousStreamingSettledPrefix != null &&
+    previousStreamingSettledPrefix.length > 0 &&
+    previousStreamingSettledPrefix.length < markdown.length &&
+    markdown.startsWith(previousStreamingSettledPrefix);
+  const primarySettledMarkdown = shouldPreserveStreamingSettledPrefix
+    ? previousStreamingSettledPrefix
+    : settledMarkdown;
+  const settledRemainderMarkdown = shouldPreserveStreamingSettledPrefix
+    ? markdown.slice(previousStreamingSettledPrefix.length)
+    : "";
+  if (isStreaming) {
+    streamingSettledPrefixRef.current =
+      settledMarkdown.length > 0 ? settledMarkdown : null;
+  } else if (!shouldPreserveStreamingSettledPrefix) {
+    streamingSettledPrefixRef.current = null;
+  }
   // Keep callback in a ref so the memoized ReactMarkdown output stays stable
   // even when the parent re-renders with a new function reference.  Without
   // this, every re-render regenerates the entire markdown DOM tree, which
@@ -3852,7 +3877,10 @@ export function MarkdownContent({
     // raw text in a `<pre>`), so it is correctly excluded.
   }, [settledMarkdown, normalizedStartLineNumber, showLineNumbers]);
 
-  const rendered = useMemo(() => {
+  const renderMarkdownDocument = useCallback((
+    documentMarkdown: string,
+    key: string,
+  ) => {
     const highlightChildren = (children: ReactNode) =>
       highlightReactNodeText(children, searchQuery, searchHighlightTone);
     const getLineAttributes = (
@@ -3866,6 +3894,7 @@ export function MarkdownContent({
 
     return (
       <ReactMarkdown
+        key={key}
         rawSourcePos={showLineNumbers}
         transformLinkUri={transformMarkdownLinkUri}
         components={{
@@ -4375,7 +4404,7 @@ export function MarkdownContent({
         rehypePlugins={[[rehypeKatex, MARKDOWN_REHYPE_KATEX_OPTIONS]]}
         remarkPlugins={MARKDOWN_REMARK_PLUGINS}
       >
-        {settledMarkdown}
+        {documentMarkdown}
       </ReactMarkdown>
     );
   }, [
@@ -4384,7 +4413,6 @@ export function MarkdownContent({
     fillMermaidAvailableSpace,
     hasTooManyMathExpressions,
     hasTooManyMermaidDiagrams,
-    settledMarkdown,
     mermaidDiagramCount,
     normalizedStartLineNumber,
     preserveMermaidSource,
@@ -4395,6 +4423,26 @@ export function MarkdownContent({
     workspaceRoot,
     hasOpenSourceLink,
   ]);
+  const renderedPrimary = useMemo(
+    () => renderMarkdownDocument(primarySettledMarkdown, "settled-primary"),
+    [primarySettledMarkdown, renderMarkdownDocument],
+  );
+  const renderedRemainder = useMemo(
+    () =>
+      settledRemainderMarkdown
+        ? renderMarkdownDocument(settledRemainderMarkdown, "settled-remainder")
+        : null,
+    [settledRemainderMarkdown, renderMarkdownDocument],
+  );
+  const rendered = useMemo(
+    () => (
+      <>
+        {renderedPrimary}
+        {renderedRemainder}
+      </>
+    ),
+    [renderedPrimary, renderedRemainder],
+  );
 
   return (
     <div
