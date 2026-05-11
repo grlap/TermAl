@@ -189,6 +189,9 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | GET | `/api/projects/{id}/digest` | Read the project digest used by Telegram/mobile workflows |
 | POST | `/api/projects/{id}/actions/{action_id}` | Dispatch a digest action such as approve, continue, or stop |
 | POST | `/api/projects/pick` | Pick a local project root |
+| GET | `/api/telegram/status` | Read Telegram relay configuration/status -> `TelegramStatusResponse` with configured/enabled/running state, lifecycle, linked chat, masked token, subscribed projects, and default targets. |
+| POST | `/api/telegram/config` | Update Telegram relay token, enabled flag, subscribed projects, and default project/session. Returns sanitized `TelegramStatusResponse`; validation failures use the standard `{ "error": ... }` envelope. |
+| POST | `/api/telegram/test` | Validate a supplied or saved Telegram bot token through `getMe` -> `TelegramTestResponse`. Local test throttling returns `429` with `Retry-After`; Telegram auth/validation failures return `422`, and upstream/network failures return `502`. |
 | POST | `/api/sessions` | Create session |
 | GET | `/api/sessions/{id}` | Fetch one session -> `SessionResponse { revision, serverInstanceId, session }`. Local sessions return full transcripts unless `?tail=N` is supplied; remote-proxy sessions can return an unloaded cached summary (`messagesLoaded: false`) on recoverable hydration fallback. |
 | POST | `/api/sessions/{id}/settings` | Update session config |

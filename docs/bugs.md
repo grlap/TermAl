@@ -674,21 +674,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 - Add a global/concurrent cap and a bounded cache.
 - Rate-limit the endpoint independently of token identity.
 
-## Telegram routes and tail-session hydration are missing from the architecture endpoint table
-
-**Severity:** Low - newly implemented client-visible API behavior is not reflected in the central REST endpoint documentation.
-
-`src/main.rs:233` registers `/api/telegram/status`, `/api/telegram/config`, and `/api/telegram/test`, but `docs/architecture.md` does not list these routes in its endpoint table. The same table still describes `GET /api/sessions/{id}` as a full-session fetch even though the new `?tail=N` query can intentionally return a partial local transcript with `messagesLoaded: false`.
-
-**Current behavior:**
-- The feature brief mentions Telegram endpoints.
-- The architecture REST table omits methods, status/error semantics, and response shapes for the implemented Telegram routes.
-- The session-fetch contract does not document `tail`, the tail cap/semantics, or the partial-response shape.
-
-**Proposal:**
-- Add the Telegram routes to `docs/architecture.md` with methods, request/response shapes, and error semantics.
-- Document `GET /api/sessions/{id}?tail=N`, including when `messagesLoaded` is false and why callers must treat that response as a tail window rather than a full transcript.
-
 ## Telegram settings UI belongs behind a focused module boundary
 
 **Severity:** Low - the Telegram panel adds a large independent API workflow to the already broad preferences panel module.
