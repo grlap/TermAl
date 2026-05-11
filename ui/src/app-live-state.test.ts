@@ -2005,6 +2005,141 @@ describe("hydration adoption side effects", () => {
     );
   });
 
+  it("preserves a tail-window delta across tail-then-full hydration retry", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+
+    const messages = makeHydrationMessages(150);
+    const updatedMessages = messages.map((message) =>
+      message.id === "message-145"
+        ? { ...message, text: "Message 145 updated" }
+        : message,
+    );
+    const initialSession = makeSession({
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    const tailSession = makeSession({
+      messages: messages.slice(-20),
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    const updatedFullSession = makeSession({
+      messages: updatedMessages,
+      messagesLoaded: true,
+      messageCount: updatedMessages.length,
+      sessionMutationStamp: 2,
+    });
+
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: tailSession,
+    });
+    let resolveFirstFullHydration!: (
+      response: Awaited<ReturnType<typeof api.fetchSession>>,
+    ) => void;
+    const firstFullHydration = new Promise<
+      Awaited<ReturnType<typeof api.fetchSession>>
+    >((resolve) => {
+      resolveFirstFullHydration = resolve;
+    });
+    let resolveRetriedFullHydration!: (
+      response: Awaited<ReturnType<typeof api.fetchSession>>,
+    ) => void;
+    const retriedFullHydration = new Promise<
+      Awaited<ReturnType<typeof api.fetchSession>>
+    >((resolve) => {
+      resolveRetriedFullHydration = resolve;
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementationOnce(() => firstFullHydration)
+      .mockImplementationOnce(() => retriedFullHydration);
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    renderLiveStateHarness(params, () => {});
+
+    await waitFor(() =>
+      expect(params.adoptionRefs.sessionsRef.current[0]?.messages[0]?.id).toBe(
+        "message-131",
+      ),
+    );
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "messageUpdated",
+        revision: 6,
+        sessionId: "session-1",
+        messageId: "message-145",
+        messageIndex: 144,
+        messageCount: updatedMessages.length,
+        message: updatedMessages[144],
+        preview: "Message 145 updated",
+        status: "idle",
+        sessionMutationStamp: 2,
+      });
+    });
+
+    await waitFor(() =>
+      expect(
+        params.adoptionRefs.sessionsRef.current[0]?.messages.find(
+          (message) => message.id === "message-145",
+        ),
+      ).toMatchObject({
+        id: "message-145",
+        text: "Message 145 updated",
+      }),
+    );
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
+      false,
+    );
+
+    await act(async () => {
+      resolveFirstFullHydration({
+        revision: 6,
+        serverInstanceId: "server-a",
+        session: updatedFullSession,
+      });
+      await firstFullHydration;
+    });
+
+    await waitFor(() => expect(fetchSession).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      resolveRetriedFullHydration({
+        revision: 6,
+        serverInstanceId: "server-a",
+        session: updatedFullSession,
+      });
+      await retriedFullHydration;
+    });
+
+    await waitFor(() =>
+      expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
+        true,
+      ),
+    );
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages[144]).toMatchObject(
+      {
+        id: "message-145",
+        text: "Message 145 updated",
+      },
+    );
+  });
+
   it("starts tail-first hydration only at the large-session threshold", async () => {
     vi.stubGlobal(
       "EventSource",
