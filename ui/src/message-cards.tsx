@@ -3,6 +3,7 @@ import {
   isValidElement,
   memo,
   useContext,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -2102,6 +2103,149 @@ function parallelAgentDetail(agent: ParallelAgentsMessage["agents"][number]) {
   return agent.status === "error" ? "Task failed." : "Initializing...";
 }
 
+type ParallelAgent = ParallelAgentsMessage["agents"][number];
+type RunParallelAgentAction = (
+  actionKey: string,
+  action: () => Promise<void> | void,
+) => void;
+
+const ParallelAgentRow = memo(function ParallelAgentRow({
+  agent,
+  isLast,
+  pendingActionKeys,
+  onOpenAgentSession,
+  onInsertAgentResult,
+  onCancelAgent,
+  runAgentAction,
+  searchQuery,
+  searchHighlightTone,
+}: {
+  agent: ParallelAgent;
+  isLast: boolean;
+  pendingActionKeys: ReadonlySet<string>;
+  onOpenAgentSession?: (agentId: string) => Promise<void> | void;
+  onInsertAgentResult?: (agentId: string) => Promise<void> | void;
+  onCancelAgent?: (agentId: string) => Promise<void> | void;
+  runAgentAction: RunParallelAgentAction;
+  searchQuery: string;
+  searchHighlightTone: SearchHighlightTone;
+}) {
+  const isDelegationAgent = agent.source === "delegation";
+  // Action callbacks receive the bare delegation id because only delegation
+  // rows expose actions; tool-source rows are display-only.
+  const hasAgentActions =
+    isDelegationAgent &&
+    (onOpenAgentSession || onInsertAgentResult || onCancelAgent);
+  const agentIdentity = `${agent.source}:${agent.id}`;
+  const openActionKey = `${agentIdentity}:open`;
+  const insertActionKey = `${agentIdentity}:insert`;
+  const cancelActionKey = `${agentIdentity}:cancel`;
+  const isOpenPending = pendingActionKeys.has(openActionKey);
+  const isInsertPending = pendingActionKeys.has(insertActionKey);
+  const isCancelPending = pendingActionKeys.has(cancelActionKey);
+  const handleOpenAgentSession = useCallback(() => {
+    if (!onOpenAgentSession) {
+      return;
+    }
+    runAgentAction(openActionKey, () => onOpenAgentSession(agent.id));
+  }, [agent.id, onOpenAgentSession, openActionKey, runAgentAction]);
+  const handleInsertAgentResult = useCallback(() => {
+    if (!onInsertAgentResult) {
+      return;
+    }
+    runAgentAction(insertActionKey, () => onInsertAgentResult(agent.id));
+  }, [agent.id, insertActionKey, onInsertAgentResult, runAgentAction]);
+  const handleCancelAgent = useCallback(() => {
+    if (!onCancelAgent) {
+      return;
+    }
+    runAgentAction(cancelActionKey, () => onCancelAgent(agent.id));
+  }, [agent.id, cancelActionKey, onCancelAgent, runAgentAction]);
+
+  return (
+    <li
+      className={`parallel-agent-row parallel-agent-row-${parallelAgentStatusTone(agent.status)}`}
+    >
+      <div className="parallel-agent-line">
+        <span className="parallel-agent-branch" aria-hidden="true">
+          {isLast ? "\u2514" : "\u251c"}
+        </span>
+        <div className="parallel-agent-copy">
+          <div className="parallel-agent-title-row">
+            <span className="parallel-agent-title">
+              {renderHighlightedText(
+                agent.title,
+                searchQuery,
+                searchHighlightTone,
+              )}
+            </span>
+            <span
+              className={`parallel-agent-status parallel-agent-status-${parallelAgentStatusTone(agent.status)}`}
+            >
+              {parallelAgentStatusLabel(agent.status)}
+            </span>
+          </div>
+          <div className="parallel-agent-detail-row">
+            <span
+              className="parallel-agent-branch-child"
+              aria-hidden="true"
+            >
+              {isLast ? " " : "\u2502"}
+            </span>
+            <span className="parallel-agent-detail">
+              {renderHighlightedText(
+                parallelAgentDetail(agent),
+                searchQuery,
+                searchHighlightTone,
+              )}
+            </span>
+          </div>
+          {hasAgentActions ? (
+            <div className="parallel-agent-actions">
+              {onOpenAgentSession ? (
+                <button
+                  className="ghost-button parallel-agent-action"
+                  type="button"
+                  disabled={isOpenPending}
+                  aria-busy={isOpenPending}
+                  onClick={handleOpenAgentSession}
+                >
+                  Open session
+                </button>
+              ) : null}
+              {onInsertAgentResult &&
+              (agent.status === "completed" || agent.status === "error") ? (
+                <button
+                  className="ghost-button parallel-agent-action"
+                  type="button"
+                  disabled={isInsertPending}
+                  aria-busy={isInsertPending}
+                  onClick={handleInsertAgentResult}
+                >
+                  Insert result
+                </button>
+              ) : null}
+              {onCancelAgent &&
+              (agent.status === "initializing" ||
+                agent.status === "running") ? (
+                <button
+                  className="ghost-button parallel-agent-action parallel-agent-action-danger"
+                  type="button"
+                  disabled={isCancelPending}
+                  aria-busy={isCancelPending}
+                  onClick={handleCancelAgent}
+                >
+                  Cancel
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </li>
+  );
+});
+
 function ParallelAgentsCard({
   message,
   onOpenAgentSession,
@@ -2145,7 +2289,7 @@ function ParallelAgentsCard({
   const isExpanded = hasActiveAgents || isSearchExpanded || expanded;
   const heading = parallelAgentsHeading(message);
   const summary = parallelAgentsSummary(message);
-  const markActionPending = (actionKey: string) => {
+  const markActionPending = useCallback((actionKey: string) => {
     if (pendingActionKeysRef.current.has(actionKey)) {
       return false;
     }
@@ -2156,8 +2300,8 @@ function ParallelAgentsCard({
       setPendingActionKeys(nextKeys);
     }
     return true;
-  };
-  const clearActionPending = (actionKey: string) => {
+  }, []);
+  const clearActionPending = useCallback((actionKey: string) => {
     if (!pendingActionKeysRef.current.has(actionKey)) {
       return;
     }
@@ -2167,34 +2311,34 @@ function ParallelAgentsCard({
     if (mountedRef.current) {
       setPendingActionKeys(nextKeys);
     }
-  };
-  const runAgentAction = (
-    actionKey: string,
-    action: () => Promise<void> | void,
-  ) => {
-    if (!markActionPending(actionKey)) {
-      return;
-    }
-    let result: Promise<void> | void;
-    try {
-      result = action();
-    } catch (error) {
-      clearActionPending(actionKey);
-      throw error;
-    }
-    if (!result || typeof result.then !== "function") {
-      clearActionPending(actionKey);
-      return;
-    }
-    void result
-      .finally(() => {
+  }, []);
+  const runAgentAction = useCallback(
+    (actionKey: string, action: () => Promise<void> | void) => {
+      if (!markActionPending(actionKey)) {
+        return;
+      }
+      let result: Promise<void> | void;
+      try {
+        result = action();
+      } catch (error) {
         clearActionPending(actionKey);
-      })
-      .catch(() => {
-        // Action handlers own user-facing error reporting; this only prevents
-        // the cleanup promise from becoming an unhandled rejection.
-      });
-  };
+        throw error;
+      }
+      if (!result || typeof result.then !== "function") {
+        clearActionPending(actionKey);
+        return;
+      }
+      void result
+        .finally(() => {
+          clearActionPending(actionKey);
+        })
+        .catch(() => {
+          // Action handlers own user-facing error reporting; this only prevents
+          // the cleanup promise from becoming an unhandled rejection.
+        });
+    },
+    [clearActionPending, markActionPending],
+  );
 
   return (
     <article
@@ -2228,115 +2372,20 @@ function ParallelAgentsCard({
       {isExpanded ? (
         <ol className="parallel-agents-tree">
           {message.agents.map((agent, index) => {
-            const isLast = index === message.agents.length - 1;
-            const isDelegationAgent = agent.source === "delegation";
-            // Action callbacks receive the bare delegation id because only
-            // delegation rows expose actions; tool-source rows are display-only.
-            const hasAgentActions =
-              isDelegationAgent &&
-              (onOpenAgentSession || onInsertAgentResult || onCancelAgent);
             const agentIdentity = `${agent.source}:${agent.id}`;
-            const openActionKey = `${agentIdentity}:open`;
-            const insertActionKey = `${agentIdentity}:insert`;
-            const cancelActionKey = `${agentIdentity}:cancel`;
-            const isOpenPending = pendingActionKeys.has(openActionKey);
-            const isInsertPending = pendingActionKeys.has(insertActionKey);
-            const isCancelPending = pendingActionKeys.has(cancelActionKey);
             return (
-              <li
+              <ParallelAgentRow
                 key={agentIdentity}
-                className={`parallel-agent-row parallel-agent-row-${parallelAgentStatusTone(agent.status)}`}
-              >
-                <div className="parallel-agent-line">
-                  <span className="parallel-agent-branch" aria-hidden="true">
-                    {isLast ? "\u2514" : "\u251c"}
-                  </span>
-                  <div className="parallel-agent-copy">
-                    <div className="parallel-agent-title-row">
-                      <span className="parallel-agent-title">
-                        {renderHighlightedText(
-                          agent.title,
-                          searchQuery,
-                          searchHighlightTone,
-                        )}
-                      </span>
-                      <span
-                        className={`parallel-agent-status parallel-agent-status-${parallelAgentStatusTone(agent.status)}`}
-                      >
-                        {parallelAgentStatusLabel(agent.status)}
-                      </span>
-                    </div>
-                    <div className="parallel-agent-detail-row">
-                      <span
-                        className="parallel-agent-branch-child"
-                        aria-hidden="true"
-                      >
-                        {isLast ? " " : "\u2502"}
-                      </span>
-                      <span className="parallel-agent-detail">
-                        {renderHighlightedText(
-                          parallelAgentDetail(agent),
-                          searchQuery,
-                          searchHighlightTone,
-                        )}
-                      </span>
-                    </div>
-                    {hasAgentActions ? (
-                      <div className="parallel-agent-actions">
-                        {onOpenAgentSession ? (
-                          <button
-                            className="ghost-button parallel-agent-action"
-                            type="button"
-                            disabled={isOpenPending}
-                            aria-busy={isOpenPending}
-                            onClick={() =>
-                              runAgentAction(openActionKey, () =>
-                                onOpenAgentSession(agent.id),
-                              )
-                            }
-                          >
-                            Open session
-                          </button>
-                        ) : null}
-                        {onInsertAgentResult &&
-                        (agent.status === "completed" ||
-                          agent.status === "error") ? (
-                          <button
-                            className="ghost-button parallel-agent-action"
-                            type="button"
-                            disabled={isInsertPending}
-                            aria-busy={isInsertPending}
-                            onClick={() =>
-                              runAgentAction(insertActionKey, () =>
-                                onInsertAgentResult(agent.id),
-                              )
-                            }
-                          >
-                            Insert result
-                          </button>
-                        ) : null}
-                        {onCancelAgent &&
-                        (agent.status === "initializing" ||
-                          agent.status === "running") ? (
-                          <button
-                            className="ghost-button parallel-agent-action parallel-agent-action-danger"
-                            type="button"
-                            disabled={isCancelPending}
-                            aria-busy={isCancelPending}
-                            onClick={() =>
-                              runAgentAction(cancelActionKey, () =>
-                                onCancelAgent(agent.id),
-                              )
-                            }
-                          >
-                            Cancel
-                          </button>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </li>
+                agent={agent}
+                isLast={index === message.agents.length - 1}
+                pendingActionKeys={pendingActionKeys}
+                onOpenAgentSession={onOpenAgentSession}
+                onInsertAgentResult={onInsertAgentResult}
+                onCancelAgent={onCancelAgent}
+                runAgentAction={runAgentAction}
+                searchQuery={searchQuery}
+                searchHighlightTone={searchHighlightTone}
+              />
             );
           })}
         </ol>

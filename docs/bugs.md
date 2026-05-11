@@ -530,48 +530,6 @@ A user clicking "Insert result" on an `error`-status agent gets the failure summ
 - Confirm with the user via a "do you really want to insert a failed result?" pattern when `result.status !== "completed"`.
 - Or surface a non-blocking notice via `onComposerError`.
 
-## `runAgentAction` not memoized; recreated per render
-
-**Severity:** Low - `runAgentAction` at `ui/src/message-cards.tsx:2120-2140` is defined inline inside the component without `useCallback`. It now reads pending state through refs, so the stale-closure bug is fixed, but the helper and per-row inline arrow handlers still get fresh identities on every render.
-
-Acceptable today; flagging for future re-use when N grows.
-
-**Current behavior:**
-- `runAgentAction` recreated per render.
-- Per-row click handlers also recreated.
-- No `useCallback` memoization.
-
-**Proposal:**
-- If parallel-agent counts grow, memoize `runAgentAction` with `useCallback` and stable deps.
-- Or extract `ParallelAgentRow` per existing tracked entry.
-
-## `ParallelAgentsCard` per-row inline arrow handlers regenerate identity per render
-
-**Severity:** Low - `ui/src/message-cards.tsx:2158-2194` constructs three inline arrow functions per agent row (`() => onOpenAgentSession(agent.id)`, etc.) that regenerate identity on every render. `MessageCard` is `memo`-wrapped, but parent message identity is what stabilizes the card; agent-status updates re-render the whole list anyway.
-
-Acceptable for the current N≤10ish parallel-agent count; flagging because the project guidelines call out "expensive render subtrees that regenerate DOM tree on every parent re-render."
-
-**Current behavior:**
-- Three inline arrows per agent row.
-- Arrow identity changes per render.
-- Acceptable at current parallel-agent counts.
-
-**Proposal:**
-- If parallel-agent counts grow, extract a `ParallelAgentRow` child component memoized on `(agent, callbacks)` and pass stable callbacks via `useCallback`.
-
-## `MessageCard.test.tsx` parallel-agent test mounts without `DeferredHeavyContentActivationProvider`
-
-**Severity:** Low - the new test at `ui/src/MessageCard.test.tsx:54-112` mounts `MessageCard` directly without wrapping it in `DeferredHeavyContentActivationProvider`. The parallel-agent card today does not require it (no Monaco etc.), but if it ever grows a deferred-render branch the test would silently bypass it.
-
-**Current behavior:**
-- Other heavy-content tests in this file wrap with `DeferredHeavyContentActivationProvider`.
-- Parallel-agent test omits the wrapper.
-- A future deferred-render branch in `ParallelAgentsCard` would silently bypass the gate in this test.
-
-**Proposal:**
-- Mirror the wrapping pattern from sibling tests for consistency.
-- Or document that parallel-agent rendering deliberately doesn't require the provider.
-
 ## `~70` lines of `getBoundingClientRect` mock setup duplicated between adjacent `AgentSessionPanel.test.tsx` tests
 
 **Severity:** Low - the new "hydrates a long-session tail after a native-scrollbar mousedown" test duplicates ~70 lines of `Object.defineProperty` and `getBoundingClientRect` boilerplate from the prior sibling test. Future changes to the rect contract need parallel edits in both tests.

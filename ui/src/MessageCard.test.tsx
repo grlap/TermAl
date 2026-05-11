@@ -125,14 +125,16 @@ describe("MessageCard", () => {
     const onCancelParallelAgent = vi.fn();
 
     render(
-      <MessageCard
-        message={message}
-        onApprovalDecision={vi.fn()}
-        onUserInputSubmit={vi.fn()}
-        onOpenParallelAgentSession={onOpenParallelAgentSession}
-        onInsertParallelAgentResult={onInsertParallelAgentResult}
-        onCancelParallelAgent={onCancelParallelAgent}
-      />,
+      <DeferredHeavyContentActivationProvider allowActivation={false}>
+        <MessageCard
+          message={message}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+          onOpenParallelAgentSession={onOpenParallelAgentSession}
+          onInsertParallelAgentResult={onInsertParallelAgentResult}
+          onCancelParallelAgent={onCancelParallelAgent}
+        />
+      </DeferredHeavyContentActivationProvider>,
     );
 
     const rows = screen.getAllByRole("listitem");
