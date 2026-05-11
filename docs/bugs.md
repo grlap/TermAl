@@ -270,21 +270,6 @@ A regression in delegation-id generation (e.g., switches from uuid to determinis
 - Add a sibling test that drives both the Claude task path and the delegation creation path with overlapping ids.
 - Or document the assumption that uuid id spaces don't collide deterministically.
 
-## Returning to bottom leaves stale virtualized scroll-kind classification
-
-**Severity:** Medium - bottom re-entry clears the idle-compaction timer but leaves `lastUserScrollKindRef.current` set to `"incremental"`.
-
-`ui/src/panels/VirtualizedConversationMessageList.tsx:2726`. The cleared idle timer is normally what expires scroll-kind state, so later native scrollbar movement without wheel/key/touch input can inherit the stale classification.
-
-**Current behavior:**
-- Native downward scroll near bottom sets `lastUserScrollKindRef.current = "incremental"`.
-- The idle-compaction timer is cleared at the same boundary.
-- Later native scrolls can reuse the cached scroll kind indefinitely.
-
-**Proposal:**
-- Clear `lastUserScrollKindRef` on bottom re-entry, or expire the one-tick override with a short timestamp/timer.
-- Add a regression that returns to bottom, then performs a native scroll with no preceding wheel/key/touch input.
-
 ## `markUserScroll` anchor speculation captures approximate touch offsets
 
 **Severity:** Medium - speculative offset adjustment `viewportOffsetPx - inputScrollDeltaY` applied unconditionally on every input event. For touch events, `touchDeltaY` is the FINGER delta (not the scroll delta). When user touches a non-scrollable region, swipes within an iframe, or hits a scroll boundary, the anchor's `viewportOffsetPx` ends up off by the would-be delta.
@@ -1796,8 +1781,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   start near bottom, send with a pending POST, grow `scrollHeight`, and assert no old-target smooth scroll fires before the prompt lands.
 - [ ] P2: Add waiting-indicator bottom-follow negative coverage:
   cover no duplicate scroll while the live indicator remains visible, far-from-bottom no-op, inactive pane/view not consuming the rising edge, and virtualized-transcript bottom-follow behavior.
-- [ ] P2: Add virtualized bottom re-entry scroll-kind expiry coverage:
-  return to bottom, cancel idle compaction, then issue a native scroll without wheel/touch/key prelude and assert stale `lastUserScrollKindRef` classification cannot leak.
 - [ ] P2: Add Telegram startup-message coverage:
   assert the no-chat startup message points to `TERMAL_TELEGRAM_CHAT_ID` / trusted state binding rather than first-touch `/start`.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:

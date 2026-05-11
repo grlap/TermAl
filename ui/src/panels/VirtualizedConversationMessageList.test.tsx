@@ -12,6 +12,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS,
   VirtualizedConversationMessageList,
+  resolveBottomReentryScrollKind,
+  resolveNativeScrollKind,
   resolvePrependedMessageCount,
   type VirtualizedConversationMessageListHandleRef,
 } from "./VirtualizedConversationMessageList";
@@ -351,6 +353,19 @@ describe("VirtualizedConversationMessageList foundation", () => {
         ),
       ).toBe(expected);
     });
+  });
+
+  it("expires cached scroll kind after bottom re-entry", () => {
+    expect(resolveNativeScrollKind("incremental", -1_000, 500)).toBe(
+      "incremental",
+    );
+    expect(
+      resolveNativeScrollKind(
+        resolveBottomReentryScrollKind(),
+        -1_000,
+        500,
+      ),
+    ).toBe("seek");
   });
 
   it("exposes a layout snapshot and explicit jump helpers", async () => {

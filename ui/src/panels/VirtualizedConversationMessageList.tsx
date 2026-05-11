@@ -187,7 +187,7 @@ const MIN_PAGE_COVERAGE_HEIGHT_PX = 64;
 const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
 
 export type VirtualizedRange = { startIndex: number; endIndex: number };
-type UserScrollKind = "incremental" | "page_jump" | "seek" | null;
+export type UserScrollKind = "incremental" | "page_jump" | "seek" | null;
 type MessageLocation = {
   message: Message;
   messageIndex: number;
@@ -264,6 +264,18 @@ function classifyScrollKind(
     Math.max(clientHeight * 1.5, DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT)
     ? "seek"
     : "incremental";
+}
+
+export function resolveBottomReentryScrollKind(): UserScrollKind {
+  return null;
+}
+
+export function resolveNativeScrollKind(
+  cachedScrollKind: UserScrollKind,
+  scrollDelta: number,
+  clientHeight: number,
+): Exclude<UserScrollKind, null> {
+  return cachedScrollKind ?? classifyScrollKind(scrollDelta, clientHeight);
 }
 
 function resolveRenderedPageCoverageHeight(pageNodes: HTMLElement[]) {
@@ -2679,7 +2691,8 @@ export function VirtualizedConversationMessageList({
             !hadUserScrollInteraction &&
             !isDetachedFromBottomRef.current;
           if (lastUserScrollKindRef.current === null) {
-            lastUserScrollKindRef.current = classifyScrollKind(
+            lastUserScrollKindRef.current = resolveNativeScrollKind(
+              lastUserScrollKindRef.current,
               scrollDelta,
               node.clientHeight,
             );
@@ -2744,10 +2757,11 @@ export function VirtualizedConversationMessageList({
             isDetachedFromBottomRef.current = false;
             shouldKeepBottomAfterLayoutRef.current = true;
             setHasUserScrollInteraction(false);
-            // Do not carry a prior seek/page-jump classification into the next
-            // native scroll tick. Treat the immediate continuation from bottom
-            // as incremental while preserving the cooldown timestamp above.
-            lastUserScrollKindRef.current = "incremental";
+            // Do not carry any prior classification into the next native scroll
+            // tick. A later scrollbar drag has no wheel/key/touch prelude, so it
+            // must be classified from its own delta instead of inheriting the
+            // bottom re-entry scroll.
+            lastUserScrollKindRef.current = resolveBottomReentryScrollKind();
             clearPendingIdleCompactionTimer();
           }
         }
