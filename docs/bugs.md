@@ -3015,10 +3015,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add a Rust test that drives both the Claude task path and the delegation creation path with overlapping ids (or document the assumption that uuid id spaces don't collide deterministically). The current test manually inserts the collision.
 - [ ] P2: Split `cancelDelegation` `it.each` running/completed/canceled identical-pin into focused tests:
   add a comment explaining the test pin is the current-but-flagged behavior, or split `running` into its own test scoped to the bugs.md follow-up.
-- [ ] P2: Pin pending-key composite contract in mixed-source MessageCard tests:
-  trigger two sequential actions on the same source/id pair, assert one is rejected as pending. Add a test that flips a tool row to a delegation row across rerenders and asserts no row reuse. Also wrap with `DeferredHeavyContentActivationProvider` per sibling test pattern.
-- [ ] P2: Strengthen "renders remote delegation progress as display-only" test:
-  add `expect(params.onComposerError).not.toHaveBeenCalled()` after rendering, exercise a flag flip mid-test, or split into per-action coverage so a regression that drops only one of the three guards surfaces.
 - [ ] P2: Clean up AgentSessionPanel `act(...)` warnings:
   targeted AgentSessionPanel Vitest still emits React `act(...)` warnings around async rerenders/events; identify the warned updates and wrap or await them so timing-sensitive failures are not hidden by noisy test output.
 - [ ] P2: Strengthen unmount race-condition delegation test:
