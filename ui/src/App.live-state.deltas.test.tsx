@@ -4997,6 +4997,151 @@ describe("App live state - delta-gap core", () => {
     }
   });
 
+  it("waits for authoritative state after a same-revision delta references an unknown session", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const initialSession = makeSession("session-1", {
+        name: "Codex Session",
+        status: "idle",
+        preview: "Known session",
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 10,
+        messages: [
+          {
+            id: "message-known",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Known session",
+          },
+        ],
+      });
+      const newSession = makeSession("session-x", {
+        name: "New Session",
+        status: "idle",
+        preview: "New session arrived authoritatively.",
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 1,
+        messages: [
+          {
+            id: "message-new-session",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "New session arrived authoritatively.",
+          },
+        ],
+      });
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse(
+            makeStateResponse({
+              revision: 5,
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [initialSession],
+            }),
+          );
+        }
+        if (requestUrl.pathname === "/api/git/status") {
+          return jsonResponse({
+            ahead: 0,
+            behind: 0,
+            branch: "main",
+            files: [],
+            isClean: true,
+            repoRoot: "/tmp",
+            upstream: "origin/main",
+            workdir: "/tmp",
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+      const stateFetchCount = () =>
+        fetchMock.mock.calls.filter(
+          ([input]) =>
+            new URL(String(input), "http://localhost").pathname === "/api/state",
+        ).length;
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 5,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [initialSession],
+          }),
+        );
+        await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+        expect(screen.getByText("Codex Session")).toBeInTheDocument();
+        fetchMock.mockClear();
+
+        await act(async () => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "messageCreated",
+            revision: 5,
+            sessionId: newSession.id,
+            messageId: "message-new-session",
+            messageIndex: 0,
+            messageCount: 1,
+            message: newSession.messages[0],
+            preview: "New session arrived authoritatively.",
+            status: "idle",
+            sessionMutationStamp: 1,
+          });
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        expect(stateFetchCount()).toBe(0);
+        expect(screen.queryByText("New Session")).not.toBeInTheDocument();
+
+        await dispatchStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 6,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [initialSession, newSession],
+          }),
+        );
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          expect(screen.getByText("New Session")).toBeInTheDocument();
+        });
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("applies metadata patch immediately and hydrates when an unhydrated session receives a missing-target delta", async () => {
     // Sibling regression for the "force re-hydrates" test above. That test
     // covers the HYDRATED case (`messagesLoaded === true`) which goes
