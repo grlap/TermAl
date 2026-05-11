@@ -672,21 +672,6 @@ Acceptable today; flagging for future re-use when N grows.
 - Document the contract: "the response always reflects sanitized current-state and may drop fields the client never touched".
 - Or add a `cleared` array (or similar) to the response so clients can know what changed.
 
-## `telegram_settings_load_defaults_only_for_missing_file` relies on platform-specific `io::ErrorKind`
-
-**Severity:** Low - the new test creates a directory at the settings file path and expects `fs::read` to return a non-`NotFound` error so the code propagates instead of defaulting. The exact `io::ErrorKind` returned when reading a directory is platform- and libstd-version-dependent (Linux: `IsADirectory` on newer toolchains, `Other` previously; Windows: `PermissionDenied`/`Other`; macOS: `Other`).
-
-`src/tests/telegram.rs:1187-1214`. Today the assertion is on `StatusCode::INTERNAL_SERVER_ERROR` and a substring of the human message, both of which depend only on the error being non-`NotFound`. If libstd ever maps directory-read on some platform to `NotFound` (unlikely), the test silently flips to asserting the default-on-missing path.
-
-**Current behavior:**
-- Test relies on directory-read error being non-`NotFound`.
-- Specific `ErrorKind` shape is platform-dependent.
-- Future libstd change could flip the behavior silently.
-
-**Proposal:**
-- Use a fixture that's reliably non-`NotFound` across platforms (e.g., write malformed JSON to assert the parse error path).
-- Or assert directly on the lower-level `io::Error::kind()` to make the platform contract explicit.
-
 ## `ParallelAgentsCard` per-row inline arrow handlers regenerate identity per render
 
 **Severity:** Low - `ui/src/message-cards.tsx:2158-2194` constructs three inline arrow functions per agent row (`() => onOpenAgentSession(agent.id)`, etc.) that regenerate identity on every render. `MessageCard` is `memo`-wrapped, but parent message identity is what stabilizes the card; agent-status updates re-render the whole list anyway.
@@ -2844,8 +2829,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   in addition to the existing "no buttons rendered" assertion, also assert that `onCancelParallelAgent` / `onOpenParallelAgentSession` / `onInsertParallelAgentResult` were NOT called with the tool agent's id (defense in depth).
 - [ ] P2: Add `ParallelAgentsCard` pending-action unmount coverage:
   click an async action, unmount before the promise settles, resolve/reject the promise, and assert the pending-state cleanup cannot update after unmount.
-- [ ] P2: Stabilize `telegram_settings_load_defaults_only_for_missing_file` against platform `io::ErrorKind`:
-  switch from a directory fixture (which returns platform-dependent kinds) to malformed JSON or asserts directly on `io::Error::kind()`.
 - [ ] P2: Cover Git literal pathspec handling:
   after forcing literal pathspec behavior, add regression coverage for filenames containing `*`, `?`, `[]`, and `:(top)` so single-file Git actions cannot expand to other files.
 - [ ] P2: Cover copy/rename staging pathspecs:

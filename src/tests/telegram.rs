@@ -5958,14 +5958,14 @@ fn telegram_settings_load_defaults_only_for_missing_file() {
 
     fs::create_dir_all(path.parent().expect("settings path should have a parent"))
         .expect("settings dir should create");
-    fs::create_dir(&path).expect("directory fixture should create");
+    fs::write(&path, b"{ not valid json").expect("malformed settings fixture should write");
 
     let err = match state.load_telegram_bot_file() {
-        Ok(_) => panic!("non-file settings path should fail instead of defaulting"),
+        Ok(_) => panic!("malformed settings file should fail instead of defaulting"),
         Err(err) => err,
     };
     assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(err.message.contains("failed to read Telegram settings"));
+    assert!(err.message.contains("failed to parse Telegram settings"));
 }
 
 #[test]
