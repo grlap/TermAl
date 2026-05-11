@@ -2230,6 +2230,8 @@ function ParallelAgentsCard({
           {message.agents.map((agent, index) => {
             const isLast = index === message.agents.length - 1;
             const isDelegationAgent = agent.source === "delegation";
+            // Action callbacks receive the bare delegation id because only
+            // delegation rows expose actions; tool-source rows are display-only.
             const hasAgentActions =
               isDelegationAgent &&
               (onOpenAgentSession || onInsertAgentResult || onCancelAgent);

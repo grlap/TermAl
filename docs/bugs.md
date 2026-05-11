@@ -345,19 +345,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 - Memoize the three "disabled" undefined values as a single object.
 - Or pass the flag itself through and let the consumer decide.
 
-## Composite key used for React identity + pendingActionKeys but bare `agent.id` for handlers
-
-**Severity:** Note - `ui/src/message-cards.tsx:2210-2219` uses `${agent.source}:${agent.id}` for React identity AND `pendingActionKeys`, but the per-row click handlers still pass the bare `agent.id` to `onOpenAgentSession`/`onInsertAgentResult`/`onCancelAgent`. Self-consistent today (only delegation rows have action buttons), but a future change that allows tool-source action handlers would bypass source disambiguation at the handler boundary.
-
-**Current behavior:**
-- React keys: `${source}:${id}`.
-- Pending action keys: `${source}:${id}:${action}`.
-- Handler args: bare `agent.id`.
-
-**Proposal:**
-- Either pass the composite identity to the handler.
-- Or document the gating contract on `runAgentAction` / the per-action callbacks.
-
 ## Mixed-source same-id MessageCard test doesn't pin pending-key composite contract
 
 **Severity:** Low - `ui/src/MessageCard.test.tsx:179-234`. The test asserts cancel works on the delegation row but does NOT assert: (a) no React duplicate-key warning across re-renders, (b) the tool row is unaffected by clicks on the delegation row, (c) the pending-action key disambiguates so a stale tool-source key doesn't interfere with the delegation cancel.
