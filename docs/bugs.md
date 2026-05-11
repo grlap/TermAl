@@ -1916,8 +1916,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   create many Mermaid/math rendered regions and assert the preview applies the same document-level caps as a single `MarkdownContent` document.
 - [ ] P2: Add single-target rendered diff navigation coverage:
   assert prev/next scrolls the only Markdown diff change and the only rendered diff region even though the selected index does not change.
-- [ ] P2: Cover large Markdown editing deferral by character count:
-  add a low-line Markdown document over `LARGE_MARKDOWN_FULL_RENDER_CHAR_LIMIT` and assert the editable-section deferral state plus opt-in transition. The current test covers only the line-count trigger.
 - [ ] P2: Route the new lagged-recovery reconnect test through the textDelta fast-path it documents:
   the new `App.live-state.reconnect.test.tsx` test exercises the revision-gap branch (the `messageCreated` delta omits `sessionMutationStamp` so it falls into the resync fallback). Add `sessionMutationStamp` so the delta routes through the matched-stamp fast-path that the surrounding `handleDeltaEvent` comment is most concerned about, OR rename the test to clarify it covers the revision-gap branch specifically and add a sibling test for the textDelta fast-path.
 - [ ] P2: Split the bad-live-event + workspaceFilesChanged test into isolated arrange-act-assert phases:

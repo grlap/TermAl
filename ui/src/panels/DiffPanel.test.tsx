@@ -2541,6 +2541,70 @@ describe("DiffPanel", () => {
     });
   });
 
+  it("defers editable full-document sections for low-line Markdown over the character cap", async () => {
+    const longBody = "Wide paragraph content. ".repeat(6_100);
+    const beforeContent = `# Base document\n\n${longBody}Old ending.\n`;
+    const afterContent = `# Draft document\n\n${longBody}New ending.\n`;
+    fetchFileMock.mockResolvedValue({
+      content: afterContent,
+      language: "markdown",
+      path: "/repo/README.md",
+    });
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={[
+            "@@ -1,3 +1,3 @@",
+            "-# Base document",
+            "+# Draft document",
+          ].join("\n")}
+          documentContent={{
+            before: {
+              content: beforeContent,
+              source: "index",
+            },
+            after: {
+              content: afterContent,
+              source: "worktree",
+            },
+            canEdit: true,
+            isCompleteDocument: true,
+          }}
+          diffMessageId="diff-large-markdown-char-deferred"
+          filePath="/repo/README.md"
+          gitSectionId="unstaged"
+          language="markdown"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Updated README"
+        />,
+      );
+    });
+
+    expect(screen.getByLabelText("Markdown diff status")).toBeInTheDocument();
+    expect(screen.getAllByText("Full document").length).toBeGreaterThan(0);
+    expect(screen.getByText("Editing deferred")).toBeInTheDocument();
+    expect(document.querySelector("[data-markdown-editable='true']")).toBeNull();
+    expect(
+      document.querySelector(".markdown-diff-change-scroll")?.textContent ?? "",
+    ).toContain("New ending.");
+
+    await clickAndSettle(
+      screen.getByRole("button", { name: "Edit full document" }),
+    );
+
+    expect(screen.queryByText("Editing deferred")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.querySelector("[data-markdown-editable='true']")).not.toBeNull();
+    });
+  });
+
   it("treats Markdown patch fallback previews as incomplete and read-only", async () => {
     fetchFileMock.mockResolvedValue({
       content: "# Draft document\n\nReady to commit.\n",
