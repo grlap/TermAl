@@ -1294,6 +1294,10 @@ describe("App scroll behaviour", () => {
         });
         scrollToMock.mockClear();
         let growSecondAssistantAfterFirstFollow = true;
+        // This test needs a stateful scroll mock after the initial setup:
+        // the second assistant message grows after the first follow scroll.
+        // Keep later assertions in this `it` aware that the standard
+        // apply-top mock is intentionally replaced from this point on.
         scrollToMock.mockImplementation(function (
           this: HTMLElement,
           options?: ScrollToOptions | number,

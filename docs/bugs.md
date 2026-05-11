@@ -252,17 +252,6 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 - Move the token to an OS secret store, or keep token configuration env-only until protected storage exists.
 - If file persistence stays, add explicit Windows ACL handling and document backup/sync exposure.
 
-## `App.scroll-behavior.test.tsx` mid-test mock override needs documenting comment
-
-**Severity:** Note - `ui/src/App.scroll-behavior.test.tsx:1000-1028`. The test now overrides `scrollToMock.mockImplementation` mid-test to add stateful scrollHeight growth. The override persists for the remainder of the `it` block but is replaced by the next test's `mockScrollToAndApplyTop()` call. If a future contributor adds another assertion expecting the standard apply-top behavior in the same test, the stateful mock could mislead.
-
-**Current behavior:**
-- Mid-test mock override.
-- No comment explaining the divergence.
-
-**Proposal:**
-- Add a one-liner comment near the mock override explaining why it deliberately diverges from the harness default.
-
 ## `wire_session_from_record` and `wire_session_summary_from_record` parallel paths still risk drift
 
 **Severity:** Note - `src/state_accessors.rs:285-318`. Round 72 added comments to both helpers reminding callers to keep them in sync, but the structural risk remains: any new field added to wire `Session` must be remembered in the explicit struct literal at `wire_session_summary_from_record`. The first proposal (refactor to a single field list) was not adopted; the second (debug-assert summary equals full for shared fields) was also not adopted.
