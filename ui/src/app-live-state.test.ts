@@ -109,6 +109,16 @@ function makeSession(overrides: Partial<Session> = {}): Session {
   };
 }
 
+function makeHydrationMessages(count: number): Message[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `message-${index + 1}`,
+    type: "text",
+    author: index % 2 === 0 ? "you" : "assistant",
+    timestamp: `10:${String(index).padStart(2, "0")}`,
+    text: `Message ${index + 1}`,
+  }));
+}
+
 function makeDelegationSummary(
   overrides: Partial<DelegationSummary> = {},
 ): DelegationSummary {
@@ -1148,6 +1158,57 @@ describe("hydration mismatch recovery gate", () => {
     expect(actionRecoveryInvocations).toHaveBeenCalledTimes(1);
   });
 
+  it("suppresses repeated tail mismatch recovery resyncs", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const messages = makeHydrationMessages(150);
+    const fetchSessionTail = vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: makeSession({
+        id: "session-2",
+        messages,
+        messagesLoaded: true,
+        messageCount: messages.length,
+        sessionMutationStamp: 1,
+      }),
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    const actionRecoveryInvocations = vi.fn();
+    const initialSession = makeSession({
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    const params = makeLiveStateParams(
+      initialSession,
+      actionRecoveryInvocations,
+    );
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    const harness = renderLiveStateHarness(params, () => {});
+
+    await waitFor(() => expect(fetchSessionTail).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(actionRecoveryInvocations).toHaveBeenCalledTimes(1),
+    );
+    expect(fetchSession).not.toHaveBeenCalled();
+
+    harness.rerenderLiveState();
+
+    await waitFor(() => expect(fetchSessionTail).toHaveBeenCalledTimes(2));
+    expect(actionRecoveryInvocations).toHaveBeenCalledTimes(1);
+    expect(fetchSession).not.toHaveBeenCalled();
+  });
+
   it("allows a later recovery resync after authoritative state adoption clears the mismatch", async () => {
     vi.stubGlobal(
       "EventSource",
@@ -1512,13 +1573,7 @@ describe("hydration adoption side effects", () => {
       () => new Promise<StateResponse>(() => {}),
     );
 
-    const messages: Message[] = Array.from({ length: 150 }, (_, index) => ({
-      id: `message-${index + 1}`,
-      type: "text",
-      author: index % 2 === 0 ? "you" : "assistant",
-      timestamp: `10:${String(index).padStart(2, "0")}`,
-      text: `Message ${index + 1}`,
-    }));
+    const messages = makeHydrationMessages(150);
     const initialSession = makeSession({
       messagesLoaded: false,
       messageCount: messages.length,
@@ -1597,6 +1652,168 @@ describe("hydration adoption side effects", () => {
     );
   });
 
+  it("short-circuits tail-first hydration when the tail response is fully loaded", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+
+    const messages = makeHydrationMessages(150);
+    const initialSession = makeSession({
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    const fullTailSession = makeSession({
+      messages,
+      messagesLoaded: true,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: fullTailSession,
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    renderLiveStateHarness(params, () => {});
+
+    await waitFor(() => expect(api.fetchSessionTail).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
+        true,
+      ),
+    );
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toHaveLength(
+      150,
+    );
+    expect(fetchSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "restartResync",
+      {
+        revision: 5,
+        serverInstanceId: "server-b",
+        session: (messages: Message[]) =>
+          makeSession({
+            messages: messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT),
+            messagesLoaded: false,
+            messageCount: messages.length,
+            sessionMutationStamp: 1,
+          }),
+      },
+    ],
+    [
+      "stateResync",
+      {
+        revision: 5,
+        serverInstanceId: "server-a",
+        session: (messages: Message[]) =>
+          makeSession({
+            messages: messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT),
+            messagesLoaded: false,
+            messageCount: messages.length + 1,
+            sessionMutationStamp: 2,
+          }),
+      },
+    ],
+  ])(
+    "requests action recovery when tail-first hydration returns %s",
+    async (_, response) => {
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      const fetchState = vi.spyOn(api, "fetchState").mockImplementation(
+        () => new Promise<StateResponse>(() => {}),
+      );
+
+      const messages = makeHydrationMessages(150);
+      const initialSession = makeSession({
+        messagesLoaded: false,
+        messageCount: messages.length,
+        sessionMutationStamp: 1,
+      });
+      vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+        revision: response.revision,
+        serverInstanceId: response.serverInstanceId,
+        session: response.session(messages),
+      });
+      const fetchSession = vi
+        .spyOn(api, "fetchSession")
+        .mockImplementation(() => new Promise(() => {}));
+      const actionRecoveryInvocations = vi.fn();
+      const params = makeLiveStateParams(
+        initialSession,
+        actionRecoveryInvocations,
+      );
+      params.adoptionRefs.latestStateRevisionRef.current = 5;
+      params.adoptionRefs.sessionsRef.current = [initialSession];
+
+      renderLiveStateHarness(params, () => {});
+
+      await waitFor(() => expect(api.fetchSessionTail).toHaveBeenCalledTimes(1));
+      await waitFor(() =>
+        expect(actionRecoveryInvocations).toHaveBeenCalledTimes(1),
+      );
+      await waitFor(() => expect(fetchState).toHaveBeenCalledTimes(1));
+      expect(fetchSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it("falls through to full hydration after a stale tail response", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    const fetchState = vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+
+    const messages = makeHydrationMessages(150);
+    const initialSession = makeSession({
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 4,
+      serverInstanceId: "server-a",
+      session: makeSession({
+        messages: messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT),
+        messagesLoaded: false,
+        messageCount: messages.length,
+        sessionMutationStamp: 1,
+      }),
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    const actionRecoveryInvocations = vi.fn();
+    const params = makeLiveStateParams(initialSession, actionRecoveryInvocations);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    renderLiveStateHarness(params, () => {});
+
+    await waitFor(() => expect(api.fetchSessionTail).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetchSession).toHaveBeenCalledTimes(1));
+    expect(actionRecoveryInvocations).not.toHaveBeenCalled();
+    expect(fetchState).not.toHaveBeenCalled();
+  });
+
   it("refetches after a missing-prefix delta races with tail-then-full hydration", async () => {
     vi.stubGlobal(
       "EventSource",
@@ -1606,13 +1823,7 @@ describe("hydration adoption side effects", () => {
       () => new Promise<StateResponse>(() => {}),
     );
 
-    const messages: Message[] = Array.from({ length: 150 }, (_, index) => ({
-      id: `message-${index + 1}`,
-      type: "text",
-      author: index % 2 === 0 ? "you" : "assistant",
-      timestamp: `10:${String(index).padStart(2, "0")}`,
-      text: `Message ${index + 1}`,
-    }));
+    const messages = makeHydrationMessages(150);
     const updatedMessages = messages.map((message) =>
       message.id === "message-30"
         ? { ...message, text: "Message 30 updated" }
