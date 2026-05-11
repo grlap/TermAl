@@ -682,6 +682,16 @@ fn backup_corrupt_telegram_bot_file(path: &FsPath, err: impl std::fmt::Display) 
         path.display(),
         backup_path.display()
     );
+    backup_corrupt_telegram_bot_file_with_rename(path, &backup_path, |from, to| {
+        fs::rename(from, to)
+    })
+}
+
+fn backup_corrupt_telegram_bot_file_with_rename(
+    path: &FsPath,
+    backup_path: &FsPath,
+    rename_fn: impl FnOnce(&FsPath, &FsPath) -> io::Result<()>,
+) -> Result<()> {
     if let Err(err) = harden_telegram_bot_file_permissions(path) {
         eprintln!(
             "telegram> failed to pre-harden corrupt `{}` before quarantine: {}; continuing",
@@ -689,20 +699,20 @@ fn backup_corrupt_telegram_bot_file(path: &FsPath, err: impl std::fmt::Display) 
             sanitize_telegram_log_detail(&err.to_string())
         );
     }
-    match fs::rename(path, &backup_path) {
+    match rename_fn(path, backup_path) {
         Ok(()) => {
-            harden_telegram_backup_file_or_remove(&backup_path)?;
+            harden_telegram_backup_file_or_remove(backup_path)?;
             Ok(())
         }
         Err(rename_err) => {
-            fs::copy(path, &backup_path).with_context(|| {
+            fs::copy(path, backup_path).with_context(|| {
                 format!(
                     "failed to copy corrupt `{}` to `{}` after rename failed: {rename_err}",
                     path.display(),
                     backup_path.display()
                 )
             })?;
-            harden_telegram_backup_file_or_remove(&backup_path)?;
+            harden_telegram_backup_file_or_remove(backup_path)?;
             fs::remove_file(path)
                 .with_context(|| format!("failed to remove corrupt `{}`", path.display()))?;
             Ok(())

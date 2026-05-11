@@ -1960,8 +1960,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   mount an overview-controller harness, flush one or two frames so a queued second-rAF or FIFO task is alive, then unmount and flush the remaining frames asserting that `setIsRailReady(true)` was never observed and the FIFO is empty. The current test never unmounts mid-pending so the rAF cancellation paths and FIFO splice-by-task-id are unexercised.
 - [ ] P2: Finish splitting the remaining marker-menu create/remove test:
   the marker-menu coverage now has focused cases for keyboard trigger, portal cleanup, scroll/resize close, explicit trigger contract, and clamp fallback. The original create/remove test still combines add/remove, Escape focus restore, ArrowDown navigation, and rect-based clamp behavior; split the remaining assertions if it grows again.
-- [ ] P2: Cover `backup_corrupt_telegram_bot_file` cross-fs fallback:
-  current `telegram_state_persist_backs_up_malformed_existing_file` covers the rename success path but does NOT cover the `fs::copy` + `fs::remove_file` fallback. Extract `corrupt_telegram_bot_file_backup_path` + the rename-then-copy fallback to a helper accepting a `rename_fn: impl Fn(...)` and inject a forced-failure rename in a unit test.
 - [ ] P2: Cover `write_telegram_bot_file` atomic-rename + temp-cleanup:
   round 56's rewrite (`telegram_settings.rs:417-427`) introduced `let result = (|| {...})(); if result.is_err() { let _ = fs::remove_file(&temp_path); }`. A failure inside the closure that leaves a stale `.tmp` file would be a silent disk-leak regression. Add a test that injects a `write_all` failure and asserts the temp file is unlinked.
 - [ ] P2: Cover Windows `MoveFileExW` Telegram settings replacement:

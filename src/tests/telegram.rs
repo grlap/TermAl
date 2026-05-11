@@ -5739,6 +5739,48 @@ fn telegram_state_persist_backs_up_malformed_existing_file() {
 }
 
 #[test]
+fn telegram_state_corrupt_backup_falls_back_to_copy_when_rename_fails() {
+    let path = std::env::temp_dir().join(format!(
+        "termal-telegram-copy-backup-state-{}.json",
+        Uuid::new_v4()
+    ));
+    fs::write(&path, b"{").expect("fixture should write");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644))
+            .expect("fixture permissions should set");
+    }
+    let backup_path = corrupt_telegram_bot_file_backup_path(&path);
+
+    backup_corrupt_telegram_bot_file_with_rename(&path, &backup_path, |_, _| {
+        Err(io::Error::new(io::ErrorKind::Other, "forced rename failure"))
+    })
+    .expect("copy fallback should quarantine corrupt state");
+
+    assert!(!path.exists());
+    assert_eq!(
+        fs::read(&backup_path).expect("backup should read"),
+        b"{"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let mode = fs::metadata(&backup_path)
+            .expect("backup metadata should read")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    fs::remove_file(&backup_path).ok();
+    fs::remove_file(&path).ok();
+}
+
+#[test]
 fn telegram_poll_error_dirty_persist_failure_is_nonfatal() {
     let path = std::env::temp_dir().join(format!(
         "termal-telegram-poll-error-state-dir-{}",
