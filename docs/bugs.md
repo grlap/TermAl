@@ -1960,12 +1960,8 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   mount an overview-controller harness, flush one or two frames so a queued second-rAF or FIFO task is alive, then unmount and flush the remaining frames asserting that `setIsRailReady(true)` was never observed and the FIFO is empty. The current test never unmounts mid-pending so the rAF cancellation paths and FIFO splice-by-task-id are unexercised.
 - [ ] P2: Finish splitting the remaining marker-menu create/remove test:
   the marker-menu coverage now has focused cases for keyboard trigger, portal cleanup, scroll/resize close, explicit trigger contract, and clamp fallback. The original create/remove test still combines add/remove, Escape focus restore, ArrowDown navigation, and rect-based clamp behavior; split the remaining assertions if it grows again.
-- [ ] P2: Cover all 7 demand-driven hydration listeners in `AgentSessionPanel.test.tsx`:
-  current test exercises only `wheel` of seven listeners (scroll, wheel, keydown, touchstart, touchmove, touchend, touchcancel). Add scroll-near-top (scrollTop = 50, fire scroll, expect hydration), keydown (ArrowUp/Home/PageUp dispatch), touchstart+touchmove with positive deltaY (pull-down) producing hydration, and a NEGATIVE control: `event.ctrlKey` wheel with `deltaY: -120` should NOT hydrate.
 - [ ] P2: Assert one-shot hydration in demand-driven hydration test:
   after the wheel triggers hydration, fire wheel again and assert no further state churn (e.g., rendering doesn't re-mount, listeners are torn down because the effect's early-return fires after `hydrated` is true).
-- [ ] P2: Cover touch hydration semantics in `AgentSessionPanel.test.tsx`:
-  dispatch touchstart at clientY=100, then touchmove at clientY=50 (negative delta, pull-up) → no hydration. Then touchstart at clientY=100, touchmove at clientY=200 (pull-down) → hydration. Verify touchend resets `lastTouchClientY` so the next touchstart starts fresh.
 - [ ] P2: Cover same-size tail-window overview translation shifts:
   build or render two different 20-message tail windows with the same `messageCount` and assert stale viewport translation is not reused across first/last message id changes. Include a cross-session case where one session's snapshot is queried against another's projection at the same `messageCount`.
 - [ ] P2: Cover `resolveViewportSnapshotTranslation` negative branches:

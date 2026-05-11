@@ -4214,6 +4214,138 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
+  it.each(["ArrowUp", "Home", "PageUp"] as const)(
+    "hydrates a long-session tail after %s inside the transcript",
+    async (key) => {
+      const OriginalResizeObserver = window.ResizeObserver;
+      const scrollNode = document.createElement("section");
+      const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
+
+      class ResizeObserverMock {
+        observe() {}
+        disconnect() {}
+      }
+
+      window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+
+      try {
+        const tailFirstPageSelector =
+          '.virtualized-message-page[data-page-key="0:8:message-581:message-588"]';
+        document.body.append(scrollNode);
+        const { container } = renderSessionPanelWithDefaults({
+          activeSession: makeSession("active-session", {
+            status: "idle",
+            messages: makeTextMessages(600),
+          }),
+          scrollContainerRef: { current: scrollNode },
+        });
+        expect(container.querySelector(tailFirstPageSelector)).not.toBeNull();
+
+        const keydown = new KeyboardEvent("keydown", { bubbles: true, key });
+        Object.defineProperty(keydown, "composedPath", {
+          value: () => [scrollNode, document.body, document, window],
+        });
+        act(() => {
+          scrollNode.dispatchEvent(keydown);
+        });
+        await act(async () => {
+          await Promise.resolve();
+        });
+
+        expect(container.querySelector(tailFirstPageSelector)).toBeNull();
+      } finally {
+        window.ResizeObserver = OriginalResizeObserver;
+        scrollNodeMocks.cleanup();
+        scrollNode.remove();
+      }
+    },
+  );
+
+  it("hydrates a long-session tail only after a pull-down touch gesture", async () => {
+    vi.useFakeTimers();
+    const OriginalResizeObserver = window.ResizeObserver;
+    const OriginalTouchEvent = window.TouchEvent;
+    const scrollNode = document.createElement("section");
+    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    class TouchEventMock extends Event {
+      readonly changedTouches: Touch[];
+      readonly touches: Touch[];
+
+      constructor(type: string, init: TouchEventInit = {}) {
+        super(type, { bubbles: init.bubbles ?? true, cancelable: init.cancelable });
+        this.changedTouches = init.changedTouches ?? [];
+        this.touches = init.touches ?? [];
+      }
+    }
+
+    function dispatchTouch(type: string, clientY: number | null) {
+      scrollNode.dispatchEvent(
+        new TouchEvent(type, {
+          bubbles: true,
+          touches: clientY === null ? [] : [{ clientY } as Touch],
+          changedTouches: clientY === null ? [] : [{ clientY } as Touch],
+        }),
+      );
+    }
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    window.TouchEvent = TouchEventMock as unknown as typeof TouchEvent;
+
+    try {
+      const tailFirstPageSelector =
+        '.virtualized-message-page[data-page-key="0:8:message-581:message-588"]';
+      document.body.append(scrollNode);
+      const { container } = renderSessionPanelWithDefaults({
+        activeSession: makeSession("active-session", {
+          status: "idle",
+          messages: makeTextMessages(600),
+        }),
+        scrollContainerRef: { current: scrollNode },
+      });
+      expect(container.querySelector(tailFirstPageSelector)).not.toBeNull();
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+
+      act(() => {
+        scrollNodeMocks.setScrollTop(50);
+        dispatchTouch("touchstart", 100);
+        dispatchTouch("touchmove", 50);
+        dispatchTouch("touchend", null);
+        dispatchTouch("touchmove", 200);
+        dispatchTouch("touchstart", 100);
+        dispatchTouch("touchcancel", null);
+        dispatchTouch("touchmove", 200);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(container.querySelector(tailFirstPageSelector)).not.toBeNull();
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+
+      act(() => {
+        scrollNodeMocks.setScrollTop(50);
+        dispatchTouch("touchstart", 100);
+        dispatchTouch("touchmove", 200);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      expect(container.querySelector(tailFirstPageSelector)).toBeNull();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      window.TouchEvent = OriginalTouchEvent;
+      scrollNodeMocks.cleanup();
+      scrollNode.remove();
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["Claude", "new prompt", "Claude is working — Waiting for output"],
     ["Cursor", "new prompt", "Cursor is working — Waiting for output"],
