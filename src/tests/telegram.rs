@@ -6414,6 +6414,61 @@ fn telegram_config_update_allows_enabled_without_token_or_project_target() {
 }
 
 #[test]
+fn telegram_config_update_reflects_in_process_relay_runtime_status() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-runtime-status-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
+
+    reset_telegram_relay_runtime_actions_for_tests();
+    let response = state
+        .update_telegram_config(UpdateTelegramConfigRequest {
+            enabled: Some(true),
+            bot_token: Some(Some("123456:secret".to_owned())),
+            subscribed_project_ids: Some(vec![project_id.clone()]),
+            default_project_id: None,
+            default_session_id: None,
+        })
+        .expect("enabled relay config should save and start");
+
+    assert!(response.enabled);
+    assert!(response.configured);
+    assert!(response.running);
+    assert_eq!(response.lifecycle, TelegramLifecycle::InProcess);
+
+    let stopped = state
+        .update_telegram_config(UpdateTelegramConfigRequest {
+            enabled: Some(false),
+            bot_token: None,
+            subscribed_project_ids: None,
+            default_project_id: None,
+            default_session_id: None,
+        })
+        .expect("disabled relay config should save and stop");
+
+    assert!(!stopped.enabled);
+    assert!(stopped.configured);
+    assert!(!stopped.running);
+    assert_eq!(stopped.lifecycle, TelegramLifecycle::InProcess);
+    assert_eq!(
+        take_telegram_relay_runtime_actions_for_tests(),
+        vec![
+            TelegramRelayRuntimeActionForTest::Start {
+                project_id: project_id.clone(),
+                subscribed_project_ids: vec![project_id],
+            },
+            TelegramRelayRuntimeActionForTest::Stop,
+        ]
+    );
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
 fn telegram_config_update_blank_token_clears_saved_token_before_project_target_check() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let home = std::env::temp_dir().join(format!(

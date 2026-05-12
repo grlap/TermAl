@@ -1097,7 +1097,7 @@ struct TelegramUiConfig {
 }
 
 /// UI-visible Telegram relay lifecycle.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum TelegramLifecycle {
     Manual,

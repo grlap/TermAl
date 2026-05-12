@@ -471,10 +471,15 @@ enum TelegramRelayRuntimeActionForTest {
 thread_local! {
     static TELEGRAM_RELAY_RUNTIME_ACTIONS_FOR_TESTS: std::cell::RefCell<Vec<TelegramRelayRuntimeActionForTest>> =
         const { std::cell::RefCell::new(Vec::new()) };
+    static TELEGRAM_RELAY_RUNTIME_RUNNING_FOR_TESTS: std::cell::RefCell<bool> =
+        const { std::cell::RefCell::new(false) };
 }
 
 #[cfg(test)]
 fn start_telegram_relay_runtime(config: TelegramBotConfig) {
+    TELEGRAM_RELAY_RUNTIME_RUNNING_FOR_TESTS.with(|running| {
+        *running.borrow_mut() = true;
+    });
     TELEGRAM_RELAY_RUNTIME_ACTIONS_FOR_TESTS.with(|actions| {
         actions
             .borrow_mut()
@@ -487,6 +492,9 @@ fn start_telegram_relay_runtime(config: TelegramBotConfig) {
 
 #[cfg(test)]
 fn stop_telegram_relay_runtime() {
+    TELEGRAM_RELAY_RUNTIME_RUNNING_FOR_TESTS.with(|running| {
+        *running.borrow_mut() = false;
+    });
     TELEGRAM_RELAY_RUNTIME_ACTIONS_FOR_TESTS.with(|actions| {
         actions
             .borrow_mut()
@@ -497,6 +505,9 @@ fn stop_telegram_relay_runtime() {
 #[cfg(test)]
 fn reset_telegram_relay_runtime_actions_for_tests() {
     TELEGRAM_RELAY_RUNTIME_ACTIONS_FOR_TESTS.with(|actions| actions.borrow_mut().clear());
+    TELEGRAM_RELAY_RUNTIME_RUNNING_FOR_TESTS.with(|running| {
+        *running.borrow_mut() = false;
+    });
 }
 
 #[cfg(test)]
@@ -518,9 +529,10 @@ fn telegram_relay_status_snapshot() -> TelegramRelayStatusSnapshot {
 
 #[cfg(test)]
 fn telegram_relay_status_snapshot() -> TelegramRelayStatusSnapshot {
+    let running = TELEGRAM_RELAY_RUNTIME_RUNNING_FOR_TESTS.with(|running| *running.borrow());
     TelegramRelayStatusSnapshot {
-        running: false,
-        lifecycle: TelegramLifecycle::Manual,
+        running,
+        lifecycle: TelegramLifecycle::InProcess,
     }
 }
 

@@ -33,19 +33,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 **Proposal:**
 - Extract the active-baseline transition into a helper `transition_active_baseline_to_settled` that returns either the new cursor + position or an `OutcomeShortCircuit`.
 
-## Supervised in-process Telegram relay status is untestable in production due to `#[cfg(test)]` fallback
-
-**Severity:** Medium - `src/telegram.rs:220-331`. `telegram_relay_status_snapshot()` has a production implementation backed by the live relay runtime and a test fallback that always returns `running: false` / `lifecycle: Manual`. The wire-shape tests can assert `InProcess` serialization statically, but no integration test exercises the live status endpoint while the in-process relay is running.
-
-**Current behavior:**
-- Relay status snapshot has `#[cfg(not(test))]`/`#[cfg(test)]` parallel implementations.
-- Tests always see `running: false` / `lifecycle: Manual`.
-- Production behavior is structurally untested.
-
-**Proposal:**
-- Add a non-`cfg(test)` "test mode" environment variable that lets a Rust integration test boot the runtime in a no-op mode and assert `running` flips.
-- Or refactor the runtime so the status accessors take a `&Self` parameter that tests can inject.
-
 ## `TelegramRelayRuntime` is a file-level global rather than `AppState`-owned state
 
 **Severity:** Note - `src/telegram.rs:220-331`. `TelegramRelayRuntime` and `TELEGRAM_RELAY_RUNTIME` are file-level globals (`LazyLock<Mutex<...>>`). `AppState` has no visibility into the relay's running state, so any future health-monitor, restart-on-error, or readiness-signaling logic ends up reading globals instead of methods on `AppState`.
