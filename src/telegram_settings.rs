@@ -50,6 +50,17 @@ struct TelegramBotFile {
     state: TelegramBotState,
 }
 
+struct TelegramConfigValidationSnapshot {
+    known_projects: HashSet<String>,
+    session_project_ids: HashMap<String, Option<String>>,
+}
+
+struct TelegramConfigNormalization {
+    subscribed_project_ids: Vec<String>,
+    default_project_id: Option<String>,
+    default_session_id: Option<String>,
+}
+
 impl TelegramStatusResponse {
     fn from_telegram_settings(
         config: TelegramUiConfig,
@@ -196,107 +207,31 @@ impl AppState {
         &self,
         config: &mut TelegramUiConfig,
     ) -> Result<(), ApiError> {
-        if let Some(token) = config.bot_token.as_deref() {
-            validate_telegram_bot_token(token)?;
-        }
-        let mut subscribed_project_ids = config.subscribed_project_ids.clone();
-        let mut default_project_id = config.default_project_id.clone();
-        let default_session_id = config.default_session_id.clone();
-        validate_telegram_target_ids(
-            &subscribed_project_ids,
-            default_project_id.as_deref(),
-            default_session_id.as_deref(),
-        )?;
+        let snapshot = self.telegram_config_validation_snapshot();
+        let normalization = validate_telegram_config_against_snapshot(config, &snapshot)?;
+        apply_telegram_config_normalization(config, normalization);
+        Ok(())
+    }
 
+    fn telegram_config_validation_snapshot(&self) -> TelegramConfigValidationSnapshot {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let known_projects = inner
-            .projects
-            .iter()
-            .map(|project| project.id.as_str())
-            .collect::<HashSet<_>>();
-
-        for project_id in &subscribed_project_ids {
-            if !known_projects.contains(project_id.as_str()) {
-                return Err(ApiError::bad_request(format!(
-                    "unknown Telegram project `{project_id}`"
-                )));
-            }
-        }
-
-        if default_project_id.is_none() && subscribed_project_ids.len() == 1 {
-            default_project_id = subscribed_project_ids.first().cloned();
-        }
-
-        if let Some(project_id) = default_project_id.clone() {
-            if !known_projects.contains(project_id.as_str()) {
-                return Err(ApiError::bad_request(format!(
-                    "unknown default Telegram project `{project_id}`"
-                )));
-            }
-            if !subscribed_project_ids
+        TelegramConfigValidationSnapshot {
+            known_projects: inner
+                .projects
                 .iter()
-                .any(|candidate| candidate == &project_id)
-            {
-                subscribed_project_ids.push(project_id);
-            }
-        }
-
-        if let Some(session_id) = default_session_id.as_deref() {
-            let session = inner
+                .map(|project| project.id.clone())
+                .collect(),
+            session_project_ids: inner
                 .sessions
                 .iter()
-                .find(|record| record.session.id == session_id)
-                .ok_or_else(|| {
-                    ApiError::bad_request(format!(
-                        "unknown default Telegram session `{session_id}`"
-                    ))
-                })?;
-            let session_project_id = session.session.project_id.as_deref().ok_or_else(|| {
-                ApiError::bad_request("default Telegram session must belong to a project")
-            })?;
-
-            if !known_projects.contains(session_project_id) {
-                return Err(ApiError::bad_request(format!(
-                    "unknown default Telegram session project `{session_project_id}`"
-                )));
-            }
-
-            match default_project_id.as_deref() {
-                Some(project_id) if project_id != session_project_id => {
-                    return Err(ApiError::bad_request(
-                        "default Telegram session must belong to the default project",
-                    ));
-                }
-                Some(_) => {}
-                None => {
-                    default_project_id = Some(session_project_id.to_owned());
-                }
-            }
-
-            if !subscribed_project_ids
-                .iter()
-                .any(|candidate| candidate == session_project_id)
-            {
-                subscribed_project_ids.push(session_project_id.to_owned());
-            }
+                .map(|record| {
+                    (
+                        record.session.id.clone(),
+                        record.session.project_id.clone(),
+                    )
+                })
+                .collect(),
         }
-
-        if config.enabled
-            && config
-                .bot_token
-                .as_deref()
-                .is_some_and(|token| !token.trim().is_empty())
-            && subscribed_project_ids.is_empty()
-        {
-            return Err(ApiError::bad_request(
-                "choose at least one Telegram project before enabling the relay",
-            ));
-        }
-
-        config.subscribed_project_ids = subscribed_project_ids;
-        config.default_project_id = default_project_id;
-        config.default_session_id = default_session_id;
-        Ok(())
     }
 
     fn prune_telegram_config_for_deleted_project(&self, project_id: &str) -> Result<(), ApiError> {
@@ -431,6 +366,116 @@ impl AppState {
             Err(_reason) => stop_telegram_relay_runtime(),
         }
     }
+}
+
+fn validate_telegram_config_against_snapshot(
+    config: &TelegramUiConfig,
+    snapshot: &TelegramConfigValidationSnapshot,
+) -> Result<TelegramConfigNormalization, ApiError> {
+    if let Some(token) = config.bot_token.as_deref() {
+        validate_telegram_bot_token(token)?;
+    }
+    let mut subscribed_project_ids = config.subscribed_project_ids.clone();
+    let mut default_project_id = config.default_project_id.clone();
+    let default_session_id = config.default_session_id.clone();
+    validate_telegram_target_ids(
+        &subscribed_project_ids,
+        default_project_id.as_deref(),
+        default_session_id.as_deref(),
+    )?;
+
+    for project_id in &subscribed_project_ids {
+        if !snapshot.known_projects.contains(project_id.as_str()) {
+            return Err(ApiError::bad_request(format!(
+                "unknown Telegram project `{project_id}`"
+            )));
+        }
+    }
+
+    if default_project_id.is_none() && subscribed_project_ids.len() == 1 {
+        default_project_id = subscribed_project_ids.first().cloned();
+    }
+
+    if let Some(project_id) = default_project_id.clone() {
+        if !snapshot.known_projects.contains(project_id.as_str()) {
+            return Err(ApiError::bad_request(format!(
+                "unknown default Telegram project `{project_id}`"
+            )));
+        }
+        if !subscribed_project_ids
+            .iter()
+            .any(|candidate| candidate == &project_id)
+        {
+            subscribed_project_ids.push(project_id);
+        }
+    }
+
+    if let Some(session_id) = default_session_id.as_deref() {
+        let session_project_id = snapshot
+            .session_project_ids
+            .get(session_id)
+            .ok_or_else(|| {
+                ApiError::bad_request(format!(
+                    "unknown default Telegram session `{session_id}`"
+                ))
+            })?
+            .as_deref()
+            .ok_or_else(|| {
+                ApiError::bad_request("default Telegram session must belong to a project")
+            })?;
+
+        if !snapshot.known_projects.contains(session_project_id) {
+            return Err(ApiError::bad_request(format!(
+                "unknown default Telegram session project `{session_project_id}`"
+            )));
+        }
+
+        match default_project_id.as_deref() {
+            Some(project_id) if project_id != session_project_id => {
+                return Err(ApiError::bad_request(
+                    "default Telegram session must belong to the default project",
+                ));
+            }
+            Some(_) => {}
+            None => {
+                default_project_id = Some(session_project_id.to_owned());
+            }
+        }
+
+        if !subscribed_project_ids
+            .iter()
+            .any(|candidate| candidate == session_project_id)
+        {
+            subscribed_project_ids.push(session_project_id.to_owned());
+        }
+    }
+
+    if config.enabled
+        && config
+            .bot_token
+            .as_deref()
+            .is_some_and(|token| !token.trim().is_empty())
+        && subscribed_project_ids.is_empty()
+    {
+        return Err(ApiError::bad_request(
+            "choose at least one Telegram project before enabling the relay",
+        ));
+    }
+
+    Ok(TelegramConfigNormalization {
+        subscribed_project_ids,
+        default_project_id,
+        default_session_id,
+    })
+}
+
+fn apply_telegram_config_normalization(
+    config: &mut TelegramUiConfig,
+    normalization: TelegramConfigNormalization,
+) {
+    config.subscribed_project_ids = normalization.subscribed_project_ids;
+    config.default_project_id = normalization.default_project_id;
+    config.default_session_id = normalization.default_session_id;
 }
 
 async fn get_telegram_status(

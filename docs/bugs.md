@@ -102,19 +102,6 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 - Extract `useUnmountSafeAsync` hook returning a `runSafe(asyncFn, { onSuccess, onError, onFinally })` wrapper, OR
 - Split `TelegramPreferencesPanel` into form-state component + inner mount-safe handler module.
 
-## `validate_and_normalize_telegram_config` mixes pure validation, mutation, and mutex acquisition
-
-**Severity:** Medium - holds the state mutex while iterating + mutating caller-owned config. Same anti-pattern that the new prepare/apply assistant-forwarding split fixed elsewhere this round.
-
-`src/telegram_settings.rs:148-227`. The rename from `validate_telegram_config` documents the dual responsibility but the `&mut TelegramUiConfig` signature still buries it.
-
-**Current behavior:**
-- One function holds state mutex, iterates `inner.projects`/`inner.sessions`, mutates caller-owned config.
-- State held across multiple checks, allocations, and conditional mutations.
-
-**Proposal:**
-- Split into `pure_validate_telegram_config(...) -> Result<TelegramConfigNormalization, ApiError>` + `apply_telegram_config_normalization(...)` outside the lock.
-
 ## Wire projection layer owns `messages_loaded` SEMANTIC field for partial case
 
 **Severity:** Medium - `wire_session_tail_from_record` decides `messages_loaded` based on whether the slice covers the whole transcript AND the source is loaded. This is wire-semantics decision (UI uses `messagesLoaded: false` to mean "still adopt me, but don't trust messages.length === messageCount") that lives in the projection helper.
