@@ -337,20 +337,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Keep digest-only forwarding as the default for Telegram integrations.
 - Document the third-party content exposure and add any practical redaction/truncation before full forwarding.
 
-## Mermaid fallback loader lives in the message card renderer
-
-**Severity:** Low - Mermaid fallback loading and cache ownership are mixed into an already large rendering component.
-
-`ui/src/message-cards.tsx:182` now owns dynamic import failure classification and global fallback script loading, while `mermaid-render.ts` already owns Mermaid rendering configuration and queueing.
-
-**Current behavior:**
-- Mermaid fallback loader/cache logic lives in `message-cards.tsx`.
-- Rendering, fallback loading, and message-card composition are coupled in the same large module.
-
-**Proposal:**
-- Move fallback loading into `mermaid-render.ts` or a small `mermaid-loader.ts`.
-- Keep message cards calling a single render helper.
-
 ## Markdown diff change-block grouping rules duplicated between renderer and index builder
 
 **Severity:** Medium - the change-navigation index walker copies the renderer's grouping rules; future drift between the two will silently desynchronize navigation stops from rendered blocks.

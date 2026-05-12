@@ -61,6 +61,7 @@
 
 import { applyActiveMermaidThemeOverride } from "./mermaid-theme-override";
 import type { MonacoAppearance } from "./monaco";
+import mermaidBundleUrl from "mermaid/dist/mermaid.min.js?url";
 import {
   DEFAULT_DIAGRAM_LOOK,
   DEFAULT_DIAGRAM_PALETTE,
@@ -77,6 +78,63 @@ export type MermaidModule = (typeof import("mermaid"))["default"];
 export type MermaidConfigInput = NonNullable<
   Parameters<MermaidModule["initialize"]>[0]
 >;
+
+type WindowWithMermaidBundle = Window &
+  typeof globalThis & {
+    mermaid?: MermaidModule;
+    __termalMermaidBundleLoadPromise?: Promise<MermaidModule>;
+  };
+
+function mermaidRenderErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isDynamicModuleFetchError(error: unknown): boolean {
+  const message = mermaidRenderErrorMessage(error);
+  return (
+    message.includes("Failed to fetch dynamically imported module") ||
+    message.includes("error loading dynamically imported module") ||
+    message.includes("Importing a module script failed")
+  );
+}
+
+function loadBundledMermaidModule(): Promise<MermaidModule> {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return Promise.reject(new Error("bundled Mermaid renderer is unavailable"));
+  }
+
+  const mermaidWindow = window as WindowWithMermaidBundle;
+  if (mermaidWindow.mermaid) {
+    return Promise.resolve(mermaidWindow.mermaid);
+  }
+  if (mermaidWindow.__termalMermaidBundleLoadPromise) {
+    return mermaidWindow.__termalMermaidBundleLoadPromise;
+  }
+
+  mermaidWindow.__termalMermaidBundleLoadPromise = new Promise<MermaidModule>(
+    (resolve, reject) => {
+      const script = document.createElement("script");
+      script.async = true;
+      script.src = mermaidBundleUrl;
+      script.onload = () => {
+        if (mermaidWindow.mermaid) {
+          resolve(mermaidWindow.mermaid);
+          return;
+        }
+        reject(new Error("bundled Mermaid renderer loaded without a global"));
+      };
+      script.onerror = () => {
+        reject(new Error("failed to load bundled Mermaid renderer"));
+      };
+      document.head.appendChild(script);
+    },
+  ).catch((error) => {
+    mermaidWindow.__termalMermaidBundleLoadPromise = undefined;
+    throw error;
+  });
+
+  return mermaidWindow.__termalMermaidBundleLoadPromise;
+}
 
 /**
  * Build the sandboxed iframe document for a rendered Mermaid SVG.
@@ -433,6 +491,40 @@ export function renderTermalMermaidDiagram(
     () => undefined,
   );
   return renderJob;
+}
+
+export async function renderMermaidDiagramWithBundleFallback({
+  appearance,
+  code,
+  diagramId,
+}: {
+  appearance: MonacoAppearance;
+  code: string;
+  diagramId: string;
+}) {
+  let mermaid: MermaidModule;
+  try {
+    mermaid = (await import("mermaid")).default;
+  } catch (error) {
+    if (!isDynamicModuleFetchError(error)) {
+      throw error;
+    }
+    mermaid = await loadBundledMermaidModule();
+  }
+  try {
+    return await renderTermalMermaidDiagram(mermaid, diagramId, code, appearance);
+  } catch (error) {
+    if (!isDynamicModuleFetchError(error)) {
+      throw error;
+    }
+    const bundledMermaid = await loadBundledMermaidModule();
+    return renderTermalMermaidDiagram(
+      bundledMermaid,
+      `${diagramId}-bundled`,
+      code,
+      appearance,
+    );
+  }
 }
 
 /**
