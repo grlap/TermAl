@@ -3897,15 +3897,7 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
 #[test]
 fn remote_text_delta_exact_replay_is_skipped_for_loaded_proxy_session() {
     let state = test_app_state();
-    let remote = RemoteConfig {
-        id: "ssh-lab".to_owned(),
-        name: "SSH Lab".to_owned(),
-        transport: RemoteTransport::Ssh,
-        enabled: true,
-        host: Some("example.com".to_owned()),
-        port: Some(22),
-        user: Some("alice".to_owned()),
-    };
+    let remote = local_replay_test_remote();
     seed_remote_proxy_session_via_apply_delta(
         &state,
         &remote,
