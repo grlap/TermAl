@@ -505,16 +505,8 @@ function renderMarkdownDiffSegments({
   sourceContent: string;
   workspaceRoot: string | null;
 }) {
-  // Map block id → index for `data-markdown-diff-change-index` so the
-  // navigation prev/next handlers can scroll the right block into
-  // view. The block ids match `computeMarkdownDiffChangeBlocks`'s
-  // output (segment ids joined by `:`), which is also the React `key`
-  // of each `<section className="markdown-diff-change-block">`.
-  const changeBlockIndexById = new Map<string, number>();
-  changeBlocks.forEach((block, index) => {
-    changeBlockIndexById.set(block.id, index);
-  });
   const rendered: ReactNode[] = [];
+  let changeBlockCursor = 0;
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
     if (!segment) {
@@ -547,32 +539,19 @@ function renderMarkdownDiffSegments({
       continue;
     }
 
-    const changedSegments = [segment];
-    while (segments[index + 1]?.kind !== "normal" && segments[index + 1] != null) {
-      // Break the change-block at a pure-add → removed transition.
-      // `pushChangedRange` in `./markdown-diff-segments.ts` emits
-      // pre-fence pure additions BEFORE the paired removed+added
-      // fence replacement, so this transition marks the boundary
-      // between "text typed before a fence change" and "the fence
-      // replacement itself". Keeping them in one change-block smears
-      // the two unrelated changes visually; breaking here renders
-      // the pure add in its own green block and the fence removal +
-      // fence addition as a separate red→green pair below it.
-      const current = changedSegments[changedSegments.length - 1];
-      const next = segments[index + 1];
-      if (current?.kind === "added" && next?.kind === "removed") {
-        break;
-      }
-      changedSegments.push(segments[index + 1]!);
-      index += 1;
+    const changeBlock = changeBlocks[changeBlockCursor];
+    const changedSegments = changeBlock?.segments ?? [segment];
+    const changeBlockId = changeBlock?.id ?? segment.id;
+    const changeBlockIndex = changeBlock ? changeBlockCursor : undefined;
+    if (changeBlock) {
+      index += changedSegments.length - 1;
+      changeBlockCursor += 1;
     }
 
-    const changeBlockId = changedSegments.map((changed) => changed.id).join(":");
-    const changeBlockIndex = changeBlockIndexById.get(changeBlockId);
     rendered.push(
       <section
         className="markdown-diff-change-block"
-        data-markdown-diff-change-index={changeBlockIndex ?? undefined}
+        data-markdown-diff-change-index={changeBlockIndex}
         key={changeBlockId}
       >
         {changedSegments.map((changedSegment) => {

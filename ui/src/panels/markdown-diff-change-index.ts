@@ -1,8 +1,7 @@
-// Change-block index for the rendered-Markdown diff view. Walks the
-// segment list with the SAME grouping rules `renderMarkdownDiffSegments`
-// in `./markdown-diff-view` uses, so navigation stops match the visible
-// blocks 1:1 (one block per group of consecutive non-`normal` segments,
-// with the same `added → removed` break the renderer applies).
+// Change-block index for the rendered-Markdown diff view. This module
+// owns the grouping rules consumed by `renderMarkdownDiffSegments`, so
+// navigation stops match the visible blocks 1:1 (one block per group of
+// consecutive non-`normal` segments, with the `added → removed` break).
 //
 // What this file owns:
 //   - `MarkdownDiffChangeBlock` — the per-block descriptor: a stable
@@ -23,9 +22,9 @@
 //
 // New module added when the Medium-severity bug "Rendered Markdown
 // diff view cannot jump between changes" was closed: the index is
-// derivable from the same model the renderer uses, so navigation
-// stops are always in sync with the rendered blocks (no separate
-// DOM walk, no per-block measurement).
+// derivable from the same model the renderer consumes, so navigation
+// stops are always in sync with the rendered blocks (no separate DOM
+// walk, no per-block measurement, no duplicated renderer grouping).
 
 import type { MarkdownDiffDocumentSegment } from "./markdown-diff-segments";
 
@@ -43,15 +42,13 @@ export type MarkdownDiffChangeBlock = {
 /**
  * Walks `segments` in document order and emits one
  * `MarkdownDiffChangeBlock` per group of consecutive non-`normal`
- * segments. The grouping mirrors `renderMarkdownDiffSegments`:
+ * segments. `renderMarkdownDiffSegments` consumes these blocks directly:
  *   - `normal` segments are skipped entirely (they are not change
  *     blocks).
  *   - Consecutive `added`/`removed` segments collect into one block.
  *   - The collection breaks at an `added → removed` boundary so a
  *     pure-add right before a fence replacement is its own block,
- *     not smeared into the fence's removed→added pair. (Comment in
- *     the renderer explains why; the rule is duplicated here so the
- *     navigation index does not drift from what the user sees.)
+ *     not smeared into the fence's removed→added pair.
  */
 export function computeMarkdownDiffChangeBlocks(
   segments: readonly MarkdownDiffDocumentSegment[],
