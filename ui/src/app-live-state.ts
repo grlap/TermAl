@@ -563,6 +563,31 @@ function areDelegationWaitRecordsEqual(
   });
 }
 
+function applyDelegationWaitCreated(
+  waits: readonly DelegationWaitRecord[],
+  wait: DelegationWaitRecord,
+): DelegationWaitRecord[] {
+  const index = waits.findIndex((record) => record.id === wait.id);
+  if (index === -1) {
+    return [...waits, wait];
+  }
+
+  const nextWaits = [...waits];
+  nextWaits[index] = wait;
+  return areDelegationWaitRecordsEqual(waits, nextWaits) ? [...waits] : nextWaits;
+}
+
+function applyDelegationWaitConsumed(
+  waits: readonly DelegationWaitRecord[],
+  waitId: string,
+): DelegationWaitRecord[] {
+  if (!waits.some((wait) => wait.id === waitId)) {
+    return [...waits];
+  }
+
+  return waits.filter((wait) => wait.id !== waitId);
+}
+
 export function useAppLiveState(
   params: UseAppLiveStateParams,
 ): UseAppLiveStateReturn {
@@ -981,6 +1006,35 @@ export function useAppLiveState(
       activePromptPollSessionIdRef.current = null;
       return;
     }
+  }
+
+  function applyDelegationWaitDeltaLocally(delta: DeltaEvent) {
+    let nextWaits: DelegationWaitRecord[] | null = null;
+    if (delta.type === "delegationWaitCreated") {
+      const currentRevision = latestStateRevisionRef.current;
+      if (currentRevision !== null && delta.revision < currentRevision) {
+        return;
+      }
+      nextWaits = applyDelegationWaitCreated(
+        delegationWaitsRef.current,
+        delta.wait,
+      );
+    } else if (delta.type === "delegationWaitConsumed") {
+      nextWaits = applyDelegationWaitConsumed(
+        delegationWaitsRef.current,
+        delta.waitId,
+      );
+    }
+
+    if (
+      nextWaits === null ||
+      areDelegationWaitRecordsEqual(delegationWaitsRef.current, nextWaits)
+    ) {
+      return;
+    }
+
+    delegationWaitsRef.current = nextWaits;
+    setDelegationWaits(nextWaits);
   }
 
   function adoptSessions(
@@ -2835,6 +2889,7 @@ export function useAppLiveState(
         const delta = JSON.parse(event.data) as DeltaEvent;
         const currentRevision = latestStateRevisionRef.current;
         if (isDelegationDeltaEvent(delta)) {
+          applyDelegationWaitDeltaLocally(delta);
           if (currentRevision === null || delta.revision >= currentRevision) {
             if (delegationRepairAdoptedSinceLastReconnectError) {
               confirmReconnectRecoveryFromDeltaEvent();

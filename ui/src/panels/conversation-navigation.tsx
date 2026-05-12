@@ -184,7 +184,9 @@ export function MessageNavigationButtons({
           }
         }}
       >
-        <MessageNavigationUpIcon />
+        <span className="message-meta-jump-icon" aria-hidden="true">
+          ↑
+        </span>
       </button>
       <button
         type="button"
@@ -198,30 +200,10 @@ export function MessageNavigationButtons({
           }
         }}
       >
-        <MessageNavigationDownIcon />
+        <span className="message-meta-jump-icon" aria-hidden="true">
+          ↓
+        </span>
       </button>
     </span>
-  );
-}
-
-function MessageNavigationUpIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" width="12" height="12">
-      <path
-        d="M8 3.5 L3 9 H6 V12.5 H10 V9 H13 Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
-function MessageNavigationDownIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" width="12" height="12">
-      <path
-        d="M8 12.5 L3 7 H6 V3.5 H10 V7 H13 Z"
-        fill="currentColor"
-      />
-    </svg>
   );
 }

@@ -1,15 +1,21 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { CodexPromptPreferencesPanel } from "./preferences-panels";
+import {
+  ClaudeApprovalsPreferencesPanel,
+  CodexPromptPreferencesPanel,
+} from "./preferences-panels";
 import { MAX_DEFAULT_MODEL_PREFERENCE_CHARS } from "./session-model-utils";
 
 function renderCodexPanel({
   defaultModel = "default",
   onSelectModel = vi.fn(),
+  sessions = [],
 }: {
   defaultModel?: string;
   onSelectModel?: (model: string) => void;
+  sessions?: ComponentProps<typeof CodexPromptPreferencesPanel>["sessions"];
 } = {}) {
   const props = {
     defaultApprovalPolicy: "never" as const,
@@ -20,6 +26,7 @@ function renderCodexPanel({
     onSelectModel,
     onSelectReasoningEffort: vi.fn(),
     onSelectSandboxMode: vi.fn(),
+    sessions,
   };
 
   return {
@@ -28,11 +35,36 @@ function renderCodexPanel({
   };
 }
 
+function renderClaudePanel({
+  defaultModel = "default",
+  onSelectModel = vi.fn(),
+  sessions = [],
+}: {
+  defaultModel?: string;
+  onSelectModel?: (model: string) => void;
+  sessions?: ComponentProps<typeof ClaudeApprovalsPreferencesPanel>["sessions"];
+} = {}) {
+  const props = {
+    defaultClaudeApprovalMode: "ask" as const,
+    defaultClaudeEffort: "default" as const,
+    defaultClaudeModel: defaultModel,
+    onSelectEffort: vi.fn(),
+    onSelectModel,
+    onSelectMode: vi.fn(),
+    sessions,
+  };
+
+  return {
+    onSelectModel,
+    ...render(<ClaudeApprovalsPreferencesPanel {...props} />),
+  };
+}
+
 describe("AgentDefaultModelControl", () => {
   it("preserves a dirty draft when the upstream preference changes", () => {
     const onSelectModel = vi.fn();
     const { rerender } = renderCodexPanel({ onSelectModel });
-    const input = screen.getByLabelText("Codex default model");
+    const input = screen.getByLabelText("Codex custom default model");
 
     fireEvent.change(input, { target: { value: "gpt-5.5" } });
     expect(input).toHaveValue("gpt-5.5");
@@ -56,7 +88,7 @@ describe("AgentDefaultModelControl", () => {
   it("canonicalizes default values before applying", () => {
     const onSelectModel = vi.fn();
     renderCodexPanel({ defaultModel: "gpt-5.4", onSelectModel });
-    const input = screen.getByLabelText("Codex default model");
+    const input = screen.getByLabelText("Codex custom default model");
     const hint = screen.getByText(/or leave blank/u);
 
     fireEvent.change(input, { target: { value: " DEFAULT " } });
@@ -69,7 +101,7 @@ describe("AgentDefaultModelControl", () => {
   it("applies a custom model with Enter", () => {
     const onSelectModel = vi.fn();
     renderCodexPanel({ onSelectModel });
-    const input = screen.getByLabelText("Codex default model");
+    const input = screen.getByLabelText("Codex custom default model");
 
     fireEvent.change(input, { target: { value: "gpt-5.5" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -93,7 +125,7 @@ describe("AgentDefaultModelControl", () => {
 
   it("renders default-like upstream values as the canonical sentinel", () => {
     renderCodexPanel({ defaultModel: " DEFAULT " });
-    const input = screen.getByLabelText("Codex default model");
+    const input = screen.getByLabelText("Codex custom default model");
 
     expect(input).toHaveValue("default");
     expect(
@@ -103,7 +135,7 @@ describe("AgentDefaultModelControl", () => {
 
   it("caps custom model drafts by Unicode scalar count", () => {
     renderCodexPanel();
-    const input = screen.getByLabelText("Codex default model");
+    const input = screen.getByLabelText("Codex custom default model");
 
     fireEvent.change(input, {
       target: { value: "😀".repeat(MAX_DEFAULT_MODEL_PREFERENCE_CHARS + 1) },
@@ -112,5 +144,69 @@ describe("AgentDefaultModelControl", () => {
     expect(Array.from((input as HTMLInputElement).value)).toHaveLength(
       MAX_DEFAULT_MODEL_PREFERENCE_CHARS,
     );
+  });
+
+  it("selects a Codex default model from live session options", async () => {
+    const onSelectModel = vi.fn();
+    renderCodexPanel({
+      onSelectModel,
+      sessions: [
+        {
+          id: "codex-1",
+          name: "Codex",
+          emoji: "",
+          agent: "Codex",
+          workdir: "/tmp",
+          model: "default",
+          modelOptions: [
+            {
+              label: "GPT-5.5",
+              value: "gpt-5.5",
+              description: "Latest Codex model",
+            },
+          ],
+          status: "idle",
+          preview: "",
+          messages: [],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Codex default model" }));
+    fireEvent.click(await screen.findByRole("option", { name: /GPT-5\.5/u }));
+
+    expect(onSelectModel).toHaveBeenCalledWith("gpt-5.5");
+  });
+
+  it("selects a Claude default model from live session options", async () => {
+    const onSelectModel = vi.fn();
+    renderClaudePanel({
+      onSelectModel,
+      sessions: [
+        {
+          id: "claude-1",
+          name: "Claude",
+          emoji: "",
+          agent: "Claude",
+          workdir: "/tmp",
+          model: "default",
+          modelOptions: [
+            {
+              label: "Claude Sonnet 4.5",
+              value: "claude-sonnet-4-5",
+              description: "Balanced Claude model",
+            },
+          ],
+          status: "idle",
+          preview: "",
+          messages: [],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Claude default model" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Claude Sonnet 4\.5/u }));
+
+    expect(onSelectModel).toHaveBeenCalledWith("claude-sonnet-4-5");
   });
 });

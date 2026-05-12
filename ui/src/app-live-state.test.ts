@@ -391,6 +391,63 @@ afterEach(() => {
 });
 
 describe("deferred session-store sync", () => {
+  it("applies delegation wait create and consume deltas locally", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+
+    const session = makeSession();
+    const params = makeLiveStateParams(session);
+    renderLiveStateHarness(params, () => {});
+    const eventSource = EventSourceMock.instances[0];
+    expect(eventSource).toBeDefined();
+
+    act(() => {
+      eventSource!.dispatchNamedEvent("delta", {
+        type: "delegationWaitCreated",
+        revision: 2,
+        wait: {
+          id: "wait-1",
+          parentSessionId: session.id,
+          delegationIds: ["delegation-1"],
+          mode: "all",
+          createdAt: "12:00:00",
+          title: "Review",
+        },
+      });
+    });
+
+    expect(params.adoptionRefs.delegationWaitsRef.current).toEqual([
+      {
+        id: "wait-1",
+        parentSessionId: session.id,
+        delegationIds: ["delegation-1"],
+        mode: "all",
+        createdAt: "12:00:00",
+        title: "Review",
+      },
+    ]);
+
+    act(() => {
+      eventSource!.dispatchNamedEvent("delta", {
+        type: "delegationWaitConsumed",
+        revision: 3,
+        waitId: "wait-1",
+        parentSessionId: session.id,
+        reason: "completed",
+      });
+    });
+
+    expect(params.adoptionRefs.delegationWaitsRef.current).toEqual([]);
+  });
+
   it("prunes queued session ids that disappear before the pending frame flushes", async () => {
     let pendingFrame: FrameRequestCallback | null = null;
     vi.stubGlobal(

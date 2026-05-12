@@ -945,6 +945,37 @@ describe("AgentSessionPanel conversation caching", () => {
     ).toBeNull();
   });
 
+  it("suppresses a stale idle live-turn tail after visible agent output", () => {
+    const activeSession = makeSession("session-a", {
+      status: "idle",
+      messages: [
+        {
+          id: "message-user",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Current prompt",
+        },
+        {
+          id: "message-files",
+          type: "fileChanges",
+          timestamp: "10:01",
+          author: "assistant",
+          title: "Agent changed 1 file",
+          files: [{ path: "ui/src/styles.css", kind: "modified" }],
+        },
+      ],
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      showWaitingIndicator: true,
+      waitingIndicatorPrompt: null,
+    });
+
+    expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
+  });
+
   it("renders conversation marker chips and navigates between markers", () => {
     const scrollIntoView = vi.fn();
     const originalScrollIntoView = Element.prototype.scrollIntoView;

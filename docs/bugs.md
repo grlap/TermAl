@@ -400,18 +400,38 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 
 `adoptState` re-derives codex, agentReadiness, projects, orchestrators, workspaces, and walks transcripts on the main thread. On a focused active session this lands in the 100-300ms range every send (longer when an active turn is mid-stream). The codebase has already self-diagnosed the path in `docs/prompt-responsiveness-refactor-plan.md` but no optimistic-insert fix has landed.
 
+Recent waiting-indicator suppression added another user-visible edge: on a second or later send, the in-flight indicator can be suppressed because the current session state still ends with assistant output from the previous completed turn while the newly submitted prompt is not yet represented in `activeSession.messages`.
+
 The lag compounds with two existing tracked bugs ("Focused live sessions monopolize the main thread during state adoption", "Composer drafts have three authoritative stores") but is itself a separable contributor.
 
 **Current behavior:**
 - User clicks Send -> textarea clears -> POST fires -> response returns -> `adoptState` walks -> card paints.
 - Total delay: round-trip (typically 30-100ms locally) + adoptState (50-200ms on focused live sessions) = visible 100-300ms gap.
 - During the gap the session shows neither the user prompt nor the composer text.
+- On repeated sends, stale-live-turn suppression can also hide the send-in-progress waiting indicator while the POST is in flight.
 
 **Proposal:**
 - Insert an optimistic user-message card in `handleSend` before `await sendMessage(...)`, keyed by a temp id.
 - When the POST response arrives or the SSE `messageCreated` delta lands (whichever is first), reconcile by id (swap temp id for server-assigned `messageId`).
 - This collapses the round-trip and the adoptState walk out of the felt-lag path simultaneously.
+- Until optimistic insertion lands, keep `isSending` feedback visible until the newly submitted prompt is represented in session state, or key stale-live-turn suppression to a known current prompt/indicator kind.
 - Cross-link to `docs/prompt-responsiveness-refactor-plan.md` and decide whether this is a standalone fix or folds into the larger refactor.
+
+## Stale live-turn suppression can hide delegation wait indicators
+
+**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:1344`. `effectiveShowWaitingIndicator` suppresses every idle waiting indicator after assistant output, including delegation waits passed through `SessionPaneView` as the same `showWaitingIndicator` boolean.
+
+The stale-live-turn fix should only remove obsolete "agent is working" tails. Delegation wait cards have different semantics: the parent session can be idle while a backend delegation wait is still active, and the user still needs the "Waiting on delegation waits..." state.
+
+**Current behavior:**
+- `SessionPaneView` computes delegation-wait prompts through the same waiting-indicator path used by live turns.
+- `AgentSessionPanel` suppresses that path when the session is idle and assistant output already exists after the latest user prompt.
+- Parent sessions with prior assistant output can lose visible delegation-wait feedback even while waits are still active.
+
+**Proposal:**
+- Carry an explicit waiting-indicator kind, such as `live-turn`, `send`, or `delegation-wait`.
+- Apply stale-live-turn suppression only to live-turn indicators, not delegation waits.
+- Add a regression that keeps the delegation-wait card visible after prior assistant output.
 
 ## `applyDeltaToSessions` duplicates the "lookup first, metadata-only fallback when missing" pattern across five non-created delta types
 
@@ -841,6 +861,10 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
+- [ ] P2: Add repeated-send waiting-indicator coverage:
+  send a second prompt after a completed assistant response while the POST is still in flight, and assert the user still sees send-in-progress feedback until the new prompt appears in session state.
+- [ ] P2: Add delegation-wait visibility coverage after prior assistant output:
+  create an idle parent session with assistant output after the latest user prompt plus an active delegation wait, and assert the delegation-wait indicator remains visible instead of being suppressed as a stale live turn.
 - [ ] P2: Cover MCP slash-command parser separator and whitespace edges:
   extend `delegation_mcp_tests::split_mcp_agent_command_tail_pins_note_separator_edges`
   in `src/delegation_mcp.rs` with bare-`--`, whitespace-surrounded-`--`,

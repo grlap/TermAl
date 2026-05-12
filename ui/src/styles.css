@@ -1397,7 +1397,11 @@ textarea {
 }
 
 .create-session-dialog {
-  width: min(32rem, 100%);
+  width: min(60rem, calc(100vw - 3rem));
+  max-height: calc(100vh - 3rem);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .create-session-dialog-header {
@@ -1409,13 +1413,17 @@ textarea {
 
 .create-session-dialog-body {
   margin-top: 1.15rem;
+  min-width: 0;
+  min-height: 0;
   display: grid;
   gap: 1rem;
+  overflow: auto;
 }
 
 .create-session-field {
   display: grid;
   gap: 0.45rem;
+  min-width: 0;
 }
 
 .create-session-dialog-error {
@@ -1424,6 +1432,14 @@ textarea {
 
 .create-session-readiness {
   margin: 0;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.create-session-readiness p {
+  overflow-wrap: anywhere;
 }
 
 .create-session-field-hint {
@@ -3761,6 +3777,7 @@ textarea {
   padding-top: 0.25rem;
 }
 
+.session-model-default-row,
 .session-model-custom-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -4865,12 +4882,21 @@ textarea {
   min-block-size: 1.55rem;
   padding: 0;
   border-radius: 0.45rem;
-  color: var(--text-muted);
+  color: var(--muted);
+}
+
+.message-meta-jump-icon {
+  display: block;
+  color: currentColor;
+  font-family: var(--code-font);
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .message-meta-jump-button:hover:not(:disabled),
 .message-meta-jump-button:focus-visible {
-  color: var(--text-strong);
+  color: var(--ink);
 }
 
 .message-meta-jump-button:disabled {
@@ -10513,10 +10539,6 @@ textarea {
     align-items: stretch;
   }
 }
-
-
-
-
 
 
 

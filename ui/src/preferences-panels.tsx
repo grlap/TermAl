@@ -18,6 +18,7 @@ import {
   isDefaultModelPreference,
   MAX_DEFAULT_MODEL_PREFERENCE_CHARS,
   remoteBadgeLabel,
+  sessionModelComboboxOptions,
   type ComboboxOption,
 } from "./session-model-utils";
 import {
@@ -131,14 +132,68 @@ function clampDefaultModelPreferenceDraft(value: string) {
   return characters.slice(0, MAX_DEFAULT_MODEL_PREFERENCE_CHARS).join("");
 }
 
+function defaultModelComboboxOptions(
+  agent: AgentType,
+  value: string,
+  modelOptions: readonly ComboboxOption[] = [],
+): ComboboxOption[] {
+  const normalizedValue = normalizeDefaultModelPreferenceDraft(value);
+  const options = new Map<string, ComboboxOption>();
+
+  options.set(DEFAULT_MODEL_PREFERENCE, {
+    label: "Default",
+    value: DEFAULT_MODEL_PREFERENCE,
+    description: `Let ${agent} choose its built-in default`,
+  });
+
+  for (const option of modelOptions) {
+    const normalizedOptionValue = normalizeDefaultModelPreferenceDraft(option.value);
+    if (options.has(normalizedOptionValue)) {
+      continue;
+    }
+
+    options.set(normalizedOptionValue, {
+      ...option,
+      label:
+        isDefaultModelPreference(option.value) || option.label.trim().toLowerCase() === "default"
+          ? "Default"
+          : option.label,
+      value: normalizedOptionValue,
+    });
+  }
+
+  if (!options.has(normalizedValue)) {
+    options.set(normalizedValue, {
+      label: isDefaultModelPreference(normalizedValue) ? "Default" : normalizedValue,
+      value: normalizedValue,
+    });
+  }
+
+  return Array.from(options.values());
+}
+
+function defaultModelOptionsFromSessions(
+  agent: AgentType,
+  sessions: readonly Session[],
+  value: string,
+): ComboboxOption[] {
+  const modelOptions = sessions
+    .filter((session) => session.agent === agent)
+    .flatMap((session) => sessionModelComboboxOptions(session.modelOptions, session.model));
+
+  return defaultModelComboboxOptions(agent, value, modelOptions);
+}
+
 function AgentDefaultModelControl({
   agent,
   id,
+  modelOptions,
   value,
   onChange,
 }: {
   agent: AgentType;
   id: string;
+  modelOptions?: readonly ComboboxOption[];
   value: string;
   onChange: (nextValue: string) => void;
 }) {
@@ -158,6 +213,10 @@ function AgentDefaultModelControl({
   const normalizedValue = normalizeDefaultModelPreferenceDraft(value);
   const canApply = normalizedDraft !== normalizedValue;
   const hintId = `${id}-hint`;
+  const selectOptions = useMemo(
+    () => defaultModelComboboxOptions(agent, value, modelOptions),
+    [agent, modelOptions, value],
+  );
 
   useEffect(() => {
     if (pendingAppliedValue !== null) {
@@ -199,15 +258,46 @@ function AgentDefaultModelControl({
       <label className="session-control-label" htmlFor={id}>
         Default model
       </label>
+      <div className="session-model-default-row">
+        <ThemedCombobox
+          id={id}
+          className="prompt-settings-select"
+          value={normalizedValue}
+          options={selectOptions}
+          aria-label={`${agent} default model`}
+          onChange={(nextValue) => {
+            const normalizedNextValue = normalizeDefaultModelPreferenceDraft(nextValue);
+            setDraft(displayDefaultModelPreference(normalizedNextValue));
+            setIsDirty(false);
+            setPendingAppliedValue(normalizedNextValue);
+            onChange(normalizedNextValue);
+          }}
+        />
+        <button
+          type="button"
+          className="ghost-button session-model-custom-reset"
+          aria-describedby={hintId}
+          aria-label={`Reset ${agent} default model`}
+          disabled={isDefaultModelPreference(value)}
+          onClick={() => {
+            setDraft(DEFAULT_MODEL_PREFERENCE);
+            setIsDirty(false);
+            setPendingAppliedValue(DEFAULT_MODEL_PREFERENCE);
+            onChange(DEFAULT_MODEL_PREFERENCE);
+          }}
+        >
+          Reset
+        </button>
+      </div>
       <div className="session-model-custom-row">
         <input
-          id={id}
+          id={`${id}-custom`}
           className="themed-input session-model-custom-input"
           type="text"
           value={draft}
           placeholder="default"
           aria-describedby={hintId}
-          aria-label={`${agent} default model`}
+          aria-label={`${agent} custom default model`}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
@@ -234,24 +324,9 @@ function AgentDefaultModelControl({
         >
           Apply
         </button>
-        <button
-          type="button"
-          className="ghost-button session-model-custom-reset"
-          aria-describedby={hintId}
-          aria-label={`Reset ${agent} default model`}
-          disabled={isDefaultModelPreference(value)}
-          onClick={() => {
-            setDraft(DEFAULT_MODEL_PREFERENCE);
-            setIsDirty(true);
-            setPendingAppliedValue(DEFAULT_MODEL_PREFERENCE);
-            onChange(DEFAULT_MODEL_PREFERENCE);
-          }}
-        >
-          Reset
-        </button>
       </div>
       <p id={hintId} className="session-control-hint">
-        Use <code>default</code> or leave blank to let {agent} choose its built-in default, or enter an exact model id.
+        Select a known model, use <code>default</code> or leave blank to let {agent} choose its built-in default, or enter an exact model id.
       </p>
     </div>
   );
@@ -1781,6 +1856,7 @@ export function ClaudeApprovalsPreferencesPanel({
   onSelectEffort,
   onSelectModel,
   onSelectMode,
+  sessions = [],
 }: {
   defaultClaudeApprovalMode: ClaudeApprovalMode;
   defaultClaudeEffort: ClaudeEffortLevel;
@@ -1788,7 +1864,13 @@ export function ClaudeApprovalsPreferencesPanel({
   onSelectEffort: (effort: ClaudeEffortLevel) => void;
   onSelectModel: (model: string) => void;
   onSelectMode: (mode: ClaudeApprovalMode) => void;
+  sessions?: readonly Session[];
 }) {
+  const defaultModelOptions = useMemo(
+    () => defaultModelOptionsFromSessions("Claude", sessions, defaultClaudeModel),
+    [defaultClaudeModel, sessions],
+  );
+
   return (
     <section className="settings-panel-stack">
       <div className="settings-panel-intro">
@@ -1807,6 +1889,7 @@ export function ClaudeApprovalsPreferencesPanel({
           <AgentDefaultModelControl
             agent="Claude"
             id="default-claude-model"
+            modelOptions={defaultModelOptions}
             value={defaultClaudeModel}
             onChange={onSelectModel}
           />
@@ -1854,6 +1937,7 @@ export function CodexPromptPreferencesPanel({
   onSelectModel,
   onSelectReasoningEffort,
   onSelectSandboxMode,
+  sessions = [],
 }: {
   defaultApprovalPolicy: ApprovalPolicy;
   defaultModel: string;
@@ -1863,7 +1947,13 @@ export function CodexPromptPreferencesPanel({
   onSelectModel: (model: string) => void;
   onSelectReasoningEffort: (effort: CodexReasoningEffort) => void;
   onSelectSandboxMode: (mode: SandboxMode) => void;
+  sessions?: readonly Session[];
 }) {
+  const defaultModelOptions = useMemo(
+    () => defaultModelOptionsFromSessions("Codex", sessions, defaultModel),
+    [defaultModel, sessions],
+  );
+
   return (
     <section className="settings-panel-stack">
       <div className="settings-panel-intro">
@@ -1883,6 +1973,7 @@ export function CodexPromptPreferencesPanel({
           <AgentDefaultModelControl
             agent="Codex"
             id="default-codex-model"
+            modelOptions={defaultModelOptions}
             value={defaultModel}
             onChange={onSelectModel}
           />

@@ -113,6 +113,25 @@ type DraftImageAttachment = ImageAttachment & {
   previewUrl: string;
 };
 
+function hasAgentOutputAfterLatestUserPrompt(messages: readonly Message[]) {
+  let sawLatestUserPrompt = false;
+  let sawAgentOutputAfterLatestUserPrompt = false;
+
+  for (const message of messages) {
+    if (message.author === "you") {
+      sawLatestUserPrompt = true;
+      sawAgentOutputAfterLatestUserPrompt = false;
+      continue;
+    }
+
+    if (sawLatestUserPrompt && message.author === "assistant") {
+      sawAgentOutputAfterLatestUserPrompt = true;
+    }
+  }
+
+  return sawAgentOutputAfterLatestUserPrompt;
+}
+
 type PromptHistoryState = {
   index: number;
   draft: string;
@@ -1322,6 +1341,10 @@ const SessionConversationPage = memo(function SessionConversationPage({
       ? visiblePendingPromptsBase
       : filteredPendingPrompts;
   }, [visibleMessages.length, visibleMessageIds, visiblePendingPromptsBase]);
+  const effectiveShowWaitingIndicator =
+    showWaitingIndicator &&
+    (session.status === "active" ||
+      !hasAgentOutputAfterLatestUserPrompt(visibleMessages));
   const conversationOverview = useConversationOverviewController({
     agent: session.agent,
     isActive,
@@ -1329,8 +1352,10 @@ const SessionConversationPage = memo(function SessionConversationPage({
     onFullTranscriptDemand: requestFullTranscriptRender,
     scrollContainerRef,
     sessionId: session.id,
-    showWaitingIndicator,
-    waitingIndicatorPrompt,
+    showWaitingIndicator: effectiveShowWaitingIndicator,
+    waitingIndicatorPrompt: effectiveShowWaitingIndicator
+      ? waitingIndicatorPrompt
+      : null,
   });
   const markersByMessageId = useMemo(
     () => groupConversationMarkersByMessageId(visibleMarkers),
@@ -1743,7 +1768,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
     ],
   );
 
-  if (visibleMessages.length === 0 && visiblePendingPrompts.length === 0 && !showWaitingIndicator) {
+  if (visibleMessages.length === 0 && visiblePendingPrompts.length === 0 && !effectiveShowWaitingIndicator) {
     return (
       <div
         ref={conversationPageRef}
@@ -1792,7 +1817,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
       forceVirtualized={isInitialTranscriptWindowActive}
     />
   );
-  const liveTurnCard = showWaitingIndicator ? (
+  const liveTurnCard = effectiveShowWaitingIndicator ? (
     <RunningIndicator agent={session.agent} lastPrompt={waitingIndicatorPrompt} />
   ) : null;
   const pendingPromptCards = visiblePendingPrompts.map((prompt) => (

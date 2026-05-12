@@ -121,6 +121,7 @@ import type {
   CreateConversationMarkerOptions,
   DiffMessage,
   JsonValue,
+  Message,
   McpElicitationAction,
   Project,
   RemoteConfig,
@@ -217,6 +218,25 @@ export function delegationWaitIndicatorPrompt(
     ? `: ${firstTitle} (+${waits.length - 1} more)`
     : "";
   return `Waiting on ${waits.length} delegation waits covering ${childLabel}${titleSuffix}`;
+}
+
+export function hasAgentOutputAfterLatestUserPrompt(messages: readonly Message[]) {
+  let sawLatestUserPrompt = false;
+  let sawAgentOutputAfterLatestUserPrompt = false;
+
+  for (const message of messages) {
+    if (message.author === "you") {
+      sawLatestUserPrompt = true;
+      sawAgentOutputAfterLatestUserPrompt = false;
+      continue;
+    }
+
+    if (sawLatestUserPrompt && message.author === "assistant") {
+      sawAgentOutputAfterLatestUserPrompt = true;
+    }
+  }
+
+  return sawAgentOutputAfterLatestUserPrompt;
 }
 
 export function SessionPaneView({
@@ -857,7 +877,10 @@ export function SessionPaneView({
     isSessionTabActive &&
     pane.viewMode === "session" &&
     Boolean(activeSession) &&
-    (activeSession?.status === "active" || (!isSessionBusy && isSending));
+    (activeSession?.status === "active" ||
+      (!isSessionBusy &&
+        isSending &&
+        !hasAgentOutputAfterLatestUserPrompt(activeSession?.messages ?? [])));
   const showWaitingIndicator =
     showLiveTurnWaitingIndicator || showDelegationWaitIndicator;
   const activeSessionMessages = activeSession?.messages;

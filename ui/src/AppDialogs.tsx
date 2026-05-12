@@ -963,6 +963,7 @@ export function AppDialogs({
                   handleDefaultCodexReasoningEffortChange
                 }
                 onSelectSandboxMode={setDefaultCodexSandboxMode}
+                sessions={sessions}
               />
             ) : settingsTab === "claude-approvals" ? (
               <ClaudeApprovalsPreferencesPanel
@@ -972,6 +973,7 @@ export function AppDialogs({
                 onSelectEffort={handleDefaultClaudeEffortChange}
                 onSelectModel={handleDefaultClaudeModelChange}
                 onSelectMode={setDefaultClaudeApprovalMode}
+                sessions={sessions}
               />
             ) : settingsTab === "cursor" ? (
               <CursorPreferencesPanel

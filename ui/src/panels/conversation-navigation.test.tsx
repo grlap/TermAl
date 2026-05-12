@@ -177,6 +177,8 @@ describe("MessageNavigationButtons", () => {
 
     expect(prev).not.toBeDisabled();
     expect(next).not.toBeDisabled();
+    expect(prev).toHaveTextContent("↑");
+    expect(next).toHaveTextContent("↓");
 
     fireEvent.click(prev);
     expect(jumpToMessageId).toHaveBeenCalledWith("d1");
