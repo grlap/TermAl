@@ -1533,6 +1533,9 @@ describe("MarkdownContent", () => {
       expect(
         container.querySelector(".markdown-streaming-fragment")?.textContent,
       ).toBe(markdown);
+      expect(
+        container.querySelector(".markdown-streaming-fragment"),
+      ).toHaveClass("markdown-streaming-fragment-table");
 
       // Turn end: rerender without `isStreaming`. The splitter is
       // bypassed, react-markdown sees the full settled text, and the

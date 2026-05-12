@@ -4732,7 +4732,9 @@ textarea {
     max-width: min(64rem, 96%);
   }
   .bubble-assistant:has(.markdown-table-scroll),
-  .markdown-card:has(.markdown-table-scroll) {
+  .bubble-assistant:has(.markdown-streaming-fragment-table),
+  .markdown-card:has(.markdown-table-scroll),
+  .markdown-card:has(.markdown-streaming-fragment-table) {
     width: fit-content;
     max-width: min(96rem, 96%);
   }

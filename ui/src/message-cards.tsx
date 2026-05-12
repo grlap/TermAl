@@ -3792,6 +3792,7 @@ export function MarkdownContent({
         : { settled: markdown, pending: "" },
     [isStreaming, markdown],
   );
+  const pendingMarkdownLooksLikeTable = /^\s*\|/u.test(pendingMarkdown);
   // Preserve the already-rendered prefix across the streaming -> settled flip.
   // The prefix exists only before the first deferred block, so block-level
   // budgets still apply to the remainder. Line-numbered callers need a single
@@ -4545,7 +4546,10 @@ export function MarkdownContent({
           // once the block closes (a blank line for tables, the
           // matching closing fence for code/math) and the next
           // textDelta fires the memoized re-split.
-          <pre className="markdown-streaming-fragment" aria-busy="true">
+          <pre
+            className={`markdown-streaming-fragment${pendingMarkdownLooksLikeTable ? " markdown-streaming-fragment-table" : ""}`}
+            aria-busy="true"
+          >
             {pendingMarkdown}
           </pre>
         ) : null}

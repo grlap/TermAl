@@ -337,20 +337,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Keep digest-only forwarding as the default for Telegram integrations.
 - Document the third-party content exposure and add any practical redaction/truncation before full forwarding.
 
-## CSS bubble `width: fit-content` transition causes horizontal layout reflow at turn end
-
-**Severity:** Medium - the "stable component subtree across stream → settle" goal is partially undermined by a CSS-driven layout jump.
-
-`ui/src/styles.css:4448-4452`. `:has(.markdown-table-scroll)` applies `width: fit-content; max-width: min(96rem, 96%)` to the bubble. With the new `deferAllBlocks: true` policy a streaming bubble has NO `.markdown-table-scroll` until the turn settles (the table sits in `.markdown-streaming-fragment` instead). When streaming ends, the bubble's effective `max-width` jumps from default `42rem` to `96rem` AND its `width` switches to `fit-content` — the bubble grows wider, producing a visible horizontal reflow at the same moment the React subtree was supposed to be stable.
-
-**Current behavior:**
-- During streaming the bubble follows the prose-default sizing (`42rem` cap).
-- On settle the `:has(.markdown-table-scroll)` selector engages and the bubble jumps to `fit-content` / 96rem cap.
-
-**Proposal:**
-- Anticipate `width: fit-content` while streaming if a `|`-line has been seen (e.g., a class on the streaming-fragment placeholder that triggers the same selector).
-- Or: document the layout shift as accepted and add a regression that asserts bubble width remains stable across the stream→settle transition so any future drift is visible in tests.
-
 ## Mermaid aspect-ratio sizing can clip constrained diagrams
 
 **Severity:** Medium - constrained Mermaid iframes can hide diagram content instead of only removing blank frame space.
