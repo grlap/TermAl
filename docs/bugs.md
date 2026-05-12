@@ -376,21 +376,6 @@ The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but
 - Stabilize handlers via `useCallback`.
 - Or document explicitly that the panel intentionally avoids memoization. Either is fine; consistency is the architectural goal.
 
-## `persist_telegram_bot_state` reads-then-writes the file unconditionally on every state change
-
-**Severity:** Low - the relay polls every `TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS` (5s default) and writes whenever `dirty`. The new logic adds a `fs::read` + `serde_json::from_slice` round-trip on every persist, doubling syscalls.
-
-`src/telegram.rs:190-205`. Modest cost on its own. More concerning: if the file is concurrently being rewritten by the HTTP route, `fs::read` could observe a partial write (since `fs::write` truncates and rewrites without atomicity), and the relay would silently `unwrap_or_default()` — meaning a corrupt-read is treated as "first ever persist" and the next write erases the `config` portion. Pairs with the existing "Telegram settings and relay state can overwrite each other" entry.
-
-**Current behavior:**
-- Each persist does `fs::read` + parse + merge + `fs::write`.
-- A partial-read mid-concurrent-write silently degrades to defaults.
-- The next write erases legitimate config.
-
-**Proposal:**
-- Combine with the atomic-write fix on the existing two-writer-race entry.
-- Distinguish "file does not exist" (legitimate first-run) from "file exists but unparseable mid-write" (warn + retry).
-
 ## `SessionPaneView` `paneScrollPositions` in deps adds no reactivity
 
 **Severity:** Low - the dependency on the dictionary identity is stable across renders for the same `pane.id`; mutations inside the dictionary do not trigger the effect. False reactivity impression for future readers.

@@ -5833,7 +5833,7 @@ fn telegram_state_persist_preserves_settings_config() {
 }
 
 #[test]
-fn telegram_state_persist_backs_up_malformed_existing_file() {
+fn telegram_state_persist_rejects_malformed_existing_file_without_overwriting() {
     let path =
         std::env::temp_dir().join(format!("termal-telegram-bad-state-{}.json", Uuid::new_v4()));
     fs::write(&path, b"{").expect("fixture should write");
@@ -5850,48 +5850,20 @@ fn telegram_state_persist_backs_up_malformed_existing_file() {
         next_update_id: Some(99),
         ..TelegramBotState::default()
     };
-    persist_telegram_bot_state(&path, &state)
-        .expect("malformed existing state should be backed up and replaced");
+    let err = persist_telegram_bot_state(&path, &state)
+        .expect_err("malformed existing settings should not be replaced with defaults");
 
-    let value: Value = serde_json::from_slice(&fs::read(&path).expect("state file should read"))
-        .expect("state file should parse");
-    assert_eq!(value["chatId"], json!(456));
-    assert_eq!(value["nextUpdateId"], json!(99));
-
-    let file_name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .expect("path should have utf8 file name");
-    let backup_prefix = format!("{file_name}.corrupt-");
-    let backups: Vec<PathBuf> = fs::read_dir(path.parent().expect("path should have a parent"))
-        .expect("temp dir should read")
-        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|candidate| {
-            candidate
-                .file_name()
-                .and_then(|value| value.to_str())
-                .is_some_and(|name| name.starts_with(&backup_prefix) && name.ends_with(".json"))
-        })
-        .collect();
-
-    assert_eq!(backups.len(), 1);
-    assert_eq!(fs::read(&backups[0]).expect("backup should read"), b"{");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-
-        let mode = fs::metadata(&backups[0])
-            .expect("backup metadata should read")
-            .permissions()
-            .mode()
-            & 0o777;
-        assert_eq!(mode, 0o600);
-    }
+    assert!(
+        err.to_string()
+            .contains("failed to parse existing Telegram bot file"),
+        "unexpected error: {err}"
+    );
+    assert_eq!(
+        fs::read(&path).expect("state file should still exist"),
+        b"{"
+    );
 
     fs::remove_file(&path).ok();
-    for backup in backups {
-        fs::remove_file(backup).ok();
-    }
 }
 
 #[test]
