@@ -162,6 +162,14 @@ fn acp_session_resume_attempts_load_when_session_load_support_is_unknown() {
         "session/load request should be written\n{written}"
     );
     assert!(
+        written.contains("\"mcpServers\"")
+            && written.contains("\"name\":\"termal-delegation\"")
+            && written.contains("\"delegation-mcp\"")
+            && written.contains("\"--parent-session-id\"")
+            && written.contains(&format!("\"{}\"", created.session_id)),
+        "session/load should include the parent-scoped TermAl delegation MCP bridge\n{written}"
+    );
+    assert!(
         !written.contains("\"method\":\"session/new\""),
         "session/new should not be written when resuming with unknown capability support\n{written}"
     );
@@ -293,6 +301,14 @@ fn acp_session_resume_skips_load_when_session_load_is_explicitly_unsupported() {
     assert!(
         written.contains("\"method\":\"session/new\""),
         "session/new should be written when support is explicitly unavailable\n{written}"
+    );
+    assert!(
+        written.contains("\"mcpServers\"")
+            && written.contains("\"name\":\"termal-delegation\"")
+            && written.contains("\"delegation-mcp\"")
+            && written.contains("\"--parent-session-id\"")
+            && written.contains(&format!("\"{}\"", created.session_id)),
+        "session/new should include the parent-scoped TermAl delegation MCP bridge\n{written}"
     );
 
     let session = state
