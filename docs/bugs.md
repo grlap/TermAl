@@ -739,20 +739,6 @@ The test pins the duplicate branch, but it would not catch a regression where th
 - Or add a load-bearing test that fails if the consume-on-adopt ordering is reversed.
 - Either way, clear `pendingSseRecreateOnInstanceChangeRef` on any `adoptState` success that does not change the instance, so a false-alarm `forceSseReconnect()` cannot fire on a later legitimate restart.
 
-## Sticky shutdown tests bypass `/api/events` stream wiring
-
-**Severity:** Medium - helper-level tests can pass while the production SSE handler still hangs during shutdown.
-
-The new tests validate the sticky `watch` shutdown helper directly, but they do not exercise `state_events` or the `/api/events` route using that signal. A future regression in the stream's pre-loop checks or select wiring could keep long-lived SSE connections open and block graceful shutdown while the helper tests still pass.
-
-**Current behavior:**
-- Tests cover the shutdown signal helper before/after registration.
-- They do not hold or open `/api/events` streams and assert termination through the route handler.
-
-**Proposal:**
-- Add route-level SSE shutdown tests for shutdown-before-connect and shutdown-after-initial-state.
-- Wrap both in timeouts so missed shutdown delivery fails loudly.
-
 ## Post-commit hardening helpers have no automated production-path coverage
 
 **Severity:** Low - `src/persist.rs:213-227`. `verify_persist_commit_integrity` is `#[cfg(not(test))]`-only because it depends on production SQLite path hardening. The post-commit contract - redirection remains fatal, owner-only chmod/mode verification remains fatal unless `TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS` is set - has no direct automated coverage.

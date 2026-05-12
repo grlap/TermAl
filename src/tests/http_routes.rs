@@ -778,6 +778,61 @@ fn fallback_state_events_payload_uses_supplied_revision() {
     assert_eq!(decoded.state.revision, 42);
 }
 
+// Pins `GET /api/events` when graceful shutdown was already triggered before
+// the request reached the SSE handler. The route must drain immediately instead
+// of opening a long-lived stream that keeps graceful shutdown blocked.
+#[tokio::test]
+async fn state_events_route_ends_when_shutdown_precedes_stream_setup() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    state.trigger_shutdown_signal();
+    let app = app_router(state.clone());
+
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+    expect_sse_stream_end(&mut body, "shutdown-before-connect /api/events").await;
+}
+
+// Pins `GET /api/events` shutdown after the initial state frame has been sent.
+// This exercises the production route's select branch, not only the lower-level
+// shutdown watch helper.
+#[tokio::test]
+async fn state_events_route_ends_when_shutdown_fires_after_initial_state() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let app = app_router(state.clone());
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+    let initial_event = next_sse_event(&mut body).await;
+    let (initial_name, initial_data) = parse_sse_event(&initial_event);
+    assert_eq!(initial_name, "state");
+    let _initial_state: StateResponse =
+        serde_json::from_str(&initial_data).expect("initial SSE payload should parse");
+
+    state.trigger_shutdown_signal();
+    expect_sse_stream_end(&mut body, "shutdown-after-initial-state /api/events").await;
+}
+
 // Pins `GET /api/events` (SSE) — asserts the `text/event-stream`
 // content-type, that the first frame is a `state` event carrying a
 // `StateResponse`, and that a subsequent `push_message` produces a

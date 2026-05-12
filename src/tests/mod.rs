@@ -1335,6 +1335,24 @@ fn parse_sse_event(raw: &str) -> (String, String) {
     )
 }
 
+async fn expect_sse_stream_end<S>(stream: &mut std::pin::Pin<Box<S>>, context: &str)
+where
+    S: futures_core::Stream<Item = Result<axum::body::Bytes, axum::Error>>,
+{
+    let next = tokio::time::timeout(Duration::from_secs(2), async {
+        std::future::poll_fn(|cx| stream.as_mut().poll_next(cx)).await
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{context}: SSE stream did not end before timeout"));
+    if let Some(item) = next {
+        let bytes = item.unwrap_or_else(|err| panic!("{context}: SSE stream errored: {err}"));
+        panic!(
+            "{context}: expected SSE stream to end, got chunk {:?}",
+            String::from_utf8_lossy(bytes.as_ref())
+        );
+    }
+}
+
 async fn collect_sse_events(response: axum::response::Response) -> Vec<(String, String)> {
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
