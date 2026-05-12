@@ -305,21 +305,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 - Move `DelegationResultPacket` to a neutral shared module such as `types.ts` or `delegation-result-types.ts`.
 - Or expose a `DelegationActionContext` provider so consumers can override.
 
-## `useInitialActiveTranscriptMessages` mutates `hydrationRef` during render
-
-**Severity:** Medium - render-time side effect on a ref. Works but fragile under concurrent mode (`useTransition`/`Suspense`) — a render that's discarded would still leave the ref in its mutated state, prematurely flipping `hydrated = true` on a discarded render path.
-
-`ui/src/panels/AgentSessionPanel.tsx:228-236`. Lines 221-226 reset on session change; lines 234-236 set `hydrated = true` in early-eligibility branch.
-
-**Current behavior:**
-- Two ref mutations during render body.
-- React 18 concurrent rendering or Suspense can discard renders.
-- Discarded render's ref mutations persist.
-
-**Proposal:**
-- Hoist the session-id-change reset into a `useEffect` (with the trade-off of one stale render after the change).
-- Or document the render-mutation as deliberate and known-fragile under Suspense.
-
 ## "in-flight Telegram test unmounts" test asserts only `consoleError`, doesn't actually pin the unmount guard
 
 **Severity:** Medium - React 18+ removed the "Can't perform a state update on an unmounted component" warning entirely, so removing the `isMountedRef` checks would not cause the test to fail.
@@ -507,22 +492,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 
 **Proposal:**
 - Extract Telegram settings UI and its fetch/save/test hook into a dedicated preferences or telegram-settings module.
-
-## `useInitialActiveTranscriptMessages` mutates a ref during render
-
-**Severity:** Medium - the new long-session tail-window hook writes `hydrationRef.current.sessionId` and `hydrationRef.current.hydrated = true` during render, breaking React 18 Strict Mode / concurrent rendering invariants.
-
-`ui/src/panels/AgentSessionPanel.tsx:236-285`. The hook is part of the long-session tail-window path that activates only on transcripts above ~512 messages. Concurrent renders can flip `hydrated: true` before the actual commit, causing the windowing optimization to be skipped on first paint of large sessions. Worse, the second render re-keys the ref, potentially losing the "I started hydrating" intent. Most hooks in `panels/` use `useState` for derived-from-prop state with explicit reset effects.
-
-**Current behavior:**
-- `if (hydrationRef.current.sessionId !== sessionId) { hydrationRef.current = { hydrated: false, sessionId }; }` mutates during render (line 242-247).
-- `if (!isTailEligible && messages.length > INITIAL_ACTIVE_TRANSCRIPT_TAIL_MIN_MESSAGES) { hydrationRef.current.hydrated = true; }` mutates during render (line 255-257).
-- Strict Mode double-invoke fires the mutation twice without committing.
-
-**Proposal:**
-- Convert to `useState` with `useEffect` reset.
-- Or use the React-docs "derived state" pattern: `const [prevSessionId, setPrev] = useState(sessionId); if (prevSessionId !== sessionId) { setPrev(sessionId); setHydrated(false); }`.
-- Add Strict Mode coverage proving the windowing path still activates after a double-render.
 
 ## Active-transcript tail-window hook overlaps with `VirtualizedConversationMessageList`'s bottom-mount path
 

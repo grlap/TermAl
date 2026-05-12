@@ -562,17 +562,10 @@ function useInitialActiveTranscriptMessages({
   scrollContainerRef: RefObject<HTMLElement | null>;
   sessionId: string;
 }) {
-  const [, forceHydratedRender] = useState(0);
-  const hydrationRef = useRef({
+  const [hydrationState, setHydrationState] = useState({
     hydrated: false,
     sessionId,
   });
-  if (hydrationRef.current.sessionId !== sessionId) {
-    hydrationRef.current = {
-      hydrated: false,
-      sessionId,
-    };
-  }
 
   const isTailEligible = shouldUseInitialActiveTranscriptTailWindow({
     hasConversationMarkers,
@@ -580,33 +573,51 @@ function useInitialActiveTranscriptMessages({
     isActive,
     messageCount: messages.length,
   });
-  if (
+  const isImplicitlyHydrated =
     !isTailEligible &&
-    messages.length > SESSION_TAIL_RENDER_MIN_MESSAGES
-  ) {
-    hydrationRef.current.hydrated = true;
-  }
-  const isWindowed = isTailEligible && !hydrationRef.current.hydrated;
+    messages.length > SESSION_TAIL_RENDER_MIN_MESSAGES;
+  const isExplicitlyHydrated =
+    hydrationState.sessionId === sessionId && hydrationState.hydrated;
+  const isHydrated = isExplicitlyHydrated || isImplicitlyHydrated;
+  const isWindowed = isTailEligible && !isHydrated;
   const hasMessages = messages.length > 0;
+
+  useEffect(() => {
+    setHydrationState((current) => {
+      const currentHydrated =
+        current.sessionId === sessionId ? current.hydrated : false;
+      const nextHydrated = currentHydrated || isImplicitlyHydrated;
+      if (
+        current.sessionId === sessionId &&
+        current.hydrated === nextHydrated
+      ) {
+        return current;
+      }
+      return {
+        hydrated: nextHydrated,
+        sessionId,
+      };
+    });
+  }, [isImplicitlyHydrated, sessionId]);
+
   const requestFullTranscriptRender = useCallback(() => {
-    if (
-      hydrationRef.current.sessionId !== sessionId ||
-      hydrationRef.current.hydrated
-    ) {
+    if (isHydrated) {
       return false;
     }
 
-    hydrationRef.current.hydrated = true;
-    forceHydratedRender((current) => current + 1);
+    setHydrationState((current) =>
+      current.sessionId === sessionId && current.hydrated
+        ? current
+        : {
+            hydrated: true,
+            sessionId,
+          },
+    );
     return true;
-  }, [sessionId]);
+  }, [isHydrated, sessionId]);
 
   useEffect(() => {
-    if (
-      hydrationRef.current.sessionId !== sessionId ||
-      hydrationRef.current.hydrated ||
-      !isWindowed
-    ) {
+    if (isHydrated || !isWindowed) {
       return undefined;
     }
     if (

@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
+  StrictMode,
   useLayoutEffect,
   type ClipboardEvent as ReactClipboardEvent,
   type RefObject,
@@ -4182,6 +4183,50 @@ describe("AgentSessionPanel conversation caching", () => {
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       window.TouchEvent = OriginalTouchEvent;
+      scrollNodeMocks.cleanup();
+      scrollNode.remove();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the first long-session tail window under StrictMode", async () => {
+    vi.useFakeTimers();
+    const OriginalResizeObserver = window.ResizeObserver;
+    const scrollNode = document.createElement("section");
+    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+
+    try {
+      document.body.append(scrollNode);
+      render(
+        <StrictMode>
+          {createAgentSessionPanelHarness({
+            activeSession: makeSession("active-session", {
+              status: "idle",
+              messages: makeTextMessages(600),
+            }),
+            scrollContainerRef: { current: scrollNode },
+          })()}
+        </StrictMode>,
+      );
+
+      expect(screen.getByText("message-600")).toBeInTheDocument();
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      expect(screen.getByText("message-600")).toBeInTheDocument();
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
       scrollNodeMocks.cleanup();
       scrollNode.remove();
       vi.useRealTimers();
