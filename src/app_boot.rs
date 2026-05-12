@@ -327,6 +327,7 @@ impl AppState {
             // accept a revision downgrade.
             server_instance_id: Uuid::new_v4().to_string(),
             default_workdir,
+            local_http_base_url: Arc::new(Mutex::new(None)),
             persistence_path: persist_path_for_state,
             orchestrator_templates_path: Arc::new(orchestrator_templates_path),
             orchestrator_templates_lock: Arc::new(Mutex::new(())),

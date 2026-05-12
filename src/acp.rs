@@ -600,6 +600,7 @@ fn ensure_acp_session_ready(
     if let Some(existing_session_id) = existing_session_id {
         return Ok(existing_session_id);
     }
+    let mcp_servers = state.termal_delegation_mcp_acp_servers(session_id)?;
 
     let session_result = if let Some(resume_session_id) = command
         .resume_session_id
@@ -619,7 +620,7 @@ fn ensure_acp_session_ready(
             json!({
                 "sessionId": resume_session_id,
                 "cwd": command.cwd,
-                "mcpServers": [],
+                "mcpServers": mcp_servers.clone(),
             }),
             Duration::from_secs(30),
             agent,
@@ -641,12 +642,24 @@ fn ensure_acp_session_ready(
                 // an existing session. Upgrade the capability so
                 // subsequent resumes skip the optimistic fallback.
                 note_acp_session_load_supported(runtime_state);
-                start_acp_session(writer, pending_requests, agent, &command.cwd)?
+                start_acp_session(
+                    writer,
+                    pending_requests,
+                    agent,
+                    &command.cwd,
+                    mcp_servers.clone(),
+                )?
             }
             Err(err) => return Err(err),
         }
     } else {
-        start_acp_session(writer, pending_requests, agent, &command.cwd)?
+        start_acp_session(
+            writer,
+            pending_requests,
+            agent,
+            &command.cwd,
+            mcp_servers.clone(),
+        )?
     };
 
     let (external_session_id, session_config) = session_result;
@@ -681,6 +694,7 @@ fn start_acp_session(
     pending_requests: &AcpPendingRequestMap,
     agent: AcpAgent,
     cwd: &str,
+    mcp_servers: Value,
 ) -> Result<(String, Value)> {
     let result = send_acp_json_rpc_request(
         writer,
@@ -688,7 +702,7 @@ fn start_acp_session(
         "session/new",
         json!({
             "cwd": cwd,
-            "mcpServers": [],
+            "mcpServers": mcp_servers,
         }),
         Duration::from_secs(30),
         agent,

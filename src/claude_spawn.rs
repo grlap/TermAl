@@ -29,7 +29,6 @@
 // Protocol-level parsing of the messages coming *back* from Claude
 // lives in `claude.rs` (`handle_claude_message` and friends).
 
-
 /// Spawns Claude runtime.
 fn spawn_claude_runtime(
     state: AppState,
@@ -51,6 +50,11 @@ fn spawn_claude_runtime(
         effort,
         resume_session_id.as_deref(),
     ));
+    command.arg("--mcp-config").arg(
+        state
+            .termal_delegation_mcp_claude_config_json(&session_id)
+            .context("failed to build Claude delegation MCP config")?,
+    );
     command.env("CLAUDE_CODE_ENTRYPOINT", "termal");
 
     let mut child = command

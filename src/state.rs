@@ -253,6 +253,10 @@ struct AppState {
     /// as the signal to accept a revision downgrade.
     server_instance_id: String,
     default_workdir: String,
+    /// Local HTTP origin for agent-facing bridge processes that need to call
+    /// TermAl's own API. Set after the server socket is bound; falls back to
+    /// TERMAL_BASE_URL/TERMAL_PORT for tests and non-server modes.
+    local_http_base_url: Arc<Mutex<Option<String>>>,
     persistence_path: Arc<PathBuf>,
     orchestrator_templates_path: Arc<PathBuf>,
     /// Must not be held at the same time as `self.inner`; template file I/O happens
@@ -932,4 +936,3 @@ fn resolve_forked_codex_workdir(
         Ok(fallback_workdir.to_owned())
     }
 }
-

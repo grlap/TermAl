@@ -75,6 +75,17 @@ async fn run() -> Result<()> {
         Mode::Telegram => tokio::task::spawn_blocking(run_telegram_bot)
             .await
             .map_err(|err| anyhow!("telegram adapter task failed: {err}"))?,
+        Mode::DelegationMcp {
+            parent_session_id,
+            base_url,
+        } => tokio::task::spawn_blocking(move || {
+            run_delegation_mcp_bridge(
+                parent_session_id,
+                base_url.unwrap_or_else(default_termal_http_base_url),
+            )
+        })
+        .await
+        .map_err(|err| anyhow!("delegation MCP bridge task failed: {err}"))?,
     }
 }
 
@@ -107,6 +118,7 @@ async fn run_server() -> Result<()> {
     let bound = listener
         .local_addr()
         .context("failed to read local backend address")?;
+    state.set_local_http_base_url(format!("http://{bound}"));
 
     println!("TermAl backend");
     println!("listening: http://{bound}");
@@ -451,8 +463,14 @@ fn run_repl(agent: Agent) -> Result<()> {
 /// Enumerates value modes.
 enum Mode {
     Server,
-    Repl { agent: Agent },
+    Repl {
+        agent: Agent,
+    },
     Telegram,
+    DelegationMcp {
+        parent_session_id: String,
+        base_url: Option<String>,
+    },
 }
 
 impl Mode {
@@ -465,6 +483,14 @@ impl Mode {
         match args.first().map(String::as_str) {
             None | Some("server") => Ok(Self::Server),
             Some("telegram") | Some("telegram-bot") => Ok(Self::Telegram),
+            Some("delegation-mcp") => {
+                let (parent_session_id, base_url) =
+                    parse_delegation_mcp_mode_args(args.into_iter().skip(1))?;
+                Ok(Self::DelegationMcp {
+                    parent_session_id,
+                    base_url,
+                })
+            }
             Some("repl") | Some("cli") => Ok(Self::Repl {
                 agent: Agent::parse(args.into_iter().skip(1))?,
             }),
@@ -484,6 +510,7 @@ include!("remote_codex_proxies.rs");
 include!("remote_session_proxies.rs");
 include!("remote_sync.rs");
 include!("state.rs");
+include!("delegation_mcp.rs");
 include!("session_runtime.rs");
 include!("session_interaction.rs");
 include!("messages.rs");

@@ -43,12 +43,14 @@ parent/sibling `sessionId` routing cannot bypass the read-only policy.
 `isolatedWorktree` requests may omit `worktreePath`; the backend generates a
 TermAl-owned path before persisting the delegation record.
 
-**Delegation MCP bridge:** Planned agent-facing delegation access is a
-TermAl-owned local MCP bridge spawned per parent agent session. The bridge is
+**Delegation MCP bridge:** Agent-facing delegation access is a TermAl-owned
+local MCP bridge spawned per parent agent session with
+`delegation-mcp --parent-session-id <id> --base-url <origin>`. The bridge is
 configured with an implicit `parentSessionId` and wraps the existing delegation
 HTTP/API routes; it does not expose broad session/delegation listing in the
-first slice. ACP/Codex, Cursor, and Claude startup paths should opt into the
-same bridge descriptor when project/workspace settings enable delegated tools.
+first slice. Claude receives it through `--mcp-config`, ACP/Cursor/Gemini
+receive it through `mcpServers` on `session/new` and `session/load`, and Codex
+receives it through `config.mcp_servers` on `thread/start` and `thread/resume`.
 
 ---
 
@@ -56,11 +58,12 @@ same bridge descriptor when project/workspace settings enable delegated tools.
 
 ### Entry Points
 
-The binary has three modes:
+The binary has four modes:
 
 1. **Server mode** (default) - starts an axum HTTP server on `127.0.0.1:8787` by default, serves the API, and manages long-lived agent processes. `TERMAL_PORT` can override the port.
 2. **REPL mode** (`repl`, `cli`, or an agent shortcut such as `codex` / `claude`) - interactive terminal loop. Reads prompts from stdin and runs one turn at a time via `run_turn_blocking()`.
 3. **Telegram mode** (`telegram` or `telegram-bot`) - long-polling relay that turns project digests and project actions into a Telegram bot workflow.
+4. **Delegation MCP mode** (`delegation-mcp --parent-session-id <id> [--base-url <origin>]`) - stdio JSON-RPC bridge exposing parent-scoped delegation tools to agent runtimes.
 
 ### Core State
 

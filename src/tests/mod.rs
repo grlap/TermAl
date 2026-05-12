@@ -584,6 +584,7 @@ fn test_app_state() -> AppState {
     AppState {
         server_instance_id: Uuid::new_v4().to_string(),
         default_workdir: "/tmp".to_owned(),
+        local_http_base_url: Arc::new(Mutex::new(None)),
         persistence_path: Arc::new(persistence_path),
         orchestrator_templates_path: Arc::new(
             std::env::temp_dir().join(format!("termal-orchestrators-test-{}.json", Uuid::new_v4())),

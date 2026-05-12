@@ -527,15 +527,25 @@ fan-in is available through `resume_after_delegations`.
 
 ### MCP Tools
 
-Delegation tools are opt-in. TermAl should not expose agent-facing spawn/wait
-tools until the user enables them for the current project or workspace.
+Delegation tools are parent-scoped. The first local implementation injects the
+bridge into TermAl-launched agent runtimes by default, relying on the implicit
+parent id, backend ownership checks, read-only default write policy, and
+concurrency/depth limits as the safety boundary. Add project/workspace opt-in
+or capability tokens before exposing the bridge over a shared, remote, or
+long-lived reusable transport.
 
-The first implementation should be a TermAl-owned local MCP bridge spawned for
-one parent agent session. The bridge is configured with the TermAl base URL and
-the current `parentSessionId`; tool calls do not accept an arbitrary parent id.
-This keeps the first security boundary simple: the bridge can only act under the
-parent session that TermAl used to launch it, and the backend still validates
-that every requested delegation belongs to that parent.
+The first implementation is a TermAl-owned local MCP bridge spawned for one
+parent agent session:
+
+```text
+termal delegation-mcp --parent-session-id <session-id> --base-url <http-origin>
+```
+
+The bridge is configured with the TermAl base URL and the current
+`parentSessionId`; tool calls do not accept an arbitrary parent id. This keeps
+the first security boundary simple: the bridge can only act under the parent
+session that TermAl used to launch it, and the backend still validates that
+every requested delegation belongs to that parent.
 
 Do not add a broad "list all sessions" or "list all delegations" tool in the
 first MCP slice. The bridge may return ids it created, and callers may pass
@@ -610,14 +620,16 @@ capability token before exposing the bridge over a shared transport, remote
 transport, or reusable long-lived process.
 
 Agent integration hooks:
-- Codex/ACP sessions: populate `mcpServers` in both `session/new` and
-  `session/load` with the TermAl MCP bridge configuration when delegation MCP is
-  enabled for the project/workspace.
-- Cursor sessions: use the same ACP `mcpServers` path when the Cursor backend
-  accepts it; otherwise generate Cursor's supported local MCP config from the
-  same bridge descriptor.
-- Claude sessions: pass the bridge through Claude's supported MCP configuration
-  path at process launch/resume time.
+- Codex sessions: pass a `config.mcp_servers.termal-delegation` descriptor in
+  `thread/start` and `thread/resume`, using the same local executable and
+  parent-scoped bridge arguments as the stdio bridge.
+- ACP sessions: populate `mcpServers` in both `session/new` and `session/load`
+  with the TermAl MCP bridge configuration.
+- Cursor and Gemini sessions: use the same ACP `mcpServers` path as long as
+  those ACP backends accept it; if a backend rejects inline `mcpServers`, fall
+  back to a backend-specific generated local config from the same descriptor.
+- Claude sessions: pass the bridge through Claude's `--mcp-config` process
+  launch/resume path.
 - All agents: if the bridge cannot be configured, commands that require
   delegated review must fail fast instead of silently falling back to raw HTTP,
   shell polling, Task agents, or Codex platform subagents.
@@ -1158,11 +1170,12 @@ quick review/explorer tasks too heavy.
 ### Phase 3: Agent MCP Bridge
 
 - Add a TermAl-owned local MCP bridge that wraps the internal delegation command
-  surface.
+  surface. Implemented as `delegation-mcp` over stdio.
 - Launch the bridge per parent agent session with an implicit `parentSessionId`.
-- Wire the bridge into ACP/Codex, Cursor, and Claude session startup/resume
-  paths.
-- Keep the bridge opt-in per project/workspace until stable.
+- Wire the bridge into ACP/Codex, Cursor, Gemini, and Claude session
+  startup/resume paths.
+- Keep the bridge parent-scoped. Project/workspace opt-in and capability tokens
+  can be added before remote/shared transports if needed.
 - Add regression coverage for terminal status/result refresh, backend resume
   waits, and restart/reconcile behavior before relying on the bridge for review
   automation.

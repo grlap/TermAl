@@ -176,6 +176,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     let reloaded_state = AppState {
         server_instance_id: state.server_instance_id.clone(),
         default_workdir: "/tmp".to_owned(),
+        local_http_base_url: state.local_http_base_url.clone(),
         persistence_path: state.persistence_path.clone(),
         orchestrator_templates_path: state.orchestrator_templates_path.clone(),
         orchestrator_templates_lock: state.orchestrator_templates_lock.clone(),

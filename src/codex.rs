@@ -780,6 +780,9 @@ fn handle_shared_codex_prompt_command(
 
     // Slow path: need to create or resume a thread first. Fire-and-forget the
     // setup request and spawn a waiter so the writer thread is not blocked.
+    let mcp_config = state
+        .termal_delegation_mcp_codex_config(session_id)
+        .context("failed to build Codex delegation MCP config")?;
     let (method, params) = match command.resume_thread_id.as_deref() {
         Some(thread_id) => (
             "thread/resume",
@@ -789,6 +792,7 @@ fn handle_shared_codex_prompt_command(
                 "model": command.model,
                 "sandbox": command.sandbox_mode.as_cli_value(),
                 "approvalPolicy": command.approval_policy.as_cli_value(),
+                "config": mcp_config,
             }),
         ),
         None => (
@@ -799,6 +803,7 @@ fn handle_shared_codex_prompt_command(
                 "sandbox": command.sandbox_mode.as_cli_value(),
                 "approvalPolicy": command.approval_policy.as_cli_value(),
                 "personality": "pragmatic",
+                "config": mcp_config,
             }),
         ),
     };
@@ -1150,4 +1155,3 @@ fn handle_shared_codex_prompt_command_result(
         }
     }
 }
-

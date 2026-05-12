@@ -11,7 +11,14 @@ Review current staged and unstaged changes by delegating `/review-local` to both
 
 **IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) may only be used when the current session write policy allows workspace mutation.**
 
-**IMPORTANT: This command must use TermAl delegations to create the two top-level reviewer sessions. Do NOT use raw `claude -p`, Codex platform subagents, Claude Task agents, or any non-TermAl review path to spawn those top-level reviewers. The delegated child sessions may execute `/review-local` using that command's own documented internal review workflow. If TermAl delegation tools are unavailable, stop and report that `/review-with-delegate` requires the TermAl delegation tool surface.**
+**IMPORTANT: This command must use TermAl MCP delegation tools to create the two top-level reviewer sessions. Do NOT use raw `claude -p`, Codex platform subagents, Claude Task agents, shell polling, raw HTTP, or any non-TermAl MCP review path to spawn or wait for those top-level reviewers. The delegated child sessions may execute `/review-local` using that command's own documented internal review workflow. If the required TermAl MCP tools are unavailable, stop and report that `/review-with-delegate` requires the TermAl delegation MCP bridge.**
+
+Required MCP tools:
+- `termal_spawn_session`
+- `termal_get_session_status`
+- `termal_get_session_result`
+- `termal_wait_delegations`
+- `termal_resume_after_delegations`
 
 ## Step 1: Confirm review target
 
@@ -21,7 +28,7 @@ If there are no staged, unstaged, or untracked changes, tell the user there is n
 
 ## Step 2: Spawn delegated reviewers
 
-Using TermAl's delegation tool surface, create two child delegation sessions from the current parent session:
+Using `termal_spawn_session`, create two child delegation sessions from the current parent session:
 
 1. Codex reviewer
    - Agent: `Codex`
@@ -43,14 +50,14 @@ If either spawn fails, report the failure clearly and stop unless one reviewer w
 
 ## Step 3: Wait for both reviewers
 
-Use TermAl's delegation wait/fan-in surface to wait for both delegated reviewers to complete.
+Use TermAl MCP wait/fan-in tools to wait for both delegated reviewers to complete.
 
 Prefer one of these paths, in order:
 
-1. If a synchronous TermAl fan-in wait tool is available and returns reviewer results into this same turn, use it and then continue to Step 4.
-2. If only the parent-scoped backend resume wait is available, schedule that wait, report the wait id and reviewer child session ids, then stop this turn immediately. Do not continue to Step 4 until TermAl resumes the parent with the fan-in prompt.
+1. If `termal_wait_delegations` is available and the expected review is short, call it with both delegation ids and `mode: "all"`; if it returns terminal results into this same turn, continue to Step 4.
+2. For normal long-running review, call `termal_resume_after_delegations` with both delegation ids and `mode: "all"`, report the wait id and reviewer child session ids, then stop this turn immediately. Do not continue to Step 4 until TermAl resumes the parent with the fan-in prompt.
 
-Never combine a backend resume wait with a manual polling loop in the same parent turn. A backend resume wait queues its result as the next parent prompt; keeping the parent turn active with PowerShell, shell, HTTP polling, or session-log polling prevents that queued fan-in prompt from running and can make the review appear stuck.
+Never combine a backend resume wait with a manual polling loop in the same parent turn. A backend resume wait queues its result as the next parent prompt; keeping the parent turn active with PowerShell, shell, raw HTTP polling, or session-log polling prevents that queued fan-in prompt from running and can make the review appear stuck.
 
 ## Step 4: Consolidate results
 
