@@ -165,6 +165,12 @@ individual delegation result. That keeps child transcripts available for later
 human inspection or follow-up prompts without making delegated reviewers visible
 in default session lists.
 
+Delegation tasks are one-shot records even though their child sessions remain
+openable. A user may open a child transcript and continue it manually, but MCP
+review automation should create a fresh child delegation for each bounded task
+instead of reusing an earlier child session. Reuse-by-default would make result
+packets ambiguous and would blur the parent-owned audit trail.
+
 The delegation record and result summary remain in backend state for lifecycle
 bookkeeping after parent deletion. Child transcripts and full result retrieval
 through parent-scoped routes end with the owning parent. Open item: define a
@@ -550,6 +556,12 @@ no tool that can enumerate unrelated sessions or delegations. This is the
 minimum boundary needed for local delegated review automation without adding a
 capability system prematurely.
 
+Do not implement a stronger namespace abstraction until there is a concrete
+reason to do so. For the local per-process bridge, `parentSessionId` plus
+backend ownership checks is the boundary. If a future transport is shared across
+projects, exposed remotely, or reused across parent sessions, add an explicit
+scope/capability layer at that point rather than weakening the v1 tool contract.
+
 The first implementation is a TermAl-owned local MCP bridge spawned for one
 parent agent session:
 
@@ -597,6 +609,10 @@ termal_resume_after_delegations({ delegationIds, mode?, title? }) -> DelegationW
 smoke tests. `termal_resume_after_delegations` schedules the durable backend
 wait and should be preferred for long-running delegated review flows because it
 lets the parent yield and be resumed by TermAl when the wait is terminal.
+Agents must not combine a backend resume wait with shell polling, raw HTTP
+polling, or session-log scraping in the same parent turn. Once a resume wait is
+scheduled, the parent should yield so the queued fan-in prompt can run as the
+next turn.
 
 Tool results should include enough information for a parent agent to continue
 without opening the child transcript:
@@ -1256,6 +1272,12 @@ MCP/internal commands:
 - polling wait support returns on completion or timeout
 - resume wait support queues a parent prompt after `any` or `all` child
   delegations finish
+- a terminal status/result read refreshes the persisted delegation state and
+  consumes any already-satisfied backend wait for that parent
+- a backend restart while a wait is pending does not leave the parent blocked
+  once all watched delegations are terminal
+- a parent-scoped bridge cannot read, wait for, cancel, or fetch result packets
+  for a delegation owned by another parent session
 - result is unavailable until completion
 - cancel is idempotent
 
@@ -1264,6 +1286,8 @@ Agent MCP bridge:
   tools
 - each tool delegates to the existing API/command surface and preserves its
   validation errors
+- no MCP tool accepts an arbitrary `parentSessionId`; the bridge process is
+  launched with exactly one implicit parent
 - ACP/Codex, Cursor, and Claude startup paths can opt into the same bridge
   descriptor
 - `/review-with-delegate` fails fast when the required TermAl MCP tools are

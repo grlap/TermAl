@@ -192,10 +192,10 @@ struct TermalDelegationMcpBridge {
 
 impl TermalDelegationMcpBridge {
     fn new(parent_session_id: String, base_url: String) -> Result<Self> {
-        let parent_session_id = parent_session_id.trim().to_owned();
-        if parent_session_id.is_empty() {
-            bail!("delegation MCP parent session id cannot be empty");
-        }
+        let parent_session_id = required_path_identifier(
+            Some(&Value::String(parent_session_id)),
+            "delegation MCP parent session id",
+        )?;
         Ok(Self {
             parent_session_id,
             base_url: normalize_termal_http_base_url(base_url),
@@ -301,7 +301,8 @@ impl TermalDelegationMcpBridge {
     }
 
     fn tool_get_session_status(&self, arguments: Value) -> Result<Value> {
-        let delegation_id = required_string(arguments.get("delegationId"), "delegationId")?;
+        let delegation_id =
+            required_path_identifier(arguments.get("delegationId"), "delegationId")?;
         self.get_json(&format!(
             "/api/sessions/{}/delegations/{}",
             self.parent_session_id, delegation_id
@@ -309,7 +310,8 @@ impl TermalDelegationMcpBridge {
     }
 
     fn tool_get_session_result(&self, arguments: Value) -> Result<Value> {
-        let delegation_id = required_string(arguments.get("delegationId"), "delegationId")?;
+        let delegation_id =
+            required_path_identifier(arguments.get("delegationId"), "delegationId")?;
         self.get_json(&format!(
             "/api/sessions/{}/delegations/{}/result",
             self.parent_session_id, delegation_id
@@ -317,7 +319,8 @@ impl TermalDelegationMcpBridge {
     }
 
     fn tool_cancel_session(&self, arguments: Value) -> Result<Value> {
-        let delegation_id = required_string(arguments.get("delegationId"), "delegationId")?;
+        let delegation_id =
+            required_path_identifier(arguments.get("delegationId"), "delegationId")?;
         self.post_json(
             &format!(
                 "/api/sessions/{}/delegations/{}/cancel",
@@ -329,7 +332,7 @@ impl TermalDelegationMcpBridge {
 
     fn tool_resume_after_delegations(&self, arguments: Value) -> Result<Value> {
         let delegation_ids =
-            required_string_array(arguments.get("delegationIds"), "delegationIds")?;
+            required_path_identifier_array(arguments.get("delegationIds"), "delegationIds")?;
         let mut body = serde_json::Map::new();
         body.insert(
             "delegationIds".to_owned(),
@@ -347,7 +350,7 @@ impl TermalDelegationMcpBridge {
 
     fn tool_wait_delegations(&self, arguments: Value) -> Result<Value> {
         let delegation_ids =
-            required_string_array(arguments.get("delegationIds"), "delegationIds")?;
+            required_path_identifier_array(arguments.get("delegationIds"), "delegationIds")?;
         let mode = optional_string(arguments.get("mode")).unwrap_or_else(|| "all".to_owned());
         let mode = match mode.as_str() {
             "all" | "any" => mode,
@@ -617,6 +620,17 @@ fn required_string(value: Option<&Value>, label: &str) -> Result<String> {
         .with_context(|| format!("{label} is required"))
 }
 
+fn required_path_identifier(value: Option<&Value>, label: &str) -> Result<String> {
+    let value = required_string(value, label)?;
+    if value
+        .chars()
+        .any(|ch| ch == '/' || ch == '?' || ch == '#' || ch.is_control())
+    {
+        bail!("{label} must not contain /, ?, #, or control characters");
+    }
+    Ok(value)
+}
+
 fn optional_string(value: Option<&Value>) -> Option<String> {
     value
         .and_then(Value::as_str)
@@ -635,14 +649,13 @@ fn insert_optional_string(
     }
 }
 
-fn required_string_array(value: Option<&Value>, label: &str) -> Result<Vec<String>> {
+fn required_path_identifier_array(value: Option<&Value>, label: &str) -> Result<Vec<String>> {
     let array = value
         .and_then(Value::as_array)
         .with_context(|| format!("{label} must be an array"))?;
     let mut values = Vec::new();
     for item in array {
-        let value = required_string(Some(item), label)?;
-        values.push(value);
+        values.push(required_path_identifier(Some(item), label)?);
     }
     if values.is_empty() {
         bail!("{label} must not be empty");
@@ -857,6 +870,43 @@ mod delegation_mcp_tests {
             codex.pointer("/mcp_servers/termal-delegation/args/2"),
             Some(&Value::String(parent.to_owned()))
         );
+    }
+
+    #[test]
+    fn delegation_mcp_rejects_path_unsafe_parent_and_delegation_ids() {
+        let err = match TermalDelegationMcpBridge::new(
+            "session-parent/other".to_owned(),
+            "http://127.0.0.1:9999".to_owned(),
+        ) {
+            Ok(_) => panic!("path-unsafe parent id should be rejected"),
+            Err(err) => err,
+        };
+        assert!(err
+            .to_string()
+            .contains("delegation MCP parent session id must not contain"));
+
+        let bridge = TermalDelegationMcpBridge::new(
+            "session-parent".to_owned(),
+            "http://127.0.0.1:9999".to_owned(),
+        )
+        .expect("path-safe parent id should be accepted");
+
+        let err = bridge
+            .tool_get_session_status(json!({ "delegationId": "delegation-bad/result" }))
+            .expect_err("path-unsafe status delegation id should be rejected");
+        assert!(err
+            .to_string()
+            .contains("delegationId must not contain /, ?, #, or control characters"));
+
+        let err = bridge
+            .tool_wait_delegations(json!({
+                "delegationIds": ["delegation-good", "delegation-bad?x"],
+                "timeoutMs": 1
+            }))
+            .expect_err("path-unsafe wait delegation id should be rejected before polling");
+        assert!(err
+            .to_string()
+            .contains("delegationIds must not contain /, ?, #, or control characters"));
     }
 
     #[test]
