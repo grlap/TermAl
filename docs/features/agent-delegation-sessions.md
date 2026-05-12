@@ -670,6 +670,12 @@ type DelegationDeltaEvent =
       reason: "completed" | "parentSessionUnavailable" | "parentSessionRemoved";
     }
   | {
+      type: "delegationWaitResumeDispatchFailed";
+      revision: number;
+      parentSessionId: string;
+      error: string;
+    }
+  | {
       type: "delegationUpdated";
       revision: number;
       delegationId: string;

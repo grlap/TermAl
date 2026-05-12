@@ -220,7 +220,7 @@ impl AppState {
                 &delegation_wait_refresh.consumed_waits,
             );
         }
-        self.dispatch_delegation_wait_resumes(delegation_wait_refresh.dispatch_parents);
+        self.dispatch_delegation_wait_resumes(revision, delegation_wait_refresh.dispatch_parents);
 
         self.resume_pending_orchestrator_transitions()
             .map_err(|err| {

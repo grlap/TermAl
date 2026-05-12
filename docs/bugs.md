@@ -34,21 +34,6 @@ The staged prompt/delegation jump buttons fix the basic "no way to jump" gap, bu
 - Bind validation to the opened handle where platform support allows it, e.g. no-follow open plus handle metadata checks.
 - Or compare pre/post file metadata and treat mismatch as unavailable.
 
-## `dispatch_delegation_wait_resumes` errors are stderr-only without audit ledger
-
-**Severity:** Low - `src/delegations.rs:1131-1154`. Dispatch errors are written to stderr only. A wait that was consumed but failed to dispatch leaves no structured trace in state, deltas, or a retained wait record.
-
-Operators and the UI cannot tell that fan-in resume should have happened but did not.
-
-**Current behavior:**
-- Dispatch errors write to stderr only.
-- The wait has already been removed.
-- No audit ledger entry is created.
-
-**Proposal:**
-- Emit a structured warning event or retain dispatch error metadata.
-- Or document the best-effort policy and recovery expectations.
-
 ## First-settled active-baseline same-message growth lacks a safe turn boundary
 
 **Severity:** Medium - `src/telegram.rs:2583-2637`. When a Telegram prompt is armed behind an active/approval-paused turn, the relay baselines the current assistant message while `baseline_while_active=true`. If the tracked message id has already grown by the first settled poll, the relay cannot distinguish "old turn finished after the last active poll" from "the Telegram reply was appended to the same message id."

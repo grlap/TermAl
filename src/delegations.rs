@@ -812,7 +812,7 @@ impl AppState {
         if refresh.did_mutate() {
             self.publish_delegation_wait_consumed_deltas(revision, &refresh.consumed_waits);
         }
-        self.dispatch_delegation_wait_resumes(refresh.dispatch_parents.clone());
+        self.dispatch_delegation_wait_resumes(revision, refresh.dispatch_parents.clone());
 
         Ok(DelegationWaitResponse {
             revision,
@@ -860,7 +860,7 @@ impl AppState {
                         &wait_refresh.consumed_waits,
                     );
                 }
-                self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
+                self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
                 return Ok(response);
             }
             let child_session_id = delegation.child_session_id.clone();
@@ -871,7 +871,7 @@ impl AppState {
             if wait_refresh.did_mutate() {
                 self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
             }
-            self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
+            self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
             child_session_id
         };
 
@@ -919,7 +919,7 @@ impl AppState {
         if wait_refresh.did_mutate() {
             self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
         }
-        self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
+        self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
         Ok(DelegationStatusResponse {
             revision,
             delegation,
@@ -946,7 +946,7 @@ impl AppState {
         if wait_refresh.did_mutate() {
             self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
         }
-        self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
+        self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
         Ok(())
     }
 
@@ -962,7 +962,7 @@ impl AppState {
         if wait_refresh.did_mutate() {
             self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
         }
-        self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
+        self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
     }
 
     fn ensure_read_only_delegation_allows_write_action(
@@ -1165,7 +1165,7 @@ impl AppState {
         if wait_refresh.did_mutate() {
             self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
         }
-        self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
+        self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
         Ok(())
     }
 
@@ -1255,6 +1255,19 @@ impl AppState {
                 reason: consumed.reason,
             });
         }
+    }
+
+    fn publish_delegation_wait_resume_dispatch_failed(
+        &self,
+        revision: u64,
+        parent_session_id: &str,
+        error: String,
+    ) {
+        self.publish_delta(&DeltaEvent::DelegationWaitResumeDispatchFailed {
+            revision,
+            parent_session_id: parent_session_id.to_owned(),
+            error,
+        });
     }
 
     fn publish_parent_delegation_card_delta(
@@ -1378,7 +1391,7 @@ impl AppState {
         Ok(())
     }
 
-    fn dispatch_delegation_wait_resumes(&self, parent_session_ids: Vec<String>) {
+    fn dispatch_delegation_wait_resumes(&self, revision: u64, parent_session_ids: Vec<String>) {
         let mut seen = BTreeSet::new();
         for parent_session_id in parent_session_ids {
             if !seen.insert(parent_session_id.clone()) {
@@ -1387,16 +1400,28 @@ impl AppState {
             match self.dispatch_next_queued_turn(&parent_session_id, false) {
                 Ok(Some(dispatch)) => {
                     if let Err(err) = deliver_turn_dispatch(self, dispatch) {
-                        eprintln!(
-                            "delegation wait warning> failed to dispatch queued resume for session `{}`: {}",
+                        let error = format!(
+                            "failed to dispatch queued resume for session `{}`: {}",
                             parent_session_id, err.message
+                        );
+                        eprintln!("delegation wait warning> {error}");
+                        self.publish_delegation_wait_resume_dispatch_failed(
+                            revision,
+                            &parent_session_id,
+                            error,
                         );
                     }
                 }
                 Ok(None) => {}
                 Err(err) => {
-                    eprintln!(
-                        "delegation wait warning> failed to inspect queued resume for session `{parent_session_id}`: {err:#}"
+                    let error = format!(
+                        "failed to inspect queued resume for session `{parent_session_id}`: {err:#}"
+                    );
+                    eprintln!("delegation wait warning> {error}");
+                    self.publish_delegation_wait_resume_dispatch_failed(
+                        revision,
+                        &parent_session_id,
+                        error,
                     );
                 }
             }
@@ -1414,7 +1439,7 @@ impl AppState {
             (revision, wait_refresh)
         };
         self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
-        self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
+        self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
         Ok(())
     }
 

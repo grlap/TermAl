@@ -714,6 +714,7 @@ impl AppState {
             DeltaEvent::DelegationCreated { .. }
             | DeltaEvent::DelegationWaitCreated { .. }
             | DeltaEvent::DelegationWaitConsumed { .. }
+            | DeltaEvent::DelegationWaitResumeDispatchFailed { .. }
             | DeltaEvent::DelegationUpdated { .. }
             | DeltaEvent::DelegationCompleted { .. }
             | DeltaEvent::DelegationFailed { .. }
@@ -2238,6 +2239,7 @@ impl AppState {
             DeltaEvent::DelegationCreated { .. }
             | DeltaEvent::DelegationWaitCreated { .. }
             | DeltaEvent::DelegationWaitConsumed { .. }
+            | DeltaEvent::DelegationWaitResumeDispatchFailed { .. }
             | DeltaEvent::DelegationUpdated { .. }
             | DeltaEvent::DelegationCompleted { .. }
             | DeltaEvent::DelegationFailed { .. }

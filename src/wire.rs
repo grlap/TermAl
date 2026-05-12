@@ -1971,6 +1971,11 @@ enum DeltaEvent {
         #[serde(default)]
         reason: DelegationWaitConsumedReason,
     },
+    DelegationWaitResumeDispatchFailed {
+        revision: u64,
+        parent_session_id: String,
+        error: String,
+    },
     DelegationUpdated {
         revision: u64,
         delegation_id: String,

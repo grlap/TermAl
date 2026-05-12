@@ -85,6 +85,7 @@ export type SessionDeltaEvent = Exclude<
   | { type: "delegationCreated" }
   | { type: "delegationWaitCreated" }
   | { type: "delegationWaitConsumed" }
+  | { type: "delegationWaitResumeDispatchFailed" }
   | { type: "delegationUpdated" }
   | { type: "delegationCompleted" }
   | { type: "delegationFailed" }

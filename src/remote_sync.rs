@@ -35,6 +35,7 @@ fn delta_event_revision(event: &DeltaEvent) -> u64 {
         | DeltaEvent::DelegationCreated { revision, .. }
         | DeltaEvent::DelegationWaitCreated { revision, .. }
         | DeltaEvent::DelegationWaitConsumed { revision, .. }
+        | DeltaEvent::DelegationWaitResumeDispatchFailed { revision, .. }
         | DeltaEvent::DelegationUpdated { revision, .. }
         | DeltaEvent::DelegationCompleted { revision, .. }
         | DeltaEvent::DelegationFailed { revision, .. }

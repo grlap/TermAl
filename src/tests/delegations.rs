@@ -473,6 +473,113 @@ fn already_terminal_delegation_wait_reports_dispatch_for_idle_parent() {
 }
 
 #[test]
+fn delegation_wait_resume_dispatch_failure_emits_structured_delta() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review dispatch failure visibility.".to_owned(),
+                title: Some("Dispatch Failure Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    state
+        .create_delegation_wait(
+            &parent_session_id,
+            CreateDelegationWaitRequest {
+                delegation_ids: vec![created.delegation.id.clone()],
+                mode: DelegationWaitMode::All,
+                title: Some("Dispatch failure fan-in".to_owned()),
+            },
+        )
+        .expect("wait should be scheduled");
+    let (wrong_runtime, _wrong_runtime_rx) =
+        test_claude_runtime_handle("delegation-wait-resume-dispatch-failure");
+
+    let mut delta_events = state.subscribe_delta_events();
+    while delta_events.try_recv().is_ok() {}
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let parent_index = inner
+            .find_session_index(&parent_session_id)
+            .expect("parent should exist");
+        let parent = inner
+            .session_mut_by_index(parent_index)
+            .expect("parent index should be valid");
+        parent.runtime = SessionRuntime::Claude(wrong_runtime);
+        parent.session.status = SessionStatus::Idle;
+    }
+
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &created.delegation.child_session_id,
+        "## Result\n\nStatus: completed\n\nSummary:\nReview found no issues.",
+    );
+    state
+        .refresh_delegation_for_child_session(&created.delegation.child_session_id)
+        .expect("child completion should consume the wait");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner.delegation_waits.is_empty(),
+        "finished child should consume the wait even if resume dispatch fails"
+    );
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_session_id)
+        .expect("parent should exist");
+    assert_eq!(
+        parent.queued_prompts.len(),
+        1,
+        "failed resume dispatch should leave the parent resume queued for retry"
+    );
+    drop(inner);
+
+    let mut saw_consumed_delta = false;
+    let mut saw_dispatch_failed_delta = false;
+    while let Ok(payload) = delta_events.try_recv() {
+        let event: DeltaEvent =
+            serde_json::from_str(&payload).expect("delta event should deserialize");
+        match event {
+            DeltaEvent::DelegationWaitConsumed {
+                parent_session_id: consumed_parent_session_id,
+                reason,
+                ..
+            } if consumed_parent_session_id == parent_session_id => {
+                assert_eq!(reason, DelegationWaitConsumedReason::Completed);
+                saw_consumed_delta = true;
+            }
+            DeltaEvent::DelegationWaitResumeDispatchFailed {
+                parent_session_id: failed_parent_session_id,
+                error,
+                ..
+            } if failed_parent_session_id == parent_session_id => {
+                assert!(error.contains("failed to inspect queued resume"));
+                assert!(error.contains("unexpected Claude runtime attached to Codex session"));
+                saw_dispatch_failed_delta = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        saw_consumed_delta,
+        "wait consumption should still be published"
+    );
+    assert!(
+        saw_dispatch_failed_delta,
+        "resume dispatch failure should be visible as a structured delta"
+    );
+}
+
+#[test]
 fn create_delegation_wait_reports_queue_result_for_returned_wait_only() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);
@@ -907,6 +1014,37 @@ fn delegation_wait_consumed_delta_serializes_reason() {
             }
             _ => panic!("expected wait-consumed delta"),
         }
+    }
+}
+
+#[test]
+fn delegation_wait_resume_dispatch_failed_delta_serializes_parent_and_error() {
+    let event = DeltaEvent::DelegationWaitResumeDispatchFailed {
+        revision: 42,
+        parent_session_id: "session-parent".to_owned(),
+        error: "failed to inspect queued resume".to_owned(),
+    };
+
+    let value = serde_json::to_value(&event).expect("dispatch failure delta should serialize");
+
+    assert_eq!(value["type"], "delegationWaitResumeDispatchFailed");
+    assert_eq!(value["revision"], 42);
+    assert_eq!(value["parentSessionId"], "session-parent");
+    assert_eq!(value["error"], "failed to inspect queued resume");
+
+    let decoded: DeltaEvent =
+        serde_json::from_value(value).expect("serialized delta should round-trip");
+    match decoded {
+        DeltaEvent::DelegationWaitResumeDispatchFailed {
+            revision,
+            parent_session_id,
+            error,
+        } => {
+            assert_eq!(revision, 42);
+            assert_eq!(parent_session_id, "session-parent");
+            assert_eq!(error, "failed to inspect queued resume");
+        }
+        _ => panic!("expected wait resume dispatch failure delta"),
     }
 }
 

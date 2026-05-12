@@ -816,6 +816,13 @@ export type DelegationWaitConsumedEvent = {
   reason: DelegationWaitConsumedReason;
 };
 
+export type DelegationWaitResumeDispatchFailedEvent = {
+  type: "delegationWaitResumeDispatchFailed";
+  revision: number;
+  parentSessionId: string;
+  error: string;
+};
+
 export type DelegationUpdatedEvent = {
   type: "delegationUpdated";
   revision: number;
@@ -890,6 +897,7 @@ export type DeltaEvent =
   | DelegationCreatedEvent
   | DelegationWaitCreatedEvent
   | DelegationWaitConsumedEvent
+  | DelegationWaitResumeDispatchFailedEvent
   | DelegationUpdatedEvent
   | DelegationCompletedEvent
   | DelegationFailedEvent

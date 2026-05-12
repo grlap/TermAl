@@ -216,7 +216,7 @@ impl AppState {
                     &wait_refresh.consumed_waits,
                 );
             }
-            self.dispatch_delegation_wait_resumes(wait_refresh.dispatch_parents);
+            self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
         }
         Ok(snapshot)
     }

@@ -338,6 +338,9 @@ DeltaEvent::ConversationMarkerCreated { revision, session_id, marker, session_mu
 DeltaEvent::ConversationMarkerUpdated { revision, session_id, marker, session_mutation_stamp? } // marker replacement; mismatched marker/session ids are treated as a resync-worthy protocol error
 DeltaEvent::ConversationMarkerDeleted { revision, session_id, marker_id, session_mutation_stamp? } // marker removal; delete is idempotent for remote replay
 DeltaEvent::DelegationCreated    { revision, delegation } // summary-safe delegation record for a newly spawned child session
+DeltaEvent::DelegationWaitCreated { revision, wait } // backend-owned wait record for parent fan-in resume scheduling
+DeltaEvent::DelegationWaitConsumed { revision, wait_id, parent_session_id, reason } // wait was satisfied or invalidated and removed from state
+DeltaEvent::DelegationWaitResumeDispatchFailed { revision, parent_session_id, error } // wait was consumed but queued parent resume dispatch failed; UI should repair via state and operators get a structured warning
 DeltaEvent::DelegationUpdated    { revision, delegation_id, status, updated_at } // lightweight lifecycle status transition; failed transitions require follow-up result fetch today
 DeltaEvent::DelegationCompleted  { revision, delegation_id, result, completed_at } // terminal completion with summary-safe result payload
 DeltaEvent::DelegationFailed     { revision, delegation_id, result, failed_at } // terminal failure with summary-safe result payload

@@ -211,6 +211,7 @@ type DelegationDeltaEvent = Extract<
       | "delegationCreated"
       | "delegationWaitCreated"
       | "delegationWaitConsumed"
+      | "delegationWaitResumeDispatchFailed"
       | "delegationUpdated"
       | "delegationCompleted"
       | "delegationFailed"
@@ -248,6 +249,7 @@ function isDelegationDeltaEvent(delta: DeltaEvent): delta is DelegationDeltaEven
     delta.type === "delegationCreated" ||
     delta.type === "delegationWaitCreated" ||
     delta.type === "delegationWaitConsumed" ||
+    delta.type === "delegationWaitResumeDispatchFailed" ||
     delta.type === "delegationUpdated" ||
     delta.type === "delegationCompleted" ||
     delta.type === "delegationFailed" ||
