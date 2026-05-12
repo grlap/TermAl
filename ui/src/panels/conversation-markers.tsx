@@ -126,11 +126,13 @@ export function sortConversationMarkersForNavigation(
 }
 
 export function useConversationMarkerJump({
+  onMissingMessageJump,
   onConversationSearchItemMount,
   scrollContainerRef,
   sessionId,
   virtualizerHandleRef,
 }: {
+  onMissingMessageJump?: () => boolean | void;
   onConversationSearchItemMount: (
     itemKey: string,
     node: HTMLElement | null,
@@ -144,6 +146,8 @@ export function useConversationMarkerJump({
   const activeSessionIdRef = useRef(sessionId);
   const messageSlotNodesRef = useRef<Map<string, HTMLElement>>(new Map());
   const messageSlotNodesSessionIdRef = useRef(sessionId);
+  const [pendingHydratedJumpMessageId, setPendingHydratedJumpMessageId] =
+    useState<string | null>(null);
   activeSessionIdRef.current = sessionId;
 
   const ensureMessageSlotCacheForCurrentSession = useCallback(() => {
@@ -229,6 +233,67 @@ export function useConversationMarkerJump({
     [cancelCorrectionFrame, scrollMountedMarkerSlotIntoView, sessionId],
   );
 
+  const tryJumpToMessageId = useCallback(
+    (messageId: string) => {
+      const jumpedWithVirtualizer =
+        virtualizerHandleRef.current?.jumpToMessageId(messageId, {
+          align: "center",
+          flush: true,
+        }) ?? false;
+      if (jumpedWithVirtualizer) {
+        if (!scrollMountedMarkerSlotIntoView(messageId, "auto")) {
+          scheduleCorrectionFrame(messageId);
+        }
+        return true;
+      }
+      return scrollMountedMarkerSlotIntoView(messageId);
+    },
+    [
+      scheduleCorrectionFrame,
+      scrollMountedMarkerSlotIntoView,
+      virtualizerHandleRef,
+    ],
+  );
+
+  useEffect(() => {
+    if (pendingHydratedJumpMessageId === null) {
+      return undefined;
+    }
+    let secondRetryFrame: number | null = null;
+    // The missing-message path usually triggers transcript hydration; retry
+    // outside React's effect phase so the virtualizer can flush its new range.
+    const staleJumpTimer = window.setTimeout(() => {
+      if (activeSessionIdRef.current !== sessionId) {
+        return;
+      }
+      setPendingHydratedJumpMessageId(null);
+    }, 1_000);
+    const retryFrame = window.requestAnimationFrame(() => {
+      if (activeSessionIdRef.current !== sessionId) {
+        return;
+      }
+      if (tryJumpToMessageId(pendingHydratedJumpMessageId)) {
+        setPendingHydratedJumpMessageId(null);
+        return;
+      }
+      secondRetryFrame = window.requestAnimationFrame(() => {
+        if (activeSessionIdRef.current !== sessionId) {
+          return;
+        }
+        if (tryJumpToMessageId(pendingHydratedJumpMessageId)) {
+          setPendingHydratedJumpMessageId(null);
+        }
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(retryFrame);
+      if (secondRetryFrame !== null) {
+        window.cancelAnimationFrame(secondRetryFrame);
+      }
+      window.clearTimeout(staleJumpTimer);
+    };
+  }, [pendingHydratedJumpMessageId, sessionId, tryJumpToMessageId]);
+
   useEffect(() => cancelCorrectionFrame, [
     cancelCorrectionFrame,
     sessionId,
@@ -241,28 +306,18 @@ export function useConversationMarkerJump({
   const jumpToMessageId = useCallback(
     (messageId: string) => {
       cancelCorrectionFrame();
-      const jumpedWithVirtualizer =
-        virtualizerHandleRef.current?.jumpToMessageId(messageId, {
-          align: "center",
-          flush: true,
-        }) ?? false;
-      if (jumpedWithVirtualizer) {
-        const correctedSynchronously = scrollMountedMarkerSlotIntoView(
-          messageId,
-          "auto",
-        );
-        if (!correctedSynchronously) {
-          scheduleCorrectionFrame(messageId);
-        }
+      setPendingHydratedJumpMessageId(null);
+      if (tryJumpToMessageId(messageId)) {
         return;
       }
-      scrollMountedMarkerSlotIntoView(messageId);
+      if (onMissingMessageJump?.()) {
+        setPendingHydratedJumpMessageId(messageId);
+      }
     },
     [
       cancelCorrectionFrame,
-      scheduleCorrectionFrame,
-      scrollMountedMarkerSlotIntoView,
-      virtualizerHandleRef,
+      onMissingMessageJump,
+      tryJumpToMessageId,
     ],
   );
 

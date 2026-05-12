@@ -593,11 +593,12 @@ function useInitialActiveTranscriptMessages({
       hydrationRef.current.sessionId !== sessionId ||
       hydrationRef.current.hydrated
     ) {
-      return;
+      return false;
     }
 
     hydrationRef.current.hydrated = true;
     forceHydratedRender((current) => current + 1);
+    return true;
   }, [sessionId]);
 
   useEffect(() => {
@@ -1435,6 +1436,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
     jumpToMarker: jumpToConversationMarker,
     jumpToMessageId,
   } = useConversationMarkerJump({
+    onMissingMessageJump: requestFullTranscriptRender,
     onConversationSearchItemMount,
     scrollContainerRef,
     sessionId: session.id,
@@ -1444,8 +1446,9 @@ const SessionConversationPage = memo(function SessionConversationPage({
   // tail. The initial-transcript window can be as small as
   // `SESSION_TAIL_WINDOW_MESSAGE_COUNT` (20) messages, so navigating delegations
   // / prompts based on the window would silently skip anything off-window.
-  // The virtualizer handle accepts any message id in `session.messages`, so
-  // off-window targets still scroll into view correctly.
+  // Off-window targets trigger full-transcript hydration and a retry in
+  // `useConversationMarkerJump`, so buttons remain accurate while the first
+  // paint stays cheap.
   const messageNavigationTargetMaps = useMessageNavigationTargetMaps(
     session.messages,
   );

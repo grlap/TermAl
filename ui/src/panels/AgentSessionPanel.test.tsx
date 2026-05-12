@@ -81,6 +81,7 @@ function installLongTranscriptScrollNodeMocks(scrollNode: HTMLElement) {
   const originalGetBoundingClientRect =
     Element.prototype.getBoundingClientRect;
   let scrollTop = 20_000;
+  let scrollHeight = 24_000;
 
   Object.defineProperty(scrollNode, "clientHeight", {
     configurable: true,
@@ -92,7 +93,7 @@ function installLongTranscriptScrollNodeMocks(scrollNode: HTMLElement) {
   });
   Object.defineProperty(scrollNode, "scrollHeight", {
     configurable: true,
-    get: () => 24_000,
+    get: () => scrollHeight,
   });
   Object.defineProperty(scrollNode, "scrollTop", {
     configurable: true,
@@ -153,6 +154,9 @@ function installLongTranscriptScrollNodeMocks(scrollNode: HTMLElement) {
     },
     setScrollTop(nextValue: number) {
       scrollTop = nextValue;
+    },
+    setScrollHeight(nextValue: number) {
+      scrollHeight = nextValue;
     },
   };
 }
@@ -270,6 +274,20 @@ function renderSessionPanelWithDefaults(
   },
 ) {
   return render(createAgentSessionPanelHarness(props)());
+}
+
+function renderNavigableMessageCard(message: Message) {
+  return (
+    <>
+      <MessageCard
+        message={message}
+        onApprovalDecision={() => {}}
+        onUserInputSubmit={() => {}}
+        onCodexAppRequestSubmit={() => {}}
+      />
+      <span>{message.id}</span>
+    </>
+  );
 }
 
 afterEach(() => {
@@ -4164,6 +4182,133 @@ describe("AgentSessionPanel conversation caching", () => {
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       window.TouchEvent = OriginalTouchEvent;
+      scrollNodeMocks.cleanup();
+      scrollNode.remove();
+      vi.useRealTimers();
+    }
+  });
+
+  it("hydrates and retries prompt navigation when the target starts outside the active tail window", async () => {
+    vi.useFakeTimers();
+    const OriginalResizeObserver = window.ResizeObserver;
+    const scrollNode = document.createElement("section");
+    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+
+    try {
+      document.body.append(scrollNode);
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("active-session", {
+          status: "idle",
+          messages: makeTextMessages(600),
+        }),
+        scrollContainerRef: { current: scrollNode },
+        renderMessageCard: renderNavigableMessageCard,
+      });
+
+      expect(screen.getByText("message-581")).toBeInTheDocument();
+      expect(screen.queryByText("message-579")).not.toBeInTheDocument();
+
+      fireEvent.click(
+        screen.getAllByRole("button", {
+          name: "Jump to previous prompt",
+        })[0]!,
+      );
+      scrollNodeMocks.setScrollHeight(90_000);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      expect(screen.getByText("message-579")).toBeInTheDocument();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      scrollNodeMocks.cleanup();
+      scrollNode.remove();
+      vi.useRealTimers();
+    }
+  });
+
+  it("hydrates and retries delegation navigation when the target starts outside the active tail window", async () => {
+    vi.useFakeTimers();
+    const OriginalResizeObserver = window.ResizeObserver;
+    const scrollNode = document.createElement("section");
+    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    const messages = makeTextMessages(600).map((message) => ({
+      ...message,
+      author: "assistant" as const,
+    }));
+    messages[569] = {
+      id: "message-570",
+      type: "parallelAgents",
+      author: "assistant",
+      timestamp: "10:570",
+      agents: [
+        {
+          id: "delegation-570",
+          source: "delegation",
+          title: "Off-window review",
+          status: "completed",
+          detail: "Done",
+        },
+      ],
+    };
+    messages[589] = {
+      id: "message-590",
+      type: "parallelAgents",
+      author: "assistant",
+      timestamp: "10:590",
+      agents: [
+        {
+          id: "delegation-590",
+          source: "delegation",
+          title: "Visible review",
+          status: "completed",
+          detail: "Done",
+        },
+      ],
+    };
+
+    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+
+    try {
+      document.body.append(scrollNode);
+      renderSessionPanelWithDefaults({
+        activeSession: makeSession("active-session", {
+          status: "idle",
+          messages,
+        }),
+        scrollContainerRef: { current: scrollNode },
+        renderMessageCard: renderNavigableMessageCard,
+      });
+
+      expect(screen.getByText("message-590")).toBeInTheDocument();
+      expect(screen.queryByText("message-570")).not.toBeInTheDocument();
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Jump to previous delegation",
+        }),
+      );
+      scrollNodeMocks.setScrollHeight(90_000);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+
+      expect(screen.getByText("message-570")).toBeInTheDocument();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
       scrollNodeMocks.cleanup();
       scrollNode.remove();
       vi.useRealTimers();
