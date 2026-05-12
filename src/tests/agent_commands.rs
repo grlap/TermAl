@@ -134,6 +134,34 @@ fn read_claude_agent_commands_rejects_oversized_command_file() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn read_agent_command_file_rejects_symlink_open() {
+    use std::os::unix::fs::symlink;
+
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-commands-symlink-open-{}",
+        Uuid::new_v4()
+    ));
+    let _cleanup = TempDirCleanup::new(root.clone());
+    let commands_dir = root.join(".claude").join("commands");
+
+    fs::create_dir_all(&commands_dir).unwrap();
+    let target_path = commands_dir.join("target.md");
+    fs::write(&target_path, "Review local changes.").unwrap();
+    let link_path = commands_dir.join("review-local.md");
+    symlink(&target_path, &link_path).unwrap();
+
+    let error = read_agent_command_file(&link_path).unwrap_err();
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(
+        error.message.contains("changed to a symlink"),
+        "{}",
+        error.message
+    );
+}
+
 #[test]
 fn reads_claude_agent_commands_strip_yaml_frontmatter() {
     let root = std::env::temp_dir().join(format!(

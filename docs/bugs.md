@@ -7,18 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Command-file regular-file gate is check-then-open
-
-**Severity:** Note - `src/api_files.rs:418, 562, 597`. Command discovery and resolver metadata now reject stable symlinks and non-regular files before opening, but the check is still separate from the subsequent file open. A command file swapped between the check and open can still be followed/read.
-
-**Current behavior:**
-- Stable symlinks and non-files under `.claude/commands/` are skipped.
-- There is still a small TOCTOU window between file-type validation and opening.
-
-**Proposal:**
-- Bind validation to the opened handle where platform support allows it, e.g. no-follow open plus handle metadata checks.
-- Or compare pre/post file metadata and treat mismatch as unavailable.
-
 ## First-settled active-baseline same-message growth lacks a safe turn boundary
 
 **Severity:** Medium - `src/telegram.rs:2583-2637`. When a Telegram prompt is armed behind an active/approval-paused turn, the relay baselines the current assistant message while `baseline_while_active=true`. If the tracked message id has already grown by the first settled poll, the relay cannot distinguish "old turn finished after the last active poll" from "the Telegram reply was appended to the same message id."

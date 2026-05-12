@@ -400,6 +400,83 @@ async fn search_instructions(
 
 const MAX_AGENT_COMMAND_FILE_BYTES: usize = 1024 * 1024;
 
+#[cfg(unix)]
+fn open_agent_command_file(path: &FsPath) -> Result<fs::File, ApiError> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    match fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+    {
+        Ok(file) => Ok(file),
+        Err(err) if err.raw_os_error() == Some(libc::ELOOP) => {
+            Err(ApiError::bad_request(format!(
+                "agent command {} changed to a symlink",
+                path.display()
+            )))
+        }
+        Err(err) => Err(ApiError::internal(format!(
+            "failed to open agent command {}: {err}",
+            path.display()
+        ))),
+    }
+}
+
+#[cfg(not(unix))]
+fn open_agent_command_file(path: &FsPath) -> Result<fs::File, ApiError> {
+    // Stable symlinks are filtered before this path. `std` has no portable
+    // no-follow open flag here, so the remaining swap window follows the same
+    // local single-user threat model as Git document enrichment on Windows.
+    fs::File::open(path).map_err(|err| {
+        ApiError::internal(format!(
+            "failed to open agent command {}: {err}",
+            path.display()
+        ))
+    })
+}
+
+fn read_agent_command_file(path: &FsPath) -> Result<String, ApiError> {
+    use std::io::Read as _;
+
+    let file = open_agent_command_file(path)?;
+    let metadata = file.metadata().map_err(|err| {
+        ApiError::internal(format!(
+            "failed to stat opened agent command {}: {err}",
+            path.display()
+        ))
+    })?;
+    if !metadata.is_file() {
+        return Err(ApiError::bad_request(format!(
+            "agent command {} is not a regular file",
+            path.display()
+        )));
+    }
+    if metadata.len() > MAX_AGENT_COMMAND_FILE_BYTES as u64 {
+        return Err(ApiError::bad_request(format!(
+            "agent command {} must be at most {MAX_AGENT_COMMAND_FILE_BYTES} bytes",
+            path.display()
+        )));
+    }
+
+    let mut raw_content = String::new();
+    file.take(MAX_AGENT_COMMAND_FILE_BYTES as u64 + 1)
+        .read_to_string(&mut raw_content)
+        .map_err(|err| {
+            ApiError::internal(format!(
+                "failed to read agent command {}: {err}",
+                path.display()
+            ))
+        })?;
+    if raw_content.len() > MAX_AGENT_COMMAND_FILE_BYTES {
+        return Err(ApiError::bad_request(format!(
+            "agent command {} must be at most {MAX_AGENT_COMMAND_FILE_BYTES} bytes",
+            path.display()
+        )));
+    }
+    Ok(raw_content)
+}
+
 /// Reads Claude agent commands.
 fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, ApiError> {
     let commands_dir = workdir.join(".claude").join("commands");
@@ -435,25 +512,7 @@ fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, Api
         if path.extension().and_then(|value| value.to_str()) != Some("md") {
             continue;
         }
-        let metadata = entry.metadata().map_err(|err| {
-            ApiError::internal(format!(
-                "failed to stat agent command {}: {err}",
-                path.display()
-            ))
-        })?;
-        if metadata.len() > MAX_AGENT_COMMAND_FILE_BYTES as u64 {
-            return Err(ApiError::bad_request(format!(
-                "agent command {} must be at most {MAX_AGENT_COMMAND_FILE_BYTES} bytes",
-                path.display()
-            )));
-        }
-
-        let raw_content = fs::read_to_string(&path).map_err(|err| {
-            ApiError::internal(format!(
-                "failed to read agent command {}: {err}",
-                path.display()
-            ))
-        })?;
+        let raw_content = read_agent_command_file(&path)?;
         let command_content = strip_markdown_frontmatter(&raw_content);
         let content = command_content.content.to_owned();
         let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
