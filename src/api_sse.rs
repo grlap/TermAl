@@ -179,6 +179,24 @@ async fn wait_for_shutdown_signal(rx: &mut tokio::sync::watch::Receiver<bool>) {
     }
 }
 
+async fn lagged_recovery_events(state: AppState) -> (Event, Event) {
+    // Lagged means the consumer fell past broadcast channel capacity, so some
+    // events were dropped before the client could read them. Emit a non-empty
+    // marker first so the client force-adopts the following state snapshot even
+    // when its revision equals the client's current revision.
+    //
+    // The `"1"` payload is intentional: empty `data` can be skipped by browsers
+    // because the WHATWG EventSource spec requires a non-empty `data:` line per
+    // dispatched event. Clients must NOT parse this body; it is reserved as a
+    // control marker. The file-change receiver deliberately does not use this
+    // helper because workspace file events are non-authoritative hints.
+    let payload = state_snapshot_payload_for_sse(state).await;
+    (
+        Event::default().event("lagged").data("1"),
+        Event::default().event("state").data(payload),
+    )
+}
+
 /// Streams state and delta events over SSE.
 async fn state_events(
     State(state): State<AppState>,
@@ -245,9 +263,9 @@ async fn state_events(
                             // this body — it is reserved as a control marker.
                             // See bugs.md "Empty-data `lagged` SSE marker may
                             // not dispatch in browsers".
-                            yield Ok(Event::default().event("lagged").data("1"));
-                            let payload = state_snapshot_payload_for_sse(state.clone()).await;
-                            yield Ok(Event::default().event("state").data(payload));
+                            let (lagged, recovery) = lagged_recovery_events(state.clone()).await;
+                            yield Ok(lagged);
+                            yield Ok(recovery);
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
                     }
@@ -261,9 +279,9 @@ async fn state_events(
                             // emit a non-empty `lagged` marker (so browsers
                             // actually dispatch it) before yielding the recovery
                             // snapshot.
-                            yield Ok(Event::default().event("lagged").data("1"));
-                            let payload = state_snapshot_payload_for_sse(state.clone()).await;
-                            yield Ok(Event::default().event("state").data(payload));
+                            let (lagged, recovery) = lagged_recovery_events(state.clone()).await;
+                            yield Ok(lagged);
+                            yield Ok(recovery);
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
                     }
