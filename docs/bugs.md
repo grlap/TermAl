@@ -44,21 +44,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 **Proposal:**
 - Move the runtime into `AppState` and own its lifecycle on the state object.
 
-## Telegram relay stop/restart does not wait for old thread quiescence
-
-**Severity:** Medium - `src/main.rs:145`, `src/telegram.rs:248-315` signal the Telegram relay to stop but do not join the old relay thread or otherwise wait until it has stopped using its captured config.
-
-After shutdown, disable, or config retargeting, a relay that already passed its shutdown check can briefly continue polling or handling Telegram updates with the old bot/project configuration. During process shutdown this can also exit before update cursors or state-file work has quiesced.
-
-**Current behavior:**
-- Stop/restart flips a shutdown flag for the old relay.
-- The old detached thread is not joined.
-- Replacement or shutdown can proceed before the old relay is fully idle.
-
-**Proposal:**
-- Retain a relay `JoinHandle` and join with a bounded timeout during restart and graceful shutdown.
-- Or gate update/action side effects on a runtime generation check immediately before each side effect.
-
 ## Telegram bot token is persisted as plaintext in `telegram-bot.json`
 
 **Severity:** Medium - `TelegramUiConfig.bot_token` is serialized directly into `~/.termal/telegram-bot.json`.
@@ -1156,5 +1141,3 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   start an in-process relay with subscribed projects but no default and assert startup fails or status exposes the effective `activeProjectId`; delete a project used by a running relay and assert the relay is stopped or restarted without the deleted id.
 - [ ] P2: Cover Telegram relay runtime lifecycle seam:
   add an injectable or testable relay runtime so startup from saved settings, implicit first subscribed-project fallback, invalid/missing config stop, config-save start/stop/restart, deleted-project reconciliation, runtime status `running: true` + `inProcess`, and graceful-shutdown stop are covered despite the production path's `#[cfg(not(test))]` guards.
-- [ ] P2: Cover Telegram relay stop/restart quiescence:
-  simulate disable or config retarget while an old relay is in flight and assert stale-generation polling/action handling cannot continue after status reports the replacement or stopped state.

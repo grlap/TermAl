@@ -321,23 +321,22 @@ struct TelegramRelayStatusSnapshot {
     lifecycle: TelegramLifecycle,
 }
 
-#[cfg(not(test))]
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
 enum TelegramRelayRuntimeState {
     #[default]
     Idle,
     Spawning,
     Running,
+    Stopping,
 }
 
-#[cfg(not(test))]
 impl TelegramRelayRuntimeState {
     fn is_active(self) -> bool {
-        matches!(self, Self::Spawning | Self::Running)
+        matches!(self, Self::Spawning | Self::Running | Self::Stopping)
     }
 
     fn is_running(self) -> bool {
-        matches!(self, Self::Running)
+        self.is_active()
     }
 }
 
@@ -469,9 +468,28 @@ fn stop_telegram_relay_runtime() {
     if let Some(shutdown) = runtime.shutdown.take() {
         shutdown.store(true, Ordering::Relaxed);
     }
+    let previous_handle = runtime.handle.take();
     runtime.config_fingerprint = None;
     runtime.generation = runtime.generation.saturating_add(1);
-    runtime.state = TelegramRelayRuntimeState::Idle;
+    let generation = runtime.generation;
+    runtime.state = if previous_handle.is_some() {
+        TelegramRelayRuntimeState::Stopping
+    } else {
+        TelegramRelayRuntimeState::Idle
+    };
+    drop(runtime);
+
+    if let Some(previous_handle) = previous_handle {
+        if let Err(err) = previous_handle.join() {
+            eprintln!("telegram> in-process relay thread panicked while stopping: {err:?}");
+        }
+        let mut runtime = TELEGRAM_RELAY_RUNTIME
+            .lock()
+            .expect("telegram relay runtime mutex poisoned");
+        if runtime.generation == generation {
+            runtime.state = TelegramRelayRuntimeState::Idle;
+        }
+    }
 }
 
 #[cfg(test)]

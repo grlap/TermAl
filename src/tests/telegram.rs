@@ -5545,6 +5545,14 @@ fn telegram_ui_file_omits_disabled_relay_config_even_with_token_and_project() {
 }
 
 #[test]
+fn telegram_relay_runtime_reports_lifecycle_transitions_as_running_until_idle() {
+    assert!(!TelegramRelayRuntimeState::Idle.is_running());
+    assert!(TelegramRelayRuntimeState::Spawning.is_running());
+    assert!(TelegramRelayRuntimeState::Running.is_running());
+    assert!(TelegramRelayRuntimeState::Stopping.is_running());
+}
+
+#[test]
 fn telegram_ui_file_requires_bot_token_for_relay_config() {
     let missing_token = telegram_ui_relay_file(TelegramUiConfig {
         bot_token: None,
