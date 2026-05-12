@@ -7,6 +7,21 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Conversation navigation can target messages outside the active transcript window
+
+**Severity:** High - `ui/src/panels/AgentSessionPanel.tsx:1449` builds prompt/delegation navigation maps from full `session.messages`, while `ConversationMessageList` can still receive only the initial `visibleMessages` tail window.
+
+The staged prompt/delegation jump buttons fix the basic "no way to jump" gap, but in long conversations an enabled button can point to a message that the active virtualized list does not know about yet. The click then falls through both the virtualizer lookup and mounted-DOM fallback, so navigation silently does nothing.
+
+**Current behavior:**
+- Prev/next prompt and delegation buttons can be enabled using targets from the full transcript.
+- During initial tail-window rendering, the virtualizer location map only contains `visibleMessages`.
+- A target outside that window cannot be mounted or scrolled to until the transcript model is expanded.
+
+**Proposal:**
+- Align the navigation target map with the rendered transcript model, or make `jumpToMessageId` request a full transcript render and retry once the target exists.
+- Add an integration test with more than `SESSION_TAIL_WINDOW_MESSAGE_COUNT` messages where a visible prompt/delegation jumps to an off-window previous or next target.
+
 ## Command-file regular-file gate is check-then-open
 
 **Severity:** Note - `src/api_files.rs:418, 562, 597`. Command discovery and resolver metadata now reject stable symlinks and non-regular files before opening, but the check is still separate from the subsequent file open. A command file swapped between the check and open can still be followed/read.
@@ -1089,16 +1104,6 @@ A future fourth recovery branch would need to update three sites; collapsing int
 - Extract a `ReconnectStateMachine` (or similar) module that owns the flag set + transitions and exposes named events (`onSseError`, `onSseReopen`, `onBadLiveEvent`, `onSnapshotAdopted`, `onLiveEventConfirmed`).
 - Defer to a pure code-move commit per CLAUDE.md.
 
-## `select_visible_session_hydration_fallback_error` lacks integration coverage
-
-**Severity:** Low - `src/state_accessors.rs:351-369`. Unit tests pin the helper and typed local-miss fallback in isolation, but no integration-style test asserts the public `get_session` path returns 404 to the caller when a recoverable remote error is followed by a `not_found` fallback. A future refactor that drops the selector call from the `or_else` chain would not be caught.
-
-**Current behavior:**
-- Selector is unit-tested but the wiring that makes the new behavior reach a caller is not pinned.
-
-**Proposal:**
-- Add an integration-style test that drives the public `AppState::get_session` path through a recoverable remote hydration miss followed by a vanished cached summary, and asserts the response is `404 session not found` / `LocalSessionMissing` rather than the original recoverable remote error.
-
 ## `useAppSessionActions` ref cluster has grown from 1 to 4 to feed the rejected-action classifier
 
 **Severity:** Medium - `ui/src/app-session-actions.ts:316-356`. `useAppSessionActions` now requires `latestStateRevisionRef`, `lastSeenServerInstanceIdRef`, `projectsRef`, and `sessionsRef` because of the inline `classifyRejectedActionState` call site. The ref count grew from 1 → 4 in a few rounds, all to feed one classifier function.
@@ -1613,6 +1618,8 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
+- [ ] P2: Add conversation navigation transcript-window integration coverage:
+  render more than `SESSION_TAIL_WINDOW_MESSAGE_COUNT` messages with prompt/delegation navigation, click a visible prev/next button whose target starts outside the active tail window, and assert the target mounts or the jump retries after full transcript render.
 - [ ] P2: Cover first-chunk Telegram forward failure:
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
 - [ ] P2: Cover first-settled active-baseline same-message growth policy:

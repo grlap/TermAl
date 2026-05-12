@@ -4843,6 +4843,39 @@ textarea {
   text-transform: uppercase;
 }
 
+/* Inline ⬆ / ⬇ navigation cluster shown on the trailing edge of message-meta
+   for message kinds that support "jump to prev/next of the same kind":
+   - parallelAgents (every delegation event in the transcript)
+   - text + author "you" (user prompts)
+   Disabled side stays in the DOM so reaching either boundary doesn't shift
+   the surrounding layout. */
+.message-meta-jump-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.message-meta-jump-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.55rem;
+  min-block-size: 1.55rem;
+  padding: 0;
+  border-radius: 0.45rem;
+  color: var(--text-muted);
+}
+
+.message-meta-jump-button:hover:not(:disabled),
+.message-meta-jump-button:focus-visible {
+  color: var(--text-strong);
+}
+
+.message-meta-jump-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .card-label {
   margin-bottom: 0.4rem;
   font-family: var(--code-font);

@@ -3334,6 +3334,133 @@ fn get_session_propagates_remote_protocol_error_instead_of_cached_summary() {
 }
 
 #[test]
+fn get_session_returns_local_not_found_when_recoverable_remote_error_loses_cached_summary() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    remote_session.messages = vec![remote_text_message(
+        "remote-message-1",
+        "Transcript only the owner should have.",
+    )];
+    remote_session.messages_loaded = true;
+    remote_session.message_count = 1;
+
+    let mut local_summary = remote_session.clone();
+    make_remote_session_summary_only(&mut local_summary, 1);
+    local_summary.preview = "Cached local summary.".to_owned();
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: local_summary.id.clone(),
+                session: local_summary,
+            },
+        )
+        .expect("remote summary session create delta should apply");
+
+    let local_session_id = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .expect("remote proxy session should exist");
+        inner.sessions[index].session.id.clone()
+    };
+
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let requests_for_server = requests.clone();
+    let state_for_server = state.clone();
+    let local_session_id_for_server = local_session_id.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_test_connection(&listener, "remote local-miss test listener");
+            let request = read_test_http_request(&mut stream);
+            requests_for_server
+                .lock()
+                .expect("requests mutex poisoned")
+                .push(request.request_line.clone());
+
+            if request.request_line.starts_with("GET /api/health ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    r#"{"ok":true}"#,
+                );
+                continue;
+            }
+
+            if request
+                .request_line
+                .starts_with("GET /api/sessions/remote-session-1 ")
+            {
+                let mut inner = state_for_server.inner.lock().expect("state mutex poisoned");
+                let index = inner
+                    .find_session_index(&local_session_id_for_server)
+                    .expect("local proxy should still exist before remote failure");
+                inner.remove_session_at(index);
+                state_for_server
+                    .commit_locked(&mut inner)
+                    .expect("local proxy removal should commit");
+                // Drop the socket without an HTTP response so the visible
+                // hydration path sees a typed recoverable remote-connection
+                // miss, then falls back to the now-missing local summary.
+                return;
+            }
+
+            panic!("unexpected request: {}", request.request_line);
+        }
+    });
+    insert_test_remote_connection(&state, &remote, port);
+
+    let err = match state.get_session(&local_session_id) {
+        Ok(_) => panic!("missing cached summary should surface as local not found"),
+        Err(err) => err,
+    };
+    assert_eq!(err.status, StatusCode::NOT_FOUND);
+    assert_eq!(err.kind, Some(ApiErrorKind::LocalSessionMissing));
+    assert_eq!(err.message, "session not found");
+
+    let request_lines = requests.lock().expect("requests mutex poisoned").clone();
+    assert!(
+        request_lines
+            .iter()
+            .any(|line| line.starts_with("GET /api/sessions/remote-session-1 ")),
+        "expected targeted remote session fetch, saw {request_lines:?}"
+    );
+    join_test_server(server);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn get_session_falls_back_to_summary_after_stale_remote_transcript() {
     let state = test_app_state();
     let remote = RemoteConfig {

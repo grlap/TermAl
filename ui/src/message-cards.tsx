@@ -122,6 +122,9 @@ import {
 } from "./deferred-render";
 import { splitStreamingMarkdownForRendering } from "./markdown-streaming-split";
 import type { MonacoAppearance } from "./monaco";
+import {
+  MessageNavigationButtons,
+} from "./panels/conversation-navigation";
 
 const HEAVY_CODE_CHARACTER_THRESHOLD = 1400;
 const HEAVY_CODE_LINE_THRESHOLD = 28;
@@ -416,15 +419,28 @@ export const MessageCard = memo(
           );
         }
 
+        // User prompts get inline ⬆ / ⬇ navigation so a long conversation can
+        // be walked one prompt at a time without manual scrolling. Assistant
+        // text intentionally does not — the user wanted to step between their
+        // own questions, not the agent's replies.
+        const showUserPromptNavigation = message.author === "you";
         return (
           <article className={`message-card bubble bubble-${message.author}`}>
             <MessageMeta
               author={message.author}
               timestamp={message.timestamp}
               trailing={
-                commandLabel ? (
-                  <span className="message-meta-tag">{commandLabel}</span>
-                ) : undefined
+                <>
+                  {commandLabel ? (
+                    <span className="message-meta-tag">{commandLabel}</span>
+                  ) : null}
+                  {showUserPromptNavigation ? (
+                    <MessageNavigationButtons
+                      kind="userPrompt"
+                      messageId={message.id}
+                    />
+                  ) : null}
+                </>
               }
             />
             {message.attachments && message.attachments.length > 0 ? (
@@ -2332,16 +2348,22 @@ function ParallelAgentsCard({
         author={message.author}
         timestamp={message.timestamp}
         trailing={
-          canCollapse ? (
-            <button
-              className="ghost-button parallel-agents-toggle"
-              type="button"
-              onClick={() => setExpanded((open) => !open)}
-              aria-expanded={isExpanded}
-            >
-              {isExpanded ? "Hide tasks" : "Show tasks"}
-            </button>
-          ) : undefined
+          <>
+            <MessageNavigationButtons
+              kind="delegation"
+              messageId={message.id}
+            />
+            {canCollapse ? (
+              <button
+                className="ghost-button parallel-agents-toggle"
+                type="button"
+                onClick={() => setExpanded((open) => !open)}
+                aria-expanded={isExpanded}
+              >
+                {isExpanded ? "Hide tasks" : "Show tasks"}
+              </button>
+            ) : null}
+          </>
         }
       />
       <div className="card-label parallel-agents-card-label">

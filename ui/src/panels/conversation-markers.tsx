@@ -234,25 +234,29 @@ export function useConversationMarkerJump({
     sessionId,
   ]);
 
-  const jumpToMarker = useCallback(
-    (marker: ConversationMarker) => {
+  // Generic message-id jump. The marker-specific entry point below is the same
+  // logic with a `marker` wrapper. Both arrow-jump navigation on cards and the
+  // marker rail share this helper so they get identical virtualizer-aware
+  // correction frames for off-band messages.
+  const jumpToMessageId = useCallback(
+    (messageId: string) => {
       cancelCorrectionFrame();
       const jumpedWithVirtualizer =
-        virtualizerHandleRef.current?.jumpToMessageId(marker.messageId, {
+        virtualizerHandleRef.current?.jumpToMessageId(messageId, {
           align: "center",
           flush: true,
         }) ?? false;
       if (jumpedWithVirtualizer) {
         const correctedSynchronously = scrollMountedMarkerSlotIntoView(
-          marker.messageId,
+          messageId,
           "auto",
         );
         if (!correctedSynchronously) {
-          scheduleCorrectionFrame(marker.messageId);
+          scheduleCorrectionFrame(messageId);
         }
         return;
       }
-      scrollMountedMarkerSlotIntoView(marker.messageId);
+      scrollMountedMarkerSlotIntoView(messageId);
     },
     [
       cancelCorrectionFrame,
@@ -262,9 +266,17 @@ export function useConversationMarkerJump({
     ],
   );
 
+  const jumpToMarker = useCallback(
+    (marker: ConversationMarker) => {
+      jumpToMessageId(marker.messageId);
+    },
+    [jumpToMessageId],
+  );
+
   return {
     handleConversationItemMount,
     jumpToMarker,
+    jumpToMessageId,
   };
 }
 

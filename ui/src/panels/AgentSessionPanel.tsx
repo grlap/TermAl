@@ -62,6 +62,12 @@ import {
   useConversationMarkerContextMenu,
 } from "./conversation-markers";
 import {
+  MessageNavigationProvider,
+  makeMessageNavigationLookup,
+  useMessageNavigationTargetMaps,
+  type MessageNavigationContextValue,
+} from "./conversation-navigation";
+import {
   renderHighlightedText,
   type SearchHighlightTone,
 } from "../search-highlight";
@@ -1427,12 +1433,34 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const {
     handleConversationItemMount,
     jumpToMarker: jumpToConversationMarker,
+    jumpToMessageId,
   } = useConversationMarkerJump({
     onConversationSearchItemMount,
     scrollContainerRef,
     sessionId: session.id,
     virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
   });
+  // Build navigation target maps from the full transcript, not the windowed
+  // tail. The initial-transcript window can be as small as
+  // `SESSION_TAIL_WINDOW_MESSAGE_COUNT` (20) messages, so navigating delegations
+  // / prompts based on the window would silently skip anything off-window.
+  // The virtualizer handle accepts any message id in `session.messages`, so
+  // off-window targets still scroll into view correctly.
+  const messageNavigationTargetMaps = useMessageNavigationTargetMaps(
+    session.messages,
+  );
+  // The lookup closure stays stable across renders that don't replace the
+  // target maps, so memoized message cards consuming the context can stay
+  // memo-hits as long as their own props haven't changed.
+  const messageNavigationContextValue = useMemo<MessageNavigationContextValue>(
+    () => ({
+      getNavigationTargets: makeMessageNavigationLookup(
+        messageNavigationTargetMaps,
+      ),
+      jumpToMessageId,
+    }),
+    [jumpToMessageId, messageNavigationTargetMaps],
+  );
 
   useEffect(() => {
     if (
@@ -1797,39 +1825,41 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const conversationPageClassName = `session-conversation-page${isActive ? " is-active" : ""}${conversationOverview.shouldRender ? " has-conversation-overview-scroll" : ""}`;
 
   return (
-    <div
-      ref={conversationPageRef}
-      className={conversationPageClassName}
-      hidden={!isActive}
-      tabIndex={-1}
-    >
-      {conversationOverview.shouldRender ? (
-        <div className="conversation-with-overview">
-          <div className="conversation-overview-content">
-            {conversationContent}
+    <MessageNavigationProvider value={messageNavigationContextValue}>
+      <div
+        ref={conversationPageRef}
+        className={conversationPageClassName}
+        hidden={!isActive}
+        tabIndex={-1}
+      >
+        {conversationOverview.shouldRender ? (
+          <div className="conversation-with-overview">
+            <div className="conversation-overview-content">
+              {conversationContent}
+            </div>
+            {conversationOverview.shouldRenderRail ? (
+              <ConversationOverviewRail
+                messages={overviewMessages}
+                layoutSnapshot={conversationOverview.layoutSnapshot}
+                viewportSnapshot={conversationOverview.viewportSnapshot}
+                markers={visibleMarkers}
+                tailItems={conversationOverview.tailItems}
+                maxHeightPx={conversationOverview.maxHeightPx}
+                onNavigate={conversationOverview.navigate}
+              />
+            ) : (
+              <div
+                aria-hidden="true"
+                className="conversation-overview-rail is-pending"
+                style={{ height: `${Math.ceil(conversationOverview.maxHeightPx)}px` }}
+              />
+            )}
           </div>
-          {conversationOverview.shouldRenderRail ? (
-            <ConversationOverviewRail
-              messages={overviewMessages}
-              layoutSnapshot={conversationOverview.layoutSnapshot}
-              viewportSnapshot={conversationOverview.viewportSnapshot}
-              markers={visibleMarkers}
-              tailItems={conversationOverview.tailItems}
-              maxHeightPx={conversationOverview.maxHeightPx}
-              onNavigate={conversationOverview.navigate}
-            />
-          ) : (
-            <div
-              aria-hidden="true"
-              className="conversation-overview-rail is-pending"
-              style={{ height: `${Math.ceil(conversationOverview.maxHeightPx)}px` }}
-            />
-          )}
-        </div>
-      ) : (
-        conversationContent
-      )}
-    </div>
+        ) : (
+          conversationContent
+        )}
+      </div>
+    </MessageNavigationProvider>
   );
 }, (previous, next) =>
   previous.renderMessageCard === next.renderMessageCard &&
