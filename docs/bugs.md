@@ -753,16 +753,6 @@ The new tests validate the sticky `watch` shutdown helper directly, but they do 
 - Add route-level SSE shutdown tests for shutdown-before-connect and shutdown-after-initial-state.
 - Wrap both in timeouts so missed shutdown delivery fails loudly.
 
-## Triplicate `requestStateResync + startSessionHydration` recovery pattern in delta handler
-
-**Severity:** Low - `ui/src/app-live-state.ts:2329, 2421, 2437`. Three near-identical recovery sites within ~110 lines of the same handler perform the same `requestStateResync({ rearmOnFailure: true }) + startSessionHydration(delta.sessionId)` pair. The `appliedNeedsResync` branch knows `delta.sessionId` is statically a string; the other two branches add a runtime guard (`"sessionId" in delta && typeof delta.sessionId === "string"`) — the type narrowing is subtly different at each site.
-
-A future fourth recovery branch would need to update three sites; collapsing into a helper subsumes the gate and centralizes the contract comment.
-
-**Proposal:**
-- Extract `function triggerRecoveryForDelta(delta: DeltaEvent)` that performs the resync and conditional hydration.
-- Replace the three call sites with the helper. Centralize the contract comment.
-
 ## Two backend Lagged branches duplicate the lagged-marker emission
 
 **Severity:** Low - `src/api_sse.rs:182-200, 204-215`. The state-receiver and delta-receiver Lagged branches now both yield `lagged` followed by a recovery state snapshot built via `state_snapshot_payload_for_sse(state.clone()).await`. The branches are byte-identical apart from comments. The third Lagged branch (`file_receiver` at line 221) deliberately doesn't recover — so a 2-of-3 helper is still warranted for the asymmetric maintenance risk: a future change that grows one branch (e.g., a tracing log, structured `data` body, or `revision` hint on the marker) needs to be mirrored manually on the other.

@@ -230,6 +230,11 @@ export type AdoptStateOptions = {
   paneId?: string | null;
 };
 
+type SessionHydrationOptions = {
+  allowDivergentTextRepairAfterNewerRevision?: boolean;
+  queueAfterCurrent?: boolean;
+};
+
 function isSessionDeltaEvent(delta: DeltaEvent): delta is SessionDeltaEvent {
   return "sessionId" in delta && typeof delta.sessionId === "string";
 }
@@ -1366,10 +1371,7 @@ export function useAppLiveState(
 
   function startSessionHydration(
     sessionId: string,
-    options?: {
-      allowDivergentTextRepairAfterNewerRevision?: boolean;
-      queueAfterCurrent?: boolean;
-    },
+    options?: SessionHydrationOptions,
   ) {
     if (hydratingSessionIdsRef.current.has(sessionId)) {
       if (options?.queueAfterCurrent === true) {
@@ -2485,6 +2487,20 @@ export function useAppLiveState(
       stateResyncPendingRef.current = true;
       startStateResyncLoop();
     }
+
+    function triggerRecoveryForDelta(
+      delta: DeltaEvent,
+      options?: {
+        requestOptions?: RequestStateResyncOptions;
+        hydrationOptions?: SessionHydrationOptions;
+      },
+    ) {
+      requestStateResync(options?.requestOptions ?? { rearmOnFailure: true });
+      if (isSessionDeltaEvent(delta)) {
+        startSessionHydration(delta.sessionId, options?.hydrationOptions);
+      }
+    }
+
     requestBackendReconnectRef.current = () => {
       if (cancelled || !readNavigatorOnline()) {
         return;
@@ -2872,13 +2888,15 @@ export function useAppLiveState(
               setBackendConnectionIssueDetail(null);
               clearRecoveredBackendRequestError();
               if (result.kind === "appliedNeedsResync") {
-                requestStateResync({
-                  allowAuthoritativeRollback: true,
-                  forceAdoptEqualOrNewerRevision: delta.revision,
-                  rearmOnFailure: true,
-                });
-                startSessionHydration(delta.sessionId, {
-                  queueAfterCurrent: true,
+                triggerRecoveryForDelta(delta, {
+                  requestOptions: {
+                    allowAuthoritativeRollback: true,
+                    forceAdoptEqualOrNewerRevision: delta.revision,
+                    rearmOnFailure: true,
+                  },
+                  hydrationOptions: {
+                    queueAfterCurrent: true,
+                  },
                 });
               }
               return;
@@ -2978,20 +2996,21 @@ export function useAppLiveState(
               scheduleSessionRender();
               setBackendConnectionIssueDetail(null);
               clearRecoveredBackendRequestError();
-              requestStateResync({
-                allowAuthoritativeRollback: true,
-                rearmOnFailure: true,
+              triggerRecoveryForDelta(delta, {
+                requestOptions: {
+                  allowAuthoritativeRollback: true,
+                  rearmOnFailure: true,
+                },
+                hydrationOptions:
+                  result.kind === "appliedNeedsResync" ||
+                  delta.type === "textDelta"
+                    ? {
+                        allowDivergentTextRepairAfterNewerRevision:
+                          delta.type === "textDelta",
+                        queueAfterCurrent: result.kind === "appliedNeedsResync",
+                      }
+                    : undefined,
               });
-              if (
-                result.kind === "appliedNeedsResync" ||
-                delta.type === "textDelta"
-              ) {
-                startSessionHydration(delta.sessionId, {
-                  allowDivergentTextRepairAfterNewerRevision:
-                    delta.type === "textDelta",
-                  queueAfterCurrent: result.kind === "appliedNeedsResync",
-                });
-              }
               return;
             }
           }
@@ -3000,15 +3019,14 @@ export function useAppLiveState(
           // fails, the client must stay in the reconnecting state. Use
           // rearmOnFailure so a failed resync re-arms polling instead of
           // stalling recovery.
-          requestStateResync({ rearmOnFailure: true });
           // Force per-session re-hydration as well so the affected session's
           // full transcript is re-fetched even if the /api/state summary's
           // reconcile decides the session looks fresh enough to keep
           // `messagesLoaded: true`. `hydratingSessionIdsRef` deduplicates so
           // a no-op when hydration is already in flight or queued.
-          if (isSessionDeltaEvent(delta)) {
-            startSessionHydration(delta.sessionId, { queueAfterCurrent: true });
-          }
+          triggerRecoveryForDelta(delta, {
+            hydrationOptions: { queueAfterCurrent: true },
+          });
           return;
         }
 
@@ -3098,7 +3116,6 @@ export function useAppLiveState(
             // the sidebar fresh, but the message body itself only arrives via
             // an authoritative state fetch — schedule one so a stuck/queued
             // hydration cannot leave the user staring at a stale transcript.
-            requestStateResync({ rearmOnFailure: true });
             // Force per-session re-hydration too: `/api/state` returns only the
             // metadata-first summary, and `applyMetadataOnlySessionDelta`
             // already advanced the local mutation stamp to match what the
@@ -3109,7 +3126,9 @@ export function useAppLiveState(
             // the full transcript via `/api/sessions/{id}` so the missing
             // message body actually appears. See bugs.md "Stuck assistant
             // reply visible only after refresh".
-            startSessionHydration(delta.sessionId, { queueAfterCurrent: true });
+            triggerRecoveryForDelta(delta, {
+              hydrationOptions: { queueAfterCurrent: true },
+            });
           }
           return;
         }
@@ -3123,10 +3142,7 @@ export function useAppLiveState(
         // until they refresh. Same reasoning as the appliedNeedsResync
         // branch above. See bugs.md "Stuck assistant reply visible only
         // after refresh".
-        requestStateResync({ rearmOnFailure: true });
-        if ("sessionId" in delta && typeof delta.sessionId === "string") {
-          startSessionHydration(delta.sessionId);
-        }
+        triggerRecoveryForDelta(delta);
       } catch {
         // Parse or reducer failure — restore reconnecting state so the retry
         // affordance stays available, and re-arm polling.
