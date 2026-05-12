@@ -6829,6 +6829,7 @@ fn delete_project_prunes_telegram_config_and_disables_relay_without_project_targ
     )
     .expect("fixture should write");
 
+    reset_telegram_relay_runtime_actions_for_tests();
     state
         .delete_project(&project_id)
         .expect("project should delete");
@@ -6844,6 +6845,10 @@ fn delete_project_prunes_telegram_config_and_disables_relay_without_project_targ
     assert!(value["config"].get("defaultProjectId").is_none());
     assert!(value["config"].get("defaultSessionId").is_none());
     assert_eq!(value["chatId"], json!(123));
+    assert_eq!(
+        take_telegram_relay_runtime_actions_for_tests(),
+        vec![TelegramRelayRuntimeActionForTest::Stop]
+    );
 }
 
 #[test]
@@ -6904,6 +6909,7 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
     )
     .expect("fixture should write");
 
+    reset_telegram_relay_runtime_actions_for_tests();
     state
         .delete_project(&deleted_project_id)
         .expect("project should delete");
@@ -6917,13 +6923,20 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
     );
     assert_eq!(
         value["config"]["defaultProjectId"],
-        json!(remaining_project_id)
+        json!(remaining_project_id.clone())
     );
     assert_eq!(
         value["config"]["defaultSessionId"],
         json!(remaining_session_id)
     );
     assert_eq!(value["chatId"], json!(123));
+    assert_eq!(
+        take_telegram_relay_runtime_actions_for_tests(),
+        vec![TelegramRelayRuntimeActionForTest::Start {
+            project_id: remaining_project_id.clone(),
+            subscribed_project_ids: vec![remaining_project_id],
+        }]
+    );
 }
 
 #[test]
@@ -6956,6 +6969,7 @@ fn delete_project_leaves_unrelated_telegram_config_file_unchanged() {
     .expect("fixture should encode");
     fs::write(&path, fixture.as_bytes()).expect("fixture should write");
 
+    reset_telegram_relay_runtime_actions_for_tests();
     state
         .delete_project(&deleted_project_id)
         .expect("project should delete");
@@ -6964,6 +6978,7 @@ fn delete_project_leaves_unrelated_telegram_config_file_unchanged() {
         fs::read(&path).expect("settings file should read"),
         fixture.as_bytes()
     );
+    assert!(take_telegram_relay_runtime_actions_for_tests().is_empty());
 }
 
 #[test]

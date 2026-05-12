@@ -108,7 +108,6 @@ impl AppState {
         // cannot leave references that the next status read would hide.
         file.config = self.sanitize_telegram_config_for_current_state(file.config);
         self.persist_telegram_bot_file(&file)?;
-        #[cfg(not(test))]
         self.reconcile_telegram_relay_for_loaded_file(&file);
 
         Ok(self.telegram_status_from_file(file))
@@ -305,7 +304,6 @@ impl AppState {
         }
 
         self.persist_telegram_bot_file(&file)?;
-        #[cfg(not(test))]
         self.reconcile_telegram_relay_for_loaded_file(&file);
         Ok(())
     }
@@ -334,7 +332,6 @@ impl AppState {
         }
 
         self.persist_telegram_bot_file(&file)?;
-        #[cfg(not(test))]
         self.reconcile_telegram_relay_for_loaded_file(&file);
         Ok(())
     }
@@ -395,7 +392,7 @@ impl AppState {
         changed
     }
 
-    #[cfg(not(test))]
+    #[cfg_attr(test, allow(dead_code))]
     fn reconcile_telegram_relay_from_saved_settings(&self) {
         let _guard = telegram_settings_file_guard();
         match self.load_telegram_bot_file() {
@@ -410,7 +407,6 @@ impl AppState {
         }
     }
 
-    #[cfg(not(test))]
     fn reconcile_telegram_relay_for_loaded_file(&self, file: &TelegramBotFile) {
         let mut file = file.clone();
         file.config = self.sanitize_telegram_config_for_current_state(file.config);

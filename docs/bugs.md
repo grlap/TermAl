@@ -33,17 +33,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 **Proposal:**
 - Extract the active-baseline transition into a helper `transition_active_baseline_to_settled` that returns either the new cursor + position or an `OutcomeShortCircuit`.
 
-## `prune_telegram_config_for_deleted_project` reconcile path is `#[cfg(not(test))]`
-
-**Severity:** Low - `src/telegram_settings.rs:243-264`. Round 74 wired the relay reconcile into `prune_telegram_config_for_deleted_project` (closes the round-73 deleted-project entry) but the reconcile path is `#[cfg(not(test))]`. The persistence side is tested, the reconcile side is not.
-
-**Current behavior:**
-- Reconcile call is `#[cfg(not(test))]`.
-- Production restart path is structurally untested.
-
-**Proposal:**
-- Add a non-`cfg`-gated abstraction so a Rust test can verify the reconcile is invoked after a successful prune.
-
 ## Supervised in-process Telegram relay status is untestable in production due to `#[cfg(test)]` fallback
 
 **Severity:** Medium - `src/telegram.rs:220-331`. `telegram_relay_status_snapshot()` has a production implementation backed by the live relay runtime and a test fallback that always returns `running: false` / `lifecycle: Manual`. The wire-shape tests can assert `InProcess` serialization statically, but no integration test exercises the live status endpoint while the in-process relay is running.
