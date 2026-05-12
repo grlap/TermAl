@@ -965,11 +965,7 @@ fn runtime_exit_success_keeps_active_turn_file_grace_window() {
     seed_runtime_exit_active_turn_file_change(&state, &session_id);
 
     state
-        .handle_runtime_exit_if_matches(
-            &session_id,
-            &runtime_token,
-            Some("runtime crashed"),
-        )
+        .handle_runtime_exit_if_matches(&session_id, &runtime_token, Some("runtime crashed"))
         .expect("runtime exit should persist successfully");
 
     let inner = state.inner.lock().expect("state mutex poisoned");

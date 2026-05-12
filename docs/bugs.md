@@ -33,19 +33,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 **Proposal:**
 - Extract the active-baseline transition into a helper `transition_active_baseline_to_settled` that returns either the new cursor + position or an `OutcomeShortCircuit`.
 
-## `from_ui_file` returns `Option<Self>` for three distinct disabled-relay reasons
-
-**Severity:** Note - `src/telegram.rs:181-213`. The function returns `Option<Self>` for THREE distinct disabled-relay reasons (disabled flag, missing/empty token, missing/empty default project). The caller cannot tell why the relay isn't started. A typed reason would help diagnostics and let the UI surface a more accurate "Stopped" reason.
-
-The new "Stopped" UI label is broad. If the user thinks they enabled the relay but configured an invalid project, they get the same "Stopped" copy as if they merely toggled the relay off.
-
-**Current behavior:**
-- Three disabled paths collapse to `None`.
-- Caller cannot distinguish.
-
-**Proposal:**
-- Return a `Result<Self, RelayDisabledReason>` and route the reason through to status / preferences UI.
-
 ## `prune_telegram_config_for_deleted_project` reconcile path is `#[cfg(not(test))]`
 
 **Severity:** Low - `src/telegram_settings.rs:243-264`. Round 74 wired the relay reconcile into `prune_telegram_config_for_deleted_project` (closes the round-73 deleted-project entry) but the reconcile path is `#[cfg(not(test))]`. The persistence side is tested, the reconcile side is not.

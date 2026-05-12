@@ -414,10 +414,9 @@ impl AppState {
     fn reconcile_telegram_relay_for_loaded_file(&self, file: &TelegramBotFile) {
         let mut file = file.clone();
         file.config = self.sanitize_telegram_config_for_current_state(file.config);
-        if let Some(config) = TelegramBotConfig::from_ui_file(&self.default_workdir, &file) {
-            start_telegram_relay_runtime(config);
-        } else {
-            stop_telegram_relay_runtime();
+        match TelegramBotConfig::from_ui_file(&self.default_workdir, &file) {
+            Ok(config) => start_telegram_relay_runtime(config),
+            Err(_reason) => stop_telegram_relay_runtime(),
         }
     }
 }
@@ -525,8 +524,7 @@ fn reset_telegram_test_rate_limit_for_tests() {
 fn age_telegram_test_rate_limit_for_tests(age: Duration) {
     *TELEGRAM_TEST_RATE_LIMIT
         .lock()
-        .expect("telegram test rate limit mutex poisoned") =
-        Some(std::time::Instant::now() - age);
+        .expect("telegram test rate limit mutex poisoned") = Some(std::time::Instant::now() - age);
 }
 
 fn telegram_test_connection_error(err: anyhow::Error) -> ApiError {

@@ -49,8 +49,8 @@ fn run_telegram_bot_with_config(
             .filter(|value| !value.is_empty())
             .ok_or_else(|| anyhow!("Telegram getMe response did not include a bot username"))?,
     );
-    let mut state = load_telegram_bot_state(&config.state_path)
-        .context("failed to load Telegram bot state")?;
+    let mut state =
+        load_telegram_bot_state(&config.state_path).context("failed to load Telegram bot state")?;
     let mut dirty = false;
     if let Some(chat_id) = config.chat_id {
         if state.chat_id != Some(chat_id) {
@@ -67,7 +67,10 @@ fn run_telegram_bot_with_config(
     println!("TermAl Telegram adapter");
     println!("api: {}", config.api_base_url);
     println!("project: {}", config.project_id);
-    println!("subscribed projects: {}", config.subscribed_project_ids.join(", "));
+    println!(
+        "subscribed projects: {}",
+        config.subscribed_project_ids.join(", ")
+    );
     match effective_telegram_chat_id(&config, &state) {
         Some(chat_id) => println!("chat: {chat_id}"),
         None => println!(
@@ -80,11 +83,7 @@ fn run_telegram_bot_with_config(
             Ok(updates) => updates,
             Err(err) => {
                 log_telegram_error("failed to poll updates", &err);
-                persist_dirty_telegram_state_after_poll_error(
-                    &config.state_path,
-                    &state,
-                    false,
-                );
+                persist_dirty_telegram_state_after_poll_error(&config.state_path, &state, false);
                 telegram_relay_sleep(TELEGRAM_ERROR_RETRY_DELAY, &shutdown);
                 continue;
             }
@@ -161,7 +160,7 @@ fn drain_telegram_updates_then_sync_digest(
 }
 
 /// Holds Telegram bot configuration.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct TelegramBotConfig {
     api_base_url: String,
     bot_username: Option<String>,
@@ -214,26 +213,33 @@ impl TelegramBotConfig {
         })
     }
 
-    fn from_ui_file(default_workdir: &str, file: &TelegramBotFile) -> Option<Self> {
+    fn from_ui_file(
+        default_workdir: &str,
+        file: &TelegramBotFile,
+    ) -> Result<Self, TelegramRelayConfigUnavailableReason> {
         if !file.config.enabled {
-            return None;
+            return Err(TelegramRelayConfigUnavailableReason::Disabled);
         }
-        let bot_token = file
+        let bot_token = match file
             .config
             .bot_token
             .as_deref()
             .map(str::trim)
-            .filter(|value| !value.is_empty())?
-            .to_owned();
-        let project_id = telegram_effective_default_project_id(&file.config)?;
+            .filter(|value| !value.is_empty())
+        {
+            Some(token) => token.to_owned(),
+            None => return Err(TelegramRelayConfigUnavailableReason::MissingBotToken),
+        };
+        let project_id = telegram_effective_default_project_id(&file.config)
+            .ok_or(TelegramRelayConfigUnavailableReason::MissingProjectTarget)?;
         if project_id.is_empty() {
-            return None;
+            return Err(TelegramRelayConfigUnavailableReason::MissingProjectTarget);
         }
         let subscribed_project_ids =
             telegram_effective_subscribed_project_ids(&file.config, &project_id);
         let state_path = resolve_termal_data_dir(default_workdir).join("telegram-bot.json");
 
-        Some(Self {
+        Ok(Self {
             api_base_url: default_termal_api_base_url(),
             bot_username: None,
             bot_token,
@@ -245,6 +251,13 @@ impl TelegramBotConfig {
             subscribed_project_ids,
         })
     }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum TelegramRelayConfigUnavailableReason {
+    Disabled,
+    MissingBotToken,
+    MissingProjectTarget,
 }
 
 fn telegram_effective_default_project_id(config: &TelegramUiConfig) -> Option<String> {
@@ -380,9 +393,7 @@ fn start_telegram_relay_runtime(config: TelegramBotConfig) {
                 let mut runtime = TELEGRAM_RELAY_RUNTIME
                     .lock()
                     .expect("telegram relay runtime mutex poisoned");
-                if runtime.generation == generation
-                    && !shutdown.load(Ordering::Relaxed)
-                {
+                if runtime.generation == generation && !shutdown.load(Ordering::Relaxed) {
                     runtime.state = TelegramRelayRuntimeState::Running;
                     true
                 } else {
@@ -407,8 +418,7 @@ fn start_telegram_relay_runtime(config: TelegramBotConfig) {
                 runtime.state = TelegramRelayRuntimeState::Idle;
                 runtime.shutdown = None;
             }
-        })
-    {
+        }) {
         Ok(handle) => {
             let mut runtime = TELEGRAM_RELAY_RUNTIME
                 .lock()
@@ -479,7 +489,8 @@ fn telegram_relay_config_fingerprint(config: &TelegramBotConfig) -> String {
         "publicBaseUrl": &config.public_base_url,
         "subscribedProjectIds": &config.subscribed_project_ids,
     });
-    let mut encoded = serde_json::to_vec(&payload).expect("telegram relay fingerprint should encode");
+    let mut encoded =
+        serde_json::to_vec(&payload).expect("telegram relay fingerprint should encode");
     hasher.update(&encoded);
     zeroize::Zeroize::zeroize(&mut encoded);
     format!("{:x}", hasher.finalize())
@@ -618,7 +629,9 @@ fn load_telegram_bot_state(path: &FsPath) -> Result<TelegramBotState> {
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
             return Ok(TelegramBotState::default());
         }
-        Err(err) => return Err(err).with_context(|| format!("failed to read `{}`", path.display())),
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read `{}`", path.display()));
+        }
     };
     match serde_json::from_slice(&raw) {
         Ok(state) => Ok(state),
@@ -646,7 +659,9 @@ fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result
             }
         },
         Err(err) if err.kind() == io::ErrorKind::NotFound => TelegramBotFile::default(),
-        Err(err) => return Err(err).with_context(|| format!("failed to read `{}`", path.display())),
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read `{}`", path.display()));
+        }
     };
     file.state = state.clone();
 
@@ -800,7 +815,10 @@ fn clear_telegram_project_scoped_state(state: &mut TelegramBotState) -> bool {
 }
 
 fn log_telegram_error(context: &str, err: &anyhow::Error) {
-    eprintln!("telegram> {context}: {}", sanitize_telegram_log_detail(&err.to_string()));
+    eprintln!(
+        "telegram> {context}: {}",
+        sanitize_telegram_log_detail(&err.to_string())
+    );
 }
 
 fn sanitize_telegram_log_detail(detail: &str) -> String {
@@ -935,7 +953,8 @@ fn standalone_telegram_bot_token_has_key_context(detail: &str, cursor: usize) ->
         return false;
     }
 
-    let key_end = trim_telegram_token_quote_left(bytes, trim_ascii_whitespace_left(bytes, cursor - 1));
+    let key_end =
+        trim_telegram_token_quote_left(bytes, trim_ascii_whitespace_left(bytes, cursor - 1));
 
     let mut key_start = key_end;
     while key_start > 0 && telegram_token_key_byte(bytes[key_start - 1]) {
@@ -960,8 +979,8 @@ fn standalone_telegram_bot_token_has_key_context(detail: &str, cursor: usize) ->
         "telegram-bot-token",
         "termal_telegram_bot_token",
     ]
-        .iter()
-        .any(|candidate| key.eq_ignore_ascii_case(candidate))
+    .iter()
+    .any(|candidate| key.eq_ignore_ascii_case(candidate))
 }
 
 fn standalone_telegram_generic_token_has_context(detail: &str, key_start: usize) -> bool {
@@ -1163,11 +1182,7 @@ impl TelegramApiClient {
     }
 
     /// Gets updates.
-    fn get_updates(
-        &self,
-        offset: Option<i64>,
-        timeout_secs: u64,
-    ) -> Result<Vec<TelegramUpdate>> {
+    fn get_updates(&self, offset: Option<i64>, timeout_secs: u64) -> Result<Vec<TelegramUpdate>> {
         let mut body = serde_json::Map::new();
         body.insert("timeout".to_owned(), json!(timeout_secs));
         body.insert("limit".to_owned(), json!(TELEGRAM_GET_UPDATES_LIMIT));
@@ -1201,8 +1216,7 @@ impl TelegramApiClient {
         reply_markup: Option<&TelegramInlineKeyboardMarkup>,
         format: TelegramTextFormat,
     ) -> Result<i64> {
-        let body =
-            telegram_edit_message_body(chat_id, message_id, text, reply_markup, format)?;
+        let body = telegram_edit_message_body(chat_id, message_id, text, reply_markup, format)?;
         let outcome: Result<Value> = self.request_json("editMessageText", Some(body));
         match outcome {
             Ok(result) => Ok(result
@@ -1258,10 +1272,7 @@ impl TelegramApiClient {
                 .description
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or_else(|| {
-                    format!(
-                        "Telegram `{method}` failed with HTTP {}",
-                        status.as_u16()
-                    )
+                    format!("Telegram `{method}` failed with HTTP {}", status.as_u16())
                 });
             return Err(TelegramApiError {
                 method: method.to_owned(),
@@ -1455,7 +1466,10 @@ impl TermalApiClient {
     fn send_session_message(&self, session_id: &str, text: &str) -> Result<StateResponse> {
         self.request_json(
             Method::POST,
-            &format!("/api/sessions/{}/messages", encode_uri_component(session_id)),
+            &format!(
+                "/api/sessions/{}/messages",
+                encode_uri_component(session_id)
+            ),
             Some(json!({
                 "text": text,
                 "attachments": [],
@@ -1774,7 +1788,6 @@ impl TelegramUpdateHandlingOutcome {
             final_sync_satisfied: false,
         }
     }
-
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -1809,10 +1822,7 @@ fn handle_telegram_message(
     state: &mut TelegramBotState,
     message: TelegramChatMessage,
 ) -> Result<bool> {
-    Ok(
-        handle_telegram_message_for_relay(telegram, termal, config, state, message)?
-            .dirty,
-    )
+    Ok(handle_telegram_message_for_relay(telegram, termal, config, state, message)?.dirty)
 }
 
 fn handle_telegram_message_for_relay(
@@ -1822,7 +1832,12 @@ fn handle_telegram_message_for_relay(
     state: &mut TelegramBotState,
     message: TelegramChatMessage,
 ) -> Result<TelegramUpdateHandlingOutcome> {
-    let Some(text) = message.text.as_deref().map(str::trim).filter(|text| !text.is_empty()) else {
+    let Some(text) = message
+        .text
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    else {
         return Ok(TelegramUpdateHandlingOutcome::default());
     };
     let chat_id = message.chat.id;
@@ -1855,7 +1870,8 @@ fn handle_telegram_message_for_relay(
         if telegram_command_mentions_other_bot(text, config.bot_username.as_deref()) {
             return Ok(TelegramUpdateHandlingOutcome::default());
         }
-        let Some(command) = parse_telegram_command_for_bot(text, config.bot_username.as_deref()) else {
+        let Some(command) = parse_telegram_command_for_bot(text, config.bot_username.as_deref())
+        else {
             telegram.send_message(chat_id, &telegram_help_text(config, state), None)?;
             return Ok(TelegramUpdateHandlingOutcome::default());
         };
@@ -1873,15 +1889,10 @@ fn handle_telegram_message_for_relay(
                 send_telegram_projects(telegram, termal, config, state, chat_id)
                     .map(TelegramUpdateHandlingOutcome::unsynced)
             }
-            TelegramIncomingCommand::Project => select_telegram_project(
-                telegram,
-                termal,
-                config,
-                state,
-                chat_id,
-                command.args,
-            )
-            .map(TelegramUpdateHandlingOutcome::unsynced),
+            TelegramIncomingCommand::Project => {
+                select_telegram_project(telegram, termal, config, state, chat_id, command.args)
+                    .map(TelegramUpdateHandlingOutcome::unsynced)
+            }
             TelegramIncomingCommand::Sessions => {
                 send_telegram_project_sessions(telegram, termal, config, state, chat_id)
                     .map(TelegramUpdateHandlingOutcome::unsynced)
@@ -2007,11 +2018,7 @@ fn handle_telegram_callback_query(
                 &callback_query.id,
                 &telegram_callback_action_error_text(action_id, &err),
             );
-            telegram.send_message(
-                chat_id,
-                &telegram_action_error_text(action_id, &err),
-                None,
-            )?;
+            telegram.send_message(chat_id, &telegram_action_error_text(action_id, &err), None)?;
             return Ok(dirty);
         }
     };
@@ -2115,13 +2122,8 @@ fn forward_telegram_text_to_project_for_relay(
     // case where the agent finishes synchronously, and it keeps the
     // forward-once contract centralized at the few places digests
     // are sent.
-    dirty |= forward_relevant_assistant_messages(
-        telegram,
-        termal,
-        state,
-        chat_id,
-        Some(session_id),
-    );
+    dirty |=
+        forward_relevant_assistant_messages(telegram, termal, state, chat_id, Some(session_id));
     Ok(TelegramPromptForwardOutcome {
         dirty,
         final_sync_satisfied: true,
@@ -2201,9 +2203,7 @@ fn ensure_selected_session_forwarding_baseline(
     session_id: &str,
 ) -> Result<bool> {
     if is_forward_next_assistant_message_session(state, session_id)
-        || state
-            .assistant_forwarding_cursors
-            .contains_key(session_id)
+        || state.assistant_forwarding_cursors.contains_key(session_id)
     {
         return Ok(false);
     }
@@ -2229,13 +2229,11 @@ fn forward_relevant_assistant_messages(
 
     for session_id in armed_session_ids {
         checked_session_ids.insert(session_id.clone());
-        match forward_new_assistant_message_outcome(telegram, termal, state, chat_id, &session_id)
-        {
+        match forward_new_assistant_message_outcome(telegram, termal, state, chat_id, &session_id) {
             Ok(outcome) => {
                 outcome.debug_assert_invariants();
                 dirty |= outcome.dirty;
-                suppress_digest_primary |=
-                    outcome.sent_visible_content || outcome.delivery_failed;
+                suppress_digest_primary |= outcome.sent_visible_content || outcome.delivery_failed;
             }
             Err(err) => {
                 dirty = true;
@@ -2397,8 +2395,10 @@ fn clear_forward_next_assistant_message_session_id(
         .forward_next_assistant_message_session_ids
         .retain(|armed_session_id| armed_session_id != session_id);
     if state.forward_next_assistant_message_session_id.as_deref() == Some(session_id) {
-        state.forward_next_assistant_message_session_id =
-            state.forward_next_assistant_message_session_ids.first().cloned();
+        state.forward_next_assistant_message_session_id = state
+            .forward_next_assistant_message_session_ids
+            .first()
+            .cloned();
         changed = true;
     }
     changed
@@ -2420,8 +2420,8 @@ fn arm_forward_next_assistant_message_session_id(
             .push(session_id.to_owned());
         true
     };
-    let changed = inserted
-        || state.forward_next_assistant_message_session_id.as_deref() != Some(session_id);
+    let changed =
+        inserted || state.forward_next_assistant_message_session_id.as_deref() != Some(session_id);
     state.forward_next_assistant_message_session_id = Some(session_id.to_owned());
     changed
 }
@@ -2545,9 +2545,8 @@ fn forward_new_assistant_message_if_any(
     chat_id: i64,
     session_id: &str,
 ) -> Result<bool> {
-    let outcome = forward_new_assistant_message_outcome(
-        telegram, termal, state, chat_id, session_id,
-    )?;
+    let outcome =
+        forward_new_assistant_message_outcome(telegram, termal, state, chat_id, session_id)?;
     outcome.debug_assert_invariants();
     Ok(outcome.dirty)
 }
@@ -2609,22 +2608,18 @@ fn forward_new_assistant_message_outcome(
             });
         }
         sent_visible_content = true;
-        pre_forward_dirty |=
-            remember_assistant_forwarding_footer_pending(state, session_id, false);
+        pre_forward_dirty |= remember_assistant_forwarding_footer_pending(state, session_id, false);
     }
 
-    let mut position_of_last = cursor
-        .message_id
-        .as_deref()
-        .and_then(|tracked| {
-            messages.iter().position(|message| {
-                matches!(
-                    message,
-                    TelegramSessionFetchMessage::Text { id, author, .. }
-                        if id == tracked && author == "assistant"
-                )
-            })
-        });
+    let mut position_of_last = cursor.message_id.as_deref().and_then(|tracked| {
+        messages.iter().position(|message| {
+            matches!(
+                message,
+                TelegramSessionFetchMessage::Text { id, author, .. }
+                    if id == tracked && author == "assistant"
+            )
+        })
+    });
 
     if forward_without_existing_baseline && cursor.baseline_while_active {
         if let Some(pos) = position_of_last {
@@ -2641,11 +2636,8 @@ fn forward_new_assistant_message_outcome(
                 text_chars,
                 ..cursor.clone()
             };
-            let dirty = remember_assistant_forwarding_cursor(
-                state,
-                session_id,
-                settled_cursor.clone(),
-            );
+            let dirty =
+                remember_assistant_forwarding_cursor(state, session_id, settled_cursor.clone());
             pre_forward_dirty |= dirty;
             cursor = settled_cursor;
             position_of_last = Some(pos);
@@ -2768,7 +2760,9 @@ fn forward_new_assistant_message_outcome(
         });
     }
 
-    sent_visible_content |= cursor.sent_chunks.is_some_and(|sent_chunks| sent_chunks > 0);
+    sent_visible_content |= cursor
+        .sent_chunks
+        .is_some_and(|sent_chunks| sent_chunks > 0);
     let mut changed = pre_forward_dirty;
     let mut delivery_failed = false;
     for (id, text) in &to_forward {
@@ -2885,11 +2879,7 @@ fn forward_new_assistant_message_outcome(
             footer_pending: false,
             baseline_while_active: false,
         };
-        changed |= remember_assistant_forwarding_cursor(
-            state,
-            session_id,
-            complete_cursor.clone(),
-        );
+        changed |= remember_assistant_forwarding_cursor(state, session_id, complete_cursor.clone());
         cursor = complete_cursor;
         changed |= clear_forward_next_assistant_message_session_id(state, session_id);
     }
@@ -3224,7 +3214,8 @@ fn select_telegram_project_session(
     }
 
     let sessions = termal.get_state_sessions()?;
-    let Some(session) = find_telegram_project_session(&sessions, &project_id, raw_session_id) else {
+    let Some(session) = find_telegram_project_session(&sessions, &project_id, raw_session_id)
+    else {
         telegram.send_message(
             chat_id,
             &format!(
@@ -3416,11 +3407,16 @@ fn build_telegram_digest_keyboard(
         rows.push(current_row);
     }
 
-    Ok(Some(TelegramInlineKeyboardMarkup { inline_keyboard: rows }))
+    Ok(Some(TelegramInlineKeyboardMarkup {
+        inline_keyboard: rows,
+    }))
 }
 
 fn telegram_digest_callback_data(project_id: &str, action_id: &str) -> Result<String> {
-    let callback_data = format!("p:{}:{action_id}", telegram_digest_project_token(project_id));
+    let callback_data = format!(
+        "p:{}:{action_id}",
+        telegram_digest_project_token(project_id)
+    );
     if callback_data.len() > TELEGRAM_CALLBACK_DATA_MAX_BYTES {
         bail!(
             "Telegram callback_data for action `{action_id}` exceeds {TELEGRAM_CALLBACK_DATA_MAX_BYTES} bytes"
@@ -3433,9 +3429,7 @@ fn parse_telegram_digest_callback_data(value: &str) -> Option<(String, String)> 
     let payload = value.strip_prefix("p:")?;
     let (project_token, action_id) = payload.split_once(':')?;
     if project_token.len() != 16
-        || !project_token
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit())
+        || !project_token.bytes().all(|byte| byte.is_ascii_hexdigit())
         || action_id.is_empty()
     {
         return None;
@@ -3509,7 +3503,10 @@ fn render_telegram_digest_html(
 ) -> String {
     let mut rows = vec![
         ("Project", telegram_digest_table_value(&digest.headline)),
-        ("Status", telegram_digest_table_value(&digest.current_status)),
+        (
+            "Status",
+            telegram_digest_table_value(&digest.current_status),
+        ),
         ("Done", telegram_digest_table_value(&digest.done_summary)),
     ];
 
@@ -3629,7 +3626,11 @@ fn render_telegram_projects(
             1 => "1 session".to_owned(),
             count => format!("{count} sessions"),
         };
-        let marker = if project_id == active_project_id { "*" } else { "-" };
+        let marker = if project_id == active_project_id {
+            "*"
+        } else {
+            "-"
+        };
         lines.push(format!("{marker} {label} ({sessions})"));
         lines.push(format!("  id: {project_id}"));
     }
@@ -3641,7 +3642,10 @@ fn find_telegram_project<'a>(
     state: &'a TelegramStateSessionsResponse,
     project_id: &str,
 ) -> Option<&'a TelegramStateProject> {
-    state.projects.iter().find(|project| project.id == project_id)
+    state
+        .projects
+        .iter()
+        .find(|project| project.id == project_id)
 }
 
 fn telegram_project_label(project: &TelegramStateProject) -> &str {
@@ -3768,7 +3772,10 @@ fn truncate_telegram_user_error_detail(detail: &str, max_chars: usize) -> String
         return trimmed.chars().take(max_chars).collect();
     }
 
-    let mut truncated = trimmed.chars().take(max_chars.saturating_sub(3)).collect::<String>();
+    let mut truncated = trimmed
+        .chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
     truncated.push_str("...");
     truncated
 }
@@ -3844,7 +3851,10 @@ fn parse_telegram_command_for_bot<'a>(
 }
 
 fn telegram_command_mentions_other_bot(text: &str, bot_username: Option<&str>) -> bool {
-    let Some(expected) = bot_username.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(expected) = bot_username
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return false;
     };
     let trimmed = text.trim();
@@ -3876,7 +3886,8 @@ fn parse_optional_i64_env(key: &str) -> Result<Option<i64>> {
     std::env::var(key)
         .ok()
         .map(|value| {
-            value.parse::<i64>()
+            value
+                .parse::<i64>()
                 .with_context(|| format!("{key} is not a valid integer: {value}"))
         })
         .transpose()

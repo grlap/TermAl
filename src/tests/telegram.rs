@@ -833,9 +833,7 @@ fn telegram_unlinked_start_accepts_matching_bot_suffix() {
     .expect("matching suffixed startup command should send guidance");
 
     assert_eq!(telegram.sent_texts.borrow().len(), 1);
-    assert!(
-        telegram.sent_texts.borrow()[0].contains("TERMAL_TELEGRAM_CHAT_ID=123")
-    );
+    assert!(telegram.sent_texts.borrow()[0].contains("TERMAL_TELEGRAM_CHAT_ID=123"));
 }
 
 #[test]
@@ -5398,7 +5396,11 @@ fn telegram_ui_file_requires_project_target_for_relay_config() {
         ..telegram_ui_relay_config()
     });
 
-    assert!(TelegramBotConfig::from_ui_file("/tmp", &without_any_project).is_none());
+    assert_eq!(
+        TelegramBotConfig::from_ui_file("/tmp", &without_any_project)
+            .expect_err("relay config without a project target should be unavailable"),
+        TelegramRelayConfigUnavailableReason::MissingProjectTarget
+    );
 }
 
 #[test]
@@ -5409,7 +5411,11 @@ fn telegram_ui_file_requires_default_when_multiple_projects_for_relay_config() {
         ..telegram_ui_relay_config()
     });
 
-    assert!(TelegramBotConfig::from_ui_file("/tmp", &with_multiple_projects).is_none());
+    assert_eq!(
+        TelegramBotConfig::from_ui_file("/tmp", &with_multiple_projects)
+            .expect_err("ambiguous relay project target should be unavailable"),
+        TelegramRelayConfigUnavailableReason::MissingProjectTarget
+    );
 }
 
 #[test]
@@ -5443,7 +5449,11 @@ fn telegram_ui_file_omits_disabled_relay_config_even_with_token_and_project() {
         ..telegram_ui_relay_config()
     });
 
-    assert!(TelegramBotConfig::from_ui_file("/tmp", &disabled).is_none());
+    assert_eq!(
+        TelegramBotConfig::from_ui_file("/tmp", &disabled)
+            .expect_err("disabled relay config should be unavailable"),
+        TelegramRelayConfigUnavailableReason::Disabled
+    );
 }
 
 #[test]
@@ -5453,7 +5463,11 @@ fn telegram_ui_file_requires_bot_token_for_relay_config() {
         ..telegram_ui_relay_config()
     });
 
-    assert!(TelegramBotConfig::from_ui_file("/tmp", &missing_token).is_none());
+    assert_eq!(
+        TelegramBotConfig::from_ui_file("/tmp", &missing_token)
+            .expect_err("relay config without a bot token should be unavailable"),
+        TelegramRelayConfigUnavailableReason::MissingBotToken
+    );
 }
 
 #[test]
@@ -5463,7 +5477,11 @@ fn telegram_ui_file_rejects_empty_bot_token_for_relay_config() {
         ..telegram_ui_relay_config()
     });
 
-    assert!(TelegramBotConfig::from_ui_file("/tmp", &empty_token).is_none());
+    assert_eq!(
+        TelegramBotConfig::from_ui_file("/tmp", &empty_token)
+            .expect_err("relay config with an empty bot token should be unavailable"),
+        TelegramRelayConfigUnavailableReason::MissingBotToken
+    );
 }
 
 #[test]
@@ -5473,7 +5491,11 @@ fn telegram_ui_file_rejects_whitespace_bot_token_for_relay_config() {
         ..telegram_ui_relay_config()
     });
 
-    assert!(TelegramBotConfig::from_ui_file("/tmp", &whitespace_token).is_none());
+    assert_eq!(
+        TelegramBotConfig::from_ui_file("/tmp", &whitespace_token)
+            .expect_err("relay config with a whitespace bot token should be unavailable"),
+        TelegramRelayConfigUnavailableReason::MissingBotToken
+    );
 }
 
 #[test]
@@ -5889,15 +5911,15 @@ fn telegram_state_corrupt_backup_falls_back_to_copy_when_rename_fails() {
     let backup_path = corrupt_telegram_bot_file_backup_path(&path);
 
     backup_corrupt_telegram_bot_file_with_rename(&path, &backup_path, |_, _| {
-        Err(io::Error::new(io::ErrorKind::Other, "forced rename failure"))
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            "forced rename failure",
+        ))
     })
     .expect("copy fallback should quarantine corrupt state");
 
     assert!(!path.exists());
-    assert_eq!(
-        fs::read(&backup_path).expect("backup should read"),
-        b"{"
-    );
+    assert_eq!(fs::read(&backup_path).expect("backup should read"), b"{");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
@@ -5985,10 +6007,8 @@ fn telegram_bot_file_write_sets_mode_600() {
 
 #[test]
 fn telegram_bot_file_write_removes_temp_after_write_failure() {
-    let root = std::env::temp_dir().join(format!(
-        "termal-telegram-write-cleanup-{}",
-        Uuid::new_v4()
-    ));
+    let root =
+        std::env::temp_dir().join(format!("termal-telegram-write-cleanup-{}", Uuid::new_v4()));
     fs::create_dir(&root).expect("fixture directory should create");
     let path = root.join("telegram-bot.json");
 
@@ -5996,8 +6016,7 @@ fn telegram_bot_file_write_removes_temp_after_write_failure() {
         &path,
         b"{\"chatId\":123}",
         |temp_path, _| {
-            fs::write(temp_path, b"{\"chatId\"")
-                .expect("partial temp file should write");
+            fs::write(temp_path, b"{\"chatId\"").expect("partial temp file should write");
             Err(io::Error::new(
                 io::ErrorKind::Other,
                 "forced temp write failure",
