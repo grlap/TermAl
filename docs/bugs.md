@@ -74,35 +74,6 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 - Move the token to an OS secret store, or keep token configuration env-only until protected storage exists.
 - If file persistence stays, add explicit Windows ACL handling and document backup/sync exposure.
 
-## `isPurePrepend` strict gate drops bottom-gap preservation when concurrent append happens
-
-**Severity:** Medium - in streaming sessions hitting hydration, the user-near-bottom-escape-upward scenario is exactly when a new assistant chunk lands alongside the prepend — making `isPurePrepend` false. The bottom-gap signal is silently consumed.
-
-`ui/src/panels/VirtualizedConversationMessageList.tsx:1473-1479`. With any trailing growth, the bottom-gap path is bypassed and `pendingBottomGapAfterPrepend` is cleared without being applied.
-
-**Current behavior:**
-- Strict `isPurePrepend` gate.
-- Concurrent append makes the gate false.
-- Bottom-gap preservation silently consumed.
-
-**Proposal:**
-- Relax to `pureOrAppendingPrepend` allowing N appended messages alongside the prepend.
-- OR re-store the bottom gap if the gate fails so the next layout effect can still consume it.
-
-## `skipNextMountedPrependRestoreRef` cleared by new prepend effect — silently overrides user-scroll intent
-
-**Severity:** Medium - the new prepend-anchor `useLayoutEffect` unconditionally writes `skipNextMountedPrependRestoreRef.current = false` whenever a prepend is detected. If user wheels (sets it true), then a transcript prepend fires before the prior effect drains, the skip flag is silently cleared.
-
-`ui/src/panels/VirtualizedConversationMessageList.tsx:1520-1521`.
-
-**Current behavior:**
-- `markUserScroll` sets `skipNextMountedPrependRestoreRef = true`.
-- New prepend effect unconditionally clears it.
-- User-scroll intent lost on prepend.
-
-**Proposal:**
-- Respect the skip flag if set; only clear when no prior intent exists.
-
 ## `pendingPrependedMessageAnchorRef.remainingAttempts = 3` magic number with no telemetry on exhaustion
 
 **Severity:** Medium - if the anchor never re-mounts (e.g., user scrolls away during chained re-renders), `remainingAttempts` decrements to 0 and gives up — leaving `latestVisibleMessageAnchorRef` stale. No log when this exhausts.

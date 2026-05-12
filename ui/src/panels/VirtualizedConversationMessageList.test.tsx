@@ -625,7 +625,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
-  it("keeps the first upward wheel from a tail bottom near the hydrated bottom", async () => {
+  it("keeps the first upward wheel from a tail bottom near the hydrated bottom when hydrate also appends", async () => {
     const messages = makeTextMessages(600);
     const tailMessages = messages.slice(-20);
     const tailFirstMessageNumber = messages.length - tailMessages.length + 1;
@@ -687,7 +687,16 @@ describe("VirtualizedConversationMessageList foundation", () => {
         );
       });
       act(() => {
-        harness.rerenderWithMessages(messages);
+        harness.rerenderWithMessages([
+          ...messages,
+          {
+            author: "assistant",
+            id: "message-601",
+            text: "Message 601",
+            timestamp: "10:601",
+            type: "text",
+          },
+        ]);
       });
 
       await waitFor(() => {

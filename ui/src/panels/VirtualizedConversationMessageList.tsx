@@ -1499,10 +1499,7 @@ export function VirtualizedConversationMessageList({
       lastNativeScrollTopRef.current = 0;
       return;
     }
-    const isPurePrepend =
-      prependedCount === messages.length - previousWindow.ids.length;
     const shouldPreserveBottomGapAfterPrepend =
-      isPurePrepend &&
       pendingBottomGapAfterPrepend !== null &&
       pendingBottomGapAfterPrepend >= 0 &&
       pendingBottomGapAfterPrepend <= Math.max(viewportHeightPx * 1.5, 72);
@@ -1547,7 +1544,8 @@ export function VirtualizedConversationMessageList({
       targetNearBottom && !preserveDetachedScroll;
     isDetachedFromBottomRef.current = preserveDetachedScroll || !targetNearBottom;
     pendingMountedPrependRestoreRef.current = null;
-    skipNextMountedPrependRestoreRef.current = false;
+    // Preserve any user-scroll skip intent so the next mounted-range prepend
+    // restore can still consume it.
     clearPendingDeferredLayoutTimer();
     pendingPrependedMessageAnchorRef.current =
       preservedAnchor && !shouldPreserveBottomGapAfterPrepend
@@ -2686,6 +2684,9 @@ export function VirtualizedConversationMessageList({
           pendingDeferredLayoutAnchorRef.current = null;
           const scrollDelta = node.scrollTop - lastNativeScrollTopRef.current;
           lastNativeScrollTopRef.current = node.scrollTop;
+          if (Math.abs(scrollDelta) >= 0.5) {
+            pendingPrependedBottomGapRef.current = null;
+          }
           const isPassiveTailFollowScroll =
             tailFollowIntent &&
             !hadUserScrollInteraction &&
