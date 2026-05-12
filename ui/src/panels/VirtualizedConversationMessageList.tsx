@@ -2819,13 +2819,16 @@ export function VirtualizedConversationMessageList({
       const visibleAnchorBeforeNativeScroll =
         captureFirstVisibleMountedMessageAnchor(renderedListRef.current, node);
       if (visibleAnchorBeforeNativeScroll) {
+        // Wheel delta is the browser's intended scroll delta. Touch delta is a
+        // finger movement approximation; at scroll boundaries or inside nested
+        // scrollers it may not correspond to any scrollTop change, so leave the
+        // anchor unshifted until the native scroll handler observes real motion.
         latestVisibleMessageAnchorRef.current =
-          inputScrollDeltaY !== null
+          wheelDeltaY !== null
             ? {
                 ...visibleAnchorBeforeNativeScroll,
                 viewportOffsetPx:
-                  visibleAnchorBeforeNativeScroll.viewportOffsetPx -
-                  inputScrollDeltaY,
+                  visibleAnchorBeforeNativeScroll.viewportOffsetPx - wheelDeltaY,
               }
             : visibleAnchorBeforeNativeScroll;
       }

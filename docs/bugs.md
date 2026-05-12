@@ -74,21 +74,6 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 - Move the token to an OS secret store, or keep token configuration env-only until protected storage exists.
 - If file persistence stays, add explicit Windows ACL handling and document backup/sync exposure.
 
-## `markUserScroll` anchor speculation captures approximate touch offsets
-
-**Severity:** Medium - speculative offset adjustment `viewportOffsetPx - inputScrollDeltaY` applied unconditionally on every input event. For touch events, `touchDeltaY` is the FINGER delta (not the scroll delta). When user touches a non-scrollable region, swipes within an iframe, or hits a scroll boundary, the anchor's `viewportOffsetPx` ends up off by the would-be delta.
-
-`ui/src/panels/VirtualizedConversationMessageList.tsx:2767-2778`. The downstream prepended-restore effect uses this anchor as a scroll target.
-
-**Current behavior:**
-- Speculative offset applied to anchor on every input event with non-null delta.
-- Touch deltas approximate scroll deltas.
-- At scroll boundaries the speculation is wrong.
-
-**Proposal:**
-- Defer the speculative offset until the native scroll handler observes an actual `scrollTop` change.
-- OR drop the speculation and re-capture the anchor inside the prepended-restore effect.
-
 ## `isPurePrepend` strict gate drops bottom-gap preservation when concurrent append happens
 
 **Severity:** Medium - in streaming sessions hitting hydration, the user-near-bottom-escape-upward scenario is exactly when a new assistant chunk lands alongside the prepend — making `isPurePrepend` false. The bottom-gap signal is silently consumed.
