@@ -156,7 +156,7 @@ struct FakeTelegramPromptClient {
     digests: RefCell<VecDeque<std::result::Result<ProjectDigestResponse, String>>>,
     digest_project_ids: RefCell<Vec<String>>,
     events: RefCell<Vec<String>>,
-    session_response: TelegramSessionFetchResponse,
+    session_responses: RefCell<VecDeque<TelegramSessionFetchResponse>>,
     state_session_reads: Cell<usize>,
     state_sessions: TelegramStateSessionsResponse,
     send_error: Option<String>,
@@ -172,7 +172,7 @@ impl FakeTelegramPromptClient {
             digests: RefCell::new(VecDeque::from(digests)),
             digest_project_ids: RefCell::new(Vec::new()),
             events: RefCell::new(Vec::new()),
-            session_response,
+            session_responses: RefCell::new(VecDeque::from([session_response])),
             state_session_reads: Cell::new(0),
             state_sessions: TelegramStateSessionsResponse {
                 projects: Vec::new(),
@@ -188,6 +188,11 @@ impl FakeTelegramPromptClient {
         self
     }
 
+    fn with_session_responses(mut self, responses: Vec<TelegramSessionFetchResponse>) -> Self {
+        self.session_responses = RefCell::new(VecDeque::from(responses));
+        self
+    }
+
     fn with_send_error(mut self, error: &str) -> Self {
         self.send_error = Some(error.to_owned());
         self
@@ -199,7 +204,17 @@ impl TelegramSessionReader for FakeTelegramPromptClient {
         self.events
             .borrow_mut()
             .push(format!("session:{session_id}"));
-        Ok(self.session_response.clone())
+        let mut responses = self.session_responses.borrow_mut();
+        if responses.len() > 1 {
+            responses
+                .pop_front()
+                .context("fake session response should be queued")
+        } else {
+            responses
+                .front()
+                .cloned()
+                .context("fake session response should be queued")
+        }
     }
 }
 
@@ -2322,6 +2337,79 @@ fn telegram_prompt_post_failure_does_not_arm_assistant_forwarding() {
     assert!(state.assistant_forwarding_cursors.is_empty());
     assert!(state.forward_next_assistant_message_session_ids.is_empty());
     assert_eq!(state.forward_next_assistant_message_session_id, None);
+}
+
+#[test]
+fn telegram_prompt_uses_post_send_assistant_forwarding_baseline() {
+    let telegram = FakeTelegramSender::new(None);
+    let pre_accept_text = "Assistant text visible before prompt accept returned";
+    let pre_send_session = TelegramSessionFetchResponse {
+        session: TelegramSessionFetchSession {
+            status: TelegramSessionStatus::Idle,
+            messages: vec![TelegramSessionFetchMessage::Text {
+                id: "message-1".to_owned(),
+                author: "assistant".to_owned(),
+                text: "Old assistant text".to_owned(),
+            }],
+        },
+    };
+    let post_send_session = TelegramSessionFetchResponse {
+        session: TelegramSessionFetchSession {
+            status: TelegramSessionStatus::Idle,
+            messages: vec![
+                TelegramSessionFetchMessage::Text {
+                    id: "message-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Old assistant text".to_owned(),
+                },
+                TelegramSessionFetchMessage::Text {
+                    id: "message-2".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: pre_accept_text.to_owned(),
+                },
+            ],
+        },
+    };
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(telegram_project_digest(Some("session-1"))),
+            Ok(telegram_project_digest(Some("session-1"))),
+        ],
+        pre_send_session.clone(),
+    )
+    .with_session_responses(vec![pre_send_session, post_send_session]);
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+
+    let changed =
+        forward_telegram_text_to_project(&telegram, &termal, &config, &mut state, 42, "from chat")
+            .expect("forwarding should succeed");
+
+    assert!(changed);
+    assert_eq!(
+        termal.events.borrow().as_slice(),
+        [
+            "digest:project-1",
+            "session:session-1",
+            "send:session-1",
+            "session:session-1",
+            "digest:project-1",
+            "session:session-1",
+        ]
+    );
+    let cursor = state
+        .assistant_forwarding_cursors
+        .get("session-1")
+        .expect("accepted prompt should arm assistant forwarding");
+    assert_eq!(cursor.message_id.as_deref(), Some("message-2"));
+    assert_eq!(cursor.text_chars, Some(pre_accept_text.chars().count()));
+    assert!(
+        !telegram
+            .sent_texts
+            .borrow()
+            .iter()
+            .any(|text| text == pre_accept_text)
+    );
 }
 
 #[test]

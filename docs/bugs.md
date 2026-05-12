@@ -74,22 +74,6 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 - Move the token to an OS secret store, or keep token configuration env-only until protected storage exists.
 - If file persistence stays, add explicit Windows ACL handling and document backup/sync exposure.
 
-## `prepare_assistant_forwarding_for_telegram_prompt` race window between cursor capture and POST send
-
-**Severity:** Medium - the new prepare/apply split correctly avoids mutate-before-success, but widens the cursor-capture-to-apply window across a network round-trip. If the agent emits new assistant text between T0 (capture) and T1 (POST returns), the T0 baseline marks the freshly-emitted message as already-forwarded.
-
-`src/telegram.rs:890-894`. The pre-round-55 `arm_assistant_forwarding_for_telegram_prompt` had the same fundamental race but a much narrower window (no network call between cursor read and state write).
-
-**Current behavior:**
-- T0: `prepare_*` reads cursor.
-- T1: `send_session_message` POST returns.
-- T2: `apply_*` commits T0 cursor to state.
-- An assistant message emitted between T0 and T1 is silently marked as "already forwarded".
-
-**Proposal:**
-- Re-fetch the cursor right before applying, not at the prepare step.
-- Or capture `latest` AFTER the POST returns (since the goal is "baseline as of after this prompt is sent").
-
 ## `src/telegram.rs` past 1500-line architecture rubric threshold
 
 **Severity:** Medium - file now exceeds 1766 lines after round 56. CLAUDE.md asks for smaller modules.

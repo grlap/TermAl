@@ -2167,9 +2167,20 @@ fn forward_telegram_text_to_project_for_relay(
         });
     };
 
-    let assistant_forwarding_plan =
+    let pre_send_assistant_forwarding_plan =
         prepare_assistant_forwarding_for_telegram_prompt(termal, session_id)?;
     termal.send_session_message(session_id, text)?;
+    let assistant_forwarding_plan =
+        match prepare_assistant_forwarding_for_telegram_prompt(termal, session_id) {
+            Ok(plan) => plan,
+            Err(err) => {
+                log_telegram_error(
+                    "failed to refresh assistant forwarding baseline after Telegram prompt",
+                    &err,
+                );
+                pre_send_assistant_forwarding_plan
+            }
+        };
     let assistant_forwarding_baseline_changed =
         apply_assistant_forwarding_plan(state, assistant_forwarding_plan);
     dirty |= assistant_forwarding_baseline_changed;
