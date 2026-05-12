@@ -11,6 +11,22 @@ Locking invariant: file I/O uses `telegram_settings_file_guard()`, and callers
 must not hold the main app state mutex while acquiring that guard. This module
 may briefly read app state while holding the file guard for validation, but it
 must release app state before writing to disk.
+
+File ownership invariant: the UI settings endpoints own the nested `config`
+object, while the Telegram relay owns the legacy flat runtime fields
+(`chatId`, update cursor, assistant-forwarding cursors, selected project/session).
+Any writer must preserve the other half.
+
+Recovery invariant: status reads tolerate stale project/session references by
+sanitizing and persisting the repaired config. User updates first scrub stale
+persisted references, then validate the submitted patch strictly, then
+re-sanitize immediately before writing so a concurrent project/session delete
+cannot leave references that the next status read would hide.
+
+Coordination invariant: `telegram_settings_file_guard()` coordinates writers in
+this backend process only. The standalone `cargo run -- telegram` relay and
+separate TermAl processes can still race through the filesystem, so read/merge
+paths must treat parse failures and unrelated-file fields carefully.
 */
 
 const TELEGRAM_BOT_TOKEN_MAX_CHARS: usize = 256;

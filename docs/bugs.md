@@ -376,19 +376,6 @@ The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but
 - Stabilize handlers via `useCallback`.
 - Or document explicitly that the panel intentionally avoids memoization. Either is fine; consistency is the architectural goal.
 
-## `src/telegram_settings.rs` module header doesn't enumerate critical invariants
-
-**Severity:** Low - the header explains the file format transition but does not document the two-writer race, validation TOCTOU, divergent lock-error handling, or sanitize-on-read recovery model.
-
-`src/telegram_settings.rs:1-9`. The header describes "the relay loop still reads the legacy flat runtime fields … the file format below keeps those fields flat and adds a `config` object", but does not document: (a) the two-writer race with the standalone CLI relay, (b) the validation TOCTOU window, (c) why the lock-error handling diverges from project convention, or (d) the sanitize-on-read recovery model. This is the entry point for the next reader who needs to extend the module (e.g., the Phase 1 in-process relay lifecycle).
-
-**Current behavior:**
-- Header enumerates the file-format transition but no invariants.
-- Future readers risk regressing the implicit contracts.
-
-**Proposal:**
-- Extend the header to enumerate (a) what owns what in the file, (b) coordination assumptions between writers, (c) lock-failure / IO-failure recovery model.
-
 ## `persist_telegram_bot_state` reads-then-writes the file unconditionally on every state change
 
 **Severity:** Low - the relay polls every `TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS` (5s default) and writes whenever `dirty`. The new logic adds a `fs::read` + `serde_json::from_slice` round-trip on every persist, doubling syscalls.
