@@ -190,15 +190,22 @@ async fn run_server() -> Result<()> {
 /// requests to finish before the persist drain runs.
 async fn shutdown_signal() {
     let ctrl_c = async {
-        let _ = tokio::signal::ctrl_c().await;
+        if let Err(err) = tokio::signal::ctrl_c().await {
+            eprintln!("failed to listen for Ctrl+C shutdown signal: {err}");
+            std::future::pending::<()>().await;
+        }
     };
 
     #[cfg(unix)]
     let terminate = async {
-        if let Ok(mut signal) =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        {
-            signal.recv().await;
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(err) => {
+                eprintln!("failed to listen for SIGTERM shutdown signal: {err}");
+                std::future::pending::<()>().await;
+            }
         }
     };
 

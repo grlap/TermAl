@@ -753,21 +753,6 @@ The new tests validate the sticky `watch` shutdown helper directly, but they do 
 - Add route-level SSE shutdown tests for shutdown-before-connect and shutdown-after-initial-state.
 - Wrap both in timeouts so missed shutdown delivery fails loudly.
 
-## Shutdown signal registration errors can look like real shutdown
-
-**Severity:** Medium - `src/main.rs:147-166`. The new `shutdown_signal()` helper ignores `tokio::signal::ctrl_c().await` errors, and on Unix the SIGTERM branch completes immediately if `tokio::signal::unix::signal(...)` returns `Err`.
-
-Those error paths should be diagnostics or startup failures, not successful shutdown triggers. If signal registration fails, the server can exit immediately after startup with little context.
-
-**Current behavior:**
-- Ctrl+C signal errors are discarded with `let _ = ...`.
-- Unix SIGTERM registration failure makes the `terminate` future complete.
-- The `tokio::select!` cannot distinguish a real shutdown signal from a signal-listener setup failure.
-
-**Proposal:**
-- Make signal setup fallible during startup and return an error if registration fails.
-- Or log the registration/await error and park that branch with `std::future::pending::<()>().await` so it cannot trigger shutdown.
-
 ## Final shutdown persist failure exits without retry
 
 **Severity:** Medium - `src/app_boot.rs:270-275`. The normal persist worker records failures and retries with backoff, but a shutdown tick sets `should_exit_after_tick` and breaks after the first final attempt even if that attempt failed.
