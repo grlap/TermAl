@@ -1148,6 +1148,57 @@ fn telegram_relay_iteration_drains_updates_before_one_digest_sync() {
 }
 
 #[test]
+fn telegram_relay_iteration_caps_oversized_update_batches_and_persists_cursor() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![Ok(telegram_project_digest(Some("session-1")))],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    );
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+    let start_update_id = 100_i64;
+    let updates = (0..TELEGRAM_MAX_UPDATES_PER_ITERATION + 5)
+        .map(|index| TelegramUpdate {
+            update_id: start_update_id + index as i64,
+            callback_query: None,
+            message: Some(TelegramChatMessage {
+                message_id: index as i64,
+                chat: TelegramChat {
+                    id: 999,
+                    _kind: "private".to_owned(),
+                },
+                text: Some("/status".to_owned()),
+            }),
+        })
+        .collect::<Vec<_>>();
+
+    let dirty = drain_telegram_updates_then_sync_digest(
+        &telegram, &termal, &config, &mut state, updates, &None,
+    );
+
+    assert!(dirty);
+    let expected_next_update_id = start_update_id + TELEGRAM_MAX_UPDATES_PER_ITERATION as i64;
+    assert_eq!(state.next_update_id, Some(expected_next_update_id));
+    assert_eq!(
+        termal.digest_project_ids.borrow().as_slice(),
+        ["project-1".to_owned()]
+    );
+    let persisted: TelegramBotFile = serde_json::from_slice(
+        &fs::read(&config.state_path).expect("cursor state should persist per handled update"),
+    )
+    .expect("persisted Telegram state should decode");
+    assert_eq!(
+        persisted.state.next_update_id,
+        Some(expected_next_update_id)
+    );
+}
+
+#[test]
 fn telegram_relay_iteration_skips_post_update_sync_after_prompt_refresh() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramPromptClient::new(

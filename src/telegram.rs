@@ -14,6 +14,7 @@ const TELEGRAM_API_BASE_URL: &str = "https://api.telegram.org";
 const TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS: u64 = 5;
 const TELEGRAM_ERROR_RETRY_DELAY: Duration = Duration::from_secs(2);
 const TELEGRAM_GET_UPDATES_LIMIT: i64 = 25;
+const TELEGRAM_MAX_UPDATES_PER_ITERATION: usize = TELEGRAM_GET_UPDATES_LIMIT as usize;
 const TELEGRAM_RELAY_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const TELEGRAM_USER_ERROR_MAX_CHARS: usize = 240;
 const TELEGRAM_CALLBACK_ERROR_MAX_CHARS: usize = 180;
@@ -130,7 +131,16 @@ fn drain_telegram_updates_then_sync_digest(
 ) -> bool {
     let mut dirty = false;
     let mut final_sync_satisfied = false;
-    for update in updates {
+    let update_count = updates.len();
+    if update_count > TELEGRAM_MAX_UPDATES_PER_ITERATION {
+        eprintln!(
+            "telegram> capped oversized update batch at {TELEGRAM_MAX_UPDATES_PER_ITERATION} of {update_count} updates"
+        );
+    }
+    for update in updates
+        .into_iter()
+        .take(TELEGRAM_MAX_UPDATES_PER_ITERATION)
+    {
         if telegram_relay_shutdown_requested(shutdown) {
             break;
         }
@@ -138,6 +148,7 @@ fn drain_telegram_updates_then_sync_digest(
         if state.next_update_id != Some(next_update_id) {
             state.next_update_id = Some(next_update_id);
             dirty = true;
+            persist_telegram_update_cursor_after_update(&config.state_path, state);
         }
 
         match handle_telegram_update(telegram, termal, config, state, update) {
@@ -783,6 +794,12 @@ fn persist_dirty_telegram_state_after_poll_error(
             log_telegram_error("failed to persist Telegram state after poll error", &err);
             false
         }
+    }
+}
+
+fn persist_telegram_update_cursor_after_update(path: &FsPath, state: &TelegramBotState) {
+    if let Err(err) = persist_telegram_bot_state(path, state) {
+        log_telegram_error("failed to persist Telegram update cursor", &err);
     }
 }
 

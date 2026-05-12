@@ -337,22 +337,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Keep digest-only forwarding as the default for Telegram integrations.
 - Document the third-party content exposure and add any practical redaction/truncation before full forwarding.
 
-## Telegram `getUpdates` batch processing is unbounded and re-runs on poll-iteration panic
-
-**Severity:** Medium - a Telegram update burst (real attack, retry storm, or accidental flood) becomes a multiplicative wave of HTTP calls into the local backend, and a panic mid-batch re-runs the same updates on the next poll.
-
-`src/telegram.rs:44-78` and `src/telegram.rs:304`. The relay accepts the entire `Vec<TelegramUpdate>` Telegram returns and walks each update through `handle_telegram_update`, which can issue multiple outbound HTTP calls per update (digest fetch, send_message, action dispatch, session fetch). State is persisted once at the end of the iteration; a panic mid-batch leaves `next_update_id` un-advanced and Telegram resends the same batch on the next poll, amplifying the effect.
-
-**Current behavior:**
-- `getUpdates` does not pass an explicit `limit`, so Telegram returns up to its server-side default (100).
-- A 100-update batch can fan out to several hundred backend HTTP calls.
-- Mid-batch panic loses all per-update state (including advanced `next_update_id`), and Telegram replays.
-
-**Proposal:**
-- Cap `getUpdates` `limit` (e.g., 25) on the request side.
-- Persist `next_update_id` per update inside the batch loop rather than once at the end.
-- Add a per-iteration backoff after errors so a sustained failure does not tight-loop.
-
 ## CSS bubble `width: fit-content` transition causes horizontal layout reflow at turn end
 
 **Severity:** Medium - the "stable component subtree across stream → settle" goal is partially undermined by a CSS-driven layout jump.
