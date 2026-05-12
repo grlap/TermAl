@@ -539,6 +539,20 @@ fan-in is available through `resume_after_delegations`.
 
 ### MCP Tools
 
+Current direction:
+- Treat the parent session id as the v1 visibility boundary. Do not build a
+  Linux-style namespace or capability-token system for the local bridge until a
+  shared, remote, or cross-parent transport makes that necessary.
+- Keep delegated child sessions durable and manually openable while the parent
+  lives. They are one workflow tree, not disposable subprocesses; the parent
+  deletion path is responsible for cascade cleanup.
+- Prefer backend resume waits for review fan-in. A parent turn that schedules a
+  resume wait must yield instead of shell-polling, raw-HTTP polling, or scraping
+  session logs, otherwise the queued fan-in prompt cannot run.
+- Expose the same TermAl-owned MCP bridge to Codex, Claude, Cursor, and Gemini
+  startup/resume hooks. Agent commands such as `/review-with-delegate` should
+  use only those tools and fail fast when the bridge is absent.
+
 Delegation tools are parent-scoped. The first local implementation injects the
 bridge into TermAl-launched agent runtimes by default, relying on the implicit
 parent id, backend ownership checks, read-only default write policy, and

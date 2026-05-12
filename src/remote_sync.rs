@@ -304,17 +304,25 @@ fn sync_remote_state_inner(
 /// Broad-snapshot callers should always use this; focused
 /// per-session applies from the forced-resync path
 /// (`resync_remote_state_snapshot` → 404 retry) bypass the gate and
-/// call `sync_remote_state_inner` directly. The remote SSE bridge passes
-/// `force = true` only for the state frame immediately following a remote
-/// `lagged` marker, matching the browser-side recovery contract.
+/// call `sync_remote_state_inner` directly. The remote SSE bridge uses
+/// `RemoteSnapshotApplyMode::ForceAfterLaggedEvent` only for the state frame
+/// immediately following a remote `lagged` marker, matching the browser-side
+/// recovery contract.
+#[derive(Clone, Copy)]
+enum RemoteSnapshotApplyMode {
+    GateBySnapshotRevision,
+    ForceAfterLaggedEvent,
+}
+
 fn apply_remote_state_if_newer_locked(
     inner: &mut StateInner,
     remote_id: &str,
     remote_state: &StateResponse,
     focus_remote_session_id: Option<&str>,
-    force: bool,
+    mode: RemoteSnapshotApplyMode,
 ) -> bool {
-    if force
+    let force_after_lagged = matches!(mode, RemoteSnapshotApplyMode::ForceAfterLaggedEvent);
+    if force_after_lagged
         && inner
             .remote_applied_revisions
             .get(remote_id)
@@ -322,7 +330,7 @@ fn apply_remote_state_if_newer_locked(
     {
         return false;
     }
-    if !force
+    if !force_after_lagged
         && inner.should_skip_remote_applied_snapshot_revision(remote_id, remote_state.revision)
     {
         return false;

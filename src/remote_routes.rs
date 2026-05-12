@@ -440,7 +440,7 @@ impl AppState {
             &target.remote.id,
             &remote_state,
             Some(&target.remote_session_id),
-            false,
+            RemoteSnapshotApplyMode::GateBySnapshotRevision,
         ) {
             return Ok(());
         }
@@ -864,7 +864,7 @@ impl AppState {
                     &target.remote.id,
                     remote_state,
                     None,
-                    false,
+                    RemoteSnapshotApplyMode::GateBySnapshotRevision,
                 ) {
                     remote_state_applied = true;
                     note_remote_applied_state_snapshot_revision(
@@ -1153,7 +1153,7 @@ impl AppState {
             &target.remote.id,
             &remote_state,
             None,
-            false,
+            RemoteSnapshotApplyMode::GateBySnapshotRevision,
         ) {
             note_remote_applied_state_snapshot_revision(
                 &mut inner,
@@ -1185,7 +1185,11 @@ impl AppState {
         remote_id: &str,
         remote_state: StateResponse,
     ) -> Result<(), ApiError> {
-        self.apply_remote_state_snapshot_with_force(remote_id, remote_state, false)
+        self.apply_remote_state_snapshot_with_mode(
+            remote_id,
+            remote_state,
+            RemoteSnapshotApplyMode::GateBySnapshotRevision,
+        )
     }
 
     fn apply_remote_lagged_recovery_state_snapshot(
@@ -1193,17 +1197,21 @@ impl AppState {
         remote_id: &str,
         remote_state: StateResponse,
     ) -> Result<(), ApiError> {
-        self.apply_remote_state_snapshot_with_force(remote_id, remote_state, true)
+        self.apply_remote_state_snapshot_with_mode(
+            remote_id,
+            remote_state,
+            RemoteSnapshotApplyMode::ForceAfterLaggedEvent,
+        )
     }
 
-    fn apply_remote_state_snapshot_with_force(
+    fn apply_remote_state_snapshot_with_mode(
         &self,
         remote_id: &str,
         remote_state: StateResponse,
-        force: bool,
+        mode: RemoteSnapshotApplyMode,
     ) -> Result<(), ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        if !apply_remote_state_if_newer_locked(&mut inner, remote_id, &remote_state, None, force) {
+        if !apply_remote_state_if_newer_locked(&mut inner, remote_id, &remote_state, None, mode) {
             return Ok(());
         }
         note_remote_applied_state_snapshot_revision(&mut inner, remote_id, &remote_state);

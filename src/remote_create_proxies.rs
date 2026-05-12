@@ -277,7 +277,7 @@ impl AppState {
                 &binding.remote.id,
                 &remote_response.state,
                 None,
-                false,
+                RemoteSnapshotApplyMode::GateBySnapshotRevision,
             );
             let remote_sessions_by_id = remote_response
                 .state
