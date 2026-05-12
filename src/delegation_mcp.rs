@@ -1166,6 +1166,65 @@ mod delegation_mcp_tests {
     }
 
     #[test]
+    fn parse_mcp_slash_command_prompt_pins_ui_compatible_shape() {
+        let parsed = parse_mcp_slash_command_prompt("/review-local staged -- include tests")
+            .expect("valid slash command should parse");
+        assert_eq!(parsed.command_name, "review-local");
+        assert_eq!(parsed.arguments.as_deref(), Some("staged"));
+        assert_eq!(parsed.note.as_deref(), Some("include tests"));
+
+        let parsed = parse_mcp_slash_command_prompt("/review-local   ")
+            .expect("trailing whitespace should not prevent parsing");
+        assert_eq!(parsed.command_name, "review-local");
+        assert_eq!(parsed.arguments, None);
+        assert_eq!(parsed.note, None);
+
+        for prompt in [
+            " /review-local",
+            "/ review-local",
+            "/",
+            "/review/local",
+            "/review-local\nextra",
+            "/review-local\rextra",
+            "review-local",
+        ] {
+            assert!(
+                parse_mcp_slash_command_prompt(prompt).is_none(),
+                "`{prompt}` should not be treated as an MCP slash command"
+            );
+        }
+    }
+
+    #[test]
+    fn split_mcp_agent_command_tail_pins_note_separator_edges() {
+        let cases = [
+            ("", None, None),
+            ("staged", Some("staged"), None),
+            ("staged -- include tests", Some("staged"), Some("include tests")),
+            ("-- include tests", None, Some("include tests")),
+            ("staged --", Some("staged"), None),
+            ("staged -- -- second", Some("staged"), Some("-- second")),
+            ("staged ---x", Some("staged ---x"), None),
+            ("staged-- include tests", Some("staged-- include tests"), None),
+            ("  staged   --   include tests  ", Some("staged"), Some("include tests")),
+        ];
+
+        for (tail, expected_arguments, expected_note) in cases {
+            let (arguments, note) = split_mcp_agent_command_tail(tail);
+            assert_eq!(
+                arguments.as_deref(),
+                expected_arguments,
+                "arguments mismatch for `{tail}`"
+            );
+            assert_eq!(
+                note.as_deref(),
+                expected_note,
+                "note mismatch for `{tail}`"
+            );
+        }
+    }
+
+    #[test]
     fn delegation_mcp_spawn_session_posts_parent_scoped_request() {
         let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
             assert_eq!(request.method, "POST");

@@ -900,6 +900,11 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
+- [ ] P2: Cover MCP slash-command parser separator and whitespace edges:
+  extend `delegation_mcp_tests::split_mcp_agent_command_tail_pins_note_separator_edges`
+  in `src/delegation_mcp.rs` with bare-`--`, whitespace-surrounded-`--`,
+  tab/Unicode-whitespace tails, and one positive trailing-CR assertion for
+  `parse_mcp_slash_command_prompt` so the current trim-vs-reject contract is pinned.
 - [ ] P2: Cover first-chunk Telegram forward failure:
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
 - [ ] P2: Cover first-settled active-baseline same-message growth policy:
