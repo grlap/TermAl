@@ -1253,6 +1253,107 @@ fn concurrent_shutdown_waits_for_join_owner_before_publishing_stopped() {
     );
 }
 
+#[test]
+fn shutdown_persist_blocking_persists_delta_committed_while_joining_worker() {
+    // Regression for the bug ledger entry "Post-shutdown persistence writes
+    // still leave a post-collection-pre-join window". A delta-only mutation
+    // can land while shutdown is waiting for the worker thread to exit. The
+    // worker may already be past its final collection, so shutdown itself must
+    // perform a final synchronized full-state persist after `join()`.
+    let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
+    let (shutdown_seen_tx, shutdown_seen_rx) = mpsc::channel::<()>();
+    let (release_worker_tx, release_worker_rx) = mpsc::channel::<()>();
+
+    let worker = std::thread::Builder::new()
+        .name("test-joining-persist-worker".to_owned())
+        .spawn(move || {
+            while let Ok(req) = persist_rx.recv() {
+                if matches!(req, PersistRequest::Shutdown) {
+                    let _ = shutdown_seen_tx.send(());
+                    release_worker_rx
+                        .recv()
+                        .expect("test should release the blocked worker");
+                    break;
+                }
+            }
+        })
+        .expect("test persist worker should spawn");
+
+    let (state, _stale_rx) = test_app_state_with_live_persist_channel();
+    let persistence_path = Arc::clone(&state.persistence_path);
+    let state = AppState {
+        persist_tx: persist_tx.clone(),
+        persist_thread_handle: Arc::new(Mutex::new(Some(worker))),
+        ..state
+    };
+
+    let session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let project = inner.create_project(
+            Some("Join Persist Project".to_owned()),
+            "/tmp".to_owned(),
+            default_local_remote_id(),
+        );
+        inner
+            .create_session(
+                Agent::Claude,
+                Some("Join Persist Session".to_owned()),
+                "/tmp".to_owned(),
+                Some(project.id),
+                None,
+            )
+            .session
+            .id
+    };
+
+    let shutdown_state = state.clone();
+    let shutdown_joiner = std::thread::spawn(move || {
+        shutdown_state.shutdown_persist_blocking();
+    });
+
+    shutdown_seen_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("shutdown should reach the worker before the late mutation");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let session_index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        inner
+            .session_mut_by_index(session_index)
+            .expect("test session should be mutable")
+            .session
+            .preview = "delta while shutdown is joining".to_owned();
+        state
+            .commit_delta_locked(&mut inner)
+            .expect("late delta commit should succeed");
+    }
+
+    release_worker_tx
+        .send(())
+        .expect("test should release worker join");
+    shutdown_joiner
+        .join()
+        .expect("shutdown caller should not panic");
+
+    let persisted = load_state(&persistence_path)
+        .expect("shutdown should persist final state")
+        .expect("persisted state should exist");
+    let persisted_session = persisted
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("late-mutated session should be persisted");
+    assert_eq!(
+        persisted_session.session.preview, "delta while shutdown is joining",
+        "shutdown's final synchronized persist must include delta-only mutations that land while \
+         the worker is joining",
+    );
+
+    let _ = fs::remove_file(&*persistence_path);
+}
+
 #[tokio::test]
 async fn shutdown_signal_wakes_a_subscriber_registered_before_the_signal() {
     // Standard ordering: subscribe first, trigger second. The subscriber's

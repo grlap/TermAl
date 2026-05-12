@@ -171,8 +171,12 @@ impl AppState {
     /// worker's loop drains every queued `Delta` (including any
     /// commits queued between the shutdown signal and the worker's
     /// next iteration) and runs one final `collect_persist_delta` /
-    /// `persist_delta_via_cache` pass before exiting. Errors from the
-    /// final write are logged via the worker's existing eprintln path.
+    /// `persist_delta_via_cache` pass before exiting. After `join()`
+    /// returns this method performs one final synchronous full-state
+    /// persist while holding `inner`, then flips `persist_worker_alive`
+    /// before releasing `inner`. That closes the narrow window where a
+    /// delta-only mutation could land after the worker's final
+    /// collection but before shutdown returned.
     ///
     /// `commit_delta_locked` calls AFTER this method returns are safe:
     /// the alive flag is flipped to `false` only after `handle.join()`
@@ -218,13 +222,26 @@ impl AppState {
                 "[termal] persist worker join failed during graceful shutdown: {err:?}"
             );
         }
-        // Worker has now exited (join returned). Any subsequent
-        // `commit_delta_locked` call sees `alive == false` and takes the
-        // synchronous fallback path; the Release-store pairs with the
-        // Acquire-load in `commit_delta_locked` so the ordering is
-        // guaranteed across threads.
-        self.persist_worker_alive
-            .store(false, std::sync::atomic::Ordering::Release);
+        // Worker has now exited (join returned). Persist one final
+        // full-state snapshot while holding `inner`, then publish
+        // `alive == false` before releasing that lock. This makes
+        // shutdown a durability fence: mutations that landed while the
+        // worker was joining are included in this write, and mutations
+        // after this point see `alive == false` and take the synchronous
+        // fallback in `commit_delta_locked`.
+        let final_persist_result = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let persisted = PersistedState::from_inner(&inner);
+            let result = persist_state_from_persisted(&self.persistence_path, &persisted);
+            self.persist_worker_alive
+                .store(false, std::sync::atomic::Ordering::Release);
+            result
+        };
+        if let Err(err) = final_persist_result {
+            eprintln!(
+                "[termal] final synchronous persist failed during graceful shutdown: {err:#}"
+            );
+        }
     }
 
     // Delta-producing changes advance the revision without publishing a full snapshot; the delta event
