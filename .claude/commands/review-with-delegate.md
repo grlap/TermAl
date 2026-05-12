@@ -17,7 +17,6 @@ Required MCP tools:
 - `termal_spawn_session`
 - `termal_get_session_status`
 - `termal_get_session_result`
-- `termal_wait_delegations`
 - `termal_resume_after_delegations`
 
 ## Step 1: Confirm review target
@@ -52,12 +51,9 @@ If either spawn fails, report the failure clearly and stop unless one reviewer w
 
 Use TermAl MCP wait/fan-in tools to wait for both delegated reviewers to complete.
 
-Prefer one of these paths, in order:
+Call `termal_resume_after_delegations` with both delegation ids and `mode: "all"`, report the wait id and reviewer child session ids, then stop this turn immediately. Do not continue to Step 4 until TermAl resumes the parent with the fan-in prompt.
 
-1. If `termal_wait_delegations` is available and the expected review is short, call it with both delegation ids and `mode: "all"`; if it returns terminal results into this same turn, continue to Step 4.
-2. For normal long-running review, call `termal_resume_after_delegations` with both delegation ids and `mode: "all"`, report the wait id and reviewer child session ids, then stop this turn immediately. Do not continue to Step 4 until TermAl resumes the parent with the fan-in prompt.
-
-Never combine a backend resume wait with a manual polling loop in the same parent turn. A backend resume wait queues its result as the next parent prompt; keeping the parent turn active with PowerShell, shell, raw HTTP polling, or session-log polling prevents that queued fan-in prompt from running and can make the review appear stuck.
+Never use `termal_wait_delegations`, PowerShell, shell, raw HTTP polling, or session-log polling for `/review-with-delegate` review fan-in. `termal_wait_delegations` is reserved for short smoke tests and diagnostics outside this command. A backend resume wait queues its result as the next parent prompt; keeping the parent turn active prevents that queued fan-in prompt from running and can make the review appear stuck.
 
 ## Step 4: Consolidate results
 
