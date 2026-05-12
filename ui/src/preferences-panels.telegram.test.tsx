@@ -244,6 +244,37 @@ describe("TelegramPreferencesPanel", () => {
     expect(await screen.findByText("Connected to @termal_bot.")).toBeInTheDocument();
   });
 
+  it("ignores stale initial Telegram status fetches after React StrictMode remount checks", async () => {
+    const staleStatus = createDeferred<TelegramStatusResponse>();
+    fetchTelegramStatusMock
+      .mockReturnValueOnce(staleStatus.promise)
+      .mockResolvedValueOnce({
+        ...emptyTelegramStatus,
+        configured: true,
+        botTokenMasked: "****fresh",
+      });
+
+    render(
+      <StrictMode>
+        <TelegramPreferencesPanel projects={projects} sessions={sessions} />
+      </StrictMode>,
+    );
+
+    expect(await screen.findByText("Saved as ****fresh.")).toBeInTheDocument();
+
+    await act(async () => {
+      staleStatus.resolve({
+        ...emptyTelegramStatus,
+        configured: true,
+        botTokenMasked: "****stale",
+      });
+      await staleStatus.promise;
+    });
+
+    expect(screen.getByText("Saved as ****fresh.")).toBeInTheDocument();
+    expect(screen.queryByText("Saved as ****stale.")).not.toBeInTheDocument();
+  });
+
   it("removes a saved Telegram token explicitly", async () => {
     fetchTelegramStatusMock.mockResolvedValue({
       ...emptyTelegramStatus,

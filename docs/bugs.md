@@ -235,20 +235,6 @@ The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but
 - Throttle via rAF.
 - OR only capture when prepend is imminent.
 
-## Two cancellation patterns coexist in `TelegramPreferencesPanel`: `cancelled` flag for initial-fetch, `isMountedRef` for handlers
-
-**Severity:** Low - same component has two patterns for the same concern ("drop late updates after unmount"). Future maintainers may copy the wrong one.
-
-`ui/src/preferences-panels.tsx:1229-1263`. The fetch-status `useEffect` uses its own `cancelled` closure flag while the three async handlers use `isMountedRef`.
-
-**Current behavior:**
-- Initial-fetch effect uses `cancelled` flag.
-- `handleSave`/`handleTestConnection`/`handleRemoveBotToken` use `isMountedRef`.
-- Two patterns side-by-side.
-
-**Proposal:**
-- Consolidate on one pattern. `isMountedRef` reads cleaner for fire-and-forget click handlers; `cancelled` flags read cleaner for effect-scoped fetches; both are fine, but pick one per file.
-
 ## `prepare_assistant_forwarding_for_telegram_prompt` race window between cursor capture and POST send
 
 **Severity:** Medium - the new prepare/apply split correctly avoids mutate-before-success, but widens the cursor-capture-to-apply window across a network round-trip. If the agent emits new assistant text between T0 (capture) and T1 (POST returns), the T0 baseline marks the freshly-emitted message as already-forwarded.

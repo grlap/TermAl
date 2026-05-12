@@ -1383,6 +1383,7 @@ export function TelegramPreferencesPanel({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const isMountedRef = useRef(true);
+  const statusFetchVersionRef = useRef(0);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -1392,11 +1393,15 @@ export function TelegramPreferencesPanel({
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    const fetchVersion = statusFetchVersionRef.current + 1;
+    statusFetchVersionRef.current = fetchVersion;
+    const isCurrentStatusFetch = () =>
+      isMountedRef.current && statusFetchVersionRef.current === fetchVersion;
+
     setIsLoading(true);
     fetchTelegramStatus()
       .then((nextStatus) => {
-        if (cancelled) {
+        if (!isCurrentStatusFetch()) {
           return;
         }
         setStatus(nextStatus);
@@ -1404,18 +1409,20 @@ export function TelegramPreferencesPanel({
         setError(null);
       })
       .catch((loadError: unknown) => {
-        if (!cancelled) {
+        if (isCurrentStatusFetch()) {
           setError(loadError instanceof Error ? loadError.message : "Failed to load Telegram settings.");
         }
       })
       .finally(() => {
-        if (!cancelled) {
+        if (isCurrentStatusFetch()) {
           setIsLoading(false);
         }
       });
 
     return () => {
-      cancelled = true;
+      if (statusFetchVersionRef.current === fetchVersion) {
+        statusFetchVersionRef.current += 1;
+      }
     };
   }, []);
 
