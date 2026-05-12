@@ -269,9 +269,11 @@ export function collectCandidateSourcePaths(session: Session) {
   return Array.from(new Set(paths));
 }
 
-export function findLastUserPrompt(session: Session) {
-  for (let index = session.messages.length - 1; index >= 0; index -= 1) {
-    const message = session.messages[index];
+export type LiveWaitingIndicatorPromptSession = Pick<Session, "messages" | "status">;
+
+export function findLastUserPromptInMessages(messages: readonly Message[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
     if (message.type === "text" && message.author === "you") {
       const prompt = message.text.trim();
       if (prompt) {
@@ -281,6 +283,20 @@ export function findLastUserPrompt(session: Session) {
   }
 
   return null;
+}
+
+export function findLastUserPrompt(session: Session) {
+  return findLastUserPromptInMessages(session.messages);
+}
+
+export function resolveLiveWaitingIndicatorPrompt(
+  session: LiveWaitingIndicatorPromptSession | null | undefined,
+) {
+  if (!session || session.status !== "active") {
+    return null;
+  }
+
+  return findLastUserPromptInMessages(session.messages);
 }
 
 export function setSessionFlag(current: SessionFlagMap, sessionId: string, value: boolean): SessionFlagMap {

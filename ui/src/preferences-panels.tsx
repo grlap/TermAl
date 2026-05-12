@@ -2074,6 +2074,11 @@ export function ThemedCombobox({
   const selectedIndex = options.findIndex((option) => option.value === value);
   const safeSelectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
   const selectedOption = options[safeSelectedIndex] ?? options[0];
+  const activeIndexRef = useRef(activeIndex);
+
+  useEffect(() => {
+    activeIndexRef.current = activeIndex;
+  }, [activeIndex]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -2081,6 +2086,7 @@ export function ThemedCombobox({
     }
 
     setActiveIndex(safeSelectedIndex);
+    activeIndexRef.current = safeSelectedIndex;
   }, [isOpen, safeSelectedIndex]);
 
   useLayoutEffect(() => {
@@ -2180,31 +2186,42 @@ export function ThemedCombobox({
 
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setActiveIndex((current) => (current + 1) % options.length);
+        setActiveIndex((current) => {
+          const next = (current + 1) % options.length;
+          activeIndexRef.current = next;
+          return next;
+        });
         return;
       }
 
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setActiveIndex((current) => (current - 1 + options.length) % options.length);
+        setActiveIndex((current) => {
+          const next = (current - 1 + options.length) % options.length;
+          activeIndexRef.current = next;
+          return next;
+        });
         return;
       }
 
       if (event.key === "Home") {
         event.preventDefault();
+        activeIndexRef.current = 0;
         setActiveIndex(0);
         return;
       }
 
       if (event.key === "End") {
         event.preventDefault();
-        setActiveIndex(options.length - 1);
+        const next = options.length - 1;
+        activeIndexRef.current = next;
+        setActiveIndex(next);
         return;
       }
 
       if (event.key === " " || event.key === "Enter") {
         event.preventDefault();
-        const nextOption = options[activeIndex];
+        const nextOption = options[activeIndexRef.current];
         if (!nextOption) {
           return;
         }
@@ -2224,7 +2241,7 @@ export function ThemedCombobox({
       document.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [activeIndex, isOpen, onChange, options]);
+  }, [isOpen, onChange, options]);
 
   function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
     if (disabled) {

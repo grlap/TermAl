@@ -217,20 +217,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 - Memoize per-segment handlers via a single delegated handler that reads the segment index from `data-conversation-overview-index`.
 - Cache aria-labels alongside the segments.
 
-## `ThemedCombobox` `useEffect` deps include `activeIndex`, tearing down listeners per keystroke
-
-**Severity:** Low - the outside-pointer/keyboard handler effect re-attaches the global `pointerdown`/`keydown` listeners every time `activeIndex` changes (every ArrowUp/ArrowDown).
-
-`ui/src/preferences-panels.tsx:1782-1859`. Functionally correct, but wasteful. If the same keystroke that triggered the change also fires a synthetic `keydown`, ordering between "old listener cleanup" and "new listener registration" is invisible to React.
-
-**Current behavior:**
-- Effect deps `[activeIndex, isOpen, onChange, options]` rebuild listeners per keystroke.
-- Each open menu sees attach/detach churn.
-
-**Proposal:**
-- Move `activeIndex` into a ref synchronized with the state update; drop it from deps.
-- Or split the effect into "attach listeners once when open" + "read activeIndex from a ref".
-
 ## `AgentSessionPanel.tsx` exceeds 2000-line architecture rubric threshold
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1475` and `ui/src/panels/AgentSessionPanel.test.tsx`. The panel remains over the documented TSX file-size budget, and the composer resize/transition behavior is now a local state machine inside `SessionComposer`.
@@ -783,36 +769,6 @@ A live Chrome profile against the current dev tab showed no runtime exceptions, 
 
 **Proposal:**
 - Track a "just-resized-synchronously" flag set in the layout effect and checked at the top of `scheduleComposerResize`, or gate the draft effect with a prev-draft ref so the "initial draft equals committed" case is a no-op.
-
-## Duplicated `Session` projection types in `session-store.ts` and `session-slash-palette.ts`
-
-**Severity:** Low - `ComposerSessionSnapshot` (`ui/src/session-store.ts:36-83`) and `SlashPaletteSession` (`ui/src/panels/session-slash-palette.ts:51-65`) each re-pick overlapping-but-non-identical field sets from `Session`. Three `Session`-like shapes now exist (`Session`, `ComposerSessionSnapshot`, `SlashPaletteSession`) with no compile-time check that additions to `Session` reach both projections — a new agent setting added to `Session` could silently default to `undefined` in consumers that read through either projection.
-
-**Current behavior:**
-- Both projection types declare field lists by hand.
-- No `Pick<Session, ...>` derivation; nothing fails to compile when `Session` grows a new field.
-
-**Proposal:**
-- Derive both types via `Pick<Session, ...>`, or express `SlashPaletteSession` as `Omit<ComposerSessionSnapshot, ...>` where their field sets differ.
-- Colocate the derivations in `session-store.ts` so the projection contract is visible in one place.
-
-## `resolvedWaitingIndicatorPrompt` duplicates `findLastUserPrompt` derivation across `SessionBody` and `SessionPaneView`
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:399-404` computes `resolvedWaitingIndicatorPrompt` by calling `findLastUserPrompt(activeSession)` inside `SessionBody` whenever the live turn indicator is showing, overriding the `waitingIndicatorPrompt` prop that `ui/src/SessionPaneView.tsx:795-805` already computed via the same helper and `useMemo`. The override was added to pick up store-subscriber updates between parent renders (correct intent), but it leaves two parallel code paths that must be kept in sync.
-
-Two smaller concerns ride along:
-- The override's condition includes an `"approval"` status arm (`status === "active" || status === "approval"`) that is presently unreachable: `SessionPaneView` only sets `showWaitingIndicator=true` when `status === "active"` or (`!isSessionBusy && isSending`), and `isSessionBusy` is true for `"approval"`, so `showWaitingIndicator && status === "approval"` never holds. Harmless defensive check but misleading for readers inferring the truth table.
-- The resolution is not wrapped in `useMemo`, so it re-runs on every `SessionBody` re-render — once per streaming chunk. `findLastUserPrompt` scans from the tail, so it usually stops early, but sessions dominated by trailing tool/assistant output could scan deep.
-
-**Current behavior:**
-- `SessionBody` (`AgentSessionPanel.tsx:399-404`) and `SessionPaneView` (`SessionPaneView.tsx:795-805`) both derive the waiting-indicator prompt by calling `findLastUserPrompt(activeSession)` on the same store record.
-- The override runs on every `SessionBody` render, uncached.
-- The `status === "approval"` arm of the override's condition is unreachable under current upstream gating.
-
-**Proposal:**
-- Collapse to one computation at the store-subscriber boundary. Either `SessionBody` becomes the sole resolver (drop the `useMemo` and prop passthrough in `SessionPaneView`), or add a one-line cross-reference comment on both sites so future readers know the two are paired.
-- Narrow the override's condition to `status === "active"` to match the upstream truth table.
-- Wrap the override in `useMemo(() => findLastUserPrompt(activeSession), [activeSession.messages])` to avoid re-scanning on every streaming chunk.
 
 ## Conversation cards overlap for one frame during scroll through long messages
 

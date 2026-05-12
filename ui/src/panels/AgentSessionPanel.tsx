@@ -72,7 +72,7 @@ import {
   type SearchHighlightTone,
 } from "../search-highlight";
 import { resolvePaneScrollCommand } from "../pane-keyboard";
-import { findLastUserPrompt } from "../app-utils";
+import { resolveLiveWaitingIndicatorPrompt } from "../app-utils";
 import {
   SESSION_TAIL_RENDER_MIN_MESSAGES,
   SESSION_TAIL_WINDOW_MESSAGE_COUNT,
@@ -1083,12 +1083,23 @@ const SessionBody = memo(function SessionBody({
   ) => JSX.Element | null;
 }): JSX.Element | null {
   const activeSession = useSessionRecordSnapshot(activeSessionId);
-  const resolvedWaitingIndicatorPrompt =
-    showWaitingIndicator &&
-    activeSession &&
-    (activeSession.status === "active" || activeSession.status === "approval")
-      ? findLastUserPrompt(activeSession)
-      : waitingIndicatorPrompt;
+  const activeSessionMessages = activeSession?.messages;
+  const activeSessionStatus = activeSession?.status;
+  const shouldResolveLiveWaitingPrompt =
+    showWaitingIndicator && activeSessionStatus === "active";
+  const liveWaitingIndicatorPrompt = useMemo(
+    () =>
+      shouldResolveLiveWaitingPrompt && activeSessionMessages
+        ? resolveLiveWaitingIndicatorPrompt({
+            messages: activeSessionMessages,
+            status: "active",
+          })
+        : null,
+    [activeSessionMessages, activeSessionStatus, shouldResolveLiveWaitingPrompt],
+  );
+  const resolvedWaitingIndicatorPrompt = shouldResolveLiveWaitingPrompt
+    ? liveWaitingIndicatorPrompt
+    : waitingIndicatorPrompt;
 
   if (!activeSession) {
     return (

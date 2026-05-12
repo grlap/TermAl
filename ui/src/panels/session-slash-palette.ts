@@ -41,6 +41,7 @@
 // directly from here.
 
 import { matchingSessionModelOption } from "../session-model-options";
+import type { SessionSummarySnapshot } from "../session-store";
 import type {
   AgentCommand,
   ApprovalPolicy,
@@ -48,25 +49,25 @@ import type {
   CodexReasoningEffort,
   SandboxMode,
   Session,
-  SessionModelOption,
   SessionSettingsField,
 } from "../types";
 
-export type SlashPaletteSession = Readonly<{
-  approvalPolicy?: Session["approvalPolicy"];
-  agent: Session["agent"];
-  agentCommandsRevision?: Session["agentCommandsRevision"];
-  claudeApprovalMode?: Session["claudeApprovalMode"];
-  claudeEffort?: Session["claudeEffort"];
-  cursorMode?: Session["cursorMode"];
-  geminiApprovalMode?: Session["geminiApprovalMode"];
-  id: Session["id"];
-  model: Session["model"];
-  modelOptions?: readonly SessionModelOption[];
-  reasoningEffort?: Session["reasoningEffort"];
-  sandboxMode?: Session["sandboxMode"];
-  workdir: Session["workdir"];
-}>;
+export type SlashPaletteSession = Pick<
+  SessionSummarySnapshot,
+  | "approvalPolicy"
+  | "agent"
+  | "agentCommandsRevision"
+  | "claudeApprovalMode"
+  | "claudeEffort"
+  | "cursorMode"
+  | "geminiApprovalMode"
+  | "id"
+  | "model"
+  | "modelOptions"
+  | "reasoningEffort"
+  | "sandboxMode"
+  | "workdir"
+>;
 
 export const STATIC_MODEL_OPTIONS: Readonly<Record<Session["agent"], readonly SessionModelChoice[]>> = {
   Claude: [],

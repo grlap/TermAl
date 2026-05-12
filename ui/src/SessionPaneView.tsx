@@ -152,7 +152,6 @@ import {
   collectClipboardImageFiles,
   createDraftAttachmentsFromFiles,
   dropLabelForPlacement,
-  findLastUserPrompt,
   formatByteSize,
   getErrorMessage,
   isMonacoEditorEventTarget,
@@ -162,6 +161,7 @@ import {
   primaryModifierLabel,
   pruneSessionFlags,
   resolvePaneDropPlacementFromPointer,
+  resolveLiveWaitingIndicatorPrompt,
   type DraftImageAttachment,
 } from "./app-utils";
 import {
@@ -860,6 +860,8 @@ export function SessionPaneView({
     (activeSession?.status === "active" || (!isSessionBusy && isSending));
   const showWaitingIndicator =
     showLiveTurnWaitingIndicator || showDelegationWaitIndicator;
+  const activeSessionMessages = activeSession?.messages;
+  const activeSessionStatus = activeSession?.status;
   const canFindInSession =
     isSessionTabActive && pane.viewMode === "session" && Boolean(activeSession);
   const hasSessionFindQuery =
@@ -906,10 +908,15 @@ export function SessionPaneView({
       return null;
     }
 
-    return findLastUserPrompt(activeSession);
+    return resolveLiveWaitingIndicatorPrompt(
+      activeSessionMessages && activeSessionStatus
+        ? { messages: activeSessionMessages, status: activeSessionStatus }
+        : null,
+    );
   }, [
     activeDelegationWaits,
-    activeSession,
+    activeSessionMessages,
+    activeSessionStatus,
     isSending,
     isSessionBusy,
     showDelegationWaitIndicator,
