@@ -2265,6 +2265,91 @@ fn delegation_parent_card_update_ignores_tool_source_id_collision() {
 }
 
 #[test]
+fn delegation_parent_card_update_ignores_recorder_tool_source_id_collision() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Exercise recorder-sourced parent card matching.".to_owned(),
+                title: Some("Recorder Source Collision".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+
+    state
+        .upsert_parallel_agents_message(
+            &parent_session_id,
+            "claude-task-group-source-collision",
+            vec![ParallelAgentProgress {
+                detail: Some("Recorder tool row must not be touched".to_owned()),
+                id: created.delegation.id.clone(),
+                source: ParallelAgentSource::Tool,
+                status: ParallelAgentStatus::Running,
+                title: "Recorder tool collision".to_owned(),
+            }],
+        )
+        .expect("recorder path should create a tool-sourced parallel-agents row");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let delegation_index = inner
+            .find_delegation_index(&created.delegation.id)
+            .expect("delegation should exist");
+        mark_delegation_failed_locked(&mut inner, delegation_index, "delegation failed")
+            .expect("running delegation should fail");
+
+        let parent = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == parent_session_id)
+            .expect("parent session should exist");
+        let agents: Vec<&ParallelAgentProgress> = parent
+            .session
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::ParallelAgents { agents, .. } => Some(agents),
+                _ => None,
+            })
+            .flat_map(|agents| agents.iter())
+            .filter(|agent| agent.id == created.delegation.id)
+            .collect();
+        assert_eq!(
+            agents.len(),
+            2,
+            "recorder tool row and delegation row should coexist for the same id"
+        );
+        let tool_agent = agents
+            .iter()
+            .find(|agent| agent.source == ParallelAgentSource::Tool)
+            .expect("tool-source collision row should remain");
+        assert_eq!(tool_agent.status, ParallelAgentStatus::Running);
+        assert_eq!(
+            tool_agent.detail.as_deref(),
+            Some("Recorder tool row must not be touched")
+        );
+        let delegation_agent = agents
+            .iter()
+            .find(|agent| agent.source == ParallelAgentSource::Delegation)
+            .expect("delegation-source row should remain");
+        assert_eq!(delegation_agent.status, ParallelAgentStatus::Error);
+        assert_eq!(
+            delegation_agent.detail.as_deref(),
+            Some("delegation failed")
+        );
+    }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn delegation_records_persist_and_reload_with_child_link() {
     let (project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let delegation_id;

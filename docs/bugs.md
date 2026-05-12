@@ -177,20 +177,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 - Assert `console.error` was not called with "act"/"unmounted" warnings during the test.
 - Or stub `setIsDelegationSpawning` via spy and verify it isn't invoked post-unmount.
 
-## `delegation_parent_card_update_ignores_tool_source_id_collision` only manually constructs the collision
-
-**Severity:** Low - the new test at `src/tests/delegations.rs:655-746` constructs the collision by manually inserting a tool-source row with the same id as the delegation. The production paths that could create such a collision (Claude task path emitting a tool-source row with a delegation-id-overlapping uuid) are not exercised.
-
-A regression in delegation-id generation (e.g., switches from uuid to deterministic source) could create real collisions and this test wouldn't catch it.
-
-**Current behavior:**
-- Test manually inserts a same-id collision.
-- Production cross-path collision not exercised.
-
-**Proposal:**
-- Add a sibling test that drives both the Claude task path and the delegation creation path with overlapping ids.
-- Or document the assumption that uuid id spaces don't collide deterministically.
-
 ## `markUserScroll` anchor speculation captures approximate touch offsets
 
 **Severity:** Medium - speculative offset adjustment `viewportOffsetPx - inputScrollDeltaY` applied unconditionally on every input event. For touch events, `touchDeltaY` is the FINGER delta (not the scroll delta). When user touches a non-scrollable region, swipes within an iframe, or hits a scroll boundary, the anchor's `viewportOffsetPx` ends up off by the would-be delta.
@@ -1564,5 +1550,3 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   add an injectable or testable relay runtime so startup from saved settings, implicit first subscribed-project fallback, invalid/missing config stop, config-save start/stop/restart, deleted-project reconciliation, runtime status `running: true` + `inProcess`, and graceful-shutdown stop are covered despite the production path's `#[cfg(not(test))]` guards.
 - [ ] P2: Cover Telegram relay stop/restart quiescence:
   simulate disable or config retarget while an old relay is in flight and assert stale-generation polling/action handling cannot continue after status reports the replacement or stopped state.
-- [ ] P2: Cover production-path tool/delegation id collision:
-  add a Rust test that drives both the Claude task path and the delegation creation path with overlapping ids (or document the assumption that uuid id spaces don't collide deterministically). The current test manually inserts the collision.
