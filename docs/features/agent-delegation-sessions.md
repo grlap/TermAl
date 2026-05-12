@@ -556,6 +556,15 @@ no tool that can enumerate unrelated sessions or delegations. This is the
 minimum boundary needed for local delegated review automation without adding a
 capability system prematurely.
 
+Visibility is scoped at the tool boundary, not at the storage layer. The local
+bridge is not expected to hide child sessions from TermAl itself, nor to make
+children reusable by unrelated parent sessions. A delegated child may remain
+openable from the parent UI for follow-up prompts while the parent lives. When
+the parent session is deleted, TermAl owns cascade cleanup of its delegation
+records and child sessions. That keeps review sessions useful during the parent
+workflow while making long-term accumulation a parent-lifecycle concern instead
+of a per-review cleanup requirement.
+
 Do not implement a stronger namespace abstraction until there is a concrete
 reason to do so. For the local per-process bridge, `parentSessionId` plus
 backend ownership checks is the boundary. If a future transport is shared across
@@ -653,6 +662,14 @@ Capability tokens are not required for the first local bridge as long as TermAl
 spawns it per agent process, passes an implicit parent session id, and does not
 expose it remotely. Treat capability tokens as remote/shared-transport work, not
 as a prerequisite for local delegated review automation.
+
+Non-goals for the local v1 bridge:
+- hiding delegated child sessions from TermAl's own session storage
+- making a delegated child reusable from another parent session
+- adding project-wide delegation discovery tools
+- adding capability-token issuance before there is a shared or remote transport
+- treating read-only reviewer policy as a process sandbox when the selected
+  agent runtime can only enforce it by instruction
 
 Agent integration hooks:
 - Codex sessions: pass a `config.mcp_servers.termal-delegation` descriptor in
@@ -1288,6 +1305,12 @@ Agent MCP bridge:
   validation errors
 - no MCP tool accepts an arbitrary `parentSessionId`; the bridge process is
   launched with exactly one implicit parent
+- child sessions remain normal TermAl sessions in storage, but parent-scoped MCP
+  tools cannot enumerate, wait for, cancel, or fetch results for delegations
+  outside that parent
+- deleting a parent session cascades delegation cleanup, so routine reviewer
+  accumulation is bounded by the parent lifecycle rather than by immediate
+  child-session deletion after every review
 - ACP/Codex, Cursor, and Claude startup paths can opt into the same bridge
   descriptor
 - `/review-with-delegate` fails fast when the required TermAl MCP tools are
