@@ -18,6 +18,7 @@ Browser UI
 
 Optional sidecar:
   telegram mode -> project digest/actions -> same local TermAl server
+  TermAl MCP bridge -> parent-scoped delegation tools -> same local TermAl server
 ```
 
 **Frontend:** React 18 + TypeScript, served on `:4173` in dev with a Vite proxy to the backend.
@@ -41,6 +42,13 @@ project/workdir scope from any session, not just from the child session, so
 parent/sibling `sessionId` routing cannot bypass the read-only policy.
 `isolatedWorktree` requests may omit `worktreePath`; the backend generates a
 TermAl-owned path before persisting the delegation record.
+
+**Delegation MCP bridge:** Planned agent-facing delegation access is a
+TermAl-owned local MCP bridge spawned per parent agent session. The bridge is
+configured with an implicit `parentSessionId` and wraps the existing delegation
+HTTP/API routes; it does not expose broad session/delegation listing in the
+first slice. ACP/Codex, Cursor, and Claude startup paths should opt into the
+same bridge descriptor when project/workspace settings enable delegated tools.
 
 ---
 
@@ -208,6 +216,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | DELETE | `/api/sessions/{id}/markers/{marker_id}` | Delete one conversation marker and publish `ConversationMarkerDeleted`. |
 | POST | `/api/sessions/{id}/messages` | Send message |
 | POST | `/api/sessions/{id}/delegations` | Create a Phase 1 local child delegation session with `readOnly` or `isolatedWorktree` write policy. Returns `201` with `DelegationResponse`; unsupported worker/`sharedWorktree`/remote-backed variants return `501`, active-limit conflicts return `409`, handler-level prompt/scope validation returns `400`, and JSON schema/deserialization failures return `422`. |
+| POST | `/api/sessions/{id}/delegation-waits` | Create a parent-scoped backend resume wait for one or more delegations. Returns `201` with `DelegationWaitResponse`; terminal targets may consume the wait immediately and queue/resume the parent in the same response cycle. |
 | POST | `/api/sessions/{id}/queued-prompts/{prompt_id}/cancel` | Cancel queued prompt |
 | POST | `/api/sessions/{id}/stop` | Stop active turn |
 | POST | `/api/sessions/{id}/kill` | Kill and remove session |

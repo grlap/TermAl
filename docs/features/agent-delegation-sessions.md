@@ -528,16 +528,46 @@ fan-in is available through `resume_after_delegations`.
 ### MCP Tools
 
 Delegation tools are opt-in. TermAl should not expose agent-facing spawn/wait
-tools until the user enables them for the current project or workspace. If
-exposed through TermAl MCP, keep tool names explicit:
+tools until the user enables them for the current project or workspace.
+
+The first implementation should be a TermAl-owned local MCP bridge spawned for
+one parent agent session. The bridge is configured with the TermAl base URL and
+the current `parentSessionId`; tool calls do not accept an arbitrary parent id.
+This keeps the first security boundary simple: the bridge can only act under the
+parent session that TermAl used to launch it, and the backend still validates
+that every requested delegation belongs to that parent.
+
+Do not add a broad "list all sessions" or "list all delegations" tool in the
+first MCP slice. The bridge may return ids it created, and callers may pass
+those ids back to status/result/cancel/wait tools. Broader visibility can be
+added later behind an explicit human-granted scope if it proves useful.
+
+Keep tool names explicit:
 
 ```text
 termal_spawn_session
 termal_get_session_status
 termal_get_session_result
 termal_cancel_session
+termal_wait_delegations
 termal_resume_after_delegations
 ```
+
+The MCP tools map to the existing command/API semantics:
+
+```text
+termal_spawn_session(request) -> SpawnDelegationCommandResult
+termal_get_session_status({ delegationId }) -> DelegationStatusCommandResult
+termal_get_session_result({ delegationId }) -> DelegationResultPacket
+termal_cancel_session({ delegationId }) -> DelegationStatusCommandResult
+termal_wait_delegations({ delegationIds, pollIntervalMs?, timeoutMs? }) -> WaitDelegationsResult
+termal_resume_after_delegations({ delegationIds, mode?, title? }) -> DelegationWaitResponse
+```
+
+`termal_wait_delegations` is a bounded synchronous wait for short waits and
+smoke tests. `termal_resume_after_delegations` schedules the durable backend
+wait and should be preferred for long-running delegated review flows because it
+lets the parent yield and be resumed by TermAl when the wait is terminal.
 
 Tool results should include enough information for a parent agent to continue
 without opening the child transcript:
@@ -551,8 +581,9 @@ without opening the child transcript:
 - links or identifiers for diff/review artifacts
 
 Safety limits for agent-facing tools:
-- delegation ids are parent-scoped; a parent can only inspect, wait for, or
-  cancel delegations it created unless the human grants broader scope
+- delegation ids are parent-scoped; the first MCP bridge is launched with one
+  implicit parent session and can only inspect, wait for, or cancel delegations
+  under that parent
 - default spawn permission is read-only
 - per-parent concurrency and nesting-depth limits prevent unbounded process
   spawning
@@ -572,6 +603,33 @@ Safety limits for agent-facing tools:
 - every spawn, cancel, timeout, and result-read emits an auditable event
 - child sessions cannot commit or push through TermAl-mediated commands unless
   the human explicitly approves that operation
+
+Capability tokens are not required for the first local bridge as long as TermAl
+spawns it per agent process and does not expose it remotely. Add an ephemeral
+capability token before exposing the bridge over a shared transport, remote
+transport, or reusable long-lived process.
+
+Agent integration hooks:
+- Codex/ACP sessions: populate `mcpServers` in both `session/new` and
+  `session/load` with the TermAl MCP bridge configuration when delegation MCP is
+  enabled for the project/workspace.
+- Cursor sessions: use the same ACP `mcpServers` path when the Cursor backend
+  accepts it; otherwise generate Cursor's supported local MCP config from the
+  same bridge descriptor.
+- Claude sessions: pass the bridge through Claude's supported MCP configuration
+  path at process launch/resume time.
+- All agents: if the bridge cannot be configured, commands that require
+  delegated review must fail fast instead of silently falling back to raw HTTP,
+  shell polling, Task agents, or Codex platform subagents.
+
+`/review-with-delegate` depends on this MCP surface. Its final form should:
+- verify `termal_spawn_session` and `termal_resume_after_delegations` are
+  available before spawning reviewers
+- spawn one Codex and one Claude read-only reviewer child session
+- schedule a backend resume wait instead of shell polling
+- fan in the returned result packets and update `docs/bugs.md` from the parent
+  session only
+- stop with a clear message when the TermAl delegation MCP tools are absent
 
 ### API Sketch
 
@@ -1084,14 +1142,26 @@ quick review/explorer tasks too heavy.
 - Add SSE deltas for delegation lifecycle.
 - Add parent transcript card.
 
-### Phase 2: MCP/Internal Tool Surface
+### Phase 2: Internal Tool Surface
 
 - Expose spawn/status/result/cancel commands.
 - Return compact result packets.
 - Add optional wait semantics, including waiting on multiple delegation ids.
 - Add timeout behavior that does not cancel by default.
 
-### Phase 3: Reviewer Batch UX
+### Phase 3: Agent MCP Bridge
+
+- Add a TermAl-owned local MCP bridge that wraps the internal delegation command
+  surface.
+- Launch the bridge per parent agent session with an implicit `parentSessionId`.
+- Wire the bridge into ACP/Codex, Cursor, and Claude session startup/resume
+  paths.
+- Keep the bridge opt-in per project/workspace until stable.
+- Add regression coverage for terminal status/result refresh, backend resume
+  waits, and restart/reconcile behavior before relying on the bridge for review
+  automation.
+
+### Phase 4: Reviewer Batch UX
 
 - Add helper command to spawn several read-only reviewers in parallel.
 - Add grouped parent card.
@@ -1099,15 +1169,17 @@ quick review/explorer tasks too heavy.
   one-call reviewer-batch path.
 - Keep UI result insertion human-driven unless the parent explicitly schedules a
   resume wait.
+- Rewrite `/review-with-delegate` to require TermAl MCP tools and stop if they
+  are absent.
 
-### Phase 4: Worker Delegation
+### Phase 5: Worker Delegation
 
 - Add explicit owned-path validation.
 - Add optional isolated git worktree creation.
 - Track changed files and verification commands.
 - Add import/compare path for worktree diffs.
 
-### Phase 5: Integration With Orchestration
+### Phase 6: Integration With Orchestration
 
 - Let orchestration templates create delegation-like child groups.
 - Allow delegation result packets to feed transition prompts.
@@ -1138,6 +1210,17 @@ MCP/internal commands:
 - result is unavailable until completion
 - cancel is idempotent
 
+Agent MCP bridge:
+- the bridge starts with an implicit parent session id and no broad listing
+  tools
+- each tool delegates to the existing API/command surface and preserves its
+  validation errors
+- ACP/Codex, Cursor, and Claude startup paths can opt into the same bridge
+  descriptor
+- `/review-with-delegate` fails fast when the required TermAl MCP tools are
+  missing
+- long-running review waits use backend resume waits instead of shell polling
+
 Isolation:
 - read-only delegation either disables writes or clearly labels the policy as
   advisory when the selected agent runtime cannot enforce it
@@ -1155,10 +1238,11 @@ Isolation:
 - A canceled child leaves an auditable parent card and child transcript.
 - Reload preserves delegation links and final results.
 - No delegation path commits or pushes without explicit user action.
+- Agent-facing delegated review is available through TermAl MCP tools rather
+  than ad hoc shell polling or non-TermAl subagent systems.
 
 ## Open Questions
 
-- Should the first MCP surface be available to agents only, humans only, or both?
 - Should `wait_delegations` stream incremental status or return only final state?
 - Should result extraction be purely prompt-convention based in v1, or should
   the backend ask the child agent for a structured final packet?
@@ -1166,3 +1250,5 @@ Isolation:
   child agent?
 - Should parent cards be regular transcript messages or session metadata rendered
   inline?
+- Should a capability token be added before remote/shared MCP transports, or is
+  a per-process local bridge sufficient for all supported agents?

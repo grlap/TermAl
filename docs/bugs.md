@@ -1618,6 +1618,14 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
+- [ ] P1: Implement TermAl delegation MCP bridge:
+  add a local per-parent-session MCP bridge with `termal_spawn_session`, `termal_get_session_status`, `termal_get_session_result`, `termal_cancel_session`, `termal_wait_delegations`, and `termal_resume_after_delegations`. The bridge should wrap existing delegation APIs, bind an implicit `parentSessionId`, and expose no broad session/delegation listing in the first slice.
+- [ ] P1: Wire delegation MCP into agent startup:
+  populate ACP/Codex `mcpServers` for `session/new` and `session/load`, add the matching Cursor hook or generated config path, and pass the same TermAl bridge descriptor through Claude's MCP launch/resume configuration when delegation MCP is enabled for the project/workspace.
+- [ ] P1: Rewrite `/review-with-delegate` to require TermAl MCP tools:
+  fail fast when the MCP tools are missing, spawn Codex and Claude reviewer delegations through `termal_spawn_session`, schedule long-running fan-in through `termal_resume_after_delegations`, and avoid raw HTTP, shell polling, Task agents, and Codex platform subagents for the top-level reviewers.
+- [ ] P1: Add delegation terminal-refresh and wait-reconcile regressions:
+  cover completed/failed/canceled polling, result fetch after terminal child completion, wait-after-terminal immediate consumption, and restart/reconcile behavior so MCP wait tools cannot strand a parent turn.
 - [ ] P2: Add conversation navigation transcript-window integration coverage:
   render more than `SESSION_TAIL_WINDOW_MESSAGE_COUNT` messages with prompt/delegation navigation, click a visible prev/next button whose target starts outside the active tail window, and assert the target mounts or the jump retries after full transcript render.
 - [ ] P2: Cover first-chunk Telegram forward failure:
