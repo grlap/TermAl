@@ -163,8 +163,10 @@ Source-preview surfaces enable `fillMermaidAvailableSpace` so rendered
 Markdown can use the full preview column and Mermaid diagrams can fit the
 available width. Default conversation/history Markdown keeps the older
 scrollable Mermaid frame: wide diagrams preserve their intrinsic iframe width
-and can scroll horizontally inside the iframe. Source previews instead pass
-`fitToFrame: true` into the Mermaid iframe srcdoc and frame-style helper.
+when the column has room, and shrink with the iframe when `max-width: 100%`
+constrains it so the aspect-ratio height does not clip the bottom of the SVG.
+Source previews instead pass `fitToFrame: true` into the Mermaid iframe srcdoc
+and frame-style helper.
 
 Fit mode changes two things deliberately:
 
@@ -431,10 +433,9 @@ Rules:
   CSS `aspect-ratio` with `height: auto`. The frame must preserve the diagram's
   aspect ratio when pane width constrains `max-width: 100%`; do not return to a
   fixed-height iframe, because wide ER diagrams otherwise scale down
-  horizontally while retaining a tall blank frame. This intentionally favors
-  tight wide-diagram layout over very tall/narrow diagrams in constrained
-  columns: the iframe srcdoc keeps `overflow-y: hidden`, so a tall diagram can
-  clip at the bottom instead of expanding past its aspect-ratio height.
+  horizontally while retaining a tall blank frame. The iframe srcdoc must also
+  let the inner SVG shrink with the constrained frame before vertical overflow
+  is hidden, otherwise tall or wide diagrams can clip at the bottom.
 - Keep source visible or recoverable in editable contexts.
 - Keep existing source length and diagram count budgets.
 

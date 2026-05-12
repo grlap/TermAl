@@ -685,7 +685,7 @@ describe("MarkdownContent Mermaid diagrams", () => {
     expect(frame.style.height).toBe("auto");
     expect(frame.style.aspectRatio).toBe("2343 / 951");
     expect((frame as HTMLIFrameElement).srcdoc).toContain(
-      "svg{display:block;max-width:none;height:auto",
+      "svg{display:block;max-width:100%;height:auto",
     );
   });
 

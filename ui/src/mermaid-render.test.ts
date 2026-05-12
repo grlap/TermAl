@@ -64,7 +64,7 @@ describe("mermaid-render", () => {
       "body{display:inline-block;min-width:100%;font-size:0;line-height:0;}",
     );
     expect(buildMermaidDiagramFrameSrcDoc(svg)).toContain(
-      "svg{display:block;max-width:none;height:auto",
+      "svg{display:block;max-width:100%;height:auto",
     );
 
     const fitSrcDoc = buildMermaidDiagramFrameSrcDoc(svg, { fitToFrame: true });

@@ -337,21 +337,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Keep digest-only forwarding as the default for Telegram integrations.
 - Document the third-party content exposure and add any practical redaction/truncation before full forwarding.
 
-## Mermaid aspect-ratio sizing can clip constrained diagrams
-
-**Severity:** Medium - constrained Mermaid iframes can hide diagram content instead of only removing blank frame space.
-
-`ui/src/mermaid-render.ts:134-152` sizes Mermaid iframes with `aspectRatio: ${frameWidth} / ${frameHeight}` + `height: auto`. The change fixes the wide-blank-frame regression, but the iframe document still keeps the SVG at intrinsic width while hiding vertical overflow. When `max-width: 100%` constrains the iframe, the frame height can shrink without the inner SVG scaling with it, so wide or tall diagrams can lose bottom content instead of simply removing unused whitespace.
-
-**Current behavior:**
-- The outer iframe height is driven by CSS `aspect-ratio` and constrained width.
-- The inner Mermaid SVG can remain at intrinsic dimensions.
-- The iframe hides vertical overflow, so constrained diagrams can be clipped at the bottom.
-
-**Proposal:**
-- Keep explicit intrinsic height for horizontally-scrollable diagrams, or make the inner SVG scale with the iframe width before using aspect-ratio sizing.
-- Add visual/regression coverage for constrained wide and tall diagrams.
-
 ## Asymmetric `orchestrator_auto_dispatch_blocked` between two persist-failure rollback sites
 
 **Severity:** Medium - an Error session can remain auto-dispatch-eligible after a runtime-exit commit failure while disk and memory disagree.

@@ -9,8 +9,9 @@
 //   - `getMermaidDiagramFrameStyle` — reads the SVG's viewBox and
 //     returns constrained `{ aspectRatio, height: "auto", width,
 //     maxWidth }` CSS for the iframe. Wide diagrams keep their
-//     intrinsic scrollable width while the used height scales down
-//     when `max-width: 100%` constrains the frame.
+//     intrinsic frame width when space allows; when `max-width: 100%`
+//     constrains the frame, the iframe srcdoc scales the SVG with it
+//     so the aspect-ratio height does not clip the diagram.
 //   - `clampMermaidDiagramExtent`, `readMermaidSvgDimensions` —
 //     the clamp math and the viewBox parser that back the frame-
 //     style helper.
@@ -81,12 +82,12 @@ export type MermaidConfigInput = NonNullable<
  * Build the sandboxed iframe document for a rendered Mermaid SVG.
  *
  * Default mode keeps `overflow-x: auto` and an inline-block body so wide
- * diagrams preserve their intrinsic width and can scroll inside the frame.
- * Fit mode is used by source-preview surfaces: the iframe hides scrollbars,
- * uses a block body, and lets the SVG shrink with `max-width: 100%` without
- * upscaling smaller diagrams. `getMermaidDiagramFrameStyle` receives the
- * same fit option so default frames keep scrollbar slack while fit frames
- * keep only a small clipping pad.
+ * diagrams preserve their intrinsic frame width when the outer column has
+ * room, but still lets the SVG shrink with a constrained iframe. Fit mode is
+ * used by source-preview surfaces: the iframe hides scrollbars, uses a block
+ * body, and uses the same shrink behavior without upscaling smaller diagrams.
+ * `getMermaidDiagramFrameStyle` receives the same fit option so default frames
+ * keep scrollbar slack while fit frames keep only a small clipping pad.
  */
 export function buildMermaidDiagramFrameSrcDoc(
   svg: string,
@@ -100,7 +101,7 @@ export function buildMermaidDiagramFrameSrcDoc(
     : "body{display:inline-block;min-width:100%;font-size:0;line-height:0;}";
   const svgCss = options.fitToFrame
     ? "svg{display:block;max-width:100%;height:auto;margin:0 auto;vertical-align:top;}"
-    : "svg{display:block;max-width:none;height:auto;margin:0 auto;vertical-align:top;}";
+    : "svg{display:block;max-width:100%;height:auto;margin:0 auto;vertical-align:top;}";
   return [
     "<!doctype html>",
     '<html><head><meta charset="utf-8">',
@@ -118,12 +119,11 @@ export function buildMermaidDiagramFrameSrcDoc(
     // the SVG to the iframe instead.
     scrollRootCss,
     "html,body{margin:0;padding:0;background:transparent;color:inherit;}",
-    // The default body can shrink-wrap wide SVGs for horizontal
-    // scrolling. Fit mode uses a block body and max-width:100% SVG so
-    // wide preview diagrams shrink to the pane without upscaling
-    // simpler diagrams past their natural Mermaid size. In both
-    // modes, zero the font + line-height + vertical-align so the
-    // body's outer height matches the SVG exactly.
+    // The default body preserves the intrinsic frame width when the parent has
+    // room, but the SVG can still shrink if max-width constrains the iframe.
+    // Fit mode uses a block body and the same max-width SVG behavior. In both
+    // modes, zero the font + line-height + vertical-align so the body's outer
+    // height matches the SVG exactly.
     bodyCss,
     svgCss,
     TERMAL_MERMAID_THEME_CSS,
@@ -168,11 +168,6 @@ export function getMermaidDiagramFrameStyle(
     // the iframe keeps the old unscaled height, leaving a large blank
     // area below wide ER diagrams. Use CSS aspect-ratio so the used
     // height scales with the constrained width.
-    //
-    // Trade-off: very tall, narrow diagrams in narrow columns can be
-    // clipped at the bottom because the srcdoc intentionally keeps
-    // vertical overflow hidden. That keeps wide diagrams tight instead
-    // of restoring the old fixed-height blank-frame behavior.
     //
     // Default frames include 24px vertical slack for horizontal
     // scrollbar chrome / Mermaid temp-DOM text-measurement drift. Fit
