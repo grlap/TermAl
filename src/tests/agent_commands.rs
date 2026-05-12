@@ -957,6 +957,7 @@ fn sync_session_agent_commands_filters_runtime_prompt_templates() {
             ResolveAgentCommandRequest {
                 arguments: Some("staged".to_owned()),
                 note: None,
+                cwd: None,
                 intent: AgentCommandResolveIntent::Delegate,
             },
         )
@@ -1066,6 +1067,7 @@ Verify the fix.
             ResolveAgentCommandRequest {
                 arguments: Some("1024".to_owned()),
                 note: Some("Please add integration tests.".to_owned()),
+                cwd: None,
                 intent: AgentCommandResolveIntent::Send,
             },
         )
@@ -1140,6 +1142,7 @@ fn rejects_oversized_agent_command_arguments_and_note() {
                 ResolveAgentCommandRequest {
                     arguments,
                     note,
+                    cwd: None,
                     intent: AgentCommandResolveIntent::Send,
                 },
             )
@@ -1208,6 +1211,7 @@ Review staged and unstaged changes.
             ResolveAgentCommandRequest {
                 arguments: None,
                 note: None,
+                cwd: None,
                 intent: AgentCommandResolveIntent::Delegate,
             },
         )
@@ -1223,6 +1227,525 @@ Review staged and unstaged changes.
         Some("Review staged and unstaged changes.\n")
     );
     assert_eq!(response.delegation, None);
+}
+
+#[test]
+fn delegation_command_resolution_uses_requested_cwd() {
+    let parent_root = std::env::temp_dir().join(format!(
+        "termal-agent-command-parent-cwd-{}",
+        Uuid::new_v4()
+    ));
+    let child_root =
+        std::env::temp_dir().join(format!("termal-agent-command-child-cwd-{}", Uuid::new_v4()));
+    let _parent_cleanup = TempDirCleanup::new(parent_root.clone());
+    let _child_cleanup = TempDirCleanup::new(child_root.clone());
+    let child_commands_dir = child_root.join(".claude").join("commands");
+    fs::create_dir_all(&child_commands_dir).unwrap();
+    fs::write(
+        child_commands_dir.join("review-local.md"),
+        "Review child cwd command for $ARGUMENTS.\n",
+    )
+    .unwrap();
+    fs::create_dir_all(&parent_root).unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Codex Session".to_owned()),
+            workdir: Some(parent_root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: Some("staged".to_owned()),
+                note: None,
+                cwd: Some(child_root.to_string_lossy().into_owned()),
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(response.visible_prompt, "/review-local staged");
+    assert_eq!(
+        response.expanded_prompt.as_deref(),
+        Some("Review child cwd command for staged.\n")
+    );
+}
+
+#[test]
+fn claude_delegation_command_resolution_cwd_ignores_parent_cached_commands() {
+    let parent_root = std::env::temp_dir().join(format!(
+        "termal-agent-command-claude-parent-cwd-{}",
+        Uuid::new_v4()
+    ));
+    let child_root = std::env::temp_dir().join(format!(
+        "termal-agent-command-claude-child-cwd-{}",
+        Uuid::new_v4()
+    ));
+    let _parent_cleanup = TempDirCleanup::new(parent_root.clone());
+    let _child_cleanup = TempDirCleanup::new(child_root.clone());
+    let child_commands_dir = child_root.join(".claude").join("commands");
+    fs::create_dir_all(&child_commands_dir).unwrap();
+    fs::write(
+        child_commands_dir.join("review-local.md"),
+        "Review child cwd command for $ARGUMENTS.\n",
+    )
+    .unwrap();
+    fs::create_dir_all(&parent_root).unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some(parent_root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    state
+        .sync_session_agent_commands(
+            &created.session_id,
+            vec![AgentCommand {
+                kind: AgentCommandKind::NativeSlash,
+                name: "review-local".to_owned(),
+                description: "Parent cached command".to_owned(),
+                content: "/review-local".to_owned(),
+                source: "Claude project command".to_owned(),
+                argument_hint: None,
+                resolver_frontmatter: None,
+                resolver_frontmatter_trusted: false,
+            }],
+        )
+        .unwrap();
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: Some("staged".to_owned()),
+                note: None,
+                cwd: Some(child_root.to_string_lossy().into_owned()),
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(response.kind, AgentCommandKind::PromptTemplate);
+    assert_eq!(
+        response.expanded_prompt.as_deref(),
+        Some("Review child cwd command for staged.\n")
+    );
+}
+
+#[test]
+fn claude_delegation_command_resolution_cwd_keeps_cache_for_session_workdir() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-agent-command-claude-same-cwd-{}",
+        Uuid::new_v4()
+    ));
+    let _cleanup = TempDirCleanup::new(root.clone());
+    fs::create_dir_all(&root).unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    state
+        .sync_session_agent_commands(
+            &created.session_id,
+            vec![AgentCommand {
+                kind: AgentCommandKind::NativeSlash,
+                name: "review-local".to_owned(),
+                description: "Cached command".to_owned(),
+                content: "/review-local".to_owned(),
+                source: "Claude project command".to_owned(),
+                argument_hint: None,
+                resolver_frontmatter: None,
+                resolver_frontmatter_trusted: false,
+            }],
+        )
+        .unwrap();
+
+    let response = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: None,
+                note: None,
+                cwd: Some(root.to_string_lossy().into_owned()),
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(response.kind, AgentCommandKind::NativeSlash);
+    assert_eq!(response.source, "Claude project command");
+}
+
+#[test]
+fn claude_delegation_command_resolution_cwd_keeps_global_cached_commands() {
+    let parent_root = std::env::temp_dir().join(format!(
+        "termal-agent-command-claude-global-parent-cwd-{}",
+        Uuid::new_v4()
+    ));
+    let child_root = std::env::temp_dir().join(format!(
+        "termal-agent-command-claude-global-child-cwd-{}",
+        Uuid::new_v4()
+    ));
+    let _parent_cleanup = TempDirCleanup::new(parent_root.clone());
+    let _child_cleanup = TempDirCleanup::new(child_root.clone());
+    fs::create_dir_all(&parent_root).unwrap();
+    fs::create_dir_all(&child_root).unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Session".to_owned()),
+            workdir: Some(parent_root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    state
+        .sync_session_agent_commands(
+            &created.session_id,
+            vec![
+                AgentCommand {
+                    kind: AgentCommandKind::NativeSlash,
+                    name: "review".to_owned(),
+                    description: "Bundled review command".to_owned(),
+                    content: "/review".to_owned(),
+                    source: "Claude bundled command".to_owned(),
+                    argument_hint: None,
+                    resolver_frontmatter: None,
+                    resolver_frontmatter_trusted: false,
+                },
+                AgentCommand {
+                    kind: AgentCommandKind::NativeSlash,
+                    name: "release-notes".to_owned(),
+                    description: "User release notes command".to_owned(),
+                    content: "/release-notes".to_owned(),
+                    source: "Claude user command".to_owned(),
+                    argument_hint: None,
+                    resolver_frontmatter: None,
+                    resolver_frontmatter_trusted: false,
+                },
+                AgentCommand {
+                    kind: AgentCommandKind::NativeSlash,
+                    name: "review-local".to_owned(),
+                    description: "Project review command".to_owned(),
+                    content: "/review-local".to_owned(),
+                    source: "Claude project command".to_owned(),
+                    argument_hint: None,
+                    resolver_frontmatter: None,
+                    resolver_frontmatter_trusted: false,
+                },
+            ],
+        )
+        .unwrap();
+
+    let bundled = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review",
+            ResolveAgentCommandRequest {
+                arguments: None,
+                note: None,
+                cwd: Some(child_root.to_string_lossy().into_owned()),
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+    assert_eq!(bundled.source, "Claude bundled command");
+
+    let user = state
+        .resolve_agent_command(
+            &created.session_id,
+            "release-notes",
+            ResolveAgentCommandRequest {
+                arguments: None,
+                note: None,
+                cwd: Some(child_root.to_string_lossy().into_owned()),
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+    assert_eq!(user.source, "Claude user command");
+
+    let project = state
+        .resolve_agent_command(
+            &created.session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: None,
+                note: None,
+                cwd: Some(child_root.to_string_lossy().into_owned()),
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap_err();
+    assert_eq!(project.status, StatusCode::NOT_FOUND);
+}
+
+#[test]
+fn delegation_command_resolution_cwd_allows_child_directory_inside_project() {
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-agent-command-project-cwd-{}",
+        Uuid::new_v4()
+    ));
+    let _cleanup = TempDirCleanup::new(project_root.clone());
+    let child_root = project_root.join("child");
+    let child_commands_dir = child_root.join(".claude").join("commands");
+    fs::create_dir_all(&child_commands_dir).unwrap();
+    fs::write(
+        child_commands_dir.join("review-local.md"),
+        "Review project child cwd for $ARGUMENTS.\n",
+    )
+    .unwrap();
+
+    let state = test_app_state();
+    let project_id = create_test_project(&state, &project_root, "Project Cwd");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &project_root);
+
+    let response = state
+        .resolve_agent_command(
+            &session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: Some("staged".to_owned()),
+                note: None,
+                cwd: Some(child_root.to_string_lossy().into_owned()),
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        response.expanded_prompt.as_deref(),
+        Some("Review project child cwd for staged.\n")
+    );
+}
+
+#[test]
+fn rejects_delegation_command_resolution_cwd_outside_project() {
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-agent-command-project-root-{}",
+        Uuid::new_v4()
+    ));
+    let outside_root = std::env::temp_dir().join(format!(
+        "termal-agent-command-outside-project-{}",
+        Uuid::new_v4()
+    ));
+    let _project_cleanup = TempDirCleanup::new(project_root.clone());
+    let _outside_cleanup = TempDirCleanup::new(outside_root.clone());
+    fs::create_dir_all(&project_root).unwrap();
+    fs::create_dir_all(&outside_root).unwrap();
+
+    let state = test_app_state();
+    let project_id = create_test_project(&state, &project_root, "Project Cwd");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &project_root);
+
+    let error = state
+        .resolve_agent_command(
+            &session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: None,
+                note: None,
+                cwd: Some(outside_root.to_string_lossy().into_owned()),
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap_err();
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("must stay inside project"));
+}
+
+#[test]
+fn rejects_delegation_command_resolution_cwd_for_remote_project() {
+    let cwd = std::env::temp_dir().join(format!(
+        "termal-agent-command-remote-project-cwd-{}",
+        Uuid::new_v4()
+    ));
+    let _cleanup = TempDirCleanup::new(cwd.clone());
+    fs::create_dir_all(&cwd).unwrap();
+
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &cwd);
+
+    let error = state
+        .resolve_agent_command(
+            &session_id,
+            "review-local",
+            ResolveAgentCommandRequest {
+                arguments: None,
+                note: None,
+                cwd: Some(cwd.to_string_lossy().into_owned()),
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap_err();
+
+    assert_eq!(error.status, StatusCode::NOT_IMPLEMENTED);
+    assert!(
+        error
+            .message
+            .contains("remote-backed projects is not implemented")
+    );
+}
+
+#[test]
+fn rejects_cwd_override_for_non_delegation_command_resolution() {
+    let root =
+        std::env::temp_dir().join(format!("termal-agent-command-send-cwd-{}", Uuid::new_v4()));
+    let _cleanup = TempDirCleanup::new(root.clone());
+    let commands_dir = root.join(".claude").join("commands");
+    fs::create_dir_all(&commands_dir).unwrap();
+    fs::write(commands_dir.join("fix-bug.md"), "Fix $ARGUMENTS.\n").unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Codex Session".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let error = state
+        .resolve_agent_command(
+            &created.session_id,
+            "fix-bug",
+            ResolveAgentCommandRequest {
+                arguments: Some("1024".to_owned()),
+                note: None,
+                cwd: Some(root.to_string_lossy().into_owned()),
+                intent: AgentCommandResolveIntent::Send,
+            },
+        )
+        .unwrap_err();
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "agent command cwd override is only supported for delegation"
+    );
+}
+
+#[test]
+fn rejects_oversized_delegation_command_resolution_cwd() {
+    let root =
+        std::env::temp_dir().join(format!("termal-agent-command-long-cwd-{}", Uuid::new_v4()));
+    let _cleanup = TempDirCleanup::new(root.clone());
+    fs::create_dir_all(&root).unwrap();
+
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Codex Session".to_owned()),
+            workdir: Some(root.to_string_lossy().into_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    let error = state
+        .resolve_agent_command(
+            &created.session_id,
+            "fix-bug",
+            ResolveAgentCommandRequest {
+                arguments: None,
+                note: None,
+                cwd: Some("a".repeat(4097)),
+                intent: AgentCommandResolveIntent::Delegate,
+            },
+        )
+        .unwrap_err();
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "delegation cwd must be at most 4096 characters"
+    );
 }
 
 #[test]
@@ -1408,6 +1931,7 @@ Body fallback should not win.
                 ResolveAgentCommandRequest {
                     arguments: None,
                     note: None,
+                    cwd: None,
                     intent: AgentCommandResolveIntent::Delegate,
                 },
             )
@@ -1552,6 +2076,7 @@ Run tool check for $ARGUMENTS.
             ResolveAgentCommandRequest {
                 arguments: Some("repo".to_owned()),
                 note: None,
+                cwd: None,
                 intent: AgentCommandResolveIntent::Send,
             },
         )
@@ -1613,6 +2138,7 @@ Run tool check for $ARGUMENTS.
             ResolveAgentCommandRequest {
                 arguments: Some("repo".to_owned()),
                 note: None,
+                cwd: None,
                 intent: AgentCommandResolveIntent::Send,
             },
         )
@@ -1679,6 +2205,7 @@ Review staged and unstaged changes.
             ResolveAgentCommandRequest {
                 arguments: None,
                 note: None,
+                cwd: None,
                 intent: AgentCommandResolveIntent::Delegate,
             },
         )
@@ -1741,6 +2268,7 @@ Review $ARGUMENTS.
             ResolveAgentCommandRequest {
                 arguments: Some("staged changes".to_owned()),
                 note: None,
+                cwd: None,
                 intent: AgentCommandResolveIntent::Delegate,
             },
         )
@@ -1793,6 +2321,7 @@ fn native_delegate_resolution_uses_metadata_name_not_source_suffix() {
             ResolveAgentCommandRequest {
                 arguments: Some("staged".to_owned()),
                 note: None,
+                cwd: None,
                 intent: AgentCommandResolveIntent::Delegate,
             },
         )
@@ -1844,6 +2373,7 @@ fn legacy_cached_prompt_template_delegate_resolution_uses_metadata_name_not_sour
             ResolveAgentCommandRequest {
                 arguments: Some("staged".to_owned()),
                 note: None,
+                cwd: None,
                 intent: AgentCommandResolveIntent::Delegate,
             },
         )
@@ -1905,6 +2435,7 @@ fn prompt_template_delegate_resolution_does_not_use_metadata_when_source_path_mi
             ResolveAgentCommandRequest {
                 arguments: Some("staged".to_owned()),
                 note: None,
+                cwd: None,
                 intent: AgentCommandResolveIntent::Delegate,
             },
         )
@@ -1969,6 +2500,7 @@ First prompt $ARGUMENTS.
             ResolveAgentCommandRequest {
                 arguments: Some("scope".to_owned()),
                 note: None,
+                cwd: None,
                 intent: AgentCommandResolveIntent::Send,
             },
         )
@@ -2002,6 +2534,7 @@ Second prompt $ARGUMENTS.
             ResolveAgentCommandRequest {
                 arguments: Some("scope".to_owned()),
                 note: None,
+                cwd: None,
                 intent: AgentCommandResolveIntent::Send,
             },
         )
@@ -2061,6 +2594,7 @@ fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
             ResolveAgentCommandRequest {
                 arguments: Some("staged".to_owned()),
                 note: None,
+                cwd: None,
                 intent: AgentCommandResolveIntent::Delegate,
             },
         )
@@ -2106,6 +2640,7 @@ fn resolver_metadata_uses_cached_frontmatter_snapshot_without_disk_reread() {
         ResolveAgentCommandRequest {
             arguments: Some("staged".to_owned()),
             note: None,
+            cwd: None,
             intent: AgentCommandResolveIntent::Delegate,
         },
         Some(metadata),
@@ -2168,6 +2703,7 @@ fn native_delegate_resolution_does_not_use_prompt_template_metadata_by_name() {
             ResolveAgentCommandRequest {
                 arguments: Some("staged".to_owned()),
                 note: None,
+                cwd: None,
                 intent: AgentCommandResolveIntent::Delegate,
             },
         )
@@ -2223,6 +2759,7 @@ fn rejects_note_for_native_slash_command_resolution() {
             ResolveAgentCommandRequest {
                 arguments: Some("staged".to_owned()),
                 note: Some("Include integration-test advice.".to_owned()),
+                cwd: None,
                 intent: AgentCommandResolveIntent::Send,
             },
         )
@@ -2232,5 +2769,80 @@ fn rejects_note_for_native_slash_command_resolution() {
     assert_eq!(
         error.message,
         "native slash commands do not support additional notes"
+    );
+}
+
+fn assert_command_contains(command: &str, expected: &str, reason: &str) {
+    assert!(
+        command.contains(expected),
+        "expected command text to contain `{expected}`: {reason}"
+    );
+}
+
+// `/review-with-delegate` owns top-level reviewer orchestration and must not
+// keep the parent turn active while waiting for reviewer fan-in.
+#[test]
+fn review_with_delegate_pins_two_child_resume_wait_flow() {
+    let review_with_delegate = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/.claude/commands/review-with-delegate.md"
+    ));
+
+    assert_command_contains(
+        review_with_delegate,
+        "attempt exactly two reviewer session spawns",
+        "/review-with-delegate must attempt the bounded two-child review shape",
+    );
+    assert_command_contains(
+        review_with_delegate,
+        "nested TermAl delegations",
+        "/review-with-delegate must forbid recursive TermAl reviewer trees",
+    );
+    assert_command_contains(
+        review_with_delegate,
+        "termal_resume_after_delegations",
+        "/review-with-delegate must schedule backend resume waits",
+    );
+    assert_command_contains(
+        review_with_delegate,
+        "stop this turn immediately",
+        "/review-with-delegate must yield so the backend fan-in prompt can resume",
+    );
+    assert_command_contains(
+        review_with_delegate,
+        "Never use `termal_wait_delegations`, PowerShell, shell, raw HTTP polling, or session-log polling",
+        "/review-with-delegate must not reintroduce active polling hangs",
+    );
+}
+
+// Delegated `/review-local` children are reviewer leaves for
+// `/review-with-delegate`; they run lens checklists inline instead of spawning
+// any nested reviewer processes.
+#[test]
+fn review_local_pins_delegated_child_inline_reviewer_mode() {
+    let review_local = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/.claude/commands/review-local.md"
+    ));
+
+    assert_command_contains(
+        review_local,
+        "You are a delegated child session for TermAl delegation",
+        "/review-local must name the delegated-session marker it keys off",
+    );
+    assert_command_contains(
+        review_local,
+        "Claude Task agents, Codex subagents, shell-launched agents, TermAl nested delegations via `termal_spawn_session`",
+        "/review-local delegated children must not spawn nested reviewers through any current path",
+    );
+    assert_command_contains(
+        review_local,
+        "do not use Task tool calls or TermAl delegation MCP tools",
+        "/review-local delegated children must run reviewer lenses inline",
+    );
+    assert_command_contains(
+        review_local,
+        "nested reviewer spawning was intentionally skipped",
+        "/review-local delegated children must report that nested spawning was skipped",
     );
 }

@@ -385,6 +385,16 @@ Required contract:
 - `spawn_delegation` receives the already-resolved prompt and the resolver's
   write policy. React components must not special-case command names such as
   `review-local`.
+- The TermAl delegation MCP bridge applies the same rule for single-line
+  prompts that match a known slash command: it resolves the command with
+  `intent: "delegate"` before posting the delegation create request. When the
+  tool call provides `cwd`, that same cwd is included in the resolve request so
+  command discovery and trusted metadata come from the intended child workdir.
+  If the command exists in the parent workdir but not the requested `cwd`, the
+  spawn fails instead of sending an unexpanded slash command to the child.
+  Literal prompts and truly unknown slash-like prompts remain unchanged.
+- Caller-supplied MCP spawn options (`title`, `mode`, and `writePolicy`) override
+  resolver-provided defaults. Omit those fields to use trusted command metadata.
 
 This keeps `/fix-bug`, future trusted `/review-local` commands, and future
 Claude skills consistent whether the user sends them in the parent session or

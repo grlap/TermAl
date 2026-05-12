@@ -1660,6 +1660,8 @@ struct ResolveAgentCommandRequest {
     #[serde(default)]
     note: Option<String>,
     #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
     intent: AgentCommandResolveIntent,
 }
 

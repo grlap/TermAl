@@ -118,13 +118,24 @@ Request:
 {
   "arguments": "1024",
   "note": "Please add integration tests for Connectivity class.",
-  "intent": "send"
+  "cwd": "C:\\github\\Personal\\TermAl",
+  "intent": "delegate"
 }
 ```
 
 `intent` is `"send"` for a normal session turn and `"delegate"` for child-session
 delegation. The resolver must use the same template expansion rules for both
 intents, but may return different execution defaults for delegation.
+
+`cwd` is optional and delegation-only. It lets MCP-based delegation resolve a
+slash command against the intended child session working directory before the
+child exists. Requests with `cwd` and `intent: "send"` are rejected. For
+project-scoped sessions the canonicalized `cwd` must stay inside the local
+project root; non-project sessions may resolve against any local directory the
+backend process can read. Remote-backed projects return `NOT_IMPLEMENTED` in
+Phase 1. The value is capped at 4,096 Unicode code points. Callers should pass
+absolute paths; relative paths follow the server-side session workdir resolution
+rules.
 
 Response:
 
@@ -185,6 +196,9 @@ Resolution rules:
   `visiblePrompt` such as `/review`. If a native runtime cannot accept appended
   notes, the resolver must either reject `note` with a validation error or
   convert the request to a prompt-template path that TermAl owns.
+- `cwd`, when present, changes command discovery and resolver metadata reads to
+  that directory. This is only valid with `intent: "delegate"` and is bounded by
+  the local project root when the parent session is project-scoped.
 - Backend resolver metadata provides command-specific title generation,
   delegation mode, and write policy. Add new command behavior through trusted
   command/skill frontmatter metadata, not React component branches or Rust

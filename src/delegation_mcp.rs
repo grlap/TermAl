@@ -278,24 +278,141 @@ impl TermalDelegationMcpBridge {
 
     fn tool_spawn_session(&self, arguments: Value) -> Result<Value> {
         let prompt = required_string(arguments.get("prompt"), "prompt")?;
+        let cwd = optional_string(arguments.get("cwd"));
+        let resolved_prompt = self.resolve_spawn_prompt_if_agent_command(&prompt, cwd.as_deref())?;
         let mut body = serde_json::Map::new();
-        body.insert("prompt".to_owned(), Value::String(prompt));
-        insert_optional_string(&mut body, "title", arguments.get("title"));
-        insert_optional_string(&mut body, "cwd", arguments.get("cwd"));
+        body.insert("prompt".to_owned(), Value::String(resolved_prompt.prompt));
+        if !insert_optional_string(&mut body, "title", arguments.get("title")) {
+            if let Some(title) = resolved_prompt.title {
+                body.insert("title".to_owned(), Value::String(title));
+            }
+        }
+        if let Some(cwd) = cwd {
+            body.insert("cwd".to_owned(), Value::String(cwd));
+        }
         insert_optional_string(&mut body, "agent", arguments.get("agent"));
         insert_optional_string(&mut body, "model", arguments.get("model"));
         body.insert(
             "mode".to_owned(),
             optional_string(arguments.get("mode"))
+                .or(resolved_prompt.mode)
                 .map(Value::String)
                 .unwrap_or_else(|| Value::String("reviewer".to_owned())),
         );
         body.insert(
             "writePolicy".to_owned(),
-            normalize_mcp_write_policy(arguments.get("writePolicy")),
+            arguments
+                .get("writePolicy")
+                .map(|value| normalize_mcp_write_policy(Some(value)))
+                .or(resolved_prompt.write_policy)
+                .unwrap_or_else(|| normalize_mcp_write_policy(None)),
         );
         self.post_json(
             &format!("/api/sessions/{}/delegations", self.parent_session_id),
+            &Value::Object(body),
+        )
+    }
+
+    fn resolve_spawn_prompt_if_agent_command(
+        &self,
+        prompt: &str,
+        cwd: Option<&str>,
+    ) -> Result<McpSpawnPrompt> {
+        let Some(parsed) = parse_mcp_slash_command_prompt(prompt) else {
+            return Ok(McpSpawnPrompt::literal(prompt));
+        };
+        let command_name =
+            required_agent_command_name(Some(&Value::String(parsed.command_name.clone())))?;
+        let resolved = match self.try_resolve_agent_command_for_spawn(&command_name, &parsed, cwd)? {
+            Some(resolved) => resolved,
+            None if cwd.is_none() => return Ok(McpSpawnPrompt::literal(prompt)),
+            None => {
+                if self
+                    .try_resolve_agent_command_for_spawn(&command_name, &parsed, None)?
+                    .is_some()
+                {
+                    bail!(
+                        "agent command `{command_name}` was not found in requested cwd `{}`",
+                        cwd.unwrap_or_default()
+                    );
+                }
+                return Ok(McpSpawnPrompt::literal(prompt));
+            }
+        };
+        let prompt = resolved
+            .get("expandedPrompt")
+            .or_else(|| resolved.get("visiblePrompt"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .with_context(|| {
+                format!("agent command `{command_name}` resolved without prompt content")
+            })?
+            .to_owned();
+        let title = resolved
+            .pointer("/delegation/title")
+            .or_else(|| resolved.get("title"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let mode = resolved
+            .pointer("/delegation/mode")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let write_policy = resolved.pointer("/delegation/writePolicy").cloned();
+        Ok(McpSpawnPrompt {
+            prompt,
+            title,
+            mode,
+            write_policy,
+        })
+    }
+
+    fn try_resolve_agent_command_for_spawn(
+        &self,
+        command_name: &str,
+        parsed: &McpSlashCommandPrompt,
+        cwd: Option<&str>,
+    ) -> Result<Option<Value>> {
+        match self.resolve_agent_command_for_spawn(command_name, parsed, cwd) {
+            Ok(resolved) => Ok(Some(resolved)),
+            Err(err)
+                if err
+                    .downcast_ref::<TermalDelegationApiError>()
+                    .is_some_and(TermalDelegationApiError::is_agent_command_not_found) =>
+            {
+                Ok(None)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn resolve_agent_command_for_spawn(
+        &self,
+        command_name: &str,
+        parsed: &McpSlashCommandPrompt,
+        cwd: Option<&str>,
+    ) -> Result<Value> {
+        let mut body = serde_json::Map::new();
+        if let Some(arguments) = parsed.arguments.as_deref() {
+            body.insert("arguments".to_owned(), Value::String(arguments.to_owned()));
+        }
+        if let Some(note) = parsed.note.as_deref() {
+            body.insert("note".to_owned(), Value::String(note.to_owned()));
+        }
+        if let Some(cwd) = cwd {
+            body.insert("cwd".to_owned(), Value::String(cwd.to_owned()));
+        }
+        body.insert("intent".to_owned(), Value::String("delegate".to_owned()));
+        self.post_json(
+            &format!(
+                "/api/sessions/{}/agent-commands/{}/resolve",
+                self.parent_session_id,
+                encode_uri_component(command_name)
+            ),
             &Value::Object(body),
         )
     }
@@ -453,9 +570,33 @@ impl TermalDelegationMcpBridge {
                     .map(str::to_owned)
             })
             .unwrap_or(text);
-        bail!("TermAl delegation API returned {status}: {message}")
+        Err(TermalDelegationApiError { status, message }.into())
     }
 }
+
+#[derive(Debug)]
+struct TermalDelegationApiError {
+    status: StatusCode,
+    message: String,
+}
+
+impl TermalDelegationApiError {
+    fn is_agent_command_not_found(&self) -> bool {
+        self.status == StatusCode::NOT_FOUND && self.message == "agent command not found"
+    }
+}
+
+impl std::fmt::Display for TermalDelegationApiError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "TermAl delegation API returned {}: {}",
+            self.status, self.message
+        )
+    }
+}
+
+impl std::error::Error for TermalDelegationApiError {}
 
 fn run_delegation_mcp_bridge(parent_session_id: String, base_url: String) -> Result<()> {
     let bridge = TermalDelegationMcpBridge::new(parent_session_id, base_url)?;
@@ -499,14 +640,20 @@ fn mcp_tools_list_result() -> Value {
         "tools": [
             {
                 "name": "termal_spawn_session",
-                "description": "Create a TermAl child delegation under the current parent session.",
+                "description": "Create a TermAl child delegation under the current parent session. Single-line prompts matching a known slash command are resolved before spawning.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["prompt"],
                     "properties": {
-                        "prompt": { "type": "string" },
+                        "prompt": {
+                            "type": "string",
+                            "description": "Task prompt. Single-line known slash commands are resolved with delegation intent before spawning."
+                        },
                         "title": { "type": "string" },
-                        "cwd": { "type": "string" },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Working directory for the spawned session. For single-line known slash-command prompts, cwd also scopes command resolution."
+                        },
                         "agent": { "type": "string", "enum": ["Codex", "Claude", "Cursor", "Gemini"] },
                         "model": { "type": "string" },
                         "mode": { "type": "string", "enum": ["reviewer", "explorer", "worker"] },
@@ -624,9 +771,27 @@ fn required_path_identifier(value: Option<&Value>, label: &str) -> Result<String
     let value = required_string(value, label)?;
     if value
         .chars()
-        .any(|ch| ch == '/' || ch == '?' || ch == '#' || ch.is_control())
+        .any(|ch| {
+            ch == '/' || ch == '?' || ch == '#' || ch == '%' || ch == '\\' || ch.is_control()
+        })
     {
-        bail!("{label} must not contain /, ?, #, or control characters");
+        bail!("{label} must not contain /, \\, ?, #, %, or control characters");
+    }
+    if value == "." || value == ".." {
+        bail!("{label} must not be . or ..");
+    }
+    Ok(value)
+}
+
+fn required_agent_command_name(value: Option<&Value>) -> Result<String> {
+    let value = required_string(value, "command")?;
+    if value.chars().any(|ch| {
+        ch == '/' || ch == '?' || ch == '#' || ch == '\\' || ch.is_control()
+    }) {
+        bail!("command must not contain /, \\, ?, #, or control characters");
+    }
+    if value == "." || value == ".." {
+        bail!("command must not be . or ..");
     }
     Ok(value)
 }
@@ -643,10 +808,89 @@ fn insert_optional_string(
     object: &mut serde_json::Map<String, Value>,
     key: &str,
     value: Option<&Value>,
-) {
+) -> bool {
     if let Some(value) = optional_string(value) {
         object.insert(key.to_owned(), Value::String(value));
+        true
+    } else {
+        false
     }
+}
+
+struct McpSpawnPrompt {
+    prompt: String,
+    title: Option<String>,
+    mode: Option<String>,
+    write_policy: Option<Value>,
+}
+
+impl McpSpawnPrompt {
+    fn literal(prompt: &str) -> Self {
+        Self {
+            prompt: prompt.to_owned(),
+            title: None,
+            mode: None,
+            write_policy: None,
+        }
+    }
+}
+
+struct McpSlashCommandPrompt {
+    command_name: String,
+    arguments: Option<String>,
+    note: Option<String>,
+}
+
+/// Parses the single-line slash-command shape supported by `termal_spawn_session`.
+///
+/// Example: `/review-local staged -- include tests` resolves to command
+/// `review-local`, arguments `staged`, and note `include tests`.
+fn parse_mcp_slash_command_prompt(prompt: &str) -> Option<McpSlashCommandPrompt> {
+    let prompt = prompt.trim_end();
+    if prompt.contains('\n') || prompt.contains('\r') {
+        return None;
+    }
+    let rest = prompt.strip_prefix('/')?;
+    if rest.is_empty() {
+        return None;
+    }
+    let mut parts = rest.splitn(2, char::is_whitespace);
+    let command_name = parts.next()?;
+    if command_name.is_empty() || command_name.contains('/') {
+        return None;
+    }
+    let (arguments, note) = split_mcp_agent_command_tail(parts.next().unwrap_or_default());
+    Some(McpSlashCommandPrompt {
+        command_name: command_name.to_owned(),
+        arguments,
+        note,
+    })
+}
+
+/// Splits slash-command tail text using the same `--` note separator as the UI.
+fn split_mcp_agent_command_tail(tail: &str) -> (Option<String>, Option<String>) {
+    let trimmed = tail.trim();
+    if trimmed.is_empty() {
+        return (None, None);
+    }
+    let bytes = trimmed.as_bytes();
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'-'
+            && bytes[index + 1] == b'-'
+            && (index == 0 || bytes[index - 1].is_ascii_whitespace())
+            && (index + 2 == bytes.len() || bytes[index + 2].is_ascii_whitespace())
+        {
+            let arguments = trimmed[..index].trim();
+            let note = trimmed[index + 2..].trim();
+            return (
+                (!arguments.is_empty()).then(|| arguments.to_owned()),
+                (!note.is_empty()).then(|| note.to_owned()),
+            );
+        }
+        index += 1;
+    }
+    (Some(trimmed.to_owned()), None)
 }
 
 fn required_path_identifier_array(value: Option<&Value>, label: &str) -> Result<Vec<String>> {
@@ -896,7 +1140,7 @@ mod delegation_mcp_tests {
             .expect_err("path-unsafe status delegation id should be rejected");
         assert!(err
             .to_string()
-            .contains("delegationId must not contain /, ?, #, or control characters"));
+            .contains("delegationId must not contain /, \\, ?, #, %, or control characters"));
 
         let err = bridge
             .tool_wait_delegations(json!({
@@ -906,7 +1150,19 @@ mod delegation_mcp_tests {
             .expect_err("path-unsafe wait delegation id should be rejected before polling");
         assert!(err
             .to_string()
-            .contains("delegationIds must not contain /, ?, #, or control characters"));
+            .contains("delegationIds must not contain /, \\, ?, #, %, or control characters"));
+
+        let err = bridge
+            .tool_get_session_status(json!({ "delegationId": "delegation%2Fbad" }))
+            .expect_err("encoded slash delegation id should be rejected");
+        assert!(err
+            .to_string()
+            .contains("delegationId must not contain /, \\, ?, #, %, or control characters"));
+
+        let err = bridge
+            .tool_get_session_status(json!({ "delegationId": ".." }))
+            .expect_err("navigation-only delegation id should be rejected");
+        assert!(err.to_string().contains("delegationId must not be . or .."));
     }
 
     #[test]
@@ -951,6 +1207,438 @@ mod delegation_mcp_tests {
 
         assert_eq!(response.pointer("/delegation/id"), Some(&json!("delegation-one")));
         assert_eq!(response["childSessionId"], "session-child");
+        server.join().expect("test server should join");
+        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
+    }
+
+    #[test]
+    fn delegation_mcp_spawn_session_resolves_known_slash_command_prompt() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
+            match (request.method.as_str(), request.path.as_str()) {
+                ("POST", "/api/sessions/session-parent/agent-commands/review-local/resolve") => {
+                    let body: Value =
+                        serde_json::from_str(&request.body).expect("resolve body should be JSON");
+                    assert_eq!(body["arguments"], "staged");
+                    assert_eq!(body["note"], "include tests");
+                    assert_eq!(body["cwd"], "C:\\repo\\child");
+                    assert_eq!(body["intent"], "delegate");
+                    (
+                        200,
+                        json!({
+                            "name": "review-local",
+                            "visiblePrompt": "/review-local staged",
+                            "expandedPrompt": "Expanded review-local command body",
+                            "title": "Review local changes",
+                            "delegation": {
+                                "mode": "explorer",
+                                "writePolicy": { "kind": "isolatedWorktree", "ownedPaths": [] }
+                            }
+                        }),
+                    )
+                }
+                ("POST", "/api/sessions/session-parent/delegations") => {
+                    let body: Value = serde_json::from_str(&request.body)
+                        .expect("delegation body should be JSON");
+                    assert_eq!(body["prompt"], "Expanded review-local command body");
+                    assert_eq!(body["title"], "Review local changes");
+                    assert_eq!(body["cwd"], "C:\\repo\\child");
+                    assert_eq!(body["mode"], "explorer");
+                    assert_eq!(
+                        body.pointer("/writePolicy/kind"),
+                        Some(&json!("isolatedWorktree"))
+                    );
+                    (
+                        200,
+                        json!({
+                            "delegation": {
+                                "id": "delegation-one",
+                                "status": "running"
+                            },
+                            "childSessionId": "session-child"
+                        }),
+                    )
+                }
+                other => panic!("unexpected request: {other:?}"),
+            }
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let response = bridge
+            .tool_spawn_session(json!({
+                "prompt": "/review-local staged -- include tests",
+                "agent": "Codex",
+                "cwd": "C:\\repo\\child"
+            }))
+            .expect("spawn should resolve the slash command then post delegation request");
+
+        assert_eq!(response.pointer("/delegation/id"), Some(&json!("delegation-one")));
+        server.join().expect("test server should join");
+        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
+    }
+
+    #[test]
+    fn delegation_mcp_spawn_session_preserves_literal_prompt_for_unknown_slash_command() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
+            match (request.method.as_str(), request.path.as_str()) {
+                ("POST", "/api/sessions/session-parent/agent-commands/unknown/resolve") => {
+                    (
+                        404,
+                        json!({
+                            "error": "agent command not found"
+                        }),
+                    )
+                }
+                ("POST", "/api/sessions/session-parent/delegations") => {
+                    let body: Value = serde_json::from_str(&request.body)
+                        .expect("delegation body should be JSON");
+                    assert_eq!(body["prompt"], "/unknown keep literal");
+                    (
+                        200,
+                        json!({
+                            "delegation": {
+                                "id": "delegation-one",
+                                "status": "running"
+                            },
+                            "childSessionId": "session-child"
+                        }),
+                    )
+                }
+                other => panic!("unexpected request: {other:?}"),
+            }
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        bridge
+            .tool_spawn_session(json!({
+                "prompt": "/unknown keep literal"
+            }))
+            .expect("unknown slash-like prompts should remain literal");
+
+        server.join().expect("test server should join");
+        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
+    }
+
+    #[test]
+    fn delegation_mcp_spawn_session_surfaces_non_command_not_found_resolve_errors() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
+            assert_eq!(request.method, "POST");
+            assert_eq!(
+                request.path,
+                "/api/sessions/session-parent/agent-commands/review-local/resolve"
+            );
+            (
+                404,
+                json!({
+                    "error": "session not found"
+                }),
+            )
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let err = bridge
+            .tool_spawn_session(json!({
+                "prompt": "/review-local"
+            }))
+            .expect_err("non-command 404 should surface");
+
+        assert!(err
+            .to_string()
+            .contains("TermAl delegation API returned 404 Not Found: session not found"));
+        server.join().expect("test server should join");
+        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
+    }
+
+    #[test]
+    fn delegation_mcp_spawn_session_encodes_slash_command_path_segment() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
+            match (request.method.as_str(), request.path.as_str()) {
+                ("POST", "/api/sessions/session-parent/agent-commands/review%3Alocal/resolve") => {
+                    (
+                        200,
+                        json!({
+                            "name": "review:local",
+                            "visiblePrompt": "/review:local",
+                            "expandedPrompt": "Expanded colon command"
+                        }),
+                    )
+                }
+                ("POST", "/api/sessions/session-parent/delegations") => {
+                    let body: Value = serde_json::from_str(&request.body)
+                        .expect("delegation body should be JSON");
+                    assert_eq!(body["prompt"], "Expanded colon command");
+                    (
+                        200,
+                        json!({
+                            "delegation": {
+                                "id": "delegation-one",
+                                "status": "running"
+                            },
+                            "childSessionId": "session-child"
+                        }),
+                    )
+                }
+                other => panic!("unexpected request: {other:?}"),
+            }
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        bridge
+            .tool_spawn_session(json!({
+                "prompt": "/review:local"
+            }))
+            .expect("command names should be encoded as a path segment");
+
+        server.join().expect("test server should join");
+        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
+    }
+
+    #[test]
+    fn delegation_mcp_spawn_session_allows_percent_in_encoded_command_name() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
+            match (request.method.as_str(), request.path.as_str()) {
+                ("POST", "/api/sessions/session-parent/agent-commands/review%25local/resolve") => {
+                    (
+                        200,
+                        json!({
+                            "name": "review%local",
+                            "visiblePrompt": "/review%local",
+                            "expandedPrompt": "Expanded percent command"
+                        }),
+                    )
+                }
+                ("POST", "/api/sessions/session-parent/delegations") => {
+                    let body: Value = serde_json::from_str(&request.body)
+                        .expect("delegation body should be JSON");
+                    assert_eq!(body["prompt"], "Expanded percent command");
+                    (
+                        200,
+                        json!({
+                            "delegation": {
+                                "id": "delegation-one",
+                                "status": "running"
+                            },
+                            "childSessionId": "session-child"
+                        }),
+                    )
+                }
+                other => panic!("unexpected request: {other:?}"),
+            }
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        bridge
+            .tool_spawn_session(json!({
+                "prompt": "/review%local"
+            }))
+            .expect("literal percent command names should be encoded as a path segment");
+
+        server.join().expect("test server should join");
+        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
+    }
+
+    #[test]
+    fn delegation_mcp_spawn_session_rejects_parent_known_command_missing_from_requested_cwd() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
+            assert_eq!(request.method, "POST");
+            assert_eq!(
+                request.path,
+                "/api/sessions/session-parent/agent-commands/review-local/resolve"
+            );
+            let body: Value =
+                serde_json::from_str(&request.body).expect("resolve body should be JSON");
+            if body.get("cwd").is_some() {
+                return (
+                    404,
+                    json!({
+                        "error": "agent command not found"
+                    }),
+                );
+            }
+            (
+                200,
+                json!({
+                    "name": "review-local",
+                    "visiblePrompt": "/review-local",
+                    "expandedPrompt": "Parent-scope review command"
+                }),
+            )
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let err = bridge
+            .tool_spawn_session(json!({
+                "prompt": "/review-local",
+                "cwd": "C:\\repo\\child"
+            }))
+            .expect_err("parent-known command missing from requested cwd should fail");
+
+        assert!(err
+            .to_string()
+            .contains("agent command `review-local` was not found in requested cwd"));
+        server.join().expect("test server should join");
+        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
+    }
+
+    #[test]
+    fn delegation_mcp_spawn_session_preserves_multiline_slash_like_prompt() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
+            assert_eq!(request.method, "POST");
+            assert_eq!(request.path, "/api/sessions/session-parent/delegations");
+            let body: Value =
+                serde_json::from_str(&request.body).expect("delegation body should be JSON");
+            assert_eq!(body["prompt"], "/review-local\nleave this literal");
+            (
+                200,
+                json!({
+                    "delegation": {
+                        "id": "delegation-one",
+                        "status": "running"
+                    },
+                    "childSessionId": "session-child"
+                }),
+            )
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        bridge
+            .tool_spawn_session(json!({
+                "prompt": "/review-local\nleave this literal"
+            }))
+            .expect("multiline prompts should not be slash-expanded");
+
+        server.join().expect("test server should join");
+        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
+    }
+
+    #[test]
+    fn delegation_mcp_spawn_session_preserves_spaced_slash_like_prompt() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
+            assert_eq!(request.method, "POST");
+            assert_eq!(request.path, "/api/sessions/session-parent/delegations");
+            let body: Value =
+                serde_json::from_str(&request.body).expect("delegation body should be JSON");
+            assert_eq!(body["prompt"], "/ review-local");
+            (
+                200,
+                json!({
+                    "delegation": {
+                        "id": "delegation-one",
+                        "status": "running"
+                    },
+                    "childSessionId": "session-child"
+                }),
+            )
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        bridge
+            .tool_spawn_session(json!({
+                "prompt": "/ review-local"
+            }))
+            .expect("slash followed by whitespace should stay literal like the UI parser");
+
+        server.join().expect("test server should join");
+        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
+    }
+
+    #[test]
+    fn delegation_mcp_spawn_session_explicit_options_override_resolved_defaults() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
+            match (request.method.as_str(), request.path.as_str()) {
+                ("POST", "/api/sessions/session-parent/agent-commands/review-local/resolve") => {
+                    let body: Value =
+                        serde_json::from_str(&request.body).expect("resolve body should be JSON");
+                    assert!(body.get("arguments").is_none());
+                    assert!(body.get("note").is_none());
+                    assert_eq!(body["intent"], "delegate");
+                    (
+                        200,
+                        json!({
+                            "name": "review-local",
+                            "visiblePrompt": "/review-local",
+                            "expandedPrompt": "Expanded review-local command body",
+                            "title": "Resolved title",
+                            "delegation": {
+                                "mode": "explorer",
+                                "writePolicy": { "kind": "isolatedWorktree", "ownedPaths": [] }
+                            }
+                        }),
+                    )
+                }
+                ("POST", "/api/sessions/session-parent/delegations") => {
+                    let body: Value = serde_json::from_str(&request.body)
+                        .expect("delegation body should be JSON");
+                    assert_eq!(body["prompt"], "Expanded review-local command body");
+                    assert_eq!(body["title"], "Explicit title");
+                    assert_eq!(body["mode"], "reviewer");
+                    assert_eq!(body.pointer("/writePolicy/kind"), Some(&json!("readOnly")));
+                    (
+                        200,
+                        json!({
+                            "delegation": {
+                                "id": "delegation-one",
+                                "status": "running"
+                            },
+                            "childSessionId": "session-child"
+                        }),
+                    )
+                }
+                other => panic!("unexpected request: {other:?}"),
+            }
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        bridge
+            .tool_spawn_session(json!({
+                "prompt": "/review-local",
+                "title": "Explicit title",
+                "mode": "reviewer",
+                "writePolicy": "readOnly"
+            }))
+            .expect("explicit spawn options should override resolved defaults");
+
+        server.join().expect("test server should join");
+        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
+    }
+
+    #[test]
+    fn delegation_mcp_spawn_session_rejects_empty_resolved_prompt() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
+            assert_eq!(request.method, "POST");
+            assert_eq!(
+                request.path,
+                "/api/sessions/session-parent/agent-commands/review-local/resolve"
+            );
+            (
+                200,
+                json!({
+                    "name": "review-local",
+                    "visiblePrompt": " ",
+                    "expandedPrompt": ""
+                }),
+            )
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let err = bridge
+            .tool_spawn_session(json!({
+                "prompt": "/review-local"
+            }))
+            .expect_err("empty resolved prompts should be rejected before spawning");
+
+        assert!(err
+            .to_string()
+            .contains("agent command `review-local` resolved without prompt content"));
         server.join().expect("test server should join");
         assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
     }

@@ -62,6 +62,41 @@ fn assert_delegation_wait_response_serializes_queue_flags(
     assert!(value.get("resume_dispatch_requested").is_none());
 }
 
+#[test]
+fn delegation_prompt_marker_stays_in_sync_with_review_local_command() {
+    let record = DelegationRecord {
+        id: "delegation-marker-test".to_owned(),
+        parent_session_id: "session-parent".to_owned(),
+        child_session_id: "session-child".to_owned(),
+        mode: DelegationMode::Reviewer,
+        status: DelegationStatus::Running,
+        title: "Marker Test".to_owned(),
+        prompt: "/review-local".to_owned(),
+        cwd: "/tmp/termal-marker-test".to_owned(),
+        agent: Agent::Codex,
+        model: None,
+        write_policy: DelegationWritePolicy::ReadOnly,
+        created_at: stamp_now(),
+        started_at: Some(stamp_now()),
+        completed_at: None,
+        result: None,
+    };
+    let prompt = build_delegation_prompt(&record);
+    let review_local = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/.claude/commands/review-local.md"
+    ));
+
+    assert!(
+        prompt.contains(DELEGATED_CHILD_SESSION_MARKER),
+        "delegation runtime prompt must expose the delegated-session marker"
+    );
+    assert!(
+        review_local.contains(DELEGATED_CHILD_SESSION_MARKER),
+        "/review-local must key delegated-child mode off the emitted marker"
+    );
+}
+
 fn test_app_state_with_delegation_codex_runtime(
     runtime_id: &str,
 ) -> (AppState, mpsc::Receiver<CodexRuntimeCommand>) {

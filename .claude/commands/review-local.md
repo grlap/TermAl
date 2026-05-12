@@ -33,7 +33,7 @@ If there are no staged, unstaged, or untracked changes, tell the user and stop.
 
 Also run `git diff --name-only` and `git diff --cached --name-only` to get the list of changed tracked files.
 For untracked files, include the `git ls-files --others --exclude-standard` list in the reviewer prompt because untracked files do not appear in `git diff`.
-Do NOT read full file contents upfront — subagents will read files on-demand as needed. For untracked files, subagents must inspect file contents directly on demand.
+Do NOT read full file contents upfront — reviewers will read files on-demand as needed. For untracked files, reviewers must inspect file contents directly on demand.
 
 ## Step 3: Discover reviewers
 
@@ -43,9 +43,13 @@ Read each file to get:
 - The reviewer name (from the filename, e.g., `rust.md` → "Rust")
 - The review instructions (the file content)
 
-## Step 4: Run reviewers in parallel
+## Step 4: Run reviewers
 
-For each reviewer found in Step 3, launch a **Task agent** (subagent_type: general-purpose) with this prompt:
+If this command is running inside a TermAl delegated child reviewer session, identified by the injected prompt block `You are a delegated child session for TermAl delegation`, do **not** launch Claude Task agents, Codex subagents, shell-launched agents, TermAl nested delegations via `termal_spawn_session`, or any other nested reviewer process. In that mode, run each reviewer lens yourself in this same session using the prompt below as the lens checklist. This keeps `/review-with-delegate` as a two-child TermAl delegation flow instead of recursively spawning reviewer trees that are invisible to the parent fan-in.
+
+If this command is running in a normal writable parent session, run all reviewer lenses in parallel when the host agent provides a native parallel Task-agent facility. If no such facility is available, run the lenses yourself sequentially in the same session.
+
+For each reviewer found in Step 3, use this prompt:
 
 ```
 You are a code reviewer focusing on: [REVIEWER NAME]
@@ -109,7 +113,7 @@ If no issues found, say "No issues found."
 **Summary:** [1-2 sentence overall assessment]
 ```
 
-Run ALL reviewer agents in parallel using multiple Task tool calls in a single message.
+In parent sessions with native Task-agent support, run ALL reviewer agents in parallel using multiple Task tool calls in a single message. In TermAl delegated child reviewer sessions, do not use Task tool calls or TermAl delegation MCP tools; execute the same lenses inline and report that nested reviewer spawning was intentionally skipped.
 
 ## Step 5: Consolidate
 

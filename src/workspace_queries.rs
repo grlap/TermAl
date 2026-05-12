@@ -135,14 +135,28 @@ impl AppState {
             )
         };
 
-        let filesystem_commands = read_claude_agent_commands(FsPath::new(&session.workdir))?;
-        let commands = if session.agent == Agent::Claude {
-            merge_agent_commands(&cached_agent_commands, &filesystem_commands)
-        } else {
-            filesystem_commands
-        };
+        let commands = self.list_agent_commands_for_workdir(
+            &session,
+            FsPath::new(&session.workdir),
+            Some(&cached_agent_commands),
+        )?;
 
         Ok(AgentCommandsResponse { commands })
+    }
+
+    fn list_agent_commands_for_workdir(
+        &self,
+        session: &Session,
+        workdir: &FsPath,
+        cached_agent_commands: Option<&[AgentCommand]>,
+    ) -> Result<Vec<AgentCommand>, ApiError> {
+        let filesystem_commands = read_claude_agent_commands(workdir)?;
+        match (session.agent, cached_agent_commands) {
+            (Agent::Claude, Some(cached_agent_commands)) => {
+                Ok(merge_agent_commands(cached_agent_commands, &filesystem_commands))
+            }
+            _ => Ok(filesystem_commands),
+        }
     }
 
     /// Resolves a discovered agent command into the concrete payload used by
@@ -162,21 +176,44 @@ impl AppState {
             return self.proxy_remote_resolve_agent_command(session_id, command_name, request);
         }
 
-        let session = {
+        let (session, project, cached_agent_commands) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
-            inner.sessions[index].session.clone()
+            let session = inner.sessions[index].session.clone();
+            let cached_agent_commands = inner.sessions[index].agent_commands.clone();
+            let project = session
+                .project_id
+                .as_deref()
+                .map(|project_id| {
+                    inner.find_project(project_id).cloned().ok_or_else(|| {
+                        ApiError::bad_request(format!("unknown project `{project_id}`"))
+                    })
+                })
+                .transpose()?;
+            (session, project, cached_agent_commands)
         };
+        let resolve_workdir = resolve_agent_command_workdir(&session, project.as_ref(), &request)?;
+        // Claude runtime commands are scoped to the parent session workdir. Keep
+        // them only when the requested cwd resolves back to that same directory.
+        let include_project_scoped_cache =
+            agent_command_workdirs_match(&resolve_workdir, &session.workdir);
+        let cached_agent_commands = cached_agent_commands_for_workdir(
+            &cached_agent_commands,
+            include_project_scoped_cache,
+        );
         let command = self
-            .list_agent_commands(session_id)?
-            .commands
+            .list_agent_commands_for_workdir(
+                &session,
+                FsPath::new(&resolve_workdir),
+                Some(&cached_agent_commands),
+            )?
             .into_iter()
             .find(|command| command.name.eq_ignore_ascii_case(command_name))
             .ok_or_else(|| ApiError::not_found("agent command not found"))?;
         let metadata =
-            read_agent_command_resolver_metadata(FsPath::new(&session.workdir), &command)?;
+            read_agent_command_resolver_metadata(FsPath::new(&resolve_workdir), &command)?;
 
         resolve_agent_command_payload(command, request, metadata)
     }
@@ -204,6 +241,56 @@ impl AppState {
 
         search_instruction_phrase(FsPath::new(&session.workdir), query)
     }
+}
+
+fn resolve_agent_command_workdir(
+    session: &Session,
+    project: Option<&Project>,
+    request: &ResolveAgentCommandRequest,
+) -> Result<String, ApiError> {
+    let Some(cwd) = request.cwd.as_deref() else {
+        return Ok(session.workdir.clone());
+    };
+    if request.intent != AgentCommandResolveIntent::Delegate {
+        return Err(ApiError::bad_request(
+            "agent command cwd override is only supported for delegation",
+        ));
+    }
+    let resolved = resolve_session_workdir(cwd)?;
+    if let Some(project) = project {
+        if project.remote_id != LOCAL_REMOTE_ID {
+            return Err(ApiError::from_status(
+                StatusCode::NOT_IMPLEMENTED,
+                "delegation command resolution for remote-backed projects is not implemented in Phase 1",
+            ));
+        }
+        if !path_contains(&project.root_path, FsPath::new(&resolved)) {
+            return Err(ApiError::bad_request(format!(
+                "agent command cwd `{resolved}` must stay inside project `{}`",
+                project.name
+            )));
+        }
+    }
+    Ok(resolved)
+}
+
+fn agent_command_workdirs_match(left: &str, right: &str) -> bool {
+    normalize_path_best_effort(FsPath::new(left)) == normalize_path_best_effort(FsPath::new(right))
+}
+
+fn cached_agent_commands_for_workdir(
+    cached_agent_commands: &[AgentCommand],
+    include_project_scoped: bool,
+) -> Vec<AgentCommand> {
+    cached_agent_commands
+        .iter()
+        .filter(|command| {
+            include_project_scoped
+                || (command.kind == AgentCommandKind::NativeSlash
+                    && command.source != "Claude project command")
+        })
+        .cloned()
+        .collect()
 }
 
 fn resolve_agent_command_payload(
@@ -269,7 +356,11 @@ fn validate_resolve_agent_command_request(
         request.note.as_deref(),
         "note",
         MAX_AGENT_COMMAND_NOTE_BYTES,
-    )
+    )?;
+    if let Some(cwd) = request.cwd.as_deref() {
+        validate_delegation_cwd_input(cwd)?;
+    }
+    Ok(())
 }
 
 fn validate_agent_command_text_field(

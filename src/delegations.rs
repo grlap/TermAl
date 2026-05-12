@@ -18,6 +18,8 @@ const MAX_DELEGATION_TITLE_CHARS: usize = 200;
 // prompt payloads. Keep in sync with `MAX_DELEGATION_MODEL_CHARS` in
 // `ui/src/delegation-commands.ts`.
 const MAX_DELEGATION_MODEL_CHARS: usize = 200;
+// CWD is path metadata; cap it before canonicalization or persistence.
+const MAX_DELEGATION_CWD_CHARS: usize = 4096;
 // Public summaries ride in `/api/state`; full summaries stay behind result reads.
 const MAX_DELEGATION_PUBLIC_SUMMARY_CHARS: usize = 1000;
 // Result packets are expected near the end of long assistant output.
@@ -34,6 +36,8 @@ const MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES: usize = 64 * 1024;
 const MAX_ISOLATED_WORKTREE_PATCH_BYTES: usize = 16 * 1024 * 1024;
 const DELEGATION_WAIT_RESUME_TRUNCATED_MARKER: &str =
     "\n\n[TermAl truncated this delegation fan-in prompt. Open the child sessions for full results.]";
+const DELEGATED_CHILD_SESSION_MARKER: &str =
+    "You are a delegated child session for TermAl delegation";
 // Shared conflict text for create/cancel races before child dispatch starts.
 const DELEGATION_NO_LONGER_STARTABLE_MESSAGE: &str = "delegation is no longer running";
 #[cfg(test)]
@@ -1466,7 +1470,7 @@ impl AppState {
 fn build_delegation_prompt(record: &DelegationRecord) -> String {
     let write_policy = delegation_prompt_write_policy(&record.write_policy);
     format!(
-        "You are a delegated child session for TermAl delegation `{}`.\n\
+        "{} `{}`.\n\
 \n\
 Mode: {:?}\n\
 Parent session: `{}`\n\
@@ -1482,6 +1486,7 @@ Final answer requirements:\n\
 - Include `Status: completed` or `Status: failed`.\n\
 - Include a concise `Summary:` section.\n\
 - Include `Findings:`, `Commands Run:`, and `Files Inspected:` sections, using `- None` when empty.",
+        DELEGATED_CHILD_SESSION_MARKER,
         record.id,
         record.mode,
         record.parent_session_id,
@@ -2451,6 +2456,11 @@ fn delegation_is_terminal(status: DelegationStatus) -> bool {
 }
 
 fn validate_delegation_cwd_input(cwd: &str) -> Result<(), ApiError> {
+    if cwd.chars().count() > MAX_DELEGATION_CWD_CHARS {
+        return Err(ApiError::bad_request(format!(
+            "delegation cwd must be at most {MAX_DELEGATION_CWD_CHARS} characters"
+        )));
+    }
     #[cfg(windows)]
     {
         let trimmed = cwd.trim();

@@ -11,7 +11,7 @@ Review current staged and unstaged changes by delegating `/review-local` to both
 
 **IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) may only be used when the current session write policy allows workspace mutation.**
 
-**IMPORTANT: This command must use TermAl MCP delegation tools to create the two top-level reviewer sessions. Do NOT use raw `claude -p`, Codex platform subagents, Claude Task agents, shell polling, raw HTTP, or any non-TermAl MCP review path to spawn or wait for those top-level reviewers. The delegated child sessions may execute `/review-local` using that command's own documented internal review workflow. If the required TermAl MCP tools are unavailable, stop and report that `/review-with-delegate` requires the TermAl delegation MCP bridge.**
+**IMPORTANT: This command must use TermAl MCP delegation tools to attempt exactly two reviewer session spawns. Do NOT use raw `claude -p`, Codex platform subagents, Claude Task agents, shell polling, raw HTTP, nested TermAl delegations, or any non-TermAl MCP review path to spawn or wait for reviewers. The delegated child sessions execute `/review-local` in read-only TermAl reviewer mode, where nested reviewer spawning is explicitly disabled. If the required TermAl MCP tools are unavailable, stop and report that `/review-with-delegate` requires the TermAl delegation MCP bridge.**
 
 Required MCP tools:
 - `termal_spawn_session`

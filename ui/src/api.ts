@@ -461,6 +461,8 @@ export type ResolveAgentCommandIntent = "send" | "delegate";
 export type ResolveAgentCommandRequest = {
   arguments?: string;
   note?: string;
+  /** Delegation-only working directory override; backend rejects this for send intent. */
+  cwd?: string;
   intent?: ResolveAgentCommandIntent;
 };
 
