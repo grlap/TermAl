@@ -3759,6 +3759,94 @@ fn shared_codex_turn_started_notification_does_not_restore_pending_state() {
         .unwrap();
 }
 
+// Pins that shared Codex thread setup includes TermAl's parent-scoped
+// delegation MCP bridge in the app-server `thread/start` config. This is the
+// hook that makes `/review-with-delegate` available inside Codex sessions.
+#[test]
+fn shared_codex_thread_start_includes_delegation_mcp_config() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _runtime_input_rx, process) =
+        test_shared_codex_runtime("shared-codex-thread-start-mcp-config");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let mut writer = Vec::new();
+    let (input_tx, input_rx) = mpsc::channel::<CodexRuntimeCommand>();
+
+    handle_shared_codex_prompt_command(
+        &mut writer,
+        &pending_requests,
+        &state,
+        &runtime.runtime_id,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &input_tx,
+        &session_id,
+        CodexPromptCommand {
+            approval_policy: CodexApprovalPolicy::Never,
+            attachments: Vec::new(),
+            cwd: "/tmp".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            prompt: "start the turn".to_owned(),
+            reasoning_effort: CodexReasoningEffort::Medium,
+            resume_thread_id: None,
+            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        },
+    )
+    .unwrap();
+
+    let written = String::from_utf8(writer).expect("Codex request should be UTF-8");
+    assert!(
+        written.contains("\"method\":\"thread/start\""),
+        "thread/start request should be written\n{written}"
+    );
+    assert!(
+        written.contains("\"mcp_servers\"")
+            && written.contains("\"termal-delegation\"")
+            && written.contains("\"delegation-mcp\"")
+            && written.contains("\"--parent-session-id\"")
+            && written.contains(&format!("\"{}\"", session_id)),
+        "thread/start should include the parent-scoped TermAl delegation MCP bridge\n{written}"
+    );
+
+    let (_request_id, sender) =
+        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    sender
+        .send(Ok(json!({
+            "thread": {
+                "id": "conversation-mcp-config"
+            }
+        })))
+        .expect("thread/start response should send");
+
+    match input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("thread setup should queue StartTurnAfterSetup")
+    {
+        CodexRuntimeCommand::StartTurnAfterSetup { thread_id, .. } => {
+            assert_eq!(thread_id, "conversation-mcp-config");
+        }
+        _ => panic!("expected StartTurnAfterSetup"),
+    }
+}
+
 // Pins that if the StartTurnAfterSetup channel hand-off fails (input_rx
 // dropped), the provisional thread registration is rolled back: runtime
 // cleared, external_session_id cleared, shared thread_id cleared, and the
