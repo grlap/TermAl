@@ -74,32 +74,6 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 - Move the token to an OS secret store, or keep token configuration env-only until protected storage exists.
 - If file persistence stays, add explicit Windows ACL handling and document backup/sync exposure.
 
-## Test bypasses internal mutation invariants for `wire_sessions_expose_remote_owner_metadata`
-
-**Severity:** Note - `src/state_accessors.rs:200-242`. The new test reaches into `state.inner.lock()` and directly mutates `inner.sessions[index].remote_id`. The test bypasses any normal mutation path (`session_mut_*`), so it doesn't exercise the mutation-stamp bookkeeping that real remote-proxy ingestion goes through.
-
-**Current behavior:**
-- Test directly mutates record fields.
-- No public ingestion path exercised.
-
-**Proposal:**
-- Drive the same scenario through a public ingestion path (e.g., feed a remote state snapshot via `apply_remote_state_snapshot`).
-
-## Cross-remote `remote_id` information leak in wire responses to remotes
-
-**Severity:** Low - `src/wire.rs:490-491`, `src/state_accessors.rs:267`. Adding `remote_id: Option<String>` to wire Session means the field is now in every API response that returns a Session, including `/api/state`, session responses, SSE `SessionCreated` payloads, and responses we serve to remotes. If we proxy a session for remote A and remote B asks us for that proxy session, the wire would emit `remote_id: "remote-a-id"`, leaking our naming for A to B.
-
-The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but it's now visible across remotes. Phase 1 trust model may waive this.
-
-**Current behavior:**
-- `remote_id` exposed in broad wire Session responses.
-- `localize_remote_session` clears the field on inbound (correct).
-- Outbound responses to remotes still include OUR alias for OTHER remotes.
-
-**Proposal:**
-- When serving wire Sessions to remotes (vs. to local UI), strip the `remote_id` field.
-- Or explicitly document that local remote aliases/session-to-remote ownership are non-sensitive shared metadata under the Phase 1 trust model.
-
 ## `markUserScroll` anchor speculation captures approximate touch offsets
 
 **Severity:** Medium - speculative offset adjustment `viewportOffsetPx - inputScrollDeltaY` applied unconditionally on every input event. For touch events, `touchDeltaY` is the FINGER delta (not the scroll delta). When user touches a non-scrollable region, swipes within an iframe, or hits a scroll boundary, the anchor's `viewportOffsetPx` ends up off by the would-be delta.

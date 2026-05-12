@@ -209,29 +209,69 @@ mod visible_session_hydration_error_tests {
         )
         .expect("test state should initialize");
 
-        let (remote_session_id, local_session_id) = {
-            let mut inner = state.inner.lock().expect("state mutex poisoned");
-            let remote_record = inner.create_session(
-                Agent::Codex,
-                Some("Remote Proxy".to_owned()),
-                root.path().to_string_lossy().into_owned(),
-                None,
-                None,
-            );
-            let remote_session_id = remote_record.session.id.clone();
+        let local_session_id = state
+            .create_session(CreateSessionRequest {
+                name: Some("Local Session".to_owned()),
+                agent: Some(Agent::Codex),
+                workdir: Some(root.path().to_string_lossy().into_owned()),
+                project_id: None,
+                model: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+            })
+            .expect("local session should be created")
+            .session_id;
+        let remote_session = Session {
+            id: "remote-session-1".to_owned(),
+            name: "Remote Proxy".to_owned(),
+            emoji: Agent::Codex.avatar().to_owned(),
+            agent: Agent::Codex,
+            workdir: root.path().to_string_lossy().into_owned(),
+            project_id: None,
+            remote_id: Some("untrusted-upstream-remote".to_owned()),
+            model: Agent::Codex.default_model().to_owned(),
+            model_options: Vec::new(),
+            approval_policy: Some(default_codex_approval_policy()),
+            reasoning_effort: Some(default_codex_reasoning_effort()),
+            sandbox_mode: Some(default_codex_sandbox_mode()),
+            cursor_mode: None,
+            claude_effort: None,
+            claude_approval_mode: None,
+            gemini_approval_mode: None,
+            external_session_id: None,
+            agent_commands_revision: 0,
+            codex_thread_state: None,
+            status: SessionStatus::Idle,
+            preview: "Remote session ready.".to_owned(),
+            messages: Vec::new(),
+            messages_loaded: true,
+            message_count: 0,
+            markers: Vec::new(),
+            pending_prompts: Vec::new(),
+            session_mutation_stamp: Some(7),
+            parent_delegation_id: None,
+        };
+        state
+            .apply_remote_delta_event(
+                "ssh-lab",
+                DeltaEvent::SessionCreated {
+                    revision: 1,
+                    session_id: remote_session.id.clone(),
+                    session: remote_session,
+                },
+            )
+            .expect("remote session-created delta should localize");
+        let remote_session_id = {
+            let inner = state.inner.lock().expect("state mutex poisoned");
             let index = inner
-                .find_session_index(&remote_session_id)
-                .expect("created session should exist");
-            inner.sessions[index].remote_id = Some("ssh-lab".to_owned());
-            inner.sessions[index].remote_session_id = Some("remote-session-1".to_owned());
-            let local_record = inner.create_session(
-                Agent::Codex,
-                Some("Local Session".to_owned()),
-                root.path().to_string_lossy().into_owned(),
-                None,
-                None,
-            );
-            (remote_session_id, local_record.session.id.clone())
+                .find_remote_session_index("ssh-lab", "remote-session-1")
+                .expect("localized remote session should exist");
+            inner.sessions[index].session.id.clone()
         };
 
         let summary = state.summary_snapshot();

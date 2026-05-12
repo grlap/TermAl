@@ -562,6 +562,17 @@ remote-native ids in runtime/persisted mapping fields such as
 The browser should treat those local ids as canonical. Remote-native ids remain
 an internal proxying detail.
 
+`Session.remoteId` is browser-facing ownership metadata. In the current
+Phase 1 SSH model it is intentionally treated as non-secret shared control-plane
+metadata: every configured remote is a TermAl backend reached through a
+user-managed SSH trust relationship, and remote aliases such as `ssh-lab` are
+local routing labels rather than credentials. Remote backends must still discard
+untrusted inbound `Session.remoteId` values when localizing snapshots or deltas;
+the field is authoritative only when projected from local `SessionRecord`
+metadata. If TermAl later supports untrusted remotes, shared multi-user remotes,
+or public HTTP exposure, add a caller-aware wire projection that strips
+`Session.remoteId` from responses served to those remotes.
+
 ### State and Event Aggregation
 
 The browser consumes one state stream from the local control plane.
