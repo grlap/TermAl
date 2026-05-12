@@ -250,23 +250,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 - Throttle via rAF.
 - OR only capture when prepend is imminent.
 
-## Delegation result formatting remains coupled to command transport
-
-**Severity:** Low - the hook at `ui/src/SessionPaneView.render-callbacks.tsx:13-20` imports `delegation-commands` and `delegation-result-prompt` directly, and the pure formatter at `ui/src/delegation-result-prompt.ts:11` imports `DelegationResultPacket` from `delegation-commands`.
-
-The formatter now uses the stricter packet shape, which fixed the prior type-drift issue, but the dependency still points from pure prompt formatting into command transport. A future refactor to swap delegation transports requires re-wiring both the hook and the formatter.
-
-**Current behavior:**
-- Hook directly imports network-API module.
-- Formatter imports a transport-owned packet type.
-- Tests must mock the imports at the module level.
-- Future transport swap requires hook rewrite.
-
-**Proposal:**
-- Pass `delegationActions: { open, insert, cancel }` as hook props (defaulting to the production wrappers in `SessionPaneView.tsx`).
-- Move `DelegationResultPacket` to a neutral shared module such as `types.ts` or `delegation-result-types.ts`.
-- Or expose a `DelegationActionContext` provider so consumers can override.
-
 ## "in-flight Telegram test unmounts" test asserts only `consoleError`, doesn't actually pin the unmount guard
 
 **Severity:** Medium - React 18+ removed the "Can't perform a state update on an unmounted component" warning entirely, so removing the `isMountedRef` checks would not cause the test to fail.

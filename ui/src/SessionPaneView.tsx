@@ -176,7 +176,10 @@ import {
   useSessionRenderCallbacks,
 } from "./SessionPaneView.render-callbacks";
 import {
+  cancelDelegationCommand,
   createComposerDelegationRequest,
+  getDelegationResultCommand,
+  getDelegationStatusCommand,
   resolveComposerDelegationAvailability,
   spawnDelegationCommand,
   type CreateComposerDelegationOptions,
@@ -2708,6 +2711,15 @@ export function SessionPaneView({
     return decoration ? { [activeSourceTab.id]: decoration } : {};
   }, [activeSourceTab, fileState, sourceEditorDirty]);
 
+  const delegationActions = useMemo(
+    () => ({
+      cancel: cancelDelegationCommand,
+      getResult: getDelegationResultCommand,
+      getStatus: getDelegationStatusCommand,
+    }),
+    [],
+  );
+
   const {
     renderSessionCommandCard,
     renderSessionDiffCard,
@@ -2722,6 +2734,7 @@ export function SessionPaneView({
     latestAssistantMessageId,
     streamingAssistantTextMessageId,
     modelOptionsError,
+    delegationActions,
     enableLocalDelegationActions,
     onArchiveCodexThread,
     onCompactCodexThread,

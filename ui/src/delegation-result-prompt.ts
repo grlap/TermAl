@@ -8,7 +8,7 @@ import type {
   DelegationCommandResult,
   DelegationFinding,
 } from "./types";
-import type { DelegationResultPacket } from "./delegation-commands";
+import type { DelegationResultPacket } from "./delegation-result-types";
 
 export type DelegationPromptResult = Pick<
   DelegationResultPacket,

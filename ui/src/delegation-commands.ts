@@ -35,8 +35,6 @@ import {
   type WaitDelegationErrorPacket,
 } from "./delegation-error-packets";
 import type {
-  DelegationCommandResult,
-  DelegationFinding,
   DelegationRecord,
   DelegationResult,
   DelegationSummary,
@@ -44,6 +42,7 @@ import type {
   Project,
   Session,
 } from "./types";
+import type { DelegationResultPacket } from "./delegation-result-types";
 
 export type {
   MixedServerInstanceRecoveryGroup,
@@ -233,18 +232,7 @@ export type DelegationStatusCommandResult = {
   serverInstanceId: string;
 };
 
-export type DelegationResultPacket = {
-  delegationId: string;
-  childSessionId: string;
-  status: DelegationStatus;
-  summary: string;
-  findings: DelegationFinding[];
-  changedFiles: string[];
-  commandsRun: DelegationCommandResult[];
-  notes: string[];
-  revision: number;
-  serverInstanceId: string;
-};
+export type { DelegationResultPacket } from "./delegation-result-types";
 
 export type WaitDelegationsOutcome = "completed" | "timeout" | "error";
 

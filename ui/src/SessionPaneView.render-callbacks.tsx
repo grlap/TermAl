@@ -11,13 +11,9 @@ import { useCallback, useEffect, useRef } from "react";
 import { type OpenPathOptions } from "./api";
 import { getErrorMessage } from "./app-utils";
 import {
-  cancelDelegationCommand,
-  getDelegationResultCommand,
-  getDelegationStatusCommand,
-} from "./delegation-commands";
-import {
   formatDelegationResultPrompt,
 } from "./delegation-result-prompt";
+import type { DelegationResultPacket } from "./delegation-result-types";
 import {
   CodexPromptSettingsCard,
   ClaudePromptSettingsCard,
@@ -131,6 +127,7 @@ type UseSessionRenderCallbacksParams = {
   modelOptionsError: string | null;
   // Local delegation affordances are intentionally all-or-nothing: Open,
   // Insert, and Cancel share the same local-runtime routing gate.
+  delegationActions: DelegationCardActions;
   enableLocalDelegationActions: boolean;
   onArchiveCodexThread: (sessionId: string) => void;
   onCompactCodexThread: (sessionId: string) => void;
@@ -169,6 +166,30 @@ type UseSessionRenderCallbacksParams = {
   sessionSettingNotice: string | null;
 };
 
+export type DelegationCardStatusResult = {
+  delegation?: unknown;
+  delegationId?: string;
+  childSessionId: string;
+  revision?: number;
+  serverInstanceId?: string;
+  status: DelegationStatus;
+};
+
+export type DelegationCardActions = {
+  getStatus: (
+    parentSessionId: string,
+    delegationId: string,
+  ) => Promise<DelegationCardStatusResult>;
+  getResult: (
+    parentSessionId: string,
+    delegationId: string,
+  ) => Promise<DelegationResultPacket>;
+  cancel: (
+    parentSessionId: string,
+    delegationId: string,
+  ) => Promise<DelegationCardStatusResult>;
+};
+
 export function useSessionRenderCallbacks({
   activeSession,
   activeSessionSearchMatchItemKey,
@@ -178,6 +199,7 @@ export function useSessionRenderCallbacks({
   latestAssistantMessageId,
   streamingAssistantTextMessageId,
   modelOptionsError,
+  delegationActions,
   enableLocalDelegationActions,
   onArchiveCodexThread,
   onCompactCodexThread,
@@ -256,7 +278,7 @@ export function useSessionRenderCallbacks({
       const operationGeneration = activeSessionGenerationRef.current;
       return (async () => {
         try {
-          const response = await getDelegationStatusCommand(
+          const response = await delegationActions.getStatus(
             parentSessionId,
             delegationId,
           );
@@ -294,6 +316,7 @@ export function useSessionRenderCallbacks({
     [
       activeSession?.id,
       canApplyDelegationActionResult,
+      delegationActions,
       onComposerError,
       onOpenConversationFromDiff,
       paneId,
@@ -311,7 +334,7 @@ export function useSessionRenderCallbacks({
       const operationGeneration = activeSessionGenerationRef.current;
       return (async () => {
         try {
-          const result = await getDelegationResultCommand(
+          const result = await delegationActions.getResult(
             parentSessionId,
             delegationId,
           );
@@ -349,6 +372,7 @@ export function useSessionRenderCallbacks({
     [
       activeSession?.id,
       canApplyDelegationActionResult,
+      delegationActions,
       onComposerError,
       onInsertReviewIntoPrompt,
       paneId,
@@ -366,7 +390,7 @@ export function useSessionRenderCallbacks({
       const operationGeneration = activeSessionGenerationRef.current;
       return (async () => {
         try {
-          const response = await cancelDelegationCommand(
+          const response = await delegationActions.cancel(
             parentSessionId,
             delegationId,
           );
@@ -398,7 +422,12 @@ export function useSessionRenderCallbacks({
         }
       })();
     },
-    [activeSession?.id, canApplyDelegationActionResult, onComposerError],
+    [
+      activeSession?.id,
+      canApplyDelegationActionResult,
+      delegationActions,
+      onComposerError,
+    ],
   );
   const canExposeLocalDelegationActions =
     enableLocalDelegationActions &&

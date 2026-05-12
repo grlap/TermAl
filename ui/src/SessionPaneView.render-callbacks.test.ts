@@ -11,22 +11,16 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement, StrictMode, type ReactNode } from "react";
 import {
-  cancelDelegationCommand,
-  getDelegationResultCommand,
-  getDelegationStatusCommand,
-} from "./delegation-commands";
-import {
+  type DelegationCardActions,
   shouldPreferStreamingAssistantTextRender,
   streamingAssistantTextMessageIdForSession,
   useSessionRenderCallbacks,
 } from "./SessionPaneView.render-callbacks";
 import type { Message, Session } from "./types";
 
-vi.mock("./delegation-commands", () => ({
-  cancelDelegationCommand: vi.fn(),
-  getDelegationResultCommand: vi.fn(),
-  getDelegationStatusCommand: vi.fn(),
-}));
+const getDelegationStatusCommand = vi.fn<DelegationCardActions["getStatus"]>();
+const getDelegationResultCommand = vi.fn<DelegationCardActions["getResult"]>();
+const cancelDelegationCommand = vi.fn<DelegationCardActions["cancel"]>();
 
 afterEach(() => {
   cleanup();
@@ -105,6 +99,11 @@ function makeRenderCallbackParams(
     latestAssistantMessageId: null,
     streamingAssistantTextMessageId: null,
     modelOptionsError: null,
+    delegationActions: {
+      cancel: cancelDelegationCommand,
+      getResult: getDelegationResultCommand,
+      getStatus: getDelegationStatusCommand,
+    },
     enableLocalDelegationActions: true,
     onArchiveCodexThread: vi.fn(),
     onCompactCodexThread: vi.fn(),
