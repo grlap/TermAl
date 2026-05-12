@@ -493,21 +493,6 @@ The formatter now uses the stricter packet shape, which fixed the prior type-dri
 **Proposal:**
 - Extract Telegram settings UI and its fetch/save/test hook into a dedicated preferences or telegram-settings module.
 
-## Active-transcript tail-window hook overlaps with `VirtualizedConversationMessageList`'s bottom-mount path
-
-**Severity:** Medium - two layers (panel + virtualizer) gate "skip work for the tail" with different thresholds and different effects on dependent UI.
-
-`ui/src/panels/AgentSessionPanel.tsx:175-286 useInitialActiveTranscriptMessages` windows messages to the last 96 before passing them to `ConversationMessageList` → `VirtualizedConversationMessageList`. The virtualizer's `preferInitialEstimatedBottomViewport` (round 53 addition) mounts the bottom range without rendering all messages above. The hook drops messages from React's perspective entirely (so `messageCount` becomes 0 → overview rail hides via `messageCount: isInitialTranscriptWindowActive ? 0 : visibleMessages.length` at line 804), while the virtualizer would just not mount unused slabs. A future reader changing the threshold has two places to keep in sync.
-
-**Current behavior:**
-- Hook drops messages above a 512-message session threshold, returning a 96-message tail.
-- Virtualizer mounts only the bottom-of-viewport range via `preferInitialEstimatedBottomViewport`.
-- Overview-rail gating uses `messageCount: 0` when the hook is windowing, hiding the rail.
-
-**Proposal:**
-- Move all "long session initial mount" logic into the virtualizer alone, then drop the hook.
-- Or document the layer split with a header comment naming which problem each layer owns and why two layers exist.
-
 ## Telegram settings HTTP API split across three routes diverges from `/api/settings` convention
 
 **Severity:** Medium - every other settings surface uses `POST /api/settings` returning `StateResponse` with SSE broadcast; Telegram uses `GET /api/telegram/status` + `POST /api/telegram/config` + `POST /api/telegram/test` returning `TelegramStatusResponse` with no broadcast.

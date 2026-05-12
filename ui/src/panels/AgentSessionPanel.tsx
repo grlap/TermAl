@@ -547,6 +547,9 @@ function isTranscriptDemandKeyEventInScope(
   return event.target instanceof Node && scrollNode.contains(event.target);
 }
 
+// This panel-level tail window avoids building React elements for hundreds of
+// offscreen messages on first paint. The virtualizer still owns mounted page
+// bands and scroll positioning once the full transcript is available.
 function useInitialActiveTranscriptMessages({
   hasConversationMarkers,
   hasConversationSearch,
