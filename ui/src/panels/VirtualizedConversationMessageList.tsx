@@ -177,6 +177,7 @@ const POST_ACTIVATION_ESTIMATED_BOTTOM_MIN_PAGES = 20;
 const ACTIVE_SCROLL_MOUNTED_RANGE_COLLAPSE_EXTRA_PAGES = 12;
 const ACTIVE_SCROLL_MOUNTED_RANGE_COLLAPSE_MULTIPLIER = 2;
 export const VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS = 200;
+const PREPENDED_MESSAGE_ANCHOR_RESTORE_ATTEMPTS = 3;
 // Separate, much shorter cooldown for the deferred-heavy-content (Markdown,
 // tool blocks) activation gate. Heavy content paint should resume almost
 // immediately after the user stops scrolling, while the broader scroll-state
@@ -1551,7 +1552,7 @@ export function VirtualizedConversationMessageList({
       preservedAnchor && !shouldPreserveBottomGapAfterPrepend
         ? {
             ...preservedAnchor,
-            remainingAttempts: 3,
+            remainingAttempts: PREPENDED_MESSAGE_ANCHOR_RESTORE_ATTEMPTS,
           }
         : null;
 
@@ -1627,13 +1628,15 @@ export function VirtualizedConversationMessageList({
       pendingAnchor.messageId,
     );
     if (!anchorSlot) {
-      pendingPrependedMessageAnchorRef.current =
-        pendingAnchor.remainingAttempts > 1
-          ? {
-              ...pendingAnchor,
-              remainingAttempts: pendingAnchor.remainingAttempts - 1,
-            }
-          : null;
+      if (pendingAnchor.remainingAttempts > 1) {
+        pendingPrependedMessageAnchorRef.current = {
+          ...pendingAnchor,
+          remainingAttempts: pendingAnchor.remainingAttempts - 1,
+        };
+      } else {
+        pendingPrependedMessageAnchorRef.current = null;
+        latestVisibleMessageAnchorRef.current = null;
+      }
       return;
     }
 

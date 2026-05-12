@@ -74,21 +74,6 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 - Move the token to an OS secret store, or keep token configuration env-only until protected storage exists.
 - If file persistence stays, add explicit Windows ACL handling and document backup/sync exposure.
 
-## `pendingPrependedMessageAnchorRef.remainingAttempts = 3` magic number with no telemetry on exhaustion
-
-**Severity:** Medium - if the anchor never re-mounts (e.g., user scrolls away during chained re-renders), `remainingAttempts` decrements to 0 and gives up — leaving `latestVisibleMessageAnchorRef` stale. No log when this exhausts.
-
-`ui/src/panels/VirtualizedConversationMessageList.tsx:1523-1529`. 3 is arbitrary with no test pinning the boundary.
-
-**Current behavior:**
-- Three retry attempts.
-- Silent exhaustion if all fail.
-- No telemetry signal.
-
-**Proposal:**
-- Log when exhaustion occurs, OR
-- Make the anchor invalidate on user-scroll inside the followup effect.
-
 ## `latestVisibleMessageAnchorRef` capture re-runs on every native scroll tick
 
 **Severity:** Medium - useLayoutEffect deps include `viewportScrollTop` (state). On every native scroll tick the viewport state updates → effect re-runs → `getBoundingClientRect()` over all mounted slots. For a 600+ message tail with mounted range covering 50+ slots, this is per-scroll-tick rect reads.
