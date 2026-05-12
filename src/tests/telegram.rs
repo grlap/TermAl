@@ -5726,6 +5726,44 @@ fn telegram_token_mask_contract_limits_visible_suffix() {
     }
 }
 
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+#[test]
+#[ignore = "writes a disposable credential to the real OS store; run explicitly on Windows/macOS/Linux"]
+fn telegram_bot_token_native_credential_store_round_trips() {
+    let store = native_telegram_secret_store().expect("native credential store should initialize");
+    let user = format!(
+        "{TELEGRAM_BOT_TOKEN_KEYRING_USER_PREFIX}:platform-smoke:{}",
+        Uuid::new_v4()
+    );
+    let token = format!("123456:{}:{}", Uuid::new_v4(), Uuid::new_v4());
+    let entry = store
+        .build(TELEGRAM_BOT_TOKEN_KEYRING_SERVICE, &user, None)
+        .expect("TermAl Telegram token entry should be valid for the native store");
+
+    if let Err(err) = entry.delete_credential() {
+        assert!(
+            matches!(err, keyring_core::Error::NoEntry),
+            "pre-test credential cleanup should only fail for missing entry, got {err:?}"
+        );
+    }
+    entry
+        .set_password(&token)
+        .expect("native credential store should save Telegram token");
+    assert_eq!(
+        entry
+            .get_password()
+            .expect("native credential store should read saved Telegram token"),
+        token
+    );
+    entry
+        .delete_credential()
+        .expect("native credential store should delete smoke-test token");
+    assert!(
+        matches!(entry.get_password(), Err(keyring_core::Error::NoEntry)),
+        "deleted native credential should not remain readable"
+    );
+}
+
 #[test]
 fn telegram_test_rate_limit_rejects_immediate_retry() {
     let _rate_limit_lock = TELEGRAM_TEST_RATE_LIMIT_TEST_LOCK

@@ -895,7 +895,7 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2: Cover first-settled active-baseline same-message growth policy:
   pin the current conservative behavior and, if a future turn-boundary signal lands, add the positive forwarding case for same-message reply text already present on first settled poll.
 - [ ] P2: Add Telegram settings API/security regressions:
-  cover plaintext token-at-rest exposure, corrupt-backup permission hardening, and Windows ACL/secret-store fallback behavior.
+  cover plaintext token-at-rest exposure, corrupt-backup permission hardening, and credential-store failure/fallback behavior beyond the native-store smoke test.
 - [ ] P2: Cover post-validation Telegram settings sanitization:
   delete a project/session after validation but before the second sanitize path, or extract a deterministic helper seam, and assert the persisted response cannot retain stale references. The current stale-reference test at `src/tests/telegram.rs:1573` seeds invalid state before validation, so removing the post-validation sanitize in `src/telegram_settings.rs:73` would still pass.
 - [ ] P2: Add Telegram settings file concurrency regressions:

@@ -101,6 +101,22 @@ The runtime state contains fields such as:
 The full bot token is never returned through `/api/telegram/status` or persisted
 back to `telegram-bot.json`; status responses expose only a masked suffix.
 
+Platform credential-store coverage is split intentionally:
+
+- Normal backend tests use `keyring_core::mock` so they are deterministic and do
+  not write secrets to the developer machine.
+- The ignored smoke test
+  `telegram_bot_token_native_credential_store_round_trips` writes and deletes a
+  disposable entry in the real OS credential store through the same platform
+  store-selection helper used by production initialization. Run it explicitly on
+  Windows, macOS, or Linux with:
+
+```bash
+cargo test --bin termal telegram_bot_token_native_credential_store_round_trips -- --ignored
+```
+
+Linux runs require a usable desktop Secret Service/keyring session.
+
 ## HTTP Surface
 
 Current routes:

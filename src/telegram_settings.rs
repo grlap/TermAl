@@ -689,28 +689,33 @@ fn configure_telegram_secret_store() -> Result<(), ApiError> {
     Ok(())
 }
 
-#[cfg(all(not(test), windows))]
-fn configure_telegram_secret_store() -> Result<(), ApiError> {
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+type NativeTelegramSecretStore = std::sync::Arc<keyring_core::CredentialStore>;
+
+#[cfg(windows)]
+fn native_telegram_secret_store() -> keyring_core::Result<NativeTelegramSecretStore> {
     let config = HashMap::<&str, &str>::new();
-    let store = windows_native_keyring_store::Store::new_with_configuration(&config)
-        .map_err(|err| telegram_secret_store_error("initialize", err))?;
-    keyring_core::set_default_store(store);
-    Ok(())
+    Ok(windows_native_keyring_store::Store::new_with_configuration(&config)?)
 }
 
-#[cfg(all(not(test), target_os = "macos"))]
-fn configure_telegram_secret_store() -> Result<(), ApiError> {
+#[cfg(target_os = "macos")]
+fn native_telegram_secret_store() -> keyring_core::Result<NativeTelegramSecretStore> {
     let config = HashMap::<&str, &str>::new();
-    let store = apple_native_keyring_store::keychain::Store::new_with_configuration(&config)
-        .map_err(|err| telegram_secret_store_error("initialize", err))?;
-    keyring_core::set_default_store(store);
-    Ok(())
+    Ok(apple_native_keyring_store::keychain::Store::new_with_configuration(&config)?)
 }
 
-#[cfg(all(not(test), target_os = "linux"))]
-fn configure_telegram_secret_store() -> Result<(), ApiError> {
+#[cfg(target_os = "linux")]
+fn native_telegram_secret_store() -> keyring_core::Result<NativeTelegramSecretStore> {
     let config = HashMap::<&str, &str>::new();
-    let store = zbus_secret_service_keyring_store::Store::new_with_configuration(&config)
+    Ok(zbus_secret_service_keyring_store::Store::new_with_configuration(&config)?)
+}
+
+#[cfg(all(
+    not(test),
+    any(windows, target_os = "macos", target_os = "linux")
+))]
+fn configure_telegram_secret_store() -> Result<(), ApiError> {
+    let store = native_telegram_secret_store()
         .map_err(|err| telegram_secret_store_error("initialize", err))?;
     keyring_core::set_default_store(store);
     Ok(())
