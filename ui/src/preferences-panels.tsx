@@ -1624,7 +1624,9 @@ export function TelegramPreferencesPanel({
               onChange={(event) => updateDraft({ botToken: event.target.value })}
             />
             {hasSavedToken ? (
-              <p className="session-control-hint">Saved as {status?.botTokenMasked}.</p>
+              <p className="session-control-hint">
+                Stored in the OS credential store as {status?.botTokenMasked}.
+              </p>
             ) : null}
           </div>
 

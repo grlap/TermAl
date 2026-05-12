@@ -11,6 +11,7 @@ base64 = "0.22"
 chrono = { version = "0.4.42", default-features = true, features = ["clock"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 futures-core = "0.3"
+keyring-core = "1.0.0"
 notify = "8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -22,11 +23,18 @@ tower-http = { version = "0.6", features = ["cors", "fs"] }
 uuid = { version = "1.18.1", features = ["v4"] }
 zeroize = "1"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1.0.0", features = ["keychain"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus-secret-service-keyring-store = { version = "1.0.0", features = ["crypto-rust"] }
+
 [target.'cfg(not(windows))'.dependencies]
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.60.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-native-keyring-store = "1.0.0"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

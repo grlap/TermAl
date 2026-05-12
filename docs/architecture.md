@@ -201,7 +201,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/projects/{id}/actions/{action_id}` | Dispatch a digest action such as approve, continue, or stop |
 | POST | `/api/projects/pick` | Pick a local project root |
 | GET | `/api/telegram/status` | Read Telegram relay configuration/status -> `TelegramStatusResponse` with configured/enabled/running state, lifecycle, linked chat, masked token, subscribed projects, and default targets. |
-| POST | `/api/telegram/config` | Update Telegram relay token, enabled flag, subscribed projects, and default project/session. Returns sanitized `TelegramStatusResponse`; validation failures use the standard `{ "error": ... }` envelope. |
+| POST | `/api/telegram/config` | Update Telegram relay token in the OS credential store, enabled flag, subscribed projects, and default project/session. Returns sanitized `TelegramStatusResponse`; validation failures use the standard `{ "error": ... }` envelope. |
 | POST | `/api/telegram/test` | Validate a supplied or saved Telegram bot token through `getMe` -> `TelegramTestResponse`. Local test throttling returns `429` with `Retry-After`; Telegram auth/validation failures return `422`, and upstream/network failures return `502`. |
 | POST | `/api/sessions` | Create session |
 | GET | `/api/sessions/{id}` | Fetch one session -> `SessionResponse { revision, serverInstanceId, session }`. Local sessions return full transcripts unless `?tail=N` is supplied; remote-proxy sessions can return an unloaded cached summary (`messagesLoaded: false`) on recoverable hydration fallback. |
@@ -400,7 +400,7 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 ~/.termal/
 |-- termal.sqlite          # primary store: app_state + sessions + delegations tables (+ WAL/-shm sidecars)
 |-- orchestrators.json     # reusable orchestrator templates
-`-- telegram-bot.json      # optional Telegram relay chat binding
+`-- telegram-bot.json      # optional Telegram relay metadata/state; bot token lives in OS credential store
 ```
 
 `PersistedState` is the logical projection of `StateInner` that excludes

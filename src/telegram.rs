@@ -232,13 +232,12 @@ impl TelegramBotConfig {
     fn from_ui_file(
         default_workdir: &str,
         file: &TelegramBotFile,
+        bot_token: Option<String>,
     ) -> Result<Self, TelegramRelayConfigUnavailableReason> {
         if !file.config.enabled {
             return Err(TelegramRelayConfigUnavailableReason::Disabled);
         }
-        let bot_token = match file
-            .config
-            .bot_token
+        let bot_token = match bot_token
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())

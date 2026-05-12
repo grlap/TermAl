@@ -14,6 +14,8 @@ Implemented:
   subscription, default project/session, enable toggle, and saved status.
 - In-process relay startup from saved settings when the backend starts.
 - One linked Telegram chat ID persisted in `~/.termal/telegram-bot.json`.
+- Bot token storage in the OS credential store, with legacy plaintext
+  `config.botToken` values migrated out of `telegram-bot.json` on read.
 - Multiple subscribed projects in one chat.
 - Telegram project switching with `/projects` and `/project <id>`.
 - Telegram session switching with `/sessions` and `/session <id>`.
@@ -72,13 +74,16 @@ to Telegram after the message settles.
 
 ## Storage
 
-Runtime and UI configuration are stored together in
-`~/.termal/telegram-bot.json`.
+Runtime and UI configuration metadata are stored together in
+`~/.termal/telegram-bot.json`. The bot token itself is stored in the OS
+credential store under a TermAl service entry scoped to the TermAl data
+directory. Existing plaintext `config.botToken` values from older releases are
+migrated into the credential store and removed from the JSON file the next time
+the Telegram settings are read or updated.
 
 The UI-owned config block contains:
 
 - `enabled`
-- `botToken`
 - `subscribedProjectIds`
 - `defaultProjectId`
 - `defaultSessionId`
@@ -93,8 +98,8 @@ The runtime state contains fields such as:
 - `lastDigestMessageId`
 - assistant forwarding cursors
 
-The full bot token is never returned through `/api/telegram/status`; status
-responses expose only a masked suffix.
+The full bot token is never returned through `/api/telegram/status` or persisted
+back to `telegram-bot.json`; status responses expose only a masked suffix.
 
 ## HTTP Surface
 
@@ -103,7 +108,7 @@ Current routes:
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/telegram/status` | Read configured/enabled/running state, lifecycle, linked chat, masked token, subscribed projects, and defaults |
-| POST | `/api/telegram/config` | Update token, enabled flag, subscriptions, and defaults |
+| POST | `/api/telegram/config` | Update token in the OS credential store, enabled flag, subscriptions, and defaults |
 | POST | `/api/telegram/test` | Validate a supplied or saved token with Telegram `getMe` |
 
 The relay itself uses existing TermAl routes:

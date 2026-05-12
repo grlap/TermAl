@@ -5,7 +5,9 @@ This owns the UI-facing config/status/test endpoints for the Telegram relay.
 The relay loop still reads the legacy flat runtime fields from
 `telegram-bot.json`; the settings file format below keeps those fields flat and
 adds a `config` object so the existing `cargo run -- telegram` path can ignore
-UI-only fields during the transition.
+UI-only fields during the transition. The bot token is stored in the OS
+credential store; any legacy plaintext `config.botToken` value is migrated out
+of this JSON file on read.
 
 Locking invariant: file I/O uses `telegram_settings_file_guard()`, and callers
 must not hold the main app state mutex while acquiring that guard. This module
@@ -36,10 +38,14 @@ const TELEGRAM_TEST_COOLDOWN: Duration = Duration::from_secs(2);
 const TELEGRAM_TEST_COOLDOWN_RETRY_AFTER: &str = "2";
 const TELEGRAM_TEST_RATE_LIMIT_MESSAGE: &str =
     "Telegram connection tests are rate-limited. Try again in a moment.";
+const TELEGRAM_BOT_TOKEN_KEYRING_SERVICE: &str = "TermAl";
+const TELEGRAM_BOT_TOKEN_KEYRING_USER_PREFIX: &str = "telegram-bot-token";
 
 static TELEGRAM_SETTINGS_FILE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 static TELEGRAM_TEST_RATE_LIMIT: LazyLock<Mutex<Option<std::time::Instant>>> =
     LazyLock::new(|| Mutex::new(None));
+static TELEGRAM_SECRET_STORE_INITIALIZED: LazyLock<Mutex<bool>> =
+    LazyLock::new(|| Mutex::new(false));
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,21 +72,16 @@ impl TelegramStatusResponse {
         config: TelegramUiConfig,
         state: TelegramBotState,
         relay: TelegramRelayStatusSnapshot,
+        bot_token: Option<&str>,
     ) -> Self {
-        let configured = config
-            .bot_token
-            .as_deref()
-            .is_some_and(|token| !token.trim().is_empty());
+        let configured = bot_token.is_some_and(|token| !token.trim().is_empty());
         Self {
             configured,
             enabled: config.enabled,
             running: relay.running,
             lifecycle: relay.lifecycle,
             linked_chat_id: state.chat_id,
-            bot_token_masked: config
-                .bot_token
-                .as_deref()
-                .and_then(mask_telegram_bot_token),
+            bot_token_masked: bot_token.and_then(mask_telegram_bot_token),
             subscribed_project_ids: config.subscribed_project_ids,
             default_project_id: config.default_project_id,
             default_session_id: config.default_session_id,
@@ -95,11 +96,12 @@ impl AppState {
 
     fn telegram_status(&self) -> Result<TelegramStatusResponse, ApiError> {
         let _guard = telegram_settings_file_guard();
-        let mut file = self.load_telegram_bot_file()?;
-        if self.sanitize_telegram_config_for_current_state_in_place(&mut file.config) {
+        let (mut file, mut changed) = self.load_telegram_bot_file_migrating_plaintext_token()?;
+        changed |= self.sanitize_telegram_config_for_current_state_in_place(&mut file.config);
+        if changed {
             self.persist_telegram_bot_file(&file)?;
         }
-        Ok(self.telegram_status_from_file(file))
+        self.telegram_status_from_file(file)
     }
 
     fn update_telegram_config(
@@ -107,16 +109,26 @@ impl AppState {
         request: UpdateTelegramConfigRequest,
     ) -> Result<TelegramStatusResponse, ApiError> {
         let _guard = telegram_settings_file_guard();
-        let mut file = self.load_telegram_bot_file()?;
+        let (mut file, migrated_plaintext_token) =
+            self.load_telegram_bot_file_migrating_plaintext_token()?;
+        if migrated_plaintext_token {
+            self.persist_telegram_bot_file(&file)?;
+        }
         // Layering is intentional: first tolerate/scrub stale persisted
         // project/session references, then validate the user's patch strictly.
         file.config = self.sanitize_telegram_config_for_current_state(file.config);
+        let saved_bot_token = self.saved_telegram_bot_token()?;
+        let mut requested_bot_token = None;
 
         if let Some(enabled) = request.enabled {
             file.config.enabled = enabled;
         }
         if let Some(bot_token) = request.bot_token {
-            file.config.bot_token = normalize_optional_secret(bot_token);
+            let bot_token = normalize_optional_secret(bot_token);
+            if let Some(token) = bot_token.as_deref() {
+                validate_telegram_bot_token(token)?;
+            }
+            requested_bot_token = Some(bot_token);
         }
         if let Some(project_ids) = request.subscribed_project_ids {
             file.config.subscribed_project_ids = normalize_project_id_list(project_ids)?;
@@ -130,14 +142,27 @@ impl AppState {
                 normalize_optional_id(session_id, "default Telegram session id")?;
         }
 
-        self.validate_and_normalize_telegram_config(&mut file.config)?;
+        let bot_token_configured = requested_bot_token
+            .as_ref()
+            .map(|value| value.is_some())
+            .unwrap_or_else(|| telegram_bot_token_is_configured(saved_bot_token.as_deref()));
+        self.validate_and_normalize_telegram_config_with_token_status(
+            &mut file.config,
+            bot_token_configured,
+        )?;
         // Re-sanitize after validation so a concurrent project/session delete
         // cannot leave references that the next status read would hide.
         file.config = self.sanitize_telegram_config_for_current_state(file.config);
+        match requested_bot_token {
+            Some(Some(token)) => self.save_telegram_bot_token(&token)?,
+            Some(None) => self.delete_saved_telegram_bot_token()?,
+            None => {}
+        }
+        file.config.bot_token = None;
         self.persist_telegram_bot_file(&file)?;
         self.reconcile_telegram_relay_for_loaded_file(&file);
 
-        Ok(self.telegram_status_from_file(file))
+        self.telegram_status_from_file(file)
     }
 
     fn test_telegram_connection(
@@ -149,9 +174,12 @@ impl AppState {
                 .ok_or_else(|| ApiError::bad_request("Telegram bot token is required"))?,
             None if request.use_saved_token => {
                 let _guard = telegram_settings_file_guard();
-                self.load_telegram_bot_file()?
-                    .config
-                    .bot_token
+                let (file, migrated_plaintext_token) =
+                    self.load_telegram_bot_file_migrating_plaintext_token()?;
+                if migrated_plaintext_token {
+                    self.persist_telegram_bot_file(&file)?;
+                }
+                self.saved_telegram_bot_token()?
                     .ok_or_else(|| ApiError::bad_request("Telegram bot token is required"))?
             }
             None => return Err(ApiError::bad_request("Telegram bot token is required")),
@@ -169,10 +197,19 @@ impl AppState {
         })
     }
 
-    fn telegram_status_from_file(&self, file: TelegramBotFile) -> TelegramStatusResponse {
+    fn telegram_status_from_file(
+        &self,
+        file: TelegramBotFile,
+    ) -> Result<TelegramStatusResponse, ApiError> {
         let config = self.sanitize_telegram_config_for_current_state(file.config);
         let relay = telegram_relay_status_snapshot();
-        TelegramStatusResponse::from_telegram_settings(config, file.state, relay)
+        let bot_token = self.saved_telegram_bot_token()?;
+        Ok(TelegramStatusResponse::from_telegram_settings(
+            config,
+            file.state,
+            relay,
+            bot_token.as_deref(),
+        ))
     }
 
     fn load_telegram_bot_file(&self) -> Result<TelegramBotFile, ApiError> {
@@ -186,6 +223,31 @@ impl AppState {
         };
         serde_json::from_slice(&raw)
             .map_err(|err| telegram_settings_file_error("parse", &path, err))
+    }
+
+    fn load_telegram_bot_file_migrating_plaintext_token(
+        &self,
+    ) -> Result<(TelegramBotFile, bool), ApiError> {
+        let mut file = self.load_telegram_bot_file()?;
+        let migrated = self.migrate_plaintext_telegram_bot_token(&mut file)?;
+        Ok((file, migrated))
+    }
+
+    fn migrate_plaintext_telegram_bot_token(
+        &self,
+        file: &mut TelegramBotFile,
+    ) -> Result<bool, ApiError> {
+        let Some(token) = file.config.bot_token.take() else {
+            return Ok(false);
+        };
+        match normalize_optional_secret(Some(token)) {
+            Some(token) => {
+                validate_telegram_bot_token(&token)?;
+                self.save_telegram_bot_token(&token)?;
+            }
+            None => self.delete_saved_telegram_bot_token()?,
+        }
+        Ok(true)
     }
 
     fn persist_telegram_bot_file(&self, file: &TelegramBotFile) -> Result<(), ApiError> {
@@ -203,12 +265,72 @@ impl AppState {
             .map_err(|err| telegram_settings_file_error("write", &path, err))
     }
 
+    fn telegram_bot_token_keyring_user(&self) -> String {
+        let data_dir = resolve_termal_data_dir(&self.default_workdir);
+        let mut hasher = Sha256::new();
+        hasher.update(data_dir.to_string_lossy().as_bytes());
+        let digest = hasher.finalize();
+        let suffix = digest
+            .iter()
+            .take(8)
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        format!("{TELEGRAM_BOT_TOKEN_KEYRING_USER_PREFIX}:{suffix}")
+    }
+
+    fn telegram_bot_token_entry(&self) -> Result<keyring_core::Entry, ApiError> {
+        ensure_telegram_secret_store()?;
+        keyring_core::Entry::new(
+            TELEGRAM_BOT_TOKEN_KEYRING_SERVICE,
+            &self.telegram_bot_token_keyring_user(),
+        )
+        .map_err(|err| telegram_secret_store_error("open", err))
+    }
+
+    fn saved_telegram_bot_token(&self) -> Result<Option<String>, ApiError> {
+        let entry = self.telegram_bot_token_entry()?;
+        match entry.get_password() {
+            Ok(token) => Ok(normalize_optional_secret(Some(token))),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
+            Err(err) => Err(telegram_secret_store_error("read", err)),
+        }
+    }
+
+    fn save_telegram_bot_token(&self, token: &str) -> Result<(), ApiError> {
+        let entry = self.telegram_bot_token_entry()?;
+        entry
+            .set_password(token)
+            .map_err(|err| telegram_secret_store_error("write", err))
+    }
+
+    fn delete_saved_telegram_bot_token(&self) -> Result<(), ApiError> {
+        let entry = self.telegram_bot_token_entry()?;
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+            Err(err) => Err(telegram_secret_store_error("delete", err)),
+        }
+    }
+
+    #[cfg(test)]
     fn validate_and_normalize_telegram_config(
         &self,
         config: &mut TelegramUiConfig,
     ) -> Result<(), ApiError> {
+        let bot_token_configured = telegram_bot_token_is_configured(config.bot_token.as_deref());
+        self.validate_and_normalize_telegram_config_with_token_status(
+            config,
+            bot_token_configured,
+        )
+    }
+
+    fn validate_and_normalize_telegram_config_with_token_status(
+        &self,
+        config: &mut TelegramUiConfig,
+        bot_token_configured: bool,
+    ) -> Result<(), ApiError> {
         let snapshot = self.telegram_config_validation_snapshot();
-        let normalization = validate_telegram_config_against_snapshot(config, &snapshot)?;
+        let normalization =
+            validate_telegram_config_against_snapshot(config, &snapshot, bot_token_configured)?;
         apply_telegram_config_normalization(config, normalization);
         Ok(())
     }
@@ -236,7 +358,8 @@ impl AppState {
 
     fn prune_telegram_config_for_deleted_project(&self, project_id: &str) -> Result<(), ApiError> {
         let _guard = telegram_settings_file_guard();
-        let mut file = self.load_telegram_bot_file()?;
+        let (mut file, migrated_plaintext_token) =
+            self.load_telegram_bot_file_migrating_plaintext_token()?;
         let before = file.config.clone();
 
         file.config
@@ -250,19 +373,21 @@ impl AppState {
             file.config.enabled = false;
         }
 
-        if telegram_configs_equal(&before, &file.config) {
+        let config_changed = !telegram_configs_equal(&before, &file.config);
+        if !migrated_plaintext_token && !config_changed {
             return Ok(());
         }
 
         self.persist_telegram_bot_file(&file)?;
-        self.reconcile_telegram_relay_for_loaded_file(&file);
+        if config_changed {
+            self.reconcile_telegram_relay_for_loaded_file(&file);
+        }
         Ok(())
     }
 
     fn prune_telegram_state_for_deleted_session(&self, session_id: &str) -> Result<(), ApiError> {
         let _guard = telegram_settings_file_guard();
-        let mut file = self.load_telegram_bot_file()?;
-        let mut changed = false;
+        let (mut file, mut changed) = self.load_telegram_bot_file_migrating_plaintext_token()?;
 
         changed |= file
             .state
@@ -346,8 +471,20 @@ impl AppState {
     #[cfg_attr(test, allow(dead_code))]
     fn reconcile_telegram_relay_from_saved_settings(&self) {
         let _guard = telegram_settings_file_guard();
-        match self.load_telegram_bot_file() {
-            Ok(file) => self.reconcile_telegram_relay_for_loaded_file(&file),
+        match self.load_telegram_bot_file_migrating_plaintext_token() {
+            Ok((file, migrated_plaintext_token)) => {
+                if migrated_plaintext_token {
+                    if let Err(err) = self.persist_telegram_bot_file(&file) {
+                        eprintln!(
+                            "telegram settings> failed to persist migrated relay config for startup: {}",
+                            sanitize_telegram_log_detail(&err.message)
+                        );
+                        stop_telegram_relay_runtime();
+                        return;
+                    }
+                }
+                self.reconcile_telegram_relay_for_loaded_file(&file);
+            }
             Err(err) => {
                 eprintln!(
                     "telegram settings> failed to load relay config for startup: {}",
@@ -361,7 +498,18 @@ impl AppState {
     fn reconcile_telegram_relay_for_loaded_file(&self, file: &TelegramBotFile) {
         let mut file = file.clone();
         file.config = self.sanitize_telegram_config_for_current_state(file.config);
-        match TelegramBotConfig::from_ui_file(&self.default_workdir, &file) {
+        let bot_token = match self.saved_telegram_bot_token() {
+            Ok(bot_token) => bot_token,
+            Err(err) => {
+                eprintln!(
+                    "telegram settings> failed to load relay bot token: {}",
+                    sanitize_telegram_log_detail(&err.message)
+                );
+                stop_telegram_relay_runtime();
+                return;
+            }
+        };
+        match TelegramBotConfig::from_ui_file(&self.default_workdir, &file, bot_token) {
             Ok(config) => start_telegram_relay_runtime(config),
             Err(_reason) => stop_telegram_relay_runtime(),
         }
@@ -371,9 +519,12 @@ impl AppState {
 fn validate_telegram_config_against_snapshot(
     config: &TelegramUiConfig,
     snapshot: &TelegramConfigValidationSnapshot,
+    bot_token_configured: bool,
 ) -> Result<TelegramConfigNormalization, ApiError> {
+    let mut bot_token_configured = bot_token_configured;
     if let Some(token) = config.bot_token.as_deref() {
         validate_telegram_bot_token(token)?;
+        bot_token_configured |= telegram_bot_token_is_configured(Some(token));
     }
     let mut subscribed_project_ids = config.subscribed_project_ids.clone();
     let mut default_project_id = config.default_project_id.clone();
@@ -450,13 +601,7 @@ fn validate_telegram_config_against_snapshot(
         }
     }
 
-    if config.enabled
-        && config
-            .bot_token
-            .as_deref()
-            .is_some_and(|token| !token.trim().is_empty())
-        && subscribed_project_ids.is_empty()
-    {
+    if config.enabled && bot_token_configured && subscribed_project_ids.is_empty() {
         return Err(ApiError::bad_request(
             "choose at least one Telegram project before enabling the relay",
         ));
@@ -522,6 +667,65 @@ fn telegram_settings_file_guard() -> std::sync::MutexGuard<'static, ()> {
     TELEGRAM_SETTINGS_FILE_LOCK
         .lock()
         .expect("telegram settings file mutex poisoned")
+}
+
+fn ensure_telegram_secret_store() -> Result<(), ApiError> {
+    let mut initialized = TELEGRAM_SECRET_STORE_INITIALIZED
+        .lock()
+        .expect("telegram secret store mutex poisoned");
+    if *initialized {
+        return Ok(());
+    }
+    configure_telegram_secret_store()?;
+    *initialized = true;
+    Ok(())
+}
+
+#[cfg(test)]
+fn configure_telegram_secret_store() -> Result<(), ApiError> {
+    let store = keyring_core::mock::Store::new()
+        .map_err(|err| telegram_secret_store_error("initialize", err))?;
+    keyring_core::set_default_store(store);
+    Ok(())
+}
+
+#[cfg(all(not(test), windows))]
+fn configure_telegram_secret_store() -> Result<(), ApiError> {
+    let config = HashMap::<&str, &str>::new();
+    let store = windows_native_keyring_store::Store::new_with_configuration(&config)
+        .map_err(|err| telegram_secret_store_error("initialize", err))?;
+    keyring_core::set_default_store(store);
+    Ok(())
+}
+
+#[cfg(all(not(test), target_os = "macos"))]
+fn configure_telegram_secret_store() -> Result<(), ApiError> {
+    let config = HashMap::<&str, &str>::new();
+    let store = apple_native_keyring_store::keychain::Store::new_with_configuration(&config)
+        .map_err(|err| telegram_secret_store_error("initialize", err))?;
+    keyring_core::set_default_store(store);
+    Ok(())
+}
+
+#[cfg(all(not(test), target_os = "linux"))]
+fn configure_telegram_secret_store() -> Result<(), ApiError> {
+    let config = HashMap::<&str, &str>::new();
+    let store = zbus_secret_service_keyring_store::Store::new_with_configuration(&config)
+        .map_err(|err| telegram_secret_store_error("initialize", err))?;
+    keyring_core::set_default_store(store);
+    Ok(())
+}
+
+#[cfg(all(
+    not(test),
+    not(windows),
+    not(target_os = "macos"),
+    not(target_os = "linux")
+))]
+fn configure_telegram_secret_store() -> Result<(), ApiError> {
+    Err(ApiError::internal(
+        "Telegram bot token storage is not supported on this platform",
+    ))
 }
 
 fn normalize_optional_secret(value: Option<String>) -> Option<String> {
@@ -689,7 +893,6 @@ fn validate_telegram_target_id(label: &str, value: &str) -> Result<(), ApiError>
 
 fn telegram_configs_equal(left: &TelegramUiConfig, right: &TelegramUiConfig) -> bool {
     left.enabled == right.enabled
-        && left.bot_token == right.bot_token
         && left.subscribed_project_ids == right.subscribed_project_ids
         && left.default_project_id == right.default_project_id
         && left.default_session_id == right.default_session_id
@@ -698,12 +901,11 @@ fn telegram_configs_equal(left: &TelegramUiConfig, right: &TelegramUiConfig) -> 
 fn telegram_config_is_enabled_without_project_target(config: &TelegramUiConfig) -> bool {
     // Keep this predicate shared with prune paths so project deletion cannot
     // persist a relay shape the normal settings save path would reject.
-    config.enabled
-        && config
-            .bot_token
-            .as_deref()
-            .is_some_and(|token| !token.trim().is_empty())
-        && config.subscribed_project_ids.is_empty()
+    config.enabled && config.subscribed_project_ids.is_empty()
+}
+
+fn telegram_bot_token_is_configured(token: Option<&str>) -> bool {
+    token.is_some_and(|token| !token.trim().is_empty())
 }
 
 fn mask_telegram_bot_token(token: &str) -> Option<String> {
@@ -728,6 +930,14 @@ fn telegram_settings_file_error(
         path.display()
     );
     ApiError::internal(format!("failed to {operation} Telegram settings"))
+}
+
+fn telegram_secret_store_error(operation: &str, err: impl std::fmt::Display) -> ApiError {
+    let err = sanitize_telegram_log_detail(&err.to_string());
+    eprintln!("telegram settings> failed to {operation} Telegram bot token: {err}");
+    ApiError::internal(format!(
+        "failed to {operation} Telegram bot token in OS credential store"
+    ))
 }
 
 fn write_telegram_bot_file(path: &FsPath, encoded: &[u8]) -> io::Result<()> {

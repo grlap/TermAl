@@ -127,7 +127,7 @@ describe("TelegramPreferencesPanel", () => {
 
     render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
 
-    await screen.findByText("Saved as ****oken.");
+    await screen.findByText("Stored in the OS credential store as ****oken.");
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
 
     await waitFor(() => {
@@ -216,7 +216,7 @@ describe("TelegramPreferencesPanel", () => {
 
     render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
 
-    await screen.findByText("Saved as ****oken.");
+    await screen.findByText("Stored in the OS credential store as ****oken.");
     fireEvent.click(screen.getByRole("button", { name: "Save Telegram" }));
 
     expect(
@@ -238,7 +238,7 @@ describe("TelegramPreferencesPanel", () => {
       </StrictMode>,
     );
 
-    await screen.findByText("Saved as ****oken.");
+    await screen.findByText("Stored in the OS credential store as ****oken.");
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
 
     expect(await screen.findByText("Connected to @termal_bot.")).toBeInTheDocument();
@@ -260,7 +260,9 @@ describe("TelegramPreferencesPanel", () => {
       </StrictMode>,
     );
 
-    expect(await screen.findByText("Saved as ****fresh.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Stored in the OS credential store as ****fresh."),
+    ).toBeInTheDocument();
 
     await act(async () => {
       staleStatus.resolve({
@@ -271,8 +273,10 @@ describe("TelegramPreferencesPanel", () => {
       await staleStatus.promise;
     });
 
-    expect(screen.getByText("Saved as ****fresh.")).toBeInTheDocument();
-    expect(screen.queryByText("Saved as ****stale.")).not.toBeInTheDocument();
+    expect(screen.getByText("Stored in the OS credential store as ****fresh."))
+      .toBeInTheDocument();
+    expect(screen.queryByText("Stored in the OS credential store as ****stale."))
+      .not.toBeInTheDocument();
   });
 
   it("removes a saved Telegram token explicitly", async () => {
@@ -287,7 +291,7 @@ describe("TelegramPreferencesPanel", () => {
 
     render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
 
-    await screen.findByText("Saved as ****oken.");
+    await screen.findByText("Stored in the OS credential store as ****oken.");
     fireEvent.click(screen.getByRole("button", { name: "Remove token" }));
 
     await waitFor(() => {
@@ -312,7 +316,7 @@ describe("TelegramPreferencesPanel", () => {
       <TelegramPreferencesPanel projects={projects} sessions={sessions} />,
     );
 
-    await screen.findByText("Saved as ****oken.");
+    await screen.findByText("Stored in the OS credential store as ****oken.");
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
     unmount();
     await act(async () => {
@@ -325,7 +329,9 @@ describe("TelegramPreferencesPanel", () => {
 
     render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
 
-    expect(await screen.findByText("Saved as ****oken.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Stored in the OS credential store as ****oken."),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Connected to @termal_bot.")).not.toBeInTheDocument();
   });
 });

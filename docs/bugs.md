@@ -44,21 +44,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 **Proposal:**
 - Move the runtime into `AppState` and own its lifecycle on the state object.
 
-## Telegram bot token is persisted as plaintext in `telegram-bot.json`
-
-**Severity:** Medium - `TelegramUiConfig.bot_token` is serialized directly into `~/.termal/telegram-bot.json`.
-
-Responses mask the token, but the full credential remains on disk and in temp/corrupt-backup write paths. Unix hardening sets `0600`; Windows is a P0 platform and currently has only a no-op permission hardening path. Backups, sync tools, or another local process can read the token from the settings file.
-
-**Current behavior:**
-- Saving Telegram settings writes the full bot token to `telegram-bot.json`.
-- API responses return only a masked token.
-- Windows file hardening does not apply an ACL or secret-store protection.
-
-**Proposal:**
-- Move the token to an OS secret store, or keep token configuration env-only until protected storage exists.
-- If file persistence stays, add explicit Windows ACL handling and document backup/sync exposure.
-
 ## `src/telegram.rs` past 1500-line architecture rubric threshold
 
 **Severity:** Medium - file now exceeds 1766 lines after round 56. CLAUDE.md asks for smaller modules.

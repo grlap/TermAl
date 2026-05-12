@@ -5505,10 +5505,14 @@ fn telegram_ui_relay_file(config: TelegramUiConfig) -> TelegramBotFile {
     }
 }
 
+fn telegram_ui_relay_token(file: &TelegramBotFile) -> Option<String> {
+    file.config.bot_token.clone()
+}
+
 #[test]
 fn telegram_ui_file_uses_single_subscribed_project_for_relay_config() {
     let file = telegram_ui_relay_file(telegram_ui_relay_config());
-    let config = TelegramBotConfig::from_ui_file("/tmp", &file)
+    let config = TelegramBotConfig::from_ui_file("/tmp", &file, telegram_ui_relay_token(&file))
         .expect("single subscribed project should produce relay config");
 
     assert_eq!(config.project_id, "project-1");
@@ -5521,8 +5525,12 @@ fn telegram_ui_file_falls_back_to_single_subscribed_project_for_blank_default() 
         default_project_id: Some("   ".to_owned()),
         ..telegram_ui_relay_config()
     });
-    let config = TelegramBotConfig::from_ui_file("/tmp", &with_blank_default)
-        .expect("blank default should fall back to single subscribed project");
+    let config = TelegramBotConfig::from_ui_file(
+        "/tmp",
+        &with_blank_default,
+        telegram_ui_relay_token(&with_blank_default),
+    )
+    .expect("blank default should fall back to single subscribed project");
 
     assert_eq!(config.project_id, "project-1");
 }
@@ -5536,7 +5544,11 @@ fn telegram_ui_file_requires_project_target_for_relay_config() {
     });
 
     assert_eq!(
-        TelegramBotConfig::from_ui_file("/tmp", &without_any_project)
+        TelegramBotConfig::from_ui_file(
+            "/tmp",
+            &without_any_project,
+            telegram_ui_relay_token(&without_any_project),
+        )
             .expect_err("relay config without a project target should be unavailable"),
         TelegramRelayConfigUnavailableReason::MissingProjectTarget
     );
@@ -5551,7 +5563,11 @@ fn telegram_ui_file_requires_default_when_multiple_projects_for_relay_config() {
     });
 
     assert_eq!(
-        TelegramBotConfig::from_ui_file("/tmp", &with_multiple_projects)
+        TelegramBotConfig::from_ui_file(
+            "/tmp",
+            &with_multiple_projects,
+            telegram_ui_relay_token(&with_multiple_projects),
+        )
             .expect_err("ambiguous relay project target should be unavailable"),
         TelegramRelayConfigUnavailableReason::MissingProjectTarget
     );
@@ -5570,7 +5586,11 @@ fn telegram_ui_file_uses_trimmed_default_project_for_relay_config() {
             ..TelegramBotState::default()
         },
     };
-    let config = TelegramBotConfig::from_ui_file("/tmp", &with_default)
+    let config = TelegramBotConfig::from_ui_file(
+        "/tmp",
+        &with_default,
+        telegram_ui_relay_token(&with_default),
+    )
         .expect("default project should produce relay config");
 
     assert_eq!(config.project_id, "project-1");
@@ -5589,7 +5609,7 @@ fn telegram_ui_file_omits_disabled_relay_config_even_with_token_and_project() {
     });
 
     assert_eq!(
-        TelegramBotConfig::from_ui_file("/tmp", &disabled)
+        TelegramBotConfig::from_ui_file("/tmp", &disabled, telegram_ui_relay_token(&disabled))
             .expect_err("disabled relay config should be unavailable"),
         TelegramRelayConfigUnavailableReason::Disabled
     );
@@ -5611,7 +5631,11 @@ fn telegram_ui_file_requires_bot_token_for_relay_config() {
     });
 
     assert_eq!(
-        TelegramBotConfig::from_ui_file("/tmp", &missing_token)
+        TelegramBotConfig::from_ui_file(
+            "/tmp",
+            &missing_token,
+            telegram_ui_relay_token(&missing_token),
+        )
             .expect_err("relay config without a bot token should be unavailable"),
         TelegramRelayConfigUnavailableReason::MissingBotToken
     );
@@ -5625,7 +5649,7 @@ fn telegram_ui_file_rejects_empty_bot_token_for_relay_config() {
     });
 
     assert_eq!(
-        TelegramBotConfig::from_ui_file("/tmp", &empty_token)
+        TelegramBotConfig::from_ui_file("/tmp", &empty_token, telegram_ui_relay_token(&empty_token))
             .expect_err("relay config with an empty bot token should be unavailable"),
         TelegramRelayConfigUnavailableReason::MissingBotToken
     );
@@ -5639,7 +5663,11 @@ fn telegram_ui_file_rejects_whitespace_bot_token_for_relay_config() {
     });
 
     assert_eq!(
-        TelegramBotConfig::from_ui_file("/tmp", &whitespace_token)
+        TelegramBotConfig::from_ui_file(
+            "/tmp",
+            &whitespace_token,
+            telegram_ui_relay_token(&whitespace_token),
+        )
             .expect_err("relay config with a whitespace bot token should be unavailable"),
         TelegramRelayConfigUnavailableReason::MissingBotToken
     );
@@ -5939,7 +5967,7 @@ fn telegram_connection_test_error_classifies_transport_and_server_failures_as_ba
 }
 
 #[test]
-fn telegram_state_persist_preserves_settings_config() {
+fn telegram_state_persist_preserves_settings_config_without_plaintext_token() {
     let path = std::env::temp_dir().join(format!("termal-telegram-state-{}.json", Uuid::new_v4()));
     fs::write(
         &path,
@@ -5966,7 +5994,7 @@ fn telegram_state_persist_preserves_settings_config() {
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("state file should read"))
         .expect("state file should parse");
-    assert_eq!(value["config"]["botToken"], json!("123456:secret"));
+    assert!(value["config"].get("botToken").is_none());
     assert_eq!(
         value["config"]["subscribedProjectIds"],
         json!(["project-1"])
@@ -6559,6 +6587,17 @@ fn telegram_config_update_reflects_in_process_relay_runtime_status() {
     assert!(response.configured);
     assert!(response.running);
     assert_eq!(response.lifecycle, TelegramLifecycle::InProcess);
+    let path = state.telegram_bot_file_path();
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert!(value["config"].get("botToken").is_none());
+    assert_eq!(
+        state
+            .saved_telegram_bot_token()
+            .expect("saved token should read")
+            .as_deref(),
+        Some("123456:secret")
+    );
 
     let stopped = state
         .update_telegram_config(UpdateTelegramConfigRequest {
@@ -6634,6 +6673,12 @@ fn telegram_config_update_blank_token_clears_saved_token_before_project_target_c
     assert!(value["config"].get("botToken").is_none());
     assert!(value["config"].get("subscribedProjectIds").is_none());
     assert_eq!(value["chatId"], json!(123));
+    assert_eq!(
+        state
+            .saved_telegram_bot_token()
+            .expect("cleared token should read"),
+        None
+    );
     let _ = fs::remove_dir_all(&home);
 }
 
@@ -6679,8 +6724,15 @@ fn telegram_config_update_rejects_saved_token_without_project_target() {
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
     assert_eq!(value["config"]["enabled"], json!(false));
-    assert_eq!(value["config"]["botToken"], json!("123456:secret"));
+    assert!(value["config"].get("botToken").is_none());
     assert_eq!(value["chatId"], json!(123));
+    assert_eq!(
+        state
+            .saved_telegram_bot_token()
+            .expect("migrated token should read")
+            .as_deref(),
+        Some("123456:secret")
+    );
     let _ = fs::remove_dir_all(&home);
 }
 
@@ -6866,6 +6918,8 @@ fn telegram_status_persists_sanitized_stale_project_and_session_references() {
         .telegram_status()
         .expect("status read should sanitize stale persisted references");
 
+    assert!(response.configured);
+    assert_eq!(response.bot_token_masked.as_deref(), Some("****cret"));
     assert_eq!(response.subscribed_project_ids, vec![project_id.clone()]);
     assert_eq!(
         response.default_project_id.as_deref(),
@@ -6882,6 +6936,7 @@ fn telegram_status_persists_sanitized_stale_project_and_session_references() {
     );
     assert_eq!(value["config"]["defaultProjectId"], json!(project_id));
     assert!(value["config"].get("defaultSessionId").is_none());
+    assert!(value["config"].get("botToken").is_none());
     assert_eq!(value["chatId"], json!(123));
 }
 
@@ -6966,7 +7021,7 @@ fn telegram_config_update_sanitizes_stale_persisted_references_before_validation
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
     assert_eq!(value["config"]["enabled"], json!(true));
-    assert_eq!(value["config"]["botToken"], json!("123456:secret"));
+    assert!(value["config"].get("botToken").is_none());
     assert_eq!(
         value["config"]["subscribedProjectIds"],
         json!([project_id.clone()])
@@ -7011,7 +7066,7 @@ fn delete_project_prunes_telegram_config_and_disables_relay_without_project_targ
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
     assert_eq!(value["config"]["enabled"], json!(false));
-    assert_eq!(value["config"]["botToken"], json!("123456:secret"));
+    assert!(value["config"].get("botToken").is_none());
     assert!(
         value["config"].get("subscribedProjectIds").is_none()
             || value["config"]["subscribedProjectIds"] == json!([])
@@ -7091,6 +7146,7 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
     assert_eq!(value["config"]["enabled"], json!(true));
+    assert!(value["config"].get("botToken").is_none());
     assert_eq!(
         value["config"]["subscribedProjectIds"],
         json!([remaining_project_id.clone()])
@@ -7114,7 +7170,7 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
 }
 
 #[test]
-fn delete_project_leaves_unrelated_telegram_config_file_unchanged() {
+fn delete_project_migrates_unrelated_telegram_token_without_restarting_relay() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let home = std::env::temp_dir().join(format!(
         "termal-telegram-unrelated-project-home-{}",
@@ -7148,11 +7204,18 @@ fn delete_project_leaves_unrelated_telegram_config_file_unchanged() {
         .delete_project(&deleted_project_id)
         .expect("project should delete");
 
-    assert_eq!(
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert_eq!(value["chatId"], json!(123));
+    assert!(value["config"].get("botToken").is_none());
+    assert_eq!(value["config"]["enabled"], json!(true));
+    assert_eq!(value["config"]["defaultProjectId"], json!(remaining_project_id));
+    assert_eq!(value["config"]["defaultSessionId"], json!(remaining_session_id));
+    assert!(take_telegram_relay_runtime_actions_for_tests().is_empty());
+    assert_ne!(
         fs::read(&path).expect("settings file should read"),
         fixture.as_bytes()
     );
-    assert!(take_telegram_relay_runtime_actions_for_tests().is_empty());
 }
 
 #[test]
@@ -7206,6 +7269,7 @@ fn kill_session_prunes_telegram_state_and_config_references() {
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
+    assert!(value["config"].get("botToken").is_none());
     assert!(value["config"].get("defaultSessionId").is_none());
     assert!(value.get("selectedSessionId").is_none());
     assert!(value.get("lastDigestHash").is_none());

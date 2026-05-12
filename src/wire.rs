@@ -1086,7 +1086,7 @@ struct UpdateAppSettingsRequest {
 struct TelegramUiConfig {
     #[serde(default)]
     enabled: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing)]
     bot_token: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     subscribed_project_ids: Vec<String>,
