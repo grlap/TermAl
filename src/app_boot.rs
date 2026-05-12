@@ -97,6 +97,10 @@ impl PersistWorkerRetryState {
             self.retry_delay = PERSIST_RETRY_SEED_DELAY;
         }
     }
+
+    fn should_exit_after_tick(&self, shutdown_requested: bool) -> bool {
+        shutdown_requested && !self.retry_after_failure
+    }
 }
 
 impl AppState {
@@ -278,7 +282,7 @@ impl AppState {
                         eprintln!("[termal] background persist failed: {err:#}");
                     }
                     retry_state.record_result(&result);
-                    if should_exit_after_tick {
+                    if retry_state.should_exit_after_tick(should_exit_after_tick) {
                         break;
                     }
                 }

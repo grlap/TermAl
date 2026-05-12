@@ -1016,6 +1016,28 @@ fn persist_worker_retry_state_doubles_and_resets_backoff() {
 }
 
 #[test]
+fn persist_worker_shutdown_exits_only_after_successful_final_tick() {
+    let mut retry_state = PersistWorkerRetryState::default();
+
+    let failure: Result<()> = Err(anyhow!("injected shutdown persist failure"));
+    retry_state.record_result(&failure);
+    assert!(
+        !retry_state.should_exit_after_tick(true),
+        "shutdown should keep retrying after a failed final persist tick"
+    );
+    assert!(
+        !retry_state.should_exit_after_tick(false),
+        "non-shutdown ticks should never exit the worker"
+    );
+
+    retry_state.record_result(&Ok(()));
+    assert!(
+        retry_state.should_exit_after_tick(true),
+        "shutdown should exit once durability is confirmed"
+    );
+}
+
+#[test]
 fn persist_worker_retry_wait_times_out_without_new_delta() {
     let (_persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
     let retry_state = PersistWorkerRetryState {

@@ -753,22 +753,6 @@ The new tests validate the sticky `watch` shutdown helper directly, but they do 
 - Add route-level SSE shutdown tests for shutdown-before-connect and shutdown-after-initial-state.
 - Wrap both in timeouts so missed shutdown delivery fails loudly.
 
-## Final shutdown persist failure exits without retry
-
-**Severity:** Medium - `src/app_boot.rs:270-275`. The normal persist worker records failures and retries with backoff, but a shutdown tick sets `should_exit_after_tick` and breaks after the first final attempt even if that attempt failed.
-
-A transient SQLite lock, disk hiccup, or I/O error during graceful shutdown can still drop pending mutations. The new drain logs the failure, but the process continues toward exit as though the final state reached disk.
-
-**Current behavior:**
-- `retry_state.record_result(&result)` records the final failure.
-- `should_exit_after_tick` still breaks the loop immediately.
-- Pending changed sessions can remain only in memory when the process exits.
-
-**Proposal:**
-- On shutdown, exit only after a successful final persist.
-- Or use a bounded retry/timeout policy and return/log a shutdown failure outcome that clearly says durability was not confirmed.
-- Add a test covering `Err` followed by `Ok` after `PersistRequest::Shutdown`.
-
 ## Triplicate `requestStateResync + startSessionHydration` recovery pattern in delta handler
 
 **Severity:** Low - `ui/src/app-live-state.ts:2329, 2421, 2437`. Three near-identical recovery sites within ~110 lines of the same handler perform the same `requestStateResync({ rearmOnFailure: true }) + startSessionHydration(delta.sessionId)` pair. The `appliedNeedsResync` branch knows `delta.sessionId` is statically a string; the other two branches add a runtime guard (`"sessionId" in delta && typeof delta.sessionId === "string"`) — the type narrowing is subtly different at each site.
