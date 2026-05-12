@@ -337,22 +337,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Keep digest-only forwarding as the default for Telegram integrations.
 - Document the third-party content exposure and add any practical redaction/truncation before full forwarding.
 
-## Duplicate remote delta hydrations fall through to unloaded-transcript delta application
-
-**Severity:** Medium - duplicate in-flight hydration callers receive `Ok(false)`, which every delta handler treats as "no repair happened; continue applying the delta".
-
-The in-flight map suppresses duplicate `/api/sessions/{id}` fetches, but it does not coordinate the waiting delta handlers. For a summary-only remote proxy, a concurrent text delta or replacement can still run against missing messages and trigger a broad `/api/state` resync; a message-created delta can partially mutate an unloaded transcript before the first full hydration finishes.
-
-**Current behavior:**
-- The first delta for an unloaded remote session starts full-session hydration.
-- A duplicate delta for the same remote/session sees the in-flight key and returns `Ok(false)`.
-- Callers continue into the narrow delta path as if no hydration was needed.
-
-**Proposal:**
-- Return a distinct outcome such as `HydrationInFlight`, or have duplicates wait/queue behind the first hydration.
-- After the first hydration completes, re-check the session transcript watermark before applying queued or retried deltas.
-- Add burst/concurrent same-session delta coverage proving only one remote fetch occurs and duplicate deltas do not mutate unloaded transcripts.
-
 ## Timer-driven reconnect fallback can stop after `/api/state` progress before SSE proves recovery
 
 **Severity:** Medium - a fallback snapshot can refresh visible UI while the live EventSource transport is still unhealthy.

@@ -56,6 +56,13 @@ struct RemoteDeltaHydrationExpectation {
     session_mutation_stamp: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RemoteDeltaHydrationOutcome {
+    Continue,
+    SkipApplied,
+    SkipInFlight,
+}
+
 struct RemoteDeltaHydrationInFlightGuard {
     in_flight: Arc<Mutex<HashSet<(String, String)>>>,
     key: (String, String),
@@ -1001,9 +1008,10 @@ impl AppState {
         })
     }
 
-    /// Returns true when an unloaded remote proxy was repaired by a targeted
-    /// full-session fetch and the caller should skip applying the narrow delta:
-    /// the fetched transcript is already at least as fresh as that delta.
+    /// Returns whether an unloaded remote proxy was repaired, is already being
+    /// repaired by another delta, or still needs the caller to apply the narrow
+    /// delta. `SkipInFlight` intentionally does not mark the delta replay key:
+    /// the in-flight hydration has not proved this specific delta was applied.
     fn hydrate_unloaded_remote_session_for_delta(
         &self,
         remote_id: &str,
@@ -1011,7 +1019,7 @@ impl AppState {
         remote_revision: u64,
         remote_message_count: u32,
         remote_session_mutation_stamp: Option<u64>,
-    ) -> Result<bool, anyhow::Error> {
+    ) -> Result<RemoteDeltaHydrationOutcome, anyhow::Error> {
         let target = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if inner.should_skip_remote_session_applied_delta_revision(
@@ -1019,14 +1027,14 @@ impl AppState {
                 remote_session_id,
                 remote_revision,
             ) {
-                return Ok(true);
+                return Ok(RemoteDeltaHydrationOutcome::SkipApplied);
             }
             let Some(index) = inner.find_remote_session_index(remote_id, remote_session_id) else {
-                return Ok(false);
+                return Ok(RemoteDeltaHydrationOutcome::Continue);
             };
             let record = &inner.sessions[index];
             if record.session.messages_loaded {
-                return Ok(false);
+                return Ok(RemoteDeltaHydrationOutcome::Continue);
             }
             let remote = inner
                 .find_remote(remote_id)
@@ -1046,7 +1054,7 @@ impl AppState {
                 .lock()
                 .expect("remote delta hydration mutex poisoned");
             if !in_flight.insert(hydration_key.clone()) {
-                return Ok(false);
+                return Ok(RemoteDeltaHydrationOutcome::SkipInFlight);
             }
             RemoteDeltaHydrationInFlightGuard {
                 in_flight: self.remote_delta_hydrations_in_flight.clone(),
@@ -1066,7 +1074,7 @@ impl AppState {
         match hydration_result {
             Ok(_) => {}
             Err(err) if is_recoverable_remote_hydration_miss(&err) => {
-                return Ok(false);
+                return Ok(RemoteDeltaHydrationOutcome::Continue);
             }
             Err(err) => {
                 return Err(anyhow!(
@@ -1075,7 +1083,22 @@ impl AppState {
                 ));
             }
         }
-        Ok(true)
+        Ok(RemoteDeltaHydrationOutcome::SkipApplied)
+    }
+
+    fn should_skip_delta_after_remote_hydration(
+        &self,
+        outcome: RemoteDeltaHydrationOutcome,
+        remote_delta_replay_key: &Option<RemoteDeltaReplayKey>,
+    ) -> bool {
+        match outcome {
+            RemoteDeltaHydrationOutcome::Continue => false,
+            RemoteDeltaHydrationOutcome::SkipApplied => {
+                self.note_remote_applied_delta_replay(remote_delta_replay_key);
+                true
+            }
+            RemoteDeltaHydrationOutcome::SkipInFlight => true,
+        }
     }
 
     // -- orchestrator lifecycle proxies --
@@ -1298,14 +1321,17 @@ impl AppState {
                         message.id()
                     ));
                 }
-                if self.hydrate_unloaded_remote_session_for_delta(
+                let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
                     remote_revision,
                     remote_message_count,
                     remote_session_mutation_stamp,
-                )? {
-                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
+                )?;
+                if self.should_skip_delta_after_remote_hydration(
+                    hydration_outcome,
+                    &remote_delta_replay_key,
+                ) {
                     return Ok(());
                 }
                 let (
@@ -1423,14 +1449,17 @@ impl AppState {
                         message.id()
                     ));
                 }
-                if self.hydrate_unloaded_remote_session_for_delta(
+                let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
                     remote_revision,
                     remote_message_count,
                     remote_session_mutation_stamp,
-                )? {
-                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
+                )?;
+                if self.should_skip_delta_after_remote_hydration(
+                    hydration_outcome,
+                    &remote_delta_replay_key,
+                ) {
                     return Ok(());
                 }
                 {
@@ -1504,14 +1533,17 @@ impl AppState {
                 session_mutation_stamp: remote_session_mutation_stamp,
                 ..
             } => {
-                if self.hydrate_unloaded_remote_session_for_delta(
+                let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
                     remote_revision,
                     remote_message_count,
                     remote_session_mutation_stamp,
-                )? {
-                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
+                )?;
+                if self.should_skip_delta_after_remote_hydration(
+                    hydration_outcome,
+                    &remote_delta_replay_key,
+                ) {
                     return Ok(());
                 }
                 let (
@@ -1595,14 +1627,17 @@ impl AppState {
                 text,
                 ..
             } => {
-                if self.hydrate_unloaded_remote_session_for_delta(
+                let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
                     remote_revision,
                     remote_message_count,
                     remote_session_mutation_stamp,
-                )? {
-                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
+                )?;
+                if self.should_skip_delta_after_remote_hydration(
+                    hydration_outcome,
+                    &remote_delta_replay_key,
+                ) {
                     return Ok(());
                 }
                 let (
@@ -1696,14 +1731,17 @@ impl AppState {
                 status,
                 ..
             } => {
-                if self.hydrate_unloaded_remote_session_for_delta(
+                let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
                     remote_revision,
                     remote_message_count,
                     remote_session_mutation_stamp,
-                )? {
-                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
+                )?;
+                if self.should_skip_delta_after_remote_hydration(
+                    hydration_outcome,
+                    &remote_delta_replay_key,
+                ) {
                     return Ok(());
                 }
                 let (
@@ -1857,14 +1895,17 @@ impl AppState {
                 session_mutation_stamp: remote_session_mutation_stamp,
                 ..
             } => {
-                if self.hydrate_unloaded_remote_session_for_delta(
+                let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
                     remote_revision,
                     remote_message_count,
                     remote_session_mutation_stamp,
-                )? {
-                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
+                )?;
+                if self.should_skip_delta_after_remote_hydration(
+                    hydration_outcome,
+                    &remote_delta_replay_key,
+                ) {
                     return Ok(());
                 }
                 let (

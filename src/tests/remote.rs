@@ -10592,11 +10592,11 @@ fn remote_delta_hydration_skips_duplicate_in_flight_same_session_fetch() {
         .expect("remote delta hydration mutex poisoned")
         .insert((remote.id.clone(), remote_session.id.clone()));
 
-    let repaired = state
+    let outcome = state
         .hydrate_unloaded_remote_session_for_delta(&remote.id, &remote_session.id, 2, 2, None)
         .expect("duplicate in-flight hydration should not fail");
 
-    assert!(!repaired);
+    assert_eq!(outcome, RemoteDeltaHydrationOutcome::SkipInFlight);
     assert!(
         state
             .remote_delta_hydrations_in_flight
@@ -10604,6 +10604,87 @@ fn remote_delta_hydration_skips_duplicate_in_flight_same_session_fetch() {
             .expect("remote delta hydration mutex poisoned")
             .contains(&(remote.id, remote_session.id))
     );
+}
+
+#[test]
+fn remote_delta_hydration_in_flight_skips_narrow_unloaded_delta_apply() {
+    let state = test_app_state();
+    let remote = local_replay_test_remote();
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let mut remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    make_remote_session_summary_only(&mut remote_session, 1);
+    remote_session.preview = "Remote summary before delta".to_owned();
+    remote_session.session_mutation_stamp = Some(9);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: remote_session.id.clone(),
+                session: remote_session.clone(),
+            },
+        )
+        .expect("remote summary session create delta should apply");
+
+    state
+        .remote_delta_hydrations_in_flight
+        .lock()
+        .expect("remote delta hydration mutex poisoned")
+        .insert((remote.id.clone(), remote_session.id.clone()));
+
+    let mut delta_rx = state.subscribe_delta_events();
+    let event = DeltaEvent::MessageCreated {
+        revision: 3,
+        session_id: remote_session.id.clone(),
+        message_id: "remote-message-1".to_owned(),
+        message_index: 0,
+        message_count: 1,
+        message: remote_text_message("remote-message-1", "Delta should wait for hydration."),
+        preview: "Delta should wait for hydration.".to_owned(),
+        status: SessionStatus::Idle,
+        session_mutation_stamp: Some(10),
+    };
+    let replay_key = AppState::remote_delta_replay_key(&remote.id, &event);
+
+    state
+        .apply_remote_delta_event(&remote.id, event)
+        .expect("in-flight hydration should skip the narrow delta without failing");
+
+    assert!(
+        delta_rx.try_recv().is_err(),
+        "in-flight hydration skip should not publish a narrow message delta",
+    );
+    assert!(
+        !state.should_skip_remote_applied_delta_replay(&replay_key),
+        "an in-flight hydration skip must not mark the skipped narrow delta as replayed",
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_remote_session_index(&remote.id, &remote_session.id)
+        .expect("remote proxy session should exist");
+    let record = &inner.sessions[index];
+    assert!(!record.session.messages_loaded);
+    assert!(record.session.messages.is_empty());
+    assert_eq!(record.session.preview, "Remote summary before delta");
+    assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&2));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 // Pins that proxying PUT /api/reviews/{id} to a remote carries the

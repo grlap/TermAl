@@ -356,9 +356,9 @@ struct AppState {
     /// Remote session transcript hydrations currently being fetched because a
     /// delta reached an unloaded proxy session. Keyed by `(remote_id,
     /// remote_session_id)` so concurrent same-session deltas do not fan out
-    /// duplicate blocking `/api/sessions/{id}` requests; the first fetch repairs
-    /// the transcript and the later deltas can continue through the narrow
-    /// delta path.
+    /// duplicate blocking `/api/sessions/{id}` requests; duplicate deltas skip
+    /// the narrow unloaded-transcript path and are left un-replayed until a
+    /// later event or the in-flight fetch repairs the transcript.
     remote_delta_hydrations_in_flight: Arc<Mutex<HashSet<(String, String)>>>,
     terminal_local_command_semaphore: Arc<tokio::sync::Semaphore>,
     terminal_remote_command_semaphore: Arc<tokio::sync::Semaphore>,
