@@ -761,13 +761,6 @@ The new tests validate the sticky `watch` shutdown helper directly, but they do 
 - Expose a testable seam (e.g., inject the hardening function via a closure or trait), OR
 - Add a Linux-only integration test that creates a real chmod-failing scenario.
 
-## Watchdog wake-gap stops-after-progress invariant is not pinned
-
-**Severity:** Low - `ui/src/backend-connection.test.tsx`. No direct negative-case test pins that watchdog wake-gap reconnect probes (which do NOT set `pendingBadLiveEventRecovery`) STOP after same-instance snapshot progress without a data-bearing SSE event. The cause-specific flag's whole premise is that wake-gap probes can stop while parse/reducer-error probes keep polling, but only the polling-continues side is pinned.
-
-**Proposal:**
-- Add a regression that triggers a watchdog wake-gap reconnect (no parse/reducer error), receives a same-instance progressed `/api/state` snapshot, advances `RECONNECT_STATE_RESYNC_MAX_DELAY_MS`, and asserts `countStateFetches()` did not increment.
-
 ## `app-live-state.ts` reconnect state machine continues to grow
 
 **Severity:** Low - `ui/src/app-live-state.ts:2504 lines`. TS utility threshold (1500) exceeded; new `pendingBadLiveEventRecovery` adds another flag-shaped piece of reconnect bookkeeping. The reconnect/resync state machine inside `useEffect` now coordinates 6+ pieces of cross-cutting state.

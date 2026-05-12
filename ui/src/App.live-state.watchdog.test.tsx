@@ -35,6 +35,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App from "./App";
+import { RECONNECT_STATE_RESYNC_MAX_DELAY_MS } from "./app-shell-internals";
 import { ThemedCombobox } from "./preferences-panels";
 import {
   describeCodexModelAdjustmentNotice,
@@ -1100,6 +1101,116 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       expect(
         screen.queryByText("Waiting for the next chunk of output..."),
       ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      setDocumentVisibilityState(originalVisibilityState);
+      scrollIntoViewSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("stops watchdog wake-gap polling after same-instance snapshot progress", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalVisibilityState = document.visibilityState;
+    const baseline = new Date("2026-04-02T09:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(baseline);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return jsonResponse({
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "Recovered after wake.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Recovered after wake.",
+                },
+              ],
+            }),
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const scrollIntoViewSpy = stubScrollIntoView();
+    const stateFetchCallCount = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
+        .length;
+    setDocumentVisibilityState("visible");
+    try {
+      await renderApp();
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "test",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+      await settleAsyncUi();
+      fetchMock.mockClear();
+
+      vi.setSystemTime(
+        new Date(
+          baseline.getTime() + LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS + 2000,
+        ),
+      );
+      await advanceTimers(1000);
+      await settleAsyncUi();
+
+      expect(stateFetchCallCount()).toBe(1);
+      expect(screen.getByText("Recovered after wake.")).toBeInTheDocument();
+
+      await advanceTimers(RECONNECT_STATE_RESYNC_MAX_DELAY_MS);
+      await settleAsyncUi();
+
+      expect(stateFetchCallCount()).toBe(1);
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
