@@ -673,6 +673,114 @@ fn is_terminal_delegation_status(status: &str) -> bool {
 #[cfg(test)]
 mod delegation_mcp_tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
+    use std::thread;
+
+    #[derive(Clone, Debug)]
+    struct TestMcpHttpRequest {
+        method: String,
+        path: String,
+        body: String,
+    }
+
+    fn read_test_mcp_http_request(stream: &mut std::net::TcpStream) -> TestMcpHttpRequest {
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let header_end = loop {
+            let bytes_read = stream.read(&mut chunk).expect("request should read");
+            assert!(bytes_read > 0, "request closed before headers completed");
+            buffer.extend_from_slice(&chunk[..bytes_read]);
+            if let Some(end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+                break end;
+            }
+        };
+        let headers = String::from_utf8_lossy(&buffer[..header_end]);
+        let request_line = headers
+            .lines()
+            .next()
+            .expect("request line should be present");
+        let mut request_parts = request_line.split_whitespace();
+        let method = request_parts
+            .next()
+            .expect("request method should be present")
+            .to_owned();
+        let path = request_parts
+            .next()
+            .expect("request path should be present")
+            .to_owned();
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.trim()
+                    .eq_ignore_ascii_case("content-length")
+                    .then_some(value.trim())
+                    .and_then(|value| value.parse::<usize>().ok())
+            })
+            .unwrap_or(0);
+        let body_start = header_end + 4;
+        while buffer.len() < body_start + content_length {
+            let bytes_read = stream.read(&mut chunk).expect("request body should read");
+            if bytes_read == 0 {
+                break;
+            }
+            buffer.extend_from_slice(&chunk[..bytes_read]);
+        }
+        let body =
+            String::from_utf8_lossy(&buffer[body_start..body_start + content_length]).to_string();
+        TestMcpHttpRequest { method, path, body }
+    }
+
+    fn write_test_mcp_http_json_response(
+        stream: &mut std::net::TcpStream,
+        status: u16,
+        body: Value,
+    ) {
+        let body = body.to_string();
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .as_bytes(),
+            )
+            .expect("response should write");
+    }
+
+    fn spawn_test_mcp_http_server(
+        expected_requests: usize,
+        handler: impl Fn(TestMcpHttpRequest) -> (u16, Value) + Send + Sync + 'static,
+    ) -> (
+        String,
+        Arc<Mutex<Vec<TestMcpHttpRequest>>>,
+        thread::JoinHandle<()>,
+    ) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test server should bind");
+        let base_url = format!(
+            "http://{}",
+            listener
+                .local_addr()
+                .expect("test server address should be readable")
+        );
+        let handler = Arc::new(handler);
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let thread_requests = requests.clone();
+        let server = thread::spawn(move || {
+            for _ in 0..expected_requests {
+                let (mut stream, _) = listener.accept().expect("test request should connect");
+                let request = read_test_mcp_http_request(&mut stream);
+                thread_requests
+                    .lock()
+                    .expect("request log mutex poisoned")
+                    .push(request.clone());
+                let (status, body) = handler(request);
+                write_test_mcp_http_json_response(&mut stream, status, body);
+            }
+        });
+        (base_url, requests, server)
+    }
 
     #[test]
     fn delegation_mcp_tools_list_exposes_parent_scoped_tools_only() {
@@ -748,6 +856,150 @@ mod delegation_mcp_tests {
         assert_eq!(
             codex.pointer("/mcp_servers/termal-delegation/args/2"),
             Some(&Value::String(parent.to_owned()))
+        );
+    }
+
+    #[test]
+    fn delegation_mcp_wait_polls_until_terminal_then_fetches_result() {
+        let status_calls = Arc::new(AtomicUsize::new(0));
+        let handler_status_calls = status_calls.clone();
+        let (base_url, requests, server) = spawn_test_mcp_http_server(3, move |request| {
+            assert_eq!(request.method, "GET");
+            assert!(request.body.is_empty());
+            match request.path.as_str() {
+                "/api/sessions/session-parent/delegations/delegation-done" => {
+                    let call = handler_status_calls.fetch_add(1, Ordering::SeqCst);
+                    let status = if call == 0 { "running" } else { "completed" };
+                    (200, json!({ "delegation": { "status": status } }))
+                }
+                "/api/sessions/session-parent/delegations/delegation-done/result" => (
+                    200,
+                    json!({
+                        "result": {
+                            "status": "completed",
+                            "summary": "MCP wait observed completion."
+                        }
+                    }),
+                ),
+                _ => (
+                    404,
+                    json!({ "error": format!("unexpected path {}", request.path) }),
+                ),
+            }
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let response = bridge
+            .tool_wait_delegations(json!({
+                "delegationIds": ["delegation-done"],
+                "mode": "all",
+                "pollIntervalMs": 100,
+                "timeoutMs": 2_000
+            }))
+            .expect("wait should complete");
+
+        assert_eq!(response["timedOut"], false);
+        assert_eq!(
+            response.pointer("/statuses/0/delegation/status"),
+            Some(&Value::String("completed".to_owned()))
+        );
+        assert_eq!(
+            response.pointer("/results/0/result/result/summary"),
+            Some(&Value::String("MCP wait observed completion.".to_owned()))
+        );
+        assert_eq!(status_calls.load(Ordering::SeqCst), 2);
+        server.join().expect("test server should join");
+        let requests = requests.lock().expect("request log mutex poisoned");
+        assert_eq!(requests.len(), 3);
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.path.ends_with("/delegation-done/result")),
+            "terminal wait must fetch the result packet after status turns terminal"
+        );
+    }
+
+    #[test]
+    fn delegation_mcp_wait_treats_completed_failed_and_canceled_as_terminal() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(6, move |request| {
+            assert_eq!(request.method, "GET");
+            assert!(request.body.is_empty());
+            match request.path.as_str() {
+                "/api/sessions/session-parent/delegations/delegation-completed" => {
+                    (200, json!({ "delegation": { "status": "completed" } }))
+                }
+                "/api/sessions/session-parent/delegations/delegation-failed" => {
+                    (200, json!({ "delegation": { "status": "failed" } }))
+                }
+                "/api/sessions/session-parent/delegations/delegation-canceled" => {
+                    (200, json!({ "delegation": { "status": "canceled" } }))
+                }
+                "/api/sessions/session-parent/delegations/delegation-completed/result" => (
+                    200,
+                    json!({ "result": { "status": "completed", "summary": "completed" } }),
+                ),
+                "/api/sessions/session-parent/delegations/delegation-failed/result" => (
+                    200,
+                    json!({ "result": { "status": "failed", "summary": "failed" } }),
+                ),
+                "/api/sessions/session-parent/delegations/delegation-canceled/result" => (
+                    200,
+                    json!({ "result": { "status": "canceled", "summary": "canceled" } }),
+                ),
+                _ => (
+                    404,
+                    json!({ "error": format!("unexpected path {}", request.path) }),
+                ),
+            }
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let response = bridge
+            .tool_wait_delegations(json!({
+                "delegationIds": [
+                    "delegation-completed",
+                    "delegation-failed",
+                    "delegation-canceled"
+                ],
+                "mode": "all",
+                "pollIntervalMs": 100,
+                "timeoutMs": 2_000
+            }))
+            .expect("wait should complete");
+
+        assert_eq!(response["timedOut"], false);
+        assert_eq!(
+            response.pointer("/statuses/0/delegation/status"),
+            Some(&Value::String("completed".to_owned()))
+        );
+        assert_eq!(
+            response.pointer("/statuses/1/delegation/status"),
+            Some(&Value::String("failed".to_owned()))
+        );
+        assert_eq!(
+            response.pointer("/statuses/2/delegation/status"),
+            Some(&Value::String("canceled".to_owned()))
+        );
+        let results = response
+            .get("results")
+            .and_then(Value::as_array)
+            .expect("results should be an array");
+        assert_eq!(results.len(), 3);
+        assert!(
+            results.iter().all(|result| result.get("error").is_none()),
+            "all terminal statuses should get result fetch attempts without synthetic errors"
+        );
+        server.join().expect("test server should join");
+        let requests = requests.lock().expect("request log mutex poisoned");
+        assert_eq!(requests.len(), 6);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.path.ends_with("/result"))
+                .count(),
+            3
         );
     }
 }

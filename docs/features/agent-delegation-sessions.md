@@ -159,6 +159,12 @@ from the parent card. The parent owns the child tree: deleting a parent session
 cascades deletion to its delegated child sessions and any delegated descendants,
 and tears down their runtimes.
 
+This intentionally allows reviewer fan-out to accumulate child sessions during a
+long parent session. The cleanup boundary is the parent session, not each
+individual delegation result. That keeps child transcripts available for later
+human inspection or follow-up prompts without making delegated reviewers visible
+in default session lists.
+
 The delegation record and result summary remain in backend state for lifecycle
 bookkeeping after parent deletion. Child transcripts and full result retrieval
 through parent-scoped routes end with the owning parent. Open item: define a
@@ -530,8 +536,10 @@ fan-in is available through `resume_after_delegations`.
 Delegation tools are parent-scoped. The first local implementation injects the
 bridge into TermAl-launched agent runtimes by default, relying on the implicit
 parent id, backend ownership checks, read-only default write policy, and
-concurrency/depth limits as the safety boundary. Add project/workspace opt-in
-or capability tokens before exposing the bridge over a shared, remote, or
+concurrency/depth limits as the safety boundary. Do not add a separate
+namespace or capability-token layer for this local per-process bridge unless a
+concrete agent integration requires it. Add project/workspace opt-in or
+capability tokens before exposing the bridge over a shared, remote, or
 long-lived reusable transport.
 
 The first implementation is a TermAl-owned local MCP bridge spawned for one
@@ -550,7 +558,10 @@ every requested delegation belongs to that parent.
 Do not add a broad "list all sessions" or "list all delegations" tool in the
 first MCP slice. The bridge may return ids it created, and callers may pass
 those ids back to status/result/cancel/wait tools. Broader visibility can be
-added later behind an explicit human-granted scope if it proves useful.
+added later behind an explicit human-granted scope if it proves useful. This is
+the practical visibility boundary for v1: delegated children remain normal
+sessions in storage, but parent-scoped MCP callers can only reach children by
+delegation id through parent-owned routes.
 
 Keep tool names explicit:
 
@@ -615,9 +626,9 @@ Safety limits for agent-facing tools:
   the human explicitly approves that operation
 
 Capability tokens are not required for the first local bridge as long as TermAl
-spawns it per agent process and does not expose it remotely. Add an ephemeral
-capability token before exposing the bridge over a shared transport, remote
-transport, or reusable long-lived process.
+spawns it per agent process, passes an implicit parent session id, and does not
+expose it remotely. Treat capability tokens as remote/shared-transport work, not
+as a prerequisite for local delegated review automation.
 
 Agent integration hooks:
 - Codex sessions: pass a `config.mcp_servers.termal-delegation` descriptor in
@@ -1175,7 +1186,7 @@ quick review/explorer tasks too heavy.
 - Wire the bridge into ACP/Codex, Cursor, Gemini, and Claude session
   startup/resume paths.
 - Keep the bridge parent-scoped. Project/workspace opt-in and capability tokens
-  can be added before remote/shared transports if needed.
+  are deferred until remote/shared transports need a stronger boundary.
 - Add regression coverage for terminal status/result refresh, backend resume
   waits, and restart/reconcile behavior before relying on the bridge for review
   automation.
@@ -1269,5 +1280,5 @@ Isolation:
   child agent?
 - Should parent cards be regular transcript messages or session metadata rendered
   inline?
-- Should a capability token be added before remote/shared MCP transports, or is
-  a per-process local bridge sufficient for all supported agents?
+- Which remote/shared MCP transports, if any, need capability tokens or
+  project-level opt-in beyond the current per-process local bridge?

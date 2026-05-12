@@ -1603,8 +1603,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P1: Add delegation terminal-refresh and wait-reconcile regressions:
-  cover completed/failed/canceled polling, result fetch after terminal child completion, wait-after-terminal immediate consumption, and restart/reconcile behavior so MCP wait tools cannot strand a parent turn.
 - [ ] P2: Add conversation navigation transcript-window integration coverage:
   render more than `SESSION_TAIL_WINDOW_MESSAGE_COUNT` messages with prompt/delegation navigation, click a visible prev/next button whose target starts outside the active tail window, and assert the target mounts or the jump retries after full transcript render.
 - [ ] P2: Cover first-chunk Telegram forward failure:
