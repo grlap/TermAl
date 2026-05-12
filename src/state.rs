@@ -279,7 +279,8 @@ struct AppState {
     /// `Arc<Mutex<Option<_>>>` so that:
     ///   - `AppState` stays `Clone` (the handle is shared, not duplicated),
     ///   - exactly one shutdown caller can `take()` the handle and join,
-    ///   - subsequent shutdown calls are a safe no-op.
+    ///   - subsequent shutdown calls block behind the join owner and then
+    ///     become a safe no-op.
     /// Populated by `AppState::new_with_paths` after spawning the thread.
     /// `None` for test-only constructors that don't spawn the thread —
     /// `shutdown_persist_blocking` then has nothing to wait on.

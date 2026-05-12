@@ -162,7 +162,10 @@ impl AppState {
     /// been taken. Safe to call from `AppState` clones — the handle is
     /// shared via `Arc<Mutex<Option<_>>>`. Test-only constructors that
     /// don't spawn the worker store `None`; this method then has no
-    /// thread to wait on and returns immediately.
+    /// thread to wait on and returns immediately. The handle mutex is
+    /// held through `handle.join()` so a concurrent shutdown caller cannot
+    /// observe `None` and publish `persist_worker_alive == false` while
+    /// the join owner is still waiting for the worker to exit.
     ///
     /// Sends `PersistRequest::Shutdown` and joins the thread. The
     /// worker's loop drains every queued `Delta` (including any
@@ -182,19 +185,16 @@ impl AppState {
     /// so callers that need strict durability for those variants should
     /// quiesce their producers before invoking this method.
     fn shutdown_persist_blocking(&self) {
-        let handle = {
-            let mut guard = self
-                .persist_thread_handle
-                .lock()
-                .expect("persist thread handle mutex poisoned");
-            guard.take()
-        };
+        let mut guard = self
+            .persist_thread_handle
+            .lock()
+            .expect("persist thread handle mutex poisoned");
+        let handle = guard.take();
+        let _shutdown_guard = guard;
         let Some(handle) = handle else {
-            // Idempotent: a previous call already took the handle. The
-            // alive flag was flipped during that prior call after its
-            // `handle.join()` returned, so it is already `false`. Re-
-            // store defensively in case a future caller sets it to
-            // `true` for some reason; otherwise this is a no-op.
+            // Idempotent: any previous join owner held this mutex until
+            // `handle.join()` returned and the alive flag was flipped, so
+            // observing `None` here means the worker is truly stopped.
             self.persist_worker_alive
                 .store(false, std::sync::atomic::Ordering::Release);
             return;

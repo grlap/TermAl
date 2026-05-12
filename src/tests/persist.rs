@@ -1171,6 +1171,88 @@ fn shutdown_persist_blocking_is_idempotent_when_no_worker_handle() {
     );
 }
 
+#[test]
+fn concurrent_shutdown_waits_for_join_owner_before_publishing_stopped() {
+    // Regression for the bug ledger entry "Concurrent shutdown callers can
+    // flip `persist_worker_alive` before the join owner finishes". The first
+    // caller takes the worker handle and blocks in `join()`. A concurrent
+    // caller must block behind that full transition instead of seeing `None`
+    // and publishing `alive == false` while the worker thread is still alive.
+    let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
+    let (shutdown_seen_tx, shutdown_seen_rx) = mpsc::channel::<()>();
+    let (release_worker_tx, release_worker_rx) = mpsc::channel::<()>();
+
+    let worker = std::thread::Builder::new()
+        .name("test-concurrent-persist-shutdown".to_owned())
+        .spawn(move || {
+            while let Ok(req) = persist_rx.recv() {
+                if matches!(req, PersistRequest::Shutdown) {
+                    let _ = shutdown_seen_tx.send(());
+                    release_worker_rx
+                        .recv()
+                        .expect("test should release the blocked worker");
+                    break;
+                }
+            }
+        })
+        .expect("test persist worker should spawn");
+
+    let (state, _stale_rx) = test_app_state_with_live_persist_channel();
+    let state = AppState {
+        persist_tx: persist_tx.clone(),
+        persist_thread_handle: Arc::new(Mutex::new(Some(worker))),
+        ..state
+    };
+
+    let first = state.clone();
+    let first_joiner = std::thread::spawn(move || {
+        first.shutdown_persist_blocking();
+    });
+
+    shutdown_seen_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("first shutdown caller should signal the worker");
+    assert!(
+        state.persist_worker_alive.load(Ordering::Acquire),
+        "alive must stay true while the join owner is still waiting",
+    );
+
+    let second = state.clone();
+    let (second_done_tx, second_done_rx) = mpsc::channel::<()>();
+    let second_joiner = std::thread::spawn(move || {
+        second.shutdown_persist_blocking();
+        let _ = second_done_tx.send(());
+    });
+
+    assert!(
+        second_done_rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err(),
+        "concurrent shutdown caller should block until the join owner finishes",
+    );
+    assert!(
+        state.persist_worker_alive.load(Ordering::Acquire),
+        "blocked concurrent shutdown must not publish stopped early",
+    );
+
+    release_worker_tx
+        .send(())
+        .expect("test should release worker join");
+    first_joiner
+        .join()
+        .expect("first shutdown caller should not panic");
+    second_joiner
+        .join()
+        .expect("second shutdown caller should not panic");
+    second_done_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("second shutdown caller should return after join owner finishes");
+    assert!(
+        !state.persist_worker_alive.load(Ordering::Acquire),
+        "alive should flip only after the worker has exited",
+    );
+}
+
 #[tokio::test]
 async fn shutdown_signal_wakes_a_subscriber_registered_before_the_signal() {
     // Standard ordering: subscribe first, trigger second. The subscriber's
