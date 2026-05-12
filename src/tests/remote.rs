@@ -3897,7 +3897,15 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
 #[test]
 fn remote_text_delta_exact_replay_is_skipped_for_loaded_proxy_session() {
     let state = test_app_state();
-    let remote = local_replay_test_remote();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
     seed_remote_proxy_session_via_apply_delta(
         &state,
         &remote,
@@ -10683,6 +10691,190 @@ fn remote_delta_hydration_in_flight_skips_narrow_unloaded_delta_apply() {
     assert!(record.session.messages.is_empty());
     assert_eq!(record.session.preview, "Remote summary before delta");
     assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&2));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let mut summary_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    make_remote_session_summary_only(&mut summary_session, 1);
+    summary_session.preview = "Remote summary before burst".to_owned();
+    summary_session.session_mutation_stamp = Some(9);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: summary_session.id.clone(),
+                session: summary_session.clone(),
+            },
+        )
+        .expect("remote summary session create delta should apply");
+
+    let mut hydrated_session = summary_session.clone();
+    hydrated_session.messages = vec![remote_text_message("remote-message-1", "Hydrated body.")];
+    hydrated_session.messages_loaded = true;
+    hydrated_session.message_count = 1;
+    hydrated_session.preview = "Hydrated body.".to_owned();
+    hydrated_session.session_mutation_stamp = Some(10);
+    let response_body = serde_json::to_string(&SessionResponse {
+        revision: 3,
+        session: hydrated_session,
+        server_instance_id: "remote-instance".to_owned(),
+    })
+    .expect("session response should encode");
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let requests_for_server = requests.clone();
+    let (session_request_tx, session_request_rx) = mpsc::channel::<()>();
+    let (release_response_tx, release_response_rx) = mpsc::channel::<()>();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_test_connection(&listener, "remote hydration burst listener");
+            let request = read_test_http_request(&mut stream);
+            requests_for_server
+                .lock()
+                .expect("requests mutex poisoned")
+                .push(request.request_line.clone());
+
+            if request.request_line.starts_with("GET /api/health ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    r#"{"ok":true}"#,
+                );
+                continue;
+            }
+
+            if request
+                .request_line
+                .starts_with("GET /api/sessions/remote-session-1 ")
+            {
+                let _ = session_request_tx.send(());
+                release_response_rx
+                    .recv()
+                    .expect("test should release the session response");
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    &response_body,
+                );
+                continue;
+            }
+
+            panic!("unexpected request: {}", request.request_line);
+        }
+    });
+    insert_test_remote_connection(&state, &remote, port);
+
+    let first_state = state.clone();
+    let first_remote_id = remote.id.clone();
+    let first_session_id = summary_session.id.clone();
+    let first = std::thread::spawn(move || {
+        first_state.apply_remote_delta_event(
+            &first_remote_id,
+            DeltaEvent::MessageCreated {
+                revision: 3,
+                session_id: first_session_id,
+                message_id: "remote-message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                message: remote_text_message("remote-message-1", "Hydrated body."),
+                preview: "Hydrated body.".to_owned(),
+                status: SessionStatus::Idle,
+                session_mutation_stamp: Some(10),
+            },
+        )
+    });
+
+    session_request_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("first delta should start targeted hydration");
+
+    let second_state = state.clone();
+    let second_remote_id = remote.id.clone();
+    let second_session_id = summary_session.id.clone();
+    let second = std::thread::spawn(move || {
+        second_state.apply_remote_delta_event(
+            &second_remote_id,
+            DeltaEvent::TextDelta {
+                revision: 4,
+                session_id: second_session_id,
+                message_id: "remote-message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                delta: " duplicate".to_owned(),
+                preview: Some("Hydrated body duplicate".to_owned()),
+                session_mutation_stamp: Some(11),
+            },
+        )
+    });
+    second
+        .join()
+        .expect("second delta thread should not panic")
+        .expect("duplicate in-flight delta should skip without falling through");
+
+    release_response_tx
+        .send(())
+        .expect("test should release session response");
+    first
+        .join()
+        .expect("first delta thread should not panic")
+        .expect("first delta should hydrate the transcript");
+    join_test_server(server);
+
+    let request_lines = requests.lock().expect("requests mutex poisoned").clone();
+    let session_fetch_count = request_lines
+        .iter()
+        .filter(|line| line.starts_with("GET /api/sessions/remote-session-1 "))
+        .count();
+    assert_eq!(
+        session_fetch_count, 1,
+        "same-session burst should issue only one targeted hydration fetch: {request_lines:?}",
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_remote_session_index(&remote.id, &summary_session.id)
+        .expect("remote proxy session should exist");
+    let record = &inner.sessions[index];
+    assert!(record.session.messages_loaded);
+    assert_eq!(record.session.preview, "Hydrated body.");
+    assert!(matches!(
+        record.session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Hydrated body."
+    ));
     drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());

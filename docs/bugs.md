@@ -353,21 +353,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Keep reconnect polling armed until `confirmReconnectRecoveryFromLiveEvent()` runs from a data-bearing SSE event, unless a cause-specific recovery path intentionally documents a different contract.
 - Add a regression that adopts same-instance `/api/state` progress through the timer-driven reconnect path, keeps SSE unopened/unconfirmed, advances timers, and asserts another fallback poll is scheduled.
 
-## Remote hydration dedupe coverage bypasses the production burst path
-
-**Severity:** Low - the current duplicate-hydration test manually seeds the in-flight map instead of driving real bursty remote deltas.
-
-The test pins the duplicate branch, but it would not catch a regression where the first real hydration leaks the guard, where a successful hydration does not clear the marker, or where multiple actual same-session delta handlers still issue duplicate remote session fetches.
-
-**Current behavior:**
-- The test inserts an in-flight key directly.
-- It does not prove the first production hydration inserts and clears the guard.
-- It does not prove bursty same-session deltas issue only one remote session fetch.
-
-**Proposal:**
-- Add coverage for a successful hydration path that asserts the guard is removed afterward.
-- Add a burst/concurrent same-session delta case that asserts only one remote session fetch is issued.
-
 ## `apply_remote_state_if_newer_locked` `force: bool` parameter is unnamed at call sites
 
 **Severity:** Low - seven call sites pass `false` and one passes `true`; readers cannot tell what `force` means without consulting the function signature.
