@@ -218,21 +218,6 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 - Fold the Telegram config bag into `UpdateAppSettingsRequest` with a `telegram: Option<UpdateTelegramConfigRequest>` field, returning `StateResponse` like every other setting.
 - Or document explicitly in `docs/features/` why Telegram is intentionally separated (e.g., "secret tokens kept out of the broadcast snapshot").
 
-## `validate_telegram_config` does TOCTOU between in-memory validation and on-disk persistence
-
-**Severity:** Low - the validation reads `inner.projects` and `inner.sessions` while holding the state mutex, releases the lock, then `persist_telegram_bot_file(&file)?` writes. Between release and write, another thread could delete the validated project, leaving a persisted config that references a now-missing project.
-
-`src/telegram_settings.rs:138-208`. The lock is correctly NOT held across I/O — that's the right call — but the TOCTOU window means the next status fetch will silently strip the dropped project ID via `sanitize_telegram_config_for_current_state`, which can be surprising to the user who just clicked Save. The read-time sanitize covers the symptom but not the underlying inconsistency.
-
-**Current behavior:**
-- Validation acquires the mutex briefly, then drops it.
-- Persistence runs without holding the mutex.
-- A concurrent project deletion between validation and persistence persists a stale reference.
-
-**Proposal:**
-- Add a header comment explaining the TOCTOU model and the sanitize-on-read recovery path.
-- Or run `sanitize_telegram_config_for_current_state` after `validate_telegram_config` so the persisted file matches what the next read would return.
-
 ## `TelegramPreferencesPanel` does not memoize handlers, diverging from sibling preference panels
 
 **Severity:** Low - `projectOptions` and `sessionOptions` are memoed, but `updateDraft`, `toggleProject`, `handleSave`, `handleTestConnection`, and the inline `onChange` lambdas at lines 1797, 1822, 1834 are recreated on every render. The two `ThemedCombobox` controls receive new function identity on every keystroke. Pattern divergence with `RemotePreferencesPanel` and other sibling panels in the same file.
