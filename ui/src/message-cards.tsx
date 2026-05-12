@@ -340,6 +340,7 @@ export const MessageCard = memo(
     onOpenParallelAgentSession,
     onInsertParallelAgentResult,
     onCancelParallelAgent,
+    parallelAgentActionsEnabled = true,
     searchQuery = "",
     searchHighlightTone = "match",
     isLatestAssistantMessage = true,
@@ -366,6 +367,7 @@ export const MessageCard = memo(
     onOpenParallelAgentSession?: (agentId: string) => Promise<void> | void;
     onInsertParallelAgentResult?: (agentId: string) => Promise<void> | void;
     onCancelParallelAgent?: (agentId: string) => Promise<void> | void;
+    parallelAgentActionsEnabled?: boolean;
     searchQuery?: string;
     searchHighlightTone?: SearchHighlightTone;
     // When false, `ConnectionRetryCard` renders the resolved (static, past-tense)
@@ -538,6 +540,7 @@ export const MessageCard = memo(
             onOpenAgentSession={onOpenParallelAgentSession}
             onInsertAgentResult={onInsertParallelAgentResult}
             onCancelAgent={onCancelParallelAgent}
+            actionsEnabled={parallelAgentActionsEnabled}
             searchQuery={searchQuery}
             searchHighlightTone={searchHighlightTone}
           />
@@ -605,27 +608,41 @@ export const MessageCard = memo(
         return null;
     }
   },
-  (previous, next) =>
-    previous.appearance === next.appearance &&
-    previous.message === next.message &&
-    previous.onOpenDiffPreview === next.onOpenDiffPreview &&
-    previous.onOpenSourceLink === next.onOpenSourceLink &&
-    previous.preferImmediateHeavyRender === next.preferImmediateHeavyRender &&
-    previous.isStreamingAssistantTextMessage ===
-      next.isStreamingAssistantTextMessage &&
-    previous.onApprovalDecision === next.onApprovalDecision &&
-    previous.onUserInputSubmit === next.onUserInputSubmit &&
-    previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
-    previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
-    previous.onOpenParallelAgentSession === next.onOpenParallelAgentSession &&
-    previous.onInsertParallelAgentResult === next.onInsertParallelAgentResult &&
-    previous.onCancelParallelAgent === next.onCancelParallelAgent &&
-    previous.searchQuery === next.searchQuery &&
-    previous.searchHighlightTone === next.searchHighlightTone &&
-    previous.isLatestAssistantMessage === next.isLatestAssistantMessage &&
-    previous.connectionRetryDisplayState ===
-      next.connectionRetryDisplayState &&
-    previous.workspaceRoot === next.workspaceRoot,
+  (previous, next) => {
+    const previousParallelActionsEnabled =
+      previous.parallelAgentActionsEnabled !== false;
+    const nextParallelActionsEnabled =
+      next.parallelAgentActionsEnabled !== false;
+    const parallelActionPropsEqual =
+      previous.message.type !== "parallelAgents" ||
+      (!previousParallelActionsEnabled && !nextParallelActionsEnabled) ||
+      (previousParallelActionsEnabled === nextParallelActionsEnabled &&
+        previous.onOpenParallelAgentSession === next.onOpenParallelAgentSession &&
+        previous.onInsertParallelAgentResult ===
+          next.onInsertParallelAgentResult &&
+        previous.onCancelParallelAgent === next.onCancelParallelAgent);
+
+    return (
+      previous.appearance === next.appearance &&
+      previous.message === next.message &&
+      previous.onOpenDiffPreview === next.onOpenDiffPreview &&
+      previous.onOpenSourceLink === next.onOpenSourceLink &&
+      previous.preferImmediateHeavyRender === next.preferImmediateHeavyRender &&
+      previous.isStreamingAssistantTextMessage ===
+        next.isStreamingAssistantTextMessage &&
+      previous.onApprovalDecision === next.onApprovalDecision &&
+      previous.onUserInputSubmit === next.onUserInputSubmit &&
+      previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
+      previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
+      parallelActionPropsEqual &&
+      previous.searchQuery === next.searchQuery &&
+      previous.searchHighlightTone === next.searchHighlightTone &&
+      previous.isLatestAssistantMessage === next.isLatestAssistantMessage &&
+      previous.connectionRetryDisplayState ===
+        next.connectionRetryDisplayState &&
+      previous.workspaceRoot === next.workspaceRoot
+    );
+  },
 );
 
 function promptCommandMetaLabel(text: string, expandedText?: string | null) {
@@ -2251,6 +2268,7 @@ function ParallelAgentsCard({
   onOpenAgentSession,
   onInsertAgentResult,
   onCancelAgent,
+  actionsEnabled = true,
   searchQuery = "",
   searchHighlightTone = "match",
 }: {
@@ -2258,6 +2276,7 @@ function ParallelAgentsCard({
   onOpenAgentSession?: (agentId: string) => Promise<void> | void;
   onInsertAgentResult?: (agentId: string) => Promise<void> | void;
   onCancelAgent?: (agentId: string) => Promise<void> | void;
+  actionsEnabled?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
@@ -2385,9 +2404,13 @@ function ParallelAgentsCard({
                 agent={agent}
                 isLast={index === message.agents.length - 1}
                 pendingActionKeys={pendingActionKeys}
-                onOpenAgentSession={onOpenAgentSession}
-                onInsertAgentResult={onInsertAgentResult}
-                onCancelAgent={onCancelAgent}
+                onOpenAgentSession={
+                  actionsEnabled ? onOpenAgentSession : undefined
+                }
+                onInsertAgentResult={
+                  actionsEnabled ? onInsertAgentResult : undefined
+                }
+                onCancelAgent={actionsEnabled ? onCancelAgent : undefined}
                 runAgentAction={runAgentAction}
                 searchQuery={searchQuery}
                 searchHighlightTone={searchHighlightTone}

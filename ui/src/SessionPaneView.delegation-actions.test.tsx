@@ -63,12 +63,15 @@ vi.mock("./panels/AgentSessionPanel", async () => {
           onOpenParallelAgentSession?: unknown;
           onInsertParallelAgentResult?: unknown;
           onCancelParallelAgent?: unknown;
+          parallelAgentActionsEnabled?: boolean;
         })
       : {};
+    const actionsEnabled = cardProps.parallelAgentActionsEnabled !== false;
 
     React.useLayoutEffect(() => {
       if (
         delegationActionMockState.autoOpenDelegationOnLayout &&
+        actionsEnabled &&
         typeof cardProps.onOpenParallelAgentSession === "function"
       ) {
         delegationActionMockState.autoOpenDelegationOnLayout = false;
@@ -78,14 +81,16 @@ vi.mock("./panels/AgentSessionPanel", async () => {
           ) => Promise<void>
         )("delegation-running");
       }
-    }, [cardProps.onOpenParallelAgentSession]);
+    }, [actionsEnabled, cardProps.onOpenParallelAgentSession]);
 
     return (
       <div data-testid="agent-session-panel">
-        {typeof cardProps.onOpenParallelAgentSession === "function" ? (
+        {actionsEnabled &&
+        typeof cardProps.onOpenParallelAgentSession === "function" ? (
           <button type="button">Open delegation child</button>
         ) : null}
-        {typeof cardProps.onInsertParallelAgentResult === "function" ? (
+        {actionsEnabled &&
+        typeof cardProps.onInsertParallelAgentResult === "function" ? (
           <button
             type="button"
             onClick={() => {
@@ -99,7 +104,8 @@ vi.mock("./panels/AgentSessionPanel", async () => {
             Insert delegation result
           </button>
         ) : null}
-        {typeof cardProps.onCancelParallelAgent === "function" ? (
+        {actionsEnabled &&
+        typeof cardProps.onCancelParallelAgent === "function" ? (
           <button type="button">Cancel delegation</button>
         ) : null}
       </div>

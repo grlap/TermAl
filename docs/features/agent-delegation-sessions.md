@@ -542,6 +542,14 @@ concrete agent integration requires it. Add project/workspace opt-in or
 capability tokens before exposing the bridge over a shared, remote, or
 long-lived reusable transport.
 
+The parent session id is the namespace for v1. That is intentionally weaker
+than a Linux-style namespace: child sessions are still ordinary TermAl sessions
+in storage, and humans can open them from the parent card. The MCP caller,
+however, only receives delegation ids created under its implicit parent and has
+no tool that can enumerate unrelated sessions or delegations. This is the
+minimum boundary needed for local delegated review automation without adding a
+capability system prematurely.
+
 The first implementation is a TermAl-owned local MCP bridge spawned for one
 parent agent session:
 
@@ -653,6 +661,17 @@ Agent integration hooks:
 - fan in the returned result packets and update `docs/bugs.md` from the parent
   session only
 - stop with a clear message when the TermAl delegation MCP tools are absent
+
+Implementation order:
+1. Close existing delegation correctness bugs first, especially terminal
+   status/result refresh and backend resume wait behavior after restart.
+2. Finish the local MCP bridge contract and regression coverage around
+   parent-scoped spawn/status/result/cancel/wait tools.
+3. Wire the same bridge descriptor into Codex, Claude, Cursor, and Gemini
+   startup/resume hooks.
+4. Rewrite `/review-with-delegate` to use only the TermAl MCP tools. The command
+   must not fall back to raw HTTP, shell polling, Claude Task agents, Codex
+   platform subagents, or manual session-log scraping.
 
 ### API Sketch
 

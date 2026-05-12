@@ -788,6 +788,53 @@ describe("MessageCard", () => {
     expect(onCancelParallelAgent).not.toHaveBeenCalled();
   });
 
+  it("hides delegation actions when parallel-agent actions are disabled", () => {
+    const message: ParallelAgentsMessage = {
+      id: "message-parallel-agents-actions-disabled",
+      type: "parallelAgents",
+      author: "assistant",
+      timestamp: "10:02",
+      agents: [
+        {
+          id: "delegation-running",
+          source: "delegation",
+          title: "Review backend",
+          status: "running",
+          detail: "Checking Rust changes",
+        },
+        {
+          id: "delegation-completed",
+          source: "delegation",
+          title: "Review frontend",
+          status: "completed",
+          detail: "No issues found",
+        },
+      ],
+    };
+    const onOpenParallelAgentSession = vi.fn();
+    const onInsertParallelAgentResult = vi.fn();
+    const onCancelParallelAgent = vi.fn();
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        onOpenParallelAgentSession={onOpenParallelAgentSession}
+        onInsertParallelAgentResult={onInsertParallelAgentResult}
+        onCancelParallelAgent={onCancelParallelAgent}
+        parallelAgentActionsEnabled={false}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Open session" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Insert result" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(onOpenParallelAgentSession).not.toHaveBeenCalled();
+    expect(onInsertParallelAgentResult).not.toHaveBeenCalled();
+    expect(onCancelParallelAgent).not.toHaveBeenCalled();
+  });
+
   it("renders thinking content with markdown formatting", async () => {
     const message: ThinkingMessage = {
       id: "message-3",

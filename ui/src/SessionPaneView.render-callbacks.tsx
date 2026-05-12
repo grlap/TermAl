@@ -445,21 +445,10 @@ export function useSessionRenderCallbacks({
         onUserInputSubmit={handleUserInput}
         onMcpElicitationSubmit={handleMcpElicitation}
         onCodexAppRequestSubmit={handleCodexAppRequest}
-        onOpenParallelAgentSession={
-          canExposeLocalDelegationActions
-            ? handleOpenParallelAgentSession
-            : undefined
-        }
-        onInsertParallelAgentResult={
-          canExposeLocalDelegationActions
-            ? handleInsertParallelAgentResult
-            : undefined
-        }
-        onCancelParallelAgent={
-          canExposeLocalDelegationActions
-            ? handleCancelParallelAgent
-            : undefined
-        }
+        onOpenParallelAgentSession={handleOpenParallelAgentSession}
+        onInsertParallelAgentResult={handleInsertParallelAgentResult}
+        onCancelParallelAgent={handleCancelParallelAgent}
+        parallelAgentActionsEnabled={canExposeLocalDelegationActions}
         searchQuery={
           activeSessionSearchMatchItemKey === `message:${message.id}`
             ? sessionFindQuery

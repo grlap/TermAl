@@ -177,18 +177,6 @@ A regression that drops the `isMountedRef.current` check inside `finally` would 
 - Assert `console.error` was not called with "act"/"unmounted" warnings during the test.
 - Or stub `setIsDelegationSpawning` via spy and verify it isn't invoked post-unmount.
 
-## `enableLocalDelegationActions` flag flips invalidate `MessageCard` memo
-
-**Severity:** Low - three callbacks at `ui/src/SessionPaneView.render-callbacks.tsx:355-371` are passed as `enableLocalDelegationActions ? handler : undefined`. When the flag flips between renders, three new `undefined` slots vs. three stable function refs change the `MessageCard` props and re-render the entire parallel-agents card. `MessageCard` is `memo`-wrapped — passing `undefined` toggles invalidate the memo check on every flag flip.
-
-**Current behavior:**
-- Flag flip → three undefined props → memo invalidation → full card re-render.
-- Acceptable today (project remoteId rarely flips).
-
-**Proposal:**
-- Memoize the three "disabled" undefined values as a single object.
-- Or pass the flag itself through and let the consumer decide.
-
 ## `delegation_parent_card_update_ignores_tool_source_id_collision` only manually constructs the collision
 
 **Severity:** Low - the new test at `src/tests/delegations.rs:655-746` constructs the collision by manually inserting a tool-source row with the same id as the delegation. The production paths that could create such a collision (Claude task path emitting a tool-source row with a delegation-id-overlapping uuid) are not exercised.
