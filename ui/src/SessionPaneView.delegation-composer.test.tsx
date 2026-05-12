@@ -177,12 +177,14 @@ function renderSessionPaneView({
   agentCommands = [],
   projects = [makeProject()],
   remotes = [makeRemote()],
+  expectComposer = true,
 }: {
   session: Session;
   draft: string;
   agentCommands?: AgentCommand[];
   projects?: Project[];
   remotes?: RemoteConfig[];
+  expectComposer?: boolean;
 }) {
   syncComposerSessionsStore({
     sessions: [session],
@@ -282,7 +284,9 @@ function renderSessionPaneView({
   return {
     onComposerError,
     onDraftCommit,
-    textarea: screen.getByLabelText(`Message ${session.name}`) as HTMLTextAreaElement,
+    textarea: expectComposer
+      ? (screen.getByLabelText(`Message ${session.name}`) as HTMLTextAreaElement)
+      : (null as unknown as HTMLTextAreaElement),
   };
 }
 
@@ -468,5 +472,33 @@ describe("SessionPaneView composer delegation click-through", () => {
     );
     expect(textarea.value).toBe(draft);
     expect(onDraftCommit).not.toHaveBeenCalled();
+  });
+
+  it("hides composer controls for delegated child sessions while keeping transcript find available", () => {
+    const session = makeSession({
+      id: "child-session-1",
+      name: "Delegated reviewer",
+      parentDelegationId: "delegation-1",
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          timestamp: "10:00:00",
+          author: "assistant",
+          text: "Review result",
+        },
+      ],
+    });
+
+    renderSessionPaneView({
+      session,
+      draft: "This should not be editable here.",
+      expectComposer: false,
+    });
+
+    expect(screen.getByRole("button", { name: "Find" })).toBeInTheDocument();
+    expect(screen.queryByLabelText(`Message ${session.name}`)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delegate" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
   });
 });

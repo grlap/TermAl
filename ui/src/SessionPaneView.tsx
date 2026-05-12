@@ -885,6 +885,7 @@ export function SessionPaneView({
     showLiveTurnWaitingIndicator || showDelegationWaitIndicator;
   const activeSessionMessages = activeSession?.messages;
   const activeSessionStatus = activeSession?.status;
+  const isDelegatedChildSession = Boolean(activeSession?.parentDelegationId);
   const canFindInSession =
     isSessionTabActive && pane.viewMode === "session" && Boolean(activeSession);
   const hasSessionFindQuery =
@@ -3630,7 +3631,8 @@ export function SessionPaneView({
       activeGitStatusTab ||
       activeTerminalTab ||
       activeInstructionDebuggerTab ||
-      activeDiffPreviewTab ? null : (
+      activeDiffPreviewTab ||
+      isDelegatedChildSession ? null : (
         <AgentSessionPanelFooter
           paneId={pane.id}
           viewMode={pane.viewMode}

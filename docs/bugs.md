@@ -7,6 +7,19 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Stop button hidden for active delegated child sessions
+
+**Severity:** Medium - `ui/src/SessionPaneView.tsx:3626-3667`. The footer-render gate disables `AgentSessionPanelFooter` whenever `activeSession.parentDelegationId` is set. The Stop button (`ui/src/panels/AgentSessionPanel.tsx:3320-3328`) lives inside that footer's `composer-actions` and is shown when the session is busy or stopping. As a result, when a delegated child is `status: "active"` or `status: "approval"`, there is no in-pane affordance to abort it.
+
+**Current behavior:**
+- Delegated child sessions render no footer, so Stop, the new-response indicator, draft attachments, Delegate, and Send are all hidden.
+- An actively streaming child must be stopped via the parent delegation lifecycle or another UI path, not from its own pane.
+
+**Proposal:**
+- Decide whether Stop should remain available for active children. If yes, render a slim "delegated child" footer that keeps Stop and the new-response indicator but omits composer/Delegate/Send.
+- Either way, add a test pinning the chosen behavior for `status: "active"` child sessions.
+- Document the contract inline at the `isDelegatedChildSession` declaration so future maintainers know what is intentionally still reachable.
+
 ## First-settled active-baseline same-message growth lacks a safe turn boundary
 
 **Severity:** Medium - `src/telegram.rs:2583-2637`. When a Telegram prompt is armed behind an active/approval-paused turn, the relay baselines the current assistant message while `baseline_while_active=true`. If the tracked message id has already grown by the first settled poll, the relay cannot distinguish "old turn finished after the last active poll" from "the Telegram reply was appended to the same message id."
@@ -32,6 +45,17 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 
 **Proposal:**
 - Extract the active-baseline transition into a helper `transition_active_baseline_to_settled` that returns either the new cursor + position or an `OutcomeShortCircuit`.
+
+## Test helper launders null into `HTMLTextAreaElement` via double-cast
+
+**Severity:** Low - `ui/src/SessionPaneView.delegation-composer.test.tsx:287-289`. The `expectComposer` branch returns `null as unknown as HTMLTextAreaElement`, bypassing TypeScript. Any future caller that opts out of the composer and then dereferences `result.textarea` will hit a runtime null deref with no compile-time warning.
+
+**Current behavior:**
+- Helper return type advertises `HTMLTextAreaElement` even when the composer is intentionally not rendered.
+- Double-cast (`as unknown as`) hides the absence from the type system.
+
+**Proposal:**
+- Type the field as `textarea: HTMLTextAreaElement | null` or return a discriminated union so callers must handle the no-composer case explicitly.
 
 ## `TelegramRelayRuntime` is a file-level global rather than `AppState`-owned state
 
@@ -861,6 +885,12 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
+- [ ] Pin Stop-button visibility for active delegated child sessions:
+  add a test in `ui/src/SessionPaneView.delegation-composer.test.tsx` that renders a child session with `parentDelegationId` set and `status: "active"`, then asserts whichever behavior we decide (Stop hidden vs. Stop preserved via a slim footer).
+- [ ] Pin "draft is not silently committed" for delegated children:
+  extend the new `hides composer controls for delegated child sessions` test to assert `onDraftCommit` is not invoked despite a draft being pre-seeded into the composer store.
+- [ ] Document the delegated-child composer contract in source:
+  add a 1-2 line comment above the `isDelegatedChildSession` declaration in `ui/src/SessionPaneView.tsx` explaining why the composer/footer are hidden and which surfaces remain reachable.
 - [ ] P2: Add repeated-send waiting-indicator coverage:
   send a second prompt after a completed assistant response while the POST is still in flight, and assert the user still sees send-in-progress feedback until the new prompt appears in session state.
 - [ ] P2: Add delegation-wait visibility coverage after prior assistant output:
