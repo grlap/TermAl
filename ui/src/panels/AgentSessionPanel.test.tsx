@@ -10666,6 +10666,9 @@ describe("AgentSessionPanelFooter", () => {
   it("ignores delegation completion after the footer unmounts", async () => {
     const pendingSpawn = deferredValue<boolean>();
     const onDraftCommit = vi.fn();
+    const focusSpy = vi
+      .spyOn(HTMLTextAreaElement.prototype, "focus")
+      .mockImplementation(() => {});
     const consoleErrorSpy = vi
       .spyOn(console, "error")
       .mockImplementation(() => {});
@@ -10688,6 +10691,7 @@ describe("AgentSessionPanelFooter", () => {
         await Promise.resolve();
       });
 
+      focusSpy.mockClear();
       unmount();
       await act(async () => {
         pendingSpawn.resolve(true);
@@ -10695,12 +10699,14 @@ describe("AgentSessionPanelFooter", () => {
       });
 
       expect(onDraftCommit).not.toHaveBeenCalledWith("session-a", "");
+      expect(focusSpy).not.toHaveBeenCalled();
       expect(
         consoleErrorSpy.mock.calls
           .map((args) => args.map(String).join(" "))
           .filter((message) => /act|unmount/i.test(message)),
       ).toEqual([]);
     } finally {
+      focusSpy.mockRestore();
       consoleErrorSpy.mockRestore();
     }
   });

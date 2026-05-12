@@ -162,21 +162,6 @@ The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but
 - When serving wire Sessions to remotes (vs. to local UI), strip the `remote_id` field.
 - Or explicitly document that local remote aliases/session-to-remote ownership are non-sensitive shared metadata under the Phase 1 trust model.
 
-## Unmount race test relies on console error suppression for `act` warnings
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx:7102-7129`. "Ignores delegation completion after the footer unmounts" exercises only the unmount-during-await path. It does NOT verify (a) `setIsDelegationSpawning(false)` is gated by `isMountedRef.current` so the React `act` warning never appears (covered indirectly by lack of console error), or (b) `focusComposerInput()` is not called after unmount (a pending rAF could try to focus a detached node).
-
-A regression that drops the `isMountedRef.current` check inside `finally` would not be caught directly — `act` warnings only surface in CI and may be flaky.
-
-**Current behavior:**
-- Unmount-during-await path covered.
-- `isMountedRef.current` guard not directly asserted.
-- `focusComposerInput()` post-unmount not verified.
-
-**Proposal:**
-- Assert `console.error` was not called with "act"/"unmounted" warnings during the test.
-- Or stub `setIsDelegationSpawning` via spy and verify it isn't invoked post-unmount.
-
 ## `markUserScroll` anchor speculation captures approximate touch offsets
 
 **Severity:** Medium - speculative offset adjustment `viewportOffsetPx - inputScrollDeltaY` applied unconditionally on every input event. For touch events, `touchDeltaY` is the FINGER delta (not the scroll delta). When user touches a non-scrollable region, swipes within an iframe, or hits a scroll boundary, the anchor's `viewportOffsetPx` ends up off by the would-be delta.
