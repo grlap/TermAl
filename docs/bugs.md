@@ -753,19 +753,6 @@ The new tests validate the sticky `watch` shutdown helper directly, but they do 
 - Add route-level SSE shutdown tests for shutdown-before-connect and shutdown-after-initial-state.
 - Wrap both in timeouts so missed shutdown delivery fails loudly.
 
-## Per-session hydration burst has no cooldown beyond in-flight deduplication
-
-**Severity:** Low - `ui/src/app-live-state.ts:2329, 2421, 2437`. The new `startSessionHydration(delta.sessionId)` calls trigger `GET /api/sessions/{id}` (full transcript fetch) on every problematic delta. `hydratingSessionIdsRef` deduplicates concurrent fetches per session, but it does not rate-limit successive fetches: once a hydration completes, the next problematic delta on the same session immediately schedules another full transcript fetch. On a flaky network with bursty deltas, a hydration→delta→hydration loop is possible, each iteration shipping the entire transcript over the wire.
-
-**Current behavior:**
-- In-flight dedup via `hydratingSessionIdsRef` collapses simultaneous calls to one round-trip.
-- After completion, the next problematic delta immediately schedules another fetch with no cooldown.
-- Phase-1 local-only deployment makes this practically free; future remote-host or flaky-network use exposes the storm risk.
-
-**Proposal:**
-- Add a per-session cooldown timestamp ("don't re-hydrate the same session within Nms of the last completed hydration unless the new delta carries a revision strictly greater than the one that started the previous hydration").
-- Or document the burst as intentional given the local-only deployment cost; add a comment naming the trade-off so future reviewers don't keep flagging it.
-
 ## Post-commit hardening helpers have no automated production-path coverage
 
 **Severity:** Low - `src/persist.rs:213-227`. `verify_persist_commit_integrity` is `#[cfg(not(test))]`-only because it depends on production SQLite path hardening. The post-commit contract - redirection remains fatal, owner-only chmod/mode verification remains fatal unless `TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS` is set - has no direct automated coverage.

@@ -2497,6 +2497,12 @@ export function useAppLiveState(
     ) {
       requestStateResync(options?.requestOptions ?? { rearmOnFailure: true });
       if (isSessionDeltaEvent(delta)) {
+        // Recovery-triggered hydration is intentionally limited only by the
+        // in-flight/queued sets in `startSessionHydration`. Phase-1 transport is
+        // local, and freshness is more important than adding a cooldown that
+        // could defer the only full-transcript fetch after a problematic delta.
+        // Revisit with a per-session cooldown if remote/flaky networks make
+        // repeated completed hydrations expensive.
         startSessionHydration(delta.sessionId, options?.hydrationOptions);
       }
     }
