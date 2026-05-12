@@ -276,7 +276,6 @@ describe("TelegramPreferencesPanel", () => {
     });
     const testResult = createDeferred<Awaited<ReturnType<typeof testTelegramConnection>>>();
     testTelegramConnectionMock.mockReturnValueOnce(testResult.promise);
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const { unmount } = render(
       <TelegramPreferencesPanel projects={projects} sessions={sessions} />,
@@ -293,7 +292,9 @@ describe("TelegramPreferencesPanel", () => {
       await testResult.promise;
     });
 
-    expect(consoleError).not.toHaveBeenCalled();
-    consoleError.mockRestore();
+    render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
+
+    expect(await screen.findByText("Saved as ****oken.")).toBeInTheDocument();
+    expect(screen.queryByText("Connected to @termal_bot.")).not.toBeInTheDocument();
   });
 });

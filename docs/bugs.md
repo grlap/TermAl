@@ -235,22 +235,6 @@ The `remote_id` is a local config alias (e.g., "ssh-lab"), not a credential, but
 - Throttle via rAF.
 - OR only capture when prepend is imminent.
 
-## "in-flight Telegram test unmounts" test asserts only `consoleError`, doesn't actually pin the unmount guard
-
-**Severity:** Medium - React 18+ removed the "Can't perform a state update on an unmounted component" warning entirely, so removing the `isMountedRef` checks would not cause the test to fail.
-
-`ui/src/preferences-panels.telegram.test.tsx:162-189`. The test reads as effective coverage for the `isMountedRef` guard but actually catches no regression because no warning fires under React 18. A regression making `setError` always swallow would also pass.
-
-**Current behavior:**
-- Test asserts `expect(consoleError).not.toHaveBeenCalled()`.
-- Under React 18, no warning fires regardless of the guard.
-- Removing the guard would not cause the test to fail.
-
-**Proposal:**
-- Spy on the test promise's then-handler (or wrap `setError`/`setIsTesting` via mock) to assert they aren't invoked post-unmount.
-- OR remount and verify state is freshly initialised.
-- Add a positive control: same flow stays mounted, error DOES surface.
-
 ## Two cancellation patterns coexist in `TelegramPreferencesPanel`: `cancelled` flag for initial-fetch, `isMountedRef` for handlers
 
 **Severity:** Low - same component has two patterns for the same concern ("drop late updates after unmount"). Future maintainers may copy the wrong one.
