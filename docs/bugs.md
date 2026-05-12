@@ -233,20 +233,6 @@ Responses mask the token, but the full credential remains on disk and in temp/co
 - Stabilize handlers via `useCallback`.
 - Or document explicitly that the panel intentionally avoids memoization. Either is fine; consistency is the architectural goal.
 
-## `SessionPaneView` `paneScrollPositions` in deps adds no reactivity
-
-**Severity:** Low - the dependency on the dictionary identity is stable across renders for the same `pane.id`; mutations inside the dictionary do not trigger the effect. False reactivity impression for future readers.
-
-`ui/src/SessionPaneView.tsx:1869-1900`. Either drop the dep with an `eslint-disable` comment explaining why, or capture the dependency narrowly (e.g., `paneScrollPositions[scrollStateKey]?.shouldStick`).
-
-**Current behavior:**
-- `paneScrollPositions` dict identity is stable across renders.
-- Mutations inside the dict don't trigger the effect.
-- The dep gives a false impression of reactivity.
-
-**Proposal:**
-- Drop the dep with an `eslint-disable` comment, or narrow to the specific value being read.
-
 ## `ConversationOverviewRail` per-segment fresh handlers and aria-label per render
 
 **Severity:** Low - up to 160 segment buttons each get fresh `onClick`/`onKeyDown` arrow functions per render, plus a fresh `aria-label` string from `overviewSegmentLabel(segment, projection.items)` (an O(n) lookup against `projection.items.length`).

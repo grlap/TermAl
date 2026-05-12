@@ -1038,7 +1038,8 @@ export function SessionPaneView({
     paneMessageContentSignaturesRef.current[pane.id] ??
     (paneMessageContentSignaturesRef.current[pane.id] = {});
   const savedScrollPosition = paneScrollPositions[scrollStateKey];
-  const waitingIndicatorShouldStick = savedScrollPosition?.shouldStick === true;
+  const savedScrollShouldStick = savedScrollPosition?.shouldStick === true;
+  const waitingIndicatorShouldStick = savedScrollShouldStick;
 
   function getTailFollowIntent() {
     return paneShouldStickToBottomRef.current[pane.id] ?? true;
@@ -2188,7 +2189,7 @@ export function SessionPaneView({
       return;
     }
 
-    if (paneScrollPositions[scrollStateKey]?.shouldStick) {
+    if (savedScrollShouldStick) {
       return;
     }
 
@@ -2198,8 +2199,8 @@ export function SessionPaneView({
   }, [
     activeSession,
     isSessionTabActive,
-    paneScrollPositions,
     pane.viewMode,
+    savedScrollShouldStick,
     scrollStateKey,
     visitedSessionIds,
   ]);
