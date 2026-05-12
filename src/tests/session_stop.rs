@@ -606,6 +606,14 @@ fn stop_session_clears_active_turn_file_tracking_when_persist_fails() {
         .find(|record| record.session.id == session_id)
         .expect("Claude session should exist");
     assert_eq!(record.session.status, SessionStatus::Idle);
+    assert!(record.orchestrator_auto_dispatch_blocked);
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_reset_required);
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.deferred_stop_callbacks.is_empty());
+    assert!(record.session.messages.iter().any(|message| {
+        matches!(message, Message::Text { text, .. } if text == "Turn stopped by user.")
+    }));
     assert!(record.active_turn_start_message_count.is_none());
     assert!(record.active_turn_file_changes.is_empty());
     assert!(record.active_turn_file_change_grace_deadline.is_none());

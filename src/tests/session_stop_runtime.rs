@@ -937,6 +937,14 @@ fn runtime_exit_clears_active_turn_file_tracking_when_persist_fails() {
         .expect("Claude session should exist");
     assert_eq!(record.session.status, SessionStatus::Error);
     assert!(record.session.preview.contains("runtime crashed"));
+    assert!(record.orchestrator_auto_dispatch_blocked);
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_reset_required);
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.deferred_stop_callbacks.is_empty());
+    assert!(record.session.messages.iter().any(|message| {
+        matches!(message, Message::Text { text, .. } if text == "Turn failed: runtime crashed")
+    }));
     assert!(record.active_turn_start_message_count.is_none());
     assert!(record.active_turn_file_changes.is_empty());
     assert!(record.active_turn_file_change_grace_deadline.is_none());

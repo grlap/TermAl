@@ -337,22 +337,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Keep digest-only forwarding as the default for Telegram integrations.
 - Document the third-party content exposure and add any practical redaction/truncation before full forwarding.
 
-## Asymmetric `orchestrator_auto_dispatch_blocked` between two persist-failure rollback sites
-
-**Severity:** Medium - an Error session can remain auto-dispatch-eligible after a runtime-exit commit failure while disk and memory disagree.
-
-`src/session_lifecycle.rs:449` defensively sets `record.orchestrator_auto_dispatch_blocked = true` on persist-failure rollback in the stop-session path. `src/turn_lifecycle.rs:455` does NOT mirror that defensive set in the runtime-exit rollback path, and the inner block at `turn_lifecycle.rs:413` has already explicitly cleared the flag to `false` before the failed `commit_locked`. Net effect: if the runtime-exit commit fails, the session in-memory state is `SessionStatus::Error` with the "Turn failed: …" message, but the orchestrator can still observe it as eligible for auto-dispatch.
-
-**Current behavior:**
-- `stop_session` rollback sets `orchestrator_auto_dispatch_blocked = true` defensively.
-- `handle_runtime_exit_if_matches` rollback leaves the flag at whatever the inner block last wrote (`false`).
-- An Error session with a failed persist commit can still be re-dispatched.
-- The new tests do not pin `orchestrator_auto_dispatch_blocked` in either rollback path.
-
-**Proposal:**
-- Either mirror the `session_lifecycle.rs` defensive set (`true`) in `turn_lifecycle.rs`, or document why the asymmetry is intentional.
-- Tighten the persist-failure tests to also pin `orchestrator_auto_dispatch_blocked`, `runtime`, `runtime_stop_in_progress`, and the "stopped/failed" message presence.
-
 ## Mermaid fallback loader lives in the message card renderer
 
 **Severity:** Low - Mermaid fallback loading and cache ownership are mixed into an already large rendering component.
