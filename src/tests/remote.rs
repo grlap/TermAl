@@ -5832,8 +5832,9 @@ fn clear_remote_applied_revision_preserves_other_remote_replay_keys() {
             .lock()
             .expect("remote delta hydration mutex poisoned");
         assert!(
-            !in_flight.contains(&("ssh-lab-a".to_owned(), "remote-session-a".to_owned())),
-            "clearing remote A should remove its in-flight hydration markers"
+            in_flight.contains(&("ssh-lab-a".to_owned(), "remote-session-a".to_owned())),
+            "clearing remote A must not remove live in-flight hydration markers; the owning \
+             hydration guard retires them"
         );
         assert!(
             in_flight.contains(&("ssh-lab-b".to_owned(), "remote-session-b".to_owned())),

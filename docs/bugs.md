@@ -353,22 +353,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Keep reconnect polling armed until `confirmReconnectRecoveryFromLiveEvent()` runs from a data-bearing SSE event, unless a cause-specific recovery path intentionally documents a different contract.
 - Add a regression that adopts same-instance `/api/state` progress through the timer-driven reconnect path, keeps SSE unopened/unconfirmed, advances timers, and asserts another fallback poll is scheduled.
 
-## Remote hydration in-flight cleanup can race with the RAII guard
-
-**Severity:** Low - clearing `remote_delta_hydrations_in_flight` by key can remove or later invalidate a newer in-flight hydration for the same remote/session.
-
-The remote hydration guard removes its `(remote_id, session_id)` key on drop. `clear_remote_applied_revision` can also remove keys for a remote while an older hydration guard is still alive. If a later hydration inserts the same key after that cleanup, the older guard can drop afterward and remove the newer marker, allowing duplicate hydrations despite the guard.
-
-**Current behavior:**
-- In-flight hydration entries are keyed only by `(remote_id, session_id)`.
-- Remote continuity cleanup can remove a live key while the guard that owns it is still alive.
-- A stale guard drop cannot distinguish its own entry from a newer entry with the same key.
-
-**Proposal:**
-- Store a unique token or generation per in-flight entry and remove only when the token still matches.
-- Or avoid clearing live in-flight markers during remote continuity reset; let the owning guard retire its own marker.
-- Add cleanup tests covering overlapping guards and per-remote cleanup.
-
 ## Remote hydration dedupe coverage bypasses the production burst path
 
 **Severity:** Low - the current duplicate-hydration test manually seeds the in-flight map instead of driving real bursty remote deltas.
