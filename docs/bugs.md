@@ -44,16 +44,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 **Proposal:**
 - Move the runtime into `AppState` and own its lifecycle on the state object.
 
-## `reconcile_telegram_relay_from_saved_settings` is synchronous on main task at startup
-
-**Severity:** Note - `src/main.rs:115-116`. The reconcile runs synchronously on the main task, blocking after "listening: http://" is printed but before the server starts accepting requests. With corrupt-file backup paths the reconcile could spend time on filesystem operations before the server is fully responsive.
-
-**Current behavior:**
-- Synchronous reconcile after server bind, before request handling.
-
-**Proposal:**
-- Spawn the reconcile as a `tokio::spawn` so the server responds immediately.
-
 ## Telegram relay stop/restart does not wait for old thread quiescence
 
 **Severity:** Medium - `src/main.rs:145`, `src/telegram.rs:248-315` signal the Telegram relay to stop but do not join the old relay thread or otherwise wait until it has stopped using its captured config.

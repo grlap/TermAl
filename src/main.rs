@@ -125,7 +125,12 @@ async fn run_server() -> Result<()> {
     println!("default cwd: {cwd}");
     println!("ui proxy target: /api");
     #[cfg(not(test))]
-    state.reconcile_telegram_relay_from_saved_settings();
+    {
+        let reconcile_state = state.clone();
+        let _telegram_reconcile_task = tokio::task::spawn_blocking(move || {
+            reconcile_state.reconcile_telegram_relay_from_saved_settings();
+        });
+    }
 
     // Compose the graceful-shutdown future:
     //   1. Wait for Ctrl+C / SIGTERM.
