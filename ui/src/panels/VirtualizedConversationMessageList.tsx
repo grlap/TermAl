@@ -1680,7 +1680,6 @@ export function VirtualizedConversationMessageList({
     layoutVersion,
     mountedPageRange,
     scrollContainerRef,
-    viewportScrollTop,
   ]);
 
   const resolveScrollTopForMessageLocation = useCallback(
