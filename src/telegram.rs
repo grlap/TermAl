@@ -28,12 +28,13 @@ fn run_telegram_bot() -> Result<()> {
         .context("current directory is not valid UTF-8")?
         .to_owned();
     let config = TelegramBotConfig::from_env(&cwd)?;
-    run_telegram_bot_with_config(config, None)
+    run_telegram_bot_with_config(config, None, None)
 }
 
 fn run_telegram_bot_with_config(
     mut config: TelegramBotConfig,
     shutdown: Option<Arc<AtomicBool>>,
+    on_ready: Option<Box<dyn FnOnce() + Send>>,
 ) -> Result<()> {
     let termal = TermalApiClient::new(&config.api_base_url)?;
     let telegram = TelegramApiClient::new(&config.bot_token, config.poll_timeout_secs)?;
@@ -76,6 +77,10 @@ fn run_telegram_bot_with_config(
         None => println!(
             "chat: not linked; set TERMAL_TELEGRAM_CHAT_ID or use the Settings link flow when it is enabled"
         ),
+    }
+
+    if let Some(on_ready) = on_ready {
+        on_ready();
     }
 
     while !telegram_relay_shutdown_requested(&shutdown) {
@@ -389,22 +394,34 @@ fn start_telegram_relay_runtime(config: TelegramBotConfig) {
                 }
             }
 
-            let should_run = {
-                let mut runtime = TELEGRAM_RELAY_RUNTIME
+            let should_start = {
+                let runtime = TELEGRAM_RELAY_RUNTIME
                     .lock()
                     .expect("telegram relay runtime mutex poisoned");
                 if runtime.generation == generation && !shutdown.load(Ordering::Relaxed) {
-                    runtime.state = TelegramRelayRuntimeState::Running;
                     true
                 } else {
                     false
                 }
             };
-            if !should_run {
+            if !should_start {
                 return;
             }
 
-            let result = run_telegram_bot_with_config(config, Some(shutdown));
+            let ready_shutdown = shutdown.clone();
+            let result = run_telegram_bot_with_config(
+                config,
+                Some(shutdown),
+                Some(Box::new(move || {
+                    let mut runtime = TELEGRAM_RELAY_RUNTIME
+                        .lock()
+                        .expect("telegram relay runtime mutex poisoned");
+                    if runtime.generation == generation && !ready_shutdown.load(Ordering::Relaxed)
+                    {
+                        runtime.state = TelegramRelayRuntimeState::Running;
+                    }
+                })),
+            );
             if let Err(err) = result {
                 eprintln!(
                     "telegram> in-process relay stopped: {}",

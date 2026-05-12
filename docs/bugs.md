@@ -69,21 +69,6 @@ After shutdown, disable, or config retargeting, a relay that already passed its 
 - Retain a relay `JoinHandle` and join with a bounded timeout during restart and graceful shutdown.
 - Or gate update/action side effects on a runtime generation check immediately before each side effect.
 
-## Telegram relay status can report running before initialization succeeds
-
-**Severity:** Low - `src/telegram.rs:257-324`. `start_telegram_relay_runtime()` sets `runtime.running = true` before the spawned worker has completed Telegram bot initialization, then `telegram_relay_status_snapshot()` reports `running: runtime.running && !runtime.spawning` after the spawn call clears `spawning`.
-
-That means `/api/telegram/status` can briefly report `running: true` while `run_telegram_bot_with_config()` is still blocked in startup work such as `getMe`, or is about to fail and clear the state.
-
-**Current behavior:**
-- Runtime state flips to `running = true` before the worker enters and completes bot initialization.
-- `spawning` is cleared immediately after the OS thread is spawned, not after the relay is ready to poll.
-- Status can present the relay as running before readiness is proven.
-
-**Proposal:**
-- Track a distinct `starting`/`ready` state in `TelegramRelayRuntime`.
-- Or have the worker signal readiness only after initialization succeeds, then expose `running: true`.
-
 ## Telegram bot token is persisted as plaintext in `telegram-bot.json`
 
 **Severity:** Medium - `TelegramUiConfig.bot_token` is serialized directly into `~/.termal/telegram-bot.json`.
