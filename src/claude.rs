@@ -172,6 +172,9 @@ fn classify_claude_control_request(
                 updated_input: request.tool_input,
             })
         }
+        ClaudeApprovalMode::ReadOnlyAutoApprove => {
+            ClaudeControlRequestAction::Respond(read_only_claude_permission_decision(request))
+        }
         ClaudeApprovalMode::Plan => {
             ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Deny {
                 request_id: request.request_id,
@@ -180,6 +183,107 @@ fn classify_claude_control_request(
             })
         }
     }))
+}
+
+fn read_only_claude_permission_decision(
+    request: ClaudeToolPermissionRequest,
+) -> ClaudePermissionDecision {
+    if claude_tool_permission_request_is_read_only(&request) {
+        return ClaudePermissionDecision::Allow {
+            request_id: request.request_id,
+            updated_input: request.tool_input,
+        };
+    }
+
+    ClaudePermissionDecision::Deny {
+        request_id: request.request_id,
+        message:
+            "TermAl denied this tool request because this Claude reviewer delegation is read-only."
+                .to_owned(),
+    }
+}
+
+fn claude_tool_permission_request_is_read_only(request: &ClaudeToolPermissionRequest) -> bool {
+    match request.tool_name.as_str() {
+        "Read" | "LS" | "Glob" | "Grep" => true,
+        "Bash" => request
+            .tool_input
+            .get("command")
+            .and_then(Value::as_str)
+            .is_some_and(claude_bash_command_is_read_only),
+        "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => false,
+        _ => false,
+    }
+}
+
+fn claude_bash_command_is_read_only(command: &str) -> bool {
+    let normalized = command
+        .replace("2> /dev/null", "")
+        .replace("2>/dev/null", "");
+    if normalized.contains('\n')
+        || normalized.contains('\r')
+        || normalized.contains(';')
+        || normalized.contains('>')
+        || normalized.contains('<')
+        || normalized.contains('`')
+        || normalized.contains("$(")
+    {
+        return false;
+    }
+
+    for segment in normalized.replace("&&", "|").replace("||", "|").split('|') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            return false;
+        }
+        if segment == "true" || segment == ":" {
+            continue;
+        }
+        if segment == "pwd" || segment.starts_with("cd ") {
+            continue;
+        }
+
+        let tokens: Vec<&str> = segment.split_whitespace().collect();
+        if !claude_bash_tokens_are_read_only(&tokens) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn claude_bash_tokens_are_read_only(tokens: &[&str]) -> bool {
+    let Some(command) = tokens.first().copied() else {
+        return false;
+    };
+
+    let read_only_commands = [
+        "cat", "date", "echo", "find", "grep", "head", "ls", "nl", "pwd", "rg", "sed", "tail", "wc",
+    ];
+    if read_only_commands.contains(&command) {
+        if command == "find"
+            && tokens
+                .iter()
+                .any(|token| matches!(*token, "-delete" | "-exec"))
+        {
+            return false;
+        }
+        if command == "sed" && tokens.iter().any(|token| *token == "-i") {
+            return false;
+        }
+        return true;
+    }
+
+    if command == "git" {
+        return tokens.get(1).is_some_and(|subcommand| {
+            matches!(
+                *subcommand,
+                "branch" | "diff" | "grep" | "log" | "ls-files" | "rev-parse" | "show" | "status"
+            )
+        });
+    }
+
+    false
 }
 
 /// Parses Claude tool permission request.

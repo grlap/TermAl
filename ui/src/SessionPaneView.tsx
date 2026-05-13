@@ -975,6 +975,9 @@ export function SessionPaneView({
     showDelegationWaitIndicator,
     showLiveTurnWaitingIndicator,
   ]);
+  const waitingIndicatorKind = showDelegationWaitIndicator
+    ? "delegationWait"
+    : "liveTurn";
   const composerInputDisabled = !activeSession || isStopping;
   const composerSendDisabled = !activeSession || isSending || isStopping;
   const scrollStateKey = activeSourceTab
@@ -1090,6 +1093,8 @@ export function SessionPaneView({
     newResponseIndicatorKind === "activity" ? "New activity" : "New response";
   const showDelegatedChildFooter =
     isDelegatedChildSession &&
+    activeTab?.kind === "session" &&
+    pane.viewMode === "session" &&
     Boolean(
       activeSession &&
         (isSessionBusy ||
@@ -3634,6 +3639,7 @@ export function SessionPaneView({
             isLoading={isLoading}
             isUpdating={isUpdating}
             showWaitingIndicator={showWaitingIndicator}
+            waitingIndicatorKind={waitingIndicatorKind}
             waitingIndicatorPrompt={waitingIndicatorPrompt}
             commandMessages={commandMessages}
             diffMessages={diffMessages}

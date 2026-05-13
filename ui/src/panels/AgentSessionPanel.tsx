@@ -107,6 +107,8 @@ import type {
 } from "../types";
 import type { PaneViewMode } from "../workspace";
 
+type WaitingIndicatorKind = "liveTurn" | "delegationWait";
+
 type DraftImageAttachment = ImageAttachment & {
   base64Data: string;
   id: string;
@@ -828,6 +830,7 @@ export function AgentSessionPanel({
   isLoading,
   isUpdating,
   showWaitingIndicator,
+  waitingIndicatorKind = "liveTurn",
   waitingIndicatorPrompt,
   commandMessages,
   diffMessages,
@@ -856,6 +859,7 @@ export function AgentSessionPanel({
   isLoading: boolean;
   isUpdating: boolean;
   showWaitingIndicator: boolean;
+  waitingIndicatorKind?: WaitingIndicatorKind;
   waitingIndicatorPrompt: string | null;
   commandMessages: CommandMessage[];
   diffMessages: DiffMessage[];
@@ -919,6 +923,7 @@ export function AgentSessionPanel({
       isLoading={isLoading}
       isUpdating={isUpdating}
       showWaitingIndicator={showWaitingIndicator}
+      waitingIndicatorKind={waitingIndicatorKind}
       waitingIndicatorPrompt={waitingIndicatorPrompt}
       commandMessages={commandMessages}
       diffMessages={diffMessages}
@@ -1059,6 +1064,7 @@ const SessionBody = memo(function SessionBody({
   isLoading,
   isUpdating,
   showWaitingIndicator,
+  waitingIndicatorKind,
   waitingIndicatorPrompt,
   commandMessages,
   diffMessages,
@@ -1087,6 +1093,7 @@ const SessionBody = memo(function SessionBody({
   isLoading: boolean;
   isUpdating: boolean;
   showWaitingIndicator: boolean;
+  waitingIndicatorKind: WaitingIndicatorKind;
   waitingIndicatorPrompt: string | null;
   commandMessages: CommandMessage[];
   diffMessages: DiffMessage[];
@@ -1128,7 +1135,9 @@ const SessionBody = memo(function SessionBody({
   const activeSessionMessages = activeSession?.messages;
   const activeSessionStatus = activeSession?.status;
   const shouldResolveLiveWaitingPrompt =
-    showWaitingIndicator && activeSessionStatus === "active";
+    showWaitingIndicator &&
+    waitingIndicatorKind === "liveTurn" &&
+    activeSessionStatus === "active";
   const liveWaitingIndicatorPrompt = useMemo(
     () =>
       shouldResolveLiveWaitingPrompt && activeSessionMessages
@@ -1179,6 +1188,7 @@ const SessionBody = memo(function SessionBody({
           isActive
           isLoading={isLoading}
           showWaitingIndicator={showWaitingIndicator}
+          waitingIndicatorKind={waitingIndicatorKind}
           waitingIndicatorPrompt={resolvedWaitingIndicatorPrompt}
           onApprovalDecision={onApprovalDecision}
           onUserInputSubmit={onUserInputSubmit}
@@ -1284,6 +1294,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   isActive,
   isLoading,
   showWaitingIndicator,
+  waitingIndicatorKind,
   waitingIndicatorPrompt,
   onApprovalDecision,
   onUserInputSubmit,
@@ -1304,6 +1315,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   isActive: boolean;
   isLoading: boolean;
   showWaitingIndicator: boolean;
+  waitingIndicatorKind: WaitingIndicatorKind;
   waitingIndicatorPrompt: string | null;
   onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
   onUserInputSubmit: UserInputSubmitHandler;
@@ -1366,8 +1378,9 @@ const SessionConversationPage = memo(function SessionConversationPage({
   }, [visibleMessages.length, visibleMessageIds, visiblePendingPromptsBase]);
   const effectiveShowWaitingIndicator =
     showWaitingIndicator &&
-    ((session.status === "active" &&
-      !hasTurnFinalizingOutputAfterLatestUserPrompt(visibleMessages)) ||
+    (waitingIndicatorKind === "delegationWait" ||
+      (session.status === "active" &&
+        !hasTurnFinalizingOutputAfterLatestUserPrompt(visibleMessages)) ||
       !hasAgentOutputAfterLatestUserPrompt(visibleMessages));
   const conversationOverview = useConversationOverviewController({
     agent: session.agent,

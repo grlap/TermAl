@@ -25,6 +25,112 @@
 
 use super::*;
 
+fn claude_permission_request(tool_name: &str, tool_input: Value) -> Value {
+    json!({
+        "type": "control_request",
+        "request_id": "permission-request-1",
+        "request": {
+            "subtype": "can_use_tool",
+            "tool_name": tool_name,
+            "input": tool_input
+        }
+    })
+}
+
+// Pins read-only auto-approval as a filtered Claude permission mode, not a
+// shortcut to full `AutoApprove`. Read-only Bash commands may proceed without
+// surfacing an approval card so `/review-local` can finish unattended.
+#[test]
+fn claude_read_only_auto_approve_allows_read_only_bash_permission_request() {
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &claude_permission_request(
+            "Bash",
+            json!({
+                "command": "git diff --cached -- src/delegations.rs | head -40"
+            }),
+        ),
+        &mut turn_state,
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+    )
+    .unwrap()
+    .expect("permission request should be classified");
+
+    let ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Allow {
+        request_id,
+        updated_input,
+    }) = action
+    else {
+        panic!("read-only bash permission should be auto-allowed");
+    };
+
+    assert_eq!(request_id, "permission-request-1");
+    assert_eq!(
+        updated_input.get("command").and_then(Value::as_str),
+        Some("git diff --cached -- src/delegations.rs | head -40")
+    );
+}
+
+// Pins read-only Claude reviewer delegations denying explicit file mutation
+// tool requests. This closes the bug where read-only reviewers used full
+// `AutoApprove` and could allow `Write`/`Edit` operations.
+#[test]
+fn claude_read_only_auto_approve_denies_write_permission_request() {
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &claude_permission_request(
+            "Write",
+            json!({
+                "file_path": "src/main.rs",
+                "content": "mutated"
+            }),
+        ),
+        &mut turn_state,
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+    )
+    .unwrap()
+    .expect("permission request should be classified");
+
+    let ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Deny {
+        request_id,
+        message,
+    }) = action
+    else {
+        panic!("write permission should be denied");
+    };
+
+    assert_eq!(request_id, "permission-request-1");
+    assert!(message.contains("read-only"));
+}
+
+#[test]
+fn claude_read_only_auto_approve_denies_unsafe_bash_permission_request() {
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &claude_permission_request(
+            "Bash",
+            json!({
+                "command": "echo mutated > README.md"
+            }),
+        ),
+        &mut turn_state,
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+    )
+    .unwrap()
+    .expect("permission request should be classified");
+
+    let ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Deny {
+        request_id,
+        message,
+    }) = action
+    else {
+        panic!("unsafe bash permission should be denied");
+    };
+
+    assert_eq!(request_id, "permission-request-1");
+    assert!(message.contains("read-only"));
+}
+
 // Pins `clear_claude_turn_state` zeroing every field of `ClaudeTurnState` —
 // approval keys, parallel agent group key and order, pending tools, the
 // streamed text buffer, the `saw_text_delta` flag, and

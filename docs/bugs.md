@@ -7,20 +7,66 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Claude read-only reviewer delegations auto-allow tool permission requests
+## Claude read-only Bash allowlist still permits mutating commands
 
-**Severity:** High - `src/delegations.rs:1514` sets read-only Claude reviewer children to `ClaudeApprovalMode::AutoApprove`, while `src/claude.rs:169` answers every Claude tool permission request with allow in that mode.
+**Severity:** High - `src/claude.rs:144-253` adds a read-only auto-approval path for Claude reviewer delegations, but the shell allowlist still permits mutating forms of commands that are treated as read-only.
 
-The current change unblocks `/review-local` for Claude by avoiding approval prompts, but it weakens the `writePolicy: readOnly` contract. A read-only delegated reviewer should not be able to mutate files even if the agent asks for a write-capable tool. Codex read-only reviewers get a sandbox mode; Claude currently gets an approval mode that is not filtered by operation type.
+The current read-only reviewer fix is directionally correct, but the Bash filter needs to deny dangerous subcommands and options, not just command names. Review found that `git branch -D`/`-m`, `find -execdir`/`-fls`/`-fprint*`/`-okdir`/`-ok`, and `sed --in-place`/`-i.bak`/`-e 'w ...'` can pass the allowlist shape while mutating files or repository state. The simple whitespace tokenizer also ignores quoting, which makes hostile-input reasoning fragile.
 
 **Current behavior:**
-- Read-only Claude reviewer delegation children are forced to `auto-approve`.
-- Claude `AutoApprove` allows every tool permission request, including write-capable requests.
-- Existing tests assert the mode selection, but do not prove write permission requests are denied or queued under read-only delegation.
+- Read-only Claude reviewer delegations use `ReadOnlyAutoApprove`.
+- Bash auto-approval allows whole command families with only shallow option checks.
+- Tests cover one safe Bash command and two denied write paths, but not hostile read-only-looking mutations.
 
 **Proposal:**
-- Keep Claude reviewer sessions in `Ask`, use an actually read-only Claude permission mode if one exists, or add a TermAl permission filter that only auto-allows read-only operations and denies or queues write-capable requests.
-- Add regression coverage for read-only Claude delegated reviewers attempting a write-capable tool request.
+- Replace the name-only Bash allowlist with per-command validators that reject mutating subcommands/options.
+- Deny or queue any command containing shell quoting/escaping that the parser cannot model safely.
+- Add hostile-input tests for dangerous `git`, `find`, and `sed` forms before relying on Claude read-only auto-approval.
+
+## Settings tab panel scroll frame rebinds observers on every render
+
+**Severity:** Medium - `ui/src/AppDialogs.tsx:262` creates observer/ref callback plumbing for `SettingsTabPanelScrollFrame`, but the reviewed implementation re-binds observers on every render.
+
+The scrollbar frame is a UI utility that will wrap settings panels. Rebinding observers repeatedly can create avoidable work and subtle cleanup bugs, especially in settings surfaces that already re-render while typing or changing tabs.
+
+**Current behavior:**
+- `SettingsTabPanelScrollFrame` is implemented inline in `AppDialogs.tsx`.
+- Observer setup is not covered by tests.
+- The component is not split into its own file despite being a reusable settings-shell primitive.
+
+**Proposal:**
+- Stabilize observer callback identity and verify observer cleanup/rebind behavior with RTL coverage.
+- Move the component to a focused settings/preferences file if it remains reusable across settings panels.
+
+## Read-only Claude approval mode is exposed in wire types but not option metadata
+
+**Severity:** Low - `ui/src/types.ts` accepts `read-only-auto-approve`, but `CLAUDE_APPROVAL_OPTIONS` in `ui/src/preferences-panels.tsx:84` does not include or explicitly hide the new mode.
+
+The new mode appears intended as an internal delegation-only mode. That contract is not encoded at the UI option boundary, so future code may treat it as a user-selectable mode or fail to label it consistently in settings and tooltips.
+
+**Current behavior:**
+- Backend can serialize `read-only-auto-approve`.
+- Frontend type accepts it.
+- Settings options still only list the user-facing modes without documenting that the read-only mode is internal-only.
+
+**Proposal:**
+- Either add a non-selectable/internal label path for `read-only-auto-approve`, or document/encode that the mode must never appear in `CLAUDE_APPROVAL_OPTIONS`.
+- Add a small UI/type regression for the chosen contract.
+
+## Read-only Claude permission filter lacks source-level contract comments
+
+**Severity:** Note - `src/claude.rs:188-253` introduces security-sensitive read-only permission filtering without comments explaining the normalization and parser limits.
+
+The `2> /dev/null` normalization and the deny-on-unsupported parser contract are load-bearing for the safety model. Future edits can easily broaden the allowlist or add command syntax without realizing that unsupported shell syntax must default to deny.
+
+**Current behavior:**
+- `2> /dev/null` is stripped before rejecting other redirection.
+- The read-only decision helper and Bash parser have no source-level contract comment.
+- Related tests cover only a narrow happy path and two basic deny cases.
+
+**Proposal:**
+- Add a short contract comment explaining that unsupported shell syntax must deny by default.
+- Document why `2>/dev/null` is the only tolerated redirection shape.
 
 ## App-level default model settings lost arbitrary model-id entry
 
@@ -920,17 +966,14 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 - [ ] P2: Add repeated-send waiting-indicator coverage:
   send a second prompt after a completed assistant response while the POST is still in flight, and assert the user still sees send-in-progress feedback until the new prompt appears in session state.
-- [ ] P2: Add read-only Claude reviewer permission regression:
-  create a read-only Claude reviewer child and simulate a write-capable tool permission request, then assert TermAl denies or queues it instead of auto-allowing it.
+- [ ] P2: Add hostile read-only Claude Bash allowlist coverage:
+  simulate dangerous `git branch`, `find`, and `sed` permission requests under `ReadOnlyAutoApprove`, and assert TermAl denies them instead of auto-allowing.
+- [ ] P2: Add SettingsTabPanelScrollFrame observer coverage:
+  render and rerender the settings scroll frame, assert observers are not rebound unnecessarily, and assert cleanup disconnects observers.
+- [ ] P2: Pin `read-only-auto-approve` UI option contract:
+  cover whether the internal Claude mode is intentionally hidden from `CLAUDE_APPROVAL_OPTIONS` or surfaced with a non-user-selectable label path.
 - [ ] P2: Add app-level custom default-model UI coverage:
   cover entering an arbitrary valid model id in app-level default model settings, or cover explicit rejection if the product contract changes to known-options-only.
-- [ ] P2: Add delegation-wait visibility coverage after prior assistant output:
-  create an idle parent session with assistant output after the latest user prompt plus an active delegation wait, and assert the delegation-wait indicator remains visible instead of being suppressed as a stale live turn.
-- [ ] P2: Cover MCP slash-command parser separator and whitespace edges:
-  extend `delegation_mcp_tests::split_mcp_agent_command_tail_pins_note_separator_edges`
-  in `src/delegation_mcp.rs` with bare-`--`, whitespace-surrounded-`--`,
-  tab/Unicode-whitespace tails, and one positive trailing-CR assertion for
-  `parse_mcp_slash_command_prompt` so the current trim-vs-reject contract is pinned.
 - [ ] P2: Cover first-chunk Telegram forward failure:
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
 - [ ] P2: Cover first-settled active-baseline same-message growth policy:
@@ -969,8 +1012,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   trigger the non-manual reconnect fallback path, adopt a same-instance `/api/state` snapshot with forward progress while SSE remains unopened/unconfirmed, advance timers, and assert fallback polling continues until a data-bearing live event confirms recovery.
 - [ ] P2: Add no-open SSE `state` live-proof regression:
   dispatch a valid SSE `state` event after a reconnect error without an explicit `onopen`, and assert it confirms reconnect recovery through the same guarded path as data-bearing delta events.
-- [ ] P2: Pin delegated-child footer suppression on non-session tabs:
-  render a busy delegated child session with a source or diff tab active, and assert the Stop/status footer does not appear below non-session pane content.
 - [ ] P2 watchdog wake-gap stop-after-progress regression:
   trigger watchdog wake-gap recovery, adopt same-instance `/api/state` progress, and assert no additional reconnect polling occurs before a later live event.
 - [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:

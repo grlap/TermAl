@@ -976,6 +976,42 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
   });
 
+  it("keeps delegation wait tails visible after prior assistant output", () => {
+    const activeSession = makeSession("session-a", {
+      status: "idle",
+      messages: [
+        {
+          id: "message-user",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Run delegated review",
+        },
+        {
+          id: "message-files",
+          type: "fileChanges",
+          timestamp: "10:01",
+          author: "assistant",
+          title: "Agent changed 1 file",
+          files: [{ path: "ui/src/styles.css", kind: "modified" }],
+        },
+      ],
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      showWaitingIndicator: true,
+      waitingIndicatorKind: "delegationWait",
+      waitingIndicatorPrompt:
+        "Waiting on 1 delegation wait covering 2 delegated sessions: review fan-in",
+    });
+
+    expect(screen.getByText("Live turn")).toBeInTheDocument();
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "Waiting on 1 delegation wait covering 2 delegated sessions: review fan-in",
+    );
+  });
+
   it("suppresses a stale active live-turn tail after turn-finalizing file output", () => {
     const activeSession = makeSession("session-a", {
       status: "active",

@@ -1511,7 +1511,7 @@ fn configure_delegation_child_prompt_settings(
         && mode == DelegationMode::Reviewer
         && matches!(write_policy, DelegationWritePolicy::ReadOnly)
     {
-        child_record.session.claude_approval_mode = Some(ClaudeApprovalMode::AutoApprove);
+        child_record.session.claude_approval_mode = Some(ClaudeApprovalMode::ReadOnlyAutoApprove);
     } else if child_record.session.agent.supports_cursor_mode() {
         child_record.session.cursor_mode = Some(CursorMode::Plan);
     } else if child_record.session.agent.supports_gemini_approval_mode() {

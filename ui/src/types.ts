@@ -13,7 +13,11 @@ export type ApprovalPolicy =
   | "on-failure"
   | "on-request"
   | "never";
-export type ClaudeApprovalMode = "ask" | "auto-approve" | "plan";
+export type ClaudeApprovalMode =
+  | "ask"
+  | "auto-approve"
+  | "plan"
+  | "read-only-auto-approve";
 export type ClaudeEffortLevel = "default" | "low" | "medium" | "high" | "max";
 export type CodexReasoningEffort =
   | "none"

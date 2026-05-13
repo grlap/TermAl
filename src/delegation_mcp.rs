@@ -1179,6 +1179,12 @@ mod delegation_mcp_tests {
         assert_eq!(parsed.arguments, None);
         assert_eq!(parsed.note, None);
 
+        let parsed = parse_mcp_slash_command_prompt("/review-local staged -- include tests\r")
+            .expect("trailing carriage return should be trimmed like other trailing whitespace");
+        assert_eq!(parsed.command_name, "review-local");
+        assert_eq!(parsed.arguments.as_deref(), Some("staged"));
+        assert_eq!(parsed.note.as_deref(), Some("include tests"));
+
         for prompt in [
             " /review-local",
             "/ review-local",
@@ -1201,12 +1207,21 @@ mod delegation_mcp_tests {
             ("", None, None),
             ("staged", Some("staged"), None),
             ("staged -- include tests", Some("staged"), Some("include tests")),
+            ("--", None, None),
+            ("  --  ", None, None),
             ("-- include tests", None, Some("include tests")),
             ("staged --", Some("staged"), None),
             ("staged -- -- second", Some("staged"), Some("-- second")),
             ("staged ---x", Some("staged ---x"), None),
             ("staged-- include tests", Some("staged-- include tests"), None),
             ("  staged   --   include tests  ", Some("staged"), Some("include tests")),
+            ("\tstaged\t--\tinclude tests\t", Some("staged"), Some("include tests")),
+            ("\u{2003}staged\u{2003}", Some("staged"), None),
+            (
+                "staged\u{2003}--\u{2003}include tests",
+                Some("staged\u{2003}--\u{2003}include tests"),
+                None,
+            ),
         ];
 
         for (tail, expected_arguments, expected_note) in cases {

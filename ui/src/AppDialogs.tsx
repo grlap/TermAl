@@ -2,6 +2,10 @@ import {
   type ComponentProps,
   type CSSProperties,
   type RefObject,
+  type ReactNode,
+  useLayoutEffect,
+  useRef,
+  useState,
 } from "react";
 import { createPortal } from "react-dom";
 import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
@@ -175,6 +179,172 @@ type AppDialogsProps = {
   defaultClaudeApprovalMode: ClaudeApprovalMode;
   setDefaultClaudeApprovalMode: ClaudeApprovalsPanelProps["onSelectMode"];
 };
+
+function SettingsTabPanelScrollFrame({
+  activeTabId,
+  className,
+  children,
+}: {
+  activeTabId: PreferencesTabId;
+  className: string;
+  children: ReactNode;
+}) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef<{
+    pointerId: number;
+    startPointerY: number;
+    startScrollTop: number;
+  } | null>(null);
+  const [scrollState, setScrollState] = useState({
+    thumbHeight: 0,
+    thumbOffset: 0,
+    visible: false,
+  });
+  const [isDraggingScrollbar, setIsDraggingScrollbar] = useState(false);
+
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) {
+      return;
+    }
+    const panelElement = panel;
+
+    function updateScrollState() {
+      const scrollable = panelElement.scrollHeight - panelElement.clientHeight;
+      if (scrollable <= 1) {
+        setScrollState({ thumbHeight: 0, thumbOffset: 0, visible: false });
+        return;
+      }
+
+      const trackHeight = panelElement.clientHeight;
+      const thumbHeight = Math.max(
+        Math.round((panelElement.clientHeight / panelElement.scrollHeight) * trackHeight),
+        34,
+      );
+      const maxThumbOffset = Math.max(trackHeight - thumbHeight, 0);
+      const thumbOffset =
+        maxThumbOffset <= 0
+          ? 0
+          : Math.round((panelElement.scrollTop / scrollable) * maxThumbOffset);
+
+      setScrollState({
+        thumbHeight,
+        thumbOffset,
+        visible: true,
+      });
+    }
+
+    updateScrollState();
+    const ResizeObserverCtor = globalThis.ResizeObserver;
+    const resizeObserver =
+      typeof ResizeObserverCtor === "function"
+        ? new ResizeObserverCtor(updateScrollState)
+        : null;
+    if (resizeObserver) {
+      resizeObserver.observe(panelElement);
+      for (const child of Array.from(panelElement.children)) {
+        resizeObserver.observe(child);
+      }
+    } else {
+      window.addEventListener("resize", updateScrollState);
+    }
+    panelElement.addEventListener("scroll", updateScrollState, { passive: true });
+
+    return () => {
+      resizeObserver?.disconnect();
+      if (!resizeObserver) {
+        window.removeEventListener("resize", updateScrollState);
+      }
+      panelElement.removeEventListener("scroll", updateScrollState);
+      dragStateRef.current = null;
+      setIsDraggingScrollbar(false);
+    };
+  }, [activeTabId, children]);
+
+  function scrollPanelByTrackPosition(clientY: number) {
+    const panel = panelRef.current;
+    if (!panel || !scrollState.visible) {
+      return;
+    }
+
+    const rect = panel.getBoundingClientRect();
+    const trackHeight = rect.height;
+    const maxThumbOffset = Math.max(trackHeight - scrollState.thumbHeight, 1);
+    const nextThumbOffset = Math.min(
+      Math.max(clientY - rect.top - scrollState.thumbHeight / 2, 0),
+      maxThumbOffset,
+    );
+    const scrollable = panel.scrollHeight - panel.clientHeight;
+    panel.scrollTop = (nextThumbOffset / maxThumbOffset) * scrollable;
+  }
+
+  return (
+    <div className="settings-tab-panel-frame">
+      <div
+        ref={panelRef}
+        id={`settings-panel-${activeTabId}`}
+        className={className}
+        role="tabpanel"
+        aria-labelledby={`settings-tab-${activeTabId}`}
+      >
+        {children}
+      </div>
+      {scrollState.visible ? (
+        <div
+          className={`settings-scrollbar ${isDraggingScrollbar ? "dragging" : ""}`}
+          aria-hidden="true"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setIsDraggingScrollbar(true);
+            dragStateRef.current = {
+              pointerId: event.pointerId,
+              startPointerY: event.clientY,
+              startScrollTop: panelRef.current?.scrollTop ?? 0,
+            };
+            scrollPanelByTrackPosition(event.clientY);
+          }}
+          onPointerMove={(event) => {
+            const dragState = dragStateRef.current;
+            const panel = panelRef.current;
+            if (!dragState || dragState.pointerId !== event.pointerId || !panel) {
+              return;
+            }
+
+            event.preventDefault();
+            const trackHeight = panel.clientHeight;
+            const maxThumbOffset = Math.max(
+              trackHeight - scrollState.thumbHeight,
+              1,
+            );
+            const scrollable = panel.scrollHeight - panel.clientHeight;
+            const deltaY = event.clientY - dragState.startPointerY;
+            panel.scrollTop =
+              dragState.startScrollTop + (deltaY / maxThumbOffset) * scrollable;
+          }}
+          onPointerUp={(event) => {
+            if (dragStateRef.current?.pointerId === event.pointerId) {
+              dragStateRef.current = null;
+              setIsDraggingScrollbar(false);
+            }
+          }}
+          onPointerCancel={() => {
+            dragStateRef.current = null;
+            setIsDraggingScrollbar(false);
+          }}
+        >
+          <div
+            className="settings-scrollbar-thumb"
+            style={{
+              height: `${scrollState.thumbHeight}px`,
+              transform: `translateY(${scrollState.thumbOffset}px)`,
+            }}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export function AppDialogs({
   pendingKillSession,
@@ -892,11 +1062,9 @@ export function AppDialogs({
               onSelectTab={setSettingsTab}
             />
 
-            <div
-              id={`settings-panel-${settingsTab}`}
+            <SettingsTabPanelScrollFrame
+              activeTabId={settingsTab}
               className={`settings-tab-panel ${settingsTab === "themes" ? "theme-settings-panel" : ""}`.trim()}
-              role="tabpanel"
-              aria-labelledby={`settings-tab-${settingsTab}`}
             >
               {settingsTab === "themes" ? (
                 <ThemePreferencesPanel
@@ -996,7 +1164,7 @@ export function AppDialogs({
                   return _exhaustive;
                 })()
               )}
-            </div>
+            </SettingsTabPanelScrollFrame>
           </div>
         </SettingsDialogShell>
       ) : null}

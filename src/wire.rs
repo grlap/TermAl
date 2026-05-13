@@ -614,6 +614,7 @@ enum ClaudeApprovalMode {
     Ask,
     AutoApprove,
     Plan,
+    ReadOnlyAutoApprove,
 }
 
 /// Defines the Claude effort level variants.
@@ -648,7 +649,7 @@ impl ClaudeApprovalMode {
     fn initial_cli_permission_mode(self) -> Option<&'static str> {
         match self {
             Self::Plan => Some("plan"),
-            Self::Ask | Self::AutoApprove => None,
+            Self::Ask | Self::AutoApprove | Self::ReadOnlyAutoApprove => None,
         }
     }
 
@@ -660,7 +661,7 @@ impl ClaudeApprovalMode {
     fn session_cli_permission_mode(self) -> &'static str {
         match self {
             Self::Plan => "plan",
-            Self::Ask | Self::AutoApprove => "default",
+            Self::Ask | Self::AutoApprove | Self::ReadOnlyAutoApprove => "default",
         }
     }
 }
@@ -1792,7 +1793,11 @@ struct PickProjectRootResponse {
 
 /// Defines the delta event variants.
 #[derive(Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 enum DeltaEvent {
     SessionCreated {
         revision: u64,

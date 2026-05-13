@@ -140,7 +140,7 @@ fn create_delegation_for_persist_transition(title: &str) -> (AppState, Delegatio
 }
 
 #[test]
-fn claude_read_only_reviewer_delegation_child_uses_auto_approve_and_keeps_effort() {
+fn claude_read_only_reviewer_delegation_child_uses_read_only_auto_approve_and_keeps_effort() {
     let state = test_app_state();
     let workdir = std::env::temp_dir().to_string_lossy().into_owned();
     let child_session_id = {
@@ -178,7 +178,7 @@ fn claude_read_only_reviewer_delegation_child_uses_auto_approve_and_keeps_effort
         .expect("child session should exist");
     assert_eq!(
         child.session.claude_approval_mode,
-        Some(ClaudeApprovalMode::AutoApprove)
+        Some(ClaudeApprovalMode::ReadOnlyAutoApprove)
     );
     assert_eq!(child.session.claude_effort, Some(ClaudeEffortLevel::Max));
 }

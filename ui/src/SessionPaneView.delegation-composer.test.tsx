@@ -61,6 +61,10 @@ vi.mock("./panels/PaneTabs", () => ({
   PaneTabs: () => <div data-testid="pane-tabs" />,
 }));
 
+vi.mock("./panels/SourcePanel", () => ({
+  SourcePanel: () => <div data-testid="source-panel" />,
+}));
+
 function makeProject(overrides: Partial<Project> = {}): Project {
   return {
     id: "project-local",
@@ -179,6 +183,7 @@ function renderSessionPaneView({
   remotes = [makeRemote()],
   expectComposer = true,
   isStopping = false,
+  pane,
 }: {
   session: Session;
   draft: string;
@@ -187,6 +192,7 @@ function renderSessionPaneView({
   remotes?: RemoteConfig[];
   expectComposer?: boolean;
   isStopping?: boolean;
+  pane?: WorkspacePane;
 }) {
   syncComposerSessionsStore({
     sessions: [session],
@@ -197,7 +203,7 @@ function renderSessionPaneView({
   const onDraftCommit = vi.fn();
   const onComposerError = vi.fn();
   const props: ComponentProps<typeof SessionPaneView> = {
-    pane: makePane(session.id),
+    pane: pane ?? makePane(session.id),
     codexState: {},
     projectLookup: new Map(projects.map((project) => [project.id, project])),
     remoteLookup: new Map(remotes.map((remote) => [remote.id, remote])),
@@ -542,5 +548,52 @@ describe("SessionPaneView composer delegation click-through", () => {
     });
 
     expect(onStopSession).toHaveBeenCalledWith("child-session-1");
+  });
+
+  it("hides delegated child footer on non-session tabs", () => {
+    const session = makeSession({
+      id: "child-session-1",
+      name: "Delegated reviewer",
+      agent: "Codex",
+      parentDelegationId: "delegation-1",
+      status: "active",
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          timestamp: "10:00:00",
+          author: "assistant",
+          text: "Review in progress",
+        },
+      ],
+    });
+    const pane: WorkspacePane = {
+      ...makePane(session.id),
+      tabs: [
+        { id: "tab-child-session", kind: "session", sessionId: session.id },
+        {
+          id: "tab-source",
+          kind: "source",
+          path: "src/main.rs",
+          originSessionId: session.id,
+          originProjectId: session.projectId,
+        },
+      ],
+      activeTabId: "tab-source",
+      viewMode: "source",
+      sourcePath: "src/main.rs",
+    };
+
+    renderSessionPaneView({
+      session,
+      draft: "This should not be editable here.",
+      expectComposer: false,
+      pane,
+    });
+
+    expect(screen.getByTestId("source-panel")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
   });
 });
