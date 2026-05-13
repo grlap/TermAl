@@ -1964,13 +1964,9 @@ fn handle_telegram_message_for_relay(
                 .map(|command| command.command),
             Some(TelegramIncomingCommand::Start | TelegramIncomingCommand::Help)
         ) {
-            telegram.send_message(
-                chat_id,
-                &format!(
-                    "This TermAl relay is not linked. Set TERMAL_TELEGRAM_CHAT_ID={chat_id} before starting the relay."
-                ),
-                None,
-            )?;
+            state.chat_id = Some(chat_id);
+            telegram.send_message(chat_id, &telegram_help_text(config, state), None)?;
+            return Ok(TelegramUpdateHandlingOutcome::unsynced(true));
         }
         return Ok(TelegramUpdateHandlingOutcome::default());
     }

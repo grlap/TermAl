@@ -7,21 +7,37 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Claude read-only Bash allowlist still permits mutating commands
+## Claude read-only Bash allowlist still permits execution and writing escapes
 
-**Severity:** High - `src/claude.rs:144-253` adds a read-only auto-approval path for Claude reviewer delegations, but the shell allowlist still permits mutating forms of commands that are treated as read-only.
+**Severity:** High - `src/claude.rs:266-384` tightened the read-only Claude bash allowlist for `find`, `sed -i*` / `sed -e w...`, and `git branch -d/-D/-m/-M/-c/-C`, but write and process-execution paths in the same threat model remain.
 
-The current read-only reviewer fix is directionally correct, but the Bash filter needs to deny dangerous subcommands and options, not just command names. Review found that `git branch -D`/`-m`, `find -execdir`/`-fls`/`-fprint*`/`-okdir`/`-ok`, and `sed --in-place`/`-i.bak`/`-e 'w ...'` can pass the allowlist shape while mutating files or repository state. The simple whitespace tokenizer also ignores quoting, which makes hostile-input reasoning fragile.
+The new per-command validators still allow `git diff`, `git log`, and `git show` for any flag set, including `--output=<file>` / `--output <file>`, which writes the diff or log into the named file. They also allow Git helper/execution paths such as `git diff --ext-diff`, `git diff --textconv`, and `git grep -O` / `--open-files-in-pager`. `git branch` deny-list misses `--set-upstream-to=<x>`, `--unset-upstream`, `--edit-description`, and `--create-reflog`, all of which mutate repo state from flags alone. The generic `rg` allow path still admits `rg --pre`, which can execute a preprocessor command. And the sed validator still permits external or write-capable scripts through `sed -f`, sed `e` / `W` commands, and bare positional write scripts such as `sed 'w/tmp/out' input.txt`.
 
 **Current behavior:**
-- Read-only Claude reviewer delegations use `ReadOnlyAutoApprove`.
-- Bash auto-approval allows whole command families with only shallow option checks.
-- Tests cover one safe Bash command and two denied write paths, but not hostile read-only-looking mutations.
+- Read-only Claude reviewer delegations would auto-allow `git diff --output=/tmp/owned src`, `git log --output=/tmp/owned`, and `git show --output=/tmp/owned <ref>`.
+- They can auto-allow Git commands that invoke external helpers or pagers, including `git diff --ext-diff`, `git diff --textconv`, and `git grep -O`.
+- They also auto-allow `git branch --set-upstream-to=origin/main` and the other mutating `git branch` long flags.
+- They can auto-allow `rg --pre`, `sed -f`, sed `e` / `W` commands, and `sed 'w/tmp/out' input.txt`.
 
 **Proposal:**
-- Replace the name-only Bash allowlist with per-command validators that reject mutating subcommands/options.
-- Deny or queue any command containing shell quoting/escaping that the parser cannot model safely.
-- Add hostile-input tests for dangerous `git`, `find`, and `sed` forms before relying on Claude read-only auto-approval.
+- Add strict per-command validators instead of broad command-name approval.
+- Deny `--output` / `--output=` for `git diff`, `git log`, and `git show`, plus Git external-helper and pager paths such as `--ext-diff`, `--textconv`, and `git grep -O` / `--open-files-in-pager`.
+- Extend the `git branch` deny match to `--set-upstream-to(=...)?`, `--unset-upstream`, `--edit-description`, `--create-reflog`, and any `--copy=` / `--move=` / `--delete=` long-form variants.
+- Deny script/external-helper features such as `rg --pre`, `sed -f`, sed `e` / `W`, and any sed write scripts unless the parser can prove they are safe.
+
+## Claude read-only sed validator denies harmless substitutions containing literal `w`
+
+**Severity:** Medium - `src/claude.rs:350-366` flags any unescaped `w` byte in a sed script as a write, but routine substitutions like `sed -e 's/window/door/' file` or `sed -e 's/^/word /' file` contain a literal `w` in the regex or replacement and are auto-denied.
+
+This makes the unattended `/review-local` path brittle on real codebases: a reviewer agent that needs to inspect text with a literal `w` in a sed substitution can hit a deny even though the command does not write a file.
+
+**Current behavior:**
+- `claude_sed_script_can_write` returns true on the first non-escaped `w` character in the script, regardless of sed syntax position.
+- `sed -e 's/window/door/' file` is denied even though it never writes a file.
+
+**Proposal:**
+- Parse the sed script enough to recognize `s///`, `y///`, addresses, and labels, and flag `w` only when it appears at a top-level command position or inside the flag suffix of `s///`.
+- Add positive tests for common substitution shapes containing literal `w` so the false-positive regression is pinned.
 
 ## Settings tab panel scroll frame rebinds observers on every render
 
@@ -52,21 +68,6 @@ The new mode appears intended as an internal delegation-only mode. That contract
 **Proposal:**
 - Either add a non-selectable/internal label path for `read-only-auto-approve`, or document/encode that the mode must never appear in `CLAUDE_APPROVAL_OPTIONS`.
 - Add a small UI/type regression for the chosen contract.
-
-## Read-only Claude permission filter lacks source-level contract comments
-
-**Severity:** Note - `src/claude.rs:188-253` introduces security-sensitive read-only permission filtering without comments explaining the normalization and parser limits.
-
-The `2> /dev/null` normalization and the deny-on-unsupported parser contract are load-bearing for the safety model. Future edits can easily broaden the allowlist or add command syntax without realizing that unsupported shell syntax must default to deny.
-
-**Current behavior:**
-- `2> /dev/null` is stripped before rejecting other redirection.
-- The read-only decision helper and Bash parser have no source-level contract comment.
-- Related tests cover only a narrow happy path and two basic deny cases.
-
-**Proposal:**
-- Add a short contract comment explaining that unsupported shell syntax must deny by default.
-- Document why `2>/dev/null` is the only tolerated redirection shape.
 
 ## App-level default model settings lost arbitrary model-id entry
 
@@ -966,8 +967,12 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 - [ ] P2: Add repeated-send waiting-indicator coverage:
   send a second prompt after a completed assistant response while the POST is still in flight, and assert the user still sees send-in-progress feedback until the new prompt appears in session state.
-- [ ] P2: Add hostile read-only Claude Bash allowlist coverage:
-  simulate dangerous `git branch`, `find`, and `sed` permission requests under `ReadOnlyAutoApprove`, and assert TermAl denies them instead of auto-allowing.
+- [ ] P2: Extend hostile read-only Claude Bash allowlist coverage to remaining write paths:
+  add deny tests for `rg --pre`, `git grep -O` / `--open-files-in-pager`, `git diff --output=foo`, `git log --output foo`, `git show --output=foo`, `git diff --ext-diff`, `git diff --textconv`, `git branch --set-upstream-to=origin/main`, `git branch --unset-upstream`, `git branch --edit-description`, `git branch --create-reflog`, `sed -f script.sed`, sed `e` / `W` commands, and `sed 'w/tmp/out' input.txt`.
+- [ ] P2: Add allow coverage for routine sed substitutions containing literal `w`:
+  pin `sed -e 's/window/door/' file` and `sed -e 's/^/word /' file` as auto-allowed once `claude_sed_script_can_write` understands sed syntax positions.
+- [ ] P2: Pin quote-aware tokenization behavior for read-only Claude Bash:
+  document and test that `grep -n 'two words' file` is denied by the current `split_whitespace` flow, or upgrade the tokenizer to preserve quoted strings as single tokens before validation.
 - [ ] P2: Add SettingsTabPanelScrollFrame observer coverage:
   render and rerender the settings scroll frame, assert observers are not rebound unnecessarily, and assert cleanup disconnects observers.
 - [ ] P2: Pin `read-only-auto-approve` UI option contract:

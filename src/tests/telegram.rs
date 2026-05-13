@@ -776,7 +776,7 @@ fn telegram_prompt_error_text_uses_safe_generic_detail() {
 }
 
 #[test]
-fn telegram_unlinked_start_message_points_to_trusted_chat_binding() {
+fn telegram_unlinked_start_links_chat_and_sends_help() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramPromptClient::new(
         Vec::new(),
@@ -805,18 +805,18 @@ fn telegram_unlinked_start_message_points_to_trusted_chat_binding() {
             text: Some("/start".to_owned()),
         },
     )
-    .expect("unlinked startup message should send guidance");
+    .expect("unlinked startup message should link chat");
 
-    assert!(!changed);
-    assert_eq!(
-        telegram.sent_texts.borrow().as_slice(),
-        ["This TermAl relay is not linked. Set TERMAL_TELEGRAM_CHAT_ID=123 before starting the relay.".to_owned()]
+    assert!(changed);
+    assert_eq!(state.chat_id, Some(123));
+    assert_eq!(telegram.sent_texts.borrow().len(), 1);
+    assert!(
+        telegram.sent_texts.borrow()[0].contains("TermAl Telegram relay for project `project-1`.")
     );
-    assert_eq!(state.chat_id, None);
 }
 
 #[test]
-fn telegram_unlinked_start_accepts_matching_bot_suffix() {
+fn telegram_unlinked_start_with_matching_bot_suffix_links_chat() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramPromptClient::new(
         Vec::new(),
@@ -831,7 +831,7 @@ fn telegram_unlinked_start_accepts_matching_bot_suffix() {
     config.chat_id = None;
     let mut state = TelegramBotState::default();
 
-    handle_telegram_message(
+    let changed = handle_telegram_message(
         &telegram,
         &termal,
         &config,
@@ -845,10 +845,12 @@ fn telegram_unlinked_start_accepts_matching_bot_suffix() {
             text: Some("/start@termal_bot".to_owned()),
         },
     )
-    .expect("matching suffixed startup command should send guidance");
+    .expect("matching suffixed startup command should link chat");
 
+    assert!(changed);
+    assert_eq!(state.chat_id, Some(123));
     assert_eq!(telegram.sent_texts.borrow().len(), 1);
-    assert!(telegram.sent_texts.borrow()[0].contains("TERMAL_TELEGRAM_CHAT_ID=123"));
+    assert!(telegram.sent_texts.borrow()[0].contains("TermAl Telegram relay"));
 }
 
 #[test]
@@ -5549,7 +5551,7 @@ fn telegram_ui_file_requires_project_target_for_relay_config() {
             &without_any_project,
             telegram_ui_relay_token(&without_any_project),
         )
-            .expect_err("relay config without a project target should be unavailable"),
+        .expect_err("relay config without a project target should be unavailable"),
         TelegramRelayConfigUnavailableReason::MissingProjectTarget
     );
 }
@@ -5568,7 +5570,7 @@ fn telegram_ui_file_requires_default_when_multiple_projects_for_relay_config() {
             &with_multiple_projects,
             telegram_ui_relay_token(&with_multiple_projects),
         )
-            .expect_err("ambiguous relay project target should be unavailable"),
+        .expect_err("ambiguous relay project target should be unavailable"),
         TelegramRelayConfigUnavailableReason::MissingProjectTarget
     );
 }
@@ -5591,7 +5593,7 @@ fn telegram_ui_file_uses_trimmed_default_project_for_relay_config() {
         &with_default,
         telegram_ui_relay_token(&with_default),
     )
-        .expect("default project should produce relay config");
+    .expect("default project should produce relay config");
 
     assert_eq!(config.project_id, "project-1");
     assert_eq!(
@@ -5636,7 +5638,7 @@ fn telegram_ui_file_requires_bot_token_for_relay_config() {
             &missing_token,
             telegram_ui_relay_token(&missing_token),
         )
-            .expect_err("relay config without a bot token should be unavailable"),
+        .expect_err("relay config without a bot token should be unavailable"),
         TelegramRelayConfigUnavailableReason::MissingBotToken
     );
 }
@@ -5649,8 +5651,12 @@ fn telegram_ui_file_rejects_empty_bot_token_for_relay_config() {
     });
 
     assert_eq!(
-        TelegramBotConfig::from_ui_file("/tmp", &empty_token, telegram_ui_relay_token(&empty_token))
-            .expect_err("relay config with an empty bot token should be unavailable"),
+        TelegramBotConfig::from_ui_file(
+            "/tmp",
+            &empty_token,
+            telegram_ui_relay_token(&empty_token)
+        )
+        .expect_err("relay config with an empty bot token should be unavailable"),
         TelegramRelayConfigUnavailableReason::MissingBotToken
     );
 }
@@ -5668,7 +5674,7 @@ fn telegram_ui_file_rejects_whitespace_bot_token_for_relay_config() {
             &whitespace_token,
             telegram_ui_relay_token(&whitespace_token),
         )
-            .expect_err("relay config with a whitespace bot token should be unavailable"),
+        .expect_err("relay config with a whitespace bot token should be unavailable"),
         TelegramRelayConfigUnavailableReason::MissingBotToken
     );
 }
@@ -7247,8 +7253,14 @@ fn delete_project_migrates_unrelated_telegram_token_without_restarting_relay() {
     assert_eq!(value["chatId"], json!(123));
     assert!(value["config"].get("botToken").is_none());
     assert_eq!(value["config"]["enabled"], json!(true));
-    assert_eq!(value["config"]["defaultProjectId"], json!(remaining_project_id));
-    assert_eq!(value["config"]["defaultSessionId"], json!(remaining_session_id));
+    assert_eq!(
+        value["config"]["defaultProjectId"],
+        json!(remaining_project_id)
+    );
+    assert_eq!(
+        value["config"]["defaultSessionId"],
+        json!(remaining_session_id)
+    );
     assert!(take_telegram_relay_runtime_actions_for_tests().is_empty());
     assert_ne!(
         fs::read(&path).expect("settings file should read"),

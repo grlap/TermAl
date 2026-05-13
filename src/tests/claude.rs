@@ -71,6 +71,43 @@ fn claude_read_only_auto_approve_allows_read_only_bash_permission_request() {
     );
 }
 
+#[test]
+fn claude_read_only_auto_approve_allows_review_local_bash_shapes() {
+    for command in [
+        "git status --short",
+        "git diff --cached -- src/delegations.rs",
+        "git diff --name-only && git diff --cached --name-only",
+        "find .claude/reviewers -name \"*.md\" 2>/dev/null",
+        "grep -n ReadOnlyAutoApprove src/claude.rs | head -20",
+        "sed -n 1,120p src/claude.rs",
+        "cat docs/bugs.md | tail -40",
+        "wc -l src/claude.rs",
+    ] {
+        let mut turn_state = ClaudeTurnState::default();
+        let action = classify_claude_control_request(
+            &claude_permission_request("Bash", json!({ "command": command })),
+            &mut turn_state,
+            ClaudeApprovalMode::ReadOnlyAutoApprove,
+        )
+        .unwrap()
+        .expect("permission request should be classified");
+
+        let ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Allow {
+            request_id,
+            updated_input,
+        }) = action
+        else {
+            panic!("read-only review-local command should be auto-allowed: {command}");
+        };
+
+        assert_eq!(request_id, "permission-request-1");
+        assert_eq!(
+            updated_input.get("command").and_then(Value::as_str),
+            Some(command)
+        );
+    }
+}
+
 // Pins read-only Claude reviewer delegations denying explicit file mutation
 // tool requests. This closes the bug where read-only reviewers used full
 // `AutoApprove` and could allow `Write`/`Edit` operations.
@@ -129,6 +166,45 @@ fn claude_read_only_auto_approve_denies_unsafe_bash_permission_request() {
 
     assert_eq!(request_id, "permission-request-1");
     assert!(message.contains("read-only"));
+}
+
+#[test]
+fn claude_read_only_auto_approve_denies_mutating_git_find_and_sed_shapes() {
+    for command in [
+        "git branch -D old-branch",
+        "git branch -m old-name new-name",
+        "git branch new-branch",
+        "find . -execdir rm {} \\;",
+        "find . -fls files.txt",
+        "find . -fprint files.txt",
+        "find . -ok rm {} \\;",
+        "find . '-execdir' rm {} \\;",
+        "sed --in-place s/a/b/ src/main.rs",
+        "sed -i.bak s/a/b/ src/main.rs",
+        "sed -e w/out.txt src/main.rs",
+        "sed '-i.bak' s/a/b/ src/main.rs",
+        "sed -e 'w out.txt' src/main.rs",
+    ] {
+        let mut turn_state = ClaudeTurnState::default();
+        let action = classify_claude_control_request(
+            &claude_permission_request("Bash", json!({ "command": command })),
+            &mut turn_state,
+            ClaudeApprovalMode::ReadOnlyAutoApprove,
+        )
+        .unwrap()
+        .expect("permission request should be classified");
+
+        let ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Deny {
+            request_id,
+            message,
+        }) = action
+        else {
+            panic!("mutating read-only-looking command should be denied: {command}");
+        };
+
+        assert_eq!(request_id, "permission-request-1");
+        assert!(message.contains("read-only"));
+    }
 }
 
 // Pins `clear_claude_turn_state` zeroing every field of `ClaudeTurnState` —

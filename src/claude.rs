@@ -203,6 +203,9 @@ fn read_only_claude_permission_decision(
     }
 }
 
+// Read-only Claude reviewer children need unattended review commands, but the
+// parser is intentionally conservative: unsupported shell syntax denies by
+// default, and only simple stderr-to-dev-null redirection is tolerated.
 fn claude_tool_permission_request_is_read_only(request: &ClaudeToolPermissionRequest) -> bool {
     match request.tool_name.as_str() {
         "Read" | "LS" | "Glob" | "Grep" => true,
@@ -253,37 +256,131 @@ fn claude_bash_command_is_read_only(command: &str) -> bool {
 }
 
 fn claude_bash_tokens_are_read_only(tokens: &[&str]) -> bool {
+    let Some(normalized_tokens) = claude_bash_tokens_for_validation(tokens) else {
+        return false;
+    };
+    let tokens = normalized_tokens
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
     let Some(command) = tokens.first().copied() else {
         return false;
     };
 
-    let read_only_commands = [
-        "cat", "date", "echo", "find", "grep", "head", "ls", "nl", "pwd", "rg", "sed", "tail", "wc",
-    ];
+    let read_only_commands = ["cat", "date", "echo", "grep", "head", "ls", "nl", "pwd", "rg", "tail", "wc"];
     if read_only_commands.contains(&command) {
-        if command == "find"
-            && tokens
-                .iter()
-                .any(|token| matches!(*token, "-delete" | "-exec"))
-        {
-            return false;
-        }
-        if command == "sed" && tokens.iter().any(|token| *token == "-i") {
-            return false;
-        }
         return true;
     }
 
+    if command == "find" {
+        return claude_find_tokens_are_read_only(&tokens);
+    }
+
+    if command == "sed" {
+        return claude_sed_tokens_are_read_only(&tokens);
+    }
+
     if command == "git" {
-        return tokens.get(1).is_some_and(|subcommand| {
-            matches!(
-                *subcommand,
-                "branch" | "diff" | "grep" | "log" | "ls-files" | "rev-parse" | "show" | "status"
-            )
-        });
+        return claude_git_tokens_are_read_only(&tokens);
     }
 
     false
+}
+
+fn claude_bash_tokens_for_validation(tokens: &[&str]) -> Option<Vec<String>> {
+    tokens
+        .iter()
+        .map(|token| {
+            let has_single_quote = token.contains('\'');
+            let has_double_quote = token.contains('"');
+            if !has_single_quote && !has_double_quote {
+                return Some((*token).to_owned());
+            }
+
+            let quote = token.as_bytes().first().copied()?;
+            if !matches!(quote, b'\'' | b'"') || token.as_bytes().last().copied() != Some(quote) {
+                return None;
+            }
+
+            let stripped = &token[1..token.len().saturating_sub(1)];
+            if stripped.contains('\'') || stripped.contains('"') {
+                return None;
+            }
+            Some(stripped.to_owned())
+        })
+        .collect()
+}
+
+fn claude_find_tokens_are_read_only(tokens: &[&str]) -> bool {
+    !tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "-delete" | "-exec" | "-execdir" | "-fls" | "-fprint" | "-fprint0" | "-fprintf"
+                | "-ok" | "-okdir"
+        )
+    })
+}
+
+fn claude_sed_tokens_are_read_only(tokens: &[&str]) -> bool {
+    for (index, token) in tokens.iter().enumerate() {
+        if *token == "-i"
+            || *token == "--in-place"
+            || token.starts_with("-i")
+            || token.starts_with("--in-place=")
+            || *token == "w"
+        {
+            return false;
+        }
+
+        if let Some(script) = token.strip_prefix("-e") {
+            let script = if script.is_empty() {
+                tokens.get(index + 1).copied().unwrap_or_default()
+            } else {
+                script
+            };
+            if claude_sed_script_can_write(script) {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+fn claude_sed_script_can_write(script: &str) -> bool {
+    let mut escaped = false;
+    for character in script.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if character == 'w' {
+            return true;
+        }
+    }
+    false
+}
+
+fn claude_git_tokens_are_read_only(tokens: &[&str]) -> bool {
+    let Some(subcommand) = tokens.get(1).copied() else {
+        return false;
+    };
+
+    match subcommand {
+        "diff" | "grep" | "log" | "ls-files" | "rev-parse" | "show" | "status" => true,
+        "branch" => tokens.iter().skip(2).all(|token| {
+            token.starts_with('-')
+                && !matches!(
+                    *token,
+                    "-d" | "-D" | "--delete" | "-m" | "-M" | "--move" | "-c" | "-C" | "--copy"
+                )
+        }),
+        _ => false,
+    }
 }
 
 /// Parses Claude tool permission request.
