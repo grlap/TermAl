@@ -1,16 +1,16 @@
-// Horizontal tab bar at the top of the Settings dialog.
+// Vertical tab rail in the Settings dialog.
 //
 // What this file owns:
 //   - The `<div role="tablist">` markup and the per-tab `<button>`
 //     rendering.
 //   - The click wiring from a tab to the `onSelectTab` callback.
 //   - The WAI-ARIA tablist keyboard pattern: roving `tabIndex`, and
-//     arrow / Home / End keys that move the selection laterally
+//     arrow / Home / End keys that move the selection vertically
 //     within the tablist without leaving it via `Tab`.
 //
 // What this file does NOT own:
 //   - The list of tab ids / labels (see `./preferences-tabs.ts`).
-//   - The panel content rendered beneath the tab bar (stays in
+//   - The panel content rendered next to the tab rail (stays in
 //     `App.tsx` for now; will move in later splits).
 //   - The active-tab state (still held by `App.tsx`; this component
 //     is a controlled, stateless view).
@@ -19,7 +19,7 @@
 // App.tsx -> preferences/* series. Behaviour-equivalent to the
 // inline JSX it replaces — same classNames, same ARIA attributes,
 // same element ids — plus the keyboard pattern that the inline
-// tab bar never implemented.
+// tab rail never implemented.
 
 import type { KeyboardEvent } from "react";
 
@@ -46,12 +46,9 @@ export function SettingsTabBar({
   // releases the key React has already committed the state update.
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const key = event.key;
-    if (
-      key !== "ArrowLeft" &&
-      key !== "ArrowRight" &&
-      key !== "Home" &&
-      key !== "End"
-    ) {
+    const isPreviousKey = key === "ArrowUp" || key === "ArrowLeft";
+    const isNextKey = key === "ArrowDown" || key === "ArrowRight";
+    if (!isPreviousKey && !isNextKey && key !== "Home" && key !== "End") {
       return;
     }
     // Skip when a modifier is held so OS / browser shortcuts can
@@ -75,9 +72,9 @@ export function SettingsTabBar({
 
     const count = PREFERENCES_TABS.length;
     let nextIndex = currentIndex;
-    if (key === "ArrowLeft") {
+    if (isPreviousKey) {
       nextIndex = (currentIndex - 1 + count) % count;
-    } else if (key === "ArrowRight") {
+    } else if (isNextKey) {
       nextIndex = (currentIndex + 1) % count;
     } else if (key === "Home") {
       nextIndex = 0;
@@ -117,6 +114,7 @@ export function SettingsTabBar({
       className="settings-tab-list"
       role="tablist"
       aria-label="Preferences sections"
+      aria-orientation="vertical"
       onKeyDown={handleKeyDown}
     >
       {PREFERENCES_TABS.map((tab) => {

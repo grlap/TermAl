@@ -140,12 +140,12 @@ fn create_delegation_for_persist_transition(title: &str) -> (AppState, Delegatio
 }
 
 #[test]
-fn claude_read_only_delegation_child_keeps_app_default_approval_mode_and_effort() {
+fn claude_read_only_reviewer_delegation_child_uses_auto_approve_and_keeps_effort() {
     let state = test_app_state();
     let workdir = std::env::temp_dir().to_string_lossy().into_owned();
     let child_session_id = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
-        inner.preferences.default_claude_approval_mode = ClaudeApprovalMode::AutoApprove;
+        inner.preferences.default_claude_approval_mode = ClaudeApprovalMode::Ask;
         inner.preferences.default_claude_effort = ClaudeEffortLevel::Max;
         let child = inner.create_session(
             Agent::Claude,
@@ -162,7 +162,11 @@ fn claude_read_only_delegation_child_keeps_app_default_approval_mode_and_effort(
             .session_mut_by_index(child_index)
             .expect("child session index should be valid");
 
-        configure_delegation_child_prompt_settings(child_record, &DelegationWritePolicy::ReadOnly);
+        configure_delegation_child_prompt_settings(
+            child_record,
+            DelegationMode::Reviewer,
+            &DelegationWritePolicy::ReadOnly,
+        );
         child_session_id
     };
 
@@ -180,7 +184,7 @@ fn claude_read_only_delegation_child_keeps_app_default_approval_mode_and_effort(
 }
 
 #[test]
-fn claude_write_delegation_child_keeps_app_default_approval_mode_and_effort() {
+fn claude_non_read_only_delegation_child_keeps_app_default_approval_mode_and_effort() {
     let state = test_app_state();
     let workdir = std::env::temp_dir().to_string_lossy().into_owned();
     let write_policies = [
@@ -201,7 +205,7 @@ fn claude_write_delegation_child_keeps_app_default_approval_mode_and_effort() {
     for write_policy in write_policies {
         let child_session_id = {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
-            inner.preferences.default_claude_approval_mode = ClaudeApprovalMode::AutoApprove;
+            inner.preferences.default_claude_approval_mode = ClaudeApprovalMode::Ask;
             inner.preferences.default_claude_effort = ClaudeEffortLevel::Max;
             let child = inner.create_session(
                 Agent::Claude,
@@ -218,7 +222,11 @@ fn claude_write_delegation_child_keeps_app_default_approval_mode_and_effort() {
                 .session_mut_by_index(child_index)
                 .expect("child session index should be valid");
 
-            configure_delegation_child_prompt_settings(child_record, &write_policy);
+            configure_delegation_child_prompt_settings(
+                child_record,
+                DelegationMode::Reviewer,
+                &write_policy,
+            );
             child_session_id
         };
 
@@ -230,10 +238,52 @@ fn claude_write_delegation_child_keeps_app_default_approval_mode_and_effort() {
             .expect("child session should exist");
         assert_eq!(
             child.session.claude_approval_mode,
-            Some(ClaudeApprovalMode::AutoApprove)
+            Some(ClaudeApprovalMode::Ask)
         );
         assert_eq!(child.session.claude_effort, Some(ClaudeEffortLevel::Max));
     }
+}
+
+#[test]
+fn claude_read_only_explorer_delegation_child_keeps_app_default_approval_mode() {
+    let state = test_app_state();
+    let workdir = std::env::temp_dir().to_string_lossy().into_owned();
+    let child_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.preferences.default_claude_approval_mode = ClaudeApprovalMode::Ask;
+        let child = inner.create_session(
+            Agent::Claude,
+            Some("Claude Explorer Delegation Defaults".to_owned()),
+            workdir,
+            None,
+            None,
+        );
+        let child_session_id = child.session.id.clone();
+        let child_index = inner
+            .find_session_index(&child_session_id)
+            .expect("child session should be indexed");
+        let child_record = inner
+            .session_mut_by_index(child_index)
+            .expect("child session index should be valid");
+
+        configure_delegation_child_prompt_settings(
+            child_record,
+            DelegationMode::Explorer,
+            &DelegationWritePolicy::ReadOnly,
+        );
+        child_session_id
+    };
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let child = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == child_session_id)
+        .expect("child session should exist");
+    assert_eq!(
+        child.session.claude_approval_mode,
+        Some(ClaudeApprovalMode::Ask)
+    );
 }
 
 #[test]

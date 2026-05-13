@@ -16,7 +16,6 @@ import {
   CODEX_REASONING_EFFORT_OPTIONS,
   DEFAULT_MODEL_PREFERENCE,
   isDefaultModelPreference,
-  MAX_DEFAULT_MODEL_PREFERENCE_CHARS,
   remoteBadgeLabel,
   sessionModelComboboxOptions,
   type ComboboxOption,
@@ -123,15 +122,6 @@ function displayDefaultModelPreference(value: string) {
     : value;
 }
 
-function clampDefaultModelPreferenceDraft(value: string) {
-  const characters = Array.from(value);
-  if (characters.length <= MAX_DEFAULT_MODEL_PREFERENCE_CHARS) {
-    return value;
-  }
-
-  return characters.slice(0, MAX_DEFAULT_MODEL_PREFERENCE_CHARS).join("");
-}
-
 function defaultModelComboboxOptions(
   agent: AgentType,
   value: string,
@@ -197,136 +187,30 @@ function AgentDefaultModelControl({
   value: string;
   onChange: (nextValue: string) => void;
 }) {
-  const [draft, setDraft] = useState(displayDefaultModelPreference(value));
-  const [isDirty, setIsDirty] = useState(false);
-  const [pendingAppliedValue, setPendingAppliedValue] = useState<string | null>(null);
-
-  useEffect(() => {
-    setIsDirty(false);
-    setPendingAppliedValue(null);
-    setDraft(displayDefaultModelPreference(value));
-    // Reset only when switching controls; value echoes are handled below without clobbering dirty drafts.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-
-  const normalizedDraft = normalizeDefaultModelPreferenceDraft(draft);
   const normalizedValue = normalizeDefaultModelPreferenceDraft(value);
-  const canApply = normalizedDraft !== normalizedValue;
   const hintId = `${id}-hint`;
   const selectOptions = useMemo(
     () => defaultModelComboboxOptions(agent, value, modelOptions),
     [agent, modelOptions, value],
   );
 
-  useEffect(() => {
-    if (pendingAppliedValue !== null) {
-      if (normalizedValue === pendingAppliedValue) {
-        setDraft(displayDefaultModelPreference(value));
-        setIsDirty(false);
-        setPendingAppliedValue(null);
-      }
-      return;
-    }
-
-    if (!isDirty) {
-      setDraft(displayDefaultModelPreference(value));
-    }
-  }, [isDirty, normalizedValue, pendingAppliedValue, value]);
-
-  function updateDraft(nextDraft: string) {
-    const clampedDraft = clampDefaultModelPreferenceDraft(nextDraft);
-    setDraft(clampedDraft);
-    setIsDirty(
-      normalizeDefaultModelPreferenceDraft(clampedDraft) !== normalizedValue,
-    );
-    setPendingAppliedValue(null);
-  }
-
-  function applyDraft() {
-    if (!canApply) {
-      return;
-    }
-
-    setDraft(normalizedDraft);
-    setIsDirty(true);
-    setPendingAppliedValue(normalizedDraft);
-    onChange(normalizedDraft);
-  }
-
   return (
     <div className="session-control-group">
       <label className="session-control-label" htmlFor={id}>
         Default model
       </label>
-      <div className="session-model-default-row">
-        <ThemedCombobox
-          id={id}
-          className="prompt-settings-select"
-          value={normalizedValue}
-          options={selectOptions}
-          aria-label={`${agent} default model`}
-          onChange={(nextValue) => {
-            const normalizedNextValue = normalizeDefaultModelPreferenceDraft(nextValue);
-            setDraft(displayDefaultModelPreference(normalizedNextValue));
-            setIsDirty(false);
-            setPendingAppliedValue(normalizedNextValue);
-            onChange(normalizedNextValue);
-          }}
-        />
-        <button
-          type="button"
-          className="ghost-button session-model-custom-reset"
-          aria-describedby={hintId}
-          aria-label={`Reset ${agent} default model`}
-          disabled={isDefaultModelPreference(value)}
-          onClick={() => {
-            setDraft(DEFAULT_MODEL_PREFERENCE);
-            setIsDirty(false);
-            setPendingAppliedValue(DEFAULT_MODEL_PREFERENCE);
-            onChange(DEFAULT_MODEL_PREFERENCE);
-          }}
-        >
-          Reset
-        </button>
-      </div>
-      <div className="session-model-custom-row">
-        <input
-          id={`${id}-custom`}
-          className="themed-input session-model-custom-input"
-          type="text"
-          value={draft}
-          placeholder="default"
-          aria-describedby={hintId}
-          aria-label={`${agent} custom default model`}
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          onChange={(event) => updateDraft(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter") {
-              return;
-            }
-            if (!canApply) {
-              return;
-            }
-
-            event.preventDefault();
-            applyDraft();
-          }}
-        />
-        <button
-          type="button"
-          className="ghost-button session-model-custom-apply"
-          aria-describedby={hintId}
-          aria-label={`Apply ${agent} default model`}
-          disabled={!canApply}
-          onClick={applyDraft}
-        >
-          Apply
-        </button>
-      </div>
+      <ThemedCombobox
+        id={id}
+        className="prompt-settings-select"
+        value={displayDefaultModelPreference(normalizedValue)}
+        options={selectOptions}
+        aria-label={`${agent} default model`}
+        onChange={(nextValue) => {
+          onChange(normalizeDefaultModelPreferenceDraft(nextValue));
+        }}
+      />
       <p id={hintId} className="session-control-hint">
-        Select a known model, use <code>default</code> or leave blank to let {agent} choose its built-in default, or enter an exact model id.
+        Select a known model or choose <code>Default</code> to let {agent} use its built-in default.
       </p>
     </div>
   );

@@ -1,9 +1,9 @@
-// Tests for the Settings dialog tab bar's WAI-ARIA tablist
+// Tests for the Settings dialog tab rail's WAI-ARIA tablist
 // keyboard pattern.
 //
 // Pins the roving tabindex contract (only the active tab
 // participates in sequential focus) and the arrow / Home / End
-// key handlers that move the selection laterally within the
+// key handlers that move the selection vertically within the
 // tablist. The inline tab-bar JSX this component replaced had
 // neither — click / Enter / Space were the only selection
 // mechanisms — so these tests are both regression guards and
@@ -18,6 +18,10 @@ import { PREFERENCES_TABS } from "./preferences-tabs";
 describe("SettingsTabBar keyboard navigation", () => {
   it("puts only the active tab in sequential Tab order", () => {
     render(<SettingsTabBar activeTabId="themes" onSelectTab={() => {}} />);
+    expect(screen.getByRole("tablist")).toHaveAttribute(
+      "aria-orientation",
+      "vertical",
+    );
     const themes = screen.getByRole("tab", { name: "Themes" });
     const markdown = screen.getByRole("tab", { name: "Markdown" });
     // Active tab participates in `Tab` traversal (tabIndex=0);
@@ -27,14 +31,14 @@ describe("SettingsTabBar keyboard navigation", () => {
     expect(markdown).toHaveAttribute("tabindex", "-1");
   });
 
-  it("moves selection to the next tab on ArrowRight and focuses it", () => {
+  it("moves selection to the next tab on ArrowDown and focuses it", () => {
     const onSelectTab = vi.fn();
     render(
       <SettingsTabBar activeTabId="themes" onSelectTab={onSelectTab} />,
     );
     const themes = screen.getByRole("tab", { name: "Themes" });
     themes.focus();
-    fireEvent.keyDown(themes, { key: "ArrowRight" });
+    fireEvent.keyDown(themes, { key: "ArrowDown" });
     // Selection advances to the next tab in PREFERENCES_TABS.
     expect(onSelectTab).toHaveBeenCalledWith("markdown");
     // DOM focus moves in lockstep — otherwise the user sees
@@ -45,26 +49,26 @@ describe("SettingsTabBar keyboard navigation", () => {
     );
   });
 
-  it("moves selection to the previous tab on ArrowLeft and focuses it", () => {
+  it("moves selection to the previous tab on ArrowUp and focuses it", () => {
     const onSelectTab = vi.fn();
     render(
       <SettingsTabBar activeTabId="markdown" onSelectTab={onSelectTab} />,
     );
     const markdown = screen.getByRole("tab", { name: "Markdown" });
     markdown.focus();
-    fireEvent.keyDown(markdown, { key: "ArrowLeft" });
+    fireEvent.keyDown(markdown, { key: "ArrowUp" });
     expect(onSelectTab).toHaveBeenCalledWith("themes");
     expect(document.activeElement).toBe(
       screen.getByRole("tab", { name: "Themes" }),
     );
   });
 
-  it("wraps to the last tab (and focuses it) when pressing ArrowLeft on the first", () => {
+  it("wraps to the last tab (and focuses it) when pressing ArrowUp on the first", () => {
     const onSelectTab = vi.fn();
     render(<SettingsTabBar activeTabId="themes" onSelectTab={onSelectTab} />);
     const themes = screen.getByRole("tab", { name: "Themes" });
     themes.focus();
-    fireEvent.keyDown(themes, { key: "ArrowLeft" });
+    fireEvent.keyDown(themes, { key: "ArrowUp" });
     const lastTab = PREFERENCES_TABS[PREFERENCES_TABS.length - 1];
     expect(lastTab).toBeDefined();
     if (!lastTab) {
@@ -80,7 +84,7 @@ describe("SettingsTabBar keyboard navigation", () => {
     );
   });
 
-  it("wraps to the first tab (and focuses it) when pressing ArrowRight on the last", () => {
+  it("wraps to the first tab (and focuses it) when pressing ArrowDown on the last", () => {
     const onSelectTab = vi.fn();
     const lastTab = PREFERENCES_TABS[PREFERENCES_TABS.length - 1];
     const firstTab = PREFERENCES_TABS[0];
@@ -99,7 +103,7 @@ describe("SettingsTabBar keyboard navigation", () => {
       return;
     }
     lastTabElement.focus();
-    fireEvent.keyDown(lastTabElement, { key: "ArrowRight" });
+    fireEvent.keyDown(lastTabElement, { key: "ArrowDown" });
     expect(onSelectTab).toHaveBeenCalledWith(firstTab.id);
     expect(document.activeElement).toBe(
       screen.getByRole("tab", { name: firstTab.label }),
@@ -185,7 +189,7 @@ describe("SettingsTabBar keyboard navigation", () => {
     const themes = screen.getByRole("tab", { name: "Themes" });
     themes.focus();
     // `Tab`, typing, and `Escape` should all pass through
-    // without triggering lateral selection.
+    // without triggering tab selection.
     fireEvent.keyDown(themes, { key: "Tab" });
     fireEvent.keyDown(themes, { key: "a" });
     fireEvent.keyDown(themes, { key: "Escape" });
@@ -193,8 +197,8 @@ describe("SettingsTabBar keyboard navigation", () => {
   });
 
   it("ignores modifier-arrow combinations so OS/browser shortcuts work", () => {
-    // Ctrl+ArrowRight is "next browser tab" / "jump word",
-    // Meta+ArrowLeft is browser-back on macOS, Ctrl+Home /
+    // Ctrl+ArrowDown / Ctrl+ArrowRight are browser or editor shortcuts,
+    // Meta+ArrowUp / Meta+ArrowLeft are browser or document shortcuts,
     // Ctrl+End jump to document top/bottom. Intercepting these
     // would surprise users who reach for them by reflex, and
     // WAI-ARIA's tablist pattern specifies unmodified arrow
@@ -203,8 +207,8 @@ describe("SettingsTabBar keyboard navigation", () => {
     render(<SettingsTabBar activeTabId="themes" onSelectTab={onSelectTab} />);
     const themes = screen.getByRole("tab", { name: "Themes" });
     themes.focus();
-    fireEvent.keyDown(themes, { key: "ArrowRight", ctrlKey: true });
-    fireEvent.keyDown(themes, { key: "ArrowLeft", metaKey: true });
+    fireEvent.keyDown(themes, { key: "ArrowDown", ctrlKey: true });
+    fireEvent.keyDown(themes, { key: "ArrowUp", metaKey: true });
     fireEvent.keyDown(themes, { key: "Home", altKey: true });
     fireEvent.keyDown(themes, { key: "End", ctrlKey: true });
     expect(onSelectTab).not.toHaveBeenCalled();

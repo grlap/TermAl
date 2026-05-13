@@ -257,7 +257,7 @@ Configure Telegram from Settings -> Telegram:
 3. Enable the relay and restart the backend if it was already running before the save.
 4. Open the bot chat in Telegram and send `/start`.
 
-The backend runs the relay in-process; no second `cargo run -- telegram` process is required for the normal setup. The relay is bound to one Telegram chat and can control multiple subscribed TermAl projects from that chat.
+The backend runs the relay in-process; no second `cargo run -- telegram` process is required for the normal setup. Today the relay is bound to one Telegram bot/chat and can control multiple subscribed TermAl projects from that chat. The planned multi-bot model is documented in `docs/features/telegram-ui-integration.md`: each bot becomes a named profile with its own token, linked chat, project subscriptions, defaults, and relay runtime.
 
 Telegram commands:
 

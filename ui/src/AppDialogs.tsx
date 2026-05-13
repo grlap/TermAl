@@ -886,115 +886,117 @@ export function AppDialogs({
       ) : null}
       {isSettingsOpen ? (
         <SettingsDialogShell onClose={closeSettingsDialog}>
-          <SettingsTabBar
-            activeTabId={settingsTab}
-            onSelectTab={setSettingsTab}
-          />
+          <div className="settings-dialog-content">
+            <SettingsTabBar
+              activeTabId={settingsTab}
+              onSelectTab={setSettingsTab}
+            />
 
-          <div
-            id={`settings-panel-${settingsTab}`}
-            className={`settings-tab-panel ${settingsTab === "themes" || settingsTab === "markdown" ? "theme-settings-panel" : ""}`.trim()}
-            role="tabpanel"
-            aria-labelledby={`settings-tab-${settingsTab}`}
-          >
-            {settingsTab === "themes" ? (
-              <ThemePreferencesPanel
-                activeStyle={activeStyle}
-                activeTheme={activeTheme}
-                styleId={styleId}
-                themeId={themeId}
-                onSelectStyle={setStyleId}
-                onSelectTheme={setThemeId}
-              />
-            ) : settingsTab === "markdown" ? (
-              <MarkdownPreferencesPanel
-                activeMarkdownTheme={activeMarkdownTheme}
-                activeMarkdownStyle={activeMarkdownStyle}
-                markdownThemeId={markdownThemeId}
-                markdownStyleId={markdownStyleId}
-                diagramThemeOverrideMode={diagramThemeOverrideMode}
-                diagramLook={diagramLook}
-                diagramPalette={diagramPalette}
-                onSelectMarkdownTheme={setMarkdownThemeId}
-                onSelectMarkdownStyle={setMarkdownStyleId}
-                onSelectDiagramThemeOverrideMode={setDiagramThemeOverrideMode}
-                onSelectDiagramLook={setDiagramLook}
-                onSelectDiagramPalette={setDiagramPalette}
-              />
-            ) : settingsTab === "appearance" ? (
-              <AppearancePreferencesPanel
-                densityPercent={densityPercent}
-                editorFontSizePx={editorFontSizePx}
-                fontSizePx={fontSizePx}
-                onSelectDensity={(nextValue) =>
-                  setDensityPercent(clampDensityPreference(nextValue))
-                }
-                onSelectEditorFontSize={(nextValue) =>
-                  setEditorFontSizePx(
-                    clampEditorFontSizePreference(nextValue),
-                  )
-                }
-                onSelectFontSize={(nextValue) =>
-                  setFontSizePx(clampFontSizePreference(nextValue))
-                }
-              />
-            ) : settingsTab === "remotes" ? (
-              <RemotePreferencesPanel
-                remotes={remoteConfigs}
-                onSaveRemotes={onSaveRemotes}
-              />
-            ) : settingsTab === "telegram" ? (
-              <TelegramPreferencesPanel projects={projects} sessions={sessions} />
-            ) : settingsTab === "orchestrators" ? (
-              <OrchestratorTemplatesPanel
-                projects={projects}
-                sessions={sessions}
-                onStateUpdated={handleOrchestratorStateUpdated}
-              />
-            ) : settingsTab === "codex-prompts" ? (
-              <CodexPromptPreferencesPanel
-                defaultApprovalPolicy={defaultCodexApprovalPolicy}
-                defaultModel={defaultCodexModel}
-                defaultReasoningEffort={defaultCodexReasoningEffort}
-                defaultSandboxMode={defaultCodexSandboxMode}
-                onSelectApprovalPolicy={setDefaultCodexApprovalPolicy}
-                onSelectModel={handleDefaultCodexModelChange}
-                onSelectReasoningEffort={
-                  handleDefaultCodexReasoningEffortChange
-                }
-                onSelectSandboxMode={setDefaultCodexSandboxMode}
-                sessions={sessions}
-              />
-            ) : settingsTab === "claude-approvals" ? (
-              <ClaudeApprovalsPreferencesPanel
-                defaultClaudeApprovalMode={defaultClaudeApprovalMode}
-                defaultClaudeEffort={defaultClaudeEffort}
-                defaultClaudeModel={defaultClaudeModel}
-                onSelectEffort={handleDefaultClaudeEffortChange}
-                onSelectModel={handleDefaultClaudeModelChange}
-                onSelectMode={setDefaultClaudeApprovalMode}
-                sessions={sessions}
-              />
-            ) : settingsTab === "cursor" ? (
-              <CursorPreferencesPanel
-                defaultCursorModel={defaultCursorModel}
-                defaultCursorMode={defaultCursorMode}
-                onSelectModel={handleDefaultCursorModelChange}
-                onSelectMode={onChangeDefaultCursorMode}
-              />
-            ) : settingsTab === "gemini" ? (
-              <GeminiPreferencesPanel
-                defaultGeminiApprovalMode={defaultGeminiApprovalMode}
-                defaultGeminiModel={defaultGeminiModel}
-                onSelectApprovalMode={onChangeDefaultGeminiApprovalMode}
-                onSelectModel={handleDefaultGeminiModelChange}
-              />
-            ) : (
-              (() => {
-                const _exhaustive: never = settingsTab;
-                return _exhaustive;
-              })()
-            )}
+            <div
+              id={`settings-panel-${settingsTab}`}
+              className={`settings-tab-panel ${settingsTab === "themes" ? "theme-settings-panel" : ""}`.trim()}
+              role="tabpanel"
+              aria-labelledby={`settings-tab-${settingsTab}`}
+            >
+              {settingsTab === "themes" ? (
+                <ThemePreferencesPanel
+                  activeStyle={activeStyle}
+                  activeTheme={activeTheme}
+                  styleId={styleId}
+                  themeId={themeId}
+                  onSelectStyle={setStyleId}
+                  onSelectTheme={setThemeId}
+                />
+              ) : settingsTab === "markdown" ? (
+                <MarkdownPreferencesPanel
+                  activeMarkdownTheme={activeMarkdownTheme}
+                  activeMarkdownStyle={activeMarkdownStyle}
+                  markdownThemeId={markdownThemeId}
+                  markdownStyleId={markdownStyleId}
+                  diagramThemeOverrideMode={diagramThemeOverrideMode}
+                  diagramLook={diagramLook}
+                  diagramPalette={diagramPalette}
+                  onSelectMarkdownTheme={setMarkdownThemeId}
+                  onSelectMarkdownStyle={setMarkdownStyleId}
+                  onSelectDiagramThemeOverrideMode={setDiagramThemeOverrideMode}
+                  onSelectDiagramLook={setDiagramLook}
+                  onSelectDiagramPalette={setDiagramPalette}
+                />
+              ) : settingsTab === "appearance" ? (
+                <AppearancePreferencesPanel
+                  densityPercent={densityPercent}
+                  editorFontSizePx={editorFontSizePx}
+                  fontSizePx={fontSizePx}
+                  onSelectDensity={(nextValue) =>
+                    setDensityPercent(clampDensityPreference(nextValue))
+                  }
+                  onSelectEditorFontSize={(nextValue) =>
+                    setEditorFontSizePx(
+                      clampEditorFontSizePreference(nextValue),
+                    )
+                  }
+                  onSelectFontSize={(nextValue) =>
+                    setFontSizePx(clampFontSizePreference(nextValue))
+                  }
+                />
+              ) : settingsTab === "remotes" ? (
+                <RemotePreferencesPanel
+                  remotes={remoteConfigs}
+                  onSaveRemotes={onSaveRemotes}
+                />
+              ) : settingsTab === "telegram" ? (
+                <TelegramPreferencesPanel projects={projects} sessions={sessions} />
+              ) : settingsTab === "orchestrators" ? (
+                <OrchestratorTemplatesPanel
+                  projects={projects}
+                  sessions={sessions}
+                  onStateUpdated={handleOrchestratorStateUpdated}
+                />
+              ) : settingsTab === "codex-prompts" ? (
+                <CodexPromptPreferencesPanel
+                  defaultApprovalPolicy={defaultCodexApprovalPolicy}
+                  defaultModel={defaultCodexModel}
+                  defaultReasoningEffort={defaultCodexReasoningEffort}
+                  defaultSandboxMode={defaultCodexSandboxMode}
+                  onSelectApprovalPolicy={setDefaultCodexApprovalPolicy}
+                  onSelectModel={handleDefaultCodexModelChange}
+                  onSelectReasoningEffort={
+                    handleDefaultCodexReasoningEffortChange
+                  }
+                  onSelectSandboxMode={setDefaultCodexSandboxMode}
+                  sessions={sessions}
+                />
+              ) : settingsTab === "claude-approvals" ? (
+                <ClaudeApprovalsPreferencesPanel
+                  defaultClaudeApprovalMode={defaultClaudeApprovalMode}
+                  defaultClaudeEffort={defaultClaudeEffort}
+                  defaultClaudeModel={defaultClaudeModel}
+                  onSelectEffort={handleDefaultClaudeEffortChange}
+                  onSelectModel={handleDefaultClaudeModelChange}
+                  onSelectMode={setDefaultClaudeApprovalMode}
+                  sessions={sessions}
+                />
+              ) : settingsTab === "cursor" ? (
+                <CursorPreferencesPanel
+                  defaultCursorModel={defaultCursorModel}
+                  defaultCursorMode={defaultCursorMode}
+                  onSelectModel={handleDefaultCursorModelChange}
+                  onSelectMode={onChangeDefaultCursorMode}
+                />
+              ) : settingsTab === "gemini" ? (
+                <GeminiPreferencesPanel
+                  defaultGeminiApprovalMode={defaultGeminiApprovalMode}
+                  defaultGeminiModel={defaultGeminiModel}
+                  onSelectApprovalMode={onChangeDefaultGeminiApprovalMode}
+                  onSelectModel={handleDefaultGeminiModelChange}
+                />
+              ) : (
+                (() => {
+                  const _exhaustive: never = settingsTab;
+                  return _exhaustive;
+                })()
+              )}
+            </div>
           </div>
         </SettingsDialogShell>
       ) : null}

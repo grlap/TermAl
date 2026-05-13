@@ -535,7 +535,7 @@ impl AppState {
             let child_record = inner
                 .session_mut_by_index(child_index)
                 .expect("child session index should be valid");
-            configure_delegation_child_prompt_settings(child_record, &write_policy);
+            configure_delegation_child_prompt_settings(child_record, mode, &write_policy);
             child_record.session.parent_delegation_id = Some(delegation_id.clone());
         }
         let child_session = Self::wire_session_from_record(&inner.sessions[child_index]);
@@ -1499,6 +1499,7 @@ Final answer requirements:\n\
 
 fn configure_delegation_child_prompt_settings(
     child_record: &mut SessionRecord,
+    mode: DelegationMode,
     write_policy: &DelegationWritePolicy,
 ) {
     if child_record.session.agent.supports_codex_prompt_settings() {
@@ -1506,6 +1507,11 @@ fn configure_delegation_child_prompt_settings(
         child_record.codex_sandbox_mode = delegation_codex_sandbox_mode(write_policy);
         child_record.session.approval_policy = Some(CodexApprovalPolicy::Never);
         child_record.session.sandbox_mode = Some(child_record.codex_sandbox_mode);
+    } else if child_record.session.agent.supports_claude_approval_mode()
+        && mode == DelegationMode::Reviewer
+        && matches!(write_policy, DelegationWritePolicy::ReadOnly)
+    {
+        child_record.session.claude_approval_mode = Some(ClaudeApprovalMode::AutoApprove);
     } else if child_record.session.agent.supports_cursor_mode() {
         child_record.session.cursor_mode = Some(CursorMode::Plan);
     } else if child_record.session.agent.supports_gemini_approval_mode() {

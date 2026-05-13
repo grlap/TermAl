@@ -15,7 +15,7 @@
 //   - Whether the dialog is open — callers conditionally render
 //     `<SettingsDialogShell>` only when their `isSettingsOpen` flag
 //     is true.
-//   - The tab bar itself (see `./SettingsTabBar.tsx`).
+//   - The tab rail itself (see `./SettingsTabBar.tsx`).
 //   - The per-tab panel content (each preference panel is its own
 //     component; the caller composes them as children).
 //   - The active-tab state (still held by `App.tsx`).

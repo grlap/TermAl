@@ -7,6 +7,36 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Claude read-only reviewer delegations auto-allow tool permission requests
+
+**Severity:** High - `src/delegations.rs:1514` sets read-only Claude reviewer children to `ClaudeApprovalMode::AutoApprove`, while `src/claude.rs:169` answers every Claude tool permission request with allow in that mode.
+
+The current change unblocks `/review-local` for Claude by avoiding approval prompts, but it weakens the `writePolicy: readOnly` contract. A read-only delegated reviewer should not be able to mutate files even if the agent asks for a write-capable tool. Codex read-only reviewers get a sandbox mode; Claude currently gets an approval mode that is not filtered by operation type.
+
+**Current behavior:**
+- Read-only Claude reviewer delegation children are forced to `auto-approve`.
+- Claude `AutoApprove` allows every tool permission request, including write-capable requests.
+- Existing tests assert the mode selection, but do not prove write permission requests are denied or queued under read-only delegation.
+
+**Proposal:**
+- Keep Claude reviewer sessions in `Ask`, use an actually read-only Claude permission mode if one exists, or add a TermAl permission filter that only auto-allows read-only operations and denies or queues write-capable requests.
+- Add regression coverage for read-only Claude delegated reviewers attempting a write-capable tool request.
+
+## App-level default model settings lost arbitrary model-id entry
+
+**Severity:** Low - `ui/src/preferences-panels.tsx:202` now renders app-level default model settings as a non-editable combobox, while `src/session_crud.rs:52` still accepts custom default model preferences up to 200 characters.
+
+The UI and backend contracts are now mismatched. Users can only select a model already present in the option list or already saved, even though the backend and earlier UI supported entering an exact model id manually. That makes newly released or locally supported model ids unreachable from the settings UI until they are pre-populated in model options.
+
+**Current behavior:**
+- App-level default model settings expose only the known-option combobox.
+- The custom input/apply/reset row was removed from the default settings path.
+- Backend validation still accepts arbitrary model ids that satisfy length and CLI-option guards.
+
+**Proposal:**
+- Restore a custom model-id entry path for app-level defaults, or explicitly change and document the API/UI contract to known-options-only.
+- Add UI coverage for whichever contract is chosen.
+
 ## First-settled active-baseline same-message growth lacks a safe turn boundary
 
 **Severity:** Medium - `src/telegram.rs:2583-2637`. When a Telegram prompt is armed behind an active/approval-paused turn, the relay baselines the current assistant message while `baseline_while_active=true`. If the tracked message id has already grown by the first settled poll, the relay cannot distinguish "old turn finished after the last active poll" from "the Telegram reply was appended to the same message id."
@@ -890,6 +920,10 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 - [ ] P2: Add repeated-send waiting-indicator coverage:
   send a second prompt after a completed assistant response while the POST is still in flight, and assert the user still sees send-in-progress feedback until the new prompt appears in session state.
+- [ ] P2: Add read-only Claude reviewer permission regression:
+  create a read-only Claude reviewer child and simulate a write-capable tool permission request, then assert TermAl denies or queues it instead of auto-allowing it.
+- [ ] P2: Add app-level custom default-model UI coverage:
+  cover entering an arbitrary valid model id in app-level default model settings, or cover explicit rejection if the product contract changes to known-options-only.
 - [ ] P2: Add delegation-wait visibility coverage after prior assistant output:
   create an idle parent session with assistant output after the latest user prompt plus an active delegation wait, and assert the delegation-wait indicator remains visible instead of being suppressed as a stale live turn.
 - [ ] P2: Cover MCP slash-command parser separator and whitespace edges:
