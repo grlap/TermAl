@@ -1620,7 +1620,6 @@ export function DiffPanel({
           <div className="diff-review-summary" aria-label="Change-set review threads">
             <span className="chip">{`${reviewThreads.length} review thread${reviewThreads.length === 1 ? "" : "s"}`}</span>
             <span className="chip">{`${openReviewThreadCount} open`}</span>
-            <span className="support-copy diff-review-summary-path">{reviewState.reviewFilePath}</span>
             {isSavingReview ? <span className="support-copy">Saving review...</span> : null}
           </div>
         ) : null}

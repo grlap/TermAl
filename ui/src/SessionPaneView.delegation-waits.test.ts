@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   delegationWaitIndicatorPrompt,
   hasAgentOutputAfterLatestUserPrompt,
+  hasTurnFinalizingOutputAfterLatestUserPrompt,
 } from "./SessionPaneView";
 import type { DelegationWaitRecord } from "./api";
 import type { Message } from "./types";
@@ -112,5 +113,61 @@ describe("hasAgentOutputAfterLatestUserPrompt", () => {
     ];
 
     expect(hasAgentOutputAfterLatestUserPrompt(messages)).toBe(false);
+  });
+});
+
+describe("hasTurnFinalizingOutputAfterLatestUserPrompt", () => {
+  it("returns true when the latest prompt has an agent file-change summary", () => {
+    const messages: Message[] = [
+      {
+        id: "message-user",
+        type: "text",
+        author: "you",
+        timestamp: "12:00",
+        text: "Fix it",
+      },
+      {
+        id: "message-files",
+        type: "fileChanges",
+        author: "assistant",
+        timestamp: "12:01",
+        title: "Agent changed 2 files",
+        files: [
+          { path: "ui/src/app-live-state.ts", kind: "modified" },
+          { path: "ui/src/app-live-state.test.ts", kind: "modified" },
+        ],
+      },
+    ];
+
+    expect(hasTurnFinalizingOutputAfterLatestUserPrompt(messages)).toBe(true);
+  });
+
+  it("does not let an older file-change summary suppress a newer prompt", () => {
+    const messages: Message[] = [
+      {
+        id: "message-user-1",
+        type: "text",
+        author: "you",
+        timestamp: "12:00",
+        text: "First",
+      },
+      {
+        id: "message-files",
+        type: "fileChanges",
+        author: "assistant",
+        timestamp: "12:01",
+        title: "Agent changed 1 file",
+        files: [{ path: "ui/src/styles.css", kind: "modified" }],
+      },
+      {
+        id: "message-user-2",
+        type: "text",
+        author: "you",
+        timestamp: "12:02",
+        text: "Second",
+      },
+    ];
+
+    expect(hasTurnFinalizingOutputAfterLatestUserPrompt(messages)).toBe(false);
   });
 });

@@ -5910,7 +5910,6 @@ textarea {
   background: var(--surface-white);
 }
 
-.markdown-document-header,
 .markdown-diff-toolbar {
   display: flex;
   align-items: center;
@@ -5920,10 +5919,6 @@ textarea {
   padding: 0.55rem 0.7rem;
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface-white) 92%, var(--accent-blue-bg) 8%);
-}
-
-.markdown-document-header {
-  justify-content: flex-start;
 }
 
 .markdown-document-note {
@@ -6737,11 +6732,6 @@ textarea {
   align-items: center;
   gap: 0.55rem;
   margin-top: 0.6rem;
-}
-
-.diff-review-summary-path {
-  font-family: var(--code-font);
-  font-size: 0.76rem;
 }
 
 .diff-preview-raw-shell {
@@ -8447,6 +8437,41 @@ textarea {
   padding: 1rem 1.35rem 1.3rem;
   border-top: 1px solid var(--line);
   background: var(--surface-composer);
+}
+
+.delegated-child-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  min-height: 4.25rem;
+  padding-block: 0.85rem;
+}
+
+.delegated-child-footer-status {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 0.6rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.delegated-child-footer-spinner {
+  width: 1rem;
+  height: 1rem;
+  border-width: 2px;
+}
+
+.delegated-child-footer-copy {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delegated-child-stop-button {
+  min-width: 5.5rem;
+  white-space: nowrap;
 }
 
 .composer-hint {
@@ -10539,6 +10564,4 @@ textarea {
     align-items: stretch;
   }
 }
-
-
 

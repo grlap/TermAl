@@ -132,6 +132,29 @@ function hasAgentOutputAfterLatestUserPrompt(messages: readonly Message[]) {
   return sawAgentOutputAfterLatestUserPrompt;
 }
 
+function hasTurnFinalizingOutputAfterLatestUserPrompt(messages: readonly Message[]) {
+  let sawLatestUserPrompt = false;
+  let sawTurnFinalizingOutputAfterLatestUserPrompt = false;
+
+  for (const message of messages) {
+    if (message.author === "you") {
+      sawLatestUserPrompt = true;
+      sawTurnFinalizingOutputAfterLatestUserPrompt = false;
+      continue;
+    }
+
+    if (
+      sawLatestUserPrompt &&
+      message.author === "assistant" &&
+      message.type === "fileChanges"
+    ) {
+      sawTurnFinalizingOutputAfterLatestUserPrompt = true;
+    }
+  }
+
+  return sawTurnFinalizingOutputAfterLatestUserPrompt;
+}
+
 type PromptHistoryState = {
   index: number;
   draft: string;
@@ -1343,7 +1366,8 @@ const SessionConversationPage = memo(function SessionConversationPage({
   }, [visibleMessages.length, visibleMessageIds, visiblePendingPromptsBase]);
   const effectiveShowWaitingIndicator =
     showWaitingIndicator &&
-    (session.status === "active" ||
+    ((session.status === "active" &&
+      !hasTurnFinalizingOutputAfterLatestUserPrompt(visibleMessages)) ||
       !hasAgentOutputAfterLatestUserPrompt(visibleMessages));
   const conversationOverview = useConversationOverviewController({
     agent: session.agent,

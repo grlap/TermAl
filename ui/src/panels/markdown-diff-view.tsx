@@ -8,16 +8,11 @@
 //   - `MarkdownDiffView` — the outer shell. Derives stable
 //     segments from `buildMarkdownDiffDocumentSegments` +
 //     `useStableMarkdownDiffDocumentSegments`, renders the
-//     toolbar chips (Rendered Markdown / staged chip / One
-//     document / Editable / side-source), the save-state copy +
-//     save button, an optional edit-blocked-reason note, the
-//     inner `<MarkdownDiffDocument>`, and the status footer
-//     (section count + full/patch pill).
+//     save-state copy + save button, an optional edit-blocked-reason
+//     note, the inner `<MarkdownDiffDocument>`, and the change
+//     navigation status footer.
 //   - `MarkdownDiffDocument` — the inner pane. Hosts the
-//     rendered-document header chips, the optional
-//     document-wide note (defaulting to "Rendered from patch
-//     context only..." when completeness is `"patch"` and no
-//     explicit note arrived), the scroll region, and the
+//     optional document-wide note, the scroll region, and the
 //     "No rendered Markdown changes were found." empty state.
 //     Intercepts arrow-key caret redirects out of removed
 //     sections when `allowReadOnlyCaret` is set.
@@ -39,16 +34,11 @@
 //   - Caret navigation helpers (`getMarkdownCaretNavigationDirection`,
 //     `redirectCaretOutOfRemovedMarkdownSection`) — live in
 //     `./markdown-diff-caret-navigation`.
-//   - The Markdown-side source label formatter
-//     (`formatMarkdownSideSource`) — lives in
-//     `./diff-panel-helpers`.
 //   - `buildDiffPreviewModel` — lives in `../diff-preview`.
 //
 // Split out of `ui/src/panels/DiffPanel.tsx`. Same class names,
-// chip copy, save-state strings ("Save Markdown" / "Saving..." /
-// "Saved"), "Rendered from patch context only..." fallback note,
-// and the "No rendered Markdown changes were found." empty-state
-// text.
+// save-state strings ("Save Markdown" / "Saving..." / "Saved"),
+// and the "No rendered Markdown changes were found." empty-state text.
 
 import {
   useCallback,
@@ -63,7 +53,6 @@ import type { GitDiffSection } from "../api";
 import type { buildDiffPreviewModel } from "../diff-preview";
 import type { MarkdownFileLinkTarget } from "../message-cards";
 import type { MonacoAppearance } from "../monaco";
-import { formatMarkdownSideSource } from "./diff-panel-helpers";
 import { DiffNavArrow } from "./DiffPanelIcons";
 import {
   EditableRenderedMarkdownSection,
@@ -83,7 +72,6 @@ import {
   buildMarkdownDiffDocumentSegments,
   type MarkdownDiffDocumentSegment,
   type MarkdownDiffPreviewModel,
-  type MarkdownDocumentCompleteness,
 } from "./markdown-diff-segments";
 
 type MarkdownDiffSaveHandler = () => Promise<void> | void;
@@ -222,8 +210,6 @@ export function MarkdownDiffView({
     },
     [onRenderedMarkdownSectionDraftChange],
   );
-  const gitSectionLabel =
-    gitSectionId === "staged" ? "Staged" : gitSectionId === "unstaged" ? "Unstaged" : null;
   const [readOnlyResetVersion, setReadOnlyResetVersion] = useState(0);
   // Scroll the active change-block into view whenever the index
   // advances via prev/next. We re-run on `changeCount` too so a fresh
@@ -273,16 +259,8 @@ export function MarkdownDiffView({
 
   return (
     <div className="source-editor-shell source-editor-shell-with-statusbar markdown-diff-shell">
-      <div className="markdown-diff-toolbar">
-        <div className="source-editor-status">
-          <span className="chip">Rendered Markdown</span>
-          {gitSectionLabel ? <span className="chip">{gitSectionLabel}</span> : null}
-          <span className="chip">One document</span>
-          {canEdit ? <span className="chip">Editable</span> : null}
-          {isFullDocumentEditDeferred ? <span className="chip">Editing deferred</span> : null}
-          <span className="chip">{formatMarkdownSideSource(markdownPreview.after.source)}</span>
-        </div>
-        {canEdit || isFullDocumentEditDeferred ? (
+      {canEdit || isFullDocumentEditDeferred ? (
+        <div className="markdown-diff-toolbar">
           <div className="source-editor-actions markdown-diff-edit-actions">
             {isFullDocumentEditDeferred && onRenderFullDocument ? (
               <button
@@ -300,8 +278,8 @@ export function MarkdownDiffView({
               </button>
             ) : null}
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       {!canEdit && editBlockedReason ? (
         <p className="support-copy markdown-document-note">{editBlockedReason}</p>
       ) : null}
@@ -310,7 +288,6 @@ export function MarkdownDiffView({
         appearance={appearance}
         canEdit={canEdit}
         changeBlocks={changeBlocks}
-        completeness={markdownPreview.after.completeness}
         documentPath={documentPath}
         key={readOnlyResetVersion}
         note={markdownPreview.after.note}
@@ -365,12 +342,6 @@ export function MarkdownDiffView({
               : editBlockedReason ?? "Rendered changes"}
           </span>
         </div>
-        <div className="source-editor-statusbar-group source-editor-statusbar-group-meta">
-          <span className="source-editor-statusbar-item">{`${segments.length} section${segments.length === 1 ? "" : "s"}`}</span>
-          <span className="source-editor-statusbar-item">
-            {markdownPreview.after.completeness === "full" ? "Full document" : "Patch preview"}
-          </span>
-        </div>
       </footer>
     </div>
   );
@@ -381,7 +352,6 @@ function MarkdownDiffDocument({
   appearance,
   canEdit,
   changeBlocks,
-  completeness,
   documentPath,
   note,
   onCommitRenderedMarkdownSectionDraft,
@@ -400,7 +370,6 @@ function MarkdownDiffDocument({
   appearance: MonacoAppearance;
   canEdit: boolean;
   changeBlocks: MarkdownDiffChangeBlock[];
-  completeness: MarkdownDocumentCompleteness;
   documentPath: string | null;
   note: string | null;
   onCommitRenderedMarkdownSectionDraft: (commit: RenderedMarkdownSectionCommit) => boolean;
@@ -415,11 +384,7 @@ function MarkdownDiffDocument({
   sourceContent: string;
   workspaceRoot: string | null;
 }) {
-  const visibleNote =
-    note ??
-    (completeness === "patch"
-      ? "Rendered from patch context only. Unchanged document sections outside the diff are omitted."
-      : null);
+  const visibleNote = note;
 
   function handleScrollKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!allowReadOnlyCaret) {
@@ -436,10 +401,6 @@ function MarkdownDiffDocument({
 
   return (
     <div className="markdown-diff-change-view">
-      <div className="markdown-document-header">
-        <span className="chip">Rendered document</span>
-        <span className="chip">{completeness === "full" ? "Full document" : "Patch preview"}</span>
-      </div>
       {visibleNote ? <p className="support-copy markdown-document-note">{visibleNote}</p> : null}
       <div
         className="markdown-diff-change-scroll"

@@ -178,6 +178,7 @@ function renderSessionPaneView({
   projects = [makeProject()],
   remotes = [makeRemote()],
   expectComposer = true,
+  isStopping = false,
 }: {
   session: Session;
   draft: string;
@@ -185,6 +186,7 @@ function renderSessionPaneView({
   projects?: Project[];
   remotes?: RemoteConfig[];
   expectComposer?: boolean;
+  isStopping?: boolean;
 }) {
   syncComposerSessionsStore({
     sessions: [session],
@@ -204,7 +206,7 @@ function renderSessionPaneView({
     isActive: true,
     isLoading: false,
     isSending: false,
-    isStopping: false,
+    isStopping,
     isKilling: false,
     isUpdating: false,
     isRefreshingModelOptions: false,
@@ -284,9 +286,10 @@ function renderSessionPaneView({
   return {
     onComposerError,
     onDraftCommit,
+    onStopSession: props.onStopSession,
     textarea: expectComposer
       ? (screen.getByLabelText(`Message ${session.name}`) as HTMLTextAreaElement)
-      : (null as unknown as HTMLTextAreaElement),
+      : null,
   };
 }
 
@@ -330,7 +333,7 @@ describe("SessionPaneView composer delegation click-through", () => {
       draft,
     });
 
-    expect(textarea.value).toBe(draft);
+    expect(textarea!.value).toBe(draft);
     await clickAndSettle(screen.getByRole("button", { name: "Delegate" }));
 
     await waitFor(() => {
@@ -347,7 +350,7 @@ describe("SessionPaneView composer delegation click-through", () => {
       );
     });
     await waitFor(() => {
-      expect(textarea.value).toBe("");
+      expect(textarea!.value).toBe("");
     });
     expect(onDraftCommit).toHaveBeenCalledWith("session-parent", "");
     expect(onComposerError).toHaveBeenCalledWith(null);
@@ -383,7 +386,7 @@ describe("SessionPaneView composer delegation click-through", () => {
       agentCommands: [reviewLocalCommand],
     });
 
-    expect(textarea.value).toBe("/rev");
+    expect(textarea!.value).toBe("/rev");
     expect(
       screen.getByRole("option", { name: /\/review-local/ }),
     ).toBeInTheDocument();
@@ -447,7 +450,7 @@ describe("SessionPaneView composer delegation click-through", () => {
         "Delegation spawn failed.",
       );
     });
-    expect(textarea.value).toBe(draft);
+    expect(textarea!.value).toBe(draft);
     expect(onDraftCommit).not.toHaveBeenCalled();
   });
 
@@ -470,7 +473,7 @@ describe("SessionPaneView composer delegation click-through", () => {
     expect(onComposerError).toHaveBeenCalledWith(
       "Delegations are unavailable until the session project is loaded.",
     );
-    expect(textarea.value).toBe(draft);
+    expect(textarea!.value).toBe(draft);
     expect(onDraftCommit).not.toHaveBeenCalled();
   });
 
@@ -490,7 +493,7 @@ describe("SessionPaneView composer delegation click-through", () => {
       ],
     });
 
-    renderSessionPaneView({
+    const { onDraftCommit } = renderSessionPaneView({
       session,
       draft: "This should not be editable here.",
       expectComposer: false,
@@ -500,5 +503,44 @@ describe("SessionPaneView composer delegation click-through", () => {
     expect(screen.queryByLabelText(`Message ${session.name}`)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delegate" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+    expect(onDraftCommit).not.toHaveBeenCalled();
+  });
+
+  it("keeps Stop and a running indicator for active delegated child sessions", () => {
+    const session = makeSession({
+      id: "child-session-1",
+      name: "Delegated reviewer",
+      agent: "Codex",
+      parentDelegationId: "delegation-1",
+      status: "active",
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          timestamp: "10:00:00",
+          author: "assistant",
+          text: "Review in progress",
+        },
+      ],
+    });
+
+    const { onStopSession } = renderSessionPaneView({
+      session,
+      draft: "This should not be editable here.",
+      expectComposer: false,
+    });
+
+    expect(screen.getByRole("button", { name: "Find" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Codex is running");
+    expect(screen.getByRole("status").querySelector(".activity-spinner")).not.toBeNull();
+    expect(screen.queryByLabelText(`Message ${session.name}`)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delegate" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+
+    act(() => {
+      screen.getByRole("button", { name: "Stop" }).click();
+    });
+
+    expect(onStopSession).toHaveBeenCalledWith("child-session-1");
   });
 });

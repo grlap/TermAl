@@ -305,11 +305,6 @@ export function RenderedDiffView({
               : `Region ${currentRegionIndex + 1} of ${regionCount}`}
           </span>
         </div>
-        <div className="source-editor-statusbar-group source-editor-statusbar-group-meta">
-          <span className="source-editor-statusbar-item">
-            {isCompleteDocument ? "Full document" : "Patch preview"}
-          </span>
-        </div>
       </footer>
     </div>
   );

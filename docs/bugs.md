@@ -7,19 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Stop button hidden for active delegated child sessions
-
-**Severity:** Medium - `ui/src/SessionPaneView.tsx:3626-3667`. The footer-render gate disables `AgentSessionPanelFooter` whenever `activeSession.parentDelegationId` is set. The Stop button (`ui/src/panels/AgentSessionPanel.tsx:3320-3328`) lives inside that footer's `composer-actions` and is shown when the session is busy or stopping. As a result, when a delegated child is `status: "active"` or `status: "approval"`, there is no in-pane affordance to abort it.
-
-**Current behavior:**
-- Delegated child sessions render no footer, so Stop, the new-response indicator, draft attachments, Delegate, and Send are all hidden.
-- An actively streaming child must be stopped via the parent delegation lifecycle or another UI path, not from its own pane.
-
-**Proposal:**
-- Decide whether Stop should remain available for active children. If yes, render a slim "delegated child" footer that keeps Stop and the new-response indicator but omits composer/Delegate/Send.
-- Either way, add a test pinning the chosen behavior for `status: "active"` child sessions.
-- Document the contract inline at the `isDelegatedChildSession` declaration so future maintainers know what is intentionally still reachable.
-
 ## First-settled active-baseline same-message growth lacks a safe turn boundary
 
 **Severity:** Medium - `src/telegram.rs:2583-2637`. When a Telegram prompt is armed behind an active/approval-paused turn, the relay baselines the current assistant message while `baseline_while_active=true`. If the tracked message id has already grown by the first settled poll, the relay cannot distinguish "old turn finished after the last active poll" from "the Telegram reply was appended to the same message id."
@@ -45,17 +32,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 
 **Proposal:**
 - Extract the active-baseline transition into a helper `transition_active_baseline_to_settled` that returns either the new cursor + position or an `OutcomeShortCircuit`.
-
-## Test helper launders null into `HTMLTextAreaElement` via double-cast
-
-**Severity:** Low - `ui/src/SessionPaneView.delegation-composer.test.tsx:287-289`. The `expectComposer` branch returns `null as unknown as HTMLTextAreaElement`, bypassing TypeScript. Any future caller that opts out of the composer and then dereferences `result.textarea` will hit a runtime null deref with no compile-time warning.
-
-**Current behavior:**
-- Helper return type advertises `HTMLTextAreaElement` even when the composer is intentionally not rendered.
-- Double-cast (`as unknown as`) hides the absence from the type system.
-
-**Proposal:**
-- Type the field as `textarea: HTMLTextAreaElement | null` or return a discriminated union so callers must handle the no-composer case explicitly.
 
 ## `TelegramRelayRuntime` is a file-level global rather than `AppState`-owned state
 
@@ -336,17 +312,44 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 
 **Severity:** Medium - a fallback snapshot can refresh visible UI while the live EventSource transport is still unhealthy.
 
-`ui/src/app-live-state.ts:2068` disables `rearmUntilLiveEventOnSuccess` when a same-instance `/api/state` response makes forward revision progress, unless the recovery path is the manual-retry variant. A successful `/api/state` fetch proves that polling can reach the backend and can repair visible state, but it does not prove the SSE stream has reopened or can deliver later assistant deltas. If the transport remains broken, a later live message can stay hidden until another reconnect/error/user action restarts recovery.
+`ui/src/app-live-state.ts:2059-2068` disables `rearmUntilLiveEventOnSuccess` when a same-instance `/api/state` response makes forward revision progress, unless the recovery path is the manual-retry variant. The timer-driven recovery path at `ui/src/app-live-state.ts:2485-2492` can then mark the backend `connected` after adopting that newer snapshot. A successful `/api/state` fetch proves that polling can reach the backend and can repair visible state, but it does not prove the SSE stream has reopened or can deliver later assistant deltas. If the transport remains broken, a later live message can stay hidden until another reconnect/error/user action restarts recovery.
 
 **Current behavior:**
 - Timer-driven reconnect fallback asks to keep polling until live-event proof.
 - Same-instance `/api/state` forward progress disables that live-proof rearm path for non-manual recovery.
+- New reconnect tests currently assert snapshot-only recovery as sufficient, which pins the problematic behavior instead of the intended live-proof contract.
 - UI state can look refreshed while the EventSource transport is still unconfirmed.
 
 **Proposal:**
 - Split "snapshot refreshed UI" from "transport recovered" in the reconnect state machine.
 - Keep reconnect polling armed until `confirmReconnectRecoveryFromLiveEvent()` runs from a data-bearing SSE event, unless a cause-specific recovery path intentionally documents a different contract.
 - Add a regression that adopts same-instance `/api/state` progress through the timer-driven reconnect path, keeps SSE unopened/unconfirmed, advances timers, and asserts another fallback poll is scheduled.
+
+## SSE `state` events do not honor no-open live-proof recovery
+
+**Severity:** Low - `ui/src/app-live-state.ts:2862`. The reconnect recovery added for data frames without an explicit `EventSource.onopen` only covers delta events. Valid SSE `state` events are also proof that the live stream is delivering data, but the state-event path calls `confirmReconnectRecoveryFromLiveEvent()` without allowing the `reconnectErrorPendingLiveProof` no-open flag.
+
+**Current behavior:**
+- Delta events can confirm reconnect recovery even if the browser never fired `onopen`.
+- Valid `state` events on the same stream do not get the same no-open recovery path.
+- The UI can stay in reconnect recovery longer than needed even though a fresh state event arrived over SSE.
+
+**Proposal:**
+- Allow valid `state` events to confirm no-open reconnect recovery while preserving the bad-event recovery guards.
+- Add a state-event regression beside the delta no-open recovery test.
+
+## Delegated-child footer can render under non-session tabs
+
+**Severity:** Low - `ui/src/SessionPaneView.tsx:1091`. The delegated-child footer gate is evaluated before the source/diff/filesystem/terminal tab suppression. A busy delegated child can therefore render its Stop/status footer below an editor or diff tab even though the active view is not the session transcript.
+
+**Current behavior:**
+- `showDelegatedChildFooter` can keep the footer visible for delegated children.
+- Non-session tab suppression runs after that path and does not fully override it.
+- A footer for the hidden session can appear below unrelated pane content.
+
+**Proposal:**
+- Gate the delegated-child footer on `isSessionTabActive && pane.viewMode === "session"`, or preserve the existing non-session tab suppression before applying the delegated-child exception.
+- Add coverage with a source or diff tab active on a busy delegated child session.
 
 ## SSE recreation control plane is split between `sseEpoch` state and `pendingSseRecreateOnInstanceChangeRef`
 
@@ -885,12 +888,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] Pin Stop-button visibility for active delegated child sessions:
-  add a test in `ui/src/SessionPaneView.delegation-composer.test.tsx` that renders a child session with `parentDelegationId` set and `status: "active"`, then asserts whichever behavior we decide (Stop hidden vs. Stop preserved via a slim footer).
-- [ ] Pin "draft is not silently committed" for delegated children:
-  extend the new `hides composer controls for delegated child sessions` test to assert `onDraftCommit` is not invoked despite a draft being pre-seeded into the composer store.
-- [ ] Document the delegated-child composer contract in source:
-  add a 1-2 line comment above the `isDelegatedChildSession` declaration in `ui/src/SessionPaneView.tsx` explaining why the composer/footer are hidden and which surfaces remain reachable.
 - [ ] P2: Add repeated-send waiting-indicator coverage:
   send a second prompt after a completed assistant response while the POST is still in flight, and assert the user still sees send-in-progress feedback until the new prompt appears in session state.
 - [ ] P2: Add delegation-wait visibility coverage after prior assistant output:
@@ -936,6 +933,10 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   cover manual retry hitting a transient failure, then the next scheduled attempt adopting a newer same-instance snapshot while polling still continues until SSE confirms.
 - [ ] P2: Add timer-driven reconnect same-instance-progress live-proof regression:
   trigger the non-manual reconnect fallback path, adopt a same-instance `/api/state` snapshot with forward progress while SSE remains unopened/unconfirmed, advance timers, and assert fallback polling continues until a data-bearing live event confirms recovery.
+- [ ] P2: Add no-open SSE `state` live-proof regression:
+  dispatch a valid SSE `state` event after a reconnect error without an explicit `onopen`, and assert it confirms reconnect recovery through the same guarded path as data-bearing delta events.
+- [ ] P2: Pin delegated-child footer suppression on non-session tabs:
+  render a busy delegated child session with a source or diff tab active, and assert the Stop/status footer does not appear below non-session pane content.
 - [ ] P2 watchdog wake-gap stop-after-progress regression:
   trigger watchdog wake-gap recovery, adopt same-instance `/api/state` progress, and assert no additional reconnect polling occurs before a later live event.
 - [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:

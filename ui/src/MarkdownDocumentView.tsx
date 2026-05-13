@@ -1,13 +1,9 @@
-// Read-only Markdown document chrome used by renderer-preview surfaces
-// that need full-document/patch labels around MarkdownContent.
+// Read-only Markdown document chrome used by renderer-preview surfaces.
 //
 // What this file owns:
-//   - `MarkdownDocumentView` — a small wrapper that renders title /
-//     completeness chips, the patch-context note, the empty-document
-//     state, and the scroll container around `MarkdownContent`.
-//   - `MarkdownDocumentCompleteness` — the local full-vs-patch label
-//     contract used by callers that display rendered Markdown outside
-//     editable SourcePanel sections.
+//   - `MarkdownDocumentView` — a small wrapper that renders an
+//     optional document note, the empty-document state, and the scroll
+//     container around `MarkdownContent`.
 //
 // What this file does NOT own:
 //   - Markdown parsing/rendering, Mermaid iframe sizing, link targets,
@@ -18,43 +14,28 @@
 import { MarkdownContent, type MarkdownFileLinkTarget } from "./message-cards";
 import type { MonacoAppearance } from "./monaco";
 
-export type MarkdownDocumentCompleteness = "full" | "patch";
-
 export function MarkdownDocumentView({
   appearance = "dark",
-  completeness = "full",
   documentPath = null,
   fillMermaidAvailableSpace = false,
   markdown,
   note = null,
   onOpenSourceLink,
-  title = "Rendered Markdown",
   workspaceRoot = null,
 }: {
   appearance?: MonacoAppearance;
-  completeness?: MarkdownDocumentCompleteness;
   documentPath?: string | null;
   fillMermaidAvailableSpace?: boolean;
   markdown: string;
   note?: string | null;
   onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
-  title?: string;
   workspaceRoot?: string | null;
 }) {
   const isEmpty = markdown.trim().length === 0;
-  const completenessLabel = completeness === "full" ? "Full document" : "Patch preview";
-  const visibleNote =
-    note ??
-    (completeness === "patch"
-      ? "Rendered from patch context only. Unchanged document sections outside the diff are omitted."
-      : null);
+  const visibleNote = note;
 
   return (
     <div className="markdown-document-view">
-      <div className="markdown-document-header">
-        <span className="chip">{title}</span>
-        <span className="chip">{completenessLabel}</span>
-      </div>
       {visibleNote ? <p className="support-copy markdown-document-note">{visibleNote}</p> : null}
       <div className="markdown-document-scroll">
         {isEmpty ? (

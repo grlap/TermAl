@@ -976,6 +976,40 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
   });
 
+  it("suppresses a stale active live-turn tail after turn-finalizing file output", () => {
+    const activeSession = makeSession("session-a", {
+      status: "active",
+      messages: [
+        {
+          id: "message-user",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Current prompt",
+        },
+        {
+          id: "message-files",
+          type: "fileChanges",
+          timestamp: "10:01",
+          author: "assistant",
+          title: "Agent changed 2 files",
+          files: [
+            { path: "ui/src/SessionPaneView.tsx", kind: "modified" },
+            { path: "ui/src/panels/AgentSessionPanel.tsx", kind: "modified" },
+          ],
+        },
+      ],
+    });
+
+    renderSessionPanelWithDefaults({
+      activeSession,
+      showWaitingIndicator: true,
+      waitingIndicatorPrompt: null,
+    });
+
+    expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
+  });
+
   it("renders conversation marker chips and navigates between markers", () => {
     const scrollIntoView = vi.fn();
     const originalScrollIntoView = Element.prototype.scrollIntoView;

@@ -16,8 +16,6 @@ describe("RendererPreviewPane", () => {
       />,
     );
 
-    expect(screen.getByText("Rendered Markdown")).toBeInTheDocument();
-    expect(screen.getByText("Full document")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Rendered document" }),
     ).toBeInTheDocument();

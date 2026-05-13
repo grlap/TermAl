@@ -1884,6 +1884,11 @@ export function useAppLiveState(
     > | null = null;
     let sawReconnectOpenSinceLastError = false;
     let reconnectRecoveryConfirmedSinceLastError = false;
+    // Some browsers/proxies can resume delivering EventSource frames after an
+    // error without an observable `onopen` in our handler order. A valid data
+    // frame still proves the transport is live, so reconnect UI must be allowed
+    // to recover from that frame.
+    let reconnectErrorPendingLiveProof = false;
     // True only between a bad reopened SSE payload and the next confirmed live
     // event or outage reset. This separates "bad SSE needs proof" from
     // ordinary reconnect wake-gap polling after `/api/state` progress.
@@ -2025,7 +2030,8 @@ export function useAppLiveState(
     }: { allowWithoutConfirmedOpen?: boolean } = {}): boolean {
       const canConfirmWithoutOpen =
         allowWithoutConfirmedOpen &&
-        allowReconnectRecoveryWithoutExplicitOpen;
+        (allowReconnectRecoveryWithoutExplicitOpen ||
+          reconnectErrorPendingLiveProof);
       if (!sawReconnectOpenSinceLastError && !canConfirmWithoutOpen) {
         return false;
       }
@@ -2035,6 +2041,7 @@ export function useAppLiveState(
       });
       pendingBadLiveEventRecovery = false;
       allowReconnectRecoveryWithoutExplicitOpen = false;
+      reconnectErrorPendingLiveProof = false;
       clearDelegationRepairReconnectProof();
       setBackendConnectionState("connected");
       return true;
@@ -2042,10 +2049,22 @@ export function useAppLiveState(
 
     function confirmReconnectRecoveryFromDeltaEvent() {
       const allowWithoutConfirmedOpen =
-        allowReconnectRecoveryWithoutExplicitOpen;
+        allowReconnectRecoveryWithoutExplicitOpen ||
+        reconnectErrorPendingLiveProof;
       return confirmReconnectRecoveryFromLiveEvent({
         allowWithoutConfirmedOpen,
       });
+    }
+
+    function confirmReconnectRecoveryFromAuthoritativeSnapshot() {
+      reconnectRecoveryConfirmedSinceLastError = true;
+      pendingBadLiveEventRecovery = false;
+      allowReconnectRecoveryWithoutExplicitOpen = false;
+      reconnectErrorPendingLiveProof = false;
+      clearReconnectStateResyncTimeout();
+      resetReconnectStateResyncBackoff();
+      clearDelegationRepairReconnectProof();
+      setBackendConnectionState("connected");
     }
 
     function beginBadLiveEventRecovery() {
@@ -2463,6 +2482,14 @@ export function useAppLiveState(
                     rearmAfterSameInstanceProgressUntilLiveEvent:
                       carryManualRetryContractForward,
                   });
+                } else if (adopted) {
+                  // Automatic reconnect fallback can recover fully through a
+                  // newer same-instance /api/state snapshot. In that case no
+                  // further SSE proof is required, so clear the reconnect badge
+                  // immediately; otherwise the UI can keep showing stale
+                  // "working" state after the adopted snapshot already marked
+                  // the session idle.
+                  confirmReconnectRecoveryFromAuthoritativeSnapshot();
                 }
               }
             } catch (error) {
@@ -2570,6 +2597,7 @@ export function useAppLiveState(
       reconnectRecoveryConfirmedSinceLastError = false;
       pendingBadLiveEventRecovery = false;
       allowReconnectRecoveryWithoutExplicitOpen = false;
+      reconnectErrorPendingLiveProof = false;
       clearInitialStateResyncRetryTimeout();
       clearReconnectStateResyncTimeout();
       resetReconnectStateResyncBackoff();
@@ -3292,6 +3320,7 @@ export function useAppLiveState(
       reconnectRecoveryConfirmedSinceLastError = false;
       pendingBadLiveEventRecovery = false;
       allowReconnectRecoveryWithoutExplicitOpen = false;
+      reconnectErrorPendingLiveProof = true;
       clearDelegationRepairReconnectProof();
       clearForceAdoptNextStateEvent();
       const isOnline = readNavigatorOnline();

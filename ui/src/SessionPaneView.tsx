@@ -239,6 +239,29 @@ export function hasAgentOutputAfterLatestUserPrompt(messages: readonly Message[]
   return sawAgentOutputAfterLatestUserPrompt;
 }
 
+export function hasTurnFinalizingOutputAfterLatestUserPrompt(messages: readonly Message[]) {
+  let sawLatestUserPrompt = false;
+  let sawTurnFinalizingOutputAfterLatestUserPrompt = false;
+
+  for (const message of messages) {
+    if (message.author === "you") {
+      sawLatestUserPrompt = true;
+      sawTurnFinalizingOutputAfterLatestUserPrompt = false;
+      continue;
+    }
+
+    if (
+      sawLatestUserPrompt &&
+      message.author === "assistant" &&
+      message.type === "fileChanges"
+    ) {
+      sawTurnFinalizingOutputAfterLatestUserPrompt = true;
+    }
+  }
+
+  return sawTurnFinalizingOutputAfterLatestUserPrompt;
+}
+
 export function SessionPaneView({
   pane,
   codexState,
@@ -877,7 +900,10 @@ export function SessionPaneView({
     isSessionTabActive &&
     pane.viewMode === "session" &&
     Boolean(activeSession) &&
-    (activeSession?.status === "active" ||
+    ((activeSession?.status === "active" &&
+      !hasTurnFinalizingOutputAfterLatestUserPrompt(
+        activeSession?.messages ?? [],
+      )) ||
       (!isSessionBusy &&
         isSending &&
         !hasAgentOutputAfterLatestUserPrompt(activeSession?.messages ?? [])));
@@ -885,6 +911,9 @@ export function SessionPaneView({
     showLiveTurnWaitingIndicator || showDelegationWaitIndicator;
   const activeSessionMessages = activeSession?.messages;
   const activeSessionStatus = activeSession?.status;
+  // Delegated children are transcript/control surfaces owned by the parent
+  // delegation flow: keep transcript tools reachable, but do not allow prompts
+  // or new delegations to be injected from the child pane.
   const isDelegatedChildSession = Boolean(activeSession?.parentDelegationId);
   const canFindInSession =
     isSessionTabActive && pane.viewMode === "session" && Boolean(activeSession);
@@ -1059,6 +1088,14 @@ export function SessionPaneView({
   const showNewResponseIndicator = newResponseIndicatorKind !== null;
   const newResponseIndicatorLabel =
     newResponseIndicatorKind === "activity" ? "New activity" : "New response";
+  const showDelegatedChildFooter =
+    isDelegatedChildSession &&
+    Boolean(
+      activeSession &&
+        (isSessionBusy ||
+          isStopping ||
+          showNewResponseIndicator),
+    );
   const paneScrollPositions =
     paneScrollPositionsRef.current[pane.id] ??
     (paneScrollPositionsRef.current[pane.id] = {});
@@ -3623,16 +3660,46 @@ export function SessionPaneView({
           />
         )}
       </section>
-      {activeControlSurfaceTab ||
-      activeCanvasTab ||
-      activeOrchestratorCanvasTab ||
-      activeSourceTab ||
-      activeFilesystemTab ||
-      activeGitStatusTab ||
-      activeTerminalTab ||
-      activeInstructionDebuggerTab ||
-      activeDiffPreviewTab ||
-      isDelegatedChildSession ? null : (
+      {showDelegatedChildFooter ? (
+        <footer className="composer delegated-child-footer">
+          {showNewResponseIndicator ? (
+            <button className="new-response-indicator" type="button" onClick={handleScrollToLatestFromFooter}>
+              {newResponseIndicatorLabel}
+            </button>
+          ) : null}
+          <div className="delegated-child-footer-status" role="status" aria-live="polite">
+            {isSessionBusy ? (
+              <span className="activity-spinner delegated-child-footer-spinner" aria-hidden="true" />
+            ) : null}
+            <span className="delegated-child-footer-copy">
+              {isStopping
+                ? "Stopping delegated session..."
+                : isSessionBusy
+                  ? `${activeSession?.agent ?? "Agent"} is running`
+                  : "Delegated session"}
+            </span>
+          </div>
+          {activeSession && (isSessionBusy || isStopping) ? (
+            <button
+              className="ghost-button delegated-child-stop-button"
+              type="button"
+              onClick={() => handleStopSessionFromFooter(activeSession.id)}
+              disabled={isStopping}
+            >
+              {isStopping ? "Stopping..." : "Stop"}
+            </button>
+          ) : null}
+        </footer>
+      ) : activeControlSurfaceTab ||
+        activeCanvasTab ||
+        activeOrchestratorCanvasTab ||
+        activeSourceTab ||
+        activeFilesystemTab ||
+        activeGitStatusTab ||
+        activeTerminalTab ||
+        activeInstructionDebuggerTab ||
+        activeDiffPreviewTab ||
+        isDelegatedChildSession ? null : (
         <AgentSessionPanelFooter
           paneId={pane.id}
           viewMode={pane.viewMode}

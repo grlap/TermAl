@@ -638,7 +638,6 @@ describe("DiffPanel", () => {
       document.querySelector(".markdown-diff-rendered-section-removed [data-markdown-line-start='4']"),
     ).not.toBeNull();
     expect(screen.queryByRole("heading", { name: "Worktree document" })).not.toBeInTheDocument();
-    expect(screen.getAllByText("Index").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "After" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Before" })).not.toBeInTheDocument();
   });
@@ -2466,7 +2465,7 @@ describe("DiffPanel", () => {
     );
 
     expect(screen.getByLabelText("Markdown diff status")).toBeInTheDocument();
-    expect(screen.getAllByText("Patch preview").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Patch preview")).not.toBeInTheDocument();
   });
 
   it("renders complete large Markdown diffs while deferring editable full-document sections", async () => {
@@ -2516,9 +2515,7 @@ describe("DiffPanel", () => {
     });
 
     expect(screen.getByLabelText("Markdown diff status")).toBeInTheDocument();
-    expect(screen.getAllByText("Full document").length).toBeGreaterThan(0);
     expect(screen.queryByText("Patch preview")).not.toBeInTheDocument();
-    expect(screen.getByText("Editing deferred")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit full document" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Render full document" })).toBeNull();
     const renderedMarkdownText =
@@ -2533,8 +2530,7 @@ describe("DiffPanel", () => {
 
     await clickAndSettle(screen.getByRole("button", { name: "Edit full document" }));
 
-    expect(screen.getAllByText("Full document").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Editing deferred")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit full document" })).toBeNull();
     await waitFor(() => {
       expect(document.querySelector("[data-markdown-editable='true']")).not.toBeNull();
     });
@@ -2587,8 +2583,6 @@ describe("DiffPanel", () => {
     });
 
     expect(screen.getByLabelText("Markdown diff status")).toBeInTheDocument();
-    expect(screen.getAllByText("Full document").length).toBeGreaterThan(0);
-    expect(screen.getByText("Editing deferred")).toBeInTheDocument();
     expect(document.querySelector("[data-markdown-editable='true']")).toBeNull();
     expect(
       document.querySelector(".markdown-diff-change-scroll")?.textContent ?? "",
@@ -2598,7 +2592,7 @@ describe("DiffPanel", () => {
       screen.getByRole("button", { name: "Edit full document" }),
     );
 
-    expect(screen.queryByText("Editing deferred")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit full document" })).toBeNull();
     await waitFor(() => {
       expect(document.querySelector("[data-markdown-editable='true']")).not.toBeNull();
     });
@@ -2633,7 +2627,7 @@ describe("DiffPanel", () => {
 
     await clickAndSettle(screen.getByRole("button", { name: "Rendered Markdown" }));
 
-    expect(screen.getAllByText("Patch preview").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Patch preview")).not.toBeInTheDocument();
     // The patch fallback note comes from `diff-preview.ts` and is plumbed into
     // `markdownPreview.after.note` before the DiffPanel fallback string ever
     // applies. Assert the actual rendered note text so a regression in either

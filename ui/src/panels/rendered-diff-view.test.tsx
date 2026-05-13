@@ -265,7 +265,7 @@ describe("RenderedDiffView", () => {
       />,
     );
     expect(screen.getByText(/Patch-only rendering/)).toBeInTheDocument();
-    expect(screen.getByText("Patch preview")).toBeInTheDocument();
+    expect(screen.queryByText("Patch preview")).not.toBeInTheDocument();
   });
 });
 
