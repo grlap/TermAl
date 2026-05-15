@@ -275,6 +275,16 @@ function isDelegationDeltaEvent(delta: DeltaEvent): delta is DelegationDeltaEven
   );
 }
 
+function staleSendRecoveryPollSessionIdsForDelta(delta: DeltaEvent) {
+  if (isSessionDeltaEvent(delta)) {
+    return [delta.sessionId];
+  }
+  if (delta.type === "orchestratorsUpdated" && delta.sessions?.length) {
+    return delta.sessions.map((session) => session.id);
+  }
+  return [];
+}
+
 export type AdoptSessionsOptions = {
   openSessionId?: string;
   paneId?: string | null;
@@ -2963,16 +2973,9 @@ export function useAppLiveState(
             // bad event) without doing any spurious resync work.
           }
 
-          if ("sessionId" in delta && typeof delta.sessionId === "string") {
-            cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
-          } else if (
-            delta.type === "orchestratorsUpdated" &&
-            delta.sessions?.length
-          ) {
-            cancelStaleSendResponseRecoveryPollForSessions(
-              delta.sessions.map((session) => session.id),
-            );
-          }
+          cancelStaleSendResponseRecoveryPollForSessions(
+            staleSendRecoveryPollSessionIdsForDelta(delta),
+          );
           // An ignored delta normally proves the client already has data at
           // this revision or newer. After a bad reopened live event, only a
           // current-revision ignored delta proves the stream is healthy again;
@@ -2992,16 +2995,9 @@ export function useAppLiveState(
           return;
         }
         if (revisionAction === "resync") {
-          if (isSessionDeltaEvent(delta)) {
-            cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
-          } else if (
-            delta.type === "orchestratorsUpdated" &&
-            delta.sessions?.length
-          ) {
-            cancelStaleSendResponseRecoveryPollForSessions(
-              delta.sessions.map((session) => session.id),
-            );
-          }
+          cancelStaleSendResponseRecoveryPollForSessions(
+            staleSendRecoveryPollSessionIdsForDelta(delta),
+          );
           if (
             isSessionDeltaEvent(delta) &&
             sessionDeltaAdvancesCurrentMutationStamp(

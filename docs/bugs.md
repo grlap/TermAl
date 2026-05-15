@@ -538,18 +538,6 @@ through a broad module instead of a small boundary with a clear contract.
 - Use `useLayoutEffect` when `allowDeferredActivation === true` (or for the near-viewport branch generally). Keep the `requestAnimationFrame` in the IntersectionObserver entry path for rapid-entry de-dupe.
 - Alternatively, add a targeted comment explaining the deliberate trade-off if the new behavior is intended.
 
-## `"sessionId" in delta` poll-cancel branches are not extensible
-
-**Severity:** Low - `ui/src/app-live-state.ts:1613, 1633` handle delta-event poll cancellations by structurally checking `"sessionId" in delta`. The two `revisionAction === "ignore"` / `"resync"` branches each hard-code the knowledge that only `SessionDeltaEvent` variants carry `sessionId`. Adding a third non-session delta type requires remembering to update both branches, and a new session-scoped delta that uses a different key (e.g. `sessionIds: string[]`) would silently miss both gates.
-
-**Current behavior:**
-- Two branches each run `"sessionId" in delta && typeof delta.sessionId === "string"`.
-- The `SessionDeltaEvent` exclude type in `ui/src/live-updates.ts:76` exists but is not used here.
-
-**Proposal:**
-- Extract a `cancelPollsForDelta(delta: DeltaEvent)` helper that switches on `delta.type` (or uses the same `SessionDeltaEvent` narrowing). Call it from both branches.
-- That also centralizes the "which deltas cancel which polls" contract in one place.
-
 ## `prevIsActive`-in-render replaced with post-commit effect delays the first-activation measurement pass
 
 **Severity:** Low - `ui/src/panels/VirtualizedConversationMessageList.tsx:426-432` converted the `prevIsActive !== isActive` render-time derived-state update into a post-commit `useEffect`. Under the previous pattern, a session switching from `isActive: false — true` flipped `setIsMeasuringPostActivation(true)` during render, so the first frame rendered the measuring shell with the correct `preferImmediateHeavyRender` value. The new effect defers that flip to after commit — the first paint of the newly-active session briefly shows `isMeasuringPostActivation: false`, flipping to the measurement shell only on the next render.
