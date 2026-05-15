@@ -125,6 +125,7 @@ import type { MonacoAppearance } from "./monaco";
 import {
   MessageNavigationButtons,
 } from "./panels/conversation-navigation";
+import { useIsMessageMetaMarkerMenuTriggerEnabled } from "./message-meta-marker-menu-context";
 
 const HEAVY_CODE_CHARACTER_THRESHOLD = 1400;
 const HEAVY_CODE_LINE_THRESHOLD = 28;
@@ -168,26 +169,6 @@ const HEAVY_MARKDOWN_LINE_THRESHOLD = 24;
 const FILE_CHANGES_COLLAPSE_THRESHOLD = 6;
 let mermaidDiagramIdCounter = 0;
 
-const MessageMetaMarkerMenuContext = createContext(false);
-
-function useIsMessageMetaMarkerMenuTriggerEnabled() {
-  return useContext(MessageMetaMarkerMenuContext);
-}
-
-export function MessageMetaMarkerMenuProvider({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  // Binary opt-in: only the conversation panel wraps message cards that should
-  // expose the marker-menu affordance on their metadata author label.
-  return (
-    <MessageMetaMarkerMenuContext.Provider value={true}>
-      {children}
-    </MessageMetaMarkerMenuContext.Provider>
-  );
-}
-
 // Stable no-op defaults for the optional callback props on
 // `MessageCard`. NOTE: React's `memo` comparator receives the
 // RAW props object as passed by the parent, NOT the destructured
@@ -216,6 +197,7 @@ const NOOP_CODEX_APP_REQUEST_SUBMIT: (
 // the type from this module before the helpers were split out into
 // `./markdown-links`.
 export type { MarkdownFileLinkTarget } from "./markdown-links";
+export { MessageMetaMarkerMenuProvider } from "./message-meta-marker-menu-context";
 
 type MarkdownSourcePosition = {
   start?: {
