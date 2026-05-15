@@ -809,7 +809,7 @@ export function VirtualizedConversationMessageList({
     ],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const previousIsActive = previousIsActiveRef.current;
     previousIsActiveRef.current = isActive;
     if (!previousIsActive && isActive && messages.length > 0) {

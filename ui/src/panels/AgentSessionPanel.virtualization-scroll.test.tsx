@@ -2142,13 +2142,9 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
         />,
       );
 
-      // The list must carry the measuring class IMMEDIATELY after the
-      // rerender — no intermediate frame with isActive=true but
-      // measuring=false. testing-library's `rerender` is synchronous;
-      // if the transition were detected in a useLayoutEffect instead
-      // of during render, React would still commit one DOM state
-      // without the class before the effect set it. The querySelector
-      // here reads the DOM after the transition commit completes.
+      // The list must carry the measuring class after the synchronous
+      // transition render settles. This guards the steady-state class, while
+      // docs/bugs.md tracks a deeper timing harness for pre-paint behavior.
       const postList = container.querySelector(".virtualized-message-list");
       expect(postList).not.toBeNull();
       expect(postList).toHaveClass("is-measuring-post-activation");
