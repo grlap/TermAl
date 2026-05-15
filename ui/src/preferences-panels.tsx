@@ -16,6 +16,7 @@ import {
   CODEX_REASONING_EFFORT_OPTIONS,
   DEFAULT_MODEL_PREFERENCE,
   isDefaultModelPreference,
+  MAX_DEFAULT_MODEL_PREFERENCE_CHARS,
   remoteBadgeLabel,
   sessionModelComboboxOptions,
   type ComboboxOption,
@@ -85,7 +86,13 @@ export const CLAUDE_APPROVAL_OPTIONS = [
   { label: "ask", value: "ask" },
   { label: "auto-approve", value: "auto-approve" },
   { label: "plan", value: "plan" },
-] as const;
+] as const satisfies readonly {
+  label: string;
+  value: Exclude<ClaudeApprovalMode, "read-only-auto-approve">;
+}[];
+export const INTERNAL_CLAUDE_APPROVAL_MODES = new Set<ClaudeApprovalMode>([
+  "read-only-auto-approve",
+]);
 export const CURSOR_MODE_OPTIONS = [
   {
     label: "agent",
@@ -188,11 +195,43 @@ function AgentDefaultModelControl({
   onChange: (nextValue: string) => void;
 }) {
   const normalizedValue = normalizeDefaultModelPreferenceDraft(value);
+  const [customModel, setCustomModel] = useState(displayDefaultModelPreference(normalizedValue));
   const hintId = `${id}-hint`;
+  const customId = `${id}-custom`;
   const selectOptions = useMemo(
     () => defaultModelComboboxOptions(agent, value, modelOptions),
     [agent, modelOptions, value],
   );
+  const trimmedCustomModel = customModel.trim();
+  const normalizedCustomModel = normalizeDefaultModelPreferenceDraft(trimmedCustomModel);
+  const canApplyCustomModel =
+    trimmedCustomModel.length > 0 && normalizedCustomModel !== normalizedValue;
+  const hasLiveModelList = (modelOptions?.length ?? 0) > 0;
+  const customModelKnown = selectOptions.some(
+    (option) => option.value === normalizedCustomModel,
+  );
+  const validationMessage =
+    trimmedCustomModel.length === 0
+      ? null
+      : normalizedCustomModel === normalizedValue
+        ? `${trimmedCustomModel} is already the configured default model.`
+        : !customModelKnown && hasLiveModelList
+          ? `${trimmedCustomModel} is not in the current live model list. TermAl will still try it for new ${agent} sessions.`
+          : null;
+  const validationTone =
+    validationMessage && !customModelKnown && hasLiveModelList ? "warning" : "info";
+
+  useEffect(() => {
+    setCustomModel(displayDefaultModelPreference(normalizedValue));
+  }, [normalizedValue]);
+
+  function applyCustomModel() {
+    if (!canApplyCustomModel) {
+      return;
+    }
+
+    onChange(normalizedCustomModel);
+  }
 
   return (
     <div className="session-control-group">
@@ -209,8 +248,53 @@ function AgentDefaultModelControl({
           onChange(normalizeDefaultModelPreferenceDraft(nextValue));
         }}
       />
+      <div className="session-model-custom">
+        <label className="session-control-label" htmlFor={customId}>
+          Manual model id
+        </label>
+        <div className="session-model-custom-row">
+          <input
+            id={customId}
+            className="themed-input session-model-custom-input"
+            type="text"
+            value={customModel}
+            placeholder={`${agent.toLowerCase()} model id`}
+            maxLength={MAX_DEFAULT_MODEL_PREFERENCE_CHARS}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            aria-label={`${agent} custom default model`}
+            onChange={(event) => setCustomModel(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") {
+                return;
+              }
+
+              event.preventDefault();
+              applyCustomModel();
+            }}
+          />
+          <button
+            type="button"
+            className="ghost-button session-model-custom-apply"
+            disabled={!canApplyCustomModel}
+            aria-label={`Apply ${agent} default model`}
+            onClick={applyCustomModel}
+          >
+            Apply
+          </button>
+        </div>
+        {validationMessage ? (
+          <p
+            className={`session-model-custom-validation ${validationTone === "warning" ? "warning" : "info"}`}
+            aria-live="polite"
+          >
+            {validationMessage}
+          </p>
+        ) : null}
+      </div>
       <p id={hintId} className="session-control-hint">
-        Select a known model or choose <code>Default</code> to let {agent} use its built-in default.
+        Select a known model, enter an exact model id, or choose <code>Default</code> to let {agent} use its built-in default.
       </p>
     </div>
   );

@@ -298,6 +298,56 @@ describe("AppDialogs create-dialog backdrop dismissal", () => {
 });
 
 describe("AppDialogs settings agent defaults", () => {
+  it("keeps the settings scroll observers stable across same-tab rerenders", () => {
+    const observerInstances: Array<{
+      disconnect: ReturnType<typeof vi.fn>;
+      observe: ReturnType<typeof vi.fn>;
+    }> = [];
+    class ResizeObserverMock {
+      readonly disconnect = vi.fn();
+      readonly observe = vi.fn();
+
+      constructor() {
+        observerInstances.push(this);
+      }
+    }
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+
+    const props = createBaseProps({
+      isSettingsOpen: true,
+      settingsTab: "appearance",
+    });
+    const { rerender, unmount } = render(<AppDialogs {...props} />);
+    const initialObserverCount = observerInstances.length;
+
+    expect(initialObserverCount).toBeGreaterThan(0);
+    rerender(
+      <AppDialogs
+        {...props}
+        densityPercent={props.densityPercent + 1}
+      />,
+    );
+
+    expect(observerInstances).toHaveLength(initialObserverCount);
+    expect(
+      observerInstances.some((observer) => observer.disconnect.mock.calls.length > 0),
+    ).toBe(false);
+
+    rerender(<AppDialogs {...props} settingsTab="themes" />);
+
+    expect(observerInstances.length).toBeGreaterThan(initialObserverCount);
+    expect(
+      observerInstances.some((observer) => observer.disconnect.mock.calls.length > 0),
+    ).toBe(true);
+
+    unmount();
+
+    expect(
+      observerInstances.filter((observer) => observer.disconnect.mock.calls.length > 0)
+        .length,
+    ).toBe(observerInstances.length);
+  });
+
   it("renders the Cursor settings tab", () => {
     renderSettingsDialog("cursor");
 

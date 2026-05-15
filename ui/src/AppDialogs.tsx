@@ -259,7 +259,7 @@ function SettingsTabPanelScrollFrame({
       dragStateRef.current = null;
       setIsDraggingScrollbar(false);
     };
-  }, [activeTabId, children]);
+  }, [activeTabId]);
 
   function scrollPanelByTrackPosition(clientY: number) {
     const panel = panelRef.current;

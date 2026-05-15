@@ -4,7 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   ClaudeApprovalsPreferencesPanel,
+  CLAUDE_APPROVAL_OPTIONS,
   CodexPromptPreferencesPanel,
+  INTERNAL_CLAUDE_APPROVAL_MODES,
 } from "./preferences-panels";
 
 function renderCodexPanel({
@@ -60,19 +62,31 @@ function renderClaudePanel({
 }
 
 describe("AgentDefaultModelControl", () => {
-  it("uses one combobox without reset or custom apply controls", () => {
+  it("keeps a custom model entry path beside the known-model combobox", () => {
     renderCodexPanel({ defaultModel: "gpt-5.5" });
 
     expect(
       screen.getByRole("combobox", { name: "Codex default model" }),
     ).toHaveTextContent("gpt-5.5");
-    expect(screen.queryByLabelText("Codex custom default model")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Codex custom default model")).toHaveValue("gpt-5.5");
     expect(
       screen.queryByRole("button", { name: "Reset Codex default model" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Apply Codex default model" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "Apply Codex default model" }),
+    ).toBeDisabled();
+  });
+
+  it("applies an arbitrary app-level default model id", () => {
+    const onSelectModel = vi.fn();
+    renderCodexPanel({ defaultModel: "default", onSelectModel });
+
+    fireEvent.change(screen.getByLabelText("Codex custom default model"), {
+      target: { value: "gpt-5.6-preview" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply Codex default model" }));
+
+    expect(onSelectModel).toHaveBeenCalledWith("gpt-5.6-preview");
   });
 
   it("selects the canonical default sentinel from the combobox", async () => {
@@ -155,5 +169,12 @@ describe("AgentDefaultModelControl", () => {
     fireEvent.click(await screen.findByRole("option", { name: /Claude Sonnet 4\.5/u }));
 
     expect(onSelectModel).toHaveBeenCalledWith("claude-sonnet-4-5");
+  });
+
+  it("keeps read-only auto-approve internal to delegation flows", () => {
+    expect(CLAUDE_APPROVAL_OPTIONS.map((option) => option.value)).not.toContain(
+      "read-only-auto-approve",
+    );
+    expect(INTERNAL_CLAUDE_APPROVAL_MODES.has("read-only-auto-approve")).toBe(true);
   });
 });

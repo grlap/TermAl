@@ -7,51 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Settings tab panel scroll frame rebinds observers on every render
-
-**Severity:** Medium - `ui/src/AppDialogs.tsx:262` creates observer/ref callback plumbing for `SettingsTabPanelScrollFrame`, but the reviewed implementation re-binds observers on every render.
-
-The scrollbar frame is a UI utility that will wrap settings panels. Rebinding observers repeatedly can create avoidable work and subtle cleanup bugs, especially in settings surfaces that already re-render while typing or changing tabs.
-
-**Current behavior:**
-- `SettingsTabPanelScrollFrame` is implemented inline in `AppDialogs.tsx`.
-- Observer setup is not covered by tests.
-- The component is not split into its own file despite being a reusable settings-shell primitive.
-
-**Proposal:**
-- Stabilize observer callback identity and verify observer cleanup/rebind behavior with RTL coverage.
-- Move the component to a focused settings/preferences file if it remains reusable across settings panels.
-
-## Read-only Claude approval mode is exposed in wire types but not option metadata
-
-**Severity:** Low - `ui/src/types.ts` accepts `read-only-auto-approve`, but `CLAUDE_APPROVAL_OPTIONS` in `ui/src/preferences-panels.tsx:84` does not include or explicitly hide the new mode.
-
-The new mode appears intended as an internal delegation-only mode. That contract is not encoded at the UI option boundary, so future code may treat it as a user-selectable mode or fail to label it consistently in settings and tooltips.
-
-**Current behavior:**
-- Backend can serialize `read-only-auto-approve`.
-- Frontend type accepts it.
-- Settings options still only list the user-facing modes without documenting that the read-only mode is internal-only.
-
-**Proposal:**
-- Either add a non-selectable/internal label path for `read-only-auto-approve`, or document/encode that the mode must never appear in `CLAUDE_APPROVAL_OPTIONS`.
-- Add a small UI/type regression for the chosen contract.
-
-## App-level default model settings lost arbitrary model-id entry
-
-**Severity:** Low - `ui/src/preferences-panels.tsx:202` now renders app-level default model settings as a non-editable combobox, while `src/session_crud.rs:52` still accepts custom default model preferences up to 200 characters.
-
-The UI and backend contracts are now mismatched. Users can only select a model already present in the option list or already saved, even though the backend and earlier UI supported entering an exact model id manually. That makes newly released or locally supported model ids unreachable from the settings UI until they are pre-populated in model options.
-
-**Current behavior:**
-- App-level default model settings expose only the known-option combobox.
-- The custom input/apply/reset row was removed from the default settings path.
-- Backend validation still accepts arbitrary model ids that satisfy length and CLI-option guards.
-
-**Proposal:**
-- Restore a custom model-id entry path for app-level defaults, or explicitly change and document the API/UI contract to known-options-only.
-- Add UI coverage for whichever contract is chosen.
-
 ## First-settled active-baseline same-message growth lacks a safe turn boundary
 
 **Severity:** Medium - `src/telegram.rs:2583-2637`. When a Telegram prompt is armed behind an active/approval-paused turn, the relay baselines the current assistant message while `baseline_while_active=true`. If the tracked message id has already grown by the first settled poll, the relay cannot distinguish "old turn finished after the last active poll" from "the Telegram reply was appended to the same message id."
@@ -105,17 +60,42 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 
 ## `ui/src/preferences-panels.tsx` past 2000-line natural split point
 
-**Severity:** Medium - `TelegramPreferencesPanel` now has three async handlers (handleSave, handleTestConnection, handleRemoveBotToken) each with `if (!isMountedRef.current)` guards repeated 3×. Pattern duplication is wide enough that a `useUnmountSafeAsync` helper would cut ~60 lines.
+**Severity:** Medium - `TelegramPreferencesPanel` and `AgentDefaultModelControl` both continue to grow inside `ui/src/preferences-panels.tsx`, which is now past the 2,000-line rubric threshold.
 
-`ui/src/preferences-panels.tsx:1226-1430`. CLAUDE.md asks for smaller modules; the panel duplicates 30-40 line handler bodies with the same guard pattern.
+`ui/src/preferences-panels.tsx:1226-1430` duplicates 30-40 line async handler bodies with the same mount guard pattern, and the restored app-level custom model entry path adds a self-contained `AgentDefaultModelControl` block. CLAUDE.md asks for smaller modules; this file already owns theme, markdown, appearance, remote, Telegram, and agent default settings.
 
 **Current behavior:**
 - Three async handlers each with three `if (!isMountedRef.current)` checkpoints (start of catch, end of try, finally).
 - Pattern duplication; future maintainer copies the shape into a fourth handler.
+- `AgentDefaultModelControl` and its helper functions live inline despite being a focused preference control.
 
 **Proposal:**
 - Extract `useUnmountSafeAsync` hook returning a `runSafe(asyncFn, { onSuccess, onError, onFinally })` wrapper, OR
 - Split `TelegramPreferencesPanel` into form-state component + inner mount-safe handler module.
+- Extract `AgentDefaultModelControl` and its small helpers into a focused `ui/src/preferences/` module as a pure code move.
+
+## Manual model id input doubles its accessible name
+
+**Severity:** Low - `ui/src/preferences-panels.tsx:252-266` associates the new custom model input with a visible `Manual model id` label and also supplies an agent-specific `aria-label`.
+
+The `aria-label` wins in the accessibility tree, so screen readers announce "Codex custom default model" or "Claude custom default model" while sighted users see "Manual model id". That mismatch is small, but it makes the control less predictable for assistive-tech users and for accessibility tests.
+
+**Current behavior:**
+- Visible label reads `Manual model id`.
+- Accessible name comes from `aria-label`.
+
+**Proposal:**
+- Pick one accessible name. Either remove the `aria-label` and rename the visible label to the intended agent-specific text, or wire the visible label through `aria-labelledby`.
+
+## Validation tone className expression is redundant
+
+**Severity:** Note - `ui/src/preferences-panels.tsx:289` expands `validationTone` through a ternary that returns the same `"warning" | "info"` value it already stores.
+
+**Current behavior:**
+- `className` uses `validationTone === "warning" ? "warning" : "info"`.
+
+**Proposal:**
+- Replace the ternary with `${validationTone}`.
 
 ## Wire projection layer owns `messages_loaded` SEMANTIC field for partial case
 
@@ -933,14 +913,14 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
+- [ ] P2: Cover custom default-model Enter-to-apply and warning-tone branches:
+  add tests for pressing Enter to apply a manual model id, for the "not in current live model list" warning when real live options exist, and for the no-live-list path where arbitrary manual ids should not warn.
+- [ ] P2: Extend custom default-model coverage to non-Codex panels:
+  add parity tests for Claude, Cursor, and Gemini app-level default model controls so per-agent custom model regressions are caught.
+- [ ] P2: Strengthen `ClaudeApprovalMode` partition coverage:
+  assert every `ClaudeApprovalMode` variant appears exactly once in either `CLAUDE_APPROVAL_OPTIONS` or `INTERNAL_CLAUDE_APPROVAL_MODES`, so future enum additions cannot drift.
 - [ ] P2: Add repeated-send waiting-indicator coverage:
   send a second prompt after a completed assistant response while the POST is still in flight, and assert the user still sees send-in-progress feedback until the new prompt appears in session state.
-- [ ] P2: Add SettingsTabPanelScrollFrame observer coverage:
-  render and rerender the settings scroll frame, assert observers are not rebound unnecessarily, and assert cleanup disconnects observers.
-- [ ] P2: Pin `read-only-auto-approve` UI option contract:
-  cover whether the internal Claude mode is intentionally hidden from `CLAUDE_APPROVAL_OPTIONS` or surfaced with a non-user-selectable label path.
-- [ ] P2: Add app-level custom default-model UI coverage:
-  cover entering an arbitrary valid model id in app-level default model settings, or cover explicit rejection if the product contract changes to known-options-only.
 - [ ] P2: Cover first-chunk Telegram forward failure:
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
 - [ ] P2: Cover first-settled active-baseline same-message growth policy:
