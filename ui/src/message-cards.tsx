@@ -39,6 +39,7 @@ import {
   isMermaidFenceLanguage,
 } from "./source-renderers";
 import { ExpandedPromptPanel } from "./ExpandedPromptPanel";
+import { useDeferredHeavyContentActivation } from "./deferred-heavy-content-activation";
 import {
   CheckIcon,
   CollapseIcon,
@@ -692,22 +693,6 @@ function MessageMeta({
   );
 }
 
-const DeferredHeavyContentActivationContext = createContext(true);
-
-export function DeferredHeavyContentActivationProvider({
-  allowActivation,
-  children,
-}: {
-  allowActivation: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <DeferredHeavyContentActivationContext.Provider value={allowActivation}>
-      {children}
-    </DeferredHeavyContentActivationContext.Provider>
-  );
-}
-
 function DeferredHeavyContent({
   children,
   estimatedHeight,
@@ -720,9 +705,7 @@ function DeferredHeavyContent({
   preferImmediateRender?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const allowDeferredActivation = useContext(
-    DeferredHeavyContentActivationContext,
-  );
+  const allowDeferredActivation = useDeferredHeavyContentActivation();
   const [isActivated, setIsActivated] = useState(() => preferImmediateRender);
   const shouldRenderContent = preferImmediateRender || isActivated;
 

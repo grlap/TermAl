@@ -488,29 +488,18 @@ still coming from the previous React `sessions` commit.
   lagging React-state-derived sibling prop and asserts the active pane never
   renders a torn combination.
 
-## Deferred heavy-content activation is coupled into the message-card renderer
+## `message-cards.tsx` still owns Markdown, code, Mermaid, KaTeX, and diff rendering as one module
 
-**Severity:** Low - `ui/src/message-cards.tsx` now owns deferred heavy-content
-activation policy in addition to Markdown, code, Mermaid, KaTeX, diff, and
-message-card composition concerns.
+**Severity:** Low - `ui/src/message-cards.tsx` is still a broad renderer module even after the deferred heavy-content activation provider was split out.
 
-The new provider/hook is useful, but keeping the virtualization activation
-contract embedded in the same large renderer increases coupling between scroll
-policy and message rendering. Future performance fixes will have to reason
-through a broad module instead of a small boundary with a clear contract.
+The activation gate now lives in `ui/src/deferred-heavy-content-activation.tsx`, so virtualization policy has a clearer boundary. The remaining heavy rendering paths still share one file with message-card composition, which keeps future performance work coupled to a large renderer surface.
 
 **Current behavior:**
-- Deferred activation context, heavy Markdown/code rendering, and message-card
-  composition live in one large module.
-- Virtualization policy reaches into message rendering through exported
-  activation context.
-- The ownership boundary is not documented near the exported provider.
+- Markdown, code, Mermaid, KaTeX, diff, and message-card composition all live in `ui/src/message-cards.tsx`.
+- The deferred activation provider/hook has its own focused module and direct consumers.
 
 **Proposal:**
-- Extract the deferred activation provider/hook into a focused module with a
-  short contract comment.
-- Consider extracting the heavy Markdown/code rendering path separately so
-  virtualization policy and content rendering can evolve independently.
+- Extract heavy Markdown/code rendering paths into focused modules so virtualization policy and content rendering can evolve independently.
 
 ## Focused live sessions monopolize the main thread during state adoption
 

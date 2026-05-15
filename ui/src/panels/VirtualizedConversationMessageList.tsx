@@ -26,7 +26,7 @@ import {
   DEFERRED_RENDER_RESUME_EVENT,
   DEFERRED_RENDER_SUSPENDED_ATTRIBUTE,
 } from "../deferred-render";
-import { DeferredHeavyContentActivationProvider } from "../message-cards";
+import { DeferredHeavyContentActivationProvider } from "../deferred-heavy-content-activation";
 import {
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
   MESSAGE_STACK_SCROLL_WRITE_EVENT,

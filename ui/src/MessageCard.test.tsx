@@ -2,8 +2,8 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
+import { DeferredHeavyContentActivationProvider } from "./deferred-heavy-content-activation";
 import {
-  DeferredHeavyContentActivationProvider,
   MessageCard,
 } from "./message-cards";
 import {
