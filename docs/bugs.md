@@ -86,20 +86,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 **Proposal:**
 - Convert to a discriminated union — `type SessionHydrationRequestContext = ({ kind: "fullSession" } | { kind: "partialTail" } | { kind: "textRepair" }) & SharedMetadata`. Classifier dispatches on `kind`; call sites can never set inconsistent flags.
 
-## `hydratedSessionIdsRef.current.add(sessionId)` invariant has three call sites
-
-**Severity:** Medium - after this change, `add` is called at three places (tail "adopted", early-return after partial-then-already-hydrated, full "adopted"). The invariant — "add when fully hydrated and we won't run another hydration" — is encoded by repetition.
-
-`ui/src/app-live-state.ts:1308, 1335, 1359-1361`. Worse, the `partial` outcome at line 1310 deliberately does NOT add to the set, because the session is not fully hydrated yet. A future reader scanning for "where do we mark hydrated" sees three places and must read each branch to understand the implicit "and partial is not hydrated" rule. If a fourth state is added (e.g., "tail returned the whole transcript because backend has fewer messages than the limit AND messages_loaded was true"), the question "do we add to hydratedSessionIdsRef here?" has no automatic answer.
-
-**Current behavior:**
-- Three call sites for the "fully hydrated" mark.
-- One outcome (partial) deliberately omits the mark.
-- The invariant is encoded by repetition.
-
-**Proposal:**
-- Either (a) extract a small `markFullyHydrated(sessionId)` helper that wraps the add + clearHydrationRetry pair (already paired at all three sites), OR (b) compute "is this session fully hydrated" from session state at use sites and stop tracking it in a separate ref.
-
 ## Tail-then-full sequence doubles HTTP request volume for sessions ≥101 messages
 
 **Severity:** Low - the frontend always pairs `fetchSessionTail(SESSION_TAIL_WINDOW_MESSAGE_COUNT)` with `fetchSession(...)` for sessions where `messageCount >= 101`. Phase 1 local-only is fast. Future remote-host or flaky-network scenarios pay this tax.

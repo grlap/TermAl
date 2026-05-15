@@ -810,6 +810,11 @@ export function useAppLiveState(
     hydrationCappedRetryAttemptsRef.current.delete(sessionId);
   }
 
+  function completeSessionHydration(sessionId: string) {
+    clearHydrationRetry(sessionId);
+    hydratedSessionIdsRef.current.add(sessionId);
+  }
+
   function cancelHydrationRetries() {
     for (const timerId of hydrationRetryTimersRef.current.values()) {
       window.clearTimeout(timerId);
@@ -1425,8 +1430,7 @@ export function useAppLiveState(
             case "partial":
               break;
             case "adopted":
-              clearHydrationRetry(sessionId);
-              hydratedSessionIdsRef.current.add(sessionId);
+              completeSessionHydration(sessionId);
               return;
             case "restartResync":
               hydrationRestartResyncPendingRef.current = true;
@@ -1447,8 +1451,7 @@ export function useAppLiveState(
         }
 
         if (attemptedTailHydration && !sessionStillNeedsHydration(sessionId)) {
-          clearHydrationRetry(sessionId);
-          hydratedSessionIdsRef.current.add(sessionId);
+          completeSessionHydration(sessionId);
           return;
         }
         // Recapture so the full-fetch classifier sees metadata mutated by
@@ -1478,8 +1481,7 @@ export function useAppLiveState(
         );
         switch (adoptOutcome) {
           case "adopted":
-            clearHydrationRetry(sessionId);
-            hydratedSessionIdsRef.current.add(sessionId);
+            completeSessionHydration(sessionId);
             break;
           case "restartResync":
             hydrationRestartResyncPendingRef.current = true;
