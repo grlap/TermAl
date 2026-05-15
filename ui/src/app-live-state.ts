@@ -1828,10 +1828,10 @@ export function useAppLiveState(
     > | null = null;
     let sawReconnectOpenSinceLastError = false;
     let reconnectRecoveryConfirmedSinceLastError = false;
-    // Some browsers/proxies can resume delivering EventSource frames after an
-    // error without an observable `onopen` in our handler order. A valid data
-    // frame still proves the transport is live, so reconnect UI must be allowed
-    // to recover from that frame.
+    // Some browsers/proxies can resume delivering authoritative `state` frames
+    // after an error without an observable `onopen` in our handler order. Delta
+    // frames can be buffered from before the error, so only state events or
+    // cause-specific recovery contracts may use this as no-open live proof.
     let reconnectErrorPendingLiveProof = false;
     // True only between a bad reopened SSE payload and the next confirmed live
     // event or outage reset. This separates "bad SSE needs proof" from
@@ -1992,11 +1992,9 @@ export function useAppLiveState(
     }
 
     function confirmReconnectRecoveryFromDeltaEvent() {
-      const allowWithoutConfirmedOpen =
-        allowReconnectRecoveryWithoutExplicitOpen ||
-        reconnectErrorPendingLiveProof;
       return confirmReconnectRecoveryFromLiveEvent({
-        allowWithoutConfirmedOpen,
+        allowWithoutConfirmedOpen:
+          allowReconnectRecoveryWithoutExplicitOpen,
       });
     }
 
@@ -2405,15 +2403,12 @@ export function useAppLiveState(
                 }
                 // Timer-driven reconnect fallbacks keep probing until a live
                 // EventSource data frame proves the SSE stream is healthy
-                // again unless a same-instance snapshot already made forward
-                // progress. Manual retry opts back into proving live SSE even
-                // after same-instance progress because the user explicitly
-                // asked to recover the backend connection, not just refresh UI.
+                // again. A same-instance /api/state snapshot can refresh the
+                // visible UI, but polling success alone does not prove later
+                // assistant deltas will arrive.
                 const shouldRearmUntilLiveEvent =
                   rearmUntilLiveEventOnSuccess &&
-                  !reconnectRecoveryConfirmedSinceLastError &&
-                  (!adoptedSameInstanceProgress ||
-                    rearmAfterSameInstanceProgressUntilLiveEvent);
+                  !reconnectRecoveryConfirmedSinceLastError;
                 const carryManualRetryContractForward =
                   rearmAfterSameInstanceProgressUntilLiveEvent &&
                   shouldRearmUntilLiveEvent;
@@ -2436,12 +2431,10 @@ export function useAppLiveState(
                       carryManualRetryContractForward,
                   });
                 } else if (adopted) {
-                  // Automatic reconnect fallback can recover fully through a
-                  // newer same-instance /api/state snapshot. In that case no
-                  // further SSE proof is required, so clear the reconnect badge
-                  // immediately; otherwise the UI can keep showing stale
-                  // "working" state after the adopted snapshot already marked
-                  // the session idle.
+                  // Non-reconnect resync paths that do not require live-SSE
+                  // proof can clear the reconnect badge after adopting their
+                  // authoritative snapshot. Timer-driven reconnect fallback
+                  // requests keep polling through `shouldRearmUntilLiveEvent`.
                   confirmReconnectRecoveryFromAuthoritativeSnapshot();
                 }
               }

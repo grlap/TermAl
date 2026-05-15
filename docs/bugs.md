@@ -7,22 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Three `backend-connection.test.tsx` reconnect tests are red on the current tree
-
-**Severity:** Medium - `ui/src/backend-connection.test.tsx:1700`, `:2939`, and `:3083` fail while searching for `Control panel backend reconnecting` after fake-timer advances.
-
-The current `app-live-state.ts` diff is a helper extraction, so these failures may predate this branch, but they are red now and block a clean frontend test gate.
-
-**Current behavior:**
-- `backs off reconnect polling until a fresh SSE open confirms recovery` fails.
-- `keeps the reconnect fallback fetch armed when an orchestrator delta arrives before a confirmed reopen` fails.
-- `keeps the reconnect fallback fetch armed when an applied session delta arrives before a confirmed reopen` fails.
-
-**Proposal:**
-- Triage whether the reconnect contract or the tests are stale.
-- Fix the reconnect state machine or rewrite the assertions to match the intended current contract.
-- Keep the three tests green before landing reconnect/state-machine work.
-
 ## First-settled active-baseline same-message growth lacks a safe turn boundary
 
 **Severity:** Medium - `src/telegram.rs:2583-2637`. When a Telegram prompt is armed behind an active/approval-paused turn, the relay baselines the current assistant message while `baseline_while_active=true`. If the tracked message id has already grown by the first settled poll, the relay cannot distinguish "old turn finished after the last active poll" from "the Telegram reply was appended to the same message id."
@@ -267,23 +251,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Make full assistant text forwarding an explicit opt-in setting.
 - Keep digest-only forwarding as the default for Telegram integrations.
 - Document the third-party content exposure and add any practical redaction/truncation before full forwarding.
-
-## Timer-driven reconnect fallback can stop after `/api/state` progress before SSE proves recovery
-
-**Severity:** Medium - a fallback snapshot can refresh visible UI while the live EventSource transport is still unhealthy.
-
-`ui/src/app-live-state.ts:2059-2068` disables `rearmUntilLiveEventOnSuccess` when a same-instance `/api/state` response makes forward revision progress, unless the recovery path is the manual-retry variant. The timer-driven recovery path at `ui/src/app-live-state.ts:2485-2492` can then mark the backend `connected` after adopting that newer snapshot. A successful `/api/state` fetch proves that polling can reach the backend and can repair visible state, but it does not prove the SSE stream has reopened or can deliver later assistant deltas. If the transport remains broken, a later live message can stay hidden until another reconnect/error/user action restarts recovery.
-
-**Current behavior:**
-- Timer-driven reconnect fallback asks to keep polling until live-event proof.
-- Same-instance `/api/state` forward progress disables that live-proof rearm path for non-manual recovery.
-- New reconnect tests currently assert snapshot-only recovery as sufficient, which pins the problematic behavior instead of the intended live-proof contract.
-- UI state can look refreshed while the EventSource transport is still unconfirmed.
-
-**Proposal:**
-- Split "snapshot refreshed UI" from "transport recovered" in the reconnect state machine.
-- Keep reconnect polling armed until `confirmReconnectRecoveryFromLiveEvent()` runs from a data-bearing SSE event, unless a cause-specific recovery path intentionally documents a different contract.
-- Add a regression that adopts same-instance `/api/state` progress through the timer-driven reconnect path, keeps SSE unopened/unconfirmed, advances timers, and asserts another fallback poll is scheduled.
 
 ## SSE recreation control plane is split between `sseEpoch` state and `pendingSseRecreateOnInstanceChangeRef`
 
@@ -776,8 +743,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   drive bursty same-session remote deltas through the production hydration path, assert only one remote session fetch is issued, and assert the in-flight guard is cleared after successful hydration.
 - [ ] P2: Add failed manual retry reconnect-rearm regression:
   cover manual retry hitting a transient failure, then the next scheduled attempt adopting a newer same-instance snapshot while polling still continues until SSE confirms.
-- [ ] P2: Add timer-driven reconnect same-instance-progress live-proof regression:
-  trigger the non-manual reconnect fallback path, adopt a same-instance `/api/state` snapshot with forward progress while SSE remains unopened/unconfirmed, advance timers, and assert fallback polling continues until a data-bearing live event confirms recovery.
 - [ ] P2 watchdog wake-gap stop-after-progress regression:
   trigger watchdog wake-gap recovery, adopt same-instance `/api/state` progress, and assert no additional reconnect polling occurs before a later live event.
 - [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:

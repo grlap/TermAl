@@ -1981,7 +1981,7 @@ describe("App live state — reconnect", () => {
     }
   });
 
-  it("stops automatic same-instance polling after catch-up advances the revision", async () => {
+  it("keeps automatic same-instance polling armed until live SSE proves recovery", async () => {
     const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
       makeStateResponse({
         revision: 6,
@@ -2036,7 +2036,7 @@ describe("App live state — reconnect", () => {
 
           await advanceTimers(RECONNECT_STATE_RESYNC_DELAY_MS * 4);
           await settleAsyncUi();
-          expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+          expect(fetchStateSpy).toHaveBeenCalledTimes(2);
         } finally {
           if (fakeTimersActive) {
             vi.useRealTimers();

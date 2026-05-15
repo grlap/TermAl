@@ -392,7 +392,7 @@ afterEach(() => {
 });
 
 describe("deferred session-store sync", () => {
-  it("clears reconnecting when valid session data arrives after an error without an open event", async () => {
+  it("keeps reconnecting when valid delta data arrives after an error without an open event", async () => {
     vi.stubGlobal(
       "EventSource",
       EventSourceMock as unknown as typeof EventSource,
@@ -450,10 +450,12 @@ describe("deferred session-store sync", () => {
     expect(params.adoptionRefs.sessionsRef.current[0]?.preview).toBe(
       "Recovered live output.",
     );
-    expect(setBackendConnectionState).toHaveBeenLastCalledWith("connected");
+    expect(setBackendConnectionState).toHaveBeenLastCalledWith(
+      "reconnecting",
+    );
   });
 
-  it("clears reconnecting when automatic fallback adopts a newer idle snapshot", async () => {
+  it("keeps reconnecting when automatic fallback adopts a newer idle snapshot", async () => {
     vi.useFakeTimers();
     vi.stubGlobal(
       "EventSource",
@@ -521,7 +523,9 @@ describe("deferred session-store sync", () => {
     expect(fetchState).toHaveBeenCalledTimes(1);
     expect(params.adoptionRefs.sessionsRef.current[0]?.status).toBe("idle");
     expect(params.adoptionRefs.sessionsRef.current[0]?.preview).toBe("Done.");
-    expect(setBackendConnectionState).toHaveBeenLastCalledWith("connected");
+    expect(setBackendConnectionState).toHaveBeenLastCalledWith(
+      "reconnecting",
+    );
   });
 
   it("applies delegation wait create and consume deltas locally", async () => {
