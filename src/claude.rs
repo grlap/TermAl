@@ -136,6 +136,7 @@ fn claude_bash_command_is_read_only(command: &str) -> bool {
         || normalized.contains('<')
         || normalized.contains('`')
         || normalized.contains("$(")
+        || claude_bash_command_has_background_separator(&normalized)
     {
         return false;
     }
@@ -152,7 +153,10 @@ fn claude_bash_command_is_read_only(command: &str) -> bool {
             continue;
         }
 
-        let tokens: Vec<&str> = segment.split_whitespace().collect();
+        let Some(tokens) = claude_bash_segment_tokens(segment) else {
+            return false;
+        };
+        let tokens = tokens.iter().map(String::as_str).collect::<Vec<_>>();
         if !claude_bash_tokens_are_read_only(&tokens) {
             return false;
         }
@@ -161,60 +165,114 @@ fn claude_bash_command_is_read_only(command: &str) -> bool {
     true
 }
 
-fn claude_bash_tokens_are_read_only(tokens: &[&str]) -> bool {
-    let Some(normalized_tokens) = claude_bash_tokens_for_validation(tokens) else {
-        return false;
-    };
-    let tokens = normalized_tokens
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    let Some(command) = tokens.first().copied() else {
-        return false;
-    };
+fn claude_bash_command_has_background_separator(command: &str) -> bool {
+    let mut quote: Option<char> = None;
+    let mut characters = command.chars().peekable();
 
-    let read_only_commands = ["cat", "date", "echo", "grep", "head", "ls", "nl", "pwd", "rg", "tail", "wc"];
-    if read_only_commands.contains(&command) {
-        return true;
-    }
+    while let Some(character) = characters.next() {
+        if let Some(active_quote) = quote {
+            if character == active_quote {
+                quote = None;
+            }
+            continue;
+        }
 
-    if command == "find" {
-        return claude_find_tokens_are_read_only(&tokens);
-    }
-
-    if command == "sed" {
-        return claude_sed_tokens_are_read_only(&tokens);
-    }
-
-    if command == "git" {
-        return claude_git_tokens_are_read_only(&tokens);
+        match character {
+            '\'' | '"' => quote = Some(character),
+            '&' => {
+                if characters.peek() == Some(&'&') {
+                    characters.next();
+                } else {
+                    return true;
+                }
+            }
+            _ => {}
+        }
     }
 
     false
 }
 
-fn claude_bash_tokens_for_validation(tokens: &[&str]) -> Option<Vec<String>> {
+fn claude_bash_tokens_are_read_only(tokens: &[&str]) -> bool {
+    let Some(command) = tokens.first().copied() else {
+        return false;
+    };
+
+    let read_only_commands = ["cat", "echo", "grep", "head", "ls", "nl", "pwd", "tail", "wc"];
+    if read_only_commands.contains(&command) {
+        return true;
+    }
+
+    if command == "date" {
+        return claude_date_tokens_are_read_only(tokens);
+    }
+
+    if command == "rg" {
+        return claude_rg_tokens_are_read_only(tokens);
+    }
+
+    if command == "find" {
+        return claude_find_tokens_are_read_only(tokens);
+    }
+
+    if command == "sed" {
+        return claude_sed_tokens_are_read_only(tokens);
+    }
+
+    if command == "git" {
+        return claude_git_tokens_are_read_only(tokens);
+    }
+
+    false
+}
+
+fn claude_bash_segment_tokens(segment: &str) -> Option<Vec<String>> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+
+    for character in segment.chars() {
+        if let Some(active_quote) = quote {
+            if character == active_quote {
+                quote = None;
+            } else {
+                current.push(character);
+            }
+            continue;
+        }
+
+        match character {
+            '\'' | '"' => quote = Some(character),
+            character if character.is_whitespace() => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(character),
+        }
+    }
+
+    if quote.is_some() {
+        return None;
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    Some(tokens)
+}
+
+fn claude_date_tokens_are_read_only(tokens: &[&str]) -> bool {
     tokens
         .iter()
-        .map(|token| {
-            let has_single_quote = token.contains('\'');
-            let has_double_quote = token.contains('"');
-            if !has_single_quote && !has_double_quote {
-                return Some((*token).to_owned());
-            }
+        .skip(1)
+        .all(|token| token.starts_with('+') || matches!(*token, "-u" | "--utc"))
+}
 
-            let quote = token.as_bytes().first().copied()?;
-            if !matches!(quote, b'\'' | b'"') || token.as_bytes().last().copied() != Some(quote) {
-                return None;
-            }
-
-            let stripped = &token[1..token.len().saturating_sub(1)];
-            if stripped.contains('\'') || stripped.contains('"') {
-                return None;
-            }
-            Some(stripped.to_owned())
-        })
-        .collect()
+fn claude_rg_tokens_are_read_only(tokens: &[&str]) -> bool {
+    !tokens
+        .iter()
+        .skip(1)
+        .any(|token| *token == "--pre" || token.starts_with("--pre="))
 }
 
 fn claude_find_tokens_are_read_only(tokens: &[&str]) -> bool {
@@ -228,23 +286,42 @@ fn claude_find_tokens_are_read_only(tokens: &[&str]) -> bool {
 }
 
 fn claude_sed_tokens_are_read_only(tokens: &[&str]) -> bool {
-    for (index, token) in tokens.iter().enumerate() {
+    let mut saw_script_option = false;
+    let mut positional_script_checked = false;
+
+    for (index, token) in tokens.iter().enumerate().skip(1) {
         if *token == "-i"
             || *token == "--in-place"
             || token.starts_with("-i")
             || token.starts_with("--in-place=")
-            || *token == "w"
+            || *token == "-f"
+            || *token == "--file"
+            || token.starts_with("-f")
+            || token.starts_with("--file=")
         {
             return false;
         }
 
         if let Some(script) = token.strip_prefix("-e") {
+            saw_script_option = true;
             let script = if script.is_empty() {
                 tokens.get(index + 1).copied().unwrap_or_default()
             } else {
                 script
             };
             if claude_sed_script_can_write(script) {
+                return false;
+            }
+            continue;
+        }
+
+        if token.starts_with('-') {
+            continue;
+        }
+
+        if !saw_script_option && !positional_script_checked {
+            positional_script_checked = true;
+            if claude_sed_script_can_write(token) {
                 return false;
             }
         }
@@ -254,8 +331,11 @@ fn claude_sed_tokens_are_read_only(tokens: &[&str]) -> bool {
 }
 
 fn claude_sed_script_can_write(script: &str) -> bool {
+    let mut command_start = true;
     let mut escaped = false;
-    for character in script.chars() {
+    let mut characters = script.chars().peekable();
+
+    while let Some(character) = characters.next() {
         if escaped {
             escaped = false;
             continue;
@@ -264,9 +344,119 @@ fn claude_sed_script_can_write(script: &str) -> bool {
             escaped = true;
             continue;
         }
-        if character == 'w' {
+        if character.is_whitespace() && command_start {
+            continue;
+        }
+        if character == ';' || character == '\n' {
+            command_start = true;
+            continue;
+        }
+
+        if !command_start {
+            continue;
+        }
+
+        match character {
+            'w' | 'W' | 'e' => return true,
+            '0'..='9' | ',' | '$' => continue,
+            '/' => {
+                if !claude_skip_sed_address_regex(&mut characters, '/') {
+                    return false;
+                }
+                continue;
+            }
+            's' | 'y' => {
+                let Some(delimiter) = characters.next() else {
+                    return false;
+                };
+                if delimiter == '\\' || delimiter == '\n' {
+                    return false;
+                }
+                let separator_count = if character == 's' { 2 } else { 1 };
+                if claude_skip_sed_delimited_sections(&mut characters, delimiter, separator_count)
+                    && character == 's'
+                    && claude_sed_substitution_flags_can_write(&mut characters)
+                {
+                    return true;
+                }
+                command_start = false;
+            }
+            _ => command_start = false,
+        }
+    }
+
+    false
+}
+
+fn claude_skip_sed_address_regex<I>(
+    characters: &mut std::iter::Peekable<I>,
+    delimiter: char,
+) -> bool
+where
+    I: Iterator<Item = char>,
+{
+    let mut escaped = false;
+    for character in characters.by_ref() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if character == delimiter {
             return true;
         }
+    }
+    false
+}
+
+fn claude_skip_sed_delimited_sections<I>(
+    characters: &mut std::iter::Peekable<I>,
+    delimiter: char,
+    separator_count: usize,
+) -> bool
+where
+    I: Iterator<Item = char>,
+{
+    let mut escaped = false;
+    let mut seen_separators = 0;
+    for character in characters.by_ref() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if character == delimiter {
+            seen_separators += 1;
+            if seen_separators == separator_count {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn claude_sed_substitution_flags_can_write<I>(characters: &mut std::iter::Peekable<I>) -> bool
+where
+    I: Iterator<Item = char>,
+{
+    while let Some(character) = characters.peek().copied() {
+        if character == ';' || character == '\n' {
+            return false;
+        }
+        if character.is_whitespace() {
+            characters.next();
+            continue;
+        }
+        if matches!(character, 'w' | 'W' | 'e') {
+            return true;
+        }
+        characters.next();
     }
     false
 }
@@ -277,16 +467,40 @@ fn claude_git_tokens_are_read_only(tokens: &[&str]) -> bool {
     };
 
     match subcommand {
-        "diff" | "grep" | "log" | "ls-files" | "rev-parse" | "show" | "status" => true,
+        "diff" | "log" | "show" => claude_git_output_tokens_are_read_only(tokens),
+        "grep" => claude_git_grep_tokens_are_read_only(tokens),
+        "ls-files" | "rev-parse" | "status" => true,
         "branch" => tokens.iter().skip(2).all(|token| {
             token.starts_with('-')
                 && !matches!(
                     *token,
                     "-d" | "-D" | "--delete" | "-m" | "-M" | "--move" | "-c" | "-C" | "--copy"
                 )
+                && !token.starts_with("--delete=")
+                && !token.starts_with("--move=")
+                && !token.starts_with("--copy=")
+                && !token.starts_with("--set-upstream-to")
+                && !matches!(
+                    *token,
+                    "--unset-upstream" | "--edit-description" | "--create-reflog"
+                )
         }),
         _ => false,
     }
+}
+
+fn claude_git_output_tokens_are_read_only(tokens: &[&str]) -> bool {
+    !tokens.iter().skip(2).any(|token| {
+        matches!(*token, "--output" | "--ext-diff" | "--textconv")
+            || token.starts_with("--output=")
+    })
+}
+
+fn claude_git_grep_tokens_are_read_only(tokens: &[&str]) -> bool {
+    !tokens.iter().skip(2).any(|token| {
+        matches!(*token, "-O" | "--open-files-in-pager")
+            || token.starts_with("--open-files-in-pager=")
+    })
 }
 
 /// Parses Claude tool permission request.

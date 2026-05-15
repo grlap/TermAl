@@ -264,8 +264,8 @@ Telegram commands:
 - `/status` — show the active project's digest and actions
 - `/projects` — list subscribed projects
 - `/project <id>` — switch the active project for this Telegram chat
-- `/sessions` — list sessions in the active project
-- `/session <id>` — select a session inside the active project
+- `/sessions` — list sessions in the active project by name, active first and then by latest update
+- `/session <name>` — select a session inside the active project by exact name or id
 - `/session clear` — return free text to the active project's current/default session
 - `/approve`, `/reject`, `/continue`, `/fix`, `/commit`, `/iterate`, `/stop`, `/review` — dispatch project digest actions
 

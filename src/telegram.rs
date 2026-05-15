@@ -671,6 +671,10 @@ struct TelegramAssistantForwardingCursor {
     message_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     text_chars: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    text_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    text_start_chars: Option<usize>,
     #[serde(default, skip_serializing_if = "is_false")]
     resend_if_grown: bool,
     /// Number of chunks already delivered for `message_id` when a long
@@ -700,6 +704,8 @@ impl TelegramAssistantForwardingCursor {
             .map(|(message_id, text_chars)| Self {
                 message_id: Some(message_id),
                 text_chars: Some(text_chars),
+                text_hash: None,
+                text_start_chars: None,
                 resend_if_grown,
                 sent_chunks: None,
                 failed_chunk_send_attempts: None,
@@ -719,6 +725,8 @@ impl TelegramAssistantForwardingCursor {
     fn is_empty(&self) -> bool {
         self.message_id.is_none()
             && self.text_chars.is_none()
+            && self.text_hash.is_none()
+            && self.text_start_chars.is_none()
             && !self.resend_if_grown
             && self.sent_chunks.is_none()
             && self.failed_chunk_send_attempts.is_none()
@@ -1790,6 +1798,10 @@ struct TelegramStateSession {
     status: TelegramSessionStatus,
     #[serde(default)]
     message_count: u32,
+    #[serde(default)]
+    session_mutation_stamp: Option<u64>,
+    #[serde(default)]
+    parent_delegation_id: Option<String>,
 }
 
 /// Narrow projection of `/api/sessions/{id}` used for forwarding
@@ -2387,6 +2399,12 @@ fn latest_assistant_text_cursor(
     })
 }
 
+fn telegram_assistant_text_hash(text: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(text.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 fn resolve_assistant_forwarding_cursor(
     state: &TelegramBotState,
     session_id: &str,
@@ -2407,6 +2425,8 @@ fn resolve_assistant_forwarding_cursor(
             return TelegramAssistantForwardingCursor {
                 message_id: state.last_forwarded_assistant_message_id.clone(),
                 text_chars: state.last_forwarded_assistant_message_text_chars,
+                text_hash: None,
+                text_start_chars: None,
                 resend_if_grown: state.last_forwarded_assistant_message_text_chars.is_none(),
                 sent_chunks: None,
                 failed_chunk_send_attempts: None,
@@ -2746,6 +2766,8 @@ fn forward_new_assistant_message_outcome(
                 failed_chunk_send_attempts: None,
                 footer_pending: false,
                 text_chars,
+                text_hash: None,
+                text_start_chars: None,
                 ..cursor.clone()
             };
             let dirty =
@@ -2777,7 +2799,32 @@ fn forward_new_assistant_message_outcome(
     // Detect the "previously forwarded message has grown" case. Telegram
     // already received the prefix, so forward only the appended suffix instead
     // of replaying the full message and duplicating content in chat.
-    let needs_resend_truncated = if session_is_settled && cursor.resend_if_grown {
+    let needs_resend_full = if session_is_settled && cursor.resend_if_grown {
+        position_of_last.and_then(|pos| match &messages[pos] {
+            TelegramSessionFetchMessage::Text { author, text, .. } if author == "assistant" => {
+                let previous_chars = cursor.text_chars?;
+                let previous_hash = cursor.text_hash.as_deref()?;
+                let current_chars = text.chars().count();
+                if current_chars < previous_chars {
+                    return Some(pos);
+                }
+                let comparison_text = if current_chars == previous_chars {
+                    text.clone()
+                } else {
+                    text.chars().take(previous_chars).collect()
+                };
+                (telegram_assistant_text_hash(&comparison_text) != previous_hash).then_some(pos)
+            }
+            _ => None,
+        })
+    } else {
+        None
+    };
+
+    let needs_resend_truncated = if session_is_settled
+        && cursor.resend_if_grown
+        && needs_resend_full.is_none()
+    {
         position_of_last.and_then(|pos| match &messages[pos] {
             TelegramSessionFetchMessage::Text { author, text, .. } if author == "assistant" => {
                 let last_chars = cursor.text_chars;
@@ -2829,6 +2876,8 @@ fn forward_new_assistant_message_outcome(
     // message.
     let start_index = if let Some(pos) = partial_message_position {
         pos
+    } else if let Some(pos) = needs_resend_full {
+        pos
     } else if let Some(pos) = needs_resend_truncated {
         pos
     } else if forward_without_existing_baseline && position_of_last.is_none() {
@@ -2836,22 +2885,37 @@ fn forward_new_assistant_message_outcome(
     } else {
         position_of_last.expect("position_of_last is Some when not baselining") + 1
     };
-    let to_forward: Vec<(String, String, usize)> = messages
+    let to_forward: Vec<(String, String, usize, String, Option<usize>)> = messages
         .iter()
         .enumerate()
         .skip(start_index)
         .filter_map(|(position, message)| match message {
             TelegramSessionFetchMessage::Text { id, author, text } if author == "assistant" => {
                 let full_text_chars = text.chars().count();
-                let text_to_send = if Some(position) == needs_resend_truncated {
-                    match cursor.text_chars {
-                        Some(previous_chars) => text.chars().skip(previous_chars).collect(),
-                        None => text.clone(),
-                    }
+                let retry_start_chars = if Some(position) == partial_message_position {
+                    cursor.text_start_chars
+                } else {
+                    None
+                };
+                let suffix_start_chars = retry_start_chars.or_else(|| {
+                    (Some(position) == needs_resend_truncated)
+                        .then_some(cursor.text_chars)
+                        .flatten()
+                });
+                let text_to_send = if Some(position) == needs_resend_full {
+                    text.clone()
+                } else if let Some(start_chars) = suffix_start_chars {
+                    text.chars().skip(start_chars).collect()
                 } else {
                     text.clone()
                 };
-                Some((id.clone(), text_to_send, full_text_chars))
+                Some((
+                    id.clone(),
+                    text_to_send,
+                    full_text_chars,
+                    telegram_assistant_text_hash(text),
+                    suffix_start_chars,
+                ))
             }
             _ => None,
         })
@@ -2884,7 +2948,7 @@ fn forward_new_assistant_message_outcome(
         .is_some_and(|sent_chunks| sent_chunks > 0);
     let mut changed = pre_forward_dirty;
     let mut delivery_failed = false;
-    for (id, text, full_text_chars) in &to_forward {
+    for (id, text, full_text_chars, full_text_hash, text_start_chars) in &to_forward {
         let trimmed = text.trim();
         // Empty messages still bump the baseline so the next sync
         // doesn't keep re-checking them; they just don't produce a
@@ -2914,6 +2978,8 @@ fn forward_new_assistant_message_outcome(
                     let failed_cursor = TelegramAssistantForwardingCursor {
                         message_id: Some(id.clone()),
                         text_chars: Some(text_chars),
+                        text_hash: Some(full_text_hash.clone()),
+                        text_start_chars: *text_start_chars,
                         resend_if_grown: true,
                         sent_chunks: Some(chunk_index),
                         failed_chunk_send_attempts: Some(failed_attempts),
@@ -2948,6 +3014,8 @@ fn forward_new_assistant_message_outcome(
                     let skipped_cursor = TelegramAssistantForwardingCursor {
                         message_id: Some(id.clone()),
                         text_chars: Some(text_chars),
+                        text_hash: Some(full_text_hash.clone()),
+                        text_start_chars: *text_start_chars,
                         resend_if_grown: true,
                         sent_chunks: Some(sent_chunks),
                         failed_chunk_send_attempts: None,
@@ -2968,6 +3036,8 @@ fn forward_new_assistant_message_outcome(
                     let chunk_cursor = TelegramAssistantForwardingCursor {
                         message_id: Some(id.clone()),
                         text_chars: Some(text_chars),
+                        text_hash: Some(full_text_hash.clone()),
+                        text_start_chars: *text_start_chars,
                         resend_if_grown: true,
                         sent_chunks: Some(sent_chunks),
                         failed_chunk_send_attempts: None,
@@ -2992,6 +3062,8 @@ fn forward_new_assistant_message_outcome(
         let complete_cursor = TelegramAssistantForwardingCursor {
             message_id: Some(id.clone()),
             text_chars: Some(*full_text_chars),
+            text_hash: Some(full_text_hash.clone()),
+            text_start_chars: None,
             resend_if_grown: true,
             sent_chunks: None,
             failed_chunk_send_attempts: None,
@@ -3299,27 +3371,25 @@ fn select_telegram_project_session(
     args: &str,
 ) -> Result<bool> {
     let (project_id, mut dirty) = resolve_telegram_active_project_id(config, state);
-    let mut parts = args.split_whitespace();
-    let Some(raw_session_id) = parts.next() else {
+    let raw_session_ref = args.trim();
+    if raw_session_ref.is_empty() {
         let text = match state.selected_session_id.as_deref() {
-            Some(session_id) => format!(
-                "Current Telegram session target: `{session_id}`.\nSend /session <session-id> to switch, /session clear to use the current project session, or /sessions to list ids."
-            ),
-            None => "No Telegram session target is selected. Send /session <session-id> to switch, or /sessions to list ids.".to_owned(),
+            Some(session_id) => {
+                let sessions = termal.get_state_sessions()?;
+                let label = find_telegram_project_session(&sessions, &project_id, session_id)
+                    .map(telegram_session_label)
+                    .unwrap_or(session_id);
+                format!(
+                    "Current Telegram session target: {label}.\nSend /session <session name> to switch, /session clear to use the current project session, or /sessions to list sessions."
+                )
+            }
+            None => "No Telegram session target is selected. Send /session <session name> to switch, or /sessions to list sessions.".to_owned(),
         };
         telegram.send_message(chat_id, &text, None)?;
         return Ok(dirty);
     };
-    if parts.next().is_some() {
-        telegram.send_message(
-            chat_id,
-            "Use /session <session-id>, or /session clear to use the current project session.",
-            None,
-        )?;
-        return Ok(dirty);
-    }
 
-    if matches!(raw_session_id, "clear" | "default" | "auto") {
+    if matches!(raw_session_ref, "clear" | "default" | "auto") {
         if let Some(session_id) = state.selected_session_id.take() {
             dirty = true;
             dirty |= clear_forward_next_assistant_message_session_id(state, &session_id);
@@ -3333,12 +3403,12 @@ fn select_telegram_project_session(
     }
 
     let sessions = termal.get_state_sessions()?;
-    let Some(session) = find_telegram_project_session(&sessions, &project_id, raw_session_id)
+    let Some(session) = find_telegram_project_session(&sessions, &project_id, raw_session_ref)
     else {
         telegram.send_message(
             chat_id,
             &format!(
-                "I couldn't find session `{raw_session_id}` in project `{}`. Send /sessions to list available ids.",
+                "I couldn't find session `{raw_session_ref}` in project `{}`. Send /sessions to list available sessions.",
                 project_id
             ),
             None,
@@ -3352,17 +3422,11 @@ fn select_telegram_project_session(
         Ok(plan) => dirty |= apply_assistant_forwarding_plan(state, plan),
         Err(err) => log_telegram_error("failed to baseline selected Telegram session", &err),
     }
-    let name = session.name.trim();
-    let label = if name.is_empty() {
-        session.id.as_str()
-    } else {
-        name
-    };
+    let label = telegram_session_label(session);
     telegram.send_message(
         chat_id,
         &format!(
-            "Telegram session target set to {label}.\nid: {}\nFree text will go to this session. Send /session clear to use the current project session.",
-            session.id
+            "Telegram session target set to {label}.\nFree text will go to this session. Send /session clear to use the current project session."
         ),
         None,
     )?;
@@ -3372,11 +3436,22 @@ fn select_telegram_project_session(
 fn find_telegram_project_session<'a>(
     state: &'a TelegramStateSessionsResponse,
     project_id: &str,
-    session_id: &str,
+    session_ref: &str,
 ) -> Option<&'a TelegramStateSession> {
-    state.sessions.iter().find(|session| {
-        session.id == session_id && session.project_id.as_deref() == Some(project_id)
-    })
+    let project_sessions = state
+        .sessions
+        .iter()
+        .filter(|session| telegram_session_is_project_root(session, project_id));
+    project_sessions
+        .clone()
+        .find(|session| session.id == session_ref)
+        .or_else(|| {
+            let needle = session_ref.trim();
+            let mut matches = project_sessions
+                .filter(|session| telegram_session_label(session) == needle)
+                .collect::<Vec<_>>();
+            (matches.len() == 1).then(|| matches.remove(0))
+        })
 }
 
 /// Handles send fresh Telegram digest from response.
@@ -3776,6 +3851,27 @@ fn telegram_project_label(project: &TelegramStateProject) -> &str {
     }
 }
 
+fn telegram_session_label(session: &TelegramStateSession) -> &str {
+    let name = session.name.trim();
+    if name.is_empty() {
+        session.id.as_str()
+    } else {
+        name
+    }
+}
+
+fn telegram_session_is_project_root(session: &TelegramStateSession, project_id: &str) -> bool {
+    session.project_id.as_deref() == Some(project_id) && session.parent_delegation_id.is_none()
+}
+
+fn telegram_session_status_sort_rank(status: &TelegramSessionStatus) -> u8 {
+    match status {
+        TelegramSessionStatus::Active | TelegramSessionStatus::Approval => 0,
+        TelegramSessionStatus::Idle => 1,
+        TelegramSessionStatus::Error | TelegramSessionStatus::Unknown => 2,
+    }
+}
+
 fn render_telegram_project_sessions(
     project_id: &str,
     state: &TelegramStateSessionsResponse,
@@ -3789,11 +3885,22 @@ fn render_telegram_project_sessions(
     let mut sessions = state
         .sessions
         .iter()
-        .filter(|session| session.project_id.as_deref() == Some(project_id))
+        .filter(|session| telegram_session_is_project_root(session, project_id))
         .collect::<Vec<_>>();
     let has_more_sessions = sessions.len() > 12;
-    sessions.reverse();
-    sessions.sort_by_key(|session| !matches!(session.status, TelegramSessionStatus::Active));
+    sessions.sort_by(|left, right| {
+        telegram_session_status_sort_rank(&left.status)
+            .cmp(&telegram_session_status_sort_rank(&right.status))
+            .then_with(|| {
+                right
+                    .session_mutation_stamp
+                    .unwrap_or_default()
+                    .cmp(&left.session_mutation_stamp.unwrap_or_default())
+            })
+            .then_with(|| right.message_count.cmp(&left.message_count))
+            .then_with(|| telegram_session_label(left).cmp(telegram_session_label(right)))
+            .then_with(|| left.id.cmp(&right.id))
+    });
 
     if sessions.is_empty() {
         return format!(
@@ -3811,9 +3918,8 @@ fn render_telegram_project_sessions(
         };
         lines.push(format!(
             "- {} ({status}, {message_count})",
-            session.name.trim()
+            telegram_session_label(session)
         ));
-        lines.push(format!("  id: {}", session.id));
     }
     if has_more_sessions {
         lines.push("More sessions exist in TermAl.".to_owned());
@@ -3837,7 +3943,7 @@ fn telegram_help_text(config: &TelegramBotConfig, state: &TelegramBotState) -> S
     [
         format!("TermAl Telegram relay for project `{active_project_id}`."),
         "Commands:".to_owned(),
-        "/status, /projects, /project <id>, /sessions, /session <id>, /approve, /reject, /continue, /fix, /commit, /iterate, /stop, /review"
+        "/status, /projects, /project <id>, /sessions, /session <name>, /approve, /reject, /continue, /fix, /commit, /iterate, /stop, /review"
             .to_owned(),
         "Reply with free text to forward it into the selected or current project session."
             .to_owned(),

@@ -19,6 +19,7 @@ mod acp_gemini;
 mod agent_commands;
 mod agent_readiness;
 mod claude;
+mod cli;
 mod codex_discovery;
 mod codex_protocol;
 mod codex_threads;

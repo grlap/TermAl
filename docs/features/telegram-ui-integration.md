@@ -21,7 +21,7 @@ Implemented:
   `config.botToken` values migrated out of `telegram-bot.json` on read.
 - Multiple subscribed projects in one chat.
 - Telegram project switching with `/projects` and `/project <id>`.
-- Telegram session switching with `/sessions` and `/session <id>`.
+- Telegram session switching with `/sessions` and `/session <name>`.
 - Free-text forwarding into the selected session, or the active project's
   digest target when no session is selected.
 - Assistant text forwarding back to Telegram for Telegram-originated prompts and
@@ -65,8 +65,9 @@ will return API 409 conflicts.
 - `/projects` lists subscribed projects and marks the active one.
 - `/project <id>` switches the active project.
 - `/project default` returns to the saved default project.
-- `/sessions` lists sessions for the active project.
-- `/session <id>` selects a session in the active project.
+- `/sessions` lists sessions for the active project by name, active first and
+  then by latest update.
+- `/session <name>` selects a session in the active project by exact name or id.
 - `/session clear` returns free text to the active project's current/default
   digest target.
 - `/approve`, `/reject`, `/continue`, `/fix`, `/commit`, `/iterate`, `/stop`,

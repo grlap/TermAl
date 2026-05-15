@@ -911,6 +911,8 @@ fn telegram_sessions_renderer_lists_active_project_sessions_first() {
                 project_id: Some("project-1".to_owned()),
                 status: TelegramSessionStatus::Idle,
                 message_count: 2,
+                session_mutation_stamp: Some(10),
+                parent_delegation_id: None,
             },
             TelegramStateSession {
                 id: "session-other".to_owned(),
@@ -918,6 +920,8 @@ fn telegram_sessions_renderer_lists_active_project_sessions_first() {
                 project_id: Some("project-2".to_owned()),
                 status: TelegramSessionStatus::Active,
                 message_count: 1,
+                session_mutation_stamp: Some(99),
+                parent_delegation_id: None,
             },
             TelegramStateSession {
                 id: "session-2".to_owned(),
@@ -925,6 +929,8 @@ fn telegram_sessions_renderer_lists_active_project_sessions_first() {
                 project_id: Some("project-1".to_owned()),
                 status: TelegramSessionStatus::Active,
                 message_count: 7,
+                session_mutation_stamp: Some(20),
+                parent_delegation_id: None,
             },
             TelegramStateSession {
                 id: "session-3".to_owned(),
@@ -932,6 +938,17 @@ fn telegram_sessions_renderer_lists_active_project_sessions_first() {
                 project_id: Some("project-1".to_owned()),
                 status: TelegramSessionStatus::Idle,
                 message_count: 3,
+                session_mutation_stamp: Some(30),
+                parent_delegation_id: None,
+            },
+            TelegramStateSession {
+                id: "session-child".to_owned(),
+                name: "Delegated Reviewer".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Active,
+                message_count: 9,
+                session_mutation_stamp: Some(100),
+                parent_delegation_id: Some("delegation-1".to_owned()),
             },
         ],
     };
@@ -939,7 +956,7 @@ fn telegram_sessions_renderer_lists_active_project_sessions_first() {
     let text = render_telegram_project_sessions("project-1", &state);
 
     assert!(text.starts_with("Sessions for TermAl:\n- Current"));
-    assert!(text.contains("id: session-2"));
+    assert!(!text.contains("id: session-2"));
     assert!(!text.contains("Working on the Telegram sessions list"));
     assert!(
         text.find("- Current")
@@ -948,7 +965,15 @@ fn telegram_sessions_renderer_lists_active_project_sessions_first() {
                 .find("- Newer Idle")
                 .expect("newer idle session should render")
     );
+    assert!(
+        text.find("- Newer Idle")
+            .expect("newer idle session should render")
+            < text
+                .find("- Older")
+                .expect("older idle session should render")
+    );
     assert!(text.contains("- Older (idle, 2 messages)"));
+    assert!(!text.contains("Delegated Reviewer"));
     assert!(!text.contains("Other Project"));
 }
 
@@ -966,6 +991,8 @@ fn telegram_sessions_renderer_reports_project_session_overflow() {
                 project_id: Some("project-1".to_owned()),
                 status: TelegramSessionStatus::Idle,
                 message_count: index,
+                session_mutation_stamp: Some(index as u64),
+                parent_delegation_id: None,
             })
             .collect(),
     };
@@ -985,6 +1012,46 @@ fn telegram_sessions_renderer_reports_project_session_overflow() {
 }
 
 #[test]
+fn telegram_sessions_renderer_falls_back_to_message_count_when_stamp_is_missing() {
+    let state = TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![
+            TelegramStateSession {
+                id: "session-a".to_owned(),
+                name: "Idle older".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Idle,
+                message_count: 2,
+                session_mutation_stamp: None,
+                parent_delegation_id: None,
+            },
+            TelegramStateSession {
+                id: "session-b".to_owned(),
+                name: "Idle newer".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Idle,
+                message_count: 9,
+                session_mutation_stamp: None,
+                parent_delegation_id: None,
+            },
+        ],
+    };
+
+    let text = render_telegram_project_sessions("project-1", &state);
+
+    assert!(
+        text.find("- Idle newer")
+            .expect("newer idle session should render")
+            < text
+                .find("- Idle older")
+                .expect("older idle session should render")
+    );
+}
+
+#[test]
 fn telegram_state_sessions_response_decodes_statuses_as_enum() {
     let state: TelegramStateSessionsResponse = serde_json::from_value(serde_json::json!({
         "projects": [],
@@ -994,7 +1061,9 @@ fn telegram_state_sessions_response_decodes_statuses_as_enum() {
                 "name": "Active",
                 "projectId": "project-1",
                 "status": "active",
-                "messageCount": 7
+                "messageCount": 7,
+                "sessionMutationStamp": 42,
+                "parentDelegationId": "delegation-1"
             },
             { "id": "session-future", "name": "Future", "status": "queued" }
         ]
@@ -1004,6 +1073,11 @@ fn telegram_state_sessions_response_decodes_statuses_as_enum() {
     assert_eq!(state.sessions[0].status, TelegramSessionStatus::Active);
     assert_eq!(state.sessions[0].project_id.as_deref(), Some("project-1"));
     assert_eq!(state.sessions[0].message_count, 7);
+    assert_eq!(state.sessions[0].session_mutation_stamp, Some(42));
+    assert_eq!(
+        state.sessions[0].parent_delegation_id.as_deref(),
+        Some("delegation-1")
+    );
     assert_eq!(state.sessions[1].status, TelegramSessionStatus::Unknown);
     assert_eq!(
         telegram_state_session_status_label(&state.sessions[1].status),
@@ -1049,6 +1123,8 @@ fn telegram_sessions_slash_command_reads_state_and_sends_rendered_list() {
             project_id: Some("project-1".to_owned()),
             status: TelegramSessionStatus::Active,
             message_count: 3,
+            session_mutation_stamp: None,
+            parent_delegation_id: None,
         }],
     });
     let config = telegram_test_config();
@@ -1076,7 +1152,7 @@ fn telegram_sessions_slash_command_reads_state_and_sends_rendered_list() {
     assert_eq!(sent_texts.len(), 1);
     assert!(sent_texts[0].contains("Sessions for TermAl:"));
     assert!(sent_texts[0].contains("- Current (active, 3 messages)"));
-    assert!(sent_texts[0].contains("id: session-1"));
+    assert!(!sent_texts[0].contains("id: session-1"));
 }
 
 #[test]
@@ -1102,6 +1178,8 @@ fn telegram_relay_iteration_drains_updates_before_one_digest_sync() {
             project_id: Some("project-1".to_owned()),
             status: TelegramSessionStatus::Idle,
             message_count: 0,
+            session_mutation_stamp: None,
+            parent_delegation_id: None,
         }],
     });
     let config = telegram_test_config();
@@ -1335,6 +1413,8 @@ fn telegram_relay_iteration_resyncs_after_later_unsynced_update() {
             project_id: Some("project-1".to_owned()),
             status: TelegramSessionStatus::Idle,
             message_count: 0,
+            session_mutation_stamp: None,
+            parent_delegation_id: None,
         }],
     });
     let config = telegram_test_config();
@@ -1406,6 +1486,8 @@ fn telegram_relay_iteration_resyncs_after_later_update_error() {
             project_id: Some("project-1".to_owned()),
             status: TelegramSessionStatus::Idle,
             message_count: 0,
+            session_mutation_stamp: None,
+            parent_delegation_id: None,
         }],
     });
     let config = telegram_test_config();
@@ -1483,6 +1565,8 @@ fn telegram_sessions_command_chunks_oversized_output() {
                 project_id: Some("project-1".to_owned()),
                 status: TelegramSessionStatus::Idle,
                 message_count: 1,
+                session_mutation_stamp: Some(index as u64),
+                parent_delegation_id: None,
             })
             .collect(),
     });
@@ -1507,12 +1591,6 @@ fn telegram_sessions_command_chunks_oversized_output() {
                     && line.ends_with("(idle, 1 message)")
             }),
             "missing session name {index}"
-        );
-        assert!(
-            lines
-                .iter()
-                .any(|line| *line == format!("  id: session-{index}")),
-            "missing session id {index}"
         );
     }
 }
@@ -1543,6 +1621,8 @@ fn telegram_projects_renderer_lists_subscribed_projects_and_active_marker() {
                 project_id: Some("project-1".to_owned()),
                 status: TelegramSessionStatus::Idle,
                 message_count: 1,
+                session_mutation_stamp: None,
+                parent_delegation_id: None,
             },
             TelegramStateSession {
                 id: "session-2".to_owned(),
@@ -1550,6 +1630,8 @@ fn telegram_projects_renderer_lists_subscribed_projects_and_active_marker() {
                 project_id: Some("project-2".to_owned()),
                 status: TelegramSessionStatus::Idle,
                 message_count: 1,
+                session_mutation_stamp: None,
+                parent_delegation_id: None,
             },
         ],
     };
@@ -1668,26 +1750,39 @@ fn telegram_session_command_selects_project_session_target() {
                 project_id: Some("project-2".to_owned()),
                 status: TelegramSessionStatus::Idle,
                 message_count: 0,
+                session_mutation_stamp: None,
+                parent_delegation_id: None,
             },
             TelegramStateSession {
                 id: "session-2".to_owned(),
-                name: "Target".to_owned(),
+                name: "Target Session".to_owned(),
                 project_id: Some("project-1".to_owned()),
                 status: TelegramSessionStatus::Idle,
                 message_count: 0,
+                session_mutation_stamp: None,
+                parent_delegation_id: None,
             },
         ],
     });
     let config = telegram_test_config();
     let mut state = TelegramBotState::default();
 
-    let changed =
-        select_telegram_project_session(&telegram, &termal, &config, &mut state, 42, "session-2")
-            .expect("session selection should succeed");
+    let changed = select_telegram_project_session(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        42,
+        "Target Session",
+    )
+    .expect("session selection should succeed");
 
     assert!(changed);
     assert_eq!(state.selected_session_id.as_deref(), Some("session-2"));
-    assert!(telegram.sent_texts.borrow()[0].contains("Telegram session target set to Target"));
+    assert!(
+        telegram.sent_texts.borrow()[0].contains("Telegram session target set to Target Session")
+    );
+    assert!(!telegram.sent_texts.borrow()[0].contains("id: session-2"));
     assert!(
         state
             .forward_next_assistant_message_session_ids
@@ -1756,6 +1851,8 @@ fn telegram_session_command_rejects_sessions_outside_project() {
             project_id: Some("project-2".to_owned()),
             status: TelegramSessionStatus::Idle,
             message_count: 0,
+            session_mutation_stamp: None,
+            parent_delegation_id: None,
         }],
     });
     let config = telegram_test_config();
@@ -1799,6 +1896,8 @@ fn telegram_session_command_uses_selected_project() {
             project_id: Some("project-2".to_owned()),
             status: TelegramSessionStatus::Idle,
             message_count: 0,
+            session_mutation_stamp: None,
+            parent_delegation_id: None,
         }],
     });
     let mut config = telegram_test_config();
@@ -1843,6 +1942,8 @@ fn telegram_selected_session_forwards_later_local_termal_reply() {
             project_id: Some("project-1".to_owned()),
             status: TelegramSessionStatus::Idle,
             message_count: 1,
+            session_mutation_stamp: None,
+            parent_delegation_id: None,
         }],
     });
     let config = telegram_test_config();
@@ -2525,6 +2626,102 @@ fn telegram_prompt_forwards_active_session_reply_without_completion_footer() {
 }
 
 #[test]
+fn telegram_prompt_reforwards_full_settled_reply_when_active_draft_is_replaced() {
+    let telegram = FakeTelegramSender::new(None);
+    let baseline_termal = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "message-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Old assistant text".to_owned(),
+                }],
+            },
+        },
+    };
+    let mut state = TelegramBotState::default();
+
+    arm_assistant_forwarding_for_telegram_prompt(&baseline_termal, &mut state, "session-1")
+        .expect("arming should succeed");
+
+    let active_termal = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Active,
+                messages: vec![
+                    TelegramSessionFetchMessage::Text {
+                        id: "message-1".to_owned(),
+                        author: "assistant".to_owned(),
+                        text: "Old assistant text".to_owned(),
+                    },
+                    TelegramSessionFetchMessage::Text {
+                        id: "message-2".to_owned(),
+                        author: "assistant".to_owned(),
+                        text: "Draft reply".to_owned(),
+                    },
+                ],
+            },
+        },
+    };
+    assert!(
+        forward_new_assistant_message_if_any(
+            &telegram,
+            &active_termal,
+            &mut state,
+            42,
+            "session-1"
+        )
+        .expect("active draft should forward")
+    );
+
+    let settled_termal = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![
+                    TelegramSessionFetchMessage::Text {
+                        id: "message-1".to_owned(),
+                        author: "assistant".to_owned(),
+                        text: "Old assistant text".to_owned(),
+                    },
+                    TelegramSessionFetchMessage::Text {
+                        id: "message-2".to_owned(),
+                        author: "assistant".to_owned(),
+                        text: "Final reply".to_owned(),
+                    },
+                ],
+            },
+        },
+    };
+    assert!(
+        forward_new_assistant_message_if_any(
+            &telegram,
+            &settled_termal,
+            &mut state,
+            42,
+            "session-1"
+        )
+        .expect("settled replacement should forward")
+    );
+
+    let sent = telegram.sent_texts.borrow();
+    assert_eq!(sent[0], "Draft reply");
+    assert_eq!(sent[1], "Final reply");
+    assert!(sent[2].contains("turn complete"));
+    let cursor = state
+        .assistant_forwarding_cursors
+        .get("session-1")
+        .expect("settled replacement should persist cursor");
+    assert_eq!(cursor.message_id.as_deref(), Some("message-2"));
+    assert_eq!(cursor.text_chars, Some("Final reply".chars().count()));
+    assert_eq!(
+        cursor.text_hash.as_deref(),
+        Some(telegram_assistant_text_hash("Final reply").as_str())
+    );
+}
+
+#[test]
 fn telegram_prompt_digest_refresh_failure_keeps_single_accepted_prompt_armed() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramPromptClient::new(
@@ -2596,6 +2793,8 @@ fn telegram_prompt_uses_selected_session_before_digest_primary() {
             project_id: Some("project-1".to_owned()),
             status: TelegramSessionStatus::Idle,
             message_count: 1,
+            session_mutation_stamp: None,
+            parent_delegation_id: None,
         }],
     });
     let config = telegram_test_config();
@@ -3113,6 +3312,85 @@ fn telegram_active_baseline_reforwards_same_message_growth_after_settle() {
     assert!(changed);
     assert_eq!(telegram.sent_texts.borrow()[0], "Telegram reply");
     assert_eq!(state.forward_next_assistant_message_session_id, None);
+}
+
+#[test]
+fn telegram_same_message_suffix_retry_resumes_inside_suffix_window() {
+    let prefix = "Already forwarded. ";
+    let suffix = format!(
+        "{}\n{}",
+        "a".repeat(TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS),
+        "b".repeat(64)
+    );
+    let full_text = format!("{prefix}{suffix}");
+    let termal = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "message-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: full_text.clone(),
+                }],
+            },
+        },
+    };
+    let mut state = TelegramBotState {
+        assistant_forwarding_cursors: HashMap::from([(
+            "session-1".to_owned(),
+            TelegramAssistantForwardingCursor {
+                message_id: Some("message-1".to_owned()),
+                text_chars: Some(prefix.chars().count()),
+                text_hash: Some(telegram_assistant_text_hash(prefix)),
+                text_start_chars: None,
+                resend_if_grown: true,
+                sent_chunks: None,
+                failed_chunk_send_attempts: None,
+                footer_pending: false,
+                baseline_while_active: false,
+            },
+        )]),
+        ..TelegramBotState::default()
+    };
+    let suffix_chunks = chunk_telegram_message_text(&suffix);
+    assert!(
+        suffix_chunks.len() > 1,
+        "test suffix must span multiple Telegram chunks"
+    );
+
+    let first_attempt = FakeTelegramSender::new(Some(2));
+    let changed =
+        forward_new_assistant_message_if_any(&first_attempt, &termal, &mut state, 42, "session-1")
+            .expect("first suffix forward should handle chunk failure");
+
+    assert!(changed);
+    assert_eq!(first_attempt.sent_texts.borrow().len(), 1);
+    assert_eq!(first_attempt.sent_texts.borrow()[0], suffix_chunks[0]);
+    let cursor = state
+        .assistant_forwarding_cursors
+        .get("session-1")
+        .expect("failed suffix send should persist cursor");
+    assert_eq!(cursor.text_chars, Some(full_text.chars().count()));
+    assert_eq!(cursor.text_start_chars, Some(prefix.chars().count()));
+    assert_eq!(cursor.sent_chunks, Some(1));
+
+    let retry = FakeTelegramSender::new(None);
+    let changed =
+        forward_new_assistant_message_if_any(&retry, &termal, &mut state, 42, "session-1")
+            .expect("retry should resume suffix window");
+
+    assert!(changed);
+    let retried = retry.sent_texts.borrow();
+    assert_eq!(retried[0], suffix_chunks[1]);
+    assert!(!retried[0].starts_with(prefix));
+    assert!(retried[1].contains("turn complete"));
+    let cursor = state
+        .assistant_forwarding_cursors
+        .get("session-1")
+        .expect("completed retry should persist cursor");
+    assert_eq!(cursor.text_chars, Some(full_text.chars().count()));
+    assert_eq!(cursor.text_start_chars, None);
+    assert_eq!(cursor.sent_chunks, None);
 }
 
 #[test]
@@ -3725,6 +4003,8 @@ fn telegram_forwarder_checks_digest_primary_when_armed_session_makes_no_progress
             TelegramAssistantForwardingCursor {
                 message_id: Some("baseline".to_owned()),
                 text_chars: Some("Baseline".chars().count()),
+                text_hash: None,
+                text_start_chars: None,
                 resend_if_grown: false,
                 sent_chunks: None,
                 failed_chunk_send_attempts: None,
@@ -3801,6 +4081,8 @@ fn telegram_forwarder_checks_digest_primary_when_armed_session_only_updates_base
                 TelegramAssistantForwardingCursor {
                     message_id: None,
                     text_chars: None,
+                    text_hash: None,
+                    text_start_chars: None,
                     resend_if_grown: false,
                     sent_chunks: None,
                     failed_chunk_send_attempts: None,
@@ -3813,6 +4095,8 @@ fn telegram_forwarder_checks_digest_primary_when_armed_session_only_updates_base
                 TelegramAssistantForwardingCursor {
                     message_id: Some("baseline".to_owned()),
                     text_chars: Some("Baseline".chars().count()),
+                    text_hash: None,
+                    text_start_chars: None,
                     resend_if_grown: false,
                     sent_chunks: None,
                     failed_chunk_send_attempts: None,
@@ -3896,6 +4180,8 @@ fn telegram_forwarder_keeps_armed_session_across_digest_primary_switch() {
                 TelegramAssistantForwardingCursor {
                     message_id: None,
                     text_chars: None,
+                    text_hash: None,
+                    text_start_chars: None,
                     resend_if_grown: false,
                     sent_chunks: None,
                     failed_chunk_send_attempts: None,
@@ -3908,6 +4194,8 @@ fn telegram_forwarder_keeps_armed_session_across_digest_primary_switch() {
                 TelegramAssistantForwardingCursor {
                     message_id: Some("baseline-b".to_owned()),
                     text_chars: Some("Baseline B".chars().count()),
+                    text_hash: None,
+                    text_start_chars: None,
                     resend_if_grown: false,
                     sent_chunks: None,
                     failed_chunk_send_attempts: None,
@@ -4005,6 +4293,8 @@ fn telegram_forwarder_checks_digest_primary_when_armed_session_errors() {
             TelegramAssistantForwardingCursor {
                 message_id: Some("baseline".to_owned()),
                 text_chars: Some("Baseline".chars().count()),
+                text_hash: None,
+                text_start_chars: None,
                 resend_if_grown: false,
                 sent_chunks: None,
                 failed_chunk_send_attempts: None,
@@ -4076,6 +4366,8 @@ fn telegram_forwarder_suppresses_digest_primary_after_visible_armed_footer_send_
             TelegramAssistantForwardingCursor {
                 message_id: Some("baseline".to_owned()),
                 text_chars: Some("Baseline".chars().count()),
+                text_hash: None,
+                text_start_chars: None,
                 resend_if_grown: false,
                 sent_chunks: None,
                 failed_chunk_send_attempts: None,
@@ -4173,6 +4465,8 @@ fn telegram_forwarder_suppresses_digest_primary_after_armed_first_chunk_send_err
             TelegramAssistantForwardingCursor {
                 message_id: Some("baseline".to_owned()),
                 text_chars: Some("Baseline".chars().count()),
+                text_hash: None,
+                text_start_chars: None,
                 resend_if_grown: false,
                 sent_chunks: None,
                 failed_chunk_send_attempts: None,
@@ -4335,6 +4629,8 @@ fn telegram_forwarder_resumes_long_armed_reply_after_content_chunk_failure() {
             TelegramAssistantForwardingCursor {
                 message_id: Some("baseline".to_owned()),
                 text_chars: Some("Baseline".chars().count()),
+                text_hash: None,
+                text_start_chars: None,
                 resend_if_grown: false,
                 sent_chunks: None,
                 failed_chunk_send_attempts: None,
@@ -4558,6 +4854,8 @@ fn telegram_assistant_forwarding_cursors_are_scoped_per_session() {
             TelegramAssistantForwardingCursor {
                 message_id: Some("session-1-baseline".to_owned()),
                 text_chars: Some("Session one baseline".chars().count()),
+                text_hash: None,
+                text_start_chars: None,
                 resend_if_grown: false,
                 sent_chunks: None,
                 failed_chunk_send_attempts: None,
@@ -5451,6 +5749,8 @@ fn telegram_assistant_forwarding_cursor_state_uses_documented_wire_shape() {
             TelegramAssistantForwardingCursor {
                 message_id: Some("message-1".to_owned()),
                 text_chars: Some(42),
+                text_hash: None,
+                text_start_chars: None,
                 resend_if_grown: true,
                 sent_chunks: Some(3),
                 failed_chunk_send_attempts: Some(2),

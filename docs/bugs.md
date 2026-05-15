@@ -7,82 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Active Telegram reply forwarding can publish mutable streamed drafts
-
-**Severity:** High - `src/telegram.rs:2700-2705` allows Telegram reply forwarding while the destination session is still active or approval-paused, before the final settled assistant payload is authoritative.
-
-Claude and Codex can replace streamed assistant text when the final payload diverges from the draft stream. TermAl models that in the UI with text replacement, but Telegram receives plain sent messages. If an active forwarded draft later changes, shrinks, or rewrites its prefix, the settled forwarding path only handles same-message length growth as an append/suffix case and the chat can keep stale or retracted text.
-
-**Current behavior:**
-- A Telegram-originated active reply can forward assistant text before the turn is settled.
-- Same-message settle handling only forwards appended suffixes when the message grows.
-- Final replacements, shrinkage, or prefix rewrites are not corrected in Telegram.
-
-**Proposal:**
-- Either wait for the settled assistant message again, or store enough sent-content metadata to detect divergence and send a clear correction/full final message on settle.
-- Add a regression where active forwarded draft text is replaced by the settled assistant payload.
-
-## Telegram suffix-only re-forward corrupts chunk retry state
-
-**Severity:** Medium - `src/telegram.rs:2839-2884`, `src/telegram.rs:2918`, and `src/telegram.rs:2992-2999` forward only the appended suffix for same-message growth but persist retry metadata as if the full message window was sent.
-
-When a suffix-only delivery fails partway through, the cursor stores `text_chars` as the full message length and `sent_chunks` as the number of suffix chunks sent. On the next retry, `needs_resend_truncated` is false, so chunking resumes over the full message instead of the suffix window. That can duplicate old prefix text or skip the wrong suffix chunk.
-
-**Current behavior:**
-- Growth forwarding sends only `text.chars().skip(previous_chars)`.
-- Retry state records full-message character length and suffix-local chunk progress.
-- A later retry resumes against the full message chunk list.
-
-**Proposal:**
-- Persist the forwarded window/offset with chunk retry state, or keep full-message resend behavior until retry state can distinguish full-message chunks from suffix-only chunks.
-- Add a long-suffix partial-send regression.
-
-## Claude REPL entry point still accepts a mode that now always fails
-
-**Severity:** High - `src/turns.rs:32-34` rejects Claude REPL turns after `run_claude_turn` was removed, but `src/main.rs:74` / `src/main.rs:406-471` and `docs/architecture.md:64` still advertise and enter Claude REPL mode.
-
-The CLI still accepts `termal claude` or `termal repl claude`, opens a prompt loop, and fails only after the user submits a prompt. The product contract now says Claude must run as a persistent stdio session, so the REPL shortcut should fail before interactive prompt entry or be backed by a persistent runtime.
-
-**Current behavior:**
-- Claude one-shot `claude -p` has been removed.
-- Claude REPL command paths still exist.
-- The user gets a runtime error only after typing a prompt.
-
-**Proposal:**
-- Reject Claude REPL mode during argument parsing and remove/update the stale docs, or implement a persistent-stdio-backed Claude REPL path.
-
-## Claude read-only Bash allowlist still permits execution and writing escapes
-
-**Severity:** High - `src/claude.rs:266-384` tightened the read-only Claude bash allowlist for `find`, `sed -i*` / `sed -e w...`, and `git branch -d/-D/-m/-M/-c/-C`, but write and process-execution paths in the same threat model remain.
-
-The new per-command validators still allow `git diff`, `git log`, and `git show` for any flag set, including `--output=<file>` / `--output <file>`, which writes the diff or log into the named file. They also allow Git helper/execution paths such as `git diff --ext-diff`, `git diff --textconv`, and `git grep -O` / `--open-files-in-pager`. `git branch` deny-list misses `--set-upstream-to=<x>`, `--unset-upstream`, `--edit-description`, and `--create-reflog`, all of which mutate repo state from flags alone. The generic `rg` allow path still admits `rg --pre`, which can execute a preprocessor command. And the sed validator still permits external or write-capable scripts through `sed -f`, sed `e` / `W` commands, and bare positional write scripts such as `sed 'w/tmp/out' input.txt`.
-
-**Current behavior:**
-- Read-only Claude reviewer delegations would auto-allow `git diff --output=/tmp/owned src`, `git log --output=/tmp/owned`, and `git show --output=/tmp/owned <ref>`.
-- They can auto-allow Git commands that invoke external helpers or pagers, including `git diff --ext-diff`, `git diff --textconv`, and `git grep -O`.
-- They also auto-allow `git branch --set-upstream-to=origin/main` and the other mutating `git branch` long flags.
-- They can auto-allow `rg --pre`, `sed -f`, sed `e` / `W` commands, and `sed 'w/tmp/out' input.txt`.
-
-**Proposal:**
-- Add strict per-command validators instead of broad command-name approval.
-- Deny `--output` / `--output=` for `git diff`, `git log`, and `git show`, plus Git external-helper and pager paths such as `--ext-diff`, `--textconv`, and `git grep -O` / `--open-files-in-pager`.
-- Extend the `git branch` deny match to `--set-upstream-to(=...)?`, `--unset-upstream`, `--edit-description`, `--create-reflog`, and any `--copy=` / `--move=` / `--delete=` long-form variants.
-- Deny script/external-helper features such as `rg --pre`, `sed -f`, sed `e` / `W`, and any sed write scripts unless the parser can prove they are safe.
-
-## Claude read-only sed validator denies harmless substitutions containing literal `w`
-
-**Severity:** Medium - `src/claude.rs:350-366` flags any unescaped `w` byte in a sed script as a write, but routine substitutions like `sed -e 's/window/door/' file` or `sed -e 's/^/word /' file` contain a literal `w` in the regex or replacement and are auto-denied.
-
-This makes the unattended `/review-local` path brittle on real codebases: a reviewer agent that needs to inspect text with a literal `w` in a sed substitution can hit a deny even though the command does not write a file.
-
-**Current behavior:**
-- `claude_sed_script_can_write` returns true on the first non-escaped `w` character in the script, regardless of sed syntax position.
-- `sed -e 's/window/door/' file` is denied even though it never writes a file.
-
-**Proposal:**
-- Parse the sed script enough to recognize `s///`, `y///`, addresses, and labels, and flag `w` only when it appears at a top-level command position or inside the flag suffix of `s///`.
-- Add positive tests for common substitution shapes containing literal `w` so the false-positive regression is pinned.
-
 ## Settings tab panel scroll frame rebinds observers on every render
 
 **Severity:** Medium - `ui/src/AppDialogs.tsx:262` creates observer/ref callback plumbing for `SettingsTabPanelScrollFrame`, but the reviewed implementation re-binds observers on every render.
@@ -1011,12 +935,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 - [ ] P2: Add repeated-send waiting-indicator coverage:
   send a second prompt after a completed assistant response while the POST is still in flight, and assert the user still sees send-in-progress feedback until the new prompt appears in session state.
-- [ ] P2: Extend hostile read-only Claude Bash allowlist coverage to remaining write paths:
-  add deny tests for `rg --pre`, `git grep -O` / `--open-files-in-pager`, `git diff --output=foo`, `git log --output foo`, `git show --output=foo`, `git diff --ext-diff`, `git diff --textconv`, `git branch --set-upstream-to=origin/main`, `git branch --unset-upstream`, `git branch --edit-description`, `git branch --create-reflog`, `sed -f script.sed`, sed `e` / `W` commands, and `sed 'w/tmp/out' input.txt`.
-- [ ] P2: Add allow coverage for routine sed substitutions containing literal `w`:
-  pin `sed -e 's/window/door/' file` and `sed -e 's/^/word /' file` as auto-allowed once `claude_sed_script_can_write` understands sed syntax positions.
-- [ ] P2: Pin quote-aware tokenization behavior for read-only Claude Bash:
-  document and test that `grep -n 'two words' file` is denied by the current `split_whitespace` flow, or upgrade the tokenizer to preserve quoted strings as single tokens before validation.
 - [ ] P2: Add SettingsTabPanelScrollFrame observer coverage:
   render and rerender the settings scroll frame, assert observers are not rebound unnecessarily, and assert cleanup disconnects observers.
 - [ ] P2: Pin `read-only-auto-approve` UI option contract:
@@ -1064,9 +982,7 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2 watchdog wake-gap stop-after-progress regression:
   trigger watchdog wake-gap recovery, adopt same-instance `/api/state` progress, and assert no additional reconnect polling occurs before a later live event.
 - [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:
-  refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, active draft text replaced by the settled assistant payload, suffix-only same-message growth with a partial-send retry, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
-- [ ] P2: Pin Claude REPL rejection at argument parsing:
-  run `termal claude` / `termal repl claude` through the CLI parser or a thin integration seam and assert it fails before entering the prompt loop, then update README/architecture docs to stop advertising Claude as a REPL shortcut unless a persistent-stdio-backed REPL is implemented.
+  refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
 - [ ] P2: Document active Telegram reply forwarding invariants:
   add a short contract comment near the active forwarding gate in `src/telegram.rs` explaining when Telegram may see active output, what cursor metadata must preserve, and how settled replacement/divergence is expected to be handled.
 - [ ] P2: Document Claude Code persistent-stdio launch flags:

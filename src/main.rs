@@ -487,8 +487,8 @@ impl Mode {
     /// Parses CLI arguments into an entry-point `Mode`. First arg
     /// selects between the HTTP server (`server`, default), the
     /// Telegram bot (`telegram` / `telegram-bot`), or a REPL
-    /// session (`repl` / `cli` + agent name, or a bare agent name
-    /// like `claude` / `codex`).
+    /// session (`repl` / `cli` + agent name, or a bare REPL-capable
+    /// agent name like `codex`).
     fn parse(args: Vec<String>) -> Result<Self> {
         match args.first().map(String::as_str) {
             None | Some("server") => Ok(Self::Server),
@@ -501,13 +501,18 @@ impl Mode {
                     base_url,
                 })
             }
-            Some("repl") | Some("cli") => Ok(Self::Repl {
-                agent: Agent::parse(args.into_iter().skip(1))?,
-            }),
-            _ => Ok(Self::Repl {
-                agent: Agent::parse(args.into_iter())?,
-            }),
+            Some("repl") | Some("cli") => Self::repl(Agent::parse(args.into_iter().skip(1))?),
+            _ => Self::repl(Agent::parse(args.into_iter())?),
         }
+    }
+
+    fn repl(agent: Agent) -> Result<Self> {
+        if agent == Agent::Claude {
+            bail!(
+                "Claude REPL mode is not supported; create a Claude session in the TermAl server UI so Claude Code can run as a persistent stdio process"
+            );
+        }
+        Ok(Self::Repl { agent })
     }
 }
 

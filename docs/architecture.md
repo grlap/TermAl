@@ -61,7 +61,7 @@ receives it through `config.mcp_servers` on `thread/start` and `thread/resume`.
 The binary has four modes:
 
 1. **Server mode** (default) - starts an axum HTTP server on `127.0.0.1:8787` by default, serves the API, and manages long-lived agent processes. `TERMAL_PORT` can override the port.
-2. **REPL mode** (`repl`, `cli`, or an agent shortcut such as `codex` / `claude`) - interactive terminal loop. Reads prompts from stdin and runs one turn at a time via `run_turn_blocking()`.
+2. **REPL mode** (`repl`, `cli`, or a REPL-capable agent shortcut such as `codex`) - interactive terminal loop. Reads prompts from stdin and runs one turn at a time via `run_turn_blocking()`. Claude is intentionally excluded because Claude Code runs through the long-lived server-side stdio runtime.
 3. **Telegram mode** (`telegram` or `telegram-bot`) - long-polling relay that turns project digests and project actions into a Telegram bot workflow.
 4. **Delegation MCP mode** (`delegation-mcp --parent-session-id <id> [--base-url <origin>]`) - stdio JSON-RPC bridge exposing parent-scoped delegation tools to agent runtimes.
 
