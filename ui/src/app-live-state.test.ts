@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import {
   SESSION_HYDRATION_FIRST_RETRY_DELAY_MS,
+  SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
   resolveAdoptStateSessionOptions,
   useAppLiveState,
   type SessionHydrationTarget,
@@ -1597,6 +1598,180 @@ describe("hydration adoption side effects", () => {
     expect(fetchSession).toHaveBeenCalledTimes(2);
     expect(actionRecoveryInvocations).not.toHaveBeenCalled();
     expect(fetchState).not.toHaveBeenCalled();
+  });
+
+  it("recovers from a transient non-404 hydration failure on the targeted retry", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const hydratedMessages = makeHydrationMessages(1);
+    const transientFailure = new Error("temporary session fetch failure");
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockRejectedValueOnce(transientFailure)
+      .mockResolvedValueOnce({
+        revision: 5,
+        serverInstanceId: "server-a",
+        session: makeSession({
+          messages: hydratedMessages,
+          messagesLoaded: true,
+          messageCount: hydratedMessages.length,
+          sessionMutationStamp: 1,
+        }),
+      });
+    const actionRecoveryInvocations = vi.fn();
+    const params = makeLiveStateParams(
+      makeSession({
+        messagesLoaded: false,
+        messageCount: hydratedMessages.length,
+        sessionMutationStamp: 1,
+      }),
+      actionRecoveryInvocations,
+    );
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+
+    renderLiveStateHarness(params, () => {});
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+    expect(params.reportRequestError).toHaveBeenCalledWith(transientFailure);
+
+    await act(async () => {
+      vi.advanceTimersByTime(SESSION_HYDRATION_FIRST_RETRY_DELAY_MS);
+      await Promise.resolve();
+    });
+
+    expect(fetchSession).toHaveBeenCalledTimes(2);
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(true);
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toEqual(
+      hydratedMessages,
+    );
+    expect(actionRecoveryInvocations).not.toHaveBeenCalled();
+  });
+
+  it("caps automatic hydration retries for persistent non-404 failures", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockRejectedValue(new Error("persistent session fetch failure"));
+    const params = makeLiveStateParams(
+      makeSession({
+        messagesLoaded: false,
+        messageCount: 1,
+        sessionMutationStamp: 1,
+      }),
+    );
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+
+    renderLiveStateHarness(params, () => {});
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+
+    for (let attempt = 0; attempt < SESSION_HYDRATION_MAX_RETRY_ATTEMPTS; attempt += 1) {
+      await act(async () => {
+        vi.advanceTimersByTime(3_000);
+        await Promise.resolve();
+      });
+    }
+
+    expect(fetchSession).toHaveBeenCalledTimes(
+      1 + SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+      await Promise.resolve();
+    });
+    expect(fetchSession).toHaveBeenCalledTimes(
+      1 + SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
+    );
+  });
+
+  it("keeps retrying metadata-only hydration responses past the error retry cap", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const hydratedMessages = makeHydrationMessages(1);
+    let fetchCount = 0;
+    const fetchSession = vi.spyOn(api, "fetchSession").mockImplementation(async () => {
+      fetchCount += 1;
+      const isStillMetadataOnly =
+        fetchCount <= 1 + SESSION_HYDRATION_MAX_RETRY_ATTEMPTS;
+      return {
+        revision: 5,
+        serverInstanceId: "server-a",
+        session: makeSession(
+          isStillMetadataOnly
+            ? {
+                messagesLoaded: false,
+                messageCount: hydratedMessages.length,
+                sessionMutationStamp: 1,
+              }
+            : {
+                messages: hydratedMessages,
+                messagesLoaded: true,
+                messageCount: hydratedMessages.length,
+                sessionMutationStamp: 1,
+              },
+        ),
+      };
+    });
+    const params = makeLiveStateParams(
+      makeSession({
+        messagesLoaded: false,
+        messageCount: hydratedMessages.length,
+        sessionMutationStamp: 1,
+      }),
+    );
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+
+    renderLiveStateHarness(params, () => {});
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+
+    for (
+      let attempt = 0;
+      attempt < SESSION_HYDRATION_MAX_RETRY_ATTEMPTS + 1;
+      attempt += 1
+    ) {
+      await act(async () => {
+        vi.advanceTimersByTime(3_000);
+        await Promise.resolve();
+      });
+    }
+
+    expect(fetchSession).toHaveBeenCalledTimes(
+      2 + SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
+    );
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(true);
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toEqual(
+      hydratedMessages,
+    );
   });
 
   it("does not retry when a fully-loaded hydration response is stale due to local SSE skew", async () => {

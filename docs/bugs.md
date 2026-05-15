@@ -161,20 +161,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 - Fold the Telegram config bag into `UpdateAppSettingsRequest` with a `telegram: Option<UpdateTelegramConfigRequest>` field, returning `StateResponse` like every other setting.
 - Or document explicitly in `docs/features/` why Telegram is intentionally separated (e.g., "secret tokens kept out of the broadcast snapshot").
 
-## `ConversationOverviewRail` per-segment fresh handlers and aria-label per render
-
-**Severity:** Low - up to 160 segment buttons each get fresh `onClick`/`onKeyDown` arrow functions per render, plus a fresh `aria-label` string from `overviewSegmentLabel(segment, projection.items)` (an O(n) lookup against `projection.items.length`).
-
-`ui/src/panels/ConversationOverviewRail.tsx:267-289`. Acceptable today, but as transcripts grow this is the next hot spot if rail rebuilds churn.
-
-**Current behavior:**
-- Each render creates 160 arrow functions and 160 aria-label strings.
-- aria-label computation is O(n) against `projection.items`.
-
-**Proposal:**
-- Memoize per-segment handlers via a single delegated handler that reads the segment index from `data-conversation-overview-index`.
-- Cache aria-labels alongside the segments.
-
 ## `AgentSessionPanel.tsx` exceeds 2000-line architecture rubric threshold
 
 **Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1475` and `ui/src/panels/AgentSessionPanel.test.tsx`. The panel remains over the documented TSX file-size budget, and the composer resize/transition behavior is now a local state machine inside `SessionComposer`.
@@ -549,21 +535,6 @@ data-minimization leak in `/api/state` and SSE `state` broadcasts.
 - Keep full queued-prompt content on targeted full-session responses where the
   active pane actually needs it.
 
-## Hydration retry loop can spam persistent failures
-
-**Severity:** Low - visible-session hydration retries clamp to the last retry delay and can continue indefinitely for persistent non-404 failures.
-
-The new retry loop correctly recovers from stale hydration rejection and transient `fetchSession` failures, but it has no ceiling. A visible metadata-only session whose targeted hydration keeps failing will retry every 3 seconds and repeatedly call the normal request-error reporting path.
-
-**Current behavior:**
-- `ui/src/app-live-state.ts` schedules retry delays of 50 ms, 250 ms, 1000 ms, then 3000 ms, and clamps all later retries to 3000 ms.
-- Non-404 `fetchSession` failures report the request error and schedule another retry.
-- The transient non-404 failure branch is not covered by a regression test.
-
-**Proposal:**
-- Cap repeated user-facing error reporting or retry attempts for the same visible session while keeping event-driven or manual recovery possible.
-- Add a test where the first `/api/sessions/{id}` request fails with a non-404 error, the retry succeeds, and the transcript appears without a tab switch or unrelated state event.
-
 ## Remote test module size slows review and triage
 
 **Severity:** Note - `src/tests/remote.rs` is large enough that focused remote
@@ -736,18 +707,6 @@ A live Chrome profile against the current dev tab showed no runtime exceptions, 
 - Pick one owner for the ref: either drop the post-commit effect and rely entirely on imperative writes, or remove the imperative ref mutations and let the store read through a ref that mirrors state exactly once per commit.
 - Document the invariant in the `session-store.ts` header so future changes do not reintroduce a third writer.
 - Add a regression test that drives two overlapping `handleDraftChange` calls in the same tick and asserts the store snapshot matches the last-written value.
-
-## Composer sizing double-resets on session switch
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.tsx:918-931` runs `resizeComposerInput(true)` synchronously inside a `useLayoutEffect` keyed on `[activeSessionId]`, and a following `useEffect` keyed on `[composerDraft]` schedules another resize via `requestAnimationFrame` on the same first render. The rAF resize is redundant because the synchronous one already measured the new metrics.
-
-**Current behavior:**
-- Layout effect resets cached sizing state and calls `resizeComposerInput(true)` synchronously.
-- Draft effect schedules a second `requestAnimationFrame` resize on the same first render.
-- First render of any newly-activated session does two resize passes instead of one.
-
-**Proposal:**
-- Track a "just-resized-synchronously" flag set in the layout effect and checked at the top of `scheduleComposerResize`, or gate the draft effect with a prev-draft ref so the "initial draft equals committed" case is a no-op.
 
 ## Conversation cards overlap for one frame during scroll through long messages
 

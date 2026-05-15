@@ -2184,6 +2184,7 @@ const SessionComposer = memo(function SessionComposer({
     useState<AgentCommandResolverErrorState | null>(null);
   const isMountedRef = useRef(true);
   const activeSessionIdRef = useRef<string | null>(null);
+  const lastComposerDraftSyncSessionIdRef = useRef<string | null>(null);
 
   // `activeSessionId` is a best-effort identity for draft bookkeeping while
   // the store snapshot catches up. Callers that need capability/session fields
@@ -2506,18 +2507,6 @@ const SessionComposer = memo(function SessionComposer({
     });
   }
 
-  useLayoutEffect(() => {
-    resetComposerSizingState();
-    resetAndCancelScheduledComposerResize();
-    cancelAndRestoreScheduledComposerTransition();
-    resizeComposerInput(true);
-
-    return () => {
-      resetAndCancelScheduledComposerResize();
-      cancelAndRestoreScheduledComposerTransition();
-    };
-  }, [activeSessionId]);
-
   useEffect(() => {
     onDraftCommitRef.current = onDraftCommit;
   }, [onDraftCommit]);
@@ -2688,6 +2677,9 @@ const SessionComposer = memo(function SessionComposer({
       return;
     }
 
+    const previousDraftSyncSessionId = lastComposerDraftSyncSessionIdRef.current;
+    const isSessionSwitch = previousDraftSyncSessionId !== activeSessionId;
+    lastComposerDraftSyncSessionIdRef.current = activeSessionId;
     const previousCommitted = committedDraftsRef.current[activeSessionId];
     const localDraft = localDraftsRef.current[activeSessionId];
 
@@ -2715,10 +2707,22 @@ const SessionComposer = memo(function SessionComposer({
             }
           : { draft: "", sessionId: null },
     );
-    if (didUpdateDomValue) {
+    if (didUpdateDomValue && !isSessionSwitch) {
       scheduleComposerResize(true);
     }
   }, [activeSessionId, committedDraft]);
+
+  useLayoutEffect(() => {
+    resetComposerSizingState();
+    resetAndCancelScheduledComposerResize();
+    cancelAndRestoreScheduledComposerTransition();
+    resizeComposerInput(true);
+
+    return () => {
+      resetAndCancelScheduledComposerResize();
+      cancelAndRestoreScheduledComposerTransition();
+    };
+  }, [activeSessionId]);
 
   useEffect(() => {
     if (!activeSessionId) {

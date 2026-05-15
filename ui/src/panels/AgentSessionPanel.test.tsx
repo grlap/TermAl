@@ -10900,6 +10900,51 @@ describe("AgentSessionPanelFooter", () => {
     expect(onDraftCommit).toHaveBeenCalledWith("session-a", "carry this draft");
   });
 
+  it("does not schedule a redundant composer autosize frame when switching sessions", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    const cancelAnimationFrameMock = vi.fn();
+
+    window.requestAnimationFrame =
+      requestAnimationFrameMock as unknown as typeof requestAnimationFrame;
+    window.cancelAnimationFrame =
+      cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame;
+
+    try {
+      const { rerender } = render(
+        renderFooter({
+          committedDraft: "first draft",
+          isPaneActive: false,
+          session: makeSession("session-a"),
+        }),
+      );
+
+      requestAnimationFrameMock.mockClear();
+
+      act(() => {
+        rerender(
+          renderFooter({
+            committedDraft: "second draft",
+            isPaneActive: false,
+            session: makeSession("session-b"),
+          }),
+        );
+      });
+
+      expect(screen.getByLabelText("Message session-b")).toHaveValue(
+        "second draft",
+      );
+      expect(requestAnimationFrameMock).toHaveBeenCalledTimes(1);
+    } finally {
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
   it("coalesces composer autosize across rapid draft changes", () => {
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;

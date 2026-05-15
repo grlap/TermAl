@@ -302,6 +302,8 @@ const SESSION_HYDRATION_RETRY_DELAYS_MS = [
   1000,
   3000,
 ] as const;
+export const SESSION_HYDRATION_MAX_RETRY_ATTEMPTS =
+  SESSION_HYDRATION_RETRY_DELAYS_MS.length;
 const SLOW_STATE_EVENT_WARNING_MS = 50;
 const STATE_EVENT_METADATA_PEEK_CHARS = 4096;
 
@@ -673,6 +675,7 @@ export function useAppLiveState(
   const hydrationRestartResyncPendingRef = useRef(false);
   const hydrationRetryTimersRef = useRef<Map<string, number>>(new Map());
   const hydrationRetryAttemptsRef = useRef<Map<string, number>>(new Map());
+  const hydrationCappedRetryAttemptsRef = useRef<Map<string, number>>(new Map());
   const forceAdoptNextStateEventRef = useRef(false);
   const laggedRecoveryBaselineRevisionRef = useRef<number | null>(null);
 
@@ -873,6 +876,7 @@ export function useAppLiveState(
       hydrationRetryTimersRef.current.delete(sessionId);
     }
     hydrationRetryAttemptsRef.current.delete(sessionId);
+    hydrationCappedRetryAttemptsRef.current.delete(sessionId);
   }
 
   function cancelHydrationRetries() {
@@ -881,6 +885,7 @@ export function useAppLiveState(
     }
     hydrationRetryTimersRef.current.clear();
     hydrationRetryAttemptsRef.current.clear();
+    hydrationCappedRetryAttemptsRef.current.clear();
   }
 
   function clearHydrationMismatchSessionIds(sessionIds: Iterable<string>) {
@@ -913,7 +918,10 @@ export function useAppLiveState(
     return messageCount >= SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES;
   }
 
-  function scheduleHydrationRetry(sessionId: string) {
+  function scheduleHydrationRetry(
+    sessionId: string,
+    options: { capAttempts?: boolean } = {},
+  ) {
     if (
       !isMountedRef.current ||
       hydrationRetryTimersRef.current.has(sessionId) ||
@@ -923,9 +931,17 @@ export function useAppLiveState(
     }
 
     const attempt = hydrationRetryAttemptsRef.current.get(sessionId) ?? 0;
+    if (options.capAttempts === true) {
+      const cappedAttempt =
+        hydrationCappedRetryAttemptsRef.current.get(sessionId) ?? 0;
+      if (cappedAttempt >= SESSION_HYDRATION_MAX_RETRY_ATTEMPTS) {
+        return;
+      }
+      hydrationCappedRetryAttemptsRef.current.set(sessionId, cappedAttempt + 1);
+    }
     const delayMs =
       SESSION_HYDRATION_RETRY_DELAYS_MS[
-        Math.min(attempt, SESSION_HYDRATION_RETRY_DELAYS_MS.length - 1)
+        Math.min(attempt, SESSION_HYDRATION_MAX_RETRY_ATTEMPTS - 1)
       ];
     hydrationRetryAttemptsRef.current.set(sessionId, attempt + 1);
     const timerId = window.setTimeout(() => {
@@ -1445,6 +1461,7 @@ export function useAppLiveState(
     }
     void (async () => {
       let shouldRetryHydration = false;
+      let retryHydrationWithCap = false;
       try {
         let attemptedTailHydration = false;
         if (shouldStartTailFirstHydration(sessionId, options)) {
@@ -1624,6 +1641,7 @@ export function useAppLiveState(
         }
         reportRequestError(error);
         shouldRetryHydration = true;
+        retryHydrationWithCap = true;
       } finally {
         hydratingSessionIdsRef.current.delete(sessionId);
         if (
@@ -1643,7 +1661,9 @@ export function useAppLiveState(
           return;
         }
         if (shouldRetryHydration) {
-          scheduleHydrationRetry(sessionId);
+          scheduleHydrationRetry(sessionId, {
+            capAttempts: retryHydrationWithCap,
+          });
         }
       }
     })();

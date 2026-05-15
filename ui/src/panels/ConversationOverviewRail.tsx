@@ -1,11 +1,14 @@
 import {
   startTransition,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type FocusEvent,
   type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent,
 } from "react";
 
@@ -40,6 +43,7 @@ const EMPTY_CONVERSATION_OVERVIEW_TAIL_ITEMS: readonly ConversationOverviewTailI
   [];
 const EMPTY_COMPACT_OVERVIEW_VISUAL_SEGMENTS: readonly CompactOverviewVisualSegment[] =
   [];
+const EMPTY_CONVERSATION_OVERVIEW_SEGMENT_LABELS: readonly string[] = [];
 
 type CompactOverviewVisualSegment = {
   id: string;
@@ -128,6 +132,15 @@ export function ConversationOverviewRail({
           )
         : EMPTY_COMPACT_OVERVIEW_VISUAL_SEGMENTS,
     [projection.totalHeightPx, segments, shouldCompactSegments],
+  );
+  const segmentLabels = useMemo(
+    () =>
+      shouldCompactSegments
+        ? EMPTY_CONVERSATION_OVERVIEW_SEGMENT_LABELS
+        : segments.map((segment) =>
+            overviewSegmentLabel(segment, projection.items),
+          ),
+    [projection.items, segments, shouldCompactSegments],
   );
 
   useEffect(() => {
@@ -238,34 +251,64 @@ export function ConversationOverviewRail({
     }
   };
 
-  const focusOverviewSegmentAtIndex = (index: number) => {
+  const focusOverviewSegmentAtIndex = useCallback((index: number) => {
     setFocusedSegmentIndex(index);
     railRef.current
       ?.querySelector<HTMLButtonElement>(
         `[data-conversation-overview-index="${index}"]`,
       )
       ?.focus();
-  };
+  }, []);
 
-  const navigateToSegment = (segment: ConversationOverviewSegment) => {
+  const navigateToSegment = useCallback((
+    segment: ConversationOverviewSegment,
+  ) => {
     const item = projection.items[segment.startItemIndex];
     if (item) {
       onNavigate(item);
     }
-  };
+  }, [onNavigate, projection.items]);
 
-  const navigateToSegmentIndex = (index: number) => {
+  const navigateToSegmentIndex = useCallback((index: number) => {
     const segment = segments[index];
     if (segment) {
       setCompactNavigationSegmentIndex(index);
       navigateToSegment(segment);
     }
-  };
+  }, [navigateToSegment, segments]);
 
-  const handleSegmentKeyDown = (
+  const handleSegmentClick = useCallback(
+    (event: MouseEvent<HTMLButtonElement>) => {
+      if (suppressNextClickRef.current) {
+        suppressNextClickRef.current = false;
+        return;
+      }
+      const index = readOverviewSegmentIndex(event.currentTarget);
+      const segment = index !== null ? segments[index] : null;
+      if (segment) {
+        navigateToSegment(segment);
+      }
+    },
+    [navigateToSegment, segments],
+  );
+
+  const handleSegmentFocus = useCallback(
+    (event: FocusEvent<HTMLButtonElement>) => {
+      const index = readOverviewSegmentIndex(event.currentTarget);
+      if (index !== null) {
+        setFocusedSegmentIndex(index);
+      }
+    },
+    [],
+  );
+
+  const handleSegmentKeyDown = useCallback((
     event: KeyboardEvent<HTMLButtonElement>,
-    index: number,
   ) => {
+    const index = readOverviewSegmentIndex(event.currentTarget);
+    if (index === null) {
+      return;
+    }
     const nextIndex = resolveOverviewSegmentKeyboardIndex(
       event.key,
       index,
@@ -276,7 +319,7 @@ export function ConversationOverviewRail({
     }
     event.preventDefault();
     focusOverviewSegmentAtIndex(nextIndex);
-  };
+  }, [focusOverviewSegmentAtIndex, segments.length]);
 
   const handleCompactRailKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -343,24 +386,18 @@ export function ConversationOverviewRail({
           <button
             key={segment.id}
             type="button"
-            aria-label={overviewSegmentLabel(segment, projection.items)}
+            aria-label={segmentLabels[index]}
             className={`conversation-overview-item conversation-overview-segment is-${segment.kind}${
               segment.status ? ` has-status-${segment.status}` : ""
             }`}
             data-conversation-overview-index={index}
-            onClick={(event) => {
-              if (suppressNextClickRef.current) {
-                suppressNextClickRef.current = false;
-                return;
-              }
-              navigateToSegment(segment);
-            }}
-            onKeyDown={(event) => handleSegmentKeyDown(event, index)}
+            onClick={handleSegmentClick}
+            onKeyDown={handleSegmentKeyDown}
             style={{
               top: `${segment.mapTopPx}px`,
               height: `${segment.mapHeightPx}px`,
             }}
-            onFocus={() => setFocusedSegmentIndex(index)}
+            onFocus={handleSegmentFocus}
             tabIndex={index === clampedFocusedSegmentIndex ? 0 : -1}
           />
         ))
@@ -782,6 +819,15 @@ function overviewSegmentLabel(
   return `${overviewSegmentKindLabel(segment)} ${firstItem.messageIndex + 1}-${
     lastItem.messageIndex + 1
   } (${segment.itemCount} messages)${sample}`;
+}
+
+function readOverviewSegmentIndex(element: HTMLElement): number | null {
+  const rawIndex = element.dataset.conversationOverviewIndex;
+  if (!rawIndex) {
+    return null;
+  }
+  const index = Number(rawIndex);
+  return Number.isInteger(index) && index >= 0 ? index : null;
 }
 
 function overviewSegmentKindLabel(segment: ConversationOverviewSegment) {
