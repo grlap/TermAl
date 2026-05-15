@@ -311,32 +311,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Keep reconnect polling armed until `confirmReconnectRecoveryFromLiveEvent()` runs from a data-bearing SSE event, unless a cause-specific recovery path intentionally documents a different contract.
 - Add a regression that adopts same-instance `/api/state` progress through the timer-driven reconnect path, keeps SSE unopened/unconfirmed, advances timers, and asserts another fallback poll is scheduled.
 
-## SSE `state` events do not honor no-open live-proof recovery
-
-**Severity:** Low - `ui/src/app-live-state.ts:2862`. The reconnect recovery added for data frames without an explicit `EventSource.onopen` only covers delta events. Valid SSE `state` events are also proof that the live stream is delivering data, but the state-event path calls `confirmReconnectRecoveryFromLiveEvent()` without allowing the `reconnectErrorPendingLiveProof` no-open flag.
-
-**Current behavior:**
-- Delta events can confirm reconnect recovery even if the browser never fired `onopen`.
-- Valid `state` events on the same stream do not get the same no-open recovery path.
-- The UI can stay in reconnect recovery longer than needed even though a fresh state event arrived over SSE.
-
-**Proposal:**
-- Allow valid `state` events to confirm no-open reconnect recovery while preserving the bad-event recovery guards.
-- Add a state-event regression beside the delta no-open recovery test.
-
-## Delegated-child footer can render under non-session tabs
-
-**Severity:** Low - `ui/src/SessionPaneView.tsx:1091`. The delegated-child footer gate is evaluated before the source/diff/filesystem/terminal tab suppression. A busy delegated child can therefore render its Stop/status footer below an editor or diff tab even though the active view is not the session transcript.
-
-**Current behavior:**
-- `showDelegatedChildFooter` can keep the footer visible for delegated children.
-- Non-session tab suppression runs after that path and does not fully override it.
-- A footer for the hidden session can appear below unrelated pane content.
-
-**Proposal:**
-- Gate the delegated-child footer on `isSessionTabActive && pane.viewMode === "session"`, or preserve the existing non-session tab suppression before applying the delegated-child exception.
-- Add coverage with a source or diff tab active on a busy delegated child session.
-
 ## SSE recreation control plane is split between `sseEpoch` state and `pendingSseRecreateOnInstanceChangeRef`
 
 **Severity:** Medium - two coordination mechanisms for one concern, increases regression risk and reduces debuggability.
@@ -912,8 +886,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   cover manual retry hitting a transient failure, then the next scheduled attempt adopting a newer same-instance snapshot while polling still continues until SSE confirms.
 - [ ] P2: Add timer-driven reconnect same-instance-progress live-proof regression:
   trigger the non-manual reconnect fallback path, adopt a same-instance `/api/state` snapshot with forward progress while SSE remains unopened/unconfirmed, advance timers, and assert fallback polling continues until a data-bearing live event confirms recovery.
-- [ ] P2: Add no-open SSE `state` live-proof regression:
-  dispatch a valid SSE `state` event after a reconnect error without an explicit `onopen`, and assert it confirms reconnect recovery through the same guarded path as data-bearing delta events.
 - [ ] P2 watchdog wake-gap stop-after-progress regression:
   trigger watchdog wake-gap recovery, adopt same-instance `/api/state` progress, and assert no additional reconnect polling occurs before a later live event.
 - [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:

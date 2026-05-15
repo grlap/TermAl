@@ -2056,6 +2056,15 @@ export function useAppLiveState(
       });
     }
 
+    function confirmReconnectRecoveryFromStateEvent() {
+      const allowWithoutConfirmedOpen =
+        allowReconnectRecoveryWithoutExplicitOpen ||
+        reconnectErrorPendingLiveProof;
+      return confirmReconnectRecoveryFromLiveEvent({
+        allowWithoutConfirmedOpen,
+      });
+    }
+
     function confirmReconnectRecoveryFromAuthoritativeSnapshot() {
       reconnectRecoveryConfirmedSinceLastError = true;
       pendingBadLiveEventRecovery = false;
@@ -2817,7 +2826,14 @@ export function useAppLiveState(
           profiledAdopted = false;
           clearForceAdoptNextStateEvent();
           if (!pendingBadLiveEventRecovery) {
-            confirmReconnectRecoveryFromLiveEvent();
+            const isEqualOrNewerRejectedState =
+              latestStateRevisionRef.current === null ||
+              rawRevision >= latestStateRevisionRef.current;
+            if (isEqualOrNewerRejectedState) {
+              confirmReconnectRecoveryFromStateEvent();
+            } else {
+              confirmReconnectRecoveryFromLiveEvent();
+            }
           }
           profiler?.mark("stalePeekReject");
           setBackendConnectionIssueDetail(null);
@@ -2860,7 +2876,7 @@ export function useAppLiveState(
         // must not clear pending bad-event recovery because it did not repair
         // the malformed event.
         if (adopted || !pendingBadLiveEventRecovery) {
-          confirmReconnectRecoveryFromLiveEvent();
+          confirmReconnectRecoveryFromStateEvent();
         }
         if (adopted) {
           cancelStaleSendResponseRecoveryPollForSessions(

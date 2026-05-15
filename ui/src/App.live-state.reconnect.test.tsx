@@ -2153,6 +2153,172 @@ describe("App live state — reconnect", () => {
     }
   });
 
+  it("disarms reconnect polling after an SSE state event arrives without onopen", async () => {
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
+      makeStateResponse({
+        revision: 7,
+        serverInstanceId: "current-instance",
+        projects: [],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-current", {
+            name: "Current Session",
+            preview: "Fallback snapshot",
+          }),
+        ],
+      }),
+    );
+
+    try {
+      await withFallbackStateHarness(async ({ eventSource, sessionList }) => {
+        let fakeTimersActive = false;
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 5,
+            serverInstanceId: "current-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-current", {
+                name: "Current Session",
+                preview: "Current preview",
+              }),
+            ],
+          }),
+        );
+        await within(sessionList).findByText("Current Session");
+
+        vi.useFakeTimers();
+        fakeTimersActive = true;
+        try {
+          act(() => {
+            eventSource.dispatchError();
+          });
+
+          await dispatchStateEvent(
+            eventSource,
+            makeStateResponse({
+              revision: 6,
+              serverInstanceId: "current-instance",
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-current", {
+                  name: "Current Session",
+                  preview: "Recovered by state event",
+                }),
+              ],
+            }),
+          );
+          await settleAsyncUi();
+
+          expect(
+            within(sessionList).getByText("Recovered by state event"),
+          ).toBeInTheDocument();
+
+          await advanceTimers(RECONNECT_STATE_RESYNC_DELAY_MS * 4);
+          await settleAsyncUi();
+
+          expect(fetchStateSpy).not.toHaveBeenCalled();
+        } finally {
+          if (fakeTimersActive) {
+            vi.useRealTimers();
+          }
+        }
+      });
+    } finally {
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
+      fetchStateSpy.mockRestore();
+    }
+  });
+
+  it("disarms reconnect polling after an equal SSE state event arrives without onopen", async () => {
+    const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
+      makeStateResponse({
+        revision: 6,
+        serverInstanceId: "current-instance",
+        projects: [],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-current", {
+            name: "Current Session",
+            preview: "Fallback snapshot",
+          }),
+        ],
+      }),
+    );
+
+    try {
+      await withFallbackStateHarness(async ({ eventSource, sessionList }) => {
+        let fakeTimersActive = false;
+        await dispatchOpenedStateEvent(
+          eventSource,
+          makeStateResponse({
+            revision: 5,
+            serverInstanceId: "current-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-current", {
+                name: "Current Session",
+                preview: "Current preview",
+              }),
+            ],
+          }),
+        );
+        await within(sessionList).findByText("Current Session");
+
+        vi.useFakeTimers();
+        fakeTimersActive = true;
+        try {
+          act(() => {
+            eventSource.dispatchError();
+          });
+
+          await dispatchStateEvent(
+            eventSource,
+            makeStateResponse({
+              revision: 5,
+              serverInstanceId: "current-instance",
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-current", {
+                  name: "Current Session",
+                  preview: "Equal state event",
+                }),
+              ],
+            }),
+          );
+          await settleAsyncUi();
+
+          await advanceTimers(RECONNECT_STATE_RESYNC_DELAY_MS * 4);
+          await settleAsyncUi();
+
+          expect(fetchStateSpy).not.toHaveBeenCalled();
+        } finally {
+          if (fakeTimersActive) {
+            vi.useRealTimers();
+          }
+        }
+      });
+    } finally {
+      if (vi.isFakeTimers()) {
+        vi.useRealTimers();
+      }
+      fetchStateSpy.mockRestore();
+    }
+  });
+
   it("retries initial-connect fallback resyncs after a transient /api/state failure", async () => {
     await withSuppressedActWarnings(async () => {
       let fetchStateCallCount = 0;
@@ -2669,11 +2835,11 @@ describe("App live state — reconnect", () => {
 
       act(() => {
         // Intentionally omit dispatchOpen(): without a confirmed stream reopen,
-        // a same-revision state snapshot is treated as stale and must not cancel
-        // the fast reconnect fallback.
+        // a lower-revision state snapshot is treated as stale and must not
+        // cancel the fast reconnect fallback.
         eventSource.dispatchError();
         eventSource.dispatchNamedEvent("state", {
-          revision: 1,
+          revision: 0,
           projects: [],
           sessions: [
             makeSession("session-1", {
