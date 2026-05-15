@@ -512,19 +512,6 @@ through a broad module instead of a small boundary with a clear contract.
 - Consider extracting the heavy Markdown/code rendering path separately so
   virtualization policy and content rendering can evolve independently.
 
-## `CodexUpdated` delta carries a full subsystem snapshot despite the "delta" name
-
-**Severity:** Medium - `src/wire.rs::DeltaEvent::CodexUpdated { revision, codex: CodexState }` publishes the entire `CodexState` on every rate-limit tick and every notice addition. The architectural contract the codebase otherwise respects is "state events for full snapshots, delta events for scoped changes". `CodexUpdated` is small today (rate_limits + notices capped at 5), but the naming invites future bulky additions to `CodexState` (login state, model-availability maps, per-provider metadata) to be broadcast in full on every tiny change.
-
-**Current behavior:**
-- The variant ships a full `CodexState` payload.
-- Two publish sites in `src/session_sync.rs` send the complete snapshot even when only the rate limits changed.
-- Wire name and shape set a precedent for "delta = tiny changes" that this variant violates.
-
-**Proposal:**
-- Split into narrower variants: `CodexRateLimitsUpdated { revision, rate_limits }` and `CodexNoticesUpdated { revision, notices }`. The two call sites in `session_sync.rs` already pick their publish trigger, so split dispatch is straightforward.
-- Alternatively, add a source-level comment on the `CodexUpdated` variant stating that `codex` is intentionally the full subsystem snapshot and any future field addition to `CodexState` must reconsider whether a narrower event is needed.
-
 ## Focused live sessions monopolize the main thread during state adoption
 
 **Severity:** Medium - a visible, focused TermAl tab with an active Codex session can spend multiple seconds of an 8 s sample on main-thread work even when no requests fail and no exceptions fire.

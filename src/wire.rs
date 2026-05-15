@@ -1950,10 +1950,13 @@ enum DeltaEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_mutation_stamp: Option<u64>,
     },
+    /// Process-global Codex runtime metadata. This event intentionally carries
+    /// the full, currently-small CodexState snapshot (rate limits plus capped
+    /// notices) so clients replace the whole subsystem atomically instead of
+    /// merging partial patches. Split this into narrower delta variants before
+    /// adding independently-changing fields or payloads larger than runtime
+    /// chrome.
     CodexUpdated {
-        // Process-global Codex runtime metadata. The payload is the latest
-        // CodexState snapshot for this small subsystem, not localized remote
-        // proxy state.
         revision: u64,
         codex: CodexState,
     },
