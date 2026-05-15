@@ -1043,13 +1043,13 @@ export const PaneTabs = memo(function PaneTabs({
         ? createPortal(
             <div
               ref={fileTabContextMenuRef}
-              className="pane-tab-context-menu panel"
+              className="context-menu pane-tab-context-menu panel"
               role="menu"
               aria-label="File tab actions"
               style={fileTabContextMenuStyle}
             >
               <button
-                className="pane-tab-context-menu-item"
+                className="context-menu-item pane-tab-context-menu-item"
                 type="button"
                 role="menuitem"
                 onClick={() => void handleCopyTabPath(fileTabContextMenu.path, closeFileTabContextMenu)}
@@ -1057,7 +1057,7 @@ export const PaneTabs = memo(function PaneTabs({
                 Copy Path
               </button>
               <button
-                className="pane-tab-context-menu-item"
+                className="context-menu-item pane-tab-context-menu-item"
                 type="button"
                 role="menuitem"
                 disabled={!fileTabContextMenu.relativePath}
@@ -1068,7 +1068,7 @@ export const PaneTabs = memo(function PaneTabs({
                 Copy Relative Path
               </button>
               <button
-                className="pane-tab-context-menu-item pane-tab-context-menu-item-danger"
+                className="context-menu-item context-menu-item-danger pane-tab-context-menu-item"
                 type="button"
                 role="menuitem"
                 onClick={() => {
@@ -1087,13 +1087,13 @@ export const PaneTabs = memo(function PaneTabs({
         ? createPortal(
             <div
               ref={gitTabContextMenuRef}
-              className="pane-tab-context-menu panel"
+              className="context-menu pane-tab-context-menu panel"
               role="menu"
               aria-label="Git tab actions"
               style={gitTabContextMenuStyle}
             >
               <button
-                className="pane-tab-context-menu-item"
+                className="context-menu-item pane-tab-context-menu-item"
                 type="button"
                 role="menuitem"
                 disabled
@@ -1101,7 +1101,7 @@ export const PaneTabs = memo(function PaneTabs({
                 {formatGitTabBranchMenuLabel(gitTabContextMenu.status, gitTabContextMenu.isLoadingStatus)}
               </button>
               <button
-                className="pane-tab-context-menu-item"
+                className="context-menu-item pane-tab-context-menu-item"
                 type="button"
                 role="menuitem"
                 disabled
@@ -1109,7 +1109,7 @@ export const PaneTabs = memo(function PaneTabs({
                 {formatGitTabUpstreamMenuLabel(gitTabContextMenu.status, gitTabContextMenu.isLoadingStatus)}
               </button>
               <button
-                className="pane-tab-context-menu-item"
+                className="context-menu-item pane-tab-context-menu-item"
                 type="button"
                 role="menuitem"
                 disabled
@@ -1118,7 +1118,7 @@ export const PaneTabs = memo(function PaneTabs({
               </button>
               {gitTabContextMenu.statusError ? (
                 <button
-                  className="pane-tab-context-menu-item"
+                  className="context-menu-item pane-tab-context-menu-item"
                   type="button"
                   role="menuitem"
                   disabled
@@ -1128,7 +1128,7 @@ export const PaneTabs = memo(function PaneTabs({
               ) : null}
               {gitTabContextMenu.statusMessage ? (
                 <button
-                  className="pane-tab-context-menu-item"
+                  className="context-menu-item pane-tab-context-menu-item"
                   type="button"
                   role="menuitem"
                   disabled
@@ -1137,7 +1137,7 @@ export const PaneTabs = memo(function PaneTabs({
                 </button>
               ) : null}
               <button
-                className="pane-tab-context-menu-item"
+                className="context-menu-item pane-tab-context-menu-item"
                 type="button"
                 role="menuitem"
                 disabled={!canSyncGitTabContextMenu(gitTabContextMenu)}
@@ -1146,7 +1146,7 @@ export const PaneTabs = memo(function PaneTabs({
                 {gitTabContextMenu.pendingAction === "sync" ? "Syncing..." : "Git Sync"}
               </button>
               <button
-                className="pane-tab-context-menu-item"
+                className="context-menu-item pane-tab-context-menu-item"
                 type="button"
                 role="menuitem"
                 disabled={!canPushGitTabContextMenu(gitTabContextMenu)}
@@ -1155,7 +1155,7 @@ export const PaneTabs = memo(function PaneTabs({
                 {gitTabContextMenu.pendingAction === "push" ? "Pushing..." : "Git Push"}
               </button>
               <button
-                className="pane-tab-context-menu-item pane-tab-context-menu-item-danger"
+                className="context-menu-item context-menu-item-danger pane-tab-context-menu-item"
                 type="button"
                 role="menuitem"
                 onClick={() => {

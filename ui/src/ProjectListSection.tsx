@@ -255,7 +255,7 @@ export function ProjectListSection({
         ? createPortal(
             <div
               ref={contextMenuRef}
-              className="pane-tab-context-menu panel project-context-menu"
+              className="context-menu pane-tab-context-menu panel project-context-menu"
               role="menu"
               aria-label={`${contextMenuProject.name} project actions`}
               style={
@@ -266,7 +266,7 @@ export function ProjectListSection({
               }
             >
               <button
-                className="pane-tab-context-menu-item"
+                className="context-menu-item pane-tab-context-menu-item"
                 type="button"
                 role="menuitem"
                 onClick={() => {
@@ -277,7 +277,7 @@ export function ProjectListSection({
                 Start new session
               </button>
               <button
-                className="pane-tab-context-menu-item pane-tab-context-menu-item-danger"
+                className="context-menu-item context-menu-item-danger pane-tab-context-menu-item"
                 type="button"
                 role="menuitem"
                 onClick={() => {

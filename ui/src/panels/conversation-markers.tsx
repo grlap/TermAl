@@ -764,7 +764,7 @@ export function useConversationMarkerContextMenu({
     ? createPortal(
         <div
           ref={menuRef}
-          className="conversation-marker-context-menu"
+          className="context-menu conversation-marker-context-menu"
           role={contextMenu.mode === "create" ? "dialog" : "menu"}
           aria-label={
             contextMenu.mode === "create"
@@ -836,7 +836,7 @@ export function useConversationMarkerContextMenu({
                 ref={firstMenuItemRef}
                 type="button"
                 role="menuitem"
-                className="conversation-marker-context-menu-item"
+                className="context-menu-item conversation-marker-context-menu-item"
                 onClick={showCreateMarkerForm}
               >
                 Add checkpoint marker
@@ -849,7 +849,7 @@ export function useConversationMarkerContextMenu({
                       key={marker.id}
                       type="button"
                       role="menuitem"
-                      className="conversation-marker-context-menu-item conversation-marker-context-menu-item-danger"
+                      className="context-menu-item context-menu-item-danger conversation-marker-context-menu-item"
                       onClick={() => {
                         onDeleteConversationMarker(sessionId, marker.id);
                         closeContextMenu();
@@ -864,7 +864,7 @@ export function useConversationMarkerContextMenu({
               <button
                 type="button"
                 role="menuitem"
-                className="conversation-marker-context-menu-item"
+                className="context-menu-item conversation-marker-context-menu-item"
                 onClick={() => {
                   onSetMarkerPanelVisible(!isMarkerPanelVisible);
                   closeContextMenu({ restoreFocus: true });

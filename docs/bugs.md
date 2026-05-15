@@ -176,22 +176,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 **Proposal:**
 - Defer (no concrete bug today). Consider in a future round whether per-pane queues would simplify reasoning, especially as multi-pane scenarios become more common.
 
-## CSS context-menu pattern duplicated between pane-tab and conversation-marker variants
-
-**Severity:** Low - two near-third "context menu" features now share ~80% of the same CSS shell; the third copy will be the trigger for extraction but it should be promoted to a `.context-menu` family before then.
-
-`ui/src/styles.css:3981-4023` (new `.conversation-marker-context-menu*`) and `:2506-2546` (existing `.pane-tab-context-menu*`). Same `position: fixed`, z-index ordering, `color-mix(in srgb, var(--surface-white) ...)` background pattern, `box-shadow: 0 20px 40px color-mix(in srgb, var(--ink) 14%, transparent)`, hover/focus blue mix, `*-item-danger` red. Differences are only `min-width`, `border-radius` (custom 1rem vs `var(--control-radius)`), padding values, and `border: 1px solid var(--line)` vs unbordered. The pattern is reusable as a `.context-menu` / `.context-menu-item` / `.context-menu-item-danger` family.
-
-**Current behavior:**
-- Two near-duplicate context-menu CSS blocks.
-- Small variations are unique-to-call-site.
-- Future third instance would copy a third near-duplicate.
-
-**Proposal:**
-- Promote the shared shell + item rules into a base `.context-menu` set.
-- Let `.pane-tab-context-menu` and `.conversation-marker-context-menu` carry only their unique tweaks (`min-width`, `border-radius`, `border`, separator).
-- Defer if the variations are deliberately divergent — but mark this as a known cluster so the third instance triggers extraction.
-
 ## `SessionPaneView.tsx` near-bottom early-out is captured at `isSending` flip, not reactive
 
 **Severity:** Low - the catchup branch never schedules for the started-near-bottom-then-scrolled-away case, contrary to what the comment promises.

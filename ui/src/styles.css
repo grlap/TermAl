@@ -2672,26 +2672,21 @@ textarea {
   color: var(--ink);
 }
 
-.pane-tab-context-menu {
+/* Shared shell for pane-tab, project, and conversation-marker menus.
+   Variants below keep only their unique sizing, border, and radius tweaks. */
+.context-menu {
   position: fixed;
-  left: 0;
-  top: 0;
-  z-index: 18;
-  min-width: 12.5rem;
   padding: 0.35rem;
-  border-radius: 1rem;
   background: color-mix(in srgb, var(--surface-white) 90%, white 10%);
   box-shadow: 0 20px 40px color-mix(in srgb, var(--ink) 14%, transparent);
 }
 
-.pane-tab-context-menu-item {
+.context-menu-item {
   display: flex;
   width: 100%;
   align-items: center;
   justify-content: flex-start;
-  padding: 0.72rem 0.9rem;
   border: 0;
-  border-radius: 0.8rem;
   background: transparent;
   color: var(--ink);
   font: inherit;
@@ -2699,19 +2694,33 @@ textarea {
   text-align: left;
 }
 
-.pane-tab-context-menu-item:hover:not(:disabled),
-.pane-tab-context-menu-item:focus-visible {
+.context-menu-item:hover:not(:disabled),
+.conversation-marker-context-menu-item:hover,
+.context-menu-item:focus-visible {
   background: color-mix(in srgb, var(--accent-blue-bg) 58%, var(--surface-white));
   outline: none;
 }
 
-.pane-tab-context-menu-item:disabled {
+.context-menu-item:disabled {
   color: var(--muted);
   cursor: default;
 }
 
-.pane-tab-context-menu-item-danger {
+.context-menu-item-danger {
   color: var(--signal-red);
+}
+
+.pane-tab-context-menu {
+  left: 0;
+  top: 0;
+  z-index: 18;
+  min-width: 12.5rem;
+  border-radius: 1rem;
+}
+
+.pane-tab-context-menu-item {
+  padding: 0.72rem 0.9rem;
+  border-radius: 0.8rem;
 }
 
 .project-context-menu {
@@ -4147,11 +4156,9 @@ textarea {
 }
 
 .conversation-marker-context-menu {
-  position: fixed;
   z-index: 28;
   min-width: 13.5rem;
   max-width: min(18rem, calc(100vw - 1rem));
-  padding: 0.35rem;
   border: 1px solid var(--line);
   border-radius: var(--control-radius);
   background:
@@ -4166,30 +4173,10 @@ textarea {
 }
 
 .conversation-marker-context-menu-item {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: flex-start;
   min-height: 2.15rem;
   padding: 0.62rem 0.72rem;
-  border: 0;
   border-radius: calc(var(--control-radius) - 2px);
-  background: transparent;
-  color: var(--ink);
-  cursor: pointer;
-  font: inherit;
   line-height: 1.2;
-  text-align: left;
-}
-
-.conversation-marker-context-menu-item:hover,
-.conversation-marker-context-menu-item:focus-visible {
-  background: color-mix(in srgb, var(--accent-blue-bg) 58%, var(--surface-white));
-  outline: none;
-}
-
-.conversation-marker-context-menu-item-danger {
-  color: var(--signal-red);
 }
 
 .conversation-marker-context-menu-form {
