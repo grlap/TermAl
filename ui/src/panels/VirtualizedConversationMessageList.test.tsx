@@ -7,6 +7,8 @@ import {
   waitFor,
 } from "@testing-library/react";
 import type { RefObject } from "react";
+import { flushSync } from "react-dom";
+import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -809,6 +811,114 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
     } finally {
       harness.restore();
+    }
+  });
+
+  it("marks post-activation measuring during the active commit", () => {
+    const messages = makeTextMessages(4);
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const scrollNode = document.createElement("div");
+    const rootNode = document.createElement("div");
+    document.body.appendChild(rootNode);
+    let root: Root | null = createRoot(rootNode);
+
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(scrollNode, "clientWidth", {
+      configurable: true,
+      get: () => 1000,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => 0,
+      set: () => {},
+    });
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    window.ResizeObserver =
+      ResizeObserverMock as unknown as typeof ResizeObserver;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      queueMicrotask(() => callback(performance.now()));
+      return 1;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame =
+      vi.fn() as unknown as typeof cancelAnimationFrame;
+    Element.prototype.getBoundingClientRect =
+      function getBoundingClientRectMock() {
+        const element = this as HTMLElement;
+        if (element === scrollNode) {
+          return makeDomRect({ height: 500, width: 1000 });
+        }
+        if (element.classList.contains("virtualized-message-slot")) {
+          return makeDomRect({ height: 0, width: 1000 });
+        }
+        return makeDomRect({ height: 500, width: 1000 });
+      };
+
+    const scrollContainerRef = {
+      current: scrollNode,
+    } as RefObject<HTMLElement | null>;
+    const renderList = (isActive: boolean) => (
+      <VirtualizedConversationMessageList
+        isActive={isActive}
+        renderMessageCard={(message) => (
+          <article className="message-card">{message.id}</article>
+        )}
+        sessionId="session-a"
+        messages={messages}
+        scrollContainerRef={scrollContainerRef}
+        onApprovalDecision={() => {}}
+        onUserInputSubmit={() => {}}
+        onMcpElicitationSubmit={() => {}}
+        onCodexAppRequestSubmit={() => {}}
+      />
+    );
+
+    try {
+      act(() => {
+        flushSync(() => {
+          root!.render(renderList(false));
+        });
+
+        expect(
+          rootNode.querySelector(".virtualized-message-list"),
+        ).not.toHaveClass("is-measuring-post-activation");
+      });
+
+      act(() => {
+        flushSync(() => {
+          root!.render(renderList(true));
+        });
+
+        expect(rootNode.querySelector(".virtualized-message-list")).toHaveClass(
+          "is-measuring-post-activation",
+        );
+      });
+    } finally {
+      act(() => {
+        flushSync(() => {
+          root?.unmount();
+        });
+      });
+      root = null;
+      rootNode.remove();
+      window.ResizeObserver = OriginalResizeObserver;
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     }
   });
 
