@@ -669,8 +669,9 @@ The UI should still not evolve toward:
 
 **Invocation:**
 ```bash
-claude -p --output-format stream-json --input-format stream-json \
+claude --output-format stream-json --input-format stream-json \
   --verbose --permission-prompt-tool stdio --include-partial-messages \
+  --setting-sources user,project,local --no-chrome --replay-user-messages \
   --resume <external_session_id>   # if resuming
 ```
 

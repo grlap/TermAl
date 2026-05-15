@@ -457,8 +457,6 @@ fn run_repl(agent: Agent) -> Result<()> {
                 codex_reasoning_effort: Some(default_codex_reasoning_effort()),
                 codex_sandbox_mode: Some(default_codex_sandbox_mode()),
                 agent,
-                claude_approval_mode: Some(default_claude_approval_mode()),
-                claude_effort: Some(default_claude_effort()),
                 cwd: cwd.clone(),
                 model: agent.default_model().to_owned(),
                 prompt: prompt.to_owned(),

@@ -7,6 +7,50 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Active Telegram reply forwarding can publish mutable streamed drafts
+
+**Severity:** High - `src/telegram.rs:2700-2705` allows Telegram reply forwarding while the destination session is still active or approval-paused, before the final settled assistant payload is authoritative.
+
+Claude and Codex can replace streamed assistant text when the final payload diverges from the draft stream. TermAl models that in the UI with text replacement, but Telegram receives plain sent messages. If an active forwarded draft later changes, shrinks, or rewrites its prefix, the settled forwarding path only handles same-message length growth as an append/suffix case and the chat can keep stale or retracted text.
+
+**Current behavior:**
+- A Telegram-originated active reply can forward assistant text before the turn is settled.
+- Same-message settle handling only forwards appended suffixes when the message grows.
+- Final replacements, shrinkage, or prefix rewrites are not corrected in Telegram.
+
+**Proposal:**
+- Either wait for the settled assistant message again, or store enough sent-content metadata to detect divergence and send a clear correction/full final message on settle.
+- Add a regression where active forwarded draft text is replaced by the settled assistant payload.
+
+## Telegram suffix-only re-forward corrupts chunk retry state
+
+**Severity:** Medium - `src/telegram.rs:2839-2884`, `src/telegram.rs:2918`, and `src/telegram.rs:2992-2999` forward only the appended suffix for same-message growth but persist retry metadata as if the full message window was sent.
+
+When a suffix-only delivery fails partway through, the cursor stores `text_chars` as the full message length and `sent_chunks` as the number of suffix chunks sent. On the next retry, `needs_resend_truncated` is false, so chunking resumes over the full message instead of the suffix window. That can duplicate old prefix text or skip the wrong suffix chunk.
+
+**Current behavior:**
+- Growth forwarding sends only `text.chars().skip(previous_chars)`.
+- Retry state records full-message character length and suffix-local chunk progress.
+- A later retry resumes against the full message chunk list.
+
+**Proposal:**
+- Persist the forwarded window/offset with chunk retry state, or keep full-message resend behavior until retry state can distinguish full-message chunks from suffix-only chunks.
+- Add a long-suffix partial-send regression.
+
+## Claude REPL entry point still accepts a mode that now always fails
+
+**Severity:** High - `src/turns.rs:32-34` rejects Claude REPL turns after `run_claude_turn` was removed, but `src/main.rs:74` / `src/main.rs:406-471` and `docs/architecture.md:64` still advertise and enter Claude REPL mode.
+
+The CLI still accepts `termal claude` or `termal repl claude`, opens a prompt loop, and fails only after the user submits a prompt. The product contract now says Claude must run as a persistent stdio session, so the REPL shortcut should fail before interactive prompt entry or be backed by a persistent runtime.
+
+**Current behavior:**
+- Claude one-shot `claude -p` has been removed.
+- Claude REPL command paths still exist.
+- The user gets a runtime error only after typing a prompt.
+
+**Proposal:**
+- Reject Claude REPL mode during argument parsing and remove/update the stale docs, or implement a persistent-stdio-backed Claude REPL path.
+
 ## Claude read-only Bash allowlist still permits execution and writing escapes
 
 **Severity:** High - `src/claude.rs:266-384` tightened the read-only Claude bash allowlist for `find`, `sed -i*` / `sed -e w...`, and `git branch -d/-D/-m/-M/-c/-C`, but write and process-execution paths in the same threat model remain.
@@ -1020,7 +1064,13 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 - [ ] P2 watchdog wake-gap stop-after-progress regression:
   trigger watchdog wake-gap recovery, adopt same-instance `/api/state` progress, and assert no additional reconnect polling occurs before a later live event.
 - [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:
-  refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
+  refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, active draft text replaced by the settled assistant payload, suffix-only same-message growth with a partial-send retry, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
+- [ ] P2: Pin Claude REPL rejection at argument parsing:
+  run `termal claude` / `termal repl claude` through the CLI parser or a thin integration seam and assert it fails before entering the prompt loop, then update README/architecture docs to stop advertising Claude as a REPL shortcut unless a persistent-stdio-backed REPL is implemented.
+- [ ] P2: Document active Telegram reply forwarding invariants:
+  add a short contract comment near the active forwarding gate in `src/telegram.rs` explaining when Telegram may see active output, what cursor metadata must preserve, and how settled replacement/divergence is expected to be handled.
+- [ ] P2: Document Claude Code persistent-stdio launch flags:
+  add a short rationale near `claude_cli_persistent_args` for the VS Code-aligned flags (`--setting-sources`, `--no-chrome`, `--replay-user-messages`) and split the argv regression into focused tests if the current lifecycle test becomes hard to read.
 - [ ] P2: Cover Telegram relay active-project reconciliation:
   start an in-process relay with subscribed projects but no default and assert startup fails or status exposes the effective `activeProjectId`; delete a project used by a running relay and assert the relay is stopped or restarted without the deleted id.
 - [ ] P2: Cover Telegram relay runtime lifecycle seam:

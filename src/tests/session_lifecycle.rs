@@ -49,52 +49,16 @@ fn creates_claude_sessions_with_default_ask_mode() {
 }
 
 // pins that the sentinel `"default"` model tells the cli layer to
-// omit `--model` entirely so claude code picks its own default,
+// omit `--model` entirely so Claude Code picks its own default,
 // while explicit models are forwarded and claude-specific flags
-// (plan mode, effort, resume) serialize correctly. guards against
-// regressions that would hard-code sonnet or drop cli args.
+// (plan mode, effort, resume) serialize correctly. This also pins
+// the VS Code-style persistent stdio contract: no `-p` one-shot mode.
 #[test]
 fn claude_default_model_delegates_to_claude_cli_default() {
     assert_eq!(Agent::Claude.default_model(), "default");
     assert_eq!(claude_cli_model_arg("default"), None);
     assert_eq!(claude_cli_model_arg(" Default "), None);
     assert_eq!(claude_cli_model_arg("opus"), Some("opus"));
-    assert_eq!(
-        claude_cli_oneshot_args(
-            " default ",
-            ClaudeApprovalMode::Ask,
-            ClaudeEffortLevel::Default,
-            ClaudeCliSessionArg::SessionId("session-a"),
-        ),
-        vec![
-            "-p",
-            "--verbose",
-            "--output-format",
-            "stream-json",
-            "--include-partial-messages",
-            "--session-id",
-            "session-a",
-        ],
-    );
-    assert_eq!(
-        claude_cli_oneshot_args(
-            "opus",
-            ClaudeApprovalMode::Ask,
-            ClaudeEffortLevel::Default,
-            ClaudeCliSessionArg::SessionId("session-a"),
-        ),
-        vec![
-            "--model",
-            "opus",
-            "-p",
-            "--verbose",
-            "--output-format",
-            "stream-json",
-            "--include-partial-messages",
-            "--session-id",
-            "session-a",
-        ],
-    );
     assert_eq!(
         claude_cli_persistent_args(
             "opus",
@@ -105,15 +69,18 @@ fn claude_default_model_delegates_to_claude_cli_default() {
         vec![
             "--model",
             "opus",
-            "-p",
             "--verbose",
             "--output-format",
             "stream-json",
+            "--setting-sources",
+            "user,project,local",
+            "--no-chrome",
             "--input-format",
             "stream-json",
             "--include-partial-messages",
             "--permission-prompt-tool",
             "stdio",
+            "--replay-user-messages",
             "--permission-mode",
             "plan",
             "--effort",
@@ -130,15 +97,18 @@ fn claude_default_model_delegates_to_claude_cli_default() {
             None,
         ),
         vec![
-            "-p",
             "--verbose",
             "--output-format",
             "stream-json",
+            "--setting-sources",
+            "user,project,local",
+            "--no-chrome",
             "--input-format",
             "stream-json",
             "--include-partial-messages",
             "--permission-prompt-tool",
             "stdio",
+            "--replay-user-messages",
         ],
     );
 }

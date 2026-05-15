@@ -313,8 +313,6 @@ struct TurnConfig {
     codex_reasoning_effort: Option<CodexReasoningEffort>,
     codex_sandbox_mode: Option<CodexSandboxMode>,
     agent: Agent,
-    claude_approval_mode: Option<ClaudeApprovalMode>,
-    claude_effort: Option<ClaudeEffortLevel>,
     cwd: String,
     model: String,
     prompt: String,
@@ -799,4 +797,3 @@ fn codex_sandbox_policy_value(mode: CodexSandboxMode) -> Value {
         }),
     }
 }
-

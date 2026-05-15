@@ -7,13 +7,12 @@
 //
 // - `claude_cli_model_arg` — picks the `--model <slug>` or passes
 //   through None to let Claude choose
-// - `push_claude_cli_common_args` — shared argv across oneshot /
-//   persistent sessions
+// - `push_claude_cli_common_args` — shared argv for the long-lived stdio
+//   runtime
 // - `push_claude_cli_permission_args` — maps our
 //   `ClaudeApprovalMode` enum to the right `--permission-mode` flag
-// - `claude_cli_oneshot_args` — argv for a one-turn invocation
-// - `claude_cli_persistent_args` — argv for a long-lived stdio
-//   session
+// - `claude_cli_persistent_args` — argv for a long-lived stdio session,
+//   matching the Claude Code VS Code extension process contract
 //
 // **Inbound message parsing** (called from `claude.rs` when a
 // handshake / system message arrives):
@@ -44,11 +43,6 @@ fn claude_cli_model_arg(model: &str) -> Option<&str> {
     Some(model)
 }
 
-enum ClaudeCliSessionArg<'a> {
-    Resume(&'a str),
-    SessionId(&'a str),
-}
-
 fn push_claude_cli_common_args(
     args: &mut Vec<String>,
     model: &str,
@@ -57,10 +51,12 @@ fn push_claude_cli_common_args(
         args.extend(["--model".to_owned(), model.to_owned()]);
     }
     args.extend([
-        "-p".to_owned(),
         "--verbose".to_owned(),
         "--output-format".to_owned(),
         "stream-json".to_owned(),
+        "--setting-sources".to_owned(),
+        "user,project,local".to_owned(),
+        "--no-chrome".to_owned(),
     ]);
 }
 
@@ -77,27 +73,6 @@ fn push_claude_cli_permission_args(
     }
 }
 
-fn claude_cli_oneshot_args(
-    model: &str,
-    approval_mode: ClaudeApprovalMode,
-    effort: ClaudeEffortLevel,
-    session_arg: ClaudeCliSessionArg<'_>,
-) -> Vec<String> {
-    let mut args = Vec::new();
-    push_claude_cli_common_args(&mut args, model);
-    args.push("--include-partial-messages".to_owned());
-    push_claude_cli_permission_args(&mut args, approval_mode, effort);
-    match session_arg {
-        ClaudeCliSessionArg::Resume(session_id) => {
-            args.extend(["--resume".to_owned(), session_id.to_owned()]);
-        }
-        ClaudeCliSessionArg::SessionId(session_id) => {
-            args.extend(["--session-id".to_owned(), session_id.to_owned()]);
-        }
-    }
-    args
-}
-
 fn claude_cli_persistent_args(
     model: &str,
     approval_mode: ClaudeApprovalMode,
@@ -112,6 +87,7 @@ fn claude_cli_persistent_args(
         "--include-partial-messages".to_owned(),
         "--permission-prompt-tool".to_owned(),
         "stdio".to_owned(),
+        "--replay-user-messages".to_owned(),
     ]);
     push_claude_cli_permission_args(&mut args, approval_mode, effort);
     if let Some(resume_session_id) = resume_session_id {

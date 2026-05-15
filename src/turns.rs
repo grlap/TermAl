@@ -29,16 +29,8 @@ fn run_turn_blocking(config: TurnConfig, recorder: &mut dyn TurnRecorder) -> Res
             &config.prompt,
             recorder,
         ),
-        Agent::Claude => run_claude_turn(
-            &config.cwd,
-            config.external_session_id.as_deref(),
-            &config.model,
-            config
-                .claude_approval_mode
-                .unwrap_or_else(default_claude_approval_mode),
-            config.claude_effort.unwrap_or_else(default_claude_effort),
-            &config.prompt,
-            recorder,
+        Agent::Claude => bail!(
+            "Claude REPL mode is not supported; Claude Code must run as a persistent stdio session"
         ),
         Agent::Cursor => run_acp_turn(
             AcpAgent::Cursor,

@@ -2393,9 +2393,9 @@ fn telegram_prompt_post_failure_does_not_arm_assistant_forwarding() {
 }
 
 #[test]
-fn telegram_prompt_uses_post_send_assistant_forwarding_baseline() {
+fn telegram_prompt_keeps_pre_send_assistant_forwarding_baseline() {
     let telegram = FakeTelegramSender::new(None);
-    let pre_accept_text = "Assistant text visible before prompt accept returned";
+    let reply_text = "Assistant text visible before prompt accept returned";
     let pre_send_session = TelegramSessionFetchResponse {
         session: TelegramSessionFetchSession {
             status: TelegramSessionStatus::Idle,
@@ -2418,7 +2418,7 @@ fn telegram_prompt_uses_post_send_assistant_forwarding_baseline() {
                 TelegramSessionFetchMessage::Text {
                     id: "message-2".to_owned(),
                     author: "assistant".to_owned(),
-                    text: pre_accept_text.to_owned(),
+                    text: reply_text.to_owned(),
                 },
             ],
         },
@@ -2445,7 +2445,6 @@ fn telegram_prompt_uses_post_send_assistant_forwarding_baseline() {
             "digest:project-1",
             "session:session-1",
             "send:session-1",
-            "session:session-1",
             "digest:project-1",
             "session:session-1",
         ]
@@ -2455,13 +2454,73 @@ fn telegram_prompt_uses_post_send_assistant_forwarding_baseline() {
         .get("session-1")
         .expect("accepted prompt should arm assistant forwarding");
     assert_eq!(cursor.message_id.as_deref(), Some("message-2"));
-    assert_eq!(cursor.text_chars, Some(pre_accept_text.chars().count()));
+    assert_eq!(cursor.text_chars, Some(reply_text.chars().count()));
+    assert!(
+        telegram
+            .sent_texts
+            .borrow()
+            .iter()
+            .any(|text| text == reply_text)
+    );
+}
+
+#[test]
+fn telegram_prompt_forwards_active_session_reply_without_completion_footer() {
+    let telegram = FakeTelegramSender::new(None);
+    let baseline_termal = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "message-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Old assistant text".to_owned(),
+                }],
+            },
+        },
+    };
+    let mut state = TelegramBotState::default();
+
+    arm_assistant_forwarding_for_telegram_prompt(&baseline_termal, &mut state, "session-1")
+        .expect("arming should succeed");
+
+    let active_termal = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Active,
+                messages: vec![
+                    TelegramSessionFetchMessage::Text {
+                        id: "message-1".to_owned(),
+                        author: "assistant".to_owned(),
+                        text: "Old assistant text".to_owned(),
+                    },
+                    TelegramSessionFetchMessage::Text {
+                        id: "message-2".to_owned(),
+                        author: "assistant".to_owned(),
+                        text: "Active reply".to_owned(),
+                    },
+                ],
+            },
+        },
+    };
+
+    let forwarded = forward_new_assistant_message_if_any(
+        &telegram,
+        &active_termal,
+        &mut state,
+        42,
+        "session-1",
+    )
+    .expect("active reply forwarding should succeed");
+
+    assert!(forwarded);
+    assert_eq!(telegram.sent_texts.borrow().as_slice(), ["Active reply"]);
     assert!(
         !telegram
             .sent_texts
             .borrow()
             .iter()
-            .any(|text| text == pre_accept_text)
+            .any(|text| text.contains("turn complete"))
     );
 }
 
@@ -3052,10 +3111,7 @@ fn telegram_active_baseline_reforwards_same_message_growth_after_settle() {
     .expect("same-message reply growth should forward");
 
     assert!(changed);
-    assert_eq!(
-        telegram.sent_texts.borrow()[0],
-        "Old turn complete\nTelegram reply"
-    );
+    assert_eq!(telegram.sent_texts.borrow()[0], "Telegram reply");
     assert_eq!(state.forward_next_assistant_message_session_id, None);
 }
 

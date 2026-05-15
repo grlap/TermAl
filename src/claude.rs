@@ -1,111 +1,17 @@
 // Claude Code CLI turn processing.
 //
-// Covers the blocking `run_claude_turn` entry point (used by both server
-// and REPL modes) that spawns the `claude` process, the per-turn state
-// machine (`ClaudeTurnState`, `ClaudeToolUse`, `ClaudeToolPermissionRequest`),
-// event dispatch from the NDJSON protocol, tool-use bookkeeping, tool-
-// result routing (bash vs file + task), approval handling, streamed
-// assistant text reconciliation (delta + completed), thinking-line
-// splitting, and the description/summary helpers used to render tool
-// requests in the transcript.
+// Covers the Claude Code stdio protocol parser used by the long-lived
+// `spawn_claude_runtime` process, the per-turn state machine
+// (`ClaudeTurnState`, `ClaudeToolUse`, `ClaudeToolPermissionRequest`), event
+// dispatch from the NDJSON protocol, tool-use bookkeeping, tool-result routing
+// (bash vs file + task), approval handling, streamed assistant text
+// reconciliation (delta + completed), thinking-line splitting, and the
+// description/summary helpers used to render tool requests in the transcript.
 //
 // Extracted from turns.rs into its own `include!()` fragment so turns.rs
 // stays focused on the TurnRecorder abstraction + shared helpers used
 // across agents (error summarization, preview text, command language
 // inference, prompt-image parsing, etc.).
-
-/// Runs Claude turn.
-fn run_claude_turn(
-    cwd: &str,
-    session_id: Option<&str>,
-    model: &str,
-    approval_mode: ClaudeApprovalMode,
-    effort: ClaudeEffortLevel,
-    prompt: &str,
-    recorder: &mut dyn TurnRecorder,
-) -> Result<String> {
-    let cwd = normalize_local_user_facing_path(cwd);
-    let mut command = Command::new("claude");
-    command.current_dir(&cwd);
-    let expected_session_id = session_id
-        .map(str::to_owned)
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
-    let session_arg = session_id
-        .map(ClaudeCliSessionArg::Resume)
-        .unwrap_or(ClaudeCliSessionArg::SessionId(&expected_session_id));
-    command.args(claude_cli_oneshot_args(
-        model,
-        approval_mode,
-        effort,
-        session_arg,
-    ));
-
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed to start Claude")?;
-
-    let mut child_stdin = child
-        .stdin
-        .take()
-        .context("failed to capture child stdin")?;
-    writeln!(child_stdin, "{prompt}").context("failed to write prompt to Claude stdin")?;
-    drop(child_stdin);
-
-    let stdout = child
-        .stdout
-        .take()
-        .context("failed to capture child stdout")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("failed to capture child stderr")?;
-
-    let stderr_thread = std::thread::spawn(move || -> Vec<String> {
-        let reader = BufReader::new(stderr);
-        reader.lines().map_while(Result::ok).collect()
-    });
-
-    let mut reader = BufReader::new(stdout);
-    let mut resolved_session_id = Some(expected_session_id);
-    let mut raw_line = String::new();
-    let mut state = ClaudeTurnState::default();
-
-    loop {
-        raw_line.clear();
-        let bytes_read = reader
-            .read_line(&mut raw_line)
-            .context("failed to read stdout from Claude")?;
-
-        if bytes_read == 0 {
-            break;
-        }
-
-        let message: Value = serde_json::from_str(raw_line.trim_end()).with_context(|| {
-            format!("failed to parse Claude JSON line: {}", raw_line.trim_end())
-        })?;
-
-        handle_claude_event(&message, &mut resolved_session_id, &mut state, recorder)?;
-    }
-
-    recorder.finish_streaming_text()?;
-
-    let status = child.wait().context("failed waiting for Claude process")?;
-    let stderr_lines = stderr_thread.join().unwrap_or_default();
-
-    if !status.success() {
-        let stderr_output = stderr_lines.join("\n");
-        if stderr_output.trim().is_empty() {
-            bail!("Claude exited with status {status}");
-        } else {
-            bail!("Claude exited with status {status}: {stderr_output}");
-        }
-    }
-
-    resolved_session_id.ok_or_else(|| anyhow!("Claude completed without emitting a session id"))
-}
 
 /// Tracks Claude turn state.
 #[derive(Default)]
