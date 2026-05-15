@@ -1345,6 +1345,191 @@ describe("MessageCard", () => {
     ).toBeInTheDocument();
   });
 
+  it("activates far heavy markdown from intersection through rAF after suspension lifts", () => {
+    const message: TextMessage = {
+      id: "message-heavy-intersection-raf",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: [
+        "# Observer heading",
+        ...Array.from({ length: 28 }, (_, index) => `Line ${index + 1}`),
+      ].join("\n"),
+    };
+    let intersectionCallback: IntersectionObserverCallback | null = null;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    const intersectionObserverMock = vi.fn(function IntersectionObserverMock(
+      this: IntersectionObserver,
+      callback: IntersectionObserverCallback,
+    ) {
+      intersectionCallback = callback;
+      Object.assign(this, {
+        observe,
+        disconnect,
+        unobserve: vi.fn(),
+        takeRecords: vi.fn(() => []),
+      });
+    });
+    let animationFrameCallback: FrameRequestCallback | null = null;
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        animationFrameCallback = callback;
+        return 1;
+      });
+    const getBoundingClientRectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function getBoundingClientRectMock(
+        this: HTMLElement,
+      ) {
+        if (this.classList.contains("message-stack")) {
+          return {
+            top: 0,
+            bottom: 100,
+            left: 0,
+            right: 100,
+            width: 100,
+            height: 100,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (this.classList.contains("deferred-heavy-content")) {
+          return {
+            top: 3000,
+            bottom: 3100,
+            left: 0,
+            right: 100,
+            width: 100,
+            height: 100,
+            x: 0,
+            y: 3000,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return {
+          top: 0,
+          bottom: 0,
+          left: 0,
+          right: 0,
+          width: 0,
+          height: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      });
+    const originalIntersectionObserver = window.IntersectionObserver;
+    window.IntersectionObserver =
+      intersectionObserverMock as unknown as typeof IntersectionObserver;
+
+    try {
+      const { container, unmount } = render(
+        <div
+          className="message-stack"
+          {...{ [DEFERRED_RENDER_SUSPENDED_ATTRIBUTE]: "true" }}
+        >
+          <MessageCard
+            message={message}
+            onApprovalDecision={vi.fn()}
+            onUserInputSubmit={vi.fn()}
+          />
+        </div>,
+      );
+
+      expect(observe).toHaveBeenCalledTimes(1);
+      expect(
+        screen.queryByRole("heading", { name: "Observer heading" }),
+      ).not.toBeInTheDocument();
+      expect(
+        container.querySelector(".deferred-markdown-placeholder"),
+      ).toBeInTheDocument();
+
+      act(() => {
+        intersectionCallback?.(
+          [
+            {
+              isIntersecting: true,
+              intersectionRatio: 1,
+            } as IntersectionObserverEntry,
+          ],
+          {} as IntersectionObserver,
+        );
+      });
+
+      expect(requestAnimationFrameSpy).not.toHaveBeenCalled();
+      expect(
+        container.querySelector(".deferred-markdown-placeholder"),
+      ).toBeInTheDocument();
+
+      const root = container.querySelector(".message-stack");
+      expect(root).not.toBeNull();
+      root!.removeAttribute(DEFERRED_RENDER_SUSPENDED_ATTRIBUTE);
+
+      act(() => {
+        intersectionCallback?.(
+          [
+            {
+              isIntersecting: true,
+              intersectionRatio: 1,
+            } as IntersectionObserverEntry,
+          ],
+          {} as IntersectionObserver,
+        );
+      });
+
+      expect(requestAnimationFrameSpy).toHaveBeenCalledTimes(1);
+      expect(
+        screen.queryByRole("heading", { name: "Observer heading" }),
+      ).not.toBeInTheDocument();
+
+      root!.setAttribute(DEFERRED_RENDER_SUSPENDED_ATTRIBUTE, "true");
+      act(() => {
+        animationFrameCallback?.(0);
+      });
+
+      expect(
+        screen.queryByRole("heading", { name: "Observer heading" }),
+      ).not.toBeInTheDocument();
+      expect(
+        container.querySelector(".deferred-markdown-placeholder"),
+      ).toBeInTheDocument();
+
+      root!.removeAttribute(DEFERRED_RENDER_SUSPENDED_ATTRIBUTE);
+      act(() => {
+        intersectionCallback?.(
+          [
+            {
+              isIntersecting: true,
+              intersectionRatio: 1,
+            } as IntersectionObserverEntry,
+          ],
+          {} as IntersectionObserver,
+        );
+      });
+
+      expect(requestAnimationFrameSpy).toHaveBeenCalledTimes(2);
+      act(() => {
+        animationFrameCallback?.(0);
+      });
+
+      expect(
+        screen.getByRole("heading", { name: "Observer heading" }),
+      ).toBeInTheDocument();
+      expect(
+        container.querySelector(".deferred-markdown-placeholder"),
+      ).not.toBeInTheDocument();
+      unmount();
+      expect(disconnect).toHaveBeenCalledTimes(1);
+    } finally {
+      window.IntersectionObserver = originalIntersectionObserver;
+      requestAnimationFrameSpy.mockRestore();
+      getBoundingClientRectSpy.mockRestore();
+    }
+  });
+
   it("keeps immediate heavy assistant markdown mounted when scrolling disables immediate preference", async () => {
     const message: TextMessage = {
       id: "message-heavy-immediate",
