@@ -103,11 +103,10 @@ import {
   renderDecision,
 } from "./app-utils";
 import {
-  connectionRetryPresentationFor,
   parseConnectionRetryNotice,
   type ConnectionRetryDisplayState,
-  type ConnectionRetryNotice,
 } from "./connection-retry";
+import { ConnectionRetryCard } from "./connection-retry-card";
 import {
   DEFERRED_RENDER_RESUME_EVENT,
   DEFERRED_RENDER_ROOT_MARGIN_PX,
@@ -307,7 +306,12 @@ export const MessageCard = memo(
             (isLatestAssistantMessage ? "live" : "resolved");
           return (
             <ConnectionRetryCard
-              message={message}
+              meta={
+                <MessageMeta
+                  author={message.author}
+                  timestamp={message.timestamp}
+                />
+              }
               notice={connectionRetryNotice}
               searchQuery={searchQuery}
               searchHighlightTone={searchHighlightTone}
@@ -542,58 +546,6 @@ export const MessageCard = memo(
 
 function promptCommandMetaLabel(text: string, expandedText?: string | null) {
   return expandedText && text.trim().startsWith("/") ? "Command" : null;
-}
-
-function ConnectionRetryCard({
-  message,
-  notice,
-  searchQuery,
-  searchHighlightTone,
-  displayState,
-}: {
-  message: TextMessage;
-  notice: ConnectionRetryNotice;
-  searchQuery: string;
-  searchHighlightTone: SearchHighlightTone;
-  displayState: ConnectionRetryDisplayState;
-}) {
-  const {
-    ariaLive,
-    cardClassName,
-    chipClassName,
-    detail,
-    heading,
-    showSpinner,
-  } = connectionRetryPresentationFor(notice, displayState);
-  return (
-    <article
-      className={cardClassName}
-      role="status"
-      aria-live={ariaLive}
-    >
-      <MessageMeta author={message.author} timestamp={message.timestamp} />
-      <div className="connection-notice-body">
-        {showSpinner ? (
-          <div
-            className="activity-spinner connection-notice-spinner"
-            aria-hidden="true"
-          />
-        ) : null}
-        <div className="connection-notice-copy">
-          <div className="card-label">Connection</div>
-          <div className="connection-notice-heading">
-            <h3>{heading}</h3>
-            {notice.attemptLabel ? (
-              <span className={chipClassName}>{notice.attemptLabel}</span>
-            ) : null}
-          </div>
-          <p className="connection-notice-detail">
-            {renderHighlightedText(detail, searchQuery, searchHighlightTone)}
-          </p>
-        </div>
-      </div>
-    </article>
-  );
 }
 
 function MessageAttachmentList({
