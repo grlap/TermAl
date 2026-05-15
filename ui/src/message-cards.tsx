@@ -5,6 +5,7 @@ import {
   useContext,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -725,7 +726,9 @@ function DeferredHeavyContent({
   const [isActivated, setIsActivated] = useState(() => preferImmediateRender);
   const shouldRenderContent = preferImmediateRender || isActivated;
 
-  useEffect(() => {
+  // Already-near content must activate before paint; the observer path below
+  // still uses rAF to batch later scroll/viewport-triggered activations.
+  useLayoutEffect(() => {
     if (shouldRenderContent || !allowDeferredActivation) {
       return;
     }
@@ -742,15 +745,7 @@ function DeferredHeavyContent({
     if (
       isElementNearRenderViewport(node, root, DEFERRED_RENDER_ROOT_MARGIN_PX)
     ) {
-      const frameId = window.requestAnimationFrame(() => {
-        if (isDeferredRenderActivationSuspended(root)) {
-          return;
-        }
-        setIsActivated(true);
-      });
-      return () => {
-        window.cancelAnimationFrame(frameId);
-      };
+      setIsActivated(true);
     }
   }, [allowDeferredActivation, shouldRenderContent]);
 

@@ -1173,6 +1173,107 @@ describe("MessageCard", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders near-viewport heavy markdown before the next animation frame", () => {
+    const message: TextMessage = {
+      id: "message-heavy-near-viewport",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: [
+        "# Near heading",
+        ...Array.from({ length: 28 }, (_, index) => `Line ${index + 1}`),
+      ].join("\n"),
+    };
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation(() => 1);
+    const cancelAnimationFrameSpy = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation(() => undefined);
+
+    try {
+      // jsdom returns zeroed layout boxes, so this mounts as already near the
+      // render viewport; a blocked rAF proves activation happened pre-frame.
+      const { container } = render(
+        <MessageCard
+          message={message}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.getByRole("heading", { name: "Near heading" }),
+      ).toBeInTheDocument();
+      expect(
+        container.querySelector(".deferred-markdown-placeholder"),
+      ).not.toBeInTheDocument();
+    } finally {
+      requestAnimationFrameSpy.mockRestore();
+      cancelAnimationFrameSpy.mockRestore();
+    }
+  });
+
+  it("renders near-viewport heavy markdown before the next animation frame when activation resumes", () => {
+    const message: TextMessage = {
+      id: "message-heavy-resumed-near-viewport",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: [
+        "# Resumed heading",
+        ...Array.from({ length: 28 }, (_, index) => `Line ${index + 1}`),
+      ].join("\n"),
+    };
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation(() => 1);
+    const cancelAnimationFrameSpy = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation(() => undefined);
+
+    try {
+      const { container, rerender } = render(
+        <DeferredHeavyContentActivationProvider allowActivation={false}>
+          <MessageCard
+            message={message}
+            onApprovalDecision={vi.fn()}
+            onUserInputSubmit={vi.fn()}
+          />
+        </DeferredHeavyContentActivationProvider>,
+      );
+
+      expect(
+        screen.queryByRole("heading", { name: "Resumed heading" }),
+      ).not.toBeInTheDocument();
+      expect(
+        container.querySelector(".deferred-markdown-placeholder"),
+      ).toBeInTheDocument();
+
+      // jsdom returns zeroed layout boxes, so lifting the provider gate should
+      // activate the near-viewport branch without waiting for rAF.
+      rerender(
+        <DeferredHeavyContentActivationProvider allowActivation>
+          <MessageCard
+            message={message}
+            onApprovalDecision={vi.fn()}
+            onUserInputSubmit={vi.fn()}
+          />
+        </DeferredHeavyContentActivationProvider>,
+      );
+
+      expect(
+        screen.getByRole("heading", { name: "Resumed heading" }),
+      ).toBeInTheDocument();
+      expect(
+        container.querySelector(".deferred-markdown-placeholder"),
+      ).not.toBeInTheDocument();
+    } finally {
+      requestAnimationFrameSpy.mockRestore();
+      cancelAnimationFrameSpy.mockRestore();
+    }
+  });
+
   it("bypasses heavy markdown deferral while assistant text is streaming", async () => {
     const message: TextMessage = {
       id: "message-heavy-streaming",
