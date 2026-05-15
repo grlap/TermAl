@@ -17,7 +17,8 @@
 // timer orchestration, visibility / focus / pagehide / pageshow
 // recovery handlers, the reconnect/watchdog coordination helpers
 // (`confirmReconnectRecoveryFromLiveEvent`, `requestStateResync`,
-// `markLiveTransportActivity`, etc.), and the per-mount
+// etc.; pure activity-map updates live in app-live-state-activity),
+// and the per-mount
 // state-resync bookkeeping refs (`stateResyncInFlightRef` et al).
 // The `workspaceFilesChangedEvent` React state + setter also
 // live here — consumers in App.tsx read them via the hook return
@@ -108,6 +109,12 @@ import {
   type PendingStateResyncOptions,
   type RequestStateResyncOptions,
 } from "./app-live-state-resync-options";
+import {
+  markLiveSessionResumeWatchdogBaseline as markLiveSessionResumeWatchdogBaselineActivity,
+  markLiveTransportActivity as markLiveTransportSessionActivity,
+  syncLiveSessionResumeWatchdogBaselines as syncLiveSessionResumeWatchdogBaselineActivity,
+  syncLiveTransportActivityFromState as syncLiveTransportSessionActivityFromState,
+} from "./app-live-state-activity";
 import {
   createStateEventProfiler,
   extractTopLevelJsonNumber,
@@ -2076,9 +2083,11 @@ export function useAppLiveState(
         clearWatchdogCooldown = true,
       }: { clearWatchdogCooldown?: boolean } = {},
     ) {
-      for (const sessionId of sessionIds) {
-        lastLiveTransportActivityAtBySessionId.set(sessionId, now);
-      }
+      markLiveTransportSessionActivity(
+        lastLiveTransportActivityAtBySessionId,
+        sessionIds,
+        now,
+      );
       if (clearWatchdogCooldown) {
         lastWatchdogResyncAttemptAt = null;
       }
@@ -2091,52 +2100,36 @@ export function useAppLiveState(
         clearWatchdogCooldown = true,
       }: { clearWatchdogCooldown?: boolean } = {},
     ) {
-      // Snapshot adoption seeds the baseline for every listed session immediately.
-      // Idle entries are harmless because stale-transport checks still gate on
-      // session.status === "active".
-      markLiveTransportActivity(
-        sessions.map((session) => session.id),
+      syncLiveTransportSessionActivityFromState(
+        lastLiveTransportActivityAtBySessionId,
+        sessions,
         now,
-        { clearWatchdogCooldown },
       );
+      if (clearWatchdogCooldown) {
+        lastWatchdogResyncAttemptAt = null;
+      }
     }
 
     function markLiveSessionResumeWatchdogBaseline(
       sessionIds: Iterable<string>,
       now = Date.now(),
     ) {
-      // Data-bearing live events must advance this baseline for their sessions.
-      // Otherwise `maybeRequestLiveSessionResumeWatchdogResync` can interpret
-      // ordinary long-running streams as a wake gap and poll /api/state until
-      // an unrelated focus/reconnect event clears the cooldown. See
-      // docs/architecture.md "Live-state reconnect and watchdog recovery".
-      for (const sessionId of sessionIds) {
-        lastLiveSessionResumeWatchdogTickAtBySessionId.set(sessionId, now);
-      }
-    }
-
-    function pruneLiveSessionResumeWatchdogBaselineSessions(
-      sessions: Session[],
-    ) {
-      const liveSessionIds = new Set(sessions.map((session) => session.id));
-      for (const sessionId of lastLiveSessionResumeWatchdogTickAtBySessionId.keys()) {
-        if (!liveSessionIds.has(sessionId)) {
-          lastLiveSessionResumeWatchdogTickAtBySessionId.delete(sessionId);
-        }
-      }
+      markLiveSessionResumeWatchdogBaselineActivity(
+        lastLiveSessionResumeWatchdogTickAtBySessionId,
+        sessionIds,
+        now,
+      );
     }
 
     function syncLiveSessionResumeWatchdogBaselines(
       sessions: Session[],
       now = Date.now(),
     ) {
-      // Advance every currently known session so idle-to-active transitions do not
-      // inherit a false wake gap from time spent without live streaming.
-      markLiveSessionResumeWatchdogBaseline(
-        sessions.map((session) => session.id),
+      syncLiveSessionResumeWatchdogBaselineActivity(
+        lastLiveSessionResumeWatchdogTickAtBySessionId,
+        sessions,
         now,
       );
-      pruneLiveSessionResumeWatchdogBaselineSessions(sessions);
     }
     syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current =
       syncLiveSessionResumeWatchdogBaselines;
