@@ -7,6 +7,22 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Three `backend-connection.test.tsx` reconnect tests are red on the current tree
+
+**Severity:** Medium - `ui/src/backend-connection.test.tsx:1700`, `:2939`, and `:3083` fail while searching for `Control panel backend reconnecting` after fake-timer advances.
+
+The current `app-live-state.ts` diff is a helper extraction, so these failures may predate this branch, but they are red now and block a clean frontend test gate.
+
+**Current behavior:**
+- `backs off reconnect polling until a fresh SSE open confirms recovery` fails.
+- `keeps the reconnect fallback fetch armed when an orchestrator delta arrives before a confirmed reopen` fails.
+- `keeps the reconnect fallback fetch armed when an applied session delta arrives before a confirmed reopen` fails.
+
+**Proposal:**
+- Triage whether the reconnect contract or the tests are stale.
+- Fix the reconnect state machine or rewrite the assertions to match the intended current contract.
+- Keep the three tests green before landing reconnect/state-machine work.
+
 ## First-settled active-baseline same-message growth lacks a safe turn boundary
 
 **Severity:** Medium - `src/telegram.rs:2583-2637`. When a Telegram prompt is armed behind an active/approval-paused turn, the relay baselines the current assistant message while `baseline_while_active=true`. If the tracked message id has already grown by the first settled poll, the relay cannot distinguish "old turn finished after the last active poll" from "the Telegram reply was appended to the same message id."
@@ -169,7 +185,7 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 
 **Current behavior:**
 - `AgentSessionPanel.tsx` is 2605 lines.
-- `AgentSessionPanel.test.tsx` is 8677 lines.
+- `AgentSessionPanel.test.tsx` was split into focused sibling files; `AgentSessionPanel.tsx` remains over the production TSX threshold.
 - Composer auto-resize and transition restoration share state across several refs and rAF callbacks.
 
 **Proposal:**
@@ -339,45 +355,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 **Proposal:**
 - Open the directory with `O_DIRECTORY | O_NOFOLLOW`, then `fchmod` on the resulting fd; or use `fchmodat(AT_FDCWD, path, mode, AT_SYMLINK_NOFOLLOW)`.
 
-## Non-optimistic user-prompt display causes 100-300ms felt lag on every Send
-
-**Severity:** Medium - `ui/src/app-session-actions.ts:851-895` and `ui/src/app-live-state.ts:1283-1385`. The composer is non-optimistic: clicking Send clears the textarea, fires `await sendMessage(...)`, and then runs `adoptState(state)` against the full `StateResponse` returned by the POST. The "you said X" card only appears after the round-trip plus the heavy `adoptState` walk completes.
-
-`adoptState` re-derives codex, agentReadiness, projects, orchestrators, workspaces, and walks transcripts on the main thread. On a focused active session this lands in the 100-300ms range every send (longer when an active turn is mid-stream). The codebase has already self-diagnosed the path in `docs/prompt-responsiveness-refactor-plan.md` but no optimistic-insert fix has landed.
-
-Recent waiting-indicator suppression added another user-visible edge: on a second or later send, the in-flight indicator can be suppressed because the current session state still ends with assistant output from the previous completed turn while the newly submitted prompt is not yet represented in `activeSession.messages`.
-
-The lag compounds with two existing tracked bugs ("Focused live sessions monopolize the main thread during state adoption", "Composer drafts have three authoritative stores") but is itself a separable contributor.
-
-**Current behavior:**
-- User clicks Send -> textarea clears -> POST fires -> response returns -> `adoptState` walks -> card paints.
-- Total delay: round-trip (typically 30-100ms locally) + adoptState (50-200ms on focused live sessions) = visible 100-300ms gap.
-- During the gap the session shows neither the user prompt nor the composer text.
-- On repeated sends, stale-live-turn suppression can also hide the send-in-progress waiting indicator while the POST is in flight.
-
-**Proposal:**
-- Insert an optimistic user-message card in `handleSend` before `await sendMessage(...)`, keyed by a temp id.
-- When the POST response arrives or the SSE `messageCreated` delta lands (whichever is first), reconcile by id (swap temp id for server-assigned `messageId`).
-- This collapses the round-trip and the adoptState walk out of the felt-lag path simultaneously.
-- Until optimistic insertion lands, keep `isSending` feedback visible until the newly submitted prompt is represented in session state, or key stale-live-turn suppression to a known current prompt/indicator kind.
-- Cross-link to `docs/prompt-responsiveness-refactor-plan.md` and decide whether this is a standalone fix or folds into the larger refactor.
-
-## Stale live-turn suppression can hide delegation wait indicators
-
-**Severity:** Medium - `ui/src/panels/AgentSessionPanel.tsx:1344`. `effectiveShowWaitingIndicator` suppresses every idle waiting indicator after assistant output, including delegation waits passed through `SessionPaneView` as the same `showWaitingIndicator` boolean.
-
-The stale-live-turn fix should only remove obsolete "agent is working" tails. Delegation wait cards have different semantics: the parent session can be idle while a backend delegation wait is still active, and the user still needs the "Waiting on delegation waits..." state.
-
-**Current behavior:**
-- `SessionPaneView` computes delegation-wait prompts through the same waiting-indicator path used by live turns.
-- `AgentSessionPanel` suppresses that path when the session is idle and assistant output already exists after the latest user prompt.
-- Parent sessions with prior assistant output can lose visible delegation-wait feedback even while waits are still active.
-
-**Proposal:**
-- Carry an explicit waiting-indicator kind, such as `live-turn`, `send`, or `delegation-wait`.
-- Apply stale-live-turn suppression only to live-turn indicators, not delegation waits.
-- Add a regression that keeps the delegation-wait card visible after prior assistant output.
-
 ## `applyDeltaToSessions` duplicates the "lookup first, metadata-only fallback when missing" pattern across five non-created delta types
 
 **Severity:** Low - `ui/src/live-updates.ts:329-599`. The reordered `messagesLoaded === false` branch (apply to in-memory message when present, fall back to metadata-only only when `messageIndex === -1`) is now repeated five times across `messageUpdated`, `textDelta`, `textReplace`, `commandUpdate`, and `parallelAgentsUpdate`. The previous code had the same shape duplicated five times in the wrong order; the new code is now the right order duplicated five times. A future sixth retained-non-created delta type will need to re-derive the same flow.
@@ -409,19 +386,19 @@ Many production SQLite helpers in `src/persist.rs` are `#[cfg(not(test))]`, so e
 
 ## `SessionPaneView.tsx` and `app-session-actions.ts` past architecture file-size thresholds
 
-**Severity:** Low - `ui/src/SessionPaneView.tsx` is now 3,160 lines and `ui/src/app-session-actions.ts` is 1,968 lines, both past the architecture rubric Â§9 thresholds (~2,000 for TSX components, ~1,500 for utility modules). The round-11 extractions of `connection-retry.ts`, `app-live-state-resync-options.ts`, `session-hydration-adoption.ts`, and `SessionPaneView.render-callbacks.tsx`, plus the later `action-state-adoption.ts` split, reduced these files but left them over their respective thresholds.
+**Severity:** Low - `ui/src/SessionPaneView.tsx` is still 3,679 lines and `ui/src/app-session-actions.ts` is still 2,289 lines after the latest small helper splits, both past the architecture rubric thresholds (~2,000 for TSX components, ~1,500 for utility modules).
 
-The companion `app-live-state.ts` entry already exists; this captures the two related Phase-2 candidates that emerged after the round-11 splits.
+The waiting-indicator helpers now live in `ui/src/SessionPaneView.waiting-indicator.ts`, and the session-settings optimism helpers now live in `ui/src/app-session-settings-optimism.ts`. Those moves reduced local clutter and gave the helpers direct unit-testable surfaces, but the main production modules remain over threshold.
 
 **Current behavior:**
-- `SessionPaneView.tsx` mixes pane orchestration with reconnect-card / waiting-indicator / retry-display orchestration.
-- `app-session-actions.ts` still mixes action handlers with optimistic-update and adoption-outcome side-effect wiring.
-- Both files now have natural extraction boundaries with their own existing direct unit-test coverage.
+- `SessionPaneView.tsx` still owns pane orchestration, tab rendering, scroll/follow behavior, panel selection, and composer/footer wiring.
+- `app-session-actions.ts` still owns prompt send, draft attachment lifecycle, session creation, stop/kill/rename, settings changes, model refresh, Codex thread actions, and marker mutations.
+- Both files now have small helper splits, but neither production module is below the review threshold.
 
 **Proposal:**
-- Pure code move per CLAUDE.md, in dedicated split commits (one per file).
-- For `SessionPaneView.tsx`: candidate is the reconnect-card / waiting-indicator computation cluster.
-- For `app-session-actions.ts`: candidate is the optimistic-update + adoption-outcome side-effect cluster now that pure stale target evidence has moved out.
+- Continue with dedicated pure-code-move commits per CLAUDE.md.
+- For `SessionPaneView.tsx`: extract session-find/scroll-follow and panel tab orchestration clusters.
+- For `app-session-actions.ts`: extract prompt send/draft lifecycle and marker/session-settings action groups into focused modules.
 
 ## `App.live-state.deltas.test.tsx` past 2,000-line review threshold
 
@@ -440,29 +417,15 @@ The newest tests still cluster around hydration/restart races and cross-instance
 
 ## `app-live-state.ts` past 1,500-line review threshold for TypeScript utility modules
 
-**Severity:** Low - `ui/src/app-live-state.ts`. File is now 2,435 lines after this round. The architecture rubric Â§9 sets a pragmatic ~1,500-line threshold for TypeScript utility modules. The hydration adoption helpers have moved out, but the module still mixes retry scheduling, profiling, JSON peek helpers, and the main state machine.
+**Severity:** Low - `ui/src/app-live-state.ts`. File is still 3,517 lines after this round. The architecture rubric sets a pragmatic ~1,500-line threshold for TypeScript utility modules. Hydration adoption and lightweight state-event profiling/JSON metadata helpers have moved out, but the module still mixes retry scheduling, reconnect recovery, hydration, workspace-file events, and the main state machine.
 
 **Current behavior:**
-- Single module mixes hydration matching, retry scheduling, profiling, JSON peek helpers, and the main state machine.
+- Single module mixes hydration matching, retry scheduling, reconnect recovery, workspace-file events, and the main state machine.
 - Per-cluster grep tax growing with each round.
 
 **Proposal:**
 - Defer to a dedicated pure-code-move commit per CLAUDE.md.
-- Extract `hydration-retention.ts` (or `session-hydration.ts`) containing `hydrationRetainedMessagesMatch`, `SESSION_HYDRATION_RETRY_DELAYS_MS`, `SessionHydrationTarget`, `SessionHydrationRequestContext`, and the matching unit tests.
-
-## `AgentSessionPanel.test.tsx` past 5,000-line review threshold
-
-**Severity:** Low - `ui/src/panels/AgentSessionPanel.test.tsx`. File is now 5,659 lines (+511 this round), past the project's review threshold for test files. The added blocks cluster naturally by concern — composer memo coverage, scroll-following coverage, ResizeObserver fixtures — and would extract cleanly into siblings without behavioral change.
-
-The adjacent `App.live-state.*.test.tsx` split (April 20) is the precedent for per-cluster `.test.tsx` files. Per `CLAUDE.md`, splits must be pure code moves and live in their own commit.
-
-**Current behavior:**
-- Single `AgentSessionPanel.test.tsx` mixes composer, scroll, resize, and lifecycle clusters.
-- Per-cluster grep tax growing with each replay-cache-adjacent feature round.
-
-**Proposal:**
-- Pure code move: extract into `AgentSessionPanel.composer.test.tsx`, `AgentSessionPanel.scroll.test.tsx`, `AgentSessionPanel.resize.test.tsx` (matching the App.live-state cluster shape).
-- Defer to a dedicated split commit; do not couple with feature changes.
+- Extract reconnect recovery and hydration retry scheduling into focused helpers with matching unit tests.
 
 ## `src/tests/remote.rs` past the 5,000-line review threshold
 
@@ -779,8 +742,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Add repeated-send waiting-indicator coverage:
-  send a second prompt after a completed assistant response while the POST is still in flight, and assert the user still sees send-in-progress feedback until the new prompt appears in session state.
 - [ ] P2: Cover first-chunk Telegram forward failure:
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
 - [ ] P2: Cover first-settled active-baseline same-message growth policy:

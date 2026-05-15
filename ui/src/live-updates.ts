@@ -7,6 +7,7 @@ import type {
   TextMessage,
 } from "./types";
 import { reconcileSessions } from "./session-reconcile";
+import { removePendingPromptForCreatedMessage } from "./app-utils";
 
 export const LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS = 15000;
 export const LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS = 5000;
@@ -183,7 +184,7 @@ function applyMetadataOnlySessionDelta(
 ): Session {
   const pendingPrompts =
     delta.type === "messageCreated"
-      ? removePendingPromptById(session.pendingPrompts, delta.messageId)
+      ? removePendingPromptForCreatedMessage(session.pendingPrompts, delta.message)
       : session.pendingPrompts;
   const base = {
     ...session,
@@ -398,9 +399,9 @@ function applyMessageCreatedDeltaToRetainedTranscript(
     updatedMessages.splice(delta.messageIndex, 0, delta.message);
   }
 
-  const pendingPrompts = removePendingPromptById(
+  const pendingPrompts = removePendingPromptForCreatedMessage(
     session.pendingPrompts,
-    delta.messageId,
+    delta.message,
   );
 
   const nextMessageCount = Math.max(
@@ -939,24 +940,6 @@ function upsertConversationMarker(
   const updatedMarkers = markers.slice();
   updatedMarkers[index] = marker;
   return updatedMarkers;
-}
-
-function removePendingPromptById(
-  pendingPrompts: Session["pendingPrompts"],
-  promptId: string,
-): Session["pendingPrompts"] {
-  if (!pendingPrompts?.length) {
-    return pendingPrompts;
-  }
-
-  const nextPendingPrompts = pendingPrompts.filter(
-    (prompt) => prompt.id !== promptId,
-  );
-  if (nextPendingPrompts.length === pendingPrompts.length) {
-    return pendingPrompts;
-  }
-
-  return nextPendingPrompts.length > 0 ? nextPendingPrompts : undefined;
 }
 
 function findMessageIndex(

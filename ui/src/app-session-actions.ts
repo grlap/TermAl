@@ -65,6 +65,11 @@ import {
   usesSessionModelPicker,
 } from "./session-model-utils";
 import {
+  buildOptimisticSessionSettingsUpdate,
+  rollbackOptimisticSessionSettingsUpdate,
+  sessionSupportsModelRefresh,
+} from "./app-session-settings-optimism";
+import {
   syncComposerDraftForSession,
   upsertSessionStoreSession,
 } from "./session-store";
@@ -92,6 +97,7 @@ import type {
   GeminiApprovalMode,
   JsonValue,
   McpElicitationAction,
+  PendingPrompt,
   Project,
   SandboxMode,
   Session,
@@ -104,6 +110,8 @@ import {
   LOCAL_REMOTE_ID,
 } from "./remotes";
 import { assertNever } from "./exhaustive";
+
+let nextOptimisticPromptSequence = 0;
 
 type UseAppSessionActionsLookups = {
   sessionLookup: Map<string, Session>;
@@ -687,6 +695,17 @@ export function useAppSessionActions(
     );
   }
 
+  function removeOptimisticPendingPrompt(sessionId: string, promptId: string) {
+    updateSessionLocally(sessionId, (currentSession) => {
+      const [nextSession] = removeQueuedPromptFromSessions(
+        [currentSession],
+        sessionId,
+        promptId,
+      );
+      return nextSession ?? currentSession;
+    });
+  }
+
   function upsertConversationMarkerLocally(
     session: Session,
     marker: NonNullable<Session["markers"]>[number],
@@ -796,195 +815,6 @@ export function useAppSessionActions(
     return "apply";
   }
 
-  function buildOptimisticSessionSettingsUpdate(
-    session: Session,
-    field: SessionSettingsField,
-    value: SessionSettingsValue,
-  ) {
-    const normalizedModelValue =
-      field === "model"
-        ? normalizedRequestedSessionModel(session, value as string)
-        : null;
-
-    switch (session.agent) {
-      case "Codex": {
-        const nextModel = normalizedModelValue ?? session.model;
-        const nextReasoningEffort =
-          field === "reasoningEffort"
-            ? (value as CodexReasoningEffort)
-            : normalizedCodexReasoningEffort(session, nextModel);
-        const nextSandboxMode =
-          field === "sandboxMode"
-            ? (value as SandboxMode)
-            : session.sandboxMode;
-        const nextApprovalPolicy =
-          field === "approvalPolicy"
-            ? (value as ApprovalPolicy)
-            : session.approvalPolicy;
-
-        if (
-          nextModel === session.model &&
-          nextReasoningEffort === session.reasoningEffort &&
-          nextSandboxMode === session.sandboxMode &&
-          nextApprovalPolicy === session.approvalPolicy
-        ) {
-          return session;
-        }
-
-        return {
-          ...session,
-          model: nextModel,
-          reasoningEffort: nextReasoningEffort,
-          sandboxMode: nextSandboxMode,
-          approvalPolicy: nextApprovalPolicy,
-        };
-      }
-      case "Cursor": {
-        const nextModel = normalizedModelValue ?? session.model;
-        const nextCursorMode =
-          field === "cursorMode" ? (value as CursorMode) : session.cursorMode;
-
-        if (
-          nextModel === session.model &&
-          nextCursorMode === session.cursorMode
-        ) {
-          return session;
-        }
-
-        return {
-          ...session,
-          model: nextModel,
-          cursorMode: nextCursorMode,
-        };
-      }
-      case "Claude": {
-        const nextModel = normalizedModelValue ?? session.model;
-        const nextClaudeApprovalMode =
-          field === "claudeApprovalMode"
-            ? (value as ClaudeApprovalMode)
-            : session.claudeApprovalMode;
-        const nextClaudeEffort =
-          field === "claudeEffort"
-            ? (value as ClaudeEffortLevel)
-            : session.claudeEffort;
-
-        if (
-          nextModel === session.model &&
-          nextClaudeApprovalMode === session.claudeApprovalMode &&
-          nextClaudeEffort === session.claudeEffort
-        ) {
-          return session;
-        }
-
-        return {
-          ...session,
-          model: nextModel,
-          claudeApprovalMode: nextClaudeApprovalMode,
-          claudeEffort: nextClaudeEffort,
-        };
-      }
-      case "Gemini": {
-        const nextModel = normalizedModelValue ?? session.model;
-        const nextGeminiApprovalMode =
-          field === "geminiApprovalMode"
-            ? (value as GeminiApprovalMode)
-            : session.geminiApprovalMode;
-
-        if (
-          nextModel === session.model &&
-          nextGeminiApprovalMode === session.geminiApprovalMode
-        ) {
-          return session;
-        }
-
-        return {
-          ...session,
-          model: nextModel,
-          geminiApprovalMode: nextGeminiApprovalMode,
-        };
-      }
-    }
-  }
-
-  function rollbackOptimisticSessionSettingsUpdate(
-    currentSession: Session,
-    previousSession: Session,
-    optimisticSession: Session,
-  ) {
-    let changed = false;
-    const nextSession = { ...currentSession };
-
-    if (
-      currentSession.model === optimisticSession.model &&
-      currentSession.model !== previousSession.model
-    ) {
-      nextSession.model = previousSession.model;
-      changed = true;
-    }
-    if (
-      currentSession.approvalPolicy === optimisticSession.approvalPolicy &&
-      currentSession.approvalPolicy !== previousSession.approvalPolicy
-    ) {
-      nextSession.approvalPolicy = previousSession.approvalPolicy;
-      changed = true;
-    }
-    if (
-      currentSession.reasoningEffort === optimisticSession.reasoningEffort &&
-      currentSession.reasoningEffort !== previousSession.reasoningEffort
-    ) {
-      nextSession.reasoningEffort = previousSession.reasoningEffort;
-      changed = true;
-    }
-    if (
-      currentSession.sandboxMode === optimisticSession.sandboxMode &&
-      currentSession.sandboxMode !== previousSession.sandboxMode
-    ) {
-      nextSession.sandboxMode = previousSession.sandboxMode;
-      changed = true;
-    }
-    if (
-      currentSession.cursorMode === optimisticSession.cursorMode &&
-      currentSession.cursorMode !== previousSession.cursorMode
-    ) {
-      nextSession.cursorMode = previousSession.cursorMode;
-      changed = true;
-    }
-    if (
-      currentSession.claudeApprovalMode ===
-        optimisticSession.claudeApprovalMode &&
-      currentSession.claudeApprovalMode !== previousSession.claudeApprovalMode
-    ) {
-      nextSession.claudeApprovalMode = previousSession.claudeApprovalMode;
-      changed = true;
-    }
-    if (
-      currentSession.claudeEffort === optimisticSession.claudeEffort &&
-      currentSession.claudeEffort !== previousSession.claudeEffort
-    ) {
-      nextSession.claudeEffort = previousSession.claudeEffort;
-      changed = true;
-    }
-    if (
-      currentSession.geminiApprovalMode ===
-        optimisticSession.geminiApprovalMode &&
-      currentSession.geminiApprovalMode !== previousSession.geminiApprovalMode
-    ) {
-      nextSession.geminiApprovalMode = previousSession.geminiApprovalMode;
-      changed = true;
-    }
-
-    return changed ? nextSession : currentSession;
-  }
-
-  function sessionSupportsModelRefresh(agent: AgentType) {
-    return (
-      agent === "Claude" ||
-      agent === "Codex" ||
-      agent === "Cursor" ||
-      agent === "Gemini"
-    );
-  }
-
   async function openCreatedSession(
     created: Awaited<ReturnType<typeof createSession>>,
     paneId: string | null,
@@ -1086,6 +916,35 @@ export function useAppSessionActions(
       delete nextState[sessionId];
       return nextState;
     });
+    nextOptimisticPromptSequence += 1;
+    const optimisticPromptId = [
+      "optimistic-send",
+      sessionId,
+      Date.now().toString(36),
+      nextOptimisticPromptSequence.toString(36),
+    ].join("-");
+    const optimisticPendingPrompt: PendingPrompt = {
+      id: optimisticPromptId,
+      timestamp: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      text: prompt,
+      expandedText: normalizedExpandedText,
+      attachments: attachments.map((attachment) => ({
+        byteSize: attachment.byteSize,
+        fileName: attachment.fileName,
+        mediaType: attachment.mediaType,
+      })),
+      localOnly: true,
+    };
+    updateSessionLocally(sessionId, (currentSession) => ({
+      ...currentSession,
+      pendingPrompts: [
+        ...(currentSession.pendingPrompts ?? []),
+        optimisticPendingPrompt,
+      ],
+    }));
 
     void (async () => {
       try {
@@ -1104,6 +963,7 @@ export function useAppSessionActions(
           return;
         }
         const adopted = adoptState(state);
+        removeOptimisticPendingPrompt(sessionId, optimisticPromptId);
         releaseDraftAttachments(attachments);
         setRequestError(null);
         const responseKeepsSessionActive = state.sessions?.some(
@@ -1201,6 +1061,7 @@ export function useAppSessionActions(
         if (!restoredAttachments) {
           releaseDraftAttachments(attachments);
         }
+        removeOptimisticPendingPrompt(sessionId, optimisticPromptId);
         reportRequestError(error);
       } finally {
         if (isMountedRef.current) {

@@ -214,7 +214,9 @@ export function buildMessageListSignature(messages: Message[]) {
 
 export function buildSessionConversationSignature(session: Session) {
   const messages = session.messages;
-  const pendingPrompts = session.pendingPrompts ?? [];
+  const pendingPrompts = (session.pendingPrompts ?? []).filter(
+    (prompt) => !prompt.localOnly,
+  );
   const lastMessage = messages[messages.length - 1];
   const lastPendingPrompt = pendingPrompts[pendingPrompts.length - 1];
 
@@ -259,6 +261,52 @@ export function messageChangeMarker(message: Message) {
 
 export function pendingPromptChangeMarker(prompt: PendingPrompt) {
   return `${prompt.text.length}:${prompt.attachments?.length ?? 0}`;
+}
+
+export function removePendingPromptById(
+  pendingPrompts: PendingPrompt[] | undefined,
+  promptId: string,
+): PendingPrompt[] | undefined {
+  if (!pendingPrompts?.length) {
+    return pendingPrompts;
+  }
+
+  const nextPendingPrompts = pendingPrompts.filter(
+    (prompt) => prompt.id !== promptId,
+  );
+  if (nextPendingPrompts.length === pendingPrompts.length) {
+    return pendingPrompts;
+  }
+
+  return nextPendingPrompts.length > 0 ? nextPendingPrompts : undefined;
+}
+
+export function removePendingPromptForCreatedMessage(
+  pendingPrompts: PendingPrompt[] | undefined,
+  message: Message,
+) {
+  const withoutMatchingServerId = removePendingPromptById(
+    pendingPrompts,
+    message.id,
+  );
+  if (!withoutMatchingServerId?.length) {
+    return withoutMatchingServerId;
+  }
+  if (message.type !== "text" || message.author !== "you") {
+    return withoutMatchingServerId;
+  }
+
+  const optimisticIndex = withoutMatchingServerId.findIndex(
+    (prompt) => prompt.localOnly === true && prompt.text === message.text,
+  );
+  if (optimisticIndex === -1) {
+    return withoutMatchingServerId;
+  }
+
+  const nextPendingPrompts = withoutMatchingServerId.filter(
+    (_, index) => index !== optimisticIndex,
+  );
+  return nextPendingPrompts.length > 0 ? nextPendingPrompts : undefined;
 }
 
 export function collectCandidateSourcePaths(session: Session) {

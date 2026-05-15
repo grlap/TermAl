@@ -436,6 +436,7 @@ export type PendingPrompt = {
   text: string;
   expandedText?: string | null;
   attachments?: ImageAttachment[];
+  localOnly?: boolean;
 };
 
 // Persisted transcript identity fields. If a new field is added here, update

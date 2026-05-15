@@ -107,7 +107,7 @@ import type {
 } from "../types";
 import type { PaneViewMode } from "../workspace";
 
-type WaitingIndicatorKind = "liveTurn" | "delegationWait";
+type WaitingIndicatorKind = "liveTurn" | "delegationWait" | "send";
 
 type DraftImageAttachment = ImageAttachment & {
   base64Data: string;
@@ -1379,6 +1379,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const effectiveShowWaitingIndicator =
     showWaitingIndicator &&
     (waitingIndicatorKind === "delegationWait" ||
+      waitingIndicatorKind === "send" ||
       (session.status === "active" &&
         !hasTurnFinalizingOutputAfterLatestUserPrompt(visibleMessages)) ||
       !hasAgentOutputAfterLatestUserPrompt(visibleMessages));
@@ -1867,7 +1868,11 @@ const SessionConversationPage = memo(function SessionConversationPage({
     >
       <PendingPromptCard
         prompt={prompt}
-        onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
+        onCancel={
+          prompt.localOnly
+            ? undefined
+            : () => onCancelQueuedPrompt(session.id, prompt.id)
+        }
         searchQuery={
           conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? conversationSearchQuery : ""
         }

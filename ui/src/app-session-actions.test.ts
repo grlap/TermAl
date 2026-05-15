@@ -413,6 +413,47 @@ describe("useAppSessionActions", () => {
     params.refs.activePromptPollCancelRef.current?.();
   });
 
+  it("publishes a pending prompt optimistically before send returns", () => {
+    vi.spyOn(api, "sendMessage").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const params = makeSessionActionsParams();
+    const actions = useAppSessionActions(params);
+
+    expect(actions.handleSend("session-1", "hello")).toBe(true);
+
+    expect(params.refs.sessionsRef.current[0]?.pendingPrompts).toEqual([
+      expect.objectContaining({
+        expandedText: null,
+        localOnly: true,
+        text: "hello",
+      }),
+    ]);
+    expect(params.setters.setSessions).toHaveBeenCalledWith(
+      params.refs.sessionsRef.current,
+    );
+  });
+
+  it("removes the optimistic pending prompt after a stale send response", async () => {
+    const staleState = {
+      ...makeStateResponse(4),
+      sessions: [makeSession("session-1", { status: "active" })],
+    };
+    vi.spyOn(api, "sendMessage").mockResolvedValue(staleState);
+    const params = makeSessionActionsParams({
+      adoptState: vi.fn(() => false),
+    });
+    const actions = useAppSessionActions(params);
+
+    expect(actions.handleSend("session-1", "hello")).toBe(true);
+    expect(params.refs.sessionsRef.current[0]?.pendingPrompts).toHaveLength(1);
+
+    await waitFor(() => {
+      expect(params.adoptState).toHaveBeenCalledWith(staleState);
+      expect(params.refs.sessionsRef.current[0]?.pendingPrompts).toBeUndefined();
+    });
+  });
+
   it("threads the originating pane into session-scoped action recovery", async () => {
     const state = {
       ...makeStateResponse(6),

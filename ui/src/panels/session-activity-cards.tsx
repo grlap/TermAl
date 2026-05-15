@@ -91,7 +91,7 @@ export const PendingPromptCard = memo(function PendingPromptCard({
   searchHighlightTone = "match",
 }: {
   prompt: PendingPrompt;
-  onCancel: () => void;
+  onCancel?: () => void;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
@@ -107,15 +107,17 @@ export const PendingPromptCard = memo(function PendingPromptCard({
             commandLabel ? <span className="message-meta-tag">{commandLabel}</span> : undefined
           }
         />
-        <button
-          className="pending-prompt-dismiss"
-          type="button"
-          onClick={onCancel}
-          aria-label="Cancel queued prompt"
-          title="Cancel queued prompt"
-        >
-          x
-        </button>
+        {onCancel ? (
+          <button
+            className="pending-prompt-dismiss"
+            type="button"
+            onClick={onCancel}
+            aria-label="Cancel queued prompt"
+            title="Cancel queued prompt"
+          >
+            x
+          </button>
+        ) : null}
       </div>
       {prompt.attachments && prompt.attachments.length > 0 ? (
         <MessageAttachmentList

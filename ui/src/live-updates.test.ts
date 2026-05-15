@@ -706,6 +706,49 @@ describe("applyDeltaToSessions", () => {
     ]);
   });
 
+  it("removes a matching optimistic prompt when its user message is created", () => {
+    const sessions = [
+      makeSession("session-a", {
+        pendingPrompts: [
+          {
+            id: "optimistic-send-session-a-abc-1",
+            timestamp: "10:00",
+            text: "Optimistic prompt",
+            localOnly: true,
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 1,
+      sessionId: "session-a",
+      messageId: "message-server-1",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "message-server-1",
+        type: "text",
+        timestamp: "10:00",
+        author: "you",
+        text: "Optimistic prompt",
+      },
+      preview: "Optimistic prompt",
+      status: "active",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+    expect(result.sessions[0].pendingPrompts).toBeUndefined();
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
+      "message-server-1",
+    ]);
+  });
+
   it("retains created messages for unhydrated summaries without forcing a state resync", () => {
     const sessions = [
       makeSession("session-a", {

@@ -4,7 +4,7 @@ import {
   delegationWaitIndicatorPrompt,
   hasAgentOutputAfterLatestUserPrompt,
   hasTurnFinalizingOutputAfterLatestUserPrompt,
-} from "./SessionPaneView";
+} from "./SessionPaneView.waiting-indicator";
 import type { DelegationWaitRecord } from "./api";
 import type { Message } from "./types";
 
