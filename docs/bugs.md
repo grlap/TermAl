@@ -58,45 +58,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 - Split into 2-3 modules mirroring the api.rs/wire.rs split shape.
 - Defer to a dedicated pure-code-move commit per CLAUDE.md.
 
-## `ui/src/preferences-panels.tsx` past 2000-line natural split point
-
-**Severity:** Medium - `TelegramPreferencesPanel` and `AgentDefaultModelControl` both continue to grow inside `ui/src/preferences-panels.tsx`, which is now past the 2,000-line rubric threshold.
-
-`ui/src/preferences-panels.tsx:1226-1430` duplicates 30-40 line async handler bodies with the same mount guard pattern, and the restored app-level custom model entry path adds a self-contained `AgentDefaultModelControl` block. CLAUDE.md asks for smaller modules; this file already owns theme, markdown, appearance, remote, Telegram, and agent default settings.
-
-**Current behavior:**
-- Three async handlers each with three `if (!isMountedRef.current)` checkpoints (start of catch, end of try, finally).
-- Pattern duplication; future maintainer copies the shape into a fourth handler.
-- `AgentDefaultModelControl` and its helper functions live inline despite being a focused preference control.
-
-**Proposal:**
-- Extract `useUnmountSafeAsync` hook returning a `runSafe(asyncFn, { onSuccess, onError, onFinally })` wrapper, OR
-- Split `TelegramPreferencesPanel` into form-state component + inner mount-safe handler module.
-- Extract `AgentDefaultModelControl` and its small helpers into a focused `ui/src/preferences/` module as a pure code move.
-
-## Manual model id input doubles its accessible name
-
-**Severity:** Low - `ui/src/preferences-panels.tsx:252-266` associates the new custom model input with a visible `Manual model id` label and also supplies an agent-specific `aria-label`.
-
-The `aria-label` wins in the accessibility tree, so screen readers announce "Codex custom default model" or "Claude custom default model" while sighted users see "Manual model id". That mismatch is small, but it makes the control less predictable for assistive-tech users and for accessibility tests.
-
-**Current behavior:**
-- Visible label reads `Manual model id`.
-- Accessible name comes from `aria-label`.
-
-**Proposal:**
-- Pick one accessible name. Either remove the `aria-label` and rename the visible label to the intended agent-specific text, or wire the visible label through `aria-labelledby`.
-
-## Validation tone className expression is redundant
-
-**Severity:** Note - `ui/src/preferences-panels.tsx:289` expands `validationTone` through a ternary that returns the same `"warning" | "info"` value it already stores.
-
-**Current behavior:**
-- `className` uses `validationTone === "warning" ? "warning" : "info"`.
-
-**Proposal:**
-- Replace the ternary with `${validationTone}`.
-
 ## Wire projection layer owns `messages_loaded` SEMANTIC field for partial case
 
 **Severity:** Medium - `wire_session_tail_from_record` decides `messages_loaded` based on whether the slice covers the whole transcript AND the source is loaded. This is wire-semantics decision (UI uses `messagesLoaded: false` to mean "still adopt me, but don't trust messages.length === messageCount") that lives in the projection helper.
@@ -913,12 +874,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
 
 ## Implementation Tasks
 
-- [ ] P2: Cover custom default-model Enter-to-apply and warning-tone branches:
-  add tests for pressing Enter to apply a manual model id, for the "not in current live model list" warning when real live options exist, and for the no-live-list path where arbitrary manual ids should not warn.
-- [ ] P2: Extend custom default-model coverage to non-Codex panels:
-  add parity tests for Claude, Cursor, and Gemini app-level default model controls so per-agent custom model regressions are caught.
-- [ ] P2: Strengthen `ClaudeApprovalMode` partition coverage:
-  assert every `ClaudeApprovalMode` variant appears exactly once in either `CLAUDE_APPROVAL_OPTIONS` or `INTERNAL_CLAUDE_APPROVAL_MODES`, so future enum additions cannot drift.
 - [ ] P2: Add repeated-send waiting-indicator coverage:
   send a second prompt after a completed assistant response while the POST is still in flight, and assert the user still sees send-in-progress feedback until the new prompt appears in session state.
 - [ ] P2: Cover first-chunk Telegram forward failure:

@@ -3,9 +3,12 @@ import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  ALL_CLAUDE_APPROVAL_MODES,
   ClaudeApprovalsPreferencesPanel,
   CLAUDE_APPROVAL_OPTIONS,
   CodexPromptPreferencesPanel,
+  CursorPreferencesPanel,
+  GeminiPreferencesPanel,
   INTERNAL_CLAUDE_APPROVAL_MODES,
 } from "./preferences-panels";
 
@@ -61,6 +64,46 @@ function renderClaudePanel({
   };
 }
 
+function renderCursorPanel({
+  defaultModel = "default",
+  onSelectModel = vi.fn(),
+}: {
+  defaultModel?: string;
+  onSelectModel?: (model: string) => void;
+} = {}) {
+  return {
+    onSelectModel,
+    ...render(
+      <CursorPreferencesPanel
+        defaultCursorMode="agent"
+        defaultCursorModel={defaultModel}
+        onSelectMode={vi.fn()}
+        onSelectModel={onSelectModel}
+      />,
+    ),
+  };
+}
+
+function renderGeminiPanel({
+  defaultModel = "default",
+  onSelectModel = vi.fn(),
+}: {
+  defaultModel?: string;
+  onSelectModel?: (model: string) => void;
+} = {}) {
+  return {
+    onSelectModel,
+    ...render(
+      <GeminiPreferencesPanel
+        defaultGeminiApprovalMode="default"
+        defaultGeminiModel={defaultModel}
+        onSelectApprovalMode={vi.fn()}
+        onSelectModel={onSelectModel}
+      />,
+    ),
+  };
+}
+
 describe("AgentDefaultModelControl", () => {
   it("keeps a custom model entry path beside the known-model combobox", () => {
     renderCodexPanel({ defaultModel: "gpt-5.5" });
@@ -87,6 +130,85 @@ describe("AgentDefaultModelControl", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply Codex default model" }));
 
     expect(onSelectModel).toHaveBeenCalledWith("gpt-5.6-preview");
+    expect(screen.queryByText(/not in the current live model list/u)).not.toBeInTheDocument();
+  });
+
+  it("warns for unknown manual model ids only when a live model list exists", () => {
+    renderCodexPanel({
+      sessions: [
+        {
+          id: "codex-1",
+          name: "Codex",
+          emoji: "",
+          agent: "Codex",
+          workdir: "/tmp",
+          model: "default",
+          modelOptions: [
+            {
+              label: "GPT-5.5",
+              value: "gpt-5.5",
+              description: "Latest Codex model",
+            },
+          ],
+          status: "idle",
+          preview: "",
+          messages: [],
+        },
+      ],
+    });
+
+    fireEvent.change(screen.getByLabelText("Codex custom default model"), {
+      target: { value: "gpt-5.6-preview" },
+    });
+
+    expect(screen.getByText(/not in the current live model list/u)).toBeInTheDocument();
+  });
+
+  it("applies manual default model ids with Enter", () => {
+    const onSelectModel = vi.fn();
+    renderCodexPanel({ defaultModel: "default", onSelectModel });
+
+    fireEvent.change(screen.getByLabelText("Codex custom default model"), {
+      target: { value: "gpt-5.7-preview" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Codex custom default model"), {
+      key: "Enter",
+    });
+
+    expect(onSelectModel).toHaveBeenCalledWith("gpt-5.7-preview");
+  });
+
+  it("applies arbitrary app-level default model ids for Claude, Cursor, and Gemini", () => {
+    const panels = [
+      {
+        agent: "Claude",
+        renderPanel: renderClaudePanel,
+        value: "claude-opus-4-5",
+      },
+      {
+        agent: "Cursor",
+        renderPanel: renderCursorPanel,
+        value: "cursor-custom-model",
+      },
+      {
+        agent: "Gemini",
+        renderPanel: renderGeminiPanel,
+        value: "gemini-custom-model",
+      },
+    ] as const;
+
+    for (const { agent, renderPanel, value } of panels) {
+      const onSelectModel = vi.fn();
+      const { unmount } = renderPanel({ onSelectModel });
+
+      fireEvent.change(screen.getByLabelText(`${agent} custom default model`), {
+        target: { value },
+      });
+      fireEvent.click(screen.getByRole("button", { name: `Apply ${agent} default model` }));
+
+      expect(onSelectModel).toHaveBeenCalledWith(value);
+      unmount();
+    }
   });
 
   it("selects the canonical default sentinel from the combobox", async () => {
@@ -172,9 +294,12 @@ describe("AgentDefaultModelControl", () => {
   });
 
   it("keeps read-only auto-approve internal to delegation flows", () => {
-    expect(CLAUDE_APPROVAL_OPTIONS.map((option) => option.value)).not.toContain(
-      "read-only-auto-approve",
-    );
-    expect(INTERNAL_CLAUDE_APPROVAL_MODES.has("read-only-auto-approve")).toBe(true);
+    const userFacingModes = CLAUDE_APPROVAL_OPTIONS.map((option) => option.value);
+    const internalModes = Array.from(INTERNAL_CLAUDE_APPROVAL_MODES);
+    const partitionedModes = [...userFacingModes, ...internalModes].sort();
+
+    expect(userFacingModes).not.toContain("read-only-auto-approve");
+    expect(partitionedModes).toEqual([...ALL_CLAUDE_APPROVAL_MODES].sort());
+    expect(new Set(partitionedModes).size).toBe(partitionedModes.length);
   });
 });

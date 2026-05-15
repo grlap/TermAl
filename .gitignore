@@ -7,6 +7,7 @@
 /ui/vite.config.js
 /ui/vite.config.d.ts
 *.diff
+.DS_Store
 
 .termal
 .tmp

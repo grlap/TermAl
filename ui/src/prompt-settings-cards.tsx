@@ -4,13 +4,13 @@ import {
   useState,
 } from "react";
 import {
-  ThemedCombobox,
   SANDBOX_MODE_OPTIONS,
   APPROVAL_POLICY_OPTIONS,
   CLAUDE_APPROVAL_OPTIONS,
   CURSOR_MODE_OPTIONS,
   GEMINI_APPROVAL_OPTIONS,
 } from "./preferences-panels";
+import { ThemedCombobox } from "./preferences/themed-combobox";
 import {
   claudeEffortComboboxOptions,
   claudeEffortHint,
