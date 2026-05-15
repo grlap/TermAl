@@ -7,12 +7,12 @@ import {
   testTelegramConnection,
   updateTelegramConfig,
   type TelegramStatusResponse,
-} from "./api";
-import { TelegramPreferencesPanel } from "./preferences-panels";
-import type { Project, Session } from "./types";
+} from "../api";
+import type { Project, Session } from "../types";
+import { TelegramPreferencesPanel } from "./telegram-preferences-panel";
 
-vi.mock("./api", async () => {
-  const actual = await vi.importActual<typeof import("./api")>("./api");
+vi.mock("../api", async () => {
+  const actual = await vi.importActual<typeof import("../api")>("../api");
   return {
     ...actual,
     fetchTelegramStatus: vi.fn(),

@@ -146,19 +146,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 - Split UI config and runtime cursor/chat state into separate files, or guard all writers with an OS-level file lock.
 - Add cross-process interleaving coverage proving config and runtime state both survive competing writes.
 
-## Telegram settings UI belongs behind a focused module boundary
-
-**Severity:** Low - the Telegram panel adds a large independent API workflow to the already broad preferences panel module.
-
-`ui/src/preferences-panels.tsx:1214` adds several hundred lines of Telegram settings state, effects, API calls, payload shaping, and rendering to a file that already owns multiple preferences panels.
-
-**Current behavior:**
-- Telegram settings lifecycle/config UI lives inside `preferences-panels.tsx`.
-- Fetch/save/test behavior and render structure are coupled to the broad preferences module.
-
-**Proposal:**
-- Extract Telegram settings UI and its fetch/save/test hook into a dedicated preferences or telegram-settings module.
-
 ## Telegram settings HTTP API split across three routes diverges from `/api/settings` convention
 
 **Severity:** Medium - every other settings surface uses `POST /api/settings` returning `StateResponse` with SSE broadcast; Telegram uses `GET /api/telegram/status` + `POST /api/telegram/config` + `POST /api/telegram/test` returning `TelegramStatusResponse` with no broadcast.
@@ -173,21 +160,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 **Proposal:**
 - Fold the Telegram config bag into `UpdateAppSettingsRequest` with a `telegram: Option<UpdateTelegramConfigRequest>` field, returning `StateResponse` like every other setting.
 - Or document explicitly in `docs/features/` why Telegram is intentionally separated (e.g., "secret tokens kept out of the broadcast snapshot").
-
-## `TelegramPreferencesPanel` does not memoize handlers, diverging from sibling preference panels
-
-**Severity:** Low - `projectOptions` and `sessionOptions` are memoed, but `updateDraft`, `toggleProject`, `handleSave`, `handleTestConnection`, and the inline `onChange` lambdas at lines 1797, 1822, 1834 are recreated on every render. The two `ThemedCombobox` controls receive new function identity on every keystroke. Pattern divergence with `RemotePreferencesPanel` and other sibling panels in the same file.
-
-`ui/src/preferences-panels.tsx:1214-1971`. A future reader copy-pasting from one panel to another now has two patterns to choose from.
-
-**Current behavior:**
-- Handlers are recreated on every render.
-- Sibling preference panels in the same file memoize handlers.
-- ThemedCombobox children receive new identity on every keystroke.
-
-**Proposal:**
-- Stabilize handlers via `useCallback`.
-- Or document explicitly that the panel intentionally avoids memoization. Either is fine; consistency is the architectural goal.
 
 ## `ConversationOverviewRail` per-segment fresh handlers and aria-label per render
 
