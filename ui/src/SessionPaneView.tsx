@@ -167,8 +167,8 @@ import {
 } from "./app-utils";
 import {
   buildConnectionRetryDisplayStateByMessageId,
-  type ConnectionRetryDisplayState,
 } from "./connection-retry";
+import { useStableMapBySignature } from "./use-stable-map-by-signature";
 import {
   workspaceFilesChangedEventChangeForPath,
 } from "./workspace-file-events";
@@ -989,35 +989,9 @@ export function SessionPaneView({
     () => buildConnectionRetryDisplayStateByMessageId(activeSession),
     [activeSession?.messages, activeSession?.status],
   );
-  const connectionRetryDisplayStateSignature = useMemo(() => {
-    if (nextConnectionRetryDisplayStateByMessageId.size === 0) {
-      return "";
-    }
-
-    return [...nextConnectionRetryDisplayStateByMessageId]
-      .map(([messageId, displayState]) => `${messageId}:${displayState}`)
-      .join("|");
-  }, [nextConnectionRetryDisplayStateByMessageId]);
-  const connectionRetryDisplayStateByMessageIdRef = useRef<{
-    signature: string;
-    map: Map<string, ConnectionRetryDisplayState>;
-  } | null>(null);
-  const connectionRetryDisplayStateByMessageId = useMemo(() => {
-    const previous = connectionRetryDisplayStateByMessageIdRef.current;
-    if (previous?.signature === connectionRetryDisplayStateSignature) {
-      return previous.map;
-    }
-
-    const next = {
-      signature: connectionRetryDisplayStateSignature,
-      map: nextConnectionRetryDisplayStateByMessageId,
-    };
-    connectionRetryDisplayStateByMessageIdRef.current = next;
-    return next.map;
-  }, [
-    connectionRetryDisplayStateSignature,
+  const connectionRetryDisplayStateByMessageId = useStableMapBySignature(
     nextConnectionRetryDisplayStateByMessageId,
-  ]);
+  );
   const getConnectionRetryDisplayState = useCallback(
     (messageId: string) => connectionRetryDisplayStateByMessageId.get(messageId),
     [connectionRetryDisplayStateByMessageId],

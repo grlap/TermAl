@@ -253,18 +253,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Pass a single `actionStateClassifierContextRef: MutableRefObject<{ revision, serverInstanceId, projects, sessions }>` (or a memoized snapshot getter) so adding a new evidence dimension does not require touching the hook signature, the caller, and the test harness.
 - Defer to a dedicated commit per CLAUDE.md.
 
-## `connectionRetryDisplayStateByMessageId` two-stage memoization is correct but threaded through ~4 stability hops
-
-**Severity:** Medium - `ui/src/SessionPaneView.tsx:858-895`. The retry-display memoization now uses `signature → ref-cached map → useCallback wrapper → useSessionRenderCallbacks deps → MessageCard renderer identity`. The map identity stability invariant is load-bearing for `SessionBody` memoization but only documented sparsely. A future change to retry-display semantics needs to be threaded through ~4 separate stability hops.
-
-**Current behavior:**
-- Hand-rolled signature-stable memo bridges to a renderer that already had its own deps tax.
-- Reviewers have flagged this as "complex invariant without nearby comments" several rounds in a row.
-
-**Proposal:**
-- Extract the signature-stable memo into a small `useStableMapBySignature` hook in a sibling utility module so the pattern is reusable and named.
-- Or memoize directly on `(messages, status)` and accept one rebuild per message-list change — `MessageCard` is already memoized below the `SessionBody` memo gate.
-
 ## Directory-level state hardening retains a TOCTOU window after symlink check
 
 **Severity:** Low - `src/persist.rs:146-149`. Round-15 carryover. `harden_local_state_directory_permissions` calls `reject_existing_state_directory_redirection_unix` (which uses `fs::symlink_metadata`), then `harden_local_state_permissions(path, 0o700)` — which uses path-based `fs::set_permissions` and `fs::metadata`, both of which follow symlinks. An attacker able to replace the directory between the two calls would get the chmod redirected through the symlink. The matching file path now uses `O_NOFOLLOW + fchmod`, but the directory path has not been migrated.
