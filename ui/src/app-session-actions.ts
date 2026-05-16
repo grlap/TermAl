@@ -73,6 +73,10 @@ import { upsertSessionStoreSession } from "./session-store";
 import { syncActionComposerDraftSlice } from "./app-session-draft-sync";
 import { conversationMarkerSatisfiesResponse } from "./conversation-marker-response-match";
 import {
+  deleteConversationMarkerLocally,
+  upsertConversationMarkerLocally,
+} from "./conversation-marker-session-mutations";
+import {
   findWorkspacePaneIdForSession,
   openSessionInWorkspaceState,
   reconcileWorkspaceState,
@@ -648,45 +652,6 @@ export function useAppSessionActions(
       );
       return nextSession ?? currentSession;
     });
-  }
-
-  function upsertConversationMarkerLocally(
-    session: Session,
-    marker: NonNullable<Session["markers"]>[number],
-    sessionMutationStamp?: number | null,
-  ): Session {
-    const markers = session.markers ?? [];
-    const markerIndex = markers.findIndex((entry) => entry.id === marker.id);
-    if (markerIndex === -1) {
-      return {
-        ...session,
-        markers: [...markers, marker],
-        ...(sessionMutationStamp !== undefined ? { sessionMutationStamp } : {}),
-      };
-    }
-
-    const updatedMarkers = markers.slice();
-    updatedMarkers[markerIndex] = marker;
-    return {
-      ...session,
-      markers: updatedMarkers,
-      ...(sessionMutationStamp !== undefined ? { sessionMutationStamp } : {}),
-    };
-  }
-
-  function deleteConversationMarkerLocally(
-    session: Session,
-    markerId: string,
-    sessionMutationStamp?: number | null,
-  ): Session {
-    const nextMarkers = (session.markers ?? []).filter(
-      (marker) => marker.id !== markerId,
-    );
-    return {
-      ...session,
-      markers: nextMarkers,
-      ...(sessionMutationStamp !== undefined ? { sessionMutationStamp } : {}),
-    };
   }
 
   function shouldApplyMarkerMutationResponse(
