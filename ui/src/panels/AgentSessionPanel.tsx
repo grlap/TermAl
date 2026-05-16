@@ -80,6 +80,10 @@ import {
 import { resolvePaneScrollCommand } from "../pane-keyboard";
 import { resolveLiveWaitingIndicatorPrompt } from "../app-utils";
 import {
+  hasAgentOutputAfterLatestUserPrompt,
+  hasTurnFinalizingOutputAfterLatestUserPrompt,
+} from "../SessionPaneView.waiting-indicator";
+import {
   SESSION_TAIL_RENDER_MIN_MESSAGES,
   SESSION_TAIL_WINDOW_MESSAGE_COUNT,
 } from "../session-tail-policy";
@@ -122,48 +126,6 @@ type DraftImageAttachment = ImageAttachment & {
   id: string;
   previewUrl: string;
 };
-
-function hasAgentOutputAfterLatestUserPrompt(messages: readonly Message[]) {
-  let sawLatestUserPrompt = false;
-  let sawAgentOutputAfterLatestUserPrompt = false;
-
-  for (const message of messages) {
-    if (message.author === "you") {
-      sawLatestUserPrompt = true;
-      sawAgentOutputAfterLatestUserPrompt = false;
-      continue;
-    }
-
-    if (sawLatestUserPrompt && message.author === "assistant") {
-      sawAgentOutputAfterLatestUserPrompt = true;
-    }
-  }
-
-  return sawAgentOutputAfterLatestUserPrompt;
-}
-
-function hasTurnFinalizingOutputAfterLatestUserPrompt(messages: readonly Message[]) {
-  let sawLatestUserPrompt = false;
-  let sawTurnFinalizingOutputAfterLatestUserPrompt = false;
-
-  for (const message of messages) {
-    if (message.author === "you") {
-      sawLatestUserPrompt = true;
-      sawTurnFinalizingOutputAfterLatestUserPrompt = false;
-      continue;
-    }
-
-    if (
-      sawLatestUserPrompt &&
-      message.author === "assistant" &&
-      message.type === "fileChanges"
-    ) {
-      sawTurnFinalizingOutputAfterLatestUserPrompt = true;
-    }
-  }
-
-  return sawTurnFinalizingOutputAfterLatestUserPrompt;
-}
 
 type PromptHistoryState = {
   index: number;
