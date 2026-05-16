@@ -63,13 +63,11 @@ fn discover_codex_threads_from_home_reads_latest_database() {
     let _ = fs::remove_dir_all(&codex_home);
 }
 
-// pins the error surface when discovery hits a legacy Codex schema that
-// predates the `model` and `reasoning_effort` columns: the query fails with
-// a recognisable "no such column" diagnostic rather than silently returning
-// an empty list. guards against a regression that would mask a corrupted or
-// out-of-date Codex install as "no threads found".
+// pins that Codex thread discovery treats `model` and `reasoning_effort` as
+// optional columns. Older Codex installs can lack them; discovery should still
+// import the thread metadata it can read instead of failing startup discovery.
 #[test]
-fn discover_codex_threads_from_home_requires_optional_columns() {
+fn discover_codex_threads_from_home_tolerates_missing_optional_columns() {
     let codex_home =
         std::env::temp_dir().join(format!("termal-codex-home-legacy-{}", Uuid::new_v4()));
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
@@ -105,13 +103,12 @@ fn discover_codex_threads_from_home_requires_optional_columns() {
         )
         .expect("legacy thread row should insert");
 
-    let err = discover_codex_threads_from_home(&codex_home, &[PathBuf::from("/tmp/project")])
-        .expect_err("legacy threads schema should fail");
-    let err_text = format!("{err:#}");
-    assert!(
-        err_text.contains("no such column"),
-        "unexpected discovery error: {err_text}"
-    );
+    let threads = discover_codex_threads_from_home(&codex_home, &[PathBuf::from("/tmp/project")])
+        .expect("legacy threads schema should load");
+    assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0].id, "thread-legacy");
+    assert_eq!(threads[0].model, None);
+    assert_eq!(threads[0].reasoning_effort, None);
 
     let _ = fs::remove_dir_all(&codex_home);
 }

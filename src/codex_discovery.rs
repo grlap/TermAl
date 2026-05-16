@@ -186,13 +186,22 @@ fn discover_codex_threads_from_home(
         .iter()
         .map(|scope| normalize_codex_discovery_path(scope))
         .collect::<Vec<_>>();
+    let has_model_column = codex_threads_table_has_column(&connection, "model")?;
+    let has_reasoning_effort_column =
+        codex_threads_table_has_column(&connection, "reasoning_effort")?;
+    let model_select = if has_model_column { "model" } else { "null as model" };
+    let reasoning_effort_select = if has_reasoning_effort_column {
+        "reasoning_effort"
+    } else {
+        "null as reasoning_effort"
+    };
     let scope_sql = query_scope_patterns
         .iter()
         .map(|_| "(cwd = ? OR cwd LIKE ? ESCAPE '\\')")
         .collect::<Vec<_>>()
         .join(" OR ");
     let query = format!(
-        "select id, cwd, title, sandbox_policy, approval_mode, archived, model, reasoning_effort
+        "select id, cwd, title, sandbox_policy, approval_mode, archived, {model_select}, {reasoning_effort_select}
          from threads
          where {scope_sql}
          order by updated_at desc
@@ -249,6 +258,20 @@ fn discover_codex_threads_from_home(
         threads.push(thread);
     }
     Ok(threads)
+}
+
+fn codex_threads_table_has_column(
+    connection: &rusqlite::Connection,
+    column_name: &str,
+) -> Result<bool> {
+    let mut statement = connection.prepare("pragma table_info(threads)")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for row in rows {
+        if row? == column_name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Collects Codex discovery query scope strings.
