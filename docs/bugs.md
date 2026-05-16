@@ -106,18 +106,18 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 
 ## `AgentSessionPanel.tsx` exceeds 2000-line architecture rubric threshold
 
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx:1475` and `ui/src/panels/AgentSessionPanel.test.tsx`. The panel remains over the documented TSX file-size budget, and the composer resize/transition behavior is now a local state machine inside `SessionComposer`.
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx` remains over the documented TSX file-size budget after the composer auto-resize state machine was split out to `ui/src/panels/useComposerAutoResize.ts`.
 
-This review adds and exercises multiple rAF/transition refs plus cancellation/restore ordering in the same component. The behavior is UI-local, but the ordering contract is subtle enough that future changes are hard to reason about inside the broader panel file.
+The resize/transition refs are now isolated, but the panel still mixes session header, footer orchestration, command palette, attachments, and send/delegate control flow. The next split should keep reducing production TSX surface rather than adding more local state.
 
 **Current behavior:**
-- `AgentSessionPanel.tsx` is 2605 lines.
+- `AgentSessionPanel.tsx` is about 3300 lines.
 - `AgentSessionPanel.test.tsx` was split into focused sibling files; `AgentSessionPanel.tsx` remains over the production TSX threshold.
-- Composer auto-resize and transition restoration share state across several refs and rAF callbacks.
+- Composer auto-resize and transition restoration now live in `useComposerAutoResize`, but the remaining composer orchestration is still embedded in the broader panel.
 
 **Proposal:**
-- When touching this area again, extract textarea sizing/transition behavior into a focused hook such as `useComposerAutoResize`.
-- Keep targeted tests for resize scheduling, transition restoration, and session-switch cleanup with that hook.
+- Continue extracting focused panel concerns, such as composer command-palette orchestration or footer/send controls, into smaller hook/component modules with split-provenance headers.
+- Keep targeted tests with the extracted concerns so the remaining panel can become mostly composition.
 
 ## Telegram-forwarded text has no per-chat rate cap
 
