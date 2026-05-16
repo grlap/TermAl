@@ -558,11 +558,18 @@ describe("deferred session-store sync", () => {
     params.adoptionRefs.latestStateRevisionRef.current = 5;
     params.adoptionRefs.sessionsRef.current = [session];
     let hook: UseAppLiveStateReturn | null = null;
+    let originalEventSource: EventSourceMock | null = null;
+    const setSessions = vi.fn((nextSessions: Session[]) => {
+      expect(originalEventSource).not.toBeNull();
+      expect(EventSourceMock.instances).toEqual([originalEventSource]);
+      params.adoptionRefs.sessionsRef.current = nextSessions;
+    }) as typeof params.stateSetters.setSessions;
+    params.stateSetters.setSessions = setSessions;
 
     renderLiveStateHarness(params, (nextHook) => {
       hook = nextHook;
     });
-    const originalEventSource =
+    originalEventSource =
       EventSourceMock.instances[EventSourceMock.instances.length - 1];
 
     act(() => {
@@ -594,6 +601,7 @@ describe("deferred session-store sync", () => {
       );
     });
 
+    expect(setSessions).toHaveBeenCalled();
     await waitFor(() => expect(EventSourceMock.instances.length).toBe(2));
     expect(EventSourceMock.instances[1]).not.toBe(originalEventSource);
   });
