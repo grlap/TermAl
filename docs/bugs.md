@@ -58,20 +58,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 - Split into 2-3 modules mirroring the api.rs/wire.rs split shape.
 - Defer to a dedicated pure-code-move commit per CLAUDE.md.
 
-## Wire projection layer owns `messages_loaded` SEMANTIC field for partial case
-
-**Severity:** Medium - `wire_session_tail_from_record` decides `messages_loaded` based on whether the slice covers the whole transcript AND the source is loaded. This is wire-semantics decision (UI uses `messagesLoaded: false` to mean "still adopt me, but don't trust messages.length === messageCount") that lives in the projection helper.
-
-`src/state_accessors.rs:210-219`. The wire layer's job is "single source of truth for the JSON shape" — but `messages_loaded` here is becoming a SEMANTIC field, not a shape field. `get_session_tail` is the only caller, but the next time someone needs partial transcripts (e.g., a "show me messages around message-X" range fetch), they'll either reuse this helper with a new caller (coupling unrelated wire-projections) or duplicate the logic.
-
-**Current behavior:**
-- `wire_session_tail_from_record` encodes "tail only counts as fully loaded if it covers the whole transcript AND the source is loaded".
-- This is semantic flag manipulation, not pure shape projection.
-- Future range-fetch callers must reuse or duplicate.
-
-**Proposal:**
-- Either move `messages_loaded` decision into the route handler (keeping the projection pure-shape), OR formalize a `partial_transcript_loaded` distinction in the wire shape itself (`transcriptLoaded: "full" | "partial-tail" | "summary"`) and have the frontend act on the typed value rather than inferring from `messagesLoaded === false && messages.length > 0`.
-
 ## `SessionHydrationRequestContext` is a four-flag bag with non-obvious mutual exclusions
 
 **Severity:** Medium - two booleans (`allowDivergentTextRepairAfterNewerRevision`, `allowPartialTranscript`) plus three metadata fields. The flags have non-obvious interactions encoded in call-site logic, not the type.

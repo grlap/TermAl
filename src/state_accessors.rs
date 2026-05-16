@@ -311,14 +311,30 @@ impl AppState {
         session
     }
 
-    fn wire_session_tail_from_record(record: &SessionRecord, message_limit: usize) -> Session {
-        let mut session = Self::wire_session_summary_from_record(record);
+    fn session_tail_start_index(record: &SessionRecord, message_limit: usize) -> usize {
         let retained_message_count =
             message_limit.min(SESSION_TAIL_HYDRATION_MAX_MESSAGES);
+        record
+            .session
+            .messages
+            .len()
+            .saturating_sub(retained_message_count)
+    }
+
+    fn wire_session_tail_from_record(
+        record: &SessionRecord,
+        message_limit: usize,
+        messages_loaded: bool,
+    ) -> Session {
+        let mut session = Self::wire_session_summary_from_record(record);
         let source_messages = &record.session.messages;
-        let start_index = source_messages.len().saturating_sub(retained_message_count);
+        let start_index = Self::session_tail_start_index(record, message_limit);
+        debug_assert!(
+            !messages_loaded || start_index == 0,
+            "tail projection cannot mark a strict suffix as fully loaded"
+        );
         session.messages = source_messages[start_index..].to_vec();
-        session.messages_loaded = record.session.messages_loaded && start_index == 0;
+        session.messages_loaded = messages_loaded;
         session
     }
 
@@ -567,9 +583,11 @@ impl AppState {
             .find_visible_session_index(session_id)
             .ok_or_else(ApiError::local_session_missing)?;
         let record = &inner.sessions[index];
+        let tail_start_index = Self::session_tail_start_index(record, message_limit);
+        let messages_loaded = record.session.messages_loaded && tail_start_index == 0;
         Ok(SessionResponse {
             revision: inner.revision,
-            session: Self::wire_session_tail_from_record(record, message_limit),
+            session: Self::wire_session_tail_from_record(record, message_limit, messages_loaded),
             server_instance_id: self.server_instance_id.clone(),
         })
     }
