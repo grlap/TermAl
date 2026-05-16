@@ -278,9 +278,7 @@ export default function App() {
     initialWorkspaceBootstrap.workspace,
   );
   const [isWorkspaceSwitcherOpen, setIsWorkspaceSwitcherOpen] = useState(false);
-  const [draftsBySessionId, setDraftsBySessionId] = useState<
-    Record<string, string>
-  >({});
+  const [, setDraftsBySessionId] = useState<Record<string, string>>({});
   const [draftAttachmentsBySessionId, setDraftAttachmentsBySessionId] =
     useState<Record<string, DraftImageAttachment[]>>({});
   const [newSessionAgent, setNewSessionAgent] = useState<AgentType>("Codex");
@@ -455,6 +453,8 @@ export default function App() {
     new Set(),
   );
   const backendInlineRequestErrorMessageRef = useRef<string | null>(null);
+  // Draft handlers own this ref and publish composer-store updates from it.
+  // Mirroring committed React state back here can overwrite newer imperative writes.
   const draftsRef = useRef<Record<string, string>>({});
   const draftAttachmentsRef = useRef<Record<string, DraftImageAttachment[]>>(
     {},
@@ -1604,9 +1604,8 @@ export default function App() {
   }, [agentReadiness, codexState, delegationWaits, orchestrators, projects]);
 
   useEffect(() => {
-    draftsRef.current = draftsBySessionId;
     draftAttachmentsRef.current = draftAttachmentsBySessionId;
-  }, [draftAttachmentsBySessionId, draftsBySessionId]);
+  }, [draftAttachmentsBySessionId]);
 
   // Re-fetch Git diff preview tabs restored from persisted workspace layout
   // without `documentContent`. Layout hydration can arrive after mount, so this
