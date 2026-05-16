@@ -326,17 +326,6 @@ The growth is incremental across many rounds of replay-cache hardening, not a si
 - Extract the replay-cache cluster (lines ~2,810–4,040) into `src/tests/remote_delta_replay.rs` as a pure code move — including the helpers and all `remote_delta_replay_*` tests.
 - Defer to a dedicated split commit; do not couple with feature changes.
 
-## `SourcePanel.tsx` is growing along a separable axis
-
-**Severity:** Low - `ui/src/panels/SourcePanel.tsx` grew from ~803 to 1119 lines in this round (+316). It is approaching but has not crossed the ~2,000-line scrutiny threshold. The new responsibility (rendered-Markdown commit pipeline orchestration: collect — resolve ranges — check overlap — reduce edits — re-emit with EOL style) is meaningfully separable from the existing source-buffer/save/rebase/compare orchestration. It has its own state (`hasRenderedMarkdownDraftActive`, `renderedMarkdownCommittersRef`), pure helpers already split into `markdown-commit-ranges`/`markdown-diff-segments`, and a clean parent-callback interface.
-
-**Current behavior:**
-- SourcePanel owns two distinct orchestration responsibilities in one component.
-
-**Proposal:**
-- No action this commit. Consider extracting a `useRenderedMarkdownDrafts(fileStateRef, editorValueRef, setEditorValueState, ...)` hook in a follow-up, owning `renderedMarkdownCommittersRef`, `hasRenderedMarkdownDraftActive`, `commitRenderedMarkdownDrafts`, `handleRenderedMarkdownSectionCommits`, and `handleRenderedMarkdownSectionDraftChange`.
-- The hook would expose a small surface for SourcePanel to consume and keep the file under the scrutiny threshold.
-
 ## Metadata-first state summaries still broadcast full pending prompts
 
 **Severity:** Low - transcript payloads were removed from global state, but queued prompt text can still ride along with every session summary.
