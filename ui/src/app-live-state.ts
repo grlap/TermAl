@@ -127,6 +127,11 @@ import {
   staleSendRecoveryPollSessionIdsForDelta,
 } from "./app-live-state-delta-events";
 import {
+  applyDelegationWaitConsumed,
+  applyDelegationWaitCreated,
+  areDelegationWaitRecordsEqual,
+} from "./app-live-state-delegation-waits";
+import {
   classifyFetchedSessionAdoption,
   getHydrationMessageCount,
   getHydrationMutationStamp,
@@ -437,53 +442,6 @@ function setContainsOnlyValuesFrom<T>(current: Set<T>, allowed: Set<T>) {
   }
 
   return true;
-}
-
-function areDelegationWaitRecordsEqual(
-  current: readonly DelegationWaitRecord[],
-  next: readonly DelegationWaitRecord[],
-) {
-  if (current.length !== next.length) {
-    return false;
-  }
-  return current.every((record, index) => {
-    const candidate = next[index];
-    return (
-      candidate !== undefined &&
-      record.id === candidate.id &&
-      record.parentSessionId === candidate.parentSessionId &&
-      record.mode === candidate.mode &&
-      record.createdAt === candidate.createdAt &&
-      (record.title ?? null) === (candidate.title ?? null) &&
-      record.delegationIds.length === candidate.delegationIds.length &&
-      record.delegationIds.every((id, idIndex) => id === candidate.delegationIds[idIndex])
-    );
-  });
-}
-
-function applyDelegationWaitCreated(
-  waits: readonly DelegationWaitRecord[],
-  wait: DelegationWaitRecord,
-): DelegationWaitRecord[] {
-  const index = waits.findIndex((record) => record.id === wait.id);
-  if (index === -1) {
-    return [...waits, wait];
-  }
-
-  const nextWaits = [...waits];
-  nextWaits[index] = wait;
-  return areDelegationWaitRecordsEqual(waits, nextWaits) ? [...waits] : nextWaits;
-}
-
-function applyDelegationWaitConsumed(
-  waits: readonly DelegationWaitRecord[],
-  waitId: string,
-): DelegationWaitRecord[] {
-  if (!waits.some((wait) => wait.id === waitId)) {
-    return [...waits];
-  }
-
-  return waits.filter((wait) => wait.id !== waitId);
 }
 
 export function useAppLiveState(
