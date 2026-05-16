@@ -97,7 +97,6 @@ import type {
   GeminiApprovalMode,
   JsonValue,
   McpElicitationAction,
-  PendingPrompt,
   Project,
   SandboxMode,
   Session,
@@ -110,8 +109,7 @@ import {
   LOCAL_REMOTE_ID,
 } from "./remotes";
 import { assertNever } from "./exhaustive";
-
-let nextOptimisticPromptSequence = 0;
+import { createOptimisticPendingPrompt } from "./optimistic-pending-prompt";
 
 type UseAppSessionActionsLookups = {
   sessionLookup: Map<string, Session>;
@@ -904,28 +902,13 @@ export function useAppSessionActions(
       delete nextState[sessionId];
       return nextState;
     });
-    nextOptimisticPromptSequence += 1;
-    const optimisticPromptId = [
-      "optimistic-send",
+    const optimisticPendingPrompt = createOptimisticPendingPrompt(
       sessionId,
-      Date.now().toString(36),
-      nextOptimisticPromptSequence.toString(36),
-    ].join("-");
-    const optimisticPendingPrompt: PendingPrompt = {
-      id: optimisticPromptId,
-      timestamp: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      text: prompt,
-      expandedText: normalizedExpandedText,
-      attachments: attachments.map((attachment) => ({
-        byteSize: attachment.byteSize,
-        fileName: attachment.fileName,
-        mediaType: attachment.mediaType,
-      })),
-      localOnly: true,
-    };
+      prompt,
+      normalizedExpandedText,
+      attachments,
+    );
+    const optimisticPromptId = optimisticPendingPrompt.id;
     updateSessionLocally(sessionId, (currentSession) => ({
       ...currentSession,
       pendingPrompts: [
