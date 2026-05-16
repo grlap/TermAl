@@ -1364,6 +1364,37 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
         );
         await flushUiWork();
       });
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "Recovered after wake.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-final-1",
+                  type: "text",
+                  timestamp: "10:02",
+                  author: "assistant",
+                  text: "Recovered after wake.",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+      await settleAsyncUi();
 
       await advanceTimers(LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS + 1000);
       // 6000 ms < LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS (15000 ms), so

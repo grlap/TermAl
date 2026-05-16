@@ -651,8 +651,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   cover manual retry hitting a transient failure, then the next scheduled attempt adopting a newer same-instance snapshot while polling still continues until SSE confirms.
 - [ ] P2 watchdog wake-gap stop-after-progress regression:
   trigger watchdog wake-gap recovery, adopt same-instance `/api/state` progress, and assert no additional reconnect polling occurs before a later live event.
-- [ ] P2: Triage unrelated full-suite vitest failures:
-  Claude delegated review observed 21 failures across `ui/src/App.control-panel.openers.test.tsx`, `ui/src/App.control-panel.scoping.test.tsx`, and `ui/src/App.live-state.watchdog.test.tsx` while reviewing the message marker-menu context split. Confirm whether these are environment-dependent flakes or an earlier regression, then stabilize the tests or add a dedicated active bug entry.
 - [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:
   refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
 - [ ] P2: Document active Telegram reply forwarding invariants:
