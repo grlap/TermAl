@@ -1839,11 +1839,18 @@ function looksLikeHtmlResponse(raw: string, contentType: string) {
     return true;
   }
 
-  const trimmed = raw
-    .trimStart()
-    .slice(0, 256)
-    .toLowerCase();
-  return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+  let start = 0;
+  while (start < raw.length && /\s/.test(raw[start] ?? "")) {
+    start += 1;
+  }
+  return (
+    startsWithIgnoreCase(raw, start, "<!doctype html") ||
+    startsWithIgnoreCase(raw, start, "<html")
+  );
+}
+
+function startsWithIgnoreCase(value: string, start: number, prefix: string) {
+  return value.slice(start, start + prefix.length).toLowerCase() === prefix;
 }
 
 function formatUnavailableApiMessage(path: string, status: number) {
