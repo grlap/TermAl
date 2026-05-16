@@ -109,6 +109,10 @@ type TranscriptDelta = Extract<
   | { type: "commandUpdate" }
   | { type: "parallelAgentsUpdate" }
 >;
+type RetainedMessageTargetDelta = Exclude<
+  TranscriptDelta,
+  MessageCreatedDelta
+>;
 
 export type DeltaApplyResult =
   | { kind: "applied"; sessions: Session[] }
@@ -428,6 +432,39 @@ function applyMessageCreatedDeltaToRetainedTranscript(
   };
 }
 
+type RetainedMessageTargetResult =
+  | { kind: "messageFound"; messageIndex: number }
+  | DeltaApplyResult;
+
+function resolveRetainedMessageTargetOrFallback(
+  sessions: Session[],
+  sessionIndex: number,
+  session: Session,
+  delta: RetainedMessageTargetDelta,
+): RetainedMessageTargetResult {
+  const messageIndex = findMessageIndex(
+    session.messages,
+    delta.messageId,
+    delta.messageIndex,
+  );
+  if (messageIndex !== -1) {
+    return { kind: "messageFound", messageIndex };
+  }
+
+  if (session.messagesLoaded === false) {
+    return {
+      kind: "appliedNeedsResync",
+      sessions: replaceSession(
+        sessions,
+        sessionIndex,
+        applyMetadataOnlySessionDelta(session, delta),
+      ),
+    };
+  }
+
+  return { kind: "needsResync" };
+}
+
 export function applyDeltaToSessions(
   sessions: Session[],
   delta: SessionDeltaEvent,
@@ -525,24 +562,16 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
 
-      const messageIndex = findMessageIndex(
-        session.messages,
-        delta.messageId,
-        delta.messageIndex,
+      const target = resolveRetainedMessageTargetOrFallback(
+        sessions,
+        sessionIndex,
+        session,
+        delta,
       );
-      if (messageIndex === -1) {
-        if (session.messagesLoaded === false) {
-          return {
-            kind: "appliedNeedsResync",
-            sessions: replaceSession(
-              sessions,
-              sessionIndex,
-              applyMetadataOnlySessionDelta(session, delta),
-            ),
-          };
-        }
-        return { kind: "needsResync" };
+      if (target.kind !== "messageFound") {
+        return target;
       }
+      const { messageIndex } = target;
 
       // Message payloads are discriminated unions; serialized comparison keeps
       // the replay shortcut tied to the exact local wire shape.
@@ -584,24 +613,16 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
-      const messageIndex = findMessageIndex(
-        session.messages,
-        delta.messageId,
-        delta.messageIndex,
+      const target = resolveRetainedMessageTargetOrFallback(
+        sessions,
+        sessionIndex,
+        session,
+        delta,
       );
-      if (messageIndex === -1) {
-        if (session.messagesLoaded === false) {
-          return {
-            kind: "appliedNeedsResync",
-            sessions: replaceSession(
-              sessions,
-              sessionIndex,
-              applyMetadataOnlySessionDelta(session, delta),
-            ),
-          };
-        }
-        return { kind: "needsResync" };
+      if (target.kind !== "messageFound") {
+        return target;
       }
+      const { messageIndex } = target;
       const message = session.messages[messageIndex];
       if (!message || message.id !== delta.messageId) {
         return {
@@ -639,24 +660,16 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
-      const messageIndex = findMessageIndex(
-        session.messages,
-        delta.messageId,
-        delta.messageIndex,
+      const target = resolveRetainedMessageTargetOrFallback(
+        sessions,
+        sessionIndex,
+        session,
+        delta,
       );
-      if (messageIndex === -1) {
-        if (session.messagesLoaded === false) {
-          return {
-            kind: "appliedNeedsResync",
-            sessions: replaceSession(
-              sessions,
-              sessionIndex,
-              applyMetadataOnlySessionDelta(session, delta),
-            ),
-          };
-        }
-        return { kind: "needsResync" };
+      if (target.kind !== "messageFound") {
+        return target;
       }
+      const { messageIndex } = target;
       const message = session.messages[messageIndex];
       if (!message || message.id !== delta.messageId) {
         return {
@@ -716,24 +729,16 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
-      const messageIndex = findMessageIndex(
-        session.messages,
-        delta.messageId,
-        delta.messageIndex,
+      const target = resolveRetainedMessageTargetOrFallback(
+        sessions,
+        sessionIndex,
+        session,
+        delta,
       );
-      if (messageIndex === -1) {
-        if (session.messagesLoaded === false) {
-          return {
-            kind: "appliedNeedsResync",
-            sessions: replaceSession(
-              sessions,
-              sessionIndex,
-              applyMetadataOnlySessionDelta(session, delta),
-            ),
-          };
-        }
-        return { kind: "needsResync" };
+      if (target.kind !== "messageFound") {
+        return target;
       }
+      const { messageIndex } = target;
       const message = session.messages[messageIndex];
       if (!message || message.id !== delta.messageId) {
         return {
@@ -793,24 +798,16 @@ export function applyDeltaToSessions(
         return { kind: "needsResync" };
       }
       const session = sessions[sessionIndex];
-      const messageIndex = findMessageIndex(
-        session.messages,
-        delta.messageId,
-        delta.messageIndex,
+      const target = resolveRetainedMessageTargetOrFallback(
+        sessions,
+        sessionIndex,
+        session,
+        delta,
       );
-      if (messageIndex === -1) {
-        if (session.messagesLoaded === false) {
-          return {
-            kind: "appliedNeedsResync",
-            sessions: replaceSession(
-              sessions,
-              sessionIndex,
-              applyMetadataOnlySessionDelta(session, delta),
-            ),
-          };
-        }
-        return { kind: "needsResync" };
+      if (target.kind !== "messageFound") {
+        return target;
       }
+      const { messageIndex } = target;
       const message = session.messages[messageIndex];
       if (!message || message.id !== delta.messageId) {
         return {
