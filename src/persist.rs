@@ -199,7 +199,7 @@ fn harden_sqlite_state_file_permissions(path: &FsPath) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(test))]
+#[cfg(any(unix, not(test)))]
 fn harden_persist_commit_files(path: &FsPath) -> Result<()> {
     harden_sqlite_state_file_permissions(path).with_context(|| {
         format!(
@@ -209,7 +209,7 @@ fn harden_persist_commit_files(path: &FsPath) -> Result<()> {
     })
 }
 
-#[cfg(not(test))]
+#[cfg(any(unix, not(test)))]
 fn verify_persist_commit_integrity(path: &FsPath) -> Result<()> {
     let hardening_result = harden_persist_commit_files(path);
     if let Err(redirection_err) = reject_existing_sqlite_state_path_redirection(path) {
@@ -289,7 +289,7 @@ fn reject_existing_windows_state_path_redirection(path: &FsPath) -> Result<()> {
     }
 }
 
-#[cfg(not(test))]
+#[cfg(any(unix, not(test)))]
 fn reject_existing_sqlite_state_path_redirection(path: &FsPath) -> Result<()> {
     if let Some(parent) = path.parent() {
         reject_existing_state_directory_redirection(parent)?;
@@ -483,6 +483,47 @@ mod state_permission_hardening_tests {
         assert!(format!("{sidecar_error:#}").contains("symlinked state path"));
         assert_eq!(mode(&main_target), 0o644);
         assert_eq!(mode(&sidecar_target), 0o644);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn persist_commit_integrity_rehardens_sqlite_files_after_commit() {
+        let root = temp_permission_root();
+        let db = root.join("termal.sqlite");
+        let paths = [
+            db.clone(),
+            sqlite_sidecar_path(&db, "-wal"),
+            sqlite_sidecar_path(&db, "-shm"),
+            sqlite_sidecar_path(&db, "-journal"),
+        ];
+        for path in &paths {
+            fs::write(path, b"state").expect("write sqlite state file");
+            set_mode(path, 0o666);
+        }
+
+        verify_persist_commit_integrity(&db).expect("post-commit integrity should pass");
+
+        for path in &paths {
+            assert_eq!(mode(path), 0o600, "{}", path.display());
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn persist_commit_integrity_rejects_post_commit_redirection() {
+        let root = temp_permission_root();
+        let db = root.join("termal.sqlite");
+        let sidecar_target = root.join("outside-wal");
+        fs::write(&db, b"state").expect("write sqlite state file");
+        fs::write(&sidecar_target, b"wal").expect("write sidecar target");
+        symlink(&sidecar_target, sqlite_sidecar_path(&db, "-wal"))
+            .expect("create sidecar symlink");
+
+        let error = verify_persist_commit_integrity(&db)
+            .expect_err("post-commit symlink should be fatal");
+
+        assert!(format!("{error:#}").contains("post-commit redirection check failed"));
+        assert!(format!("{error:#}").contains("symlinked state path"));
         let _ = fs::remove_dir_all(root);
     }
 

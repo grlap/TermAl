@@ -196,14 +196,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Or add a load-bearing test that fails if the consume-on-adopt ordering is reversed.
 - Either way, clear `pendingSseRecreateOnInstanceChangeRef` on any `adoptState` success that does not change the instance, so a false-alarm `forceSseReconnect()` cannot fire on a later legitimate restart.
 
-## Post-commit hardening helpers have no automated production-path coverage
-
-**Severity:** Low - `src/persist.rs:213-227`. `verify_persist_commit_integrity` is `#[cfg(not(test))]`-only because it depends on production SQLite path hardening. The post-commit contract - redirection remains fatal, owner-only chmod/mode verification remains fatal unless `TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS` is set - has no direct automated coverage.
-
-**Proposal:**
-- Expose a testable seam (e.g., inject the hardening function via a closure or trait), OR
-- Add a Linux-only integration test that creates a real chmod-failing scenario.
-
 ## `app-live-state.ts` reconnect state machine continues to grow
 
 **Severity:** Low - `ui/src/app-live-state.ts:2504 lines`. TS utility threshold (1500) exceeded; new `pendingBadLiveEventRecovery` adds another flag-shaped piece of reconnect bookkeeping. The reconnect/resync state machine inside `useEffect` now coordinates 6+ pieces of cross-cutting state.
