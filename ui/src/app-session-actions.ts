@@ -64,8 +64,6 @@ import { CREATE_SESSION_WORKSPACE_ID } from "./app-shell-internals";
 import {
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
-  normalizedCodexReasoningEffort,
-  normalizedRequestedSessionModel,
   resolveUnknownSessionModelSendAttempt,
   usesSessionModelPicker,
 } from "./session-model-utils";
@@ -74,6 +72,7 @@ import {
   rollbackOptimisticSessionSettingsUpdate,
   sessionSupportsModelRefresh,
 } from "./app-session-settings-optimism";
+import { buildSessionSettingsPayload } from "./app-session-settings-payload";
 import { upsertSessionStoreSession } from "./session-store";
 import { syncActionComposerDraftSlice } from "./app-session-draft-sync";
 import { requestedModelForNewSession } from "./app-session-model-requests";
@@ -1537,69 +1536,7 @@ export function useAppSessionActions(
     if (!session) {
       return;
     }
-    const normalizedModelValue =
-      field === "model"
-        ? normalizedRequestedSessionModel(session, value as string)
-        : null;
-    const payload =
-      session.agent === "Codex"
-        ? {
-            ...(field === "model"
-              ? { model: normalizedModelValue ?? (value as string) }
-              : {}),
-            reasoningEffort:
-              field === "reasoningEffort"
-                ? (value as CodexReasoningEffort)
-                : normalizedCodexReasoningEffort(
-                    session,
-                    field === "model"
-                      ? (normalizedModelValue ?? (value as string))
-                      : session.model,
-                  ),
-            sandboxMode:
-              field === "sandboxMode"
-                ? (value as SandboxMode)
-                : (session.sandboxMode ?? "workspace-write"),
-            approvalPolicy:
-              field === "approvalPolicy"
-                ? (value as ApprovalPolicy)
-                : (session.approvalPolicy ?? "never"),
-          }
-        : session.agent === "Cursor"
-          ? field === "model"
-            ? {
-                model: normalizedModelValue ?? (value as string),
-              }
-            : field === "cursorMode"
-              ? {
-                  cursorMode: value as CursorMode,
-                }
-              : null
-          : session.agent === "Claude"
-            ? field === "model"
-              ? {
-                  model: normalizedModelValue ?? (value as string),
-                }
-              : field === "claudeApprovalMode"
-                ? {
-                    claudeApprovalMode: value as ClaudeApprovalMode,
-                  }
-                : field === "claudeEffort"
-                  ? {
-                      claudeEffort: value as ClaudeEffortLevel,
-                    }
-                  : null
-            : session.agent === "Gemini"
-              ? field === "model"
-                ? {
-                    model: normalizedModelValue ?? (value as string),
-                  }
-                : field === "geminiApprovalMode"
-                  ? {
-                      geminiApprovalMode: value as GeminiApprovalMode,
-                    }
-                  : null
-              : null;
+    const payload = buildSessionSettingsPayload(session, field, value);
     if (!payload) {
       return;
     }
