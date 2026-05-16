@@ -58,7 +58,6 @@ import { CREATE_SESSION_WORKSPACE_ID } from "./app-shell-internals";
 import {
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
-  isDefaultModelPreference,
   normalizedCodexReasoningEffort,
   normalizedRequestedSessionModel,
   resolveUnknownSessionModelSendAttempt,
@@ -71,6 +70,7 @@ import {
 } from "./app-session-settings-optimism";
 import { upsertSessionStoreSession } from "./session-store";
 import { syncActionComposerDraftSlice } from "./app-session-draft-sync";
+import { requestedModelForNewSession } from "./app-session-model-requests";
 import { conversationMarkerSatisfiesResponse } from "./conversation-marker-response-match";
 import { buildCreateConversationMarkerRequest } from "./conversation-marker-requests";
 import {
@@ -111,7 +111,6 @@ import {
   isLocalRemoteId,
   LOCAL_REMOTE_ID,
 } from "./remotes";
-import { assertNever } from "./exhaustive";
 import { createOptimisticPendingPrompt } from "./optimistic-pending-prompt";
 
 type UseAppSessionActionsLookups = {
@@ -1040,39 +1039,6 @@ export function useAppSessionActions(
     });
   }
 
-  function configuredDefaultModelForAgent(agent: AgentType): string {
-    switch (agent) {
-      case "Claude":
-        return defaultClaudeModel;
-      case "Codex":
-        return defaultCodexModel;
-      case "Cursor":
-        return defaultCursorModel;
-      case "Gemini":
-        return defaultGeminiModel;
-      default:
-        return assertNever(agent, "Unhandled default model agent");
-    }
-  }
-
-  function requestedModelForNewSession(
-    agent: AgentType,
-    dialogModel: string,
-  ): string | undefined {
-    if (!usesSessionModelPicker(agent)) {
-      return dialogModel.trim() || undefined;
-    }
-
-    const defaultModel = configuredDefaultModelForAgent(agent).trim();
-    if (isDefaultModelPreference(defaultModel)) {
-      return undefined;
-    }
-
-    // Send a configured default explicitly so an immediately-created session
-    // observes optimistic settings changes before the backend save returns.
-    return defaultModel;
-  }
-
   async function handleNewSession({
     agent,
     model,
@@ -1125,7 +1091,12 @@ export function useAppSessionActions(
         projectSelectionId === CREATE_SESSION_WORKSPACE_ID
           ? null
           : projectSelectionId;
-      const requestedModel = requestedModelForNewSession(agent, model);
+      const requestedModel = requestedModelForNewSession(agent, model, {
+        Claude: defaultClaudeModel,
+        Codex: defaultCodexModel,
+        Cursor: defaultCursorModel,
+        Gemini: defaultGeminiModel,
+      });
       const created = await createSession({
         agent,
         model: requestedModel,
