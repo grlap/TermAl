@@ -189,18 +189,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Extract a `ReconnectStateMachine` (or similar) module that owns the flag set + transitions and exposes named events (`onSseError`, `onSseReopen`, `onBadLiveEvent`, `onSnapshotAdopted`, `onLiveEventConfirmed`).
 - Defer to a pure code-move commit per CLAUDE.md.
 
-## Directory-level state hardening retains a TOCTOU window after symlink check
-
-**Severity:** Low - `src/persist.rs:146-149`. Round-15 carryover. `harden_local_state_directory_permissions` calls `reject_existing_state_directory_redirection_unix` (which uses `fs::symlink_metadata`), then `harden_local_state_permissions(path, 0o700)` — which uses path-based `fs::set_permissions` and `fs::metadata`, both of which follow symlinks. An attacker able to replace the directory between the two calls would get the chmod redirected through the symlink. The matching file path now uses `O_NOFOLLOW + fchmod`, but the directory path has not been migrated.
-
-**Current behavior:**
-- File-level chmod is symlink-safe (O_NOFOLLOW + fchmod).
-- Directory-level chmod is not.
-- Mitigated by Phase-1 single-user threat model (only the user controlling `~/` could plant the symlink).
-
-**Proposal:**
-- Open the directory with `O_DIRECTORY | O_NOFOLLOW`, then `fchmod` on the resulting fd; or use `fchmodat(AT_FDCWD, path, mode, AT_SYMLINK_NOFOLLOW)`.
-
 ## Production SQLite persistence is bypassed in the test build
 
 **Severity:** Medium - `src/app_boot.rs:229`. The runtime persistence changes now depend on SQLite schema setup, startup load, metadata writes, per-session row updates, tombstone cleanup, and cached delta persistence, but `#[cfg(test)]` still routes the background persist worker through the old full-state JSON fallback.

@@ -90,27 +90,6 @@ fn permission_hardening_failure(path: &FsPath, detail: impl std::fmt::Display) -
 }
 
 #[cfg(unix)]
-fn harden_local_state_permissions(path: &FsPath, mode: u32) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    if let Err(err) = fs::set_permissions(path, fs::Permissions::from_mode(mode)) {
-        permission_hardening_failure(path, err)?;
-    }
-
-    let actual_mode = match fs::metadata(path) {
-        Ok(metadata) => metadata.permissions().mode() & 0o777,
-        Err(err) => return permission_hardening_failure(path, err),
-    };
-    if actual_mode & 0o077 != 0 {
-        permission_hardening_failure(
-            path,
-            format!("mode {actual_mode:o} still grants group or other access"),
-        )?;
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
 fn harden_local_state_file_permissions(path: &FsPath) -> Result<()> {
     use std::os::fd::AsRawFd;
     use std::os::unix::fs::OpenOptionsExt;
@@ -143,8 +122,34 @@ fn harden_local_state_file_permissions(path: &FsPath) -> Result<()> {
 
 #[cfg(unix)]
 fn harden_local_state_directory_permissions(path: &FsPath) -> Result<()> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::fs::PermissionsExt;
+
     reject_existing_state_directory_redirection_unix(path)?;
-    harden_local_state_permissions(path, 0o700)
+    let directory = match fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
+    {
+        Ok(directory) => directory,
+        Err(err) => return permission_hardening_failure(path, err),
+    };
+    if unsafe { libc::fchmod(directory.as_raw_fd(), 0o700) } != 0 {
+        permission_hardening_failure(path, io::Error::last_os_error())?;
+    }
+
+    let actual_mode = match directory.metadata() {
+        Ok(metadata) => metadata.permissions().mode() & 0o777,
+        Err(err) => return permission_hardening_failure(path, err),
+    };
+    if actual_mode & 0o077 != 0 {
+        permission_hardening_failure(
+            path,
+            format!("mode {actual_mode:o} still grants group or other access"),
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
