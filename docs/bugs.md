@@ -366,8 +366,6 @@ Before the broadcaster thread, `commit_locked` published state synchronously (`s
 
 ## Implementation Tasks
 
-- [ ] P2: Move `includeUndeferredMessageTail` unit tests to a sibling test file:
-  the focused tests still import `includeUndeferredMessageTail` from `./AgentSessionPanel`. After the split to `ui/src/panels/useInitialActiveTranscriptMessages.ts`, those tests should live in a sibling `useInitialActiveTranscriptMessages.test.ts` and the panel re-export can then be removed.
 - [ ] P2: Add focused coverage for `useInitialActiveTranscriptMessages`:
   cover the hook's hydration state machine and demand-event wiring, including scroll/wheel/keydown in scope vs. typing targets, touch pull-down, session-id reset, `isImplicitlyHydrated` when markers/search are present, and `requestFullTranscriptRender` collapsing the window.
 - [ ] P2: Cover first-chunk Telegram forward failure:

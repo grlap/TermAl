@@ -117,8 +117,6 @@ import type {
 import type { PaneViewMode } from "../workspace";
 
 export { splitAgentCommandResolverTail } from "./session-agent-command-submission";
-export { includeUndeferredMessageTail } from "./useInitialActiveTranscriptMessages";
-
 type WaitingIndicatorKind = "liveTurn" | "delegationWait" | "send";
 
 type DraftImageAttachment = ImageAttachment & {

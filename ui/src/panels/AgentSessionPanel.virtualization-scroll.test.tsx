@@ -24,7 +24,6 @@ import * as slashPalette from "./session-slash-palette";
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
-  includeUndeferredMessageTail,
   splitAgentCommandResolverTail,
 } from "./AgentSessionPanel";
 import { buildConversationOverviewTailItems } from "./conversation-overview-controller";
