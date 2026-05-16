@@ -177,9 +177,9 @@ Many production SQLite helpers in `src/persist.rs` are `#[cfg(not(test))]`, so e
 
 ## `SessionPaneView.tsx` and `app-session-actions.ts` past architecture file-size thresholds
 
-**Severity:** Low - `ui/src/SessionPaneView.tsx` is still 3,679 lines and `ui/src/app-session-actions.ts` is still about 2,280 lines after the latest small helper splits, both past the architecture rubric thresholds (~2,000 for TSX components, ~1,500 for utility modules).
+**Severity:** Low - `ui/src/SessionPaneView.tsx` is still 3,679 lines and `ui/src/app-session-actions.ts` is still about 2,239 lines after the latest small helper splits, both past the architecture rubric thresholds (~2,000 for TSX components, ~1,500 for utility modules).
 
-The waiting-indicator helpers now live in `ui/src/SessionPaneView.waiting-indicator.ts`, the session-settings optimism helpers now live in `ui/src/app-session-settings-optimism.ts`, conversation-marker response matching now lives in `ui/src/conversation-marker-response-match.ts`, and optimistic pending prompt construction now lives in `ui/src/optimistic-pending-prompt.ts`. Those moves reduced local clutter and gave the helpers direct unit-testable surfaces, but the main production modules remain over threshold.
+The waiting-indicator helpers now live in `ui/src/SessionPaneView.waiting-indicator.ts`, the session-settings optimism helpers now live in `ui/src/app-session-settings-optimism.ts`, conversation-marker response matching now lives in `ui/src/conversation-marker-response-match.ts`, optimistic pending prompt construction now lives in `ui/src/optimistic-pending-prompt.ts`, and draft ref/store sync now lives in `ui/src/app-session-draft-sync.ts`. Those moves reduced local clutter and gave the helpers direct unit-testable surfaces, but the main production modules remain over threshold.
 
 **Current behavior:**
 - `SessionPaneView.tsx` still owns pane orchestration, tab rendering, scroll/follow behavior, panel selection, and composer/footer wiring.

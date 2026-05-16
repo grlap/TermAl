@@ -69,10 +69,8 @@ import {
   rollbackOptimisticSessionSettingsUpdate,
   sessionSupportsModelRefresh,
 } from "./app-session-settings-optimism";
-import {
-  syncComposerDraftForSession,
-  upsertSessionStoreSession,
-} from "./session-store";
+import { upsertSessionStoreSession } from "./session-store";
+import { syncActionComposerDraftSlice } from "./app-session-draft-sync";
 import { conversationMarkerSatisfiesResponse } from "./conversation-marker-response-match";
 import {
   findWorkspacePaneIdForSession,
@@ -589,56 +587,17 @@ export function useAppSessionActions(
     };
   }
 
-  function setDraftRefValue(sessionId: string, nextValue: string) {
-    const current = draftsBySessionIdRef.current;
-    if ((current[sessionId] ?? "") === nextValue) {
-      return;
-    }
-
-    draftsBySessionIdRef.current = {
-      ...current,
-      [sessionId]: nextValue,
-    };
-  }
-
-  function setDraftAttachmentRefs(
-    sessionId: string,
-    nextAttachments: readonly DraftImageAttachment[],
-  ) {
-    const current = draftAttachmentsBySessionIdRef.current;
-    const currentAttachments = current[sessionId] ?? [];
-    if (currentAttachments === nextAttachments) {
-      return;
-    }
-
-    if (nextAttachments.length === 0) {
-      if (!current[sessionId]) {
-        return;
-      }
-      const nextState = { ...current };
-      delete nextState[sessionId];
-      draftAttachmentsBySessionIdRef.current = nextState;
-      return;
-    }
-
-    draftAttachmentsBySessionIdRef.current = {
-      ...current,
-      [sessionId]: [...nextAttachments],
-    };
-  }
-
   function syncComposerDraftSlice(
     sessionId: string,
     committedDraft: string,
     draftAttachments: readonly DraftImageAttachment[],
   ) {
-    setDraftRefValue(sessionId, committedDraft);
-    setDraftAttachmentRefs(sessionId, draftAttachments);
-    syncComposerDraftForSession({
+    syncActionComposerDraftSlice(
+      { draftsBySessionIdRef, draftAttachmentsBySessionIdRef },
       sessionId,
       committedDraft,
       draftAttachments,
-    });
+    );
   }
 
   function syncSessionSlice(session: Session) {
