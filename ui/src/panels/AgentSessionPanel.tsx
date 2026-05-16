@@ -28,13 +28,19 @@ import {
   type ResolveAgentCommandResponse,
 } from "../api";
 import {
+  findNewPendingCreatedConversationMarker,
+  isSpaceKey,
+  spawnDelegationOptionsFromResolvedCommand,
+  type PendingCreatedConversationMarker,
+  type SpawnDelegationOptions,
+} from "./agent-session-panel-helpers";
+import {
   formatAgentCommandResolverError,
   prepareAgentCommandSubmission,
   sendResolvedAgentCommandSubmission,
   shouldFocusDelegateWithSlashPaletteKey,
   shouldSubmitSlashPaletteKey,
 } from "./session-agent-command-submission";
-import type { CreateComposerDelegationOptions } from "../delegation-commands";
 import {
   MessageSlot,
   PanelEmptyState,
@@ -135,14 +141,6 @@ type AgentCommandResolverErrorState = {
   sessionId: string;
 };
 
-type PendingCreatedConversationMarker = {
-  localId: number;
-  messageId: string;
-  name: string | null;
-  existingMarkerIds: ReadonlySet<string>;
-  resolvedMarkerId?: string;
-};
-
 const EMPTY_PENDING_PROMPTS: readonly PendingPrompt[] = [];
 const EMPTY_CONVERSATION_MARKERS: readonly ConversationMarker[] = [];
 const NOOP_CREATE_CONVERSATION_MARKER = () => {};
@@ -172,49 +170,11 @@ type SessionSettingsValue =
   | CursorMode
   | GeminiApprovalMode;
 
-type SpawnDelegationOptions = CreateComposerDelegationOptions;
-
 type SpawnDelegationHandler = (
   sessionId: string,
   prompt: string,
   options?: SpawnDelegationOptions,
 ) => Promise<boolean>;
-
-function findNewPendingCreatedConversationMarker(
-  markers: readonly ConversationMarker[],
-  pendingMarker: PendingCreatedConversationMarker,
-  usedMarkerIds: ReadonlySet<string>,
-) {
-  for (const marker of markers) {
-    if (
-      pendingMarker.existingMarkerIds.has(marker.id) ||
-      usedMarkerIds.has(marker.id)
-    ) {
-      continue;
-    }
-    if (pendingMarker.name && marker.name.trim() !== pendingMarker.name) {
-      continue;
-    }
-    return marker;
-  }
-  return null;
-}
-
-function spawnDelegationOptionsFromResolvedCommand(
-  resolved: ResolveAgentCommandResponse,
-): SpawnDelegationOptions | undefined {
-  const title = resolved.delegation?.title ?? resolved.title ?? undefined;
-  const mode = resolved.delegation?.mode ?? undefined;
-  const writePolicy = resolved.delegation?.writePolicy ?? undefined;
-  if (!title && !mode && !writePolicy) {
-    return undefined;
-  }
-  return {
-    ...(title ? { title } : {}),
-    ...(mode ? { mode } : {}),
-    ...(writePolicy ? { writePolicy } : {}),
-  };
-}
 
 // The transcript virtualizer and overview rail intentionally share the same
 // size threshold. The rail may still defer its first paint, but marker jumps
@@ -229,22 +189,6 @@ const EMPTY_COMPOSER_ATTACHMENTS: readonly {
   previewUrl: string;
 }[] = [];
 const EMPTY_COMPOSER_PROMPT_HISTORY: readonly string[] = [];
-
-function isSpaceKey(event: {
-  key: string;
-  code?: string;
-  keyCode?: number;
-  which?: number;
-}) {
-  return (
-    event.key === " " ||
-    event.key === "Space" ||
-    event.key === "Spacebar" ||
-    event.code === "Space" ||
-    event.keyCode === 32 ||
-    event.which === 32
-  );
-}
 
 export function AgentSessionPanel({
   paneId,
