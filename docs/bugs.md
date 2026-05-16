@@ -106,14 +106,14 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 
 ## `AgentSessionPanel.tsx` exceeds 2000-line architecture rubric threshold
 
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx` remains over the documented TSX file-size budget after the composer auto-resize state machine was split out to `ui/src/panels/useComposerAutoResize.ts`.
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx` remains over the documented TSX file-size budget after the composer auto-resize state machine was split out to `ui/src/panels/useComposerAutoResize.ts` and agent-command submission helpers moved to `ui/src/panels/session-agent-command-submission.ts`.
 
 The resize/transition refs are now isolated, but the panel still mixes session header, footer orchestration, command palette, attachments, and send/delegate control flow. The next split should keep reducing production TSX surface rather than adding more local state.
 
 **Current behavior:**
-- `AgentSessionPanel.tsx` is about 3300 lines.
+- `AgentSessionPanel.tsx` is about 3,094 lines.
 - `AgentSessionPanel.test.tsx` was split into focused sibling files; `AgentSessionPanel.tsx` remains over the production TSX threshold.
-- Composer auto-resize and transition restoration now live in `useComposerAutoResize`, but the remaining composer orchestration is still embedded in the broader panel.
+- Composer auto-resize, transition restoration, and agent-command submission/error handling now live in focused helpers, but the remaining composer orchestration is still embedded in the broader panel.
 
 **Proposal:**
 - Continue extracting focused panel concerns, such as composer command-palette orchestration or footer/send controls, into smaller hook/component modules with split-provenance headers.
