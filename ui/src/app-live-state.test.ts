@@ -1361,7 +1361,9 @@ describe("hydration mismatch recovery gate", () => {
     vi.spyOn(api, "fetchState").mockImplementation(
       () => new Promise<StateResponse>(() => {}),
     );
-    const messages = makeHydrationMessages(150);
+    const messages = makeHydrationMessages(
+      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+    );
     const fetchSessionTail = vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
       revision: 5,
       serverInstanceId: "server-a",
@@ -1942,7 +1944,9 @@ describe("hydration adoption side effects", () => {
       () => new Promise<StateResponse>(() => {}),
     );
 
-    const messages = makeHydrationMessages(150);
+    const messages = makeHydrationMessages(
+      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+    );
     const initialSession = makeSession({
       messagesLoaded: false,
       messageCount: messages.length,
@@ -1993,9 +1997,11 @@ describe("hydration adoption side effects", () => {
         SESSION_TAIL_WINDOW_MESSAGE_COUNT,
       ),
     );
-    expect(params.adoptionRefs.sessionsRef.current[0]?.messageCount).toBe(150);
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messageCount).toBe(
+      messages.length,
+    );
     expect(params.adoptionRefs.sessionsRef.current[0]?.messages[0]?.id).toBe(
-      "message-131",
+      `message-${messages.length - SESSION_TAIL_WINDOW_MESSAGE_COUNT + 1}`,
     );
     expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
       false,
@@ -2017,7 +2023,7 @@ describe("hydration adoption side effects", () => {
       ),
     );
     expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toHaveLength(
-      150,
+      messages.length,
     );
   });
 
@@ -2030,7 +2036,9 @@ describe("hydration adoption side effects", () => {
       () => new Promise<StateResponse>(() => {}),
     );
 
-    const messages = makeHydrationMessages(150);
+    const messages = makeHydrationMessages(
+      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+    );
     const initialSession = makeSession({
       messagesLoaded: false,
       messageCount: messages.length,
@@ -2064,7 +2072,7 @@ describe("hydration adoption side effects", () => {
       ),
     );
     expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toHaveLength(
-      150,
+      messages.length,
     );
     expect(fetchSession).not.toHaveBeenCalled();
   });
@@ -2109,7 +2117,9 @@ describe("hydration adoption side effects", () => {
         () => new Promise<StateResponse>(() => {}),
       );
 
-      const messages = makeHydrationMessages(150);
+      const messages = makeHydrationMessages(
+        SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+      );
       const initialSession = makeSession({
         messagesLoaded: false,
         messageCount: messages.length,
@@ -2151,7 +2161,9 @@ describe("hydration adoption side effects", () => {
       () => new Promise<StateResponse>(() => {}),
     );
 
-    const messages = makeHydrationMessages(150);
+    const messages = makeHydrationMessages(
+      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+    );
     const initialSession = makeSession({
       messagesLoaded: false,
       messageCount: messages.length,
@@ -2192,7 +2204,9 @@ describe("hydration adoption side effects", () => {
       () => new Promise<StateResponse>(() => {}),
     );
 
-    const messages = makeHydrationMessages(150);
+    const messages = makeHydrationMessages(
+      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+    );
     const initialSession = makeSession({
       messagesLoaded: false,
       messageCount: messages.length,
@@ -2249,7 +2263,9 @@ describe("hydration adoption side effects", () => {
       () => new Promise<StateResponse>(() => {}),
     );
 
-    const messages = makeHydrationMessages(150);
+    const messages = makeHydrationMessages(
+      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+    );
     const updatedMessages = messages.map((message) =>
       message.id === "message-30"
         ? { ...message, text: "Message 30 updated" }
@@ -2312,7 +2328,7 @@ describe("hydration adoption side effects", () => {
 
     await waitFor(() =>
       expect(params.adoptionRefs.sessionsRef.current[0]?.messages[0]?.id).toBe(
-        "message-131",
+        `message-${messages.length - SESSION_TAIL_WINDOW_MESSAGE_COUNT + 1}`,
       ),
     );
     expect(fetchSession).toHaveBeenCalledTimes(1);
@@ -2383,10 +2399,15 @@ describe("hydration adoption side effects", () => {
       () => new Promise<StateResponse>(() => {}),
     );
 
-    const messages = makeHydrationMessages(150);
-    const updatedMessages = messages.map((message) =>
-      message.id === "message-145"
-        ? { ...message, text: "Message 145 updated" }
+    const messages = makeHydrationMessages(
+      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+    );
+    const updatedMessageIndex = messages.length - 6;
+    const updatedMessageId = `message-${updatedMessageIndex + 1}`;
+    const updatedMessageText = `Message ${updatedMessageIndex + 1} updated`;
+    const updatedMessages = messages.map((message, index) =>
+      index === updatedMessageIndex
+        ? { ...message, text: updatedMessageText }
         : message,
     );
     const initialSession = makeSession({
@@ -2440,7 +2461,7 @@ describe("hydration adoption side effects", () => {
 
     await waitFor(() =>
       expect(params.adoptionRefs.sessionsRef.current[0]?.messages[0]?.id).toBe(
-        "message-131",
+        `message-${messages.length - SESSION_TAIL_WINDOW_MESSAGE_COUNT + 1}`,
       ),
     );
     expect(fetchSession).toHaveBeenCalledTimes(1);
@@ -2452,11 +2473,11 @@ describe("hydration adoption side effects", () => {
         type: "messageUpdated",
         revision: 6,
         sessionId: "session-1",
-        messageId: "message-145",
-        messageIndex: 144,
+        messageId: updatedMessageId,
+        messageIndex: updatedMessageIndex,
         messageCount: updatedMessages.length,
-        message: updatedMessages[144],
-        preview: "Message 145 updated",
+        message: updatedMessages[updatedMessageIndex],
+        preview: updatedMessageText,
         status: "idle",
         sessionMutationStamp: 2,
       });
@@ -2465,11 +2486,11 @@ describe("hydration adoption side effects", () => {
     await waitFor(() =>
       expect(
         params.adoptionRefs.sessionsRef.current[0]?.messages.find(
-          (message) => message.id === "message-145",
+          (message) => message.id === updatedMessageId,
         ),
       ).toMatchObject({
-        id: "message-145",
-        text: "Message 145 updated",
+        id: updatedMessageId,
+        text: updatedMessageText,
       }),
     );
     expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
@@ -2501,12 +2522,12 @@ describe("hydration adoption side effects", () => {
         true,
       ),
     );
-    expect(params.adoptionRefs.sessionsRef.current[0]?.messages[144]).toMatchObject(
-      {
-        id: "message-145",
-        text: "Message 145 updated",
-      },
-    );
+    expect(
+      params.adoptionRefs.sessionsRef.current[0]?.messages[updatedMessageIndex],
+    ).toMatchObject({
+      id: updatedMessageId,
+      text: updatedMessageText,
+    });
   });
 
   it.each([

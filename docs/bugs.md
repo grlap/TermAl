@@ -58,21 +58,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 - Split into 2-3 modules mirroring the api.rs/wire.rs split shape.
 - Defer to a dedicated pure-code-move commit per CLAUDE.md.
 
-## Tail-then-full sequence doubles HTTP request volume for sessions ≥101 messages
-
-**Severity:** Low - the frontend always pairs `fetchSessionTail(SESSION_TAIL_WINDOW_MESSAGE_COUNT)` with `fetchSession(...)` for sessions where `messageCount >= 101`. Phase 1 local-only is fast. Future remote-host or flaky-network scenarios pay this tax.
-
-`ui/src/app-live-state.ts:1278-1390`. Over SSH this matters more than over HTTP loopback. Combined with the High-severity "remote-proxy hydration skipped" entry, the worst case is: tail-first (returns empty for unhydrated remote proxy) + full-fetch (triggers remote hydration, returns full transcript) — two round-trips for what could have been one.
-
-**Current behavior:**
-- Two HTTP calls per visible-session hydration for sessions ≥101 messages.
-- Phase 1 local-only is fast.
-- Combined with remote-proxy issue, worst case is 2× wasted traffic.
-
-**Proposal:**
-- Once remote routing is sorted, consider returning the full transcript in the same response for sessions under a "small-enough" threshold.
-- Or have the client skip the tail-first request when the remote round-trip cost would dominate.
-
 ## Telegram settings updates live outside the app state/revision model
 
 **Severity:** Medium - Telegram settings are user-visible configuration, but saves bypass `StateInner`, `commit_locked()`, snapshots, revisions, and SSE.

@@ -7,13 +7,11 @@
 // window below that cap unless the API contract changes.
 export const SESSION_TAIL_WINDOW_MESSAGE_COUNT = 20;
 
-// Tail-first hydration adds a round trip before the full transcript fetch, so
-// use it only for larger transcripts rather than immediately above the
-// `SESSION_TAIL_WINDOW_MESSAGE_COUNT` boundary.
-export const SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES = 101;
-
 // The active transcript only starts in render-window mode for substantially
-// larger histories. Sessions between the hydration threshold and this render
-// threshold still hydrate a small tail first, then render the full visible
-// transcript normally once the full session response arrives.
+// larger histories.
 export const SESSION_TAIL_RENDER_MIN_MESSAGES = 512;
+
+// Tail-first hydration adds a round trip before the full transcript fetch, so
+// use it only when the visible transcript will also render from a tail window.
+export const SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES =
+  SESSION_TAIL_RENDER_MIN_MESSAGES + 1;
