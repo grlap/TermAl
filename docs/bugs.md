@@ -176,21 +176,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 **Proposal:**
 - Defer (no concrete bug today). Consider in a future round whether per-pane queues would simplify reasoning, especially as multi-pane scenarios become more common.
 
-## `SessionPaneView.tsx` near-bottom early-out is captured at `isSending` flip, not reactive
-
-**Severity:** Low - the catchup branch never schedules for the started-near-bottom-then-scrolled-away case, contrary to what the comment promises.
-
-`ui/src/SessionPaneView.tsx:2024`. The effect has dependency array `[isSending, pane.viewMode, scrollStateKey]`, and `isMessageStackNearBottom()` reads from `messageStackRef.current` (not reactive). The effect's near-bottom decision is therefore evaluated only at the moment `isSending` flips true. If the user starts the send near bottom but scrolls away while the request is in flight, the catchup branch (`scheduleSettledScrollToBottom` via `followLatestMessageForPromptSend`) never schedules.
-
-**Current behavior:**
-- Near-bottom snapshot captured only at `isSending` true→false transition.
-- User scrolling away during the in-flight request bypasses catchup.
-- Comment overstates the guarantee ("schedule the settled-poll catchup here to bring the user's prompt into view once it lands").
-
-**Proposal:**
-- Add a reactive signal (e.g., a derived `nearBottomAtSendStart` captured into the effect's deps via a ref-based subscription).
-- Or update the comment to match the actual behavior ("when the user is near bottom AT THE TIME isSending toggled, defer entirely to the post-message-land effect").
-
 ## Telegram-forwarded text has no per-chat rate cap
 
 **Severity:** Medium - any linked chat can still fan out prompt submissions quickly enough to create a burst of local backend and agent work.

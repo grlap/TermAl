@@ -2396,10 +2396,18 @@ export function SessionPaneView({
     // motion. Letting the post-message-land effect drive the
     // single smooth-scroll keeps the animation linear.
     //
-    // For the far-from-bottom case the auto-scroll layout effect
-    // is gated off (the user explicitly scrolled away), so we
-    // still schedule the settled-poll catchup here to bring the
-    // user's prompt into view once it lands. The
+    // This branch samples scroll position only when `isSending`
+    // flips. For users already near bottom at that moment, defer
+    // this pre-land effect to the post-message-land effect above.
+    // If the user later scrolls away while the send is still in
+    // flight, this effect does not re-run from that scroll position;
+    // the landed user-message path remains responsible for deciding
+    // whether prompt-follow catchup should run.
+    //
+    // For the far-from-bottom-at-send-start case the auto-scroll
+    // layout effect is gated off (the user explicitly scrolled
+    // away), so we still schedule the settled-poll catchup here to
+    // bring the user's prompt into view once it lands. The
     // `App.scroll-behavior.test.tsx::"follows the latest user
     // prompt immediately while a send is in flight"` regression
     // pins this exact behavior.
