@@ -43,6 +43,12 @@ import {
 } from "./api";
 import type { AdoptStateOptions, UseAppLiveStateReturn } from "./app-live-state";
 import { startActivePromptPoll } from "./active-prompt-poll";
+import {
+  appendDraftAttachments,
+  draftAttachmentsMatchingId,
+  draftAttachmentsWithoutId,
+  removeDraftAttachmentFromState,
+} from "./app-session-draft-attachments";
 import { isServerInstanceMismatch } from "./state-revision";
 import {
   getErrorMessage,
@@ -986,10 +992,9 @@ export function useAppSessionActions(
       draftsBySessionIdRef.current[sessionId] ?? "",
       nextAttachments,
     );
-    setDraftAttachmentsBySessionId((current) => ({
-      ...current,
-      [sessionId]: [...(current[sessionId] ?? []), ...attachments],
-    }));
+    setDraftAttachmentsBySessionId((current) =>
+      appendDraftAttachments(current, sessionId, attachments),
+    );
   }
 
   function handleDraftAttachmentRemove(
@@ -998,45 +1003,24 @@ export function useAppSessionActions(
   ) {
     const existingAttachments =
       draftAttachmentsBySessionIdRef.current[sessionId] ?? [];
-    const removed = existingAttachments.filter(
-      (attachment) => attachment.id === attachmentId,
-    );
+    const removed = draftAttachmentsMatchingId(existingAttachments, attachmentId);
     if (removed.length === 0) {
       return;
     }
 
     releaseDraftAttachments(removed);
-    const nextRefAttachments = existingAttachments.filter(
-      (attachment) => attachment.id !== attachmentId,
+    const nextRefAttachments = draftAttachmentsWithoutId(
+      existingAttachments,
+      attachmentId,
     );
     syncComposerDraftSlice(
       sessionId,
       draftsBySessionIdRef.current[sessionId] ?? "",
       nextRefAttachments,
     );
-    setDraftAttachmentsBySessionId((current) => {
-      const existing = current[sessionId];
-      if (!existing) {
-        return current;
-      }
-
-      const nextAttachments = existing.filter(
-        (attachment) => attachment.id !== attachmentId,
-      );
-      if (nextAttachments.length === existing.length) {
-        return current;
-      }
-      if (nextAttachments.length === 0) {
-        const nextState = { ...current };
-        delete nextState[sessionId];
-        return nextState;
-      }
-
-      return {
-        ...current,
-        [sessionId]: nextAttachments,
-      };
-    });
+    setDraftAttachmentsBySessionId((current) =>
+      removeDraftAttachmentFromState(current, sessionId, attachmentId),
+    );
   }
 
   async function handleNewSession({
