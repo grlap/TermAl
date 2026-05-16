@@ -366,8 +366,6 @@ Before the broadcaster thread, `commit_locked` published state synchronously (`s
 
 ## Implementation Tasks
 
-- [ ] P2: Add focused coverage for `useInitialActiveTranscriptMessages`:
-  cover the hook's hydration state machine and demand-event wiring, including scroll/wheel/keydown in scope vs. typing targets, touch pull-down, session-id reset, `isImplicitlyHydrated` when markers/search are present, and `requestFullTranscriptRender` collapsing the window.
 - [ ] P2: Cover first-chunk Telegram forward failure:
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
 - [ ] P2: Cover first-settled active-baseline same-message growth policy:
