@@ -106,14 +106,14 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 
 ## `AgentSessionPanel.tsx` exceeds 2000-line architecture rubric threshold
 
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx` remains over the documented TSX file-size budget after the composer auto-resize state machine was split out to `ui/src/panels/useComposerAutoResize.ts`, agent-command submission helpers moved to `ui/src/panels/session-agent-command-submission.ts`, and waiting-output helpers were reused from `ui/src/SessionPaneView.waiting-indicator.ts`.
+**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx` remains over the documented TSX file-size budget after the composer auto-resize state machine was split out to `ui/src/panels/useComposerAutoResize.ts`, agent-command submission helpers moved to `ui/src/panels/session-agent-command-submission.ts`, waiting-output helpers were reused from `ui/src/SessionPaneView.waiting-indicator.ts`, and first-paint transcript tail-windowing moved to `ui/src/panels/useInitialActiveTranscriptMessages.ts`.
 
 The resize/transition refs are now isolated, but the panel still mixes session header, footer orchestration, command palette, attachments, and send/delegate control flow. The next split should keep reducing production TSX surface rather than adding more local state.
 
 **Current behavior:**
-- `AgentSessionPanel.tsx` is about 3,057 lines.
+- `AgentSessionPanel.tsx` is about 2,726 lines.
 - `AgentSessionPanel.test.tsx` was split into focused sibling files; `AgentSessionPanel.tsx` remains over the production TSX threshold.
-- Composer auto-resize, transition restoration, agent-command submission/error handling, and waiting-output classification now live in focused helpers, but the remaining composer orchestration is still embedded in the broader panel.
+- Composer auto-resize, transition restoration, agent-command submission/error handling, waiting-output classification, and initial transcript tail-windowing now live in focused helpers, but the remaining composer orchestration is still embedded in the broader panel.
 
 **Proposal:**
 - Continue extracting focused panel concerns, such as composer command-palette orchestration or footer/send controls, into smaller hook/component modules with split-provenance headers.
@@ -366,6 +366,10 @@ Before the broadcaster thread, `commit_locked` published state synchronously (`s
 
 ## Implementation Tasks
 
+- [ ] P2: Move `includeUndeferredMessageTail` unit tests to a sibling test file:
+  the focused tests still import `includeUndeferredMessageTail` from `./AgentSessionPanel`. After the split to `ui/src/panels/useInitialActiveTranscriptMessages.ts`, those tests should live in a sibling `useInitialActiveTranscriptMessages.test.ts` and the panel re-export can then be removed.
+- [ ] P2: Add focused coverage for `useInitialActiveTranscriptMessages`:
+  cover the hook's hydration state machine and demand-event wiring, including scroll/wheel/keydown in scope vs. typing targets, touch pull-down, session-id reset, `isImplicitlyHydrated` when markers/search are present, and `requestFullTranscriptRender` collapsing the window.
 - [ ] P2: Cover first-chunk Telegram forward failure:
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
 - [ ] P2: Cover first-settled active-baseline same-message growth policy:
