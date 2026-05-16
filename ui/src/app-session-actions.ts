@@ -135,12 +135,24 @@ type UseAppSessionActionsDefaults = {
   defaultGeminiModel: string;
 };
 
+export type ActionStateClassifierContext = {
+  // Snapshot getter for the state inputs that prove a rejected action response
+  // still achieved the requested local outcome. Keep classifier-only evidence
+  // here so the action hook signature does not grow one ref at a time.
+  getSnapshot: () => {
+    revision: number | null;
+    serverInstanceId: string | null;
+    projects: Project[];
+    sessions: Session[];
+  };
+};
+
 type UseAppSessionActionsRefs = {
   isMountedRef: MutableRefObject<boolean>;
   latestStateRevisionRef: MutableRefObject<number | null>;
   lastSeenServerInstanceIdRef: MutableRefObject<string | null>;
   sessionsRef: MutableRefObject<Session[]>;
-  projectsRef: MutableRefObject<Project[]>;
+  actionStateClassifierContextRef: MutableRefObject<ActionStateClassifierContext>;
   draftsBySessionIdRef: MutableRefObject<Record<string, string>>;
   draftAttachmentsBySessionIdRef: MutableRefObject<
     Record<string, DraftImageAttachment[]>
@@ -414,7 +426,7 @@ export function useAppSessionActions(
       latestStateRevisionRef,
       lastSeenServerInstanceIdRef,
       sessionsRef,
-      projectsRef,
+      actionStateClassifierContextRef,
       draftsBySessionIdRef,
       draftAttachmentsBySessionIdRef,
       confirmedUnknownModelSendsRef,
@@ -483,13 +495,15 @@ export function useAppSessionActions(
     if (adopted) {
       return "adopted";
     }
+    const classifierContext =
+      actionStateClassifierContextRef.current.getSnapshot();
     const rejectedDecision = classifyRejectedActionState({
       currentProjects: new Map(
-        projectsRef.current.map((project) => [project.id, project]),
+        classifierContext.projects.map((project) => [project.id, project]),
       ),
-      currentRevision: latestStateRevisionRef.current,
-      currentServerInstanceId: lastSeenServerInstanceIdRef.current,
-      currentSessions: sessionsRef.current,
+      currentRevision: classifierContext.revision,
+      currentServerInstanceId: classifierContext.serverInstanceId,
+      currentSessions: classifierContext.sessions,
       options,
       state,
     });

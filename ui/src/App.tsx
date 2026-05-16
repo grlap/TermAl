@@ -82,7 +82,10 @@ import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
 import { useAppPreferencesState } from "./app-preferences-state";
 import { useAppWorkspaceLayout } from "./app-workspace-layout";
 import { useAppLiveState, type SessionHydrationTarget } from "./app-live-state";
-import { useAppSessionActions } from "./app-session-actions";
+import {
+  useAppSessionActions,
+  type ActionStateClassifierContext,
+} from "./app-session-actions";
 import { useAppDragResize } from "./app-drag-resize";
 import { useAppDialogState } from "./app-dialog-state";
 import { useAppWorkspaceActions } from "./app-workspace-actions";
@@ -497,6 +500,15 @@ export default function App() {
   // lets late old-process responses stay recognizable without eviction races.
   const lastSeenServerInstanceIdRef = useRef<string | null>(null);
   const seenServerInstanceIdsRef = useRef<Set<string>>(new Set());
+  const actionStateClassifierContextRef =
+    useRef<ActionStateClassifierContext>({
+      getSnapshot: () => ({
+        revision: latestStateRevisionRef.current,
+        serverInstanceId: lastSeenServerInstanceIdRef.current,
+        projects: projectsRef.current,
+        sessions: sessionsRef.current,
+      }),
+    });
   // Populated by the live-state hook's transport useEffect on
   // mount and reset to a no-op on cleanup. App.tsx owns the ref
   // identity because `reportRequestError` and
@@ -909,7 +921,7 @@ export default function App() {
       latestStateRevisionRef,
       lastSeenServerInstanceIdRef,
       sessionsRef,
-      projectsRef,
+      actionStateClassifierContextRef,
       draftsBySessionIdRef: draftsRef,
       draftAttachmentsBySessionIdRef: draftAttachmentsRef,
       confirmedUnknownModelSendsRef,

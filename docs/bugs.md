@@ -240,19 +240,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - Extract a `ReconnectStateMachine` (or similar) module that owns the flag set + transitions and exposes named events (`onSseError`, `onSseReopen`, `onBadLiveEvent`, `onSnapshotAdopted`, `onLiveEventConfirmed`).
 - Defer to a pure code-move commit per CLAUDE.md.
 
-## `useAppSessionActions` ref cluster has grown from 1 to 4 to feed the rejected-action classifier
-
-**Severity:** Medium - `ui/src/app-session-actions.ts:316-356`. `useAppSessionActions` now requires `latestStateRevisionRef`, `lastSeenServerInstanceIdRef`, `projectsRef`, and `sessionsRef` because of the inline `classifyRejectedActionState` call site. The ref count grew from 1 → 4 in a few rounds, all to feed one classifier function.
-
-**Current behavior:**
-- Every new evidence dimension for stale action snapshots pushes another ref into this hook.
-- App.tsx, the test harness, and the hook signature all need editing whenever a new dimension is added.
-- Same anti-pattern the resync-options ref cluster had before extraction.
-
-**Proposal:**
-- Pass a single `actionStateClassifierContextRef: MutableRefObject<{ revision, serverInstanceId, projects, sessions }>` (or a memoized snapshot getter) so adding a new evidence dimension does not require touching the hook signature, the caller, and the test harness.
-- Defer to a dedicated commit per CLAUDE.md.
-
 ## Directory-level state hardening retains a TOCTOU window after symlink check
 
 **Severity:** Low - `src/persist.rs:146-149`. Round-15 carryover. `harden_local_state_directory_permissions` calls `reject_existing_state_directory_redirection_unix` (which uses `fs::symlink_metadata`), then `harden_local_state_permissions(path, 0o700)` — which uses path-based `fs::set_permissions` and `fs::metadata`, both of which follow symlinks. An attacker able to replace the directory between the two calls would get the chmod redirected through the symlink. The matching file path now uses `O_NOFOLLOW + fchmod`, but the directory path has not been migrated.

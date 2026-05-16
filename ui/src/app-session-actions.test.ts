@@ -94,6 +94,31 @@ function makeSessionActionsParams(
 ): Parameters<typeof useAppSessionActions>[0] {
   const session = makeSession("session-1");
   const noopSetter = vi.fn();
+  const classifierProjectsRef = { current: [] as Project[] };
+  let refs: Parameters<typeof useAppSessionActions>[0]["refs"];
+  refs = {
+    isMountedRef: { current: true },
+    latestStateRevisionRef: { current: 5 },
+    lastSeenServerInstanceIdRef: { current: "server-a" },
+    sessionsRef: { current: [session] },
+    actionStateClassifierContextRef: {
+      current: {
+        getSnapshot: () => ({
+          revision: refs.latestStateRevisionRef.current,
+          serverInstanceId: refs.lastSeenServerInstanceIdRef.current,
+          projects: classifierProjectsRef.current,
+          sessions: refs.sessionsRef.current,
+        }),
+      },
+    },
+    draftsBySessionIdRef: { current: {} },
+    draftAttachmentsBySessionIdRef: { current: {} },
+    confirmedUnknownModelSendsRef: { current: new Set() },
+    activePromptPollCancelRef: { current: null },
+    activePromptPollSessionIdRef: { current: null },
+    refreshingSessionModelOptionIdsRef: { current: {} },
+    refreshingAgentCommandSessionIdsRef: { current: {} },
+  };
 
   return {
     lookups: {
@@ -119,20 +144,7 @@ function makeSessionActionsParams(
       defaultGeminiApprovalMode: "default",
       defaultGeminiModel: "default",
     },
-    refs: {
-      isMountedRef: { current: true },
-      latestStateRevisionRef: { current: 5 },
-      lastSeenServerInstanceIdRef: { current: "server-a" },
-      sessionsRef: { current: [session] },
-      projectsRef: { current: [] },
-      draftsBySessionIdRef: { current: {} },
-      draftAttachmentsBySessionIdRef: { current: {} },
-      confirmedUnknownModelSendsRef: { current: new Set() },
-      activePromptPollCancelRef: { current: null },
-      activePromptPollSessionIdRef: { current: null },
-      refreshingSessionModelOptionIdsRef: { current: {} },
-      refreshingAgentCommandSessionIdsRef: { current: {} },
-    },
+    refs,
     setters: {
       setSessions: noopSetter,
       setWorkspace: noopSetter,
@@ -1465,7 +1477,14 @@ describe("useAppSessionActions", () => {
       newProjectRootPath: "/repo",
     });
     params.lookups.projectLookup = new Map();
-    params.refs.projectsRef.current = [project];
+    params.refs.actionStateClassifierContextRef.current = {
+      getSnapshot: () => ({
+        revision: params.refs.latestStateRevisionRef.current,
+        serverInstanceId: params.refs.lastSeenServerInstanceIdRef.current,
+        projects: [project],
+        sessions: params.refs.sessionsRef.current,
+      }),
+    };
     params.setters.setSelectedProjectId = setSelectedProjectId;
     const actions = useAppSessionActions(params);
 
@@ -1489,7 +1508,6 @@ describe("useAppSessionActions", () => {
       newProjectRootPath: "/repo",
     });
     params.lookups.projectLookup = new Map();
-    params.refs.projectsRef.current = [];
     params.setters.setSelectedProjectId = setSelectedProjectId;
     const actions = useAppSessionActions(params);
 
