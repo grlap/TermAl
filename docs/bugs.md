@@ -649,8 +649,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   drive bursty same-session remote deltas through the production hydration path, assert only one remote session fetch is issued, and assert the in-flight guard is cleared after successful hydration.
 - [ ] P2: Add failed manual retry reconnect-rearm regression:
   cover manual retry hitting a transient failure, then the next scheduled attempt adopting a newer same-instance snapshot while polling still continues until SSE confirms.
-- [ ] P2 watchdog wake-gap stop-after-progress regression:
-  trigger watchdog wake-gap recovery, adopt same-instance `/api/state` progress, and assert no additional reconnect polling occurs before a later live event.
 - [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:
   refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
 - [ ] P2: Document active Telegram reply forwarding invariants:
