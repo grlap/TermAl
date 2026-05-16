@@ -3,7 +3,8 @@ import mermaid from "mermaid";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as connectionRetry from "./connection-retry";
-import { MarkdownContent, MessageCard, areMarkdownLineMarkersEqual } from "./message-cards";
+import { MarkdownContent, MessageCard } from "./message-cards";
+import { areMarkdownLineMarkersEqual } from "./markdown-line-markers";
 import type {
   CodexAppRequestMessage,
   McpElicitationRequestMessage,
