@@ -72,6 +72,7 @@ import {
 import { upsertSessionStoreSession } from "./session-store";
 import { syncActionComposerDraftSlice } from "./app-session-draft-sync";
 import { conversationMarkerSatisfiesResponse } from "./conversation-marker-response-match";
+import { buildCreateConversationMarkerRequest } from "./conversation-marker-requests";
 import {
   deleteConversationMarkerLocally,
   upsertConversationMarkerLocally,
@@ -2016,20 +2017,15 @@ export function useAppSessionActions(
     if (!session || !session.messages.some((message) => message.id === messageId)) {
       return false;
     }
-    const markerName = options.name?.trim() || "Checkpoint";
 
     setUpdatingSessionIds((current) =>
       setSessionFlag(current, sessionId, true),
     );
     try {
-      const response = await createConversationMarker(sessionId, {
-        kind: "checkpoint",
-        name: markerName,
-        body: null,
-        color: "#3b82f6",
-        messageId,
-        endMessageId: null,
-      });
+      const response = await createConversationMarker(
+        sessionId,
+        buildCreateConversationMarkerRequest(messageId, options),
+      );
       if (!isMountedRef.current) {
         return false;
       }
