@@ -189,7 +189,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         persist_thread_handle: Arc::new(Mutex::new(None)),
         persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
-        state_broadcast_tx: mpsc::channel().0,
+        state_broadcast_mailbox: None,
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),
         test_agent_setup_failures: Arc::new(Mutex::new(Vec::new())),

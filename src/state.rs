@@ -48,6 +48,83 @@ enum PersistRequest {
     Shutdown,
 }
 
+#[derive(Default)]
+struct StateBroadcastMailbox {
+    pending: Mutex<Option<StateResponse>>,
+    ready: Condvar,
+}
+
+impl StateBroadcastMailbox {
+    fn publish(&self, snapshot: StateResponse) {
+        let mut pending = self
+            .pending
+            .lock()
+            .expect("state broadcast mailbox mutex poisoned");
+        *pending = Some(snapshot);
+        self.ready.notify_one();
+    }
+
+    fn recv_latest(&self) -> StateResponse {
+        let mut pending = self
+            .pending
+            .lock()
+            .expect("state broadcast mailbox mutex poisoned");
+        loop {
+            if let Some(snapshot) = pending.take() {
+                return snapshot;
+            }
+            pending = self
+                .ready
+                .wait(pending)
+                .expect("state broadcast mailbox mutex poisoned");
+        }
+    }
+
+    #[cfg(test)]
+    fn take_pending_for_test(&self) -> Option<StateResponse> {
+        self.pending
+            .lock()
+            .expect("state broadcast mailbox mutex poisoned")
+            .take()
+    }
+}
+
+#[cfg(test)]
+mod state_broadcast_mailbox_tests {
+    use super::*;
+
+    fn snapshot(revision: u64) -> StateResponse {
+        StateResponse {
+            revision,
+            server_instance_id: "test-instance".to_owned(),
+            codex: CodexState::default(),
+            agent_readiness: Vec::new(),
+            preferences: AppPreferences::default(),
+            projects: Vec::new(),
+            orchestrators: Vec::new(),
+            workspaces: Vec::new(),
+            sessions: Vec::new(),
+            delegations: Vec::new(),
+            delegation_waits: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn state_broadcast_mailbox_keeps_only_latest_pending_snapshot() {
+        let mailbox = StateBroadcastMailbox::default();
+
+        mailbox.publish(snapshot(1));
+        mailbox.publish(snapshot(2));
+        mailbox.publish(snapshot(3));
+
+        let latest = mailbox
+            .take_pending_for_test()
+            .expect("latest snapshot should be pending");
+        assert_eq!(latest.revision, 3);
+        assert!(mailbox.take_pending_for_test().is_none());
+    }
+}
+
 const REMOTE_DELTA_REPLAY_CACHE_LIMIT: usize = 2048;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -318,16 +395,17 @@ struct AppState {
     /// waiter registration" / "Graceful shutdown blocks forever waiting
     /// for SSE streams to drain".
     shutdown_signal_tx: Arc<tokio::sync::watch::Sender<bool>>,
-    /// Background SSE state-broadcast channel. `publish_snapshot` sends a
-    /// pre-built `StateResponse` through this channel; a dedicated thread
-    /// serializes it to JSON and forwards the payload to `state_events`,
+    /// Background SSE state-broadcast mailbox. `publish_snapshot` stores a
+    /// pre-built `StateResponse` here; a dedicated thread serializes the
+    /// latest snapshot to JSON and forwards the payload to `state_events`,
     /// so the state mutex is never held during the O(sessions × messages)
-    /// serialization pass. The broadcaster coalesces queued snapshots to
-    /// the newest, which is safe because state events are idempotent
-    /// full-state snapshots — subscribers always converge on the latest
-    /// revision either way, and delta events (`publish_delta`) still fire
-    /// in order for every revision via a separate channel.
-    state_broadcast_tx: mpsc::Sender<StateResponse>,
+    /// serialization pass. The mailbox has one logical slot: bursts overwrite
+    /// superseded snapshots before they can queue. That is safe because state
+    /// events are idempotent full-state snapshots — subscribers always
+    /// converge on the latest revision either way, and delta events
+    /// (`publish_delta`) still fire in order for every revision via a
+    /// separate channel.
+    state_broadcast_mailbox: Option<Arc<StateBroadcastMailbox>>,
     /// Lazily created shared Codex app-server reused across Codex sessions.
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
     #[cfg(test)]

@@ -290,23 +290,22 @@ impl AppState {
             .expect("failed to spawn persist thread");
 
         let state_events_sender = broadcast::channel::<String>(128).0;
-        let (state_broadcast_tx, state_broadcast_rx) = mpsc::channel::<StateResponse>();
+        let state_broadcast_mailbox = Arc::new(StateBroadcastMailbox::default());
 
-        // Background state-broadcast thread: drains queued state snapshots,
-        // serializes each to JSON, and forwards the payload to the SSE
-        // state-events broadcast channel. Coalesces queued snapshots to the
-        // newest — intermediate revisions are safe to skip because a state
-        // event is a full-state snapshot, not a delta. Subscribers converge
-        // on the latest revision either way, and delta events fire in order
-        // for every revision on a separate channel.
+        // Background state-broadcast thread: reads the latest pending state
+        // snapshot from a single-slot mailbox, serializes it to JSON, and
+        // forwards the payload to the SSE state-events broadcast channel.
+        // Intermediate revisions are safe to skip because a state event is a
+        // full-state snapshot, not a delta. Subscribers converge on the
+        // latest revision either way, and delta events fire in order for
+        // every revision on a separate channel.
         let state_events_for_broadcast = state_events_sender.clone();
+        let state_broadcast_mailbox_for_thread = state_broadcast_mailbox.clone();
         std::thread::Builder::new()
             .name("termal-state-broadcast".to_owned())
             .spawn(move || {
-                while let Ok(mut snapshot) = state_broadcast_rx.recv() {
-                    while let Ok(newer) = state_broadcast_rx.try_recv() {
-                        snapshot = newer;
-                    }
+                loop {
+                    let snapshot = state_broadcast_mailbox_for_thread.recv_latest();
                     match serde_json::to_string(&snapshot) {
                         Ok(payload) => {
                             let _ = state_events_for_broadcast.send(payload);
@@ -344,7 +343,7 @@ impl AppState {
             persist_thread_handle: Arc::new(Mutex::new(Some(persist_thread_handle))),
             persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
-            state_broadcast_tx,
+            state_broadcast_mailbox: Some(state_broadcast_mailbox),
             shared_codex_runtime: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),

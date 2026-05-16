@@ -396,21 +396,6 @@ Before the broadcaster thread, `commit_locked` published state synchronously (`s
 - Or: have `publish_snapshot` synchronously send a revision-only "marker" into `state_events` immediately and let the broadcaster thread serialize and send the full payload; the client's `latestStateRevisionRef` advances on the marker.
 - Or: document the tradeoff and rely on the existing `/api/state` resync fallback; track the extra traffic.
 
-## SSE state broadcaster queue can grow before coalescing
-
-**Severity:** Low - bursty commits can enqueue multiple full `StateResponse` snapshots before the broadcaster gets a chance to drop superseded ones.
-
-The broadcaster thread coalesces snapshots only after receiving from its unbounded `mpsc::channel`. During a burst of commits, the sender side can enqueue several large snapshots first, so the "newest only" behavior does not actually bound queued memory or provide backpressure.
-
-**Current behavior:**
-- `publish_snapshot` sends owned `StateResponse` values to an unbounded channel.
-- The broadcaster drains and coalesces only after snapshots have already queued.
-- Full-state snapshots can accumulate during bursts even though older snapshots will be superseded.
-
-- Replace the unbounded queue with a single-slot latest mailbox or bounded channel.
-- Drop or overwrite superseded snapshots before they can accumulate in memory.
-- Add a burst test that publishes multiple large snapshots while the broadcaster is delayed and asserts only the latest snapshot is retained.
-
 ## Implementation Tasks
 
 - [ ] P2: Cover first-chunk Telegram forward failure:

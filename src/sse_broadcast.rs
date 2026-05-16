@@ -42,11 +42,12 @@
 // `StateResponse` *inside* the state lock (required — snapshot
 // fields read `inner`) but hands the owned snapshot off to a
 // dedicated broadcaster thread for JSON serialization via
-// `publish_snapshot`. That keeps the state mutex off the slow-
-// serialization critical path for commit-heavy routes like
-// `put_workspace_layout`. When the broadcaster channel is
-// disconnected (notably: test builds that construct `AppState`
-// without spawning the broadcaster thread) we fall back to
+// `publish_snapshot`. The handoff is a single latest-snapshot mailbox,
+// so bursty commits overwrite superseded snapshots before they can
+// accumulate. That keeps the state mutex off the slow-serialization
+// critical path for commit-heavy routes like `put_workspace_layout`.
+// When there is no broadcaster mailbox (notably: test builds that
+// construct `AppState` without spawning the broadcaster thread) we fall back to
 // synchronous serialize + broadcast so tests can still assert SSE
 // behaviour.
 
@@ -547,23 +548,27 @@ impl AppState {
 
     /// Publishes a pre-built snapshot as an SSE state event.
     ///
-    /// Sends the owned snapshot to the background broadcaster thread,
-    /// which serializes to JSON and forwards to `state_events` off the
-    /// critical path. Falls back to synchronous serialize + broadcast
-    /// if the channel is disconnected (test builds that construct
-    /// `AppState` manually without a broadcaster thread).
+    /// Sends the owned snapshot to the background broadcaster mailbox, whose
+    /// thread serializes to JSON and forwards to `state_events` off the
+    /// critical path. The mailbox retains only the latest pending snapshot.
+    /// Falls back to synchronous serialize + broadcast if no mailbox exists
+    /// (test builds that construct `AppState` manually without a broadcaster
+    /// thread).
     fn publish_snapshot(&self, snapshot: StateResponse) {
-        if let Err(mpsc::SendError(snapshot)) = self.state_broadcast_tx.send(snapshot) {
-            match serde_json::to_string(&snapshot) {
-                Ok(payload) => {
-                    let _ = self.state_events.send(payload);
-                }
-                Err(err) => {
-                    eprintln!(
-                        "warning: failed to serialize SSE state snapshot at revision {}: {err}",
-                        snapshot.revision,
-                    );
-                }
+        if let Some(mailbox) = &self.state_broadcast_mailbox {
+            mailbox.publish(snapshot);
+            return;
+        }
+
+        match serde_json::to_string(&snapshot) {
+            Ok(payload) => {
+                let _ = self.state_events.send(payload);
+            }
+            Err(err) => {
+                eprintln!(
+                    "warning: failed to serialize SSE state snapshot at revision {}: {err}",
+                    snapshot.revision,
+                );
             }
         }
     }
