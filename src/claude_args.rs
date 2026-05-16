@@ -73,6 +73,10 @@ fn push_claude_cli_permission_args(
     }
 }
 
+// Keep this aligned with Claude Code's editor-style bridge mode: TermAl owns
+// the long-lived stdin/stdout transport, Claude reads user/project/local
+// settings like the VS Code extension, no Chrome helper is launched, and
+// replayed user messages preserve transcript continuity when resuming.
 fn claude_cli_persistent_args(
     model: &str,
     approval_mode: ClaudeApprovalMode,

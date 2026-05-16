@@ -657,8 +657,6 @@ The broadcaster thread coalesces snapshots only after receiving from its unbound
   refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
 - [ ] P2: Document active Telegram reply forwarding invariants:
   add a short contract comment near the active forwarding gate in `src/telegram.rs` explaining when Telegram may see active output, what cursor metadata must preserve, and how settled replacement/divergence is expected to be handled.
-- [ ] P2: Document Claude Code persistent-stdio launch flags:
-  add a short rationale near `claude_cli_persistent_args` for the VS Code-aligned flags (`--setting-sources`, `--no-chrome`, `--replay-user-messages`) and split the argv regression into focused tests if the current lifecycle test becomes hard to read.
 - [ ] P2: Cover Telegram relay active-project reconciliation:
   start an in-process relay with subscribed projects but no default and assert startup fails or status exposes the effective `activeProjectId`; delete a project used by a running relay and assert the relay is stopped or restarted without the deleted id.
 - [ ] P2: Cover Telegram relay runtime lifecycle seam:
