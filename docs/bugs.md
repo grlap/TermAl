@@ -119,20 +119,6 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 - When touching this area again, extract textarea sizing/transition behavior into a focused hook such as `useComposerAutoResize`.
 - Keep targeted tests for resize scheduling, transition restoration, and session-switch cleanup with that hook.
 
-## `scheduleConversationOverviewRailBuild` module-level FIFO queue is shared across all controller instances
-
-**Severity:** Note - a slow rail build in pane A delays pane B by one frame; cleanup story across module reloads / HMR is subtle.
-
-`ui/src/panels/conversation-overview-controller.ts:33-87`. The module-level `pendingConversationOverviewRailBuildTasks: ConversationOverviewRailBuildTask[]`, `conversationOverviewRailBuildFrameId: number | null`, and `nextConversationOverviewRailBuildTaskId: number = 1` are shared across all controllers/sessions/panes. Acceptable per the rAF cadence (60Hz = 16ms/frame). The cleanup logic (cancel-on-empty-queue, splice-by-task-id) is correct but the global-state coupling means HMR / module reloads have subtle behavior.
-
-**Current behavior:**
-- All rail builds across all panes serialized through one global FIFO queue.
-- One slow task delays all subsequent panes by one frame.
-- Module-level globals make cleanup-across-HMR subtle.
-
-**Proposal:**
-- Defer (no concrete bug today). Consider in a future round whether per-pane queues would simplify reasoning, especially as multi-pane scenarios become more common.
-
 ## Telegram-forwarded text has no per-chat rate cap
 
 **Severity:** Medium - any linked chat can still fan out prompt submissions quickly enough to create a burst of local backend and agent work.

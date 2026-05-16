@@ -3,8 +3,6 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  pendingConversationOverviewRailBuildTaskCountForTests,
-  resetConversationOverviewRailBuildStateForTests,
   useConversationOverviewController,
 } from "./conversation-overview-controller";
 import type { ConversationOverviewItem } from "./conversation-overview-map";
@@ -210,7 +208,6 @@ function OverviewGrowthHarness({
 
 describe("useConversationOverviewController", () => {
   afterEach(() => {
-    resetConversationOverviewRailBuildStateForTests();
     vi.restoreAllMocks();
   });
 
@@ -389,7 +386,7 @@ describe("useConversationOverviewController", () => {
       act(flushNextFrame);
       act(flushNextFrame);
 
-      expect(pendingConversationOverviewRailBuildTaskCountForTests()).toBe(1);
+      expect(idleCallbacks.size).toBe(1);
       const queuedIdle = idleCallbacks.entries().next().value as
         | [number, IdleRequestCallback]
         | undefined;
@@ -398,7 +395,6 @@ describe("useConversationOverviewController", () => {
 
       unmount();
 
-      expect(pendingConversationOverviewRailBuildTaskCountForTests()).toBe(0);
       expect(idleCallbacks.size).toBe(0);
 
       act(() => {
@@ -410,6 +406,80 @@ describe("useConversationOverviewController", () => {
 
       expect(onRailReadyChange).toHaveBeenCalledWith(false);
       expect(onRailReadyChange).not.toHaveBeenCalledWith(true);
+    } finally {
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+      idleWindow.requestIdleCallback = originalRequestIdleCallback;
+      idleWindow.cancelIdleCallback = originalCancelIdleCallback;
+    }
+  });
+
+  it("keeps deferred rail activation queues isolated per controller", () => {
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const idleWindow = window as Window &
+      typeof globalThis & {
+        requestIdleCallback?: (
+          callback: IdleRequestCallback,
+          options?: IdleRequestOptions,
+        ) => number;
+        cancelIdleCallback?: (handle: number) => void;
+      };
+    const originalRequestIdleCallback = idleWindow.requestIdleCallback;
+    const originalCancelIdleCallback = idleWindow.cancelIdleCallback;
+    const frameCallbacks = new Map<number, FrameRequestCallback>();
+    const idleCallbacks = new Map<number, IdleRequestCallback>();
+    let nextFrameId = 1;
+    let nextIdleId = 1;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      frameCallbacks.set(frameId, callback);
+      return frameId;
+    }) as typeof requestAnimationFrame;
+    window.cancelAnimationFrame = ((frameId: number) => {
+      frameCallbacks.delete(frameId);
+    }) as typeof cancelAnimationFrame;
+    idleWindow.requestIdleCallback = ((callback: IdleRequestCallback) => {
+      const idleId = nextIdleId;
+      nextIdleId += 1;
+      idleCallbacks.set(idleId, callback);
+      return idleId;
+    }) as typeof requestIdleCallback;
+    idleWindow.cancelIdleCallback = ((idleId: number) => {
+      idleCallbacks.delete(idleId);
+    }) as typeof cancelIdleCallback;
+    const flushNextFrame = () => {
+      const nextFrame = frameCallbacks.entries().next().value as
+        | [number, FrameRequestCallback]
+        | undefined;
+      expect(nextFrame).toBeDefined();
+      if (!nextFrame) {
+        return;
+      }
+      const [frameId, callback] = nextFrame;
+      frameCallbacks.delete(frameId);
+      callback(performance.now());
+    };
+
+    try {
+      const { unmount } = render(
+        <>
+          <OverviewControllerHarness sessionId="session-a" />
+          <OverviewControllerHarness sessionId="session-b" />
+        </>,
+      );
+
+      act(flushNextFrame);
+      act(flushNextFrame);
+      act(flushNextFrame);
+      act(flushNextFrame);
+
+      expect(idleCallbacks.size).toBe(2);
+
+      unmount();
+
+      expect(idleCallbacks.size).toBe(0);
     } finally {
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;

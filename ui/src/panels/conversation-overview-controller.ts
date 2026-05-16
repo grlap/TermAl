@@ -37,6 +37,12 @@ type ConversationOverviewRailBuildTask = {
   run: () => void;
 };
 
+type ConversationOverviewRailBuildScheduler = {
+  nextTaskId: number;
+  cancelDrain: (() => void) | null;
+  pendingTasks: ConversationOverviewRailBuildTask[];
+};
+
 type ConversationOverviewIdleWindow = Window &
   typeof globalThis & {
     requestIdleCallback?: (
@@ -46,22 +52,20 @@ type ConversationOverviewIdleWindow = Window &
     cancelIdleCallback?: (handle: number) => void;
   };
 
-let nextConversationOverviewRailBuildTaskId = 1;
-let cancelConversationOverviewRailBuildDrain: (() => void) | null = null;
-const pendingConversationOverviewRailBuildTasks: ConversationOverviewRailBuildTask[] =
-  [];
-
-export function resetConversationOverviewRailBuildStateForTests() {
-  if (cancelConversationOverviewRailBuildDrain !== null) {
-    cancelConversationOverviewRailBuildDrain();
-    cancelConversationOverviewRailBuildDrain = null;
-  }
-  pendingConversationOverviewRailBuildTasks.splice(0);
-  nextConversationOverviewRailBuildTaskId = 1;
+function createConversationOverviewRailBuildScheduler(): ConversationOverviewRailBuildScheduler {
+  return {
+    nextTaskId: 1,
+    cancelDrain: null,
+    pendingTasks: [],
+  };
 }
 
-export function pendingConversationOverviewRailBuildTaskCountForTests() {
-  return pendingConversationOverviewRailBuildTasks.length;
+function resetConversationOverviewRailBuildScheduler(
+  scheduler: ConversationOverviewRailBuildScheduler,
+) {
+  scheduler.cancelDrain?.();
+  scheduler.cancelDrain = null;
+  scheduler.pendingTasks.splice(0);
 }
 
 function canUseMessageIndexFallback(
@@ -89,46 +93,47 @@ function jumpToOverviewItem(
   return handle.jumpToMessageIndex(item.messageIndex, { align: "center" });
 }
 
-function scheduleConversationOverviewRailBuild(run: () => void) {
+function scheduleConversationOverviewRailBuild(
+  scheduler: ConversationOverviewRailBuildScheduler,
+  run: () => void,
+) {
   const task: ConversationOverviewRailBuildTask = {
-    id: nextConversationOverviewRailBuildTaskId,
+    id: scheduler.nextTaskId,
     run,
   };
-  nextConversationOverviewRailBuildTaskId += 1;
-  pendingConversationOverviewRailBuildTasks.push(task);
-  scheduleConversationOverviewRailBuildDrain();
+  scheduler.nextTaskId += 1;
+  scheduler.pendingTasks.push(task);
+  scheduleConversationOverviewRailBuildDrain(scheduler);
   return () => {
-    const taskIndex = pendingConversationOverviewRailBuildTasks.findIndex(
+    const taskIndex = scheduler.pendingTasks.findIndex(
       (candidate) => candidate.id === task.id,
     );
     if (taskIndex !== -1) {
-      pendingConversationOverviewRailBuildTasks.splice(taskIndex, 1);
+      scheduler.pendingTasks.splice(taskIndex, 1);
     }
-    if (
-      pendingConversationOverviewRailBuildTasks.length === 0 &&
-      cancelConversationOverviewRailBuildDrain !== null
-    ) {
-      cancelConversationOverviewRailBuildDrain();
-      cancelConversationOverviewRailBuildDrain = null;
+    if (scheduler.pendingTasks.length === 0 && scheduler.cancelDrain !== null) {
+      scheduler.cancelDrain();
+      scheduler.cancelDrain = null;
     }
   };
 }
 
-function scheduleConversationOverviewRailBuildDrain() {
-  if (cancelConversationOverviewRailBuildDrain !== null) {
+function scheduleConversationOverviewRailBuildDrain(
+  scheduler: ConversationOverviewRailBuildScheduler,
+) {
+  if (scheduler.cancelDrain !== null) {
     return;
   }
-  cancelConversationOverviewRailBuildDrain =
-    scheduleConversationOverviewIdleCallback(() => {
-      cancelConversationOverviewRailBuildDrain = null;
-      const task = pendingConversationOverviewRailBuildTasks.shift();
-      if (task) {
-        task.run();
-      }
-      if (pendingConversationOverviewRailBuildTasks.length > 0) {
-        scheduleConversationOverviewRailBuildDrain();
-      }
-    });
+  scheduler.cancelDrain = scheduleConversationOverviewIdleCallback(() => {
+    scheduler.cancelDrain = null;
+    const task = scheduler.pendingTasks.shift();
+    if (task) {
+      task.run();
+    }
+    if (scheduler.pendingTasks.length > 0) {
+      scheduleConversationOverviewRailBuildDrain(scheduler);
+    }
+  });
 }
 
 function scheduleConversationOverviewIdleCallback(run: () => void) {
@@ -195,8 +200,18 @@ export function useConversationOverviewController({
   const layoutSnapshotMessageCount = layoutSnapshot?.messageCount ?? null;
   const layoutSnapshotSessionId = layoutSnapshot?.sessionId ?? null;
   const overviewSessionIdRef = useRef(sessionId);
+  const railBuildSchedulerRef = useRef(
+    createConversationOverviewRailBuildScheduler(),
+  );
   const navigationFrameIdsRef = useRef<Set<number>>(new Set());
   overviewSessionIdRef.current = sessionId;
+
+  useEffect(
+    () => () => {
+      resetConversationOverviewRailBuildScheduler(railBuildSchedulerRef.current);
+    },
+    [],
+  );
 
   const refreshLayoutSnapshot = useCallback(() => {
     const nextSnapshot = virtualizerHandleRef.current?.getLayoutSnapshot() ?? null;
@@ -418,7 +433,10 @@ export function useConversationOverviewController({
       firstFrameId = null;
       secondFrameId = window.requestAnimationFrame(() => {
         secondFrameId = null;
-        cancelQueuedActivation = scheduleConversationOverviewRailBuild(activate);
+        cancelQueuedActivation = scheduleConversationOverviewRailBuild(
+          railBuildSchedulerRef.current,
+          activate,
+        );
       });
     });
 
