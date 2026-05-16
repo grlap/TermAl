@@ -29,14 +29,17 @@ export type SessionSearchMatch = {
 };
 
 export type SessionListSearchResult = {
+  hasMatch: boolean;
   matchCount: number;
   snippet: string;
+  transcriptIncomplete: boolean;
 };
 
 export type SessionSearchIndex = {
   items: SearchableSessionItem[];
   metadataParts: SearchableTextPart[];
   preview: string;
+  transcriptLoaded: boolean;
 };
 
 type SearchableTextPart = {
@@ -110,13 +113,22 @@ export function buildSessionListSearchResultFromIndex(
 
   const metadataMatch = findSessionMetadataMatch(searchIndex, query);
   const conversationMatchSummary = summarizeConversationMatches(searchIndex, query);
-  if (!metadataMatch && conversationMatchSummary.matchCount === 0) {
+  const transcriptIncomplete = !searchIndex.transcriptLoaded;
+  const matchCount =
+    conversationMatchSummary.matchCount + (metadataMatch ? 1 : 0);
+  const hasMatch = matchCount > 0;
+  if (!hasMatch && !transcriptIncomplete) {
     return null;
   }
 
   return {
-    matchCount: conversationMatchSummary.matchCount + (metadataMatch ? 1 : 0),
-    snippet: conversationMatchSummary.firstSnippet ?? metadataMatch?.snippet ?? searchIndex.preview,
+    hasMatch,
+    matchCount,
+    snippet:
+      conversationMatchSummary.firstSnippet ??
+      metadataMatch?.snippet ??
+      "Transcript not loaded",
+    transcriptIncomplete,
   };
 }
 
@@ -125,6 +137,7 @@ export function buildSessionSearchIndex(session: Session): SessionSearchIndex {
     items: buildSearchableSessionItems(session),
     metadataParts: collectSessionMetadataSearchParts(session).map(createSearchableTextPart),
     preview: session.preview,
+    transcriptLoaded: session.messagesLoaded !== false,
   };
 }
 

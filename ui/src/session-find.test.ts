@@ -221,14 +221,48 @@ describe("session find helpers", () => {
     });
 
     expect(buildSessionListSearchResult(metadataSession, "release")).toEqual({
+      hasMatch: true,
       matchCount: 1,
       snippet: "Release automation",
+      transcriptIncomplete: false,
     });
     expect(buildSessionListSearchResult(conversationSession, "deploy")).toEqual({
+      hasMatch: true,
       matchCount: 1,
       snippet: "Investigate the flaky deploy gate in CI.",
+      transcriptIncomplete: false,
     });
     expect(buildSessionListSearchResult(conversationSession, "missing")).toBeNull();
+  });
+
+  it("surfaces incomplete transcript search for metadata-only summaries", () => {
+    const session = createSession({
+      messagesLoaded: false,
+      messages: [],
+      preview: "Ready",
+    });
+
+    expect(buildSessionListSearchResult(session, "transcript-only")).toEqual({
+      hasMatch: false,
+      matchCount: 0,
+      snippet: "Transcript not loaded",
+      transcriptIncomplete: true,
+    });
+  });
+
+  it("marks metadata matches incomplete when the transcript is not loaded", () => {
+    const session = createSession({
+      name: "Release automation",
+      messagesLoaded: false,
+      messages: [],
+    });
+
+    expect(buildSessionListSearchResult(session, "release")).toEqual({
+      hasMatch: true,
+      matchCount: 1,
+      snippet: "Release automation",
+      transcriptIncomplete: true,
+    });
   });
 
   describe("indexes rendered connection-retry notice state", () => {

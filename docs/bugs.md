@@ -337,32 +337,6 @@ The growth is incremental across many rounds of replay-cache hardening, not a si
 - No action this commit. Consider extracting a `useRenderedMarkdownDrafts(fileStateRef, editorValueRef, setEditorValueState, ...)` hook in a follow-up, owning `renderedMarkdownCommittersRef`, `hasRenderedMarkdownDraftActive`, `commitRenderedMarkdownDrafts`, `handleRenderedMarkdownSectionCommits`, and `handleRenderedMarkdownSectionDraftChange`.
 - The hook would expose a small surface for SourcePanel to consume and keep the file under the scrutiny threshold.
 
-## Metadata-first summaries make transcript search incomplete
-
-**Severity:** Medium - search can silently miss transcript matches for sessions that have only metadata summaries loaded.
-
-`/api/state` now returns session summaries with `messages: []` and
-`messagesLoaded: false`. The session search index still walks
-`session.messages` directly, so non-visible sessions can be treated as having
-no searchable transcript even though the transcript simply has not been
-hydrated in this browser view.
-
-**Current behavior:**
-- `ui/src/session-find.ts` builds transcript search items from
-  `session.messages`.
-- Metadata-first session summaries clear `messages` before reaching the
-  frontend.
-- Search has no "transcript not loaded" state and no on-demand hydration path
-  before concluding that there are no message matches.
-
-**Proposal:**
-- Gate transcript search to hydrated sessions and surface incomplete results
-  when a session summary is not loaded.
-- Or hydrate/index target sessions on demand when search needs transcript
-  content.
-- Add coverage proving metadata-only summaries do not silently produce false
-  "no transcript match" results.
-
 ## Metadata-first state summaries still broadcast full pending prompts
 
 **Severity:** Low - transcript payloads were removed from global state, but queued prompt text can still ride along with every session summary.

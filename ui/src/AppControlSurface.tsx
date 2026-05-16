@@ -302,6 +302,29 @@ export function AppControlSurface({
     const controlSurfaceFilteredSessions = standaloneSessionListState
       ? standaloneSessionListState.filteredSessions
       : filteredSessions;
+    const controlSurfaceSearchDefiniteMatchCount = controlSurfaceHasSessionListSearch
+      ? controlSurfaceFilteredSessions.filter(
+          (session) =>
+            controlSurfaceSessionListSearchResults.get(session.id)?.hasMatch,
+        ).length
+      : 0;
+    const controlSurfaceSearchIncompleteOnlyCount =
+      controlSurfaceHasSessionListSearch
+        ? controlSurfaceFilteredSessions.filter((session) => {
+            const result = controlSurfaceSessionListSearchResults.get(session.id);
+            return result?.transcriptIncomplete && !result.hasMatch;
+          }).length
+        : 0;
+    const controlSurfaceSessionListSearchMeta =
+      controlSurfaceSearchIncompleteOnlyCount > 0
+        ? `${controlSurfaceSearchDefiniteMatchCount} matching ${
+            controlSurfaceSearchDefiniteMatchCount === 1 ? "session" : "sessions"
+          }, ${controlSurfaceSearchIncompleteOnlyCount} transcript${
+            controlSurfaceSearchIncompleteOnlyCount === 1 ? "" : "s"
+          } not loaded`
+        : controlSurfaceSearchDefiniteMatchCount === 1
+          ? "1 matching session"
+          : `${controlSurfaceSearchDefiniteMatchCount} matching sessions`;
     const controlSurfaceSessionListEntries =
       buildControlSurfaceSessionListEntries(
         controlSurfaceFilteredSessions,
@@ -395,8 +418,12 @@ export function AppControlSurface({
                 <strong>{session.name}</strong>
                 {searchResult ? (
                   <span className="session-search-count">
-                    {searchResult.matchCount} hit
-                    {searchResult.matchCount === 1 ? "" : "s"}
+                    {searchResult.transcriptIncomplete &&
+                    searchResult.matchCount === 0
+                      ? "Transcript not loaded"
+                      : `${searchResult.matchCount}${
+                          searchResult.transcriptIncomplete ? "+" : ""
+                        } hit${searchResult.matchCount === 1 ? "" : "s"}`}
                   </span>
                 ) : null}
               </div>
@@ -1001,9 +1028,7 @@ export function AppControlSurface({
                       className="session-list-search-meta"
                       aria-live="polite"
                     >
-                      {controlSurfaceFilteredSessions.length === 1
-                        ? "1 matching session"
-                        : `${controlSurfaceFilteredSessions.length} matching sessions`}
+                      {controlSurfaceSessionListSearchMeta}
                     </div>
                   ) : null}
                 </div>
