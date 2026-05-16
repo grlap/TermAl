@@ -175,16 +175,16 @@ Many production SQLite helpers in `src/persist.rs` are `#[cfg(not(test))]`, so e
 - Add coverage for post-commit permission failures, cache invalidation reset, and fatal redirection/reparse checks.
 - Keep legacy JSON fixture tests separate from production runtime persistence tests.
 
-## `SessionPaneView.tsx` and `app-session-actions.ts` past architecture file-size thresholds
+## `SessionPaneView.tsx` and `app-session-actions.ts` still past architecture file-size thresholds
 
-**Severity:** Low - `ui/src/SessionPaneView.tsx` is still about 3,661 lines and `ui/src/app-session-actions.ts` is still about 2,089 lines after the latest small helper splits, both past the architecture rubric thresholds (~2,000 for TSX components, ~1,500 for utility modules).
+**Severity:** Low - `ui/src/SessionPaneView.tsx` is still about 3,661 lines and `ui/src/app-session-actions.ts` is still about 1,881 lines after the latest small helper splits. `SessionPaneView.tsx` remains past the TSX component threshold (~2,000 lines), and `app-session-actions.ts` remains past the utility-module threshold (~1,500 lines).
 
-The waiting-indicator helpers now live in `ui/src/SessionPaneView.waiting-indicator.ts`, the session-settings optimism helpers now live in `ui/src/app-session-settings-optimism.ts`, session-settings API payload construction now lives in `ui/src/app-session-settings-payload.ts`, conversation-marker response matching now lives in `ui/src/conversation-marker-response-match.ts`, optimistic pending prompt construction now lives in `ui/src/optimistic-pending-prompt.ts`, draft ref/store sync now lives in `ui/src/app-session-draft-sync.ts`, local marker session transforms now live in `ui/src/conversation-marker-session-mutations.ts`, marker create-request construction now lives in `ui/src/conversation-marker-requests.ts`, new-session model request selection now lives in `ui/src/app-session-model-requests.ts`, and draft attachment collection transforms now live in `ui/src/app-session-draft-attachments.ts`. Those moves reduced local clutter and gave the helpers direct unit-testable surfaces, but the main production modules remain over threshold.
+The waiting-indicator helpers now live in `ui/src/SessionPaneView.waiting-indicator.ts`, the session-settings optimism helpers now live in `ui/src/app-session-settings-optimism.ts`, session-settings API payload construction now lives in `ui/src/app-session-settings-payload.ts`, conversation-marker response matching now lives in `ui/src/conversation-marker-response-match.ts`, optimistic pending prompt construction now lives in `ui/src/optimistic-pending-prompt.ts`, draft ref/store sync now lives in `ui/src/app-session-draft-sync.ts`, local marker session transforms now live in `ui/src/conversation-marker-session-mutations.ts`, marker create-request construction now lives in `ui/src/conversation-marker-requests.ts`, new-session model request selection now lives in `ui/src/app-session-model-requests.ts`, draft attachment collection transforms now live in `ui/src/app-session-draft-attachments.ts`, and the session action type surface now lives in `ui/src/app-session-actions-types.ts`. Those moves reduced local clutter and gave the helpers direct unit-testable surfaces, but the main production modules remain over threshold.
 
 **Current behavior:**
 - `SessionPaneView.tsx` still owns pane orchestration, tab rendering, scroll/follow behavior, panel selection, and composer/footer wiring.
 - `app-session-actions.ts` still owns prompt send, draft attachment lifecycle, session creation, stop/kill/rename, settings changes, model refresh, Codex thread actions, and marker mutations.
-- Both files now have small helper splits, but neither production module is below the review threshold.
+- Both files now have small helper splits, but neither production module is below its applicable review threshold.
 
 **Proposal:**
 - Continue with dedicated pure-code-move commits per CLAUDE.md.
