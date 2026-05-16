@@ -1317,8 +1317,10 @@ export function useAppLiveState(
     }
 
     return {
-      allowDivergentTextRepairAfterNewerRevision:
-        options?.allowDivergentTextRepairAfterNewerRevision === true,
+      kind:
+        options?.allowDivergentTextRepairAfterNewerRevision === true
+          ? "textRepair"
+          : "fullSession",
       messageCount: getHydrationMessageCount(session),
       revision: latestStateRevisionRef.current,
       serverInstanceId: lastSeenServerInstanceIdRef.current,
@@ -1433,7 +1435,7 @@ export function useAppLiveState(
             tailResponse.serverInstanceId,
             {
               ...requestContext,
-              allowPartialTranscript: true,
+              kind: "partialTail",
             },
           );
           switch (tailAdoptOutcome) {

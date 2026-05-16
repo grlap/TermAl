@@ -13,14 +13,23 @@ import {
 } from "./state-revision";
 import type { Session } from "./types";
 
-export type SessionHydrationRequestContext = {
-  allowDivergentTextRepairAfterNewerRevision?: boolean;
-  allowPartialTranscript?: boolean;
+type SessionHydrationRequestMetadata = {
   messageCount: number | null;
   revision: number | null;
   serverInstanceId: string | null;
   sessionMutationStamp: number | null;
 };
+
+export type SessionHydrationRequestContext =
+  | ({
+      kind: "fullSession";
+    } & SessionHydrationRequestMetadata)
+  | ({
+      kind: "partialTail";
+    } & SessionHydrationRequestMetadata)
+  | ({
+      kind: "textRepair";
+    } & SessionHydrationRequestMetadata);
 
 export type AdoptFetchedSessionOutcome =
   | "adopted"
@@ -241,7 +250,7 @@ export function classifyFetchedSessionAdoption({
   // normal delayed hydration cannot overwrite newer text. See also the normal
   // lower-revision hydration branch above; they should stay visibly paired.
   const canAdoptLowerRevisionTextRepairHydration =
-    requestContext.allowDivergentTextRepairAfterNewerRevision === true &&
+    requestContext.kind === "textRepair" &&
     responseIsNotOlderThanRequest &&
     requestStillMatches &&
     responseMetadataMatches &&
@@ -272,7 +281,7 @@ export function classifyFetchedSessionAdoption({
     if (
       requestStillMatches &&
       (requestRevisionStillCurrent ||
-        requestContext.allowDivergentTextRepairAfterNewerRevision === true) &&
+        requestContext.kind === "textRepair") &&
       responseMetadataMatches &&
       responseSession.messagesLoaded === true
     ) {
@@ -289,7 +298,7 @@ export function classifyFetchedSessionAdoption({
 
   if (responseSession.messagesLoaded !== true) {
     if (
-      requestContext.allowPartialTranscript === true &&
+      requestContext.kind === "partialTail" &&
       responseSession.messages.length > 0
     ) {
       return "partial";

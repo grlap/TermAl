@@ -58,20 +58,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 - Split into 2-3 modules mirroring the api.rs/wire.rs split shape.
 - Defer to a dedicated pure-code-move commit per CLAUDE.md.
 
-## `SessionHydrationRequestContext` is a four-flag bag with non-obvious mutual exclusions
-
-**Severity:** Medium - two booleans (`allowDivergentTextRepairAfterNewerRevision`, `allowPartialTranscript`) plus three metadata fields. The flags have non-obvious interactions encoded in call-site logic, not the type.
-
-`ui/src/session-hydration-adoption.ts:16-23`. `allowDivergentTextRepairAfterNewerRevision === true` means the request is for a divergence repair, which `shouldStartTailFirstHydration` deliberately excludes from tail-first. That exclusion lives at `app-live-state.ts:771-773`, not in the type. A reader of `SessionHydrationRequestContext` sees two unrelated flags and has to chase to the call sites to learn they're never simultaneously true.
-
-**Current behavior:**
-- Four-flag context bag.
-- Mutual exclusions encoded as call-site early-returns.
-- Type system doesn't enforce the contract.
-
-**Proposal:**
-- Convert to a discriminated union — `type SessionHydrationRequestContext = ({ kind: "fullSession" } | { kind: "partialTail" } | { kind: "textRepair" }) & SharedMetadata`. Classifier dispatches on `kind`; call sites can never set inconsistent flags.
-
 ## Tail-then-full sequence doubles HTTP request volume for sessions ≥101 messages
 
 **Severity:** Low - the frontend always pairs `fetchSessionTail(SESSION_TAIL_WINDOW_MESSAGE_COUNT)` with `fetchSession(...)` for sessions where `messageCount >= 101`. Phase 1 local-only is fast. Future remote-host or flaky-network scenarios pay this tax.

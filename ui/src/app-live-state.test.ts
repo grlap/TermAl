@@ -208,6 +208,7 @@ function makeHydrationRequestContext(
   overrides: Partial<SessionHydrationRequestContext> = {},
 ): SessionHydrationRequestContext {
   return {
+    kind: "fullSession",
     messageCount: 1,
     revision: 5,
     serverInstanceId: "server-a",
@@ -2918,7 +2919,7 @@ describe("classifyFetchedSessionAdoption", () => {
         responseRevision: 7,
         responseServerInstanceId: "server-a",
         requestContext: makeHydrationRequestContext({
-          allowDivergentTextRepairAfterNewerRevision: true,
+          kind: "textRepair",
           revision: 6,
           sessionMutationStamp: 2,
         }),
@@ -2947,7 +2948,7 @@ describe("classifyFetchedSessionAdoption", () => {
         responseRevision: 6,
         responseServerInstanceId: "server-a",
         requestContext: makeHydrationRequestContext({
-          allowDivergentTextRepairAfterNewerRevision: true,
+          kind: "textRepair",
           revision: 6,
           sessionMutationStamp: 2,
         }),
@@ -2962,6 +2963,29 @@ describe("classifyFetchedSessionAdoption", () => {
         seenServerInstanceIds: new Set(["server-a"]),
       }),
     ).toBe("adopted");
+  });
+
+  it("allows partial transcript adoption only for tail hydration requests", () => {
+    expect(
+      classifyFetchedSessionAdoption({
+        responseSession: makeSession({
+          messages: [message],
+          messagesLoaded: false,
+          messageCount: 1,
+          sessionMutationStamp: 1,
+        }),
+        responseRevision: 5,
+        responseServerInstanceId: "server-a",
+        requestContext: makeHydrationRequestContext({ kind: "partialTail" }),
+        currentSession: makeSession({
+          messageCount: 1,
+          sessionMutationStamp: 1,
+        }),
+        currentRevision: 5,
+        currentServerInstanceId: "server-a",
+        seenServerInstanceIds: new Set(["server-a"]),
+      }),
+    ).toBe("partial");
   });
 
   it("rejects stale lower-revision responses once the session is loaded", () => {
