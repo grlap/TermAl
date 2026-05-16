@@ -520,6 +520,7 @@ export default function App() {
       openSessionId?: string;
       paneId?: string | null;
       allowUnknownServerInstance?: boolean;
+      sseReconnectRequestId?: number;
     }) => void
   >(() => {});
   const paneShouldStickToBottomRef = useRef<

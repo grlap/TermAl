@@ -529,6 +529,75 @@ describe("deferred session-store sync", () => {
     );
   });
 
+  it("recreates SSE when an older in-flight resync adopts an armed replacement instance", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const session = makeSession({
+      messagesLoaded: true,
+      messageCount: 1,
+      preview: "Before restart.",
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Before restart.",
+        },
+      ],
+    });
+    const params = makeLiveStateParams(session);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [session];
+    let hook: UseAppLiveStateReturn | null = null;
+
+    renderLiveStateHarness(params, (nextHook) => {
+      hook = nextHook;
+    });
+    const originalEventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      hook?.forceSseReconnect();
+    });
+    act(() => {
+      hook?.adoptState(
+        {
+          ...makeStateResponse(
+            makeSession({
+              messagesLoaded: true,
+              messageCount: 1,
+              preview: "Recovered on older probe.",
+              messages: [
+                {
+                  id: "message-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Recovered on older probe.",
+                },
+              ],
+            }),
+            1,
+          ),
+          serverInstanceId: "server-b",
+        },
+        { allowUnknownServerInstance: true },
+      );
+    });
+
+    await waitFor(() => expect(EventSourceMock.instances.length).toBe(2));
+    expect(EventSourceMock.instances[1]).not.toBe(originalEventSource);
+  });
+
   it("applies delegation wait create and consume deltas locally", async () => {
     vi.stubGlobal(
       "EventSource",

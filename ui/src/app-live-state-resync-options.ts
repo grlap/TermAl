@@ -18,6 +18,7 @@ export type RequestStateResyncOptions = {
   rearmAfterSameInstanceProgressUntilLiveEvent?: boolean;
   confirmReconnectRecoveryOnAdoption?: boolean;
   forceAdoptEqualOrNewerRevision?: number;
+  sseReconnectRequestId?: number;
   rearmOnFailure?: boolean;
   openSessionId?: string;
   paneId?: string | null;
@@ -33,6 +34,7 @@ export type PendingStateResyncOptions = {
   rearmAfterSameInstanceProgressUntilLiveEvent: boolean;
   confirmReconnectRecoveryOnAdoption: boolean;
   forceAdoptEqualOrNewerRevision: number | null;
+  sseReconnectRequestId: number | null;
   rearmOnFailure: boolean;
   openSessionId?: string;
   paneId?: string | null;
@@ -49,6 +51,7 @@ function createEmptyPendingStateResyncOptions(): PendingStateResyncOptions {
     rearmAfterSameInstanceProgressUntilLiveEvent: false,
     confirmReconnectRecoveryOnAdoption: false,
     forceAdoptEqualOrNewerRevision: null,
+    sseReconnectRequestId: null,
     rearmOnFailure: false,
   };
 }
@@ -94,6 +97,15 @@ export function coalescePendingStateResyncOptions(
             next.forceAdoptEqualOrNewerRevision,
             options.forceAdoptEqualOrNewerRevision,
           );
+  }
+  if (
+    typeof options?.sseReconnectRequestId === "number" &&
+    Number.isSafeInteger(options.sseReconnectRequestId)
+  ) {
+    next.sseReconnectRequestId =
+      next.sseReconnectRequestId === null
+        ? options.sseReconnectRequestId
+        : Math.max(next.sseReconnectRequestId, options.sseReconnectRequestId);
   }
   next.rearmOnFailure =
     next.rearmOnFailure || options?.rearmOnFailure === true;

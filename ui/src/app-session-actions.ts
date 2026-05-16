@@ -209,6 +209,7 @@ type UseAppSessionActionsParams = {
     openSessionId?: string;
     paneId?: string | null;
     allowUnknownServerInstance?: boolean;
+    sseReconnectRequestId?: number;
   }) => void;
   /**
    * Forces the SSE transport effect to re-run, closing the current
@@ -229,7 +230,7 @@ type UseAppSessionActionsParams = {
    * on the EventSource recreation path. Safe to call alongside
    * `requestActionRecoveryResync`.
    */
-  forceSseReconnect: () => void;
+  forceSseReconnect: () => number;
 };
 
 type HandleNewSessionArgs = {
@@ -525,7 +526,6 @@ export function useAppSessionActions(
       recoveryOptions.openSessionId = recoveryOpenSessionId;
       recoveryOptions.paneId = recoveryPaneId ?? null;
     }
-    requestActionRecoveryResync(recoveryOptions);
     // Cross-instance action recovery (approval / user-input / MCP /
     // Codex app-request, plus settings updates and project actions
     // routed through this helper) needs the EventSource recreated for
@@ -538,14 +538,23 @@ export function useAppSessionActions(
     // user has to hard-refresh to see them. Mirrors the `handleSend`
     // mismatch branch; see bugs.md "Cross-instance non-send action
     // recovery does not force SSE recreation".
+    let sseReconnectRequestId: number | undefined;
     if (
       isServerInstanceMismatch(
         lastSeenServerInstanceIdRef.current,
         state.serverInstanceId,
       )
     ) {
-      forceSseReconnect();
+      sseReconnectRequestId = forceSseReconnect();
     }
+    requestActionRecoveryResync(
+      sseReconnectRequestId === undefined
+        ? recoveryOptions
+        : {
+            ...recoveryOptions,
+            sseReconnectRequestId,
+          },
+    );
     return "deferred";
   }
 
@@ -784,12 +793,13 @@ export function useAppSessionActions(
       // A server-instance mismatch means this response came from a restarted
       // backend. Do not optimistically apply its marker; let recovery adopt
       // the authoritative snapshot from the new instance.
+      const sseReconnectRequestId = forceSseReconnect();
       requestActionRecoveryResync({
         openSessionId: sessionId,
         paneId: findWorkspacePaneIdForSession(workspace, sessionId),
         allowUnknownServerInstance: true,
+        sseReconnectRequestId,
       });
-      forceSseReconnect();
       return "deferred";
     }
 
@@ -1023,8 +1033,11 @@ export function useAppSessionActions(
           // an EventSource recreate would be wasteful. See bugs.md
           // "Send-after-restart leaves session preview tooltip stale for
           // 30 s".
-          requestActionRecoveryResync({ allowUnknownServerInstance: true });
-          forceSseReconnect();
+          const sseReconnectRequestId = forceSseReconnect();
+          requestActionRecoveryResync({
+            allowUnknownServerInstance: true,
+            sseReconnectRequestId,
+          });
         }
         if (!adopted || responseKeepsSessionActive) {
           startStaleSendResponseRecoveryPoll(sessionId);

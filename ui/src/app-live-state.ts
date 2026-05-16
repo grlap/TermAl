@@ -239,6 +239,7 @@ export type AdoptStateOptions = {
   allowRevisionDowngrade?: boolean;
   allowUnknownServerInstance?: boolean;
   disableMutationStampFastPath?: boolean;
+  sseReconnectRequestId?: number | null;
   openSessionId?: string;
   paneId?: string | null;
 };
@@ -434,6 +435,7 @@ export type UseAppLiveStateParams = {
       openSessionId?: string;
       paneId?: string | null;
       allowUnknownServerInstance?: boolean;
+      sseReconnectRequestId?: number;
     }) => void
   >;
   activeSession: Session | null;
@@ -457,7 +459,7 @@ export type UseAppLiveStateReturn = {
   hydratingSessionIdsRef: MutableRefObject<Set<string>>;
   forceAdoptNextStateEventRef: MutableRefObject<boolean>;
   /** See `forceSseReconnect` definition in the hook body for full semantics. */
-  forceSseReconnect: () => void;
+  forceSseReconnect: () => number;
   workspaceFilesChangedEvent: WorkspaceFilesChangedEvent | null;
   workspaceFilesChangedEventBufferRef: MutableRefObject<WorkspaceFilesChangedEvent | null>;
   workspaceFilesChangedEventFlushTimeoutRef: MutableRefObject<number | null>;
@@ -639,15 +641,17 @@ export function useAppLiveState(
     null,
   );
   // Set by `forceSseReconnect` (e.g. from `handleSend` after detecting a
-  // server-restart mid-request). Consumed by the next successful
-  // `adoptState` call that ALSO observes a `fullStateServerInstanceChanged`
-  // flip — the conjunction confirms (a) recovery completed and (b) the
-  // backend actually changed, so it's worth tearing down the EventSource.
+  // server-restart mid-request). Any later `adoptState` call that observes a
+  // `fullStateServerInstanceChanged` flip consumes it and recreates SSE. The
+  // returned request token only scopes same-instance false-alarm cleanup.
   // Setting `setSseEpoch` synchronously inside `forceSseReconnect` would
   // race with an in-flight `/api/state` probe scheduled by the same
   // caller — the effect cleanup sets `cancelled = true` and the probe's
   // await callback bails before the recovered state is applied.
-  const pendingSseRecreateOnInstanceChangeRef = useRef(false);
+  const nextSseReconnectRequestIdRef = useRef(1);
+  const pendingSseRecreateOnInstanceChangeRef = useRef<{
+    requestId: number;
+  } | null>(null);
   const workspaceFilesChangedEventBufferRef =
     useRef<WorkspaceFilesChangedEvent | null>(null);
   const workspaceFilesChangedEventFlushTimeoutRef = useRef<number | null>(null);
@@ -1709,6 +1713,13 @@ export function useAppLiveState(
       lastSeenServerInstanceIdRef.current = nextState.serverInstanceId;
       lastFullStateServerInstanceIdRef.current = nextState.serverInstanceId;
     }
+    const pendingSseRecreateOnInstanceChange =
+      pendingSseRecreateOnInstanceChangeRef.current;
+    const shouldClearPendingSseRecreateFalseAlarm =
+      pendingSseRecreateOnInstanceChange !== null &&
+      options?.sseReconnectRequestId ===
+        pendingSseRecreateOnInstanceChange.requestId;
+
     if (fullStateServerInstanceChanged) {
       hydratingSessionIdsRef.current.clear();
       hydratedSessionIdsRef.current.clear();
@@ -1723,10 +1734,16 @@ export function useAppLiveState(
       // and drop the recovered response. The `setSseEpoch` will queue a
       // re-render whose effect cleanup runs ONLY after the in-progress
       // adoption is fully reflected in React state.
-      if (pendingSseRecreateOnInstanceChangeRef.current) {
-        pendingSseRecreateOnInstanceChangeRef.current = false;
+      if (pendingSseRecreateOnInstanceChange !== null) {
+        pendingSseRecreateOnInstanceChangeRef.current = null;
         setSseEpoch((current) => current + 1);
       }
+    } else if (shouldClearPendingSseRecreateFalseAlarm) {
+      // A successful same-instance recovery means the caller's restart
+      // suspicion was a false alarm. Clear the pending marker so a later,
+      // unrelated instance change does not recreate the EventSource for a
+      // stale request.
+      pendingSseRecreateOnInstanceChangeRef.current = null;
     }
     hydrationMismatchSessionIdsRef.current.clear();
     const currentCodexState = codexStateRef.current;
@@ -2172,6 +2189,7 @@ export function useAppLiveState(
               rearmAfterSameInstanceProgressUntilLiveEvent,
               confirmReconnectRecoveryOnAdoption,
               forceAdoptEqualOrNewerRevision,
+              sseReconnectRequestId,
               rearmOnFailure,
               openSessionId,
               paneId,
@@ -2304,6 +2322,7 @@ export function useAppLiveState(
                 force: shouldForceAuthoritativeSnapshot,
                 allowRevisionDowngrade: shouldForceAuthoritativeSnapshot,
                 allowUnknownServerInstance: shouldAllowUnknownServerInstance,
+                sseReconnectRequestId,
                 openSessionId,
                 paneId,
               });
@@ -2596,6 +2615,7 @@ export function useAppLiveState(
         // already-queued stronger recovery request.
         rearmOnSuccess: false,
         rearmUntilLiveEventOnSuccess: false,
+        sseReconnectRequestId: options?.sseReconnectRequestId,
         openSessionId: options?.openSessionId,
         paneId: options?.paneId,
       });
@@ -3464,8 +3484,12 @@ export function useAppLiveState(
   }, [sseEpoch]);
 
   /**
-   * Marks an EventSource recreation as pending — it fires the next time
-   * `adoptState` succeeds with a `fullStateServerInstanceChanged` flip.
+   * Marks an EventSource recreation as pending and returns a request token.
+   * The marker fires when any later `adoptState` call observes a
+   * `fullStateServerInstanceChanged` flip. The returned token scopes only the
+   * same-instance false-alarm cleanup path, so older in-flight `/api/state`
+   * probes can still consume the armed recreate when they are first to adopt
+   * the replacement instance.
    * Used by `useAppSessionActions::handleSend` after detecting the
    * server-restarted-mid-request case: the immediate
    * `requestActionRecoveryResync` probe will adopt the new state in
@@ -3483,7 +3507,10 @@ export function useAppLiveState(
    * gated on an explicit caller request.
    */
   function forceSseReconnect() {
-    pendingSseRecreateOnInstanceChangeRef.current = true;
+    const requestId = nextSseReconnectRequestIdRef.current;
+    nextSseReconnectRequestIdRef.current += 1;
+    pendingSseRecreateOnInstanceChangeRef.current = { requestId };
+    return requestId;
   }
 
   return {

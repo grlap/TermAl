@@ -173,7 +173,7 @@ function makeSessionActionsParams(
     applyControlPanelLayout: (workspace) => workspace,
     reportRequestError: vi.fn(),
     requestActionRecoveryResync: vi.fn(),
-    forceSseReconnect: vi.fn(),
+    forceSseReconnect: vi.fn(() => 42),
     ...overrides,
   };
 }
@@ -354,6 +354,7 @@ describe("useAppSessionActions", () => {
       openSessionId: "session-1",
       paneId: null,
       allowUnknownServerInstance: true,
+      sseReconnectRequestId: 42,
     });
     // Cross-instance recovery must also recreate the EventSource so live
     // assistant deltas land on the new backend instead of the dead
@@ -419,6 +420,7 @@ describe("useAppSessionActions", () => {
       expect(params.adoptState).toHaveBeenCalledWith(restartedState);
       expect(params.requestActionRecoveryResync).toHaveBeenCalledWith({
         allowUnknownServerInstance: true,
+        sseReconnectRequestId: 42,
       });
       expect(params.forceSseReconnect).toHaveBeenCalledTimes(1);
     });
@@ -520,6 +522,7 @@ describe("useAppSessionActions", () => {
       openSessionId: "session-1",
       paneId: "pane-origin",
       allowUnknownServerInstance: true,
+      sseReconnectRequestId: 42,
     });
   });
 
@@ -899,6 +902,7 @@ describe("useAppSessionActions", () => {
       openSessionId: "session-1",
       paneId: null,
       allowUnknownServerInstance: true,
+      sseReconnectRequestId: 42,
     });
     expect(params.forceSseReconnect).toHaveBeenCalledTimes(1);
     expect(params.refs.sessionsRef.current[0].markers).toEqual([]);
@@ -1340,6 +1344,7 @@ describe("useAppSessionActions", () => {
       openSessionId: "session-1",
       paneId: null,
       allowUnknownServerInstance: true,
+      sseReconnectRequestId: 42,
     });
     expect(params.forceSseReconnect).toHaveBeenCalledTimes(1);
     expect(params.refs.sessionsRef.current[0].markers).toEqual([marker]);

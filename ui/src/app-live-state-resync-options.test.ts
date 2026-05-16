@@ -19,6 +19,7 @@ describe("state resync option coalescing", () => {
       rearmAfterSameInstanceProgressUntilLiveEvent: false,
       confirmReconnectRecoveryOnAdoption: false,
       forceAdoptEqualOrNewerRevision: null,
+      sseReconnectRequestId: null,
       rearmOnFailure: false,
     });
   });
@@ -50,6 +51,7 @@ describe("state resync option coalescing", () => {
       rearmAfterSameInstanceProgressUntilLiveEvent: true,
       confirmReconnectRecoveryOnAdoption: true,
       forceAdoptEqualOrNewerRevision: 7,
+      sseReconnectRequestId: null,
       rearmOnFailure: true,
     });
   });
@@ -158,7 +160,22 @@ describe("state resync option coalescing", () => {
       rearmAfterSameInstanceProgressUntilLiveEvent: false,
       confirmReconnectRecoveryOnAdoption: false,
       forceAdoptEqualOrNewerRevision: null,
+      sseReconnectRequestId: null,
       rearmOnFailure: false,
     });
+  });
+
+  it("retains the highest SSE reconnect request token across coalesced requests", () => {
+    const first = coalescePendingStateResyncOptions(null, {
+      sseReconnectRequestId: 3,
+    });
+    const second = coalescePendingStateResyncOptions(first, {
+      sseReconnectRequestId: 9,
+    });
+    const third = coalescePendingStateResyncOptions(second, {
+      sseReconnectRequestId: 5,
+    });
+
+    expect(third.sseReconnectRequestId).toBe(9);
   });
 });

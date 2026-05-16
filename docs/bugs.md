@@ -168,18 +168,17 @@ This review adds and exercises multiple rAF/transition refs plus cancellation/re
 
 **Severity:** Medium - two coordination mechanisms for one concern, increases regression risk and reduces debuggability.
 
-`forceSseReconnect()` sets `pendingSseRecreateOnInstanceChangeRef.current = true` synchronously and the consume happens inside `adoptState` only when `fullStateServerInstanceChanged` is true. This adds a second control plane for SSE reconnection alongside the existing `sseEpoch` state, with the ref-vs-state ordering being load-bearing (synchronous `setSseEpoch` would tear down the in-flight probe). The pattern is documented inline, but ref state is not visible in React DevTools or in any state diff, so a subsequent maintainer reading the SSE transport effect cannot see the gate that determines whether the effect re-runs. The Round 8 comment in the doc-block notes this exact split-plane pattern was reverted before for the same reason. There is also no clear-on-no-instance-change reset path: if `forceSseReconnect()` fires but the recovery probe response comes back as same-instance (false alarm), the flag stays armed and could fire on a much later legitimate restart.
+`forceSseReconnect()` sets `pendingSseRecreateOnInstanceChangeRef.current` synchronously and a later `adoptState` consumes that request when a full-state adoption sees `fullStateServerInstanceChanged`; the request token only scopes same-instance false-alarm cleanup. This adds a second control plane for SSE reconnection alongside the existing `sseEpoch` state, with the ref-vs-state ordering being load-bearing (synchronous `setSseEpoch` would tear down the in-flight probe). The pattern is documented inline, but ref state is not visible in React DevTools or in any state diff, so a subsequent maintainer reading the SSE transport effect cannot see the gate that determines whether the effect re-runs. The Round 8 comment in the doc-block notes this exact split-plane pattern was reverted before for the same reason.
 
 **Current behavior:**
 - `forceSseReconnect()` mutates a ref invisible to DevTools.
-- The flag is consumed only inside the `fullStateServerInstanceChanged` branch of `adoptState`.
-- A successful recovery probe with no instance change leaves the flag armed indefinitely.
+- The request lives outside React state.
+- Any replacement-instance full-state adoption while a request is armed bumps `sseEpoch`; tagged same-instance recovery clears the request as a false alarm.
 - The flag-on-adopt ordering relative to `setSseEpoch` is not pinned by a load-bearing test (current tests assert the recreate happens but not the ordering).
 
 **Proposal:**
 - Lift the gate into a state-driven shape (e.g., a single `sseReconnectReason` state with `instanceChangeAfterAdopt` as one of its values), so the SSE reconnection trigger is visible in React DevTools.
 - Or add a load-bearing test that fails if the consume-on-adopt ordering is reversed.
-- Either way, clear `pendingSseRecreateOnInstanceChangeRef` on any `adoptState` success that does not change the instance, so a false-alarm `forceSseReconnect()` cannot fire on a later legitimate restart.
 
 ## `app-live-state.ts` reconnect state machine continues to grow
 
