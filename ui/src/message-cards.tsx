@@ -5,11 +5,9 @@ import {
   useContext,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
@@ -39,7 +37,6 @@ import {
   isMermaidFenceLanguage,
 } from "./source-renderers";
 import { ExpandedPromptPanel } from "./ExpandedPromptPanel";
-import { useDeferredHeavyContentActivation } from "./deferred-heavy-content-activation";
 import {
   CheckIcon,
   CollapseIcon,
@@ -59,8 +56,12 @@ import {
 } from "./mermaid-render";
 import { copyTextToClipboard } from "./clipboard";
 import { buildDiffPreviewModel } from "./diff-preview";
+import { DeferredHeavyContent } from "./deferred-heavy-content";
 import { FileChangesCard } from "./file-changes-card";
-import { highlightCode } from "./highlight";
+import {
+  DeferredHighlightedCodeBlock,
+  HighlightedCodeBlock,
+} from "./highlighted-code-block";
 import {
   buildMarkdownHrefDisplayLabel,
   isExternalMarkdownHref,
@@ -120,16 +121,9 @@ import {
 } from "./connection-retry";
 import { ConnectionRetryCard } from "./connection-retry-card";
 import {
-  DEFERRED_RENDER_RESUME_EVENT,
-  DEFERRED_RENDER_ROOT_MARGIN_PX,
-  buildDeferredPreviewText,
   buildMarkdownPreviewText,
-  estimateCodeBlockHeight,
   estimateMarkdownBlockHeight,
-  isDeferredRenderActivationSuspended,
-  isElementNearRenderViewport,
   measureTextBlock,
-  resolveDeferredRenderRoot,
 } from "./deferred-render";
 import { splitStreamingMarkdownForRendering } from "./markdown-streaming-split";
 import { ParallelAgentsCard } from "./parallel-agents-card";
@@ -138,8 +132,6 @@ import {
   MessageNavigationButtons,
 } from "./panels/conversation-navigation";
 
-const HEAVY_CODE_CHARACTER_THRESHOLD = 1400;
-const HEAVY_CODE_LINE_THRESHOLD = 28;
 // Markdown qualifies as "heavy" — and therefore goes through
 // `DeferredMarkdownContent`'s IntersectionObserver-gated render path —
 // when EITHER the line count OR the character count crosses these
@@ -535,211 +527,6 @@ export const MessageCard = memo(
   },
 );
 
-function DeferredHeavyContent({
-  children,
-  estimatedHeight,
-  placeholder,
-  preferImmediateRender = false,
-}: {
-  children: ReactNode;
-  estimatedHeight: number;
-  placeholder: ReactNode;
-  preferImmediateRender?: boolean;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const allowDeferredActivation = useDeferredHeavyContentActivation();
-  const [isActivated, setIsActivated] = useState(() => preferImmediateRender);
-  const shouldRenderContent = preferImmediateRender || isActivated;
-
-  // Already-near content must activate before paint; the observer path below
-  // still uses rAF to batch later scroll/viewport-triggered activations.
-  useLayoutEffect(() => {
-    if (shouldRenderContent || !allowDeferredActivation) {
-      return;
-    }
-
-    const node = containerRef.current;
-    if (!node) {
-      return;
-    }
-
-    const root = resolveDeferredRenderRoot(node);
-    if (isDeferredRenderActivationSuspended(root)) {
-      return;
-    }
-    if (
-      isElementNearRenderViewport(node, root, DEFERRED_RENDER_ROOT_MARGIN_PX)
-    ) {
-      setIsActivated(true);
-    }
-  }, [allowDeferredActivation, shouldRenderContent]);
-
-  useEffect(() => {
-    if (shouldRenderContent || !allowDeferredActivation) {
-      return;
-    }
-
-    const node = containerRef.current;
-    if (!node) {
-      return;
-    }
-
-    const root = resolveDeferredRenderRoot(node);
-    let activationFrameId: number | null = null;
-    const activate = () => {
-      if (activationFrameId !== null) {
-        return;
-      }
-      if (isDeferredRenderActivationSuspended(root)) {
-        return;
-      }
-      activationFrameId = window.requestAnimationFrame(() => {
-        activationFrameId = null;
-        if (isDeferredRenderActivationSuspended(root)) {
-          return;
-        }
-        setIsActivated(true);
-      });
-    };
-    const activateIfNearViewport = () => {
-      if (
-        isElementNearRenderViewport(
-          node,
-          root,
-          DEFERRED_RENDER_ROOT_MARGIN_PX,
-        )
-      ) {
-        activate();
-      }
-    };
-    root?.addEventListener(DEFERRED_RENDER_RESUME_EVENT, activateIfNearViewport);
-
-    if (
-      typeof window === "undefined" ||
-      typeof window.IntersectionObserver === "undefined"
-    ) {
-      activate();
-      return () => {
-        if (activationFrameId !== null) {
-          window.cancelAnimationFrame(activationFrameId);
-        }
-        root?.removeEventListener(
-          DEFERRED_RENDER_RESUME_EVENT,
-          activateIfNearViewport,
-        );
-      };
-    }
-
-    const observer = new window.IntersectionObserver(
-      (entries) => {
-        if (
-          entries.some(
-            (entry) => entry.isIntersecting || entry.intersectionRatio > 0,
-          )
-        ) {
-          activate();
-        }
-      },
-      {
-        root,
-        rootMargin: `${DEFERRED_RENDER_ROOT_MARGIN_PX}px 0px ${DEFERRED_RENDER_ROOT_MARGIN_PX}px 0px`,
-        threshold: 0.01,
-      },
-    );
-
-    observer.observe(node);
-    return () => {
-      if (activationFrameId !== null) {
-        window.cancelAnimationFrame(activationFrameId);
-      }
-      root?.removeEventListener(
-        DEFERRED_RENDER_RESUME_EVENT,
-        activateIfNearViewport,
-      );
-      observer.disconnect();
-    };
-  }, [allowDeferredActivation, shouldRenderContent]);
-
-  return (
-    <div
-      ref={containerRef}
-      className="deferred-heavy-content"
-      style={
-        shouldRenderContent
-          ? undefined
-          : ({
-              "--deferred-min-height": `${estimatedHeight}px`,
-            } as CSSProperties)
-      }
-    >
-      {shouldRenderContent ? children : placeholder}
-    </div>
-  );
-}
-
-function DeferredHighlightedCodeBlock({
-  className,
-  code,
-  commandHint,
-  language,
-  pathHint,
-  preferImmediateRender = false,
-  searchQuery,
-  searchHighlightTone = "match",
-}: {
-  className: string;
-  code: string;
-  commandHint?: string | null;
-  language?: string | null;
-  pathHint?: string | null;
-  preferImmediateRender?: boolean;
-  searchQuery?: string;
-  searchHighlightTone?: SearchHighlightTone;
-}) {
-  const metrics = useMemo(() => measureTextBlock(code), [code]);
-  const showSearchHighlight = containsSearchMatch(code, searchQuery ?? "");
-  const shouldDefer =
-    !showSearchHighlight &&
-    (metrics.lineCount >= HEAVY_CODE_LINE_THRESHOLD ||
-      code.length >= HEAVY_CODE_CHARACTER_THRESHOLD);
-
-  if (!shouldDefer) {
-    return (
-      <HighlightedCodeBlock
-        className={className}
-        code={code}
-        commandHint={commandHint}
-        language={language}
-        pathHint={pathHint}
-        searchQuery={searchQuery}
-        searchHighlightTone={searchHighlightTone}
-      />
-    );
-  }
-
-  return (
-    <DeferredHeavyContent
-      estimatedHeight={estimateCodeBlockHeight(metrics.lineCount)}
-      preferImmediateRender={preferImmediateRender}
-      placeholder={
-        <pre className={`${className} syntax-block deferred-code-placeholder`}>
-          <code>{buildDeferredPreviewText(code)}</code>
-        </pre>
-      }
-    >
-      <HighlightedCodeBlock
-        className={className}
-        code={code}
-        commandHint={commandHint}
-        language={language}
-        pathHint={pathHint}
-        searchQuery={searchQuery}
-        searchHighlightTone={searchHighlightTone}
-      />
-    </DeferredHeavyContent>
-  );
-}
-
 /*
  * Streaming-stable assistant markdown wrapper.
  *
@@ -828,97 +615,6 @@ function DeferredMarkdownContent({
         workspaceRoot={workspaceRoot}
       />
     </DeferredHeavyContent>
-  );
-}
-
-function HighlightedCodeBlock({
-  className,
-  code,
-  commandHint,
-  lineAttributes,
-  language,
-  pathHint,
-  showCopyButton = false,
-  searchQuery = "",
-  searchHighlightTone = "match",
-}: {
-  className: string;
-  code: string;
-  commandHint?: string | null;
-  lineAttributes?: MarkdownLineAttributes | null;
-  language?: string | null;
-  pathHint?: string | null;
-  showCopyButton?: boolean;
-  searchQuery?: string;
-  searchHighlightTone?: SearchHighlightTone;
-}) {
-  const [copied, setCopied] = useState(false);
-  const showSearchHighlight = containsSearchMatch(code, searchQuery);
-  const highlighted = useMemo(
-    () =>
-      highlightCode(code, {
-        commandHint,
-        language,
-        pathHint,
-      }),
-    [code, commandHint, language, pathHint],
-  );
-  const codeLanguage =
-    highlighted.language ?? normalizeCodeLanguageClass(language);
-
-  useEffect(() => {
-    if (!copied) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setCopied(false);
-    }, 1600);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [copied]);
-
-  async function handleCopy() {
-    try {
-      await copyTextToClipboard(code);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  }
-
-  return (
-    <pre
-      {...(lineAttributes ?? {})}
-      className={`${className} syntax-block${showCopyButton ? " copyable" : ""}`}
-    >
-      {showCopyButton ? (
-        <button
-          className={`command-icon-button syntax-copy-button${copied ? " copied" : ""}`}
-          type="button"
-          onMouseDown={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-          onClick={() => void handleCopy()}
-          aria-label={copied ? "Code copied" : "Copy code"}
-          title={copied ? "Copied" : "Copy code"}
-        >
-          {copied ? <CheckIcon /> : <CopyIcon />}
-        </button>
-      ) : null}
-      <code
-        className={`hljs${codeLanguage ? ` language-${codeLanguage}` : ""}`}
-      >
-        {showSearchHighlight ? (
-          renderHighlightedText(code, searchQuery, searchHighlightTone)
-        ) : (
-          <span dangerouslySetInnerHTML={{ __html: highlighted.html }} />
-        )}
-      </code>
-    </pre>
   );
 }
 
@@ -1174,15 +870,6 @@ function MermaidRenderBudgetFallback({
 // through the top-of-file import so new callers — Source panel,
 // Diff panel for non-Markdown — get the same answers without having
 // to re-import through `message-cards.tsx`.
-
-function normalizeCodeLanguageClass(language: string | null | undefined) {
-  const normalized =
-    language
-      ?.trim()
-      .toLowerCase()
-      .replace(/^language-/, "") ?? "";
-  return /^[a-z0-9_-]+$/.test(normalized) ? normalized : null;
-}
 
 function ThinkingCard({
   appearance = "dark",
