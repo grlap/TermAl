@@ -102,79 +102,35 @@ import { normalizeConversationMarkerColor } from "../conversation-marker-colors"
 import type {
   ApprovalDecision,
   AgentCommand,
-  ApprovalPolicy,
-  ClaudeApprovalMode,
-  ClaudeEffortLevel,
   CommandMessage,
-  CodexReasoningEffort,
-  CursorMode,
   DiffMessage,
-  GeminiApprovalMode,
-  ImageAttachment,
-  JsonValue,
   Message,
-  McpElicitationAction,
   PendingPrompt,
-  SandboxMode,
   Session,
   ConversationMarker,
   CreateConversationMarkerOptions,
 } from "../types";
 import type { PaneViewMode } from "../workspace";
+import type {
+  AgentCommandResolverErrorState,
+  AgentSessionPanelFooterProps,
+  AgentSessionPanelProps,
+  CreateConversationMarkerHandlerResult,
+  DraftImageAttachment,
+  PromptHistoryState,
+  SessionConversationPageProps,
+  SessionSettingsField,
+  SessionSettingsValue,
+  SpawnDelegationHandler,
+  WaitingIndicatorKind,
+} from "./AgentSessionPanel.types";
 
 export { splitAgentCommandResolverTail } from "./session-agent-command-submission";
-type WaitingIndicatorKind = "liveTurn" | "delegationWait" | "send";
-
-type DraftImageAttachment = ImageAttachment & {
-  base64Data: string;
-  id: string;
-  previewUrl: string;
-};
-
-type PromptHistoryState = {
-  index: number;
-  draft: string;
-};
-
-type AgentCommandResolverErrorState = {
-  message: string;
-  sessionId: string;
-};
 
 const EMPTY_PENDING_PROMPTS: readonly PendingPrompt[] = [];
 const EMPTY_CONVERSATION_MARKERS: readonly ConversationMarker[] = [];
 const NOOP_CREATE_CONVERSATION_MARKER = () => {};
 const NOOP_DELETE_CONVERSATION_MARKER = () => {};
-
-type CreateConversationMarkerHandlerResult =
-  | boolean
-  | void
-  | Promise<boolean | void>;
-
-type SessionSettingsField =
-  | "model"
-  | "sandboxMode"
-  | "approvalPolicy"
-  | "reasoningEffort"
-  | "claudeApprovalMode"
-  | "claudeEffort"
-  | "cursorMode"
-  | "geminiApprovalMode";
-type SessionSettingsValue =
-  | string
-  | SandboxMode
-  | ApprovalPolicy
-  | ClaudeEffortLevel
-  | CodexReasoningEffort
-  | ClaudeApprovalMode
-  | CursorMode
-  | GeminiApprovalMode;
-
-type SpawnDelegationHandler = (
-  sessionId: string,
-  prompt: string,
-  options?: SpawnDelegationOptions,
-) => Promise<boolean>;
 
 // The transcript virtualizer and overview rail intentionally share the same
 // size threshold. The rail may still defer its first paint, but marker jumps
@@ -219,53 +175,7 @@ export function AgentSessionPanel({
   renderDiffCard,
   renderMessageCard,
   renderPromptSettings,
-}: {
-  paneId: string;
-  viewMode: PaneViewMode;
-  activeSessionId: string | null;
-  liveTailPinned?: boolean;
-  isLoading: boolean;
-  isUpdating: boolean;
-  showWaitingIndicator: boolean;
-  waitingIndicatorKind?: WaitingIndicatorKind;
-  waitingIndicatorPrompt: string | null;
-  commandMessages: CommandMessage[];
-  diffMessages: DiffMessage[];
-  scrollContainerRef: RefObject<HTMLElement | null>;
-  onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
-  onUserInputSubmit: UserInputSubmitHandler;
-  onMcpElicitationSubmit: McpElicitationSubmitHandler;
-  onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
-  onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
-  onCreateConversationMarker?: (
-    sessionId: string,
-    messageId: string,
-    options?: CreateConversationMarkerOptions,
-  ) => CreateConversationMarkerHandlerResult;
-  onDeleteConversationMarker?: (sessionId: string, markerId: string) => void;
-  onSessionSettingsChange: (
-      sessionId: string,
-      field: SessionSettingsField,
-      value: SessionSettingsValue,
-    ) => void;
-  conversationSearchQuery: string;
-  conversationSearchMatchedItemKeys: ReadonlySet<string>;
-  conversationSearchActiveItemKey: string | null;
-  onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
-  renderCommandCard: (message: CommandMessage) => JSX.Element | null;
-  renderDiffCard: (message: DiffMessage) => JSX.Element | null;
-  renderMessageCard: RenderMessageCard;
-  renderPromptSettings: (
-    paneId: string,
-    session: Session,
-    isUpdating: boolean,
-    onSessionSettingsChange: (
-      sessionId: string,
-      field: SessionSettingsField,
-      value: SessionSettingsValue,
-    ) => void,
-  ) => JSX.Element | null;
-}): JSX.Element {
+}: AgentSessionPanelProps): JSX.Element {
   const stableOnApprovalDecision = useStableEvent(onApprovalDecision);
   const stableOnUserInputSubmit = useStableEvent(onUserInputSubmit);
   const stableOnMcpElicitationSubmit = useStableEvent(onMcpElicitationSubmit);
@@ -345,41 +255,7 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
   onSessionSettingsChange,
   onStopSession,
   onPaste,
-}: {
-  paneId: string;
-  viewMode: PaneViewMode;
-  isPaneActive: boolean;
-  activeSessionId: string | null;
-  formatByteSize: (byteSize: number) => string;
-  isSending: boolean;
-  isStopping: boolean;
-  isSessionBusy: boolean;
-  isUpdating: boolean;
-  showNewResponseIndicator: boolean;
-  newResponseIndicatorLabel: string;
-  footerModeLabel: string;
-  onScrollToLatest: () => void;
-  onDraftCommit: (sessionId: string, nextValue: string) => void;
-  onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
-  isRefreshingModelOptions: boolean;
-  modelOptionsError: string | null;
-  agentCommands: AgentCommand[];
-  hasLoadedAgentCommands: boolean;
-  isRefreshingAgentCommands: boolean;
-  agentCommandsError: string | null;
-  onRefreshSessionModelOptions: (sessionId: string) => void;
-  onRefreshAgentCommands: (sessionId: string) => void;
-  onSend: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
-  canSpawnDelegation?: boolean;
-  onSpawnDelegation?: SpawnDelegationHandler;
-  onSessionSettingsChange: (
-    sessionId: string,
-    field: SessionSettingsField,
-    value: SessionSettingsValue,
-  ) => void;
-  onStopSession: (sessionId: string) => void;
-  onPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
-}): JSX.Element {
+}: AgentSessionPanelFooterProps): JSX.Element {
   if (viewMode === "session") {
     return (
       <SessionComposer
@@ -675,32 +551,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   conversationSearchMatchedItemKeys,
   conversationSearchActiveItemKey,
   onConversationSearchItemMount,
-}: {
-  renderMessageCard: RenderMessageCard;
-  session: Session;
-  liveTailPinned: boolean;
-  scrollContainerRef: RefObject<HTMLElement | null>;
-  isActive: boolean;
-  isLoading: boolean;
-  showWaitingIndicator: boolean;
-  waitingIndicatorKind: WaitingIndicatorKind;
-  waitingIndicatorPrompt: string | null;
-  onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
-  onUserInputSubmit: UserInputSubmitHandler;
-  onMcpElicitationSubmit: McpElicitationSubmitHandler;
-  onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
-  onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
-  onCreateConversationMarker: (
-    sessionId: string,
-    messageId: string,
-    options?: CreateConversationMarkerOptions,
-  ) => CreateConversationMarkerHandlerResult;
-  onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
-  conversationSearchQuery: string;
-  conversationSearchMatchedItemKeys: ReadonlySet<string>;
-  conversationSearchActiveItemKey: string | null;
-  onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
-}) {
+}: SessionConversationPageProps) {
   const pendingPrompts = session.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
   const deferredMessages = useDeferredValue(session.messages);
   const deferredPendingPrompts = useDeferredValue(pendingPrompts);
