@@ -91,9 +91,7 @@ import {
 } from "./live-updates";
 import {
   areRemoteConfigsEqual,
-  describeUnknownSessionModelWarning,
   resolveAppPreferences,
-  unknownSessionModelConfirmationKey,
 } from "./session-model-utils";
 import { resolveAdoptedStateSlices } from "./state-adoption";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
@@ -131,6 +129,10 @@ import {
   applyDelegationWaitCreated,
   areDelegationWaitRecordsEqual,
 } from "./app-live-state-delegation-waits";
+import {
+  buildUnknownModelConfirmationKeySet,
+  setContainsOnlyValuesFrom,
+} from "./app-live-state-model-confirmations";
 import {
   classifyFetchedSessionAdoption,
   getHydrationMessageCount,
@@ -423,26 +425,6 @@ export type UseAppLiveStateReturn = {
   workspaceFilesChangedEventFlushTimeoutRef: MutableRefObject<number | null>;
   resetWorkspaceFilesChangedEventGate: () => void;
 };
-
-function buildUnknownModelConfirmationKeySet(sessions: Session[]) {
-  return new Set(
-    sessions
-      .filter((session) => describeUnknownSessionModelWarning(session))
-      .map((session) =>
-        unknownSessionModelConfirmationKey(session.id, session.model),
-      ),
-  );
-}
-
-function setContainsOnlyValuesFrom<T>(current: Set<T>, allowed: Set<T>) {
-  for (const value of current) {
-    if (!allowed.has(value)) {
-      return false;
-    }
-  }
-
-  return true;
-}
 
 export function useAppLiveState(
   params: UseAppLiveStateParams,
