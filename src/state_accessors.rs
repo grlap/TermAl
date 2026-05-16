@@ -297,6 +297,73 @@ mod visible_session_hydration_error_tests {
             .expect("local full session should be available");
         assert!(local_full.session.remote_id.is_none());
     }
+
+    #[test]
+    fn summary_snapshot_omits_pending_prompt_content() {
+        let root = TempStateDir::new("termal-summary-pending-prompts");
+        let state_path = root.path().join("state.json");
+        let templates_path = root.path().join("orchestrators.json");
+        let state = AppState::new_with_paths(
+            root.path().to_string_lossy().into_owned(),
+            state_path,
+            templates_path,
+        )
+        .expect("test state should initialize");
+        let session_id = state
+            .create_session(CreateSessionRequest {
+                name: Some("Queued Session".to_owned()),
+                agent: Some(Agent::Codex),
+                workdir: Some(root.path().to_string_lossy().into_owned()),
+                project_id: None,
+                model: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+            })
+            .expect("session should be created")
+            .session_id;
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("session should exist");
+            inner.sessions[index].session.pending_prompts.push(PendingPrompt {
+                attachments: Vec::new(),
+                id: "pending-1".to_owned(),
+                timestamp: "10:00".to_owned(),
+                text: "Sensitive queued prompt".to_owned(),
+                expanded_text: Some("Expanded sensitive queued prompt".to_owned()),
+            });
+        }
+
+        let summary = state.summary_snapshot();
+        let summary_session = summary
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("summary session should be present");
+        assert!(summary_session.pending_prompts.is_empty());
+
+        let targeted = state.summary_snapshot_with_full_session(&session_id);
+        let targeted_session = targeted
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("targeted session should be present");
+        assert_eq!(targeted_session.pending_prompts.len(), 1);
+        assert_eq!(
+            targeted_session.pending_prompts[0].text,
+            "Sensitive queued prompt"
+        );
+        assert_eq!(
+            targeted_session.pending_prompts[0].expanded_text.as_deref(),
+            Some("Expanded sensitive queued prompt")
+        );
+    }
 }
 
 impl AppState {
@@ -368,7 +435,10 @@ impl AppState {
             messages_loaded: false,
             message_count: session_message_count(record),
             markers: session.markers.clone(),
-            pending_prompts: session.pending_prompts.clone(),
+            // Global state snapshots are metadata-first. Pending prompts can
+            // contain user-authored prompt bodies, so expose them only through
+            // targeted full-session responses.
+            pending_prompts: Vec::new(),
             session_mutation_stamp: Some(record.mutation_stamp),
             parent_delegation_id: session.parent_delegation_id.clone(),
         };
@@ -408,12 +478,7 @@ impl AppState {
         debug_assert_eq!(summary.preview, full.preview);
         debug_assert_eq!(summary.message_count, full.message_count);
         debug_assert_eq!(summary.markers, full.markers);
-        debug_assert_eq!(
-            serde_json::to_value(&summary.pending_prompts)
-                .expect("summary pending prompts should serialize"),
-            serde_json::to_value(&full.pending_prompts)
-                .expect("full pending prompts should serialize")
-        );
+        debug_assert!(summary.pending_prompts.is_empty());
         debug_assert_eq!(summary.session_mutation_stamp, full.session_mutation_stamp);
         debug_assert_eq!(summary.parent_delegation_id, full.parent_delegation_id);
     }

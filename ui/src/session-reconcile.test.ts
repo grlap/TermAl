@@ -179,6 +179,48 @@ describe("reconcileSessions", () => {
     expect(merged[0].markers).toEqual(next[0].markers);
   });
 
+  it("preserves pending prompts when summary snapshots redact prompt content", () => {
+    const pendingPrompt = {
+      id: "prompt-1",
+      timestamp: "10:01",
+      text: "Sensitive queued prompt",
+      expandedText: "Expanded sensitive queued prompt",
+    };
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: true,
+        messageCount: 1,
+        sessionMutationStamp: 10,
+        pendingPrompts: [pendingPrompt],
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Hello",
+          },
+        ],
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 1,
+        sessionMutationStamp: 11,
+        pendingPrompts: [],
+        preview: "summary advanced",
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0].messages).toBe(previous[0].messages);
+    expect(merged[0].pendingPrompts).toBe(previous[0].pendingPrompts);
+    expect(merged[0].pendingPrompts).toEqual([pendingPrompt]);
+  });
+
   it("reuses marker state when only valid color casing changed", () => {
     const marker = {
       id: "marker-1",
@@ -1282,4 +1324,3 @@ describe("reconcileSessions", () => {
   });
 
 });
-

@@ -158,7 +158,9 @@ function reconcileSummarySession(
     return previous;
   }
 
-  const pendingPrompts = reconcilePendingPrompts(previous.pendingPrompts, next.pendingPrompts);
+  // Metadata-only summaries redact prompt bodies; an empty list on this path
+  // means "not included", not "the backend has no queued prompts".
+  const pendingPrompts = previous.pendingPrompts;
   const nextMessageCount =
     typeof next.messageCount === "number" ? next.messageCount : null;
   const hasCompleteMessages =

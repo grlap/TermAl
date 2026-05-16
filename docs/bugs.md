@@ -233,26 +233,6 @@ The growth is incremental across many rounds of replay-cache hardening, not a si
 - Extract the replay-cache cluster (lines ~2,810–4,040) into `src/tests/remote_delta_replay.rs` as a pure code move — including the helpers and all `remote_delta_replay_*` tests.
 - Defer to a dedicated split commit; do not couple with feature changes.
 
-## Metadata-first state summaries still broadcast full pending prompts
-
-**Severity:** Low - transcript payloads were removed from global state, but queued prompt text can still ride along with every session summary.
-
-Metadata-first state summaries clear `messages`, but the session summary still
-includes full pending-prompt data. Queued prompts can contain user-authored
-instructions or expanded prompt content, so this remains a smaller but real
-data-minimization leak in `/api/state` and SSE `state` broadcasts.
-
-**Current behavior:**
-- `src/state_accessors.rs` builds transcript-free summaries but keeps the full
-  `pending_prompts` projection.
-- Every listening tab can receive pending prompt content for sessions it is not
-  actively hydrating.
-
-**Proposal:**
-- Project pending prompts to a bounded metadata-only summary in `StateResponse`.
-- Keep full queued-prompt content on targeted full-session responses where the
-  active pane actually needs it.
-
 ## Remote test module size slows review and triage
 
 **Severity:** Note - `src/tests/remote.rs` is large enough that focused remote
