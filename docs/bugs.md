@@ -207,21 +207,6 @@ The waiting-indicator helpers now live in `ui/src/SessionPaneView.waiting-indica
 - For `SessionPaneView.tsx`: extract session-find/scroll-follow and panel tab orchestration clusters.
 - For `app-session-actions.ts`: extract prompt send/draft lifecycle and marker/session-settings action groups into focused modules.
 
-## `App.live-state.deltas.test.tsx` past 2,000-line review threshold
-
-**Severity:** Low - `ui/src/App.live-state.deltas.test.tsx`. File is now 3,435 lines and 18 `it` blocks after this round's cross-instance regression coverage, well past the architecture rubric Â§9 ~2,000-line threshold for TSX files. The header already lists three sibling files split out (`reconnect`, `visibility`, `watchdog`), establishing the per-cluster split pattern.
-
-The newest tests still cluster around hydration/restart races and cross-instance recovery, which is a coherent split boundary. Pure code move per CLAUDE.md.
-
-**Current behavior:**
-- Single test file mixes hydration races, watchdog resync, ignored deltas, orchestrator-only deltas, scroll/render coalescing, and resync-after-mismatch flows.
-- 18 `it` blocks; the newest coverage adds another cross-instance state-adoption scenario.
-- Per-cluster grep tax growing.
-
-**Proposal:**
-- Pure code move: extract the 4–5 hydration-focused tests into `ui/src/App.live-state.hydration.test.tsx`, mirroring the sibling-split pattern.
-- Defer to a dedicated split commit; do not couple with feature changes.
-
 ## `app-live-state.ts` past 1,500-line review threshold for TypeScript utility modules
 
 **Severity:** Low - `ui/src/app-live-state.ts`. File is still 3,517 lines after this round. The architecture rubric sets a pragmatic ~1,500-line threshold for TypeScript utility modules. Hydration adoption and lightweight state-event profiling/JSON metadata helpers have moved out, but the module still mixes retry scheduling, reconnect recovery, hydration, workspace-file events, and the main state machine.
