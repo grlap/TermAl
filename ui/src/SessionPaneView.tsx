@@ -168,6 +168,7 @@ import {
   hasAgentOutputAfterLatestUserPrompt,
   hasTurnFinalizingOutputAfterLatestUserPrompt,
 } from "./SessionPaneView.waiting-indicator";
+import { resolveSessionPaneScrollStateKey } from "./SessionPaneView.scroll-key";
 import type { SessionPaneViewProps } from "./SessionPaneView.types";
 
 const SESSION_PAGE_JUMP_VIEWPORT_FACTOR = 0.45;
@@ -695,23 +696,12 @@ export function SessionPaneView({
     : "liveTurn";
   const composerInputDisabled = !activeSession || isStopping;
   const composerSendDisabled = !activeSession || isSending || isStopping;
-  const scrollStateKey = activeSourceTab
-    ? `${pane.id}:source:${activeSourceTab.path ?? "empty"}`
-    : activeCanvasTab
-      ? `${pane.id}:canvas:${activeCanvasTab.id}`
-      : activeOrchestratorCanvasTab
-        ? `${pane.id}:orchestratorCanvas:${activeOrchestratorCanvasTab.id}`
-        : activeFilesystemTab
-          ? `${pane.id}:filesystem:${activeFilesystemTab.rootPath ?? "empty"}`
-          : activeGitStatusTab
-            ? `${pane.id}:gitStatus:${activeGitStatusTab.workdir ?? "empty"}`
-            : activeTerminalTab
-              ? `${pane.id}:terminal:${activeTerminalTab.id}`
-              : activeInstructionDebuggerTab
-                ? `${pane.id}:instructionDebugger:${activeInstructionDebuggerTab.originSessionId ?? activeInstructionDebuggerTab.workdir ?? "empty"}`
-                : activeDiffPreviewTab
-                  ? `${pane.id}:diffPreview:${activeDiffPreviewTab.diffMessageId}`
-                  : `${pane.id}:${pane.viewMode}:${activeSession?.id ?? "empty"}`;
+  const scrollStateKey = resolveSessionPaneScrollStateKey(
+    pane.id,
+    pane.viewMode,
+    activeSession?.id,
+    activeTab,
+  );
   const defaultScrollToBottom =
     pane.viewMode === "session" ||
     pane.viewMode === "commands" ||
