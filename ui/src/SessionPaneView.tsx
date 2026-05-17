@@ -153,6 +153,7 @@ import {
   streamingAssistantTextMessageIdForSession,
   useSessionRenderCallbacks,
 } from "./SessionPaneView.render-callbacks";
+import { resolveSessionPaneActiveTab } from "./SessionPaneView.active-tab";
 import {
   cancelDelegationCommand,
   createComposerDelegationRequest,
@@ -259,10 +260,7 @@ export function SessionPaneView({
   workspaceFilesChangedEvent,
   backendConnectionState,
 }: SessionPaneViewProps) {
-  const activeTab =
-    pane.tabs.find((tab) => tab.id === pane.activeTabId) ??
-    pane.tabs[0] ??
-    null;
+  const activeTab = resolveSessionPaneActiveTab(pane);
   const activeControlPanelTab =
     activeTab?.kind === "controlPanel" ? activeTab : null;
   const activeOrchestratorListTab =
