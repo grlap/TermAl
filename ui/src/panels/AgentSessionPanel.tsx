@@ -7,7 +7,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ClipboardEvent as ReactClipboardEvent,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -100,7 +99,6 @@ import { MessageMetaMarkerMenuProvider } from "../message-cards";
 import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
 import type {
   ApprovalDecision,
-  AgentCommand,
   CommandMessage,
   DiffMessage,
   Message,
@@ -117,10 +115,10 @@ import type {
   CreateConversationMarkerHandlerResult,
   DraftImageAttachment,
   PromptHistoryState,
+  SessionComposerProps,
   SessionConversationPageProps,
   SessionSettingsField,
   SessionSettingsValue,
-  SpawnDelegationHandler,
   WaitingIndicatorKind,
 } from "./AgentSessionPanel.types";
 
@@ -1315,39 +1313,7 @@ const SessionComposer = memo(function SessionComposer({
   onSessionSettingsChange,
   onStopSession,
   onPaste,
-}: {
-  paneId: string;
-  isPaneActive: boolean;
-  sessionId: string | null;
-  formatByteSize: (byteSize: number) => string;
-  isSending: boolean;
-  isStopping: boolean;
-  isSessionBusy: boolean;
-  isUpdating: boolean;
-  isRefreshingModelOptions: boolean;
-  modelOptionsError: string | null;
-  agentCommands: AgentCommand[];
-  hasLoadedAgentCommands: boolean;
-  isRefreshingAgentCommands: boolean;
-  agentCommandsError: string | null;
-  showNewResponseIndicator: boolean;
-  newResponseIndicatorLabel: string;
-  onScrollToLatest: () => void;
-  onDraftCommit: (sessionId: string, nextValue: string) => void;
-  onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
-  onRefreshSessionModelOptions: (sessionId: string) => void;
-  onRefreshAgentCommands: (sessionId: string) => void;
-  onSend: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
-  canSpawnDelegation?: boolean;
-  onSpawnDelegation?: SpawnDelegationHandler;
-  onSessionSettingsChange: (
-    sessionId: string,
-    field: SessionSettingsField,
-    value: SessionSettingsValue,
-  ) => void;
-  onStopSession: (sessionId: string) => void;
-  onPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
-}) {
+}: SessionComposerProps) {
   const {
     composerInputRef,
     resetAndCancelScheduledComposerResize,
