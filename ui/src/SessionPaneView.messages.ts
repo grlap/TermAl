@@ -9,6 +9,7 @@ import type {
   Session,
 } from "./types";
 import type { PaneViewMode } from "./workspace";
+import { buildMessageListSignature } from "./app-utils";
 
 export function commandMessagesForPaneViewMode(
   viewMode: PaneViewMode,
@@ -50,6 +51,82 @@ export function paneViewModeDefaultsToBottomScroll(
   viewMode: PaneViewMode,
 ): boolean {
   return viewMode === "session" || viewMode === "commands" || viewMode === "diffs";
+}
+
+export function visibleContentSignatureForPaneViewMode(
+  viewMode: PaneViewMode,
+  sessionConversationSignature: string,
+  visibleMessages: Message[],
+): string {
+  return viewMode === "session"
+    ? sessionConversationSignature
+    : buildMessageListSignature(visibleMessages);
+}
+
+export function visibleMessageContentSignatureForPaneViewMode(
+  viewMode: PaneViewMode,
+  session: Session | null,
+  visibleMessages: Message[],
+): string {
+  return viewMode === "session" && session
+    ? buildMessageListSignature(session.messages)
+    : buildMessageListSignature(visibleMessages);
+}
+
+export function visibleLastMessageAuthorForPaneViewMode(
+  viewMode: PaneViewMode,
+  session: Session | null,
+  visibleMessages: Message[],
+): Message["author"] | undefined {
+  return viewMode === "session"
+    ? session?.messages[session.messages.length - 1]?.author
+    : visibleMessages[visibleMessages.length - 1]?.author;
+}
+
+export type SessionPaneVisibleMessageState = {
+  visibleMessages: Message[];
+  visibleContentSignature: string;
+  visibleMessageContentSignature: string;
+  visibleLastMessageAuthor: Message["author"] | undefined;
+};
+
+export function resolveSessionPaneVisibleMessageState({
+  viewMode,
+  session,
+  commandMessages,
+  diffMessages,
+  sessionConversationSignature,
+}: {
+  viewMode: PaneViewMode;
+  session: Session | null;
+  commandMessages: CommandMessage[];
+  diffMessages: DiffMessage[];
+  sessionConversationSignature: string;
+}): SessionPaneVisibleMessageState {
+  const visibleMessages = visibleMessagesForPaneViewMode(
+    viewMode,
+    commandMessages,
+    diffMessages,
+  );
+  return {
+    visibleMessages,
+    visibleContentSignature: visibleContentSignatureForPaneViewMode(
+      viewMode,
+      sessionConversationSignature,
+      visibleMessages,
+    ),
+    visibleMessageContentSignature:
+      visibleMessageContentSignatureForPaneViewMode(
+        viewMode,
+        session,
+        visibleMessages,
+      ),
+    visibleLastMessageAuthor: visibleLastMessageAuthorForPaneViewMode(
+      viewMode,
+      session,
+      visibleMessages,
+    ),
+  };
 }
 
 export function latestAssistantMessageIdForSession(

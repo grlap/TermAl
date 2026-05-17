@@ -121,7 +121,6 @@ import {
 import {
   canNestedScrollableConsumeWheel,
   clamp,
-  buildMessageListSignature,
   buildSessionConversationSignature,
   collectCandidateSourcePaths,
   collectClipboardImageFiles,
@@ -156,7 +155,7 @@ import {
   diffMessagesForPaneViewMode,
   latestAssistantMessageIdForSession,
   paneViewModeDefaultsToBottomScroll,
-  visibleMessagesForPaneViewMode,
+  resolveSessionPaneVisibleMessageState,
 } from "./SessionPaneView.messages";
 import {
   cancelDelegationCommand,
@@ -695,30 +694,27 @@ export function SessionPaneView({
     activeTab,
   );
   const defaultScrollToBottom = paneViewModeDefaultsToBottomScroll(pane.viewMode);
-  const visibleMessages = useMemo(
-    () => visibleMessagesForPaneViewMode(pane.viewMode, commandMessages, diffMessages),
-    [commandMessages, diffMessages, pane.viewMode],
-  );
-  const visibleContentSignature = useMemo(
+  const {
+    visibleMessages,
+    visibleContentSignature,
+    visibleMessageContentSignature,
+    visibleLastMessageAuthor,
+  } = useMemo(
     () =>
-      pane.viewMode === "session"
-        ? sessionConversationSignature
-        : buildMessageListSignature(visibleMessages),
-    [pane.viewMode, sessionConversationSignature, visibleMessages],
-  );
-  const visibleMessageContentSignature = useMemo(
-    () =>
-      pane.viewMode === "session" && activeSession
-        ? buildMessageListSignature(activeSession.messages)
-        : buildMessageListSignature(visibleMessages),
-    [activeSession, pane.viewMode, visibleMessages],
-  );
-  const visibleLastMessageAuthor = useMemo(
-    () =>
-      pane.viewMode === "session"
-        ? activeSession?.messages[activeSession.messages.length - 1]?.author
-        : visibleMessages[visibleMessages.length - 1]?.author,
-    [activeSession, pane.viewMode, visibleMessages],
+      resolveSessionPaneVisibleMessageState({
+        viewMode: pane.viewMode,
+        session: activeSession,
+        commandMessages,
+        diffMessages,
+        sessionConversationSignature,
+      }),
+    [
+      activeSession,
+      commandMessages,
+      diffMessages,
+      pane.viewMode,
+      sessionConversationSignature,
+    ],
   );
   // Newest assistant message id drives retry-notice liveness. Streaming render
   // preference is narrower: only the active turn's last transcript item can be

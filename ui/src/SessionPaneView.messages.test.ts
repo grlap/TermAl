@@ -5,6 +5,10 @@ import {
   diffMessagesForPaneViewMode,
   latestAssistantMessageIdForSession,
   paneViewModeDefaultsToBottomScroll,
+  resolveSessionPaneVisibleMessageState,
+  visibleContentSignatureForPaneViewMode,
+  visibleLastMessageAuthorForPaneViewMode,
+  visibleMessageContentSignatureForPaneViewMode,
   visibleMessagesForPaneViewMode,
 } from "./SessionPaneView.messages";
 import type { CommandMessage, DiffMessage, Message, Session } from "./types";
@@ -104,6 +108,79 @@ describe("SessionPaneView message helpers", () => {
 
     expect(bottomModes.every(paneViewModeDefaultsToBottomScroll)).toBe(true);
     expect(nonBottomModes.some(paneViewModeDefaultsToBottomScroll)).toBe(false);
+  });
+
+  it("derives visible message signatures from session or mode messages", () => {
+    const activeSession = session([
+      textMessage("session-1", "you"),
+      textMessage("session-2", "assistant"),
+    ]);
+    const command = commandMessage("command-1");
+
+    expect(
+      visibleContentSignatureForPaneViewMode(
+        "session",
+        "session-conversation-signature",
+        [command],
+      ),
+    ).toBe("session-conversation-signature");
+    expect(
+      visibleContentSignatureForPaneViewMode("commands", "", [command]),
+    ).toBe("1|command-1|command:success:2");
+    expect(
+      visibleMessageContentSignatureForPaneViewMode(
+        "session",
+        activeSession,
+        [command],
+      ),
+    ).toBe("2|session-2|text:9:0");
+    expect(
+      visibleMessageContentSignatureForPaneViewMode(
+        "commands",
+        activeSession,
+        [command],
+      ),
+    ).toBe("1|command-1|command:success:2");
+  });
+
+  it("returns the visible last message author for session or mode messages", () => {
+    const activeSession = session([
+      textMessage("session-1", "you"),
+      textMessage("session-2", "assistant"),
+    ]);
+    const command = commandMessage("command-1");
+
+    expect(
+      visibleLastMessageAuthorForPaneViewMode("session", activeSession, [command]),
+    ).toBe("assistant");
+    expect(
+      visibleLastMessageAuthorForPaneViewMode("commands", activeSession, [command]),
+    ).toBe("assistant");
+    expect(
+      visibleLastMessageAuthorForPaneViewMode("commands", activeSession, []),
+    ).toBeUndefined();
+  });
+
+  it("resolves the complete visible message state in one projection", () => {
+    const activeSession = session([
+      textMessage("session-1", "you"),
+      textMessage("session-2", "assistant"),
+    ]);
+    const command = commandMessage("command-1");
+    const state = resolveSessionPaneVisibleMessageState({
+      viewMode: "commands",
+      session: activeSession,
+      commandMessages: [command],
+      diffMessages: [],
+      sessionConversationSignature: "session-signature",
+    });
+
+    expect(state).toEqual({
+      visibleMessages: [command],
+      visibleContentSignature: "1|command-1|command:success:2",
+      visibleMessageContentSignature: "1|command-1|command:success:2",
+      visibleLastMessageAuthor: "assistant",
+    });
   });
 
   it("returns the newest assistant message id", () => {
