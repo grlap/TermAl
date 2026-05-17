@@ -218,6 +218,12 @@ struct DetachedDelegationChildRuntime {
     transcript_deltas: Vec<DelegationChildTranscriptDelta>,
 }
 
+impl DetachedDelegationChildRuntime {
+    fn did_mutate(&self) -> bool {
+        self.runtime.is_some() || !self.transcript_deltas.is_empty()
+    }
+}
+
 type ClaudeSpareProfile = (
     String,
     Option<String>,
@@ -682,18 +688,22 @@ impl AppState {
         parent_session_id: &str,
         delegation_id: &str,
     ) -> Result<DelegationStatusResponse, ApiError> {
-        let (revision, delegation, lifecycle_delta, wait_refresh) = {
+        let (revision, delegation, lifecycle_delta, detached_child, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
             let lifecycle_delta = refresh_delegation_from_child_locked(&mut inner, index);
+            let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
             // Status/result reads are active freshness checks: they may observe
             // terminal child output and queue a matching wait's resume prompt.
             // Keep the wait refresh scoped to the requested delegation so
             // unrelated waits are not consumed by opportunistic polling.
             let wait_refresh =
                 refresh_delegation_waits_for_delegation_locked(&mut inner, delegation_id);
-            let revision = if lifecycle_delta.is_some() || wait_refresh.did_mutate() {
+            let revision = if lifecycle_delta.is_some()
+                || detached_child.did_mutate()
+                || wait_refresh.did_mutate()
+            {
                 self.commit_locked(&mut inner).map_err(|err| {
                     ApiError::internal(format!(
                         "failed to persist delegation status refresh: {err:#}"
@@ -703,9 +713,20 @@ impl AppState {
                 inner.revision
             };
             let delegation = inner.delegations[index].clone();
-            (revision, delegation, lifecycle_delta, wait_refresh)
+            (
+                revision,
+                delegation,
+                lifecycle_delta,
+                detached_child,
+                wait_refresh,
+            )
         };
-        self.publish_delegation_refresh_side_effects(revision, lifecycle_delta, wait_refresh);
+        self.publish_delegation_refresh_side_effects(
+            revision,
+            lifecycle_delta,
+            detached_child,
+            wait_refresh,
+        );
         Ok(DelegationStatusResponse {
             revision,
             delegation,
@@ -718,17 +739,21 @@ impl AppState {
         parent_session_id: &str,
         delegation_id: &str,
     ) -> Result<DelegationResultResponse, ApiError> {
-        let (revision, result, lifecycle_delta, wait_refresh) = {
+        let (revision, result, lifecycle_delta, detached_child, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
             let lifecycle_delta = refresh_delegation_from_child_locked(&mut inner, index);
+            let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
             // Result polling has the same refresh contract as status polling,
             // even when the result remains unavailable and the endpoint returns
             // 409 after publishing any observed side effects.
             let wait_refresh =
                 refresh_delegation_waits_for_delegation_locked(&mut inner, delegation_id);
-            let revision = if lifecycle_delta.is_some() || wait_refresh.did_mutate() {
+            let revision = if lifecycle_delta.is_some()
+                || detached_child.did_mutate()
+                || wait_refresh.did_mutate()
+            {
                 self.commit_locked(&mut inner).map_err(|err| {
                     ApiError::internal(format!(
                         "failed to persist delegation result refresh: {err:#}"
@@ -738,9 +763,14 @@ impl AppState {
                 inner.revision
             };
             let result = inner.delegations[index].result.clone();
-            (revision, result, lifecycle_delta, wait_refresh)
+            (revision, result, lifecycle_delta, detached_child, wait_refresh)
         };
-        self.publish_delegation_refresh_side_effects(revision, lifecycle_delta, wait_refresh);
+        self.publish_delegation_refresh_side_effects(
+            revision,
+            lifecycle_delta,
+            detached_child,
+            wait_refresh,
+        );
         let result =
             result.ok_or_else(|| ApiError::conflict("delegation result is not available yet"))?;
         Ok(DelegationResultResponse {
@@ -837,8 +867,12 @@ impl AppState {
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
             let lifecycle_delta = refresh_delegation_from_child_locked(&mut inner, index);
+            let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
             let wait_refresh = refresh_delegation_waits_locked(&mut inner);
-            let revision = if lifecycle_delta.is_some() || wait_refresh.did_mutate() {
+            let revision = if lifecycle_delta.is_some()
+                || detached_child.did_mutate()
+                || wait_refresh.did_mutate()
+            {
                 self.commit_locked(&mut inner).map_err(|err| {
                     ApiError::internal(format!(
                         "failed to persist delegation status before cancel: {err:#}"
@@ -855,27 +889,22 @@ impl AppState {
                     server_instance_id: self.server_instance_id.clone(),
                 };
                 drop(inner);
-                if let Some(delta) = lifecycle_delta {
-                    self.publish_delegation_lifecycle_delta(revision, delta);
-                }
-                if wait_refresh.did_mutate() {
-                    self.publish_delegation_wait_consumed_deltas(
-                        revision,
-                        &wait_refresh.consumed_waits,
-                    );
-                }
-                self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
+                self.publish_delegation_refresh_side_effects(
+                    revision,
+                    lifecycle_delta,
+                    detached_child,
+                    wait_refresh,
+                );
                 return Ok(response);
             }
             let child_session_id = delegation.child_session_id.clone();
             drop(inner);
-            if let Some(delta) = lifecycle_delta {
-                self.publish_delegation_lifecycle_delta(revision, delta);
-            }
-            if wait_refresh.did_mutate() {
-                self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
-            }
-            self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
+            self.publish_delegation_refresh_side_effects(
+                revision,
+                lifecycle_delta,
+                detached_child,
+                wait_refresh,
+            );
             child_session_id
         };
 
@@ -907,8 +936,11 @@ impl AppState {
         } else {
             mark_delegation_canceled_locked(&mut inner, index, None)
         };
+        let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
         let wait_refresh = refresh_delegation_waits_locked(&mut inner);
-        let revision = if lifecycle_delta.is_some() || wait_refresh.did_mutate() {
+        let revision =
+            if lifecycle_delta.is_some() || detached_child.did_mutate() || wait_refresh.did_mutate()
+            {
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist delegation cancelation: {err:#}"))
             })?
@@ -917,13 +949,12 @@ impl AppState {
         };
         let delegation = inner.delegations[index].clone();
         drop(inner);
-        if let Some(delta) = lifecycle_delta {
-            self.publish_delegation_lifecycle_delta(revision, delta);
-        }
-        if wait_refresh.did_mutate() {
-            self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
-        }
-        self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
+        self.publish_delegation_refresh_side_effects(
+            revision,
+            lifecycle_delta,
+            detached_child,
+            wait_refresh,
+        );
         Ok(DelegationStatusResponse {
             revision,
             delegation,
@@ -932,7 +963,7 @@ impl AppState {
     }
 
     fn refresh_delegation_for_child_session(&self, child_session_id: &str) -> Result<()> {
-        let (revision, lifecycle_delta, wait_refresh) = {
+        let (revision, lifecycle_delta, detached_child, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_delegation_index_by_child_session_id(child_session_id)
             else {
@@ -942,15 +973,17 @@ impl AppState {
             else {
                 return Ok(());
             };
+            let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
             let wait_refresh = refresh_delegation_waits_locked(&mut inner);
             let revision = self.commit_locked(&mut inner)?;
-            (revision, lifecycle_delta, wait_refresh)
+            (revision, lifecycle_delta, detached_child, wait_refresh)
         };
-        self.publish_delegation_lifecycle_delta(revision, lifecycle_delta);
-        if wait_refresh.did_mutate() {
-            self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
-        }
-        self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
+        self.publish_delegation_refresh_side_effects(
+            revision,
+            Some(lifecycle_delta),
+            detached_child,
+            wait_refresh,
+        );
         Ok(())
     }
 
@@ -958,8 +991,19 @@ impl AppState {
         &self,
         revision: u64,
         lifecycle_delta: Option<DelegationLifecycleDelta>,
+        detached_child: DetachedDelegationChildRuntime,
         wait_refresh: DelegationWaitRefresh,
     ) {
+        if let Some(runtime) = detached_child.runtime {
+            if let Err(err) =
+                shutdown_removed_runtime(runtime, "terminal read-only delegation child")
+            {
+                eprintln!("delegation cleanup warning> {err:#}");
+            }
+        }
+        for delta in detached_child.transcript_deltas {
+            self.publish_delegation_child_transcript_delta(revision, delta);
+        }
         if let Some(delta) = lifecycle_delta {
             self.publish_delegation_lifecycle_delta(revision, delta);
         }
@@ -2101,6 +2145,20 @@ fn refresh_delegation_from_child_locked(
             "delegation child session no longer exists",
         ),
     }
+}
+
+fn detach_terminal_delegation_child_runtime_locked(
+    inner: &mut StateInner,
+    delegation_index: usize,
+) -> DetachedDelegationChildRuntime {
+    let Some(delegation) = inner.delegations.get(delegation_index) else {
+        return DetachedDelegationChildRuntime::default();
+    };
+    if !delegation_is_terminal(delegation.status) {
+        return DetachedDelegationChildRuntime::default();
+    }
+    let child_session_id = delegation.child_session_id.clone();
+    detach_delegation_child_runtime_locked(inner, &child_session_id, None)
 }
 
 fn reconcile_delegations_for_removed_session_locked(

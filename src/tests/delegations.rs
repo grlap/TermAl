@@ -42,6 +42,29 @@ fn finish_delegation_child_with_assistant_text(
     state.commit_locked(&mut inner).unwrap();
 }
 
+fn attach_sleeping_claude_runtime_to_delegation_child(
+    state: &AppState,
+    child_session_id: &str,
+) -> Arc<SharedChild> {
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let child_index = inner
+        .find_session_index(child_session_id)
+        .expect("child session should exist");
+    let child = inner
+        .session_mut_by_index(child_index)
+        .expect("child session index should be valid");
+    child.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
+        runtime_id: format!("test-delegation-child-runtime-{child_session_id}"),
+        input_tx,
+        process: process.clone(),
+    });
+    child.session.status = SessionStatus::Active;
+    state.commit_locked(&mut inner).unwrap();
+    process
+}
+
 fn assert_read_only_delegation_error(value: &Value, title: &str) {
     let error = value["error"]
         .as_str()
@@ -5506,6 +5529,63 @@ fn cancel_preserves_completed_delegation_result() {
             "terminal cancel should not publish delegation deltas"
         );
     }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn completed_delegation_refresh_detaches_and_kills_child_runtime() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Complete and clean up runtime.".to_owned(),
+                title: Some("Runtime Cleanup".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    let process = attach_sleeping_claude_runtime_to_delegation_child(
+        &state,
+        &created.delegation.child_session_id,
+    );
+
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &created.delegation.child_session_id,
+        "## Result\n\nStatus: completed\n\nSummary:\nDone.",
+    );
+    state
+        .refresh_delegation_for_child_session(&created.delegation.child_session_id)
+        .expect("refresh should complete delegation");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let child = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == created.delegation.child_session_id)
+        .expect("child session should remain for transcript inspection");
+    assert!(
+        matches!(child.runtime, SessionRuntime::None),
+        "terminal delegation child should not keep a runtime handle"
+    );
+    drop(inner);
+    assert!(
+        wait_for_shared_child_exit_timeout(
+            &process,
+            Duration::from_secs(1),
+            "delegation child runtime"
+        )
+        .expect("runtime wait should succeed")
+        .is_some(),
+        "terminal delegation refresh should reap the child runtime process"
+    );
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
