@@ -85,9 +85,8 @@ import {
 } from "../search-highlight";
 import { resolveLiveWaitingIndicatorPrompt } from "../app-utils";
 import {
-  hasAgentOutputAfterLatestUserPrompt,
-  hasTurnFinalizingOutputAfterLatestUserPrompt,
-} from "../SessionPaneView.waiting-indicator";
+  shouldShowAgentSessionWaitingIndicator,
+} from "./AgentSessionPanel.waiting-indicator";
 import {
   useComposerSessionSnapshot,
   useSessionRecordSnapshot,
@@ -595,13 +594,12 @@ const SessionConversationPage = memo(function SessionConversationPage({
       ? visiblePendingPromptsBase
       : filteredPendingPrompts;
   }, [visibleMessages.length, visibleMessageIds, visiblePendingPromptsBase]);
-  const effectiveShowWaitingIndicator =
-    showWaitingIndicator &&
-    (waitingIndicatorKind === "delegationWait" ||
-      waitingIndicatorKind === "send" ||
-      (session.status === "active" &&
-        !hasTurnFinalizingOutputAfterLatestUserPrompt(visibleMessages)) ||
-      !hasAgentOutputAfterLatestUserPrompt(visibleMessages));
+  const effectiveShowWaitingIndicator = shouldShowAgentSessionWaitingIndicator({
+    showWaitingIndicator,
+    waitingIndicatorKind,
+    sessionStatus: session.status,
+    visibleMessages,
+  });
   const conversationOverview = useConversationOverviewController({
     agent: session.agent,
     isActive,
