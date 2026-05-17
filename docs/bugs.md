@@ -193,10 +193,10 @@ The waiting-indicator helpers now live in `ui/src/SessionPaneView.waiting-indica
 
 ## `app-live-state.ts` past 1,500-line review threshold for TypeScript utility modules
 
-**Severity:** Low - `ui/src/app-live-state.ts`. File is still about 3,225 lines after this round. The architecture rubric sets a pragmatic ~1,500-line threshold for TypeScript utility modules. Hydration adoption, hydration constants/pure helpers, lightweight state-event profiling/JSON metadata helpers, delta-event guards, delegation-wait list helpers, exported hook contract types, and unknown-model confirmation pruning have moved out, but the module still mixes retry scheduling, reconnect recovery, hydration, workspace-file events, and the main state machine.
+**Severity:** Low - `ui/src/app-live-state.ts`. File is still about 3,205 lines after this round. The architecture rubric sets a pragmatic ~1,500-line threshold for TypeScript utility modules. Hydration adoption, hydration constants/pure helpers, workspace-file event buffering, lightweight state-event profiling/JSON metadata helpers, delta-event guards, delegation-wait list helpers, exported hook contract types, and unknown-model confirmation pruning have moved out, but the module still mixes retry scheduling, reconnect recovery, hydration, and the main state machine.
 
 **Current behavior:**
-- Single module still mixes hydration matching, retry scheduling, reconnect recovery, workspace-file events, and the main state machine.
+- Single module still mixes hydration matching, retry scheduling, reconnect recovery, and the main state machine.
 - Per-cluster grep tax growing with each round.
 
 **Proposal:**

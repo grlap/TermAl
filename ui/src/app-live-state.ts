@@ -5,12 +5,9 @@
 // `workspaceFilesChanged` handler bodies, the adoption helpers
 // (`adoptState`, `adoptSessions`, `adoptCreatedSessionResponse`,
 // `adoptFetchedSession`, `syncPreferencesFromState`), the
-// workspace-files-changed buffering gate
-// (`flushWorkspaceFilesChangedEventBuffer`,
-// `resetWorkspaceFilesChangedEventGate`,
-// `enqueueWorkspaceFilesChangedEvent` plus the buffer / flush
-// timeout / revision-gate refs), the `forceAdoptNextStateEventRef`
-// refresh flag, the session hydration fetch effect, the
+// workspace-files-changed React state that consumes the extracted
+// buffering gate from app-live-state-workspace-events, the
+// `forceAdoptNextStateEventRef` refresh flag, the session hydration fetch effect, the
 // `hydratedSessionIdsRef` / `hydratingSessionIdsRef` tracking
 // refs, AND (as of Slice 13B) the EventSource open/close
 // lifecycle, reconnect fallback timer orchestration, watchdog
@@ -167,7 +164,6 @@ import {
   type SessionAgentCommandMap,
   type SessionFlagMap,
 } from "./app-utils";
-import { mergeWorkspaceFilesChangedEvents } from "./workspace-file-events";
 import type { WorkspaceLayoutSummary } from "./api";
 import {
   describeBackendConnectionIssueDetail,
@@ -196,6 +192,13 @@ import {
   SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
   SESSION_HYDRATION_RETRY_DELAYS_MS,
 } from "./app-live-state-hydration";
+import {
+  clearWorkspaceFilesChangedEventBuffer,
+  enqueueWorkspaceFilesChangedEvent as enqueueWorkspaceFilesChangedEventInGate,
+  flushWorkspaceFilesChangedEventBuffer as flushWorkspaceFilesChangedEventGateBuffer,
+  resetWorkspaceFilesChangedEventGate as resetWorkspaceFilesChangedEventGateRefs,
+  type WorkspaceFilesChangedEventGateRefs,
+} from "./app-live-state-workspace-events";
 
 export type {
   AdoptCreatedSessionOutcome,
@@ -351,6 +354,12 @@ export function useAppLiveState(
     useRef<WorkspaceFilesChangedEvent | null>(null);
   const workspaceFilesChangedEventFlushTimeoutRef = useRef<number | null>(null);
   const lastWorkspaceFilesChangedRevisionRef = useRef<number | null>(null);
+  const workspaceFilesChangedEventGateRefs: WorkspaceFilesChangedEventGateRefs =
+    {
+      bufferRef: workspaceFilesChangedEventBufferRef,
+      flushTimeoutRef: workspaceFilesChangedEventFlushTimeoutRef,
+      lastRevisionRef: lastWorkspaceFilesChangedRevisionRef,
+    };
   // State-resync refs are kept at the hook body so the
   // transport useEffect can reset them on Strict Mode remount
   // without losing the per-mount cleanup identity.
@@ -1505,49 +1514,24 @@ export function useAppLiveState(
   }
 
   function flushWorkspaceFilesChangedEventBuffer() {
-    workspaceFilesChangedEventFlushTimeoutRef.current = null;
-    const bufferedEvent = workspaceFilesChangedEventBufferRef.current;
-    workspaceFilesChangedEventBufferRef.current = null;
-    if (!bufferedEvent || !isMountedRef.current) {
-      return;
-    }
-
-    startTransition(() => {
-      setWorkspaceFilesChangedEvent(bufferedEvent);
+    flushWorkspaceFilesChangedEventGateBuffer({
+      gateRefs: workspaceFilesChangedEventGateRefs,
+      isMountedRef,
+      setWorkspaceFilesChangedEvent,
     });
   }
 
   function resetWorkspaceFilesChangedEventGate() {
-    lastWorkspaceFilesChangedRevisionRef.current = null;
-    workspaceFilesChangedEventBufferRef.current = null;
-    if (workspaceFilesChangedEventFlushTimeoutRef.current !== null) {
-      window.clearTimeout(workspaceFilesChangedEventFlushTimeoutRef.current);
-      workspaceFilesChangedEventFlushTimeoutRef.current = null;
-    }
+    resetWorkspaceFilesChangedEventGateRefs(workspaceFilesChangedEventGateRefs);
   }
 
   function enqueueWorkspaceFilesChangedEvent(
     filesChanged: WorkspaceFilesChangedEvent,
   ) {
-    const lastRevision = lastWorkspaceFilesChangedRevisionRef.current;
-    if (lastRevision !== null && filesChanged.revision < lastRevision) {
-      return;
-    }
-
-    lastWorkspaceFilesChangedRevisionRef.current = filesChanged.revision;
-    workspaceFilesChangedEventBufferRef.current =
-      mergeWorkspaceFilesChangedEvents(
-        workspaceFilesChangedEventBufferRef.current,
-        filesChanged,
-      );
-
-    if (workspaceFilesChangedEventFlushTimeoutRef.current !== null) {
-      return;
-    }
-
-    workspaceFilesChangedEventFlushTimeoutRef.current = window.setTimeout(
+    enqueueWorkspaceFilesChangedEventInGate(
+      workspaceFilesChangedEventGateRefs,
+      filesChanged,
       flushWorkspaceFilesChangedEventBuffer,
-      0,
     );
   }
 
@@ -3131,11 +3115,7 @@ export function useAppLiveState(
       clearInitialStateResyncRetryTimeout();
       clearReconnectStateResyncTimeout();
       clearForceAdoptNextStateEvent();
-      if (workspaceFilesChangedEventFlushTimeoutRef.current !== null) {
-        window.clearTimeout(workspaceFilesChangedEventFlushTimeoutRef.current);
-        workspaceFilesChangedEventFlushTimeoutRef.current = null;
-      }
-      workspaceFilesChangedEventBufferRef.current = null;
+      clearWorkspaceFilesChangedEventBuffer(workspaceFilesChangedEventGateRefs);
       if (liveSessionResumeWatchdogIntervalId !== null) {
         window.clearInterval(liveSessionResumeWatchdogIntervalId);
       }
