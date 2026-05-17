@@ -103,9 +103,6 @@ import {
   buildSessionSearchMatchesFromIndex,
 } from "./session-find";
 import type {
-  CommandMessage,
-  DiffMessage,
-  Message,
   Session,
 } from "./types";
 import {
@@ -154,6 +151,13 @@ import {
   useSessionRenderCallbacks,
 } from "./SessionPaneView.render-callbacks";
 import { resolveSessionPaneActiveTab } from "./SessionPaneView.active-tab";
+import {
+  commandMessagesForPaneViewMode,
+  diffMessagesForPaneViewMode,
+  latestAssistantMessageIdForSession,
+  paneViewModeDefaultsToBottomScroll,
+  visibleMessagesForPaneViewMode,
+} from "./SessionPaneView.messages";
 import {
   cancelDelegationCommand,
   createComposerDelegationRequest,
@@ -562,21 +566,11 @@ export function SessionPaneView({
     [activeSession, activeSourceTab],
   );
   const commandMessages = useMemo(
-    () =>
-      pane.viewMode === "commands" && activeSession
-        ? activeSession.messages.filter(
-            (message): message is CommandMessage => message.type === "command",
-          )
-        : [],
+    () => commandMessagesForPaneViewMode(pane.viewMode, activeSession),
     [activeSession, pane.viewMode],
   );
   const diffMessages = useMemo(
-    () =>
-      pane.viewMode === "diffs" && activeSession
-        ? activeSession.messages.filter(
-            (message): message is DiffMessage => message.type === "diff",
-          )
-        : [],
+    () => diffMessagesForPaneViewMode(pane.viewMode, activeSession),
     [activeSession, pane.viewMode],
   );
   const pendingPrompts = useMemo(
@@ -700,17 +694,9 @@ export function SessionPaneView({
     activeSession?.id,
     activeTab,
   );
-  const defaultScrollToBottom =
-    pane.viewMode === "session" ||
-    pane.viewMode === "commands" ||
-    pane.viewMode === "diffs";
+  const defaultScrollToBottom = paneViewModeDefaultsToBottomScroll(pane.viewMode);
   const visibleMessages = useMemo(
-    () =>
-      pane.viewMode === "commands"
-        ? commandMessages
-        : pane.viewMode === "diffs"
-          ? diffMessages
-          : [],
+    () => visibleMessagesForPaneViewMode(pane.viewMode, commandMessages, diffMessages),
     [commandMessages, diffMessages, pane.viewMode],
   );
   const visibleContentSignature = useMemo(
@@ -738,16 +724,10 @@ export function SessionPaneView({
   // preference is narrower: only the active turn's last transcript item can be
   // streaming text, so a previous completed table does not switch render modes
   // while the next prompt is waiting for its first assistant chunk.
-  const latestAssistantMessageId = useMemo(() => {
-    const sessionMessages = activeSession?.messages ?? [];
-    for (let index = sessionMessages.length - 1; index >= 0; index -= 1) {
-      const candidate = sessionMessages[index];
-      if (candidate && candidate.author === "assistant") {
-        return candidate.id;
-      }
-    }
-    return null;
-  }, [activeSession?.messages]);
+  const latestAssistantMessageId = useMemo(
+    () => latestAssistantMessageIdForSession(activeSession),
+    [activeSession],
+  );
   const streamingAssistantTextMessageId = useMemo(
     () => streamingAssistantTextMessageIdForSession(activeSession),
     [activeSession],
