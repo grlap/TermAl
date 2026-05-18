@@ -11,7 +11,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
-  type RefObject,
 } from "react";
 import { ExpandedPromptPanel } from "../ExpandedPromptPanel";
 import { CONVERSATION_COMPOSER_INPUT_DATA_ATTRIBUTES } from "./conversation-composer-focus";
@@ -50,10 +49,7 @@ import {
 } from "./session-activity-cards";
 import {
   VirtualizedConversationMessageList,
-  type CodexAppRequestSubmitHandler,
-  type McpElicitationSubmitHandler,
   type RenderMessageCard,
-  type UserInputSubmitHandler,
 } from "./VirtualizedConversationMessageList";
 import {
   CONVERSATION_OVERVIEW_MIN_MESSAGES,
@@ -97,15 +93,10 @@ import {
 import { MessageMetaMarkerMenuProvider } from "../message-cards";
 import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
 import type {
-  ApprovalDecision,
-  CommandMessage,
-  DiffMessage,
   PendingPrompt,
-  Session,
   ConversationMarker,
   CreateConversationMarkerOptions,
 } from "../types";
-import type { PaneViewMode } from "../workspace";
 import type {
   AgentCommandResolverErrorState,
   AgentSessionPanelFooterProps,
@@ -115,9 +106,8 @@ import type {
   DraftImageAttachment,
   PromptHistoryState,
   SessionComposerProps,
+  SessionBodyProps,
   SessionConversationPageProps,
-  SessionSettingsField,
-  SessionSettingsValue,
   WaitingIndicatorKind,
 } from "./AgentSessionPanel.types";
 
@@ -324,53 +314,7 @@ const SessionBody = memo(function SessionBody({
   renderDiffCard,
   renderMessageCard,
   renderPromptSettings,
-}: {
-  paneId: string;
-  viewMode: PaneViewMode;
-  scrollContainerRef: RefObject<HTMLElement | null>;
-  activeSessionId: string | null;
-  liveTailPinned: boolean;
-  isLoading: boolean;
-  isUpdating: boolean;
-  showWaitingIndicator: boolean;
-  waitingIndicatorKind: WaitingIndicatorKind;
-  waitingIndicatorPrompt: string | null;
-  commandMessages: CommandMessage[];
-  diffMessages: DiffMessage[];
-  onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
-  onUserInputSubmit: UserInputSubmitHandler;
-  onMcpElicitationSubmit: McpElicitationSubmitHandler;
-  onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
-  onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
-  onCreateConversationMarker: (
-    sessionId: string,
-    messageId: string,
-    options?: CreateConversationMarkerOptions,
-  ) => CreateConversationMarkerHandlerResult;
-  onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
-  onSessionSettingsChange: (
-    sessionId: string,
-    field: SessionSettingsField,
-    value: SessionSettingsValue,
-  ) => void;
-  conversationSearchQuery: string;
-  conversationSearchMatchedItemKeys: ReadonlySet<string>;
-  conversationSearchActiveItemKey: string | null;
-  onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
-  renderCommandCard: (message: CommandMessage) => JSX.Element | null;
-  renderDiffCard: (message: DiffMessage) => JSX.Element | null;
-  renderMessageCard: RenderMessageCard;
-  renderPromptSettings: (
-    paneId: string,
-    session: Session,
-    isUpdating: boolean,
-    onSessionSettingsChange: (
-      sessionId: string,
-      field: SessionSettingsField,
-      value: SessionSettingsValue,
-    ) => void,
-  ) => JSX.Element | null;
-}): JSX.Element | null {
+}: SessionBodyProps): JSX.Element | null {
   const activeSession = useSessionRecordSnapshot(activeSessionId);
   const activeSessionMessages = activeSession?.messages;
   const activeSessionStatus = activeSession?.status;

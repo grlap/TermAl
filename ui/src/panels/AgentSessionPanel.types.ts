@@ -141,6 +141,61 @@ export type AgentSessionPanelProps = {
   ) => JSX.Element | null;
 };
 
+export type SessionBodyProps = {
+  paneId: string;
+  viewMode: PaneViewMode;
+  scrollContainerRef: RefObject<HTMLElement | null>;
+  activeSessionId: string | null;
+  liveTailPinned: boolean;
+  isLoading: boolean;
+  isUpdating: boolean;
+  showWaitingIndicator: boolean;
+  waitingIndicatorKind: WaitingIndicatorKind;
+  waitingIndicatorPrompt: string | null;
+  commandMessages: CommandMessage[];
+  diffMessages: DiffMessage[];
+  onApprovalDecision: (
+    sessionId: string,
+    messageId: string,
+    decision: ApprovalDecision,
+  ) => void;
+  onUserInputSubmit: UserInputSubmitHandler;
+  onMcpElicitationSubmit: McpElicitationSubmitHandler;
+  onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
+  onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
+  onCreateConversationMarker: (
+    sessionId: string,
+    messageId: string,
+    options?: CreateConversationMarkerOptions,
+  ) => CreateConversationMarkerHandlerResult;
+  onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
+  onSessionSettingsChange: (
+    sessionId: string,
+    field: SessionSettingsField,
+    value: SessionSettingsValue,
+  ) => void;
+  conversationSearchQuery: string;
+  conversationSearchMatchedItemKeys: ReadonlySet<string>;
+  conversationSearchActiveItemKey: string | null;
+  onConversationSearchItemMount: (
+    itemKey: string,
+    node: HTMLElement | null,
+  ) => void;
+  renderCommandCard: (message: CommandMessage) => JSX.Element | null;
+  renderDiffCard: (message: DiffMessage) => JSX.Element | null;
+  renderMessageCard: RenderMessageCard;
+  renderPromptSettings: (
+    paneId: string,
+    session: Session,
+    isUpdating: boolean,
+    onSessionSettingsChange: (
+      sessionId: string,
+      field: SessionSettingsField,
+      value: SessionSettingsValue,
+    ) => void,
+  ) => JSX.Element | null;
+};
+
 export type AgentSessionPanelFooterProps = {
   paneId: string;
   viewMode: PaneViewMode;
