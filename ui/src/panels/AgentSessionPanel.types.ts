@@ -22,6 +22,7 @@ import type {
   GeminiApprovalMode,
   ImageAttachment,
   JsonValue,
+  Message,
   McpElicitationAction,
   SandboxMode,
   Session,
@@ -32,6 +33,7 @@ import type {
   McpElicitationSubmitHandler,
   RenderMessageCard,
   UserInputSubmitHandler,
+  VirtualizedConversationMessageListHandle,
 } from "./VirtualizedConversationMessageList";
 import type { SpawnDelegationOptions } from "./agent-session-panel-helpers";
 
@@ -249,4 +251,32 @@ export type SessionConversationPageProps = {
     itemKey: string,
     node: HTMLElement | null,
   ) => void;
+};
+
+export type ConversationMessageListProps = {
+  renderMessageCard: RenderMessageCard;
+  sessionId: string;
+  messages: Message[];
+  scrollContainerRef: RefObject<HTMLElement | null>;
+  tailFollowIntent: boolean;
+  virtualizerHandleRef?: {
+    current: VirtualizedConversationMessageListHandle | null;
+  };
+  isActive: boolean;
+  onApprovalDecision: (
+    sessionId: string,
+    messageId: string,
+    decision: ApprovalDecision,
+  ) => void;
+  onUserInputSubmit: UserInputSubmitHandler;
+  onMcpElicitationSubmit: McpElicitationSubmitHandler;
+  onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
+  conversationSearchQuery: string;
+  conversationSearchMatchedItemKeys: ReadonlySet<string>;
+  conversationSearchActiveItemKey: string | null;
+  onConversationSearchItemMount: (
+    itemKey: string,
+    node: HTMLElement | null,
+  ) => void;
+  forceVirtualized?: boolean;
 };

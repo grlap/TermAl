@@ -54,7 +54,6 @@ import {
   type McpElicitationSubmitHandler,
   type RenderMessageCard,
   type UserInputSubmitHandler,
-  type VirtualizedConversationMessageListHandle,
 } from "./VirtualizedConversationMessageList";
 import {
   CONVERSATION_OVERVIEW_MIN_MESSAGES,
@@ -101,7 +100,6 @@ import type {
   ApprovalDecision,
   CommandMessage,
   DiffMessage,
-  Message,
   PendingPrompt,
   Session,
   ConversationMarker,
@@ -112,6 +110,7 @@ import type {
   AgentCommandResolverErrorState,
   AgentSessionPanelFooterProps,
   AgentSessionPanelProps,
+  ConversationMessageListProps,
   CreateConversationMarkerHandlerResult,
   DraftImageAttachment,
   PromptHistoryState,
@@ -1208,24 +1207,7 @@ function ConversationMessageList({
   conversationSearchActiveItemKey,
   onConversationSearchItemMount,
   forceVirtualized = false,
-}: {
-  renderMessageCard: RenderMessageCard;
-  sessionId: string;
-  messages: Message[];
-  scrollContainerRef: RefObject<HTMLElement | null>;
-  tailFollowIntent: boolean;
-  virtualizerHandleRef?: { current: VirtualizedConversationMessageListHandle | null };
-  isActive: boolean;
-  onApprovalDecision: (sessionId: string, messageId: string, decision: ApprovalDecision) => void;
-  onUserInputSubmit: UserInputSubmitHandler;
-  onMcpElicitationSubmit: McpElicitationSubmitHandler;
-  onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
-  conversationSearchQuery: string;
-  conversationSearchMatchedItemKeys: ReadonlySet<string>;
-  conversationSearchActiveItemKey: string | null;
-  onConversationSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
-  forceVirtualized?: boolean;
-}) {
+}: ConversationMessageListProps) {
   if (!forceVirtualized && messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
     return (
       <>
