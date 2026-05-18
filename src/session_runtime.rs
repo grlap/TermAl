@@ -114,6 +114,23 @@ struct SharedCodexSessionHandle {
 }
 
 impl SharedCodexSessionHandle {
+    fn remove_locked_session(
+        sessions: &mut HashMap<String, SharedCodexSessionState>,
+        session_id: &str,
+    ) -> Option<String> {
+        sessions.remove(session_id).and_then(|state| state.thread_id)
+    }
+
+    fn remove_thread_mapping(&self, removed_thread_id: Option<String>) {
+        if let Some(thread_id) = removed_thread_id {
+            self.runtime
+                .thread_sessions
+                .lock()
+                .expect("shared Codex thread mutex poisoned")
+                .remove(&thread_id);
+        }
+    }
+
     /// Releases this session's slot in the shared Codex runtime
     /// (`runtime.sessions`) and its `thread_id` → session mapping
     /// (`runtime.thread_sessions`) if one is bound. The underlying
@@ -125,19 +142,52 @@ impl SharedCodexSessionHandle {
                 .sessions
                 .lock()
                 .expect("shared Codex session mutex poisoned");
-            sessions
-                .remove(&self.session_id)
-                .and_then(|state| state.thread_id)
+            Self::remove_locked_session(&mut sessions, &self.session_id)
         };
 
-        if let Some(thread_id) = removed_thread_id {
-            self.runtime
-                .thread_sessions
-                .lock()
-                .expect("shared Codex thread mutex poisoned")
-                .remove(&thread_id);
-        }
+        self.remove_thread_mapping(removed_thread_id);
     }
+
+    /// Best-effort nonblocking variant used by natural completion cleanup.
+    /// `turn/completed` handling owns `runtime.sessions` while applying the
+    /// state transition; blocking here would self-deadlock before parent
+    /// delegation result deltas are published.
+    fn try_detach(&self) -> bool {
+        let removed_thread_id = match self.runtime.sessions.try_lock() {
+            Ok(mut sessions) => Self::remove_locked_session(&mut sessions, &self.session_id),
+            Err(std::sync::TryLockError::WouldBlock) => return false,
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                panic!("shared Codex session mutex poisoned")
+            }
+        };
+
+        self.remove_thread_mapping(removed_thread_id);
+        true
+    }
+
+    fn detach_async(&self, context: &str) -> Result<()> {
+        let shared_session = self.clone();
+        let context = context.to_owned();
+        std::thread::Builder::new()
+            .name("termal-codex-detach".to_owned())
+            .spawn(move || {
+                shared_session.detach();
+                trace_shared_codex_event(
+                    "shared_session_detach_deferred_done",
+                    "delegation/runtime_cleanup",
+                    Some(&shared_session.session_id),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(context.as_str()),
+                );
+            })
+            .map(|_| ())
+            .map_err(|err| anyhow!("failed to spawn shared Codex detach cleanup: {err}"))
+        }
 
     /// Sends an `interrupt` request to the shared Codex runtime for
     /// this session's currently active `(thread_id, turn_id)` pair,
@@ -315,6 +365,41 @@ fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<(
                 handle.agent.label()
             )
         }),
+    }
+}
+
+/// Detaches a naturally terminal delegation child without interrupting an
+/// already-finished shared Codex turn.
+fn shutdown_terminal_delegation_child_runtime(
+    runtime: KillableRuntime,
+    context: &str,
+) -> Result<()> {
+    match runtime {
+        KillableRuntime::Codex(handle) => {
+            if let Some(shared_session) = &handle.shared_session {
+                if !shared_session.try_detach() {
+                    trace_shared_codex_event(
+                        "shared_session_detach_deferred",
+                        "delegation/runtime_cleanup",
+                        Some(&shared_session.session_id),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        Some("sessions_locked"),
+                    );
+                    shared_session.detach_async(context)?;
+                }
+                Ok(())
+            } else {
+                handle
+                    .kill()
+                    .with_context(|| format!("failed to kill Codex runtime for {context}"))
+            }
+        }
+        runtime => shutdown_removed_runtime(runtime, context),
     }
 }
 

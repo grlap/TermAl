@@ -97,6 +97,22 @@ fn format_runtime_stderr_prefix_includes_timestamp_and_label() {
 }
 
 #[test]
+fn runtime_stderr_filter_drops_codex_closed_stdin_tool_router_diagnostic() {
+    assert!(!should_forward_runtime_stderr_line(
+        "codex",
+        "2026-05-18T09:28:47.554986Z ERROR codex_core::tools::router: error=write_stdin failed: stdin is closed for this session; rerun exec_command with tty=true to keep stdin open"
+    ));
+    assert!(should_forward_runtime_stderr_line(
+        "codex",
+        "2026-05-18T09:28:47.554986Z ERROR codex_core::tools::router: error=exec_command failed"
+    ));
+    assert!(should_forward_runtime_stderr_line(
+        "claude",
+        "write_stdin failed: stdin is closed for this session"
+    ));
+}
+
+#[test]
 fn parallel_agent_source_serializes_wire_contract() {
     let delegation = ParallelAgentProgress {
         detail: None,
@@ -370,9 +386,14 @@ fn shared_codex_app_server_event_matches_active_turn_covers_turn_id_and_turnless
     assert!(!shared_codex_app_server_event_matches_active_turn(
         None, false, None
     ));
-    assert!(shared_codex_app_server_event_matches_active_turn(
+    assert!(!shared_codex_app_server_event_matches_active_turn(
         Some("turn-1"),
         false,
+        Some("turn-1")
+    ));
+    assert!(shared_codex_app_server_event_matches_active_turn(
+        Some("turn-1"),
+        true,
         Some("turn-1")
     ));
     assert!(!shared_codex_app_server_event_matches_active_turn(

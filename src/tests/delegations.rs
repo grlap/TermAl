@@ -5783,6 +5783,116 @@ async fn delegation_cancel_running_runtime_route_interrupts_child() {
 }
 
 #[test]
+fn delegation_cancel_conflicted_stop_interrupts_before_detaching_child() {
+    let (state, input_rx) =
+        test_app_state_with_delegation_codex_runtime("delegation-cancel-stop-conflict");
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Cancel while stop is already in progress.".to_owned(),
+                title: Some("Cancel Stop Conflict".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("initial delegation prompt should dispatch");
+
+    let runtime = shared_codex_runtime_for_state(&state);
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            created.delegation.child_session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("delegation-cancel-conflict-thread".to_owned()),
+                turn_id: Some("delegation-cancel-conflict-turn".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert(
+            "delegation-cancel-conflict-thread".to_owned(),
+            created.delegation.child_session_id.clone(),
+        );
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let child_index = inner
+            .find_session_index(&created.delegation.child_session_id)
+            .expect("child session should exist");
+        let child = inner
+            .session_mut_by_index(child_index)
+            .expect("child session index should be valid");
+        child.runtime_stop_in_progress = true;
+    }
+
+    let command_thread = std::thread::spawn(move || {
+        let command = input_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("conflicted delegation cancel should still interrupt the child");
+        match command {
+            CodexRuntimeCommand::InterruptTurn {
+                thread_id,
+                turn_id,
+                response_tx,
+            } => {
+                assert_eq!(thread_id, "delegation-cancel-conflict-thread");
+                assert_eq!(turn_id, "delegation-cancel-conflict-turn");
+                let _ = response_tx.send(Ok(()));
+            }
+            _ => panic!("expected child turn interrupt command"),
+        }
+    });
+
+    let response = state
+        .cancel_delegation(&parent_session_id, &created.delegation.id)
+        .expect("delegation cancel should succeed");
+    command_thread
+        .join()
+        .expect("delegation cancel command thread should join cleanly");
+
+    assert_eq!(response.delegation.status, DelegationStatus::Canceled);
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let child = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == created.delegation.child_session_id)
+        .expect("child session should exist");
+    assert_eq!(child.session.status, SessionStatus::Idle);
+    assert!(matches!(child.runtime, SessionRuntime::None));
+    assert!(!child.runtime_stop_in_progress);
+    drop(inner);
+    assert!(
+        !runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned")
+            .contains_key(&created.delegation.child_session_id)
+    );
+    assert!(
+        !runtime
+            .thread_sessions
+            .lock()
+            .expect("shared Codex thread mutex poisoned")
+            .contains_key("delegation-cancel-conflict-thread")
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn mark_delegation_canceled_sets_child_session_idle() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);

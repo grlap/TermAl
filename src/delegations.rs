@@ -224,6 +224,28 @@ impl DetachedDelegationChildRuntime {
     }
 }
 
+fn delegation_lifecycle_trace_reason(
+    lifecycle_delta: Option<&DelegationLifecycleDelta>,
+) -> &'static str {
+    match lifecycle_delta {
+        Some(DelegationLifecycleDelta::Updated { .. }) => "updated",
+        Some(DelegationLifecycleDelta::Completed { .. }) => "completed",
+        Some(DelegationLifecycleDelta::Failed { .. }) => "failed",
+        Some(DelegationLifecycleDelta::Canceled { .. }) => "canceled",
+        None => "none",
+    }
+}
+
+fn killable_runtime_shared_codex_session_id(runtime: &KillableRuntime) -> Option<&str> {
+    match runtime {
+        KillableRuntime::Codex(handle) => handle
+            .shared_session
+            .as_ref()
+            .map(|shared_session| shared_session.session_id.as_str()),
+        KillableRuntime::Claude(_) | KillableRuntime::Acp(_) => None,
+    }
+}
+
 type ClaudeSpareProfile = (
     String,
     Option<String>,
@@ -994,11 +1016,84 @@ impl AppState {
         detached_child: DetachedDelegationChildRuntime,
         wait_refresh: DelegationWaitRefresh,
     ) {
+        let lifecycle_reason = delegation_lifecycle_trace_reason(lifecycle_delta.as_ref());
+        let canceled_child_cleanup = matches!(
+            &lifecycle_delta,
+            Some(DelegationLifecycleDelta::Canceled { .. })
+        );
+        let transcript_delta_count = detached_child.transcript_deltas.len().to_string();
+        let wait_refresh_reason = if wait_refresh.did_mutate() {
+            "wait_refresh"
+        } else {
+            "no_wait_refresh"
+        };
+        trace_shared_codex_event(
+            "delegation_side_effects_start",
+            "delegation/side_effects",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(lifecycle_reason),
+        );
         if let Some(runtime) = detached_child.runtime {
-            if let Err(err) =
-                shutdown_removed_runtime(runtime, "terminal read-only delegation child")
-            {
+            let cleanup_session_id =
+                killable_runtime_shared_codex_session_id(&runtime).map(str::to_owned);
+            let cleanup_reason = if canceled_child_cleanup {
+                "canceled_interrupt"
+            } else {
+                "terminal_detach"
+            };
+            trace_shared_codex_event(
+                "delegation_runtime_cleanup_start",
+                "delegation/runtime_cleanup",
+                cleanup_session_id.as_deref(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(cleanup_reason),
+            );
+            let shutdown_result = if canceled_child_cleanup {
+                shutdown_removed_runtime(runtime, "canceled read-only delegation child")
+            } else {
+                shutdown_terminal_delegation_child_runtime(
+                    runtime,
+                    "terminal read-only delegation child",
+                )
+            };
+            if let Err(err) = shutdown_result {
+                trace_shared_codex_event(
+                    "delegation_runtime_cleanup_error",
+                    "delegation/runtime_cleanup",
+                    cleanup_session_id.as_deref(),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(cleanup_reason),
+                );
                 eprintln!("delegation cleanup warning> {err:#}");
+            } else {
+                trace_shared_codex_event(
+                    "delegation_runtime_cleanup_done",
+                    "delegation/runtime_cleanup",
+                    cleanup_session_id.as_deref(),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(cleanup_reason),
+                );
             }
         }
         for delta in detached_child.transcript_deltas {
@@ -1011,6 +1106,30 @@ impl AppState {
             self.publish_delegation_wait_consumed_deltas(revision, &wait_refresh.consumed_waits);
         }
         self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
+        trace_shared_codex_event(
+            "delegation_side_effects_done",
+            "delegation/side_effects",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(wait_refresh_reason),
+        );
+        trace_shared_codex_event(
+            "delegation_transcript_deltas",
+            "delegation/side_effects",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(transcript_delta_count.as_str()),
+        );
     }
 
     fn ensure_read_only_delegation_allows_write_action(

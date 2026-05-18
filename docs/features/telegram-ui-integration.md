@@ -78,6 +78,20 @@ the active project's current digest target. The selected session is also tailed:
 assistant text produced from prompts typed directly in TermAl is forwarded back
 to Telegram after the message settles.
 
+### Assistant Forwarding Boundary
+
+The relay keeps a conservative boundary when Telegram free text is queued behind
+an already-active or approval-paused TermAl turn. While that older turn is still
+open, the relay treats the latest assistant text as a moving baseline and does
+not forward it to Telegram. On the first settled poll, if the tracked assistant
+message has already grown, the relay records the grown length as the baseline
+and waits for later growth or a later assistant message.
+
+That means same-message reply text already present before the first settled
+poll is intentionally not forwarded for queued Telegram prompts. Forwarding it
+would risk sending output from the pre-existing local turn. Supporting that case
+requires a stronger per-turn boundary from the session or agent layer.
+
 ## Storage
 
 Runtime and UI configuration metadata are stored together in
@@ -284,6 +298,15 @@ Linux runs require a usable desktop Secret Service/keyring session.
 ## HTTP Surface
 
 Current routes:
+
+Telegram uses a focused API surface instead of the generic `POST /api/settings`
+route because the settings response must include relay lifecycle state and a
+masked token without ever placing secret token material in the normal
+`StateResponse` / SSE snapshot stream. The `test` route is also intentionally
+separate because it performs an outbound Telegram `getMe` check without saving
+configuration. The remaining config route returns a sanitized
+`TelegramStatusResponse` so clients can replace their local Telegram settings
+view from one response.
 
 | Method | Path | Purpose |
 |---|---|---|

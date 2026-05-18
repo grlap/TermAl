@@ -293,7 +293,14 @@ The first three carry a `revision: u64` field. `state` and `delta` share the mai
 
 #### Graceful shutdown contract
 
-On Ctrl+C / SIGTERM, `main.rs::shutdown_signal()` resolves and the wrapping `with_graceful_shutdown` future calls `AppState::trigger_shutdown_signal()`, which flips the shared `tokio::sync::watch::Sender<bool>` to `true`. Every live `/api/events` stream owns a watch receiver and checks `borrow_and_update()` before entering the `tokio::select!` loop and again through `wait_for_shutdown_signal()` inside the loop. The watch value is sticky, so a receiver created after the shutdown trigger still observes `true`; this avoids the missed-waiter race that existed with one-shot `Notify` wakeups. Without this signal, the SSE handler's only loop-exit branch would be `RecvError::Closed` on the broadcast channels, whose senders live on `AppState` clones — including the `shutdown_state` clone the main task keeps alive for the post-serve drain — so graceful shutdown could wait forever. After the streams end and `axum::serve` finishes graceful shutdown, `shutdown_state.shutdown_persist_blocking()` sends `PersistRequest::Shutdown` to the persist worker, which performs one final drain of `collect_persist_delta` + `persist_delta_via_cache` so the latest streamed assistant message is durable before the process exits. Hard kills (SIGKILL, power loss) still race the same drain window; at most the last un-drained mutation can be lost.
+On Ctrl+C / SIGTERM, `main.rs::shutdown_signal()` resolves and the wrapping `with_graceful_shutdown` future calls `AppState::trigger_shutdown_signal()`, which flips the shared `tokio::sync::watch::Sender<bool>` to `true`. Every live `/api/events` stream owns a watch receiver and checks `borrow_and_update()` before entering the `tokio::select!` loop and again through `wait_for_shutdown_signal()` inside the loop. The watch value is sticky, so a receiver created after the shutdown trigger still observes `true`; this avoids the missed-waiter race that existed with one-shot `Notify` wakeups. Without this signal, the SSE handler's only loop-exit branch would be `RecvError::Closed` on the broadcast channels, whose senders live on `AppState` clones — including the `shutdown_state` clone the main task keeps alive for the post-serve drain — so graceful shutdown could wait forever. After the streams end and `axum::serve` finishes graceful shutdown, `shutdown_state.shutdown_persist_blocking()` sends `PersistRequest::Shutdown` to the persist worker, which performs one final drain of `collect_persist_delta` + `persist_delta_via_cache` so the latest streamed assistant message is durable before the process exits.
+
+The durability contract only covers graceful shutdown. Hard kills such as
+SIGKILL, power loss, or a crash can still land between a mutation being queued
+for the background persist worker and the corresponding SQLite commit. In that
+case TermAl may lose at most the last un-drained mutation. This is an accepted
+Phase-1 limitation of background persistence rather than a frontend recovery
+problem; after restart, the browser must treat SQLite as authoritative.
 
 #### EventSource recovery on the client
 
@@ -402,6 +409,12 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 |-- orchestrators.json     # reusable orchestrator templates
 `-- telegram-bot.json      # optional Telegram relay metadata/state; bot token lives in OS credential store
 ```
+
+Background persistence favors UI responsiveness over hard-kill durability. A
+normal shutdown drains the persist worker before exit, but SIGKILL, power loss,
+or process crash can discard the last mutation that was signaled but not yet
+committed to SQLite. The expected loss bound is one un-drained mutation; once
+the backend restarts, persisted SQLite state is the source of truth.
 
 `PersistedState` is the logical projection of `StateInner` that excludes
 runtime handles, pending approval maps, and empty collections. On disk it

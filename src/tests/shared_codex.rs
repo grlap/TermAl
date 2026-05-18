@@ -277,6 +277,292 @@ fn shared_codex_agent_message_event_without_turn_id_uses_active_turn() {
     ));
 }
 
+// Pins that final and completion notifications without a thread id can still
+// route by the in-flight turn id. Live shared-Codex app-server events can be
+// persisted in Codex rollout state with only `turn_id`; dropping those leaves
+// TermAl sessions active even though Codex produced the final answer.
+#[test]
+fn shared_codex_turn_events_without_thread_id_route_by_active_turn_id() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-turn-route-by-turn-id");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                turn_id: Some("turn-no-thread-id".to_owned()),
+                turn_started: true,
+                ..SharedCodexSessionState::default()
+            },
+        );
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let final_message = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "id": "turn-no-thread-id",
+            "msg": {
+                "message": "Final shared Codex answer without thread id.",
+                "phase": "final_answer",
+                "type": "agent_message"
+            }
+        }
+    });
+    let turn_completed = json!({
+        "method": "turn/completed",
+        "params": {
+            "turn": {
+                "id": "turn-no-thread-id",
+                "error": null
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &final_message,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &turn_completed,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .unwrap();
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(
+        session.preview,
+        "Final shared Codex answer without thread id."
+    );
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Final shared Codex answer without thread id."
+    ));
+}
+
+// Pins that a terminal task_complete without a thread id can finish the
+// active turn by turn id and use last_agent_message as the final assistant
+// text. Live delegate reviewers can emit this shape after the canonical
+// agent_message, and dropping it leaves the TermAl session active until
+// runtime shutdown marks it failed.
+#[test]
+fn shared_codex_terminal_task_complete_without_thread_id_finishes_turn() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-terminal-task-complete");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                turn_id: Some("turn-terminal-task-complete".to_owned()),
+                turn_started: true,
+                ..SharedCodexSessionState::default()
+            },
+        );
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let task_complete = json!({
+        "method": "codex/event/task_complete",
+        "params": {
+            "msg": {
+                "last_agent_message": "Final answer from task_complete.",
+                "turn_id": "turn-terminal-task-complete",
+                "type": "task_complete"
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &task_complete,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .unwrap();
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(session.preview, "Final answer from task_complete.");
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Final answer from task_complete."
+    ));
+}
+
+// Pins that task_complete is a terminal fallback, not a second final bubble,
+// when Codex already delivered the canonical agent_message first.
+#[test]
+fn shared_codex_terminal_task_complete_after_agent_message_does_not_duplicate_final_text() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-terminal-task-complete-after-final");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                turn_id: Some("turn-terminal-after-final".to_owned()),
+                turn_started: true,
+                ..SharedCodexSessionState::default()
+            },
+        );
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let final_message = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "id": "turn-terminal-after-final",
+            "msg": {
+                "message": "Final answer before task_complete.",
+                "phase": "final_answer",
+                "type": "agent_message"
+            }
+        }
+    });
+    let task_complete = json!({
+        "method": "codex/event/task_complete",
+        "params": {
+            "msg": {
+                "last_agent_message": "Final answer before task_complete.",
+                "turn_id": "turn-terminal-after-final",
+                "type": "task_complete"
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &final_message,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &task_complete,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .unwrap();
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(session.preview, "Final answer before task_complete.");
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Final answer before task_complete."
+    ));
+}
+
 // Pins that an agent_message carrying a stale turn_id from params.id (a
 // turn that has already been superseded by a newer turn/started) is
 // dropped rather than appended to the current transcript.
@@ -3488,6 +3774,7 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
         &runtime.sessions,
         &runtime.thread_sessions,
         &dummy_input_tx,
+        None,
         &session_id,
         CodexPromptCommand {
             approval_policy: CodexApprovalPolicy::Never,
@@ -3720,6 +4007,7 @@ fn shared_codex_turn_started_notification_does_not_restore_pending_state() {
         &state,
         &runtime.runtime_id,
         &runtime.sessions,
+        None,
         &session_id,
         "conversation-123",
         CodexPromptCommand {
@@ -3798,6 +4086,7 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
         &runtime.sessions,
         &runtime.thread_sessions,
         &input_tx,
+        None,
         &session_id,
         CodexPromptCommand {
             approval_policy: CodexApprovalPolicy::Never,
@@ -3889,6 +4178,7 @@ fn shared_codex_thread_setup_handoff_failure_rolls_back_registration() {
         &runtime.sessions,
         &runtime.thread_sessions,
         &input_tx,
+        None,
         &session_id,
         CodexPromptCommand {
             approval_policy: CodexApprovalPolicy::Never,
@@ -4015,6 +4305,7 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
         &runtime.sessions,
         &runtime.thread_sessions,
         &input_tx,
+        None,
         &session_id,
         CodexPromptCommand {
             approval_policy: CodexApprovalPolicy::Never,
@@ -4141,6 +4432,7 @@ fn shared_codex_stale_start_turn_handoff_skips_runtime_config_persistence() {
         &state,
         "stale-runtime",
         &sessions,
+        None,
         &session_id,
         "conversation-stale",
         CodexPromptCommand {
@@ -4303,6 +4595,7 @@ fn shared_codex_start_turn_persist_failure_does_not_tear_down_runtime() {
         &state,
         &runtime.runtime_id,
         &runtime.sessions,
+        None,
         &session_id,
         "conversation-123",
         CodexPromptCommand {
@@ -4469,6 +4762,252 @@ fn shared_codex_undeliverable_server_request_returns_json_rpc_error() {
     }
 }
 
+// Pins that a request with an explicit but unknown thread id is rejected even
+// if its turn id matches an active session. The turn-id fallback is only safe
+// for messages that truly lack thread identity.
+#[test]
+fn shared_codex_server_request_with_unknown_thread_id_does_not_fallback_to_turn_id() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, process) =
+        test_shared_codex_runtime("shared-codex-wrong-thread-no-turn-fallback");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                turn_id: Some("turn-live".to_owned()),
+                turn_started: true,
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    handle_shared_codex_app_server_message(
+        &json!({
+            "method": "codex/event/agent_message",
+            "params": {
+                "conversationId": "wrong-thread",
+                "id": "turn-live",
+                "msg": {
+                    "message": "Wrong-thread final answer.",
+                    "phase": "final_answer",
+                    "type": "agent_message"
+                }
+            }
+        }),
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.input_tx,
+    )
+    .unwrap();
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert!(session.messages.is_empty());
+
+    handle_shared_codex_app_server_message(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "request-wrong-thread",
+            "method": "session/request_permission",
+            "params": {
+                "threadId": "wrong-thread",
+                "turnId": "turn-live"
+            }
+        }),
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.input_tx,
+    )
+    .unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::JsonRpcResponse { response } => {
+            assert_eq!(
+                codex_json_rpc_response_message(&response),
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": "request-wrong-thread",
+                    "error": {
+                        "code": -32001,
+                        "message": "Session unavailable; request could not be delivered."
+                    }
+                })
+            );
+        }
+        _ => panic!("expected JSON-RPC rejection"),
+    }
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert!(session.messages.is_empty());
+}
+
+// Pins that a request routed by the completed-turn grace window is still
+// answered with an error when there is no active turn. It must not be
+// silently dropped, because Codex waits for JSON-RPC request responses.
+#[test]
+fn shared_codex_server_request_for_completed_turn_returns_json_rpc_error() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, process) =
+        test_shared_codex_runtime("shared-codex-completed-turn-request");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Idle;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id,
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                completed_turn_id: Some("turn-completed".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    handle_shared_codex_app_server_message(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "request-completed-turn",
+            "method": "session/request_permission",
+            "params": {
+                "turnId": "turn-completed"
+            }
+        }),
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.input_tx,
+    )
+    .unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::JsonRpcResponse { response } => {
+            assert_eq!(
+                codex_json_rpc_response_message(&response),
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": "request-completed-turn",
+                    "error": {
+                        "code": -32001,
+                        "message": "Session unavailable; request could not be delivered."
+                    }
+                })
+            );
+        }
+        _ => panic!("expected JSON-RPC rejection"),
+    }
+}
+
+// Pins that a server-initiated JSON-RPC request with no thread id is
+// rejected instead of being logged-and-dropped. Newer Codex app-server
+// builds can emit global requests such as auth-token refresh; leaving
+// those unanswered stalls the shared app-server and makes Codex turns
+// look permanently active.
+#[test]
+fn shared_codex_server_request_missing_thread_id_returns_json_rpc_error() {
+    let state = test_app_state();
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let sessions = SharedCodexSessions::new();
+    let thread_sessions: SharedCodexThreadMap = Arc::new(Mutex::new(HashMap::new()));
+    let (input_tx, input_rx) = mpsc::channel::<CodexRuntimeCommand>();
+
+    handle_shared_codex_app_server_message(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "request-without-thread",
+            "method": "account/chatgptAuthTokens/refresh",
+            "params": {}
+        }),
+        &state,
+        "shared-codex-missing-thread",
+        &pending_requests,
+        &sessions,
+        &thread_sessions,
+        &input_tx,
+    )
+    .unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::JsonRpcResponse { response } => {
+            assert_eq!(
+                codex_json_rpc_response_message(&response),
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": "request-without-thread",
+                    "error": {
+                        "code": -32001,
+                        "message": "Session unavailable; request could not be delivered."
+                    }
+                })
+            );
+        }
+        _ => panic!("expected JSON-RPC rejection"),
+    }
+}
+
 // Pins that while handle_shared_codex_prompt_command blocks waiting on a
 // turn/start JSON-RPC response, the writer loop still accepts and
 // forwards other CodexRuntimeCommand::JsonRpcResponse items (e.g. an
@@ -4546,6 +5085,7 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
                             &thread_runtime.sessions,
                             &thread_runtime.thread_sessions,
                             &thread_input_tx,
+                            None,
                             &session_id,
                             command,
                         ),
@@ -4567,6 +5107,7 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
                             &thread_state,
                             &thread_runtime.runtime_id,
                             &thread_runtime.sessions,
+                            None,
                             &session_id,
                             &thread_id,
                             command,
@@ -4749,6 +5290,119 @@ fn shared_codex_prompt_json_rpc_errors_fail_the_turn_without_tearing_down_runtim
     assert!(matches!(record.runtime, SessionRuntime::Codex(_)));
 }
 
+// Pins that startup timeouts are treated as shared-transport failures, not as
+// one bad turn. If the app-server is wedged, keeping the shared runtime attached
+// would route every later Codex session into the same stuck process.
+#[test]
+fn shared_codex_startup_timeout_tears_down_runtime() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let idle_session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex-startup-timeout");
+    let runtime_token = RuntimeToken::Codex(runtime.runtime_id.clone());
+
+    {
+        let mut shared_runtime = state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        *shared_runtime = Some(runtime.clone());
+    }
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Waiting for Codex".to_owned();
+
+        let idle_index = inner
+            .find_session_index(&idle_session_id)
+            .expect("idle Codex session should exist");
+        inner.sessions[idle_index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: idle_session_id.clone(),
+            }),
+        });
+        inner.sessions[idle_index].session.status = SessionStatus::Idle;
+        inner.sessions[idle_index].session.preview = "Idle Codex tab".to_owned();
+    }
+
+    handle_shared_codex_startup_response_error(
+        &state,
+        &runtime.runtime_id,
+        &session_id,
+        CodexResponseError::Timeout(
+            "timed out waiting for Codex app-server response to `turn/start`".to_owned(),
+        ),
+    );
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(session.status, SessionStatus::Error);
+    assert!(
+        session
+            .preview
+            .contains("failed to communicate with shared Codex app-server")
+    );
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. })
+            if text.contains("Turn failed: failed to communicate with shared Codex app-server")
+    ));
+
+    let idle_session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == idle_session_id)
+        .expect("idle session should remain present");
+    assert_eq!(idle_session.status, SessionStatus::Idle);
+    assert_eq!(idle_session.preview, "Idle Codex tab");
+
+    assert!(
+        state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .is_none()
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    let idle_record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == idle_session_id)
+        .expect("idle Codex session should exist");
+    assert!(matches!(idle_record.runtime, SessionRuntime::None));
+
+    drop(inner);
+    drop(runtime_token);
+}
+
 // Pins that an item/agentMessage/delta arriving while turn_started=false
 // is held (no transcript write) and then takes effect once turn/started
 // flips the flag for the matching turn_id.
@@ -4870,15 +5524,15 @@ fn shared_codex_app_server_agent_message_delta_waits_for_turn_started() {
 }
 
 // Pins that a server-initiated request (item/tool/requestUserInput) is
-// held while turn_started=false, and only records a Message::UserInputRequest
-// once turn/started has fired for the matching turn_id.
+// rejected while turn_started=false, and only records a
+// Message::UserInputRequest once turn/started has fired for the matching turn_id.
 // Guards against user-input prompts rendering before the turn is actually
-// live, which would mix tool-input UI into setup noise.
+// live, while still answering Codex's JSON-RPC request instead of dropping it.
 #[test]
 fn shared_codex_app_server_request_waits_for_turn_started() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
-    let (runtime, _input_rx, process) =
+    let (runtime, input_rx, process) =
         test_shared_codex_runtime("shared-codex-app-server-request-turn-started");
 
     {
@@ -4923,6 +5577,7 @@ fn shared_codex_app_server_request_waits_for_turn_started() {
         "method": "item/tool/requestUserInput",
         "params": {
             "threadId": "conversation-123",
+            "turnId": "turn-current",
             "questions": [
                 {
                     "header": "Scope",
@@ -4949,9 +5604,26 @@ fn shared_codex_app_server_request_waits_for_turn_started() {
         &pending_requests,
         &runtime.sessions,
         &runtime.thread_sessions,
-        &mpsc::channel::<CodexRuntimeCommand>().0,
+        &runtime.input_tx,
     )
     .unwrap();
+
+    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        CodexRuntimeCommand::JsonRpcResponse { response } => {
+            assert_eq!(
+                codex_json_rpc_response_message(&response),
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": "req-1",
+                    "error": {
+                        "code": -32001,
+                        "message": "Session unavailable; request could not be delivered."
+                    }
+                })
+            );
+        }
+        _ => panic!("expected JSON-RPC rejection"),
+    }
 
     let snapshot = state.full_snapshot();
     let session = snapshot

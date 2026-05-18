@@ -55,11 +55,13 @@ const SHARED_CODEX_STDIN_WATCHDOG_POLL_INTERVAL: Duration = Duration::from_milli
 #[derive(Clone, Debug)]
 struct SharedCodexStdinActivity {
     operation: &'static str,
+    context: String,
     started_at: std::time::Instant,
     timed_out: bool,
 }
 
 type SharedCodexStdinActivityState = Arc<Mutex<Option<SharedCodexStdinActivity>>>;
+type SharedCodexStdinContextState = Arc<Mutex<String>>;
 
 struct SharedCodexStdinActivityGuard<'a> {
     activity: &'a SharedCodexStdinActivityState,
@@ -69,11 +71,13 @@ impl<'a> SharedCodexStdinActivityGuard<'a> {
     fn new(
         activity: &'a SharedCodexStdinActivityState,
         operation: &'static str,
+        context: String,
     ) -> SharedCodexStdinActivityGuard<'a> {
         *activity
             .lock()
             .expect("shared Codex stdin activity mutex poisoned") = Some(SharedCodexStdinActivity {
             operation,
+            context,
             started_at: std::time::Instant::now(),
             timed_out: false,
         });
@@ -93,35 +97,81 @@ impl Drop for SharedCodexStdinActivityGuard<'_> {
 struct SharedCodexWatchedWriter<W> {
     inner: W,
     activity: SharedCodexStdinActivityState,
+    context: SharedCodexStdinContextState,
 }
 
 impl<W> SharedCodexWatchedWriter<W> {
     fn new(inner: W, activity: SharedCodexStdinActivityState) -> Self {
-        SharedCodexWatchedWriter { inner, activity }
+        SharedCodexWatchedWriter {
+            inner,
+            activity,
+            context: Arc::new(Mutex::new("idle".to_owned())),
+        }
+    }
+
+    fn set_activity_context(&mut self, context: impl Into<String>) {
+        *self
+            .context
+            .lock()
+            .expect("shared Codex stdin context mutex poisoned") = context.into();
+    }
+
+    fn activity_context(&self) -> SharedCodexStdinContextState {
+        self.context.clone()
     }
 }
 
 impl<W: Write> Write for SharedCodexWatchedWriter<W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let _guard = SharedCodexStdinActivityGuard::new(&self.activity, "write");
+        let context = self
+            .context
+            .lock()
+            .expect("shared Codex stdin context mutex poisoned")
+            .clone();
+        let _guard = SharedCodexStdinActivityGuard::new(&self.activity, "write", context);
         self.inner.write(buf)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        let _guard = SharedCodexStdinActivityGuard::new(&self.activity, "flush");
+        let context = self
+            .context
+            .lock()
+            .expect("shared Codex stdin context mutex poisoned")
+            .clone();
+        let _guard = SharedCodexStdinActivityGuard::new(&self.activity, "flush", context);
         self.inner.flush()
     }
 }
 
+fn set_shared_codex_writer_context(
+    context: Option<&SharedCodexStdinContextState>,
+    value: impl Into<String>,
+) {
+    if let Some(context) = context {
+        *context
+            .lock()
+            .expect("shared Codex stdin context mutex poisoned") = value.into();
+    }
+}
+
 fn shared_codex_stdin_timeout_detail(
-    operation: &'static str,
+    activity: &SharedCodexStdinActivity,
     timeout: Duration,
 ) -> String {
     // Log the internal detail to stderr; return a generic user-facing message.
     eprintln!(
-        "[termal] shared Codex writer thread blocked on stdin {operation} for over {}s",
-        timeout.as_secs()
+        "[termal] shared Codex writer thread blocked on stdin {} for over {}s; context={}",
+        activity.operation,
+        timeout.as_secs(),
+        activity.context
     );
+    if shared_codex_trace_enabled() {
+        eprintln!(
+            "shared-codex trace> context=stdin_watchdog method=- session=- thread=- event_turn=- active_turn=- completed_turn=- turn_started=- pending_turn_start=- reason=blocked_{} writer_context={}",
+            activity.operation,
+            activity.context
+        );
+    }
     "Agent communication timed out.".to_owned()
 }
 
@@ -146,7 +196,7 @@ fn spawn_shared_codex_stdin_watchdog(
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
 
-            let timed_out_operation = {
+            let timed_out_activity = {
                 let mut locked = watchdog_activity
                     .lock()
                     .expect("shared Codex stdin activity mutex poisoned");
@@ -155,14 +205,14 @@ fn spawn_shared_codex_stdin_watchdog(
                         if !entry.timed_out && entry.started_at.elapsed() >= timeout =>
                     {
                         entry.timed_out = true;
-                        Some(entry.operation)
+                        Some(entry.clone())
                     }
                     _ => None,
                 }
             };
 
-            if let Some(operation) = timed_out_operation {
-                let detail = shared_codex_stdin_timeout_detail(operation, timeout);
+            if let Some(activity) = timed_out_activity {
+                let detail = shared_codex_stdin_timeout_detail(&activity, timeout);
                 if let Err(err) = watchdog_state
                     .handle_shared_codex_runtime_exit(&watchdog_runtime_id, Some(&detail))
                 {
@@ -249,6 +299,8 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         }
         std::thread::spawn(move || {
             let mut stdin = SharedCodexWatchedWriter::new(stdin, writer_activity);
+            let writer_context = stdin.activity_context();
+            stdin.set_activity_context("initialize request");
             let initialize_result = send_codex_json_rpc_request(
                 &mut stdin,
                 &writer_pending_requests,
@@ -263,11 +315,13 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
             )
             .map_err(anyhow::Error::new)
             .and_then(|_| {
+                stdin.set_activity_context("initialized notification");
                 write_codex_json_rpc_message(
                     &mut stdin,
                     &json_rpc_notification_message("initialized"),
                 )
             });
+            stdin.set_activity_context("idle");
 
             if let Err(err) = initialize_result {
                 drop(stdin);
@@ -286,53 +340,73 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                     CodexRuntimeCommand::Prompt {
                         session_id,
                         command,
-                    } => handle_shared_codex_prompt_command_result(
-                        &writer_state,
-                        &session_id,
-                        &writer_runtime_token,
-                        handle_shared_codex_prompt_command(
-                            &mut stdin,
-                            &writer_pending_requests,
+                    } => {
+                        stdin.set_activity_context(format!(
+                            "command=Prompt session={session_id}"
+                        ));
+                        handle_shared_codex_prompt_command_result(
                             &writer_state,
-                            &writer_runtime_id,
-                            &writer_sessions,
-                            &writer_thread_sessions,
-                            &writer_input_tx,
                             &session_id,
-                            command,
-                        ),
-                    ),
+                            &writer_runtime_token,
+                            handle_shared_codex_prompt_command(
+                                &mut stdin,
+                                &writer_pending_requests,
+                                &writer_state,
+                                &writer_runtime_id,
+                                &writer_sessions,
+                                &writer_thread_sessions,
+                                &writer_input_tx,
+                                Some(&writer_context),
+                                &session_id,
+                                command,
+                            ),
+                        )
+                    }
                     CodexRuntimeCommand::StartTurnAfterSetup {
                         session_id,
                         thread_id,
                         command,
-                    } => handle_shared_codex_prompt_command_result(
-                        &writer_state,
-                        &session_id,
-                        &writer_runtime_token,
-                        handle_shared_codex_start_turn(
-                            &mut stdin,
-                            &writer_pending_requests,
+                    } => {
+                        stdin.set_activity_context(format!(
+                            "command=StartTurnAfterSetup session={session_id} thread={thread_id}"
+                        ));
+                        handle_shared_codex_prompt_command_result(
                             &writer_state,
-                            &writer_runtime_id,
-                            &writer_sessions,
                             &session_id,
-                            &thread_id,
-                            command,
-                        ),
-                    ),
+                            &writer_runtime_token,
+                            handle_shared_codex_start_turn(
+                                &mut stdin,
+                                &writer_pending_requests,
+                                &writer_state,
+                                &writer_runtime_id,
+                                &writer_sessions,
+                                Some(&writer_context),
+                                &session_id,
+                                &thread_id,
+                                command,
+                            ),
+                        )
+                    }
                     CodexRuntimeCommand::JsonRpcRequest {
                         method,
                         params,
                         timeout,
                         response_tx,
                     } => {
+                        stdin.set_activity_context(format!(
+                            "command=JsonRpcRequest method={method}"
+                        ));
+                        let request_id = Uuid::new_v4().to_string();
+                        stdin.set_activity_context(format!(
+                            "jsonrpc_request method={method} id={request_id}"
+                        ));
                         // Fire-and-forget: write the request, then spawn a
                         // waiter thread for the response. The writer thread
                         // returns immediately so other commands are not blocked.
-                        match start_codex_json_rpc_request(
+                        match start_codex_json_rpc_request_with_id(
                             &mut stdin,
                             &writer_pending_requests,
+                            request_id,
                             &method,
                             params,
                         ) {
@@ -365,12 +439,19 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                         }
                     }
                     CodexRuntimeCommand::JsonRpcResponse { response } => {
+                        stdin.set_activity_context(format!(
+                            "jsonrpc_response id={}",
+                            response.request_id
+                        ));
                         write_codex_json_rpc_message(
                             &mut stdin,
                             &codex_json_rpc_response_message(&response),
                         )
                     }
                     CodexRuntimeCommand::JsonRpcNotification { method } => {
+                        stdin.set_activity_context(format!(
+                            "command=JsonRpcNotification method={method}"
+                        ));
                         write_codex_json_rpc_message(
                             &mut stdin,
                             &json_rpc_notification_message(&method),
@@ -381,13 +462,18 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                         thread_id,
                         turn_id,
                     } => {
+                        let request_id = Uuid::new_v4().to_string();
+                        stdin.set_activity_context(format!(
+                            "jsonrpc_request method=turn/interrupt id={request_id} thread={thread_id} turn={turn_id}"
+                        ));
                         // Fire-and-forget: write the interrupt request, then
                         // spawn a waiter thread for the ack. The writer thread
                         // returns immediately so new commands (e.g. a follow-up
                         // prompt) are not blocked behind a slow interrupt ack.
-                        match start_codex_json_rpc_request(
+                        match start_codex_json_rpc_request_with_id(
                             &mut stdin,
                             &writer_pending_requests,
+                            request_id,
                             "turn/interrupt",
                             json!({
                                 "threadId": thread_id,
@@ -422,6 +508,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                         }
                     }
                     CodexRuntimeCommand::RefreshModelList { response_tx } => {
+                        stdin.set_activity_context("command=RefreshModelList");
                         fire_codex_model_list_page(
                             &mut stdin,
                             &writer_pending_requests,
@@ -437,16 +524,22 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                         accumulated,
                         page_count,
                         response_tx,
-                    } => fire_codex_model_list_page(
-                        &mut stdin,
-                        &writer_pending_requests,
-                        &writer_input_tx,
-                        Some(cursor),
-                        accumulated,
-                        page_count,
-                        response_tx,
-                    ),
+                    } => {
+                        stdin.set_activity_context(format!(
+                            "command=RefreshModelListPage page={page_count}"
+                        ));
+                        fire_codex_model_list_page(
+                            &mut stdin,
+                            &writer_pending_requests,
+                            &writer_input_tx,
+                            Some(cursor),
+                            accumulated,
+                            page_count,
+                            response_tx,
+                        )
+                    }
                 };
+                stdin.set_activity_context("idle");
 
                 if let Err(err) = command_result {
                     let _ = writer_state.handle_shared_codex_runtime_exit(
@@ -579,6 +672,9 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines().map_while(Result::ok) {
+                if !should_forward_runtime_stderr_line("codex", &line) {
+                    continue;
+                }
                 let timestamp = runtime_stderr_timestamp();
                 let prefix = format_runtime_stderr_prefix("codex", &timestamp);
                 eprintln!("{prefix} {line}");
@@ -710,6 +806,22 @@ fn find_shared_codex_session_id(
     Some(session_id)
 }
 
+/// Finds shared Codex session ID by active/completed turn ID.
+fn find_shared_codex_session_id_by_turn_id(
+    sessions: &SharedCodexSessionMap,
+    turn_id: &str,
+) -> Option<String> {
+    sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .iter()
+        .find_map(|(session_id, session_state)| {
+            (session_state.turn_id.as_deref() == Some(turn_id)
+                || session_state.completed_turn_id.as_deref() == Some(turn_id))
+            .then(|| session_id.clone())
+        })
+}
+
 /// Handles Codex message thread ID.
 fn codex_message_thread_id<'a>(message: &'a Value) -> Option<&'a str> {
     message
@@ -750,6 +862,7 @@ fn handle_shared_codex_prompt_command(
     sessions: &SharedCodexSessionMap,
     thread_sessions: &SharedCodexThreadMap,
     input_tx: &Sender<CodexRuntimeCommand>,
+    writer_context: Option<&SharedCodexStdinContextState>,
     session_id: &str,
     command: CodexPromptCommand,
 ) -> Result<()> {
@@ -772,6 +885,7 @@ fn handle_shared_codex_prompt_command(
             state,
             runtime_id,
             sessions,
+            writer_context,
             session_id,
             &thread_id,
             command,
@@ -808,7 +922,13 @@ fn handle_shared_codex_prompt_command(
         ),
     };
 
-    let pending = start_codex_json_rpc_request(writer, pending_requests, method, params)?;
+    let request_id = Uuid::new_v4().to_string();
+    set_shared_codex_writer_context(
+        writer_context,
+        format!("jsonrpc_request method={method} id={request_id} session={session_id}"),
+    );
+    let pending =
+        start_codex_json_rpc_request_with_id(writer, pending_requests, request_id, method, params)?;
 
     let waiter_pending = pending_requests.clone();
     let waiter_state = state.clone();
@@ -919,20 +1039,12 @@ fn handle_shared_codex_prompt_command(
                         .handle_shared_codex_runtime_exit(&waiter_runtime_id, Some(&detail));
                 }
             }
-            Err(CodexResponseError::JsonRpc(detail)
-                | CodexResponseError::Timeout(detail)) => {
-                let _ = waiter_state.fail_turn_if_runtime_matches(
-                    &waiter_session_id,
-                    &RuntimeToken::Codex(waiter_runtime_id),
-                    &detail,
-                );
-            }
-            Err(CodexResponseError::Transport(detail)) => {
-                let _ = waiter_state.handle_shared_codex_runtime_exit(
-                    &waiter_runtime_id,
-                    Some(&shared_codex_runtime_command_error_detail(&anyhow!(detail))),
-                );
-            }
+            Err(err) => handle_shared_codex_startup_response_error(
+                &waiter_state,
+                &waiter_runtime_id,
+                &waiter_session_id,
+                err,
+            ),
         }
     });
     Ok(())
@@ -947,6 +1059,7 @@ fn handle_shared_codex_start_turn(
     state: &AppState,
     runtime_id: &str,
     sessions: &SharedCodexSessionMap,
+    writer_context: Option<&SharedCodexStdinContextState>,
     session_id: &str,
     thread_id: &str,
     command: CodexPromptCommand,
@@ -995,6 +1108,12 @@ fn handle_shared_codex_start_turn(
         session_state.turn_started = false;
     }
 
+    set_shared_codex_writer_context(
+        writer_context,
+        format!(
+            "jsonrpc_request method=turn/start id={request_id} session={session_id} thread={thread_id}"
+        ),
+    );
     let pending_turn_request = match start_codex_json_rpc_request_with_id(
         writer,
         pending_requests,
@@ -1057,8 +1176,7 @@ fn handle_shared_codex_start_turn(
                         .map(str::to_owned);
                 }
             }
-            Err(CodexResponseError::JsonRpc(detail)
-                | CodexResponseError::Timeout(detail)) => {
+            Err(CodexResponseError::JsonRpc(detail)) => {
                 {
                     let mut sessions = wait_sessions
                         .lock()
@@ -1079,6 +1197,30 @@ fn handle_shared_codex_start_turn(
                     eprintln!(
                         "runtime state warning> failed to mark shared Codex turn error for session `{}`: {err:#}",
                         wait_session_id
+                    );
+                }
+            }
+            Err(CodexResponseError::Timeout(detail)) => {
+                let should_fail_runtime = {
+                    let mut sessions = wait_sessions
+                        .lock()
+                        .expect("shared Codex session mutex poisoned");
+                    let Some(session_state) = sessions.get_mut(&wait_session_id) else {
+                        return;
+                    };
+                    if session_state.pending_turn_start_request_id.as_deref() != Some(&request_id) {
+                        false
+                    } else {
+                        session_state.pending_turn_start_request_id = None;
+                        true
+                    }
+                };
+                if should_fail_runtime {
+                    handle_shared_codex_startup_response_error(
+                        &wait_state,
+                        &wait_runtime_id,
+                        &wait_session_id,
+                        CodexResponseError::Timeout(detail),
                     );
                 }
             }
@@ -1112,6 +1254,37 @@ fn handle_shared_codex_start_turn(
         }
     });
     Ok(())
+}
+
+fn handle_shared_codex_startup_response_error(
+    state: &AppState,
+    runtime_id: &str,
+    session_id: &str,
+    err: CodexResponseError,
+) {
+    match err {
+        CodexResponseError::JsonRpc(detail) => {
+            if let Err(err) = state.fail_turn_if_runtime_matches(
+                session_id,
+                &RuntimeToken::Codex(runtime_id.to_owned()),
+                &detail,
+            ) {
+                eprintln!(
+                    "runtime state warning> failed to mark shared Codex turn error for session `{session_id}`: {err:#}"
+                );
+            }
+        }
+        CodexResponseError::Timeout(detail) | CodexResponseError::Transport(detail) => {
+            if let Err(err) = state.handle_shared_codex_runtime_exit(
+                runtime_id,
+                Some(&shared_codex_runtime_command_error_detail(&anyhow!(detail))),
+            ) {
+                eprintln!(
+                    "runtime state warning> failed to tear down shared Codex runtime for session `{session_id}`: {err:#}"
+                );
+            }
+        }
+    }
 }
 
 fn fail_shared_codex_turn_without_runtime_exit(

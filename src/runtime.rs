@@ -534,6 +534,14 @@ impl SharedCodexSessions {
         self.inner.lock()
     }
 
+    fn try_lock(
+        &self,
+    ) -> std::sync::TryLockResult<
+        std::sync::MutexGuard<'_, HashMap<String, SharedCodexSessionState>>,
+    > {
+        self.inner.try_lock()
+    }
+
     fn schedule_completed_turn_cleanup(&self, session_id: &str, completed_turn_id: &str) {
         let _ = self.cleanup_tx.send(SharedCodexCompletedTurnCleanup {
             session_id: session_id.to_owned(),

@@ -148,6 +148,7 @@ fn shared_codex_stdin_watchdog_times_out_stalled_writer_and_clears_runtime() {
     let activity: SharedCodexStdinActivityState =
         Arc::new(Mutex::new(Some(SharedCodexStdinActivity {
             operation: "flush",
+            context: "test watchdog context".to_owned(),
             started_at: std::time::Instant::now() - Duration::from_millis(50),
             timed_out: false,
         })));

@@ -60,11 +60,32 @@ const MAX_FILE_CONTENT_BYTES: usize = 10 * 1024 * 1024;
 /// Starts the backend entrypoint.
 #[tokio::main]
 async fn main() {
+    ignore_sigpipe();
     if let Err(err) = run().await {
         eprintln!("fatal: {err:#}");
         std::process::exit(1);
     }
 }
+
+/// Ignores SIGPIPE process-wide so writes to a closed child pipe (e.g. a
+/// dead shared Codex app-server) return `ErrorKind::BrokenPipe` instead of
+/// terminating TermAl. Rust's stdlib leaves SIGPIPE at `SIG_DFL` for shell
+/// pipeline compatibility, which is fatal for a server that supervises
+/// long-lived child processes — without this, a Codex crash silently kills
+/// TermAl before the runtime supervisor in `src/codex.rs` can run its
+/// cleanup paths and respawn the child.
+#[cfg(unix)]
+fn ignore_sigpipe() {
+    // SAFETY: setting a process-wide signal disposition once, immediately
+    // after tokio starts and before any code writes to a child pipe. No
+    // thread inspects the previous handler so the return value is ignored.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+}
+
+#[cfg(not(unix))]
+fn ignore_sigpipe() {}
 
 /// Runs the selected CLI mode.
 async fn run() -> Result<()> {

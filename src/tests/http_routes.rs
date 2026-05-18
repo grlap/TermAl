@@ -567,7 +567,7 @@ async fn send_message_route_returns_full_session_and_publishes_prompt_delta() {
     let state = test_app_state();
     let _files = HttpRouteTestFiles::capture(&state);
     let session_id = test_session_id(&state, Agent::Claude);
-    let (runtime, _input_rx) = test_claude_runtime_handle("send-message-route-full-session");
+    let (runtime, input_rx) = test_claude_runtime_handle("send-message-route-full-session");
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -595,6 +595,16 @@ async fn send_message_route_returns_full_session_and_publishes_prompt_delta() {
     .await;
 
     assert_eq!(status, StatusCode::ACCEPTED);
+    match input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("route should enqueue the runtime prompt before returning")
+    {
+        ClaudeRuntimeCommand::Prompt(command) => {
+            assert_eq!(command.text, "Visible route prompt");
+            assert!(command.attachments.is_empty());
+        }
+        _ => panic!("expected Claude prompt command"),
+    }
     let session = response
         .sessions
         .iter()

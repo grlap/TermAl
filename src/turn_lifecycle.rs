@@ -282,9 +282,37 @@ impl AppState {
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
             if !record.runtime.matches_runtime_token(token) {
+                if matches!(token, RuntimeToken::Codex(_)) {
+                    trace_shared_codex_event(
+                        "finish_noop",
+                        "state/finish_turn",
+                        Some(session_id),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        Some("runtime_mismatch"),
+                    );
+                }
                 return Ok(());
             }
             if record.runtime_stop_in_progress {
+                if matches!(token, RuntimeToken::Codex(_)) {
+                    trace_shared_codex_event(
+                        "finish_deferred",
+                        "state/finish_turn",
+                        Some(session_id),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        Some("runtime_stop_in_progress"),
+                    );
+                }
                 record
                     .deferred_stop_callbacks
                     .push(DeferredStopCallback::TurnCompleted);
@@ -293,6 +321,20 @@ impl AppState {
 
             if record.session.status == SessionStatus::Active {
                 record.session.status = SessionStatus::Idle;
+            }
+            if matches!(token, RuntimeToken::Codex(_)) {
+                trace_shared_codex_event(
+                    "finish_apply",
+                    "state/finish_turn",
+                    Some(session_id),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some("status_idle"),
+                );
             }
             if record.session.preview.trim().is_empty() {
                 record.session.preview = "Turn completed.".to_owned();

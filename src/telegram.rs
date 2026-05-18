@@ -2694,10 +2694,20 @@ fn forward_new_assistant_message_outcome(
         is_forward_next_assistant_message_session(state, session_id);
     let mut cursor = resolve_assistant_forwarding_cursor(state, session_id, messages);
 
-    // While a session is active or approval-paused, assistant text can still
-    // belong to the pre-existing local turn. If this arm was created behind
-    // that turn, keep updating the baseline and do not forward old output as
-    // the Telegram prompt's reply.
+    // Assistant forwarding has two active-session modes:
+    //
+    // - `baseline_while_active=true` means a Telegram prompt was queued behind
+    //   an already-active local turn. Until the session settles, every
+    //   assistant message may still belong to that older turn, so the cursor is
+    //   only a moving baseline and no visible text is sent to Telegram.
+    // - `baseline_while_active=false` on an armed session means the Telegram
+    //   prompt started from a settled baseline. Active assistant text can be
+    //   forwarded because any new message/growth is attributable to that
+    //   Telegram-originated prompt.
+    //
+    // Cursor progress must preserve message id, delivered char count/hash,
+    // partial chunk state, and footer state. Once settled, hash divergence
+    // triggers a full resend and pure length growth sends only the suffix.
     if forward_without_existing_baseline
         && cursor.baseline_while_active
         && response
@@ -2755,6 +2765,11 @@ fn forward_new_assistant_message_outcome(
 
     if forward_without_existing_baseline && cursor.baseline_while_active {
         if let Some(pos) = position_of_last {
+            // First settled poll after queuing behind a local turn has no
+            // stronger turn-boundary signal. If the tracked same message grew
+            // before this poll, record its current length as the baseline and
+            // wait for later growth or a later assistant message. Forwarding
+            // the already-present suffix here could leak the previous turn.
             let text_chars = match &messages[pos] {
                 TelegramSessionFetchMessage::Text { text, .. } => Some(text.chars().count()),
                 _ => None,

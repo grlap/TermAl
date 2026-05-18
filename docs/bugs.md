@@ -1,3 +1,5 @@
+Non-hang version: shared Codex delegation cleanup uses nonblocking detach after `turn/completed`.
+
 # Bugs & Known Issues
 
 This file tracks only reproduced, current issues and open review follow-up
@@ -7,20 +9,26 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## First-settled active-baseline same-message growth lacks a safe turn boundary
+## Shared Codex runtime can leave sessions stuck instead of recovering
 
-**Severity:** Medium - `src/telegram.rs:2583-2637`. When a Telegram prompt is armed behind an active/approval-paused turn, the relay baselines the current assistant message while `baseline_while_active=true`. If the tracked message id has already grown by the first settled poll, the relay cannot distinguish "old turn finished after the last active poll" from "the Telegram reply was appended to the same message id."
-
-Forwarding the grown same message immediately can leak the pre-existing active turn into Telegram and consume the arm. Baseline-only behavior avoids that leak but can miss producers that append the actual Telegram reply to the same assistant message before the first settled poll.
+**Severity:** High - the shared `codex app-server` is the expected Codex runtime, but TermAl must retire it promptly when the transport is no longer usable. If a closed stdin, startup timeout, or wedged request leaves the runtime attached, later Codex turns can keep routing into the bad runtime and appear stuck.
 
 **Current behavior:**
-- First settled poll records the grown same-message length as the baseline and waits for later growth or a later message.
-- Later same-message growth is forwarded because `resend_if_grown` remains armed.
-- Same-message reply text already present on the first settled poll is not forwarded.
+- `session-666` reproduced this with a trivial `reply hi`: the first turn failed with `shared Codex app-server exited with status signal: 2 (SIGINT)`.
+- A controlled delegate repro (`session-690`) that attempted the closed/unknown terminal-stdin path left both the delegate and `session-666` active until the shared Codex app-server was killed and the server restarted.
+- Clean traces for `session-689`, `session-701`, and `session-723` reached `turn/completed` -> `finish_apply`, and `session-666` could answer `hi` immediately after the `Unknown process id` terminal-tool diagnostic. That diagnostic alone is not sufficient to wedge the app-server.
+- The first concrete post-completion cleanup race candidate was in terminal read-only delegation cleanup: `publish_delegation_refresh_side_effects` used the generic `shutdown_removed_runtime`, which sends `turn/interrupt` before detaching a shared Codex session. Naturally terminal delegation children now detach their shared-session bookkeeping without interrupting the already-finished turn, with regression coverage proving no `InterruptTurn` is queued and the shared process stays alive. Explicitly canceled delegation cleanup still uses the interrupting removal path, with stop-conflict coverage proving `InterruptTurn` is not skipped.
+- A live smoke delegate (`session-745`) completed with `turn/completed` -> `finish_apply`, then emitted `delegation_runtime_cleanup_start ... terminal_detach` without a matching `delegation_runtime_cleanup_done/error`. That explained why the child result existed but was not posted back to the parent chat.
+- Root cause: shared Codex event routing holds `runtime.sessions` while applying `turn/completed`; `finish_turn` can refresh the completed delegation and terminal cleanup tried to synchronously `detach()` the same shared session, self-deadlocking before `publish_delegation_lifecycle_delta`.
+- Natural terminal delegation cleanup now uses nonblocking shared-session detach: immediate detach when the mutex is free, or deferred detach on a cleanup thread when `turn/completed` already owns the mutex. Regression coverage holds `runtime.sessions` and proves parent-result cleanup does not block.
+- Startup timeouts now retire the shared runtime so future turns get a fresh app-server instead of reusing a known-bad transport.
+- The desired behavior is recovery on shared-runtime failure, not splitting delegate and user traffic into separate app-servers.
 
 **Proposal:**
-- Add a stronger turn-boundary signal from the session/agent layer, then forward only text known to belong to the Telegram-originated prompt.
-- Or document that same-message append before the first settled poll is unsupported for queued Telegram prompts.
+- Live-retest the completed-delegate recycle path after restarting with the nonblocking detach build: a successful run should show `delegation_runtime_cleanup_start`, `shared_session_detach_deferred` when the event lock is held, then `delegation_runtime_cleanup_done`, parent-result publication, and later `shared_session_detach_deferred_done`.
+- Then rerun the closed/unknown process-id delegate repro, send a trivial prompt in another Codex session, and confirm it completes without the shared app-server receiving SIGINT or the UI/runtime remaining busy.
+- Keep the writer-context watchdog trace until the live repro proves the cleanup race is closed or identifies a different blocked JSON-RPC command.
+- Add a higher-level integration regression that starts a stuck delegate, sends a trivial prompt in another Codex session, and asserts the second session completes after recovery or fails fast without remaining active indefinitely.
 
 ## `forward_new_assistant_message_outcome` is now ~400 lines with interleaved early-returns
 
@@ -88,21 +96,6 @@ Forwarding the grown same message immediately can leak the pre-existing active t
 **Proposal:**
 - Split UI config and runtime cursor/chat state into separate files, or guard all writers with an OS-level file lock.
 - Add cross-process interleaving coverage proving config and runtime state both survive competing writes.
-
-## Telegram settings HTTP API split across three routes diverges from `/api/settings` convention
-
-**Severity:** Medium - every other settings surface uses `POST /api/settings` returning `StateResponse` with SSE broadcast; Telegram uses `GET /api/telegram/status` + `POST /api/telegram/config` + `POST /api/telegram/test` returning `TelegramStatusResponse` with no broadcast.
-
-`src/main.rs:233-235`. The `/test` route reasonably stays separate (genuinely a side-effecting outbound call). But splitting the GET/POST status+config into its own route is a divergence from the established pattern. The split also means none of the rest of the codebase's settings infrastructure (revision bumping, SSE broadcast, partial-payload merging via `UpdateAppSettingsRequest`) applies. A future caller scripting via the API has two patterns to learn.
-
-**Current behavior:**
-- Existing settings flow through `POST /api/settings` returning `StateResponse` (broadcast via SSE).
-- Telegram settings use three new routes returning custom `TelegramStatusResponse` (not broadcast).
-- The divergence is unexplained in code or docs.
-
-**Proposal:**
-- Fold the Telegram config bag into `UpdateAppSettingsRequest` with a `telegram: Option<UpdateTelegramConfigRequest>` field, returning `StateResponse` like every other setting.
-- Or document explicitly in `docs/features/` why Telegram is intentionally separated (e.g., "secret tokens kept out of the broadcast snapshot").
 
 ## `AgentSessionPanel.tsx` exceeds 2000-line architecture rubric threshold
 
@@ -175,21 +168,19 @@ Many production SQLite helpers in `src/persist.rs` are `#[cfg(not(test))]`, so e
 - Add coverage for post-commit permission failures, cache invalidation reset, and fatal redirection/reparse checks.
 - Keep legacy JSON fixture tests separate from production runtime persistence tests.
 
-## `SessionPaneView.tsx` and `app-session-actions.ts` still past architecture file-size thresholds
+## `SessionPaneView.tsx` still past architecture file-size threshold
 
-**Severity:** Low - `ui/src/SessionPaneView.tsx` is still about 3,404 lines and `ui/src/app-session-actions.ts` is still about 1,881 lines after the latest small helper splits. `SessionPaneView.tsx` remains past the TSX component threshold (~2,000 lines), and `app-session-actions.ts` remains past the utility-module threshold (~1,500 lines).
+**Severity:** Low - `ui/src/SessionPaneView.tsx` is still 3,262 lines after the latest helper splits, past the TSX component threshold (~2,000 lines). `ui/src/app-session-actions.ts` is now at the 1,500-line utility-module threshold after its Codex-thread, marker, and draft-attachment action handlers were extracted.
 
-The waiting-indicator helpers now live in `ui/src/SessionPaneView.waiting-indicator.ts`, the active-tab resolver now lives in `ui/src/SessionPaneView.active-tab.ts`, pane message-list selection and visible-message projection now live in `ui/src/SessionPaneView.messages.ts`, the pane scroll-key resolver now lives in `ui/src/SessionPaneView.scroll-key.ts`, the `SessionPaneView` prop contract now lives in `ui/src/SessionPaneView.types.ts`, the session-settings optimism helpers now live in `ui/src/app-session-settings-optimism.ts`, session-settings API payload construction now lives in `ui/src/app-session-settings-payload.ts`, conversation-marker response matching now lives in `ui/src/conversation-marker-response-match.ts`, optimistic pending prompt construction now lives in `ui/src/optimistic-pending-prompt.ts`, draft ref/store sync now lives in `ui/src/app-session-draft-sync.ts`, local marker session transforms now live in `ui/src/conversation-marker-session-mutations.ts`, marker create-request construction now lives in `ui/src/conversation-marker-requests.ts`, new-session model request selection now lives in `ui/src/app-session-model-requests.ts`, draft attachment collection transforms now live in `ui/src/app-session-draft-attachments.ts`, and the session action type surface now lives in `ui/src/app-session-actions-types.ts`. Those moves reduced local clutter and gave the helpers direct unit-testable surfaces, but the main production modules remain over threshold.
+The waiting-indicator helpers now live in `ui/src/SessionPaneView.waiting-indicator.ts`, the active-tab resolver now lives in `ui/src/SessionPaneView.active-tab.ts`, active tab/session/workspace derivation now lives in `ui/src/SessionPaneView.active-context.ts`, pane message-list selection and visible-message projection now live in `ui/src/SessionPaneView.messages.ts`, the pane scroll-key resolver now lives in `ui/src/SessionPaneView.scroll-key.ts`, and the `SessionPaneView` prop contract now lives in `ui/src/SessionPaneView.types.ts`. Those moves reduced local clutter and gave the helpers direct unit-testable surfaces, but the main pane component remains over threshold.
 
 **Current behavior:**
 - `SessionPaneView.tsx` still owns pane orchestration, tab rendering, scroll/follow behavior, panel selection, and composer/footer wiring.
-- `app-session-actions.ts` still owns prompt send, draft attachment lifecycle, session creation, stop/kill/rename, settings changes, model refresh, Codex thread actions, and marker mutations.
-- Both files now have small helper splits, but neither production module is below its applicable review threshold.
+- The main component now has active-context and small helper splits, but the production TSX module is still above its review threshold.
 
 **Proposal:**
 - Continue with dedicated pure-code-move commits per CLAUDE.md.
-- For `SessionPaneView.tsx`: extract session-find/scroll-follow and panel tab orchestration clusters.
-- For `app-session-actions.ts`: extract prompt send/draft lifecycle and marker/session-settings action groups into focused modules.
+- For `SessionPaneView.tsx`: extract session-find/scroll-follow and panel body rendering clusters.
 
 ## `app-live-state.ts` past 1,500-line review threshold for TypeScript utility modules
 
@@ -329,25 +320,6 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
 - Alternative: batch-measurement pass when the virtualization window shifts — hide the wrapper briefly, mount the newly-entering cards, wait for all their measurements, then reveal.
 - Not: raise the estimator cap. Large overshoots trade one visible artifact for a worse one.
 
-## Hard kill (SIGKILL, power loss) can still lose the last un-drained persist write
-
-**Severity:** Low - restarting the backend process while the browser tab is still open can make the most recent assistant message disappear from the UI, because the persist thread has a small window between "commit fires" and "row is durably in SQLite" during which an un-drained mutation is lost on kill.
-
-Persistence is intentionally background and best-effort: every `commit_persisted_delta_locked` (and similar delta-producing commit helpers) signals `PersistRequest::Delta` to the persist thread and returns. The thread then locks `inner`, builds the delta, and writes. If the backend process is killed (SIGKILL, laptop sleep wedge, crash, manual restart of the dev process) between the signal fire and the SQLite commit, the mutation is lost. Old pre-delta-persistence behavior had the same window — the persist channel carried a full-state clone — so this is not a regression introduced by the delta refactor, but the symptom is visible now because the reconnect adoption path applies the persisted state with `allowRevisionDowngrade: true`: the browser's in-memory copy of the just-streamed last message is replaced by the freshly loaded (older) backend state, making the message disappear from the UI.
-
-The message is not hidden; it is genuinely gone from SQLite. No amount of frontend re-rendering will bring it back.
-
-**Current behavior:**
-- Active-turn deltas (e.g., streaming assistant text, `MessageCreated` at the end of a turn) commit through `commit_persisted_delta_locked`, which only signals the persist thread.
-- The persist thread acquires `inner` briefly, collects the delta, and writes to SQLite.
-- Between "signal sent" and "row written" there is a small time window (usually sub-millisecond, but can stretch under contention) during which a hard kill of the backend loses the mutation.
-- On backend restart + SSE reconnect, the browser's `allowRevisionDowngrade: true` adoption path applies the persisted state. The persisted state is missing the un-drained mutation, so the in-memory latest message is overwritten and disappears.
-
-**Proposal:**
-- The user-initiated restart path (Ctrl+C / SIGTERM) is now covered by the graceful-shutdown drain — see the preamble.
-- For the residual hard-kill case (SIGKILL, power loss): consider opt-in synchronous persistence for the last message of a turn — the turn-completion commit (`finish_turn_ok_if_runtime_matches`'s `commit_locked`) could flush synchronously before returning, trading a few ms of latency on turn completion for zero-loss durability of the final message.
-- Or accept and document this as a known Phase-1 limitation in `docs/architecture.md` (background-persist durability contract: at most one un-drained mutation may be lost on hard kill).
-
 ## SSE state broadcaster can reorder state events against deltas
 
 **Severity:** Medium - under a burst of mutations, a delta event can arrive at the client before the state event for the same revision, triggering avoidable `/api/state` resync fetches.
@@ -404,8 +376,6 @@ Before the broadcaster thread, `commit_locked` published state synchronously (`s
   cover manual retry hitting a transient failure, then the next scheduled attempt adopting a newer same-instance snapshot while polling still continues until SSE confirms.
 - [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:
   refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
-- [ ] P2: Document active Telegram reply forwarding invariants:
-  add a short contract comment near the active forwarding gate in `src/telegram.rs` explaining when Telegram may see active output, what cursor metadata must preserve, and how settled replacement/divergence is expected to be handled.
 - [ ] P2: Cover Telegram relay active-project reconciliation:
   start an in-process relay with subscribed projects but no default and assert startup fails or status exposes the effective `activeProjectId`; delete a project used by a running relay and assert the relay is stopped or restarted without the deleted id.
 - [ ] P2: Cover Telegram relay runtime lifecycle seam:

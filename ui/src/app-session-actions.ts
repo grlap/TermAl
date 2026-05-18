@@ -4,8 +4,7 @@
 // App.tsx. That includes prompt send/draft-attachment lifecycle, session
 // creation/cloning, project creation + folder picking, approval/user-input/MCP
 // submissions, queued-prompt cancellation, stop/kill/rename, session settings
-// updates, session-model refresh, Codex thread actions, and agent-command
-// refresh.
+// updates, session-model refresh, and agent-command refresh.
 //
 // Does not own: dialog/popup open-close state, popover positioning/focus
 // management, render-only props/JSX, or top-level request-error presentation.
@@ -13,32 +12,23 @@
 // Split out of: ui/src/App.tsx (Slice 14 of docs/app-split-plan.md).
 
 import {
-  archiveCodexThread,
   cancelQueuedPrompt,
-  compactCodexThread,
-  createConversationMarker,
   createProject,
-  deleteConversationMarker,
   createSession,
   fetchAgentCommands,
   fetchState,
-  forkCodexThread,
   killSession,
   pickProjectRoot,
   refreshSessionModelOptions,
   renameSession,
-  rollbackCodexThread,
   sendMessage,
   stopSession,
   submitApproval,
   submitCodexAppRequest,
   submitMcpElicitation,
   submitUserInput,
-  unarchiveCodexThread,
-  updateConversationMarker,
   updateSessionSettings,
   type StateResponse,
-  type UpdateConversationMarkerRequest,
 } from "./api";
 import type { AdoptStateOptions } from "./app-live-state";
 import type {
@@ -51,12 +41,9 @@ export type {
   UseAppSessionActionsReturn,
 } from "./app-session-actions-types";
 import { startActivePromptPoll } from "./active-prompt-poll";
-import {
-  appendDraftAttachments,
-  draftAttachmentsMatchingId,
-  draftAttachmentsWithoutId,
-  removeDraftAttachmentFromState,
-} from "./app-session-draft-attachments";
+import { createCodexThreadActions } from "./app-session-codex-thread-actions";
+import { createDraftAttachmentActions } from "./app-session-draft-attachment-actions";
+import { createSessionMarkerActions } from "./app-session-marker-actions";
 import { isServerInstanceMismatch } from "./state-revision";
 import {
   getErrorMessage,
@@ -84,17 +71,10 @@ import { buildSessionSettingsPayload } from "./app-session-settings-payload";
 import { upsertSessionStoreSession } from "./session-store";
 import { syncActionComposerDraftSlice } from "./app-session-draft-sync";
 import { requestedModelForNewSession } from "./app-session-model-requests";
-import { conversationMarkerSatisfiesResponse } from "./conversation-marker-response-match";
-import { buildCreateConversationMarkerRequest } from "./conversation-marker-requests";
-import {
-  deleteConversationMarkerLocally,
-  upsertConversationMarkerLocally,
-} from "./conversation-marker-session-mutations";
 import {
   findWorkspacePaneIdForSession,
   openSessionInWorkspaceState,
   reconcileWorkspaceState,
-  type WorkspaceState,
 } from "./workspace";
 import {
   classifyRejectedActionState,
@@ -108,7 +88,6 @@ import type {
   ClaudeApprovalMode,
   ClaudeEffortLevel,
   CodexReasoningEffort,
-  CreateConversationMarkerOptions,
   CursorMode,
   GeminiApprovalMode,
   JsonValue,
@@ -451,77 +430,6 @@ export function useAppSessionActions(
     });
   }
 
-  function shouldApplyMarkerMutationResponse(
-    sessionId: string,
-    response: {
-      revision: number;
-      serverInstanceId: string;
-      marker?: NonNullable<Session["markers"]>[number];
-      markerId?: string;
-      sessionMutationStamp?: number | null;
-    },
-    options: { deleted?: boolean } = {},
-  ): "apply" | "stale-success" | "deferred" {
-    const markerId = response.marker?.id ?? response.markerId;
-    if (!markerId) {
-      return "deferred";
-    }
-
-    if (
-      isServerInstanceMismatch(
-        lastSeenServerInstanceIdRef.current,
-        response.serverInstanceId,
-      )
-    ) {
-      // A server-instance mismatch means this response came from a restarted
-      // backend. Do not optimistically apply its marker; let recovery adopt
-      // the authoritative snapshot from the new instance.
-      const sseReconnectRequestId = forceSseReconnect();
-      requestActionRecoveryResync({
-        openSessionId: sessionId,
-        paneId: findWorkspacePaneIdForSession(workspace, sessionId),
-        allowUnknownServerInstance: true,
-        sseReconnectRequestId,
-      });
-      return "deferred";
-    }
-
-    if (
-      latestStateRevisionRef.current !== null &&
-      response.revision <= latestStateRevisionRef.current
-    ) {
-      const currentSession =
-        sessionsRef.current.find((session) => session.id === sessionId) ?? null;
-      const currentMarker = currentSession?.markers?.find(
-        (marker) => marker.id === markerId,
-      );
-      const responseMutationStamp = response.sessionMutationStamp ?? null;
-      const currentMutationStamp = currentSession?.sessionMutationStamp ?? null;
-      const targetStateMatches = options.deleted
-        ? currentMarker === undefined
-        : conversationMarkerSatisfiesResponse(currentMarker, response.marker);
-      const hasTargetEvidence =
-        currentSession !== null &&
-        targetStateMatches &&
-        (responseMutationStamp === null ||
-          (currentMutationStamp !== null &&
-            currentMutationStamp >= responseMutationStamp));
-      if (hasTargetEvidence) {
-        return "stale-success";
-      }
-
-      requestActionRecoveryResync({
-        openSessionId: sessionId,
-        paneId: findWorkspacePaneIdForSession(workspace, sessionId),
-        allowUnknownServerInstance: true,
-      });
-      return "deferred";
-    }
-
-    latestStateRevisionRef.current = response.revision;
-    return "apply";
-  }
-
   async function openCreatedSession(
     created: Awaited<ReturnType<typeof createSession>>,
     paneId: string | null,
@@ -768,50 +676,6 @@ export function useAppSessionActions(
     })();
 
     return true;
-  }
-
-  function handleDraftAttachmentsAdd(
-    sessionId: string,
-    attachments: DraftImageAttachment[],
-  ) {
-    const nextAttachments = [
-      ...(draftAttachmentsBySessionIdRef.current[sessionId] ?? []),
-      ...attachments,
-    ];
-    syncComposerDraftSlice(
-      sessionId,
-      draftsBySessionIdRef.current[sessionId] ?? "",
-      nextAttachments,
-    );
-    setDraftAttachmentsBySessionId((current) =>
-      appendDraftAttachments(current, sessionId, attachments),
-    );
-  }
-
-  function handleDraftAttachmentRemove(
-    sessionId: string,
-    attachmentId: string,
-  ) {
-    const existingAttachments =
-      draftAttachmentsBySessionIdRef.current[sessionId] ?? [];
-    const removed = draftAttachmentsMatchingId(existingAttachments, attachmentId);
-    if (removed.length === 0) {
-      return;
-    }
-
-    releaseDraftAttachments(removed);
-    const nextRefAttachments = draftAttachmentsWithoutId(
-      existingAttachments,
-      attachmentId,
-    );
-    syncComposerDraftSlice(
-      sessionId,
-      draftsBySessionIdRef.current[sessionId] ?? "",
-      nextRefAttachments,
-    );
-    setDraftAttachmentsBySessionId((current) =>
-      removeDraftAttachmentFromState(current, sessionId, attachmentId),
-    );
   }
 
   async function handleNewSession({
@@ -1502,143 +1366,6 @@ export function useAppSessionActions(
     }
   }
 
-  async function runCodexThreadStateAction(
-    sessionId: string,
-    request: () => Promise<StateResponse>,
-    successNotice: string,
-  ) {
-    setRequestError(null);
-    setUpdatingSessionIds((current) =>
-      setSessionFlag(current, sessionId, true),
-    );
-    try {
-      const state = await request();
-      if (!isMountedRef.current) {
-        return;
-      }
-      if (
-        !isSuccessfulAdoptActionStateOutcome(
-          adoptSessionActionState(sessionId, state),
-        )
-      ) {
-        return;
-      }
-      setSessionSettingNotices((current) => ({
-        ...current,
-        [sessionId]: successNotice,
-      }));
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return;
-      }
-      reportRequestError(error);
-    } finally {
-      if (isMountedRef.current) {
-        setUpdatingSessionIds((current) =>
-          setSessionFlag(current, sessionId, false),
-        );
-      }
-    }
-  }
-
-  async function handleForkCodexThread(
-    sessionId: string,
-    preferredPaneId: string | null,
-  ) {
-    setRequestError(null);
-    setUpdatingSessionIds((current) =>
-      setSessionFlag(current, sessionId, true),
-    );
-    try {
-      const created = await forkCodexThread(sessionId);
-      if (!isMountedRef.current) {
-        return;
-      }
-      const adopted = adoptCreatedSessionResponse(created, {
-        openSessionId: created.sessionId,
-        paneId: preferredPaneId,
-      });
-      const canOpenStaleCreatedSession =
-        adopted === "stale" &&
-        sessionsRef.current.some((session) => session.id === created.sessionId);
-      if (adopted === "stale" && !canOpenStaleCreatedSession) {
-        requestActionRecoveryResync({
-          openSessionId: created.sessionId,
-          paneId: preferredPaneId,
-          allowUnknownServerInstance: true,
-        });
-      }
-      const canUseCreatedSession =
-        adopted === "adopted" || canOpenStaleCreatedSession;
-      if (canOpenStaleCreatedSession) {
-        setWorkspace((current) =>
-          applyControlPanelLayout(
-            openSessionInWorkspaceState(
-              current,
-              created.sessionId,
-              preferredPaneId,
-            ),
-          ),
-        );
-      }
-      if (canUseCreatedSession) {
-        setSessionSettingNotices((current) => ({
-          ...current,
-          [sessionId]: "Forked the live Codex thread into a new session.",
-          [created.sessionId]:
-            "This session is attached to a forked Codex thread. Earlier Codex history was restored from Codex where available.",
-        }));
-      }
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return;
-      }
-      reportRequestError(error);
-    } finally {
-      if (isMountedRef.current) {
-        setUpdatingSessionIds((current) =>
-          setSessionFlag(current, sessionId, false),
-        );
-      }
-    }
-  }
-
-  async function handleArchiveCodexThread(sessionId: string) {
-    await runCodexThreadStateAction(
-      sessionId,
-      () => archiveCodexThread(sessionId),
-      "Archived the live Codex thread for this session.",
-    );
-  }
-
-  async function handleUnarchiveCodexThread(sessionId: string) {
-    await runCodexThreadStateAction(
-      sessionId,
-      () => unarchiveCodexThread(sessionId),
-      "Restored the archived Codex thread for this session.",
-    );
-  }
-
-  async function handleCompactCodexThread(sessionId: string) {
-    await runCodexThreadStateAction(
-      sessionId,
-      () => compactCodexThread(sessionId),
-      "Started Codex context compaction for this session.",
-    );
-  }
-
-  async function handleRollbackCodexThread(
-    sessionId: string,
-    numTurns: number,
-  ) {
-    const turnLabel = numTurns === 1 ? "turn" : "turns";
-    await runCodexThreadStateAction(
-      sessionId,
-      () => rollbackCodexThread(sessionId, numTurns),
-      `Rolled the live Codex thread back by ${numTurns} ${turnLabel}.`,
-    );
-  }
-
   async function handleRefreshAgentCommands(sessionId: string) {
     if (refreshingAgentCommandSessionIdsRef.current[sessionId]) {
       return;
@@ -1692,163 +1419,55 @@ export function useAppSessionActions(
     }
   }
 
-  async function handleCreateConversationMarker(
-    sessionId: string,
-    messageId: string,
-    options: CreateConversationMarkerOptions = {},
-  ) {
-    const session = sessionLookup.get(sessionId);
-    if (!session || !session.messages.some((message) => message.id === messageId)) {
-      return false;
-    }
+  const { handleDraftAttachmentsAdd, handleDraftAttachmentRemove } =
+    createDraftAttachmentActions({
+      draftAttachmentsBySessionIdRef,
+      draftsBySessionIdRef,
+      setDraftAttachmentsBySessionId,
+      syncComposerDraftSlice,
+    });
 
-    setUpdatingSessionIds((current) =>
-      setSessionFlag(current, sessionId, true),
-    );
-    try {
-      const response = await createConversationMarker(
-        sessionId,
-        buildCreateConversationMarkerRequest(messageId, options),
-      );
-      if (!isMountedRef.current) {
-        return false;
-      }
+  const {
+    handleForkCodexThread,
+    handleArchiveCodexThread,
+    handleUnarchiveCodexThread,
+    handleCompactCodexThread,
+    handleRollbackCodexThread,
+  } = createCodexThreadActions({
+    adoptCreatedSessionResponse,
+    adoptSessionActionState: (sessionId, state) =>
+      isSuccessfulAdoptActionStateOutcome(
+        adoptSessionActionState(sessionId, state),
+      ),
+    applyControlPanelLayout,
+    isMountedRef,
+    reportRequestError,
+    requestActionRecoveryResync,
+    sessionsRef,
+    setRequestError,
+    setSessionSettingNotices,
+    setUpdatingSessionIds,
+    setWorkspace,
+  });
 
-      const responseOutcome = shouldApplyMarkerMutationResponse(sessionId, response);
-      if (responseOutcome === "deferred") {
-        return false;
-      }
-      if (responseOutcome === "apply") {
-        updateSessionLocally(sessionId, (currentSession) =>
-          upsertConversationMarkerLocally(
-            currentSession,
-            response.marker,
-            response.sessionMutationStamp,
-          ),
-        );
-      }
-      setRequestError(null);
-      return true;
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return false;
-      }
-      reportRequestError(error);
-      return false;
-    } finally {
-      if (isMountedRef.current) {
-        setUpdatingSessionIds((current) =>
-          setSessionFlag(current, sessionId, false),
-        );
-      }
-    }
-  }
-
-  async function handleUpdateConversationMarker(
-    sessionId: string,
-    markerId: string,
-    payload: UpdateConversationMarkerRequest,
-  ) {
-    const session = sessionLookup.get(sessionId);
-    if (!session?.markers?.some((marker) => marker.id === markerId)) {
-      return false;
-    }
-
-    setUpdatingSessionIds((current) =>
-      setSessionFlag(current, sessionId, true),
-    );
-    try {
-      const response = await updateConversationMarker(sessionId, markerId, payload);
-      if (!isMountedRef.current) {
-        return false;
-      }
-
-      const responseOutcome = shouldApplyMarkerMutationResponse(sessionId, response);
-      if (responseOutcome === "deferred") {
-        return false;
-      }
-      if (responseOutcome === "apply") {
-        updateSessionLocally(sessionId, (currentSession) =>
-          upsertConversationMarkerLocally(
-            currentSession,
-            response.marker,
-            response.sessionMutationStamp,
-          ),
-        );
-      }
-      setRequestError(null);
-      return true;
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return false;
-      }
-      reportRequestError(error);
-      return false;
-    } finally {
-      if (isMountedRef.current) {
-        setUpdatingSessionIds((current) =>
-          setSessionFlag(current, sessionId, false),
-        );
-      }
-    }
-  }
-
-  async function handleDeleteConversationMarker(
-    sessionId: string,
-    markerId: string,
-  ) {
-    const session = sessionLookup.get(sessionId);
-    if (!session?.markers?.some((marker) => marker.id === markerId)) {
-      return false;
-    }
-
-    setUpdatingSessionIds((current) =>
-      setSessionFlag(current, sessionId, true),
-    );
-    try {
-      const response = await deleteConversationMarker(sessionId, markerId);
-      if (!isMountedRef.current) {
-        return false;
-      }
-
-      const responseOutcome = shouldApplyMarkerMutationResponse(
-        sessionId,
-        {
-          revision: response.revision,
-          serverInstanceId: response.serverInstanceId,
-          markerId: response.markerId,
-          sessionMutationStamp: response.sessionMutationStamp,
-        },
-        { deleted: true },
-      );
-      if (responseOutcome === "deferred") {
-        return false;
-      }
-      if (responseOutcome === "apply") {
-        updateSessionLocally(sessionId, (currentSession) =>
-          deleteConversationMarkerLocally(
-            currentSession,
-            response.markerId,
-            response.sessionMutationStamp,
-          ),
-        );
-      }
-      setRequestError(null);
-      return true;
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return false;
-      }
-      reportRequestError(error);
-      return false;
-    } finally {
-      if (isMountedRef.current) {
-        setUpdatingSessionIds((current) =>
-          setSessionFlag(current, sessionId, false),
-        );
-      }
-    }
-  }
+  const {
+    handleCreateConversationMarker,
+    handleUpdateConversationMarker,
+    handleDeleteConversationMarker,
+  } = createSessionMarkerActions({
+    forceSseReconnect,
+    isMountedRef,
+    lastSeenServerInstanceIdRef,
+    latestStateRevisionRef,
+    reportRequestError,
+    requestActionRecoveryResync,
+    sessionLookup,
+    sessionsRef,
+    setRequestError,
+    setUpdatingSessionIds,
+    updateSessionLocally,
+    workspace,
+  });
 
   return {
     handleSend,

@@ -140,6 +140,18 @@ fn handle_shared_codex_event_agent_message_content_delta(
         completed_turn_id,
         event_turn_id,
     ) {
+        trace_shared_codex_event(
+            "drop",
+            "codex/event/agent_message_content_delta",
+            Some(session_id),
+            None,
+            event_turn_id,
+            current_turn_id,
+            completed_turn_id,
+            None,
+            None,
+            Some("agent_message_delta_not_visible_turn"),
+        );
         return Ok(());
     }
 
@@ -175,6 +187,18 @@ fn handle_shared_codex_event_agent_message(
         completed_turn_id,
         event_turn_id,
     ) {
+        trace_shared_codex_event(
+            "drop",
+            "codex/event/agent_message",
+            Some(session_id),
+            None,
+            event_turn_id,
+            current_turn_id,
+            completed_turn_id,
+            None,
+            None,
+            Some("agent_message_not_visible_turn"),
+        );
         return Ok(());
     }
 
@@ -190,11 +214,35 @@ fn handle_shared_codex_event_agent_message(
     }
 
     if let Some(item_id) = turn_state.current_agent_message_id.clone() {
+        trace_shared_codex_event(
+            "record",
+            "codex/event/agent_message",
+            Some(session_id),
+            None,
+            event_turn_id,
+            current_turn_id,
+            completed_turn_id,
+            None,
+            None,
+            Some("agent_message_reconcile_streamed_item"),
+        );
         return record_completed_codex_agent_message(
             turn_state, recorder, state, session_id, &item_id, trimmed,
         );
     }
 
+    trace_shared_codex_event(
+        "record",
+        "codex/event/agent_message",
+        Some(session_id),
+        None,
+        event_turn_id,
+        current_turn_id,
+        completed_turn_id,
+        None,
+        None,
+        Some("agent_message_push_final_text"),
+    );
     begin_codex_assistant_output(turn_state, recorder)?;
     recorder.push_text(trimmed)?;
     remember_codex_first_assistant_message_id(state, session_id, turn_state)

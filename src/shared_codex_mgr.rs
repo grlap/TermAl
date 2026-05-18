@@ -247,14 +247,20 @@ impl AppState {
         runtime_id: &str,
         error_message: Option<&str>,
     ) -> Result<()> {
-        let session_ids = {
+        let session_exits = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
                 .sessions
                 .iter()
                 .filter_map(|record| match &record.runtime {
                     SessionRuntime::Codex(handle) if handle.runtime_id == runtime_id => {
-                        Some(record.session.id.clone())
+                        Some((
+                            record.session.id.clone(),
+                            matches!(
+                                record.session.status,
+                                SessionStatus::Active | SessionStatus::Approval
+                            ),
+                        ))
                     }
                     _ => None,
                 })
@@ -262,8 +268,9 @@ impl AppState {
         };
 
         let token = RuntimeToken::Codex(runtime_id.to_owned());
-        for session_id in session_ids {
-            self.handle_runtime_exit_if_matches(&session_id, &token, error_message)?;
+        for (session_id, was_busy) in session_exits {
+            let session_error = was_busy.then_some(error_message).flatten();
+            self.handle_runtime_exit_if_matches(&session_id, &token, session_error)?;
         }
         self.clear_shared_codex_runtime_if_matches(runtime_id)?;
         Ok(())

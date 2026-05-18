@@ -88,6 +88,18 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
     Ok(())
 }
 
+fn dispatch_turn_and_snapshot(
+    state: &AppState,
+    session_id: &str,
+    request: SendMessageRequest,
+) -> Result<StateResponse, ApiError> {
+    let dispatch = state.dispatch_turn(session_id, request)?;
+    if let DispatchTurnResult::Dispatched(dispatch) = dispatch {
+        deliver_turn_dispatch(state, dispatch)?;
+    }
+    Ok(state.summary_snapshot_with_full_session(session_id))
+}
+
 /// Returns the backend health response.
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
@@ -835,21 +847,10 @@ async fn send_message(
     State(state): State<AppState>,
     Json(request): Json<SendMessageRequest>,
 ) -> Result<(StatusCode, Json<StateResponse>), ApiError> {
-    let dispatch = run_blocking_api({
-        let state = state.clone();
-        let session_id = session_id.clone();
-        move || state.dispatch_turn(&session_id, request)
-    })
-    .await?;
-
-    if let DispatchTurnResult::Dispatched(dispatch) = dispatch {
-        deliver_turn_dispatch(&state, dispatch)?;
-    }
-
     let snapshot = run_blocking_api({
         let state = state.clone();
         let session_id = session_id.clone();
-        move || Ok(state.summary_snapshot_with_full_session(&session_id))
+        move || dispatch_turn_and_snapshot(&state, &session_id, request)
     })
     .await?;
 

@@ -57,6 +57,17 @@ fn format_runtime_stderr_prefix(label: &str, timestamp: &str) -> String {
     format!("{label} stderr [{timestamp}]>")
 }
 
+/// Returns whether a runtime stderr line should be forwarded to TermAl stderr.
+fn should_forward_runtime_stderr_line(label: &str, line: &str) -> bool {
+    !(label == "codex" && is_codex_closed_stdin_tool_router_diagnostic(line))
+}
+
+fn is_codex_closed_stdin_tool_router_diagnostic(line: &str) -> bool {
+    line.contains("ERROR codex_core::tools::router:")
+        && line.contains("write_stdin failed:")
+        && line.contains("stdin is closed for this session")
+}
+
 /// Resolves TermAl Codex home.
 fn resolve_termal_codex_home(default_workdir: &str, scope: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir)

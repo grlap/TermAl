@@ -177,6 +177,174 @@ fn stops_shared_codex_sessions_via_turn_interrupt() {
     );
 }
 
+// pins terminal delegation cleanup: a completed read-only delegation child is
+// no longer an active stop request, so cleanup must detach its shared-codex
+// bookkeeping without sending turn/interrupt. This guards the completed-child
+// recycling path from racing Codex app-server finalization after a normal turn
+// completion.
+#[test]
+fn terminal_delegation_cleanup_detaches_shared_codex_child_without_interrupt() {
+    let session_id = "delegation-child-shared-codex".to_owned();
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, input_rx) = mpsc::channel();
+    let runtime = SharedCodexRuntime {
+        runtime_id: "shared-codex-terminal-delegation".to_owned(),
+        input_tx,
+        process: process.clone(),
+        sessions: SharedCodexSessions::new(),
+        thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("thread-terminal-delegation".to_owned()),
+                turn_id: Some("turn-terminal-delegation".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("thread-terminal-delegation".to_owned(), session_id.clone());
+
+    let handle = CodexRuntimeHandle {
+        runtime_id: runtime.runtime_id.clone(),
+        input_tx: runtime.input_tx.clone(),
+        process: process.clone(),
+        shared_session: Some(SharedCodexSessionHandle {
+            runtime: runtime.clone(),
+            session_id: session_id.clone(),
+        }),
+    };
+
+    shutdown_terminal_delegation_child_runtime(
+        KillableRuntime::Codex(handle),
+        "terminal read-only delegation child",
+    )
+    .unwrap();
+
+    assert!(
+        !runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned")
+            .contains_key(&session_id)
+    );
+    assert!(
+        !runtime
+            .thread_sessions
+            .lock()
+            .expect("shared Codex thread mutex poisoned")
+            .contains_key("thread-terminal-delegation")
+    );
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    assert!(!shared_child_has_exited(&process, "shared Codex runtime").unwrap());
+
+    process.kill().unwrap();
+    process.wait().unwrap();
+}
+
+// pins the turn/completed self-deadlock escape hatch: the shared Codex event
+// router owns runtime.sessions while applying finish_turn, and finish_turn can
+// refresh a completed delegation. Natural terminal cleanup must not block on
+// that same mutex before publishing the parent delegation result.
+#[test]
+fn terminal_delegation_cleanup_defers_shared_codex_detach_when_sessions_lock_is_held() {
+    let session_id = "delegation-child-shared-codex-locked".to_owned();
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, input_rx) = mpsc::channel();
+    let runtime = SharedCodexRuntime {
+        runtime_id: "shared-codex-terminal-delegation-locked".to_owned(),
+        input_tx,
+        process: process.clone(),
+        sessions: SharedCodexSessions::new(),
+        thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("thread-terminal-delegation-locked".to_owned()),
+                turn_id: Some("turn-terminal-delegation-locked".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert(
+            "thread-terminal-delegation-locked".to_owned(),
+            session_id.clone(),
+        );
+
+    let handle = CodexRuntimeHandle {
+        runtime_id: runtime.runtime_id.clone(),
+        input_tx: runtime.input_tx.clone(),
+        process: process.clone(),
+        shared_session: Some(SharedCodexSessionHandle {
+            runtime: runtime.clone(),
+            session_id: session_id.clone(),
+        }),
+    };
+
+    let sessions_guard = runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    shutdown_terminal_delegation_child_runtime(
+        KillableRuntime::Codex(handle),
+        "terminal read-only delegation child",
+    )
+    .unwrap();
+    assert!(sessions_guard.contains_key(&session_id));
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    drop(sessions_guard);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let detached = {
+            let sessions = runtime
+                .sessions
+                .lock()
+                .expect("shared Codex session mutex poisoned");
+            !sessions.contains_key(&session_id)
+        } && !runtime
+            .thread_sessions
+            .lock()
+            .expect("shared Codex thread mutex poisoned")
+            .contains_key("thread-terminal-delegation-locked");
+
+        if detached {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!("deferred shared Codex detach did not complete");
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(!shared_child_has_exited(&process, "shared Codex runtime").unwrap());
+
+    process.kill().unwrap();
+    process.wait().unwrap();
+}
+
 // pins the interrupt-failure isolation contract: when turn/interrupt cannot
 // be delivered (channel closed, app-server rejected it), stop_session still
 // detaches the session locally — clearing its sessions/thread_sessions entries
@@ -1054,15 +1222,17 @@ fn codex_thread_state_updates_are_suppressed_while_stop_is_in_progress() {
 
 // pins the shared-process exit reaping contract: when the shared codex helper
 // process exits (crash, sigterm, communication failure), every session hosted
-// on that runtime has its SessionRuntime cleared and flips to error with the
-// supplied diagnostic preview, the shared_codex_runtime slot is emptied so
-// the next codex session spawns a fresh helper, and the os child handle is
-// reaped. guards against zombie processes and sessions pointing at dead
-// runtimes.
+// on that runtime has its SessionRuntime cleared. Active/approval sessions flip
+// to error with the supplied diagnostic preview, idle sessions remain idle so
+// their next prompt can spawn a fresh helper. The shared_codex_runtime slot is
+// emptied and the os child handle is reaped. Guards against zombie processes,
+// sessions pointing at dead runtimes, and idle Codex tabs being poisoned by an
+// unrelated active turn's shared-process failure.
 #[test]
 fn shared_codex_runtime_exit_clears_state_and_kills_process() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
+    let idle_session_id = test_session_id(&state, Agent::Codex);
     let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = SharedCodexRuntime {
@@ -1079,6 +1249,15 @@ fn shared_codex_runtime_exit_clears_state_and_kills_process() {
         shared_session: Some(SharedCodexSessionHandle {
             runtime: runtime.clone(),
             session_id: session_id.clone(),
+        }),
+    };
+    let idle_handle = CodexRuntimeHandle {
+        runtime_id: runtime.runtime_id.clone(),
+        input_tx: runtime.input_tx.clone(),
+        process: process.clone(),
+        shared_session: Some(SharedCodexSessionHandle {
+            runtime: runtime.clone(),
+            session_id: idle_session_id.clone(),
         }),
     };
 
@@ -1098,6 +1277,13 @@ fn shared_codex_runtime_exit_clears_state_and_kills_process() {
         inner.sessions[index].runtime = SessionRuntime::Codex(handle);
         inner.sessions[index].session.status = SessionStatus::Active;
         inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+
+        let idle_index = inner
+            .find_session_index(&idle_session_id)
+            .expect("idle Codex session should exist");
+        inner.sessions[idle_index].runtime = SessionRuntime::Codex(idle_handle);
+        inner.sessions[idle_index].session.status = SessionStatus::Idle;
+        inner.sessions[idle_index].session.preview = "Idle Codex tab".to_owned();
     }
 
     state
@@ -1119,6 +1305,13 @@ fn shared_codex_runtime_exit_clears_state_and_kills_process() {
             .preview
             .contains("failed to communicate with shared Codex app-server")
     );
+    let idle_session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == idle_session_id)
+        .expect("idle Codex session should remain present");
+    assert_eq!(idle_session.status, SessionStatus::Idle);
+    assert_eq!(idle_session.preview, "Idle Codex tab");
 
     assert!(
         state
@@ -1135,6 +1328,12 @@ fn shared_codex_runtime_exit_clears_state_and_kills_process() {
         .find(|record| record.session.id == session_id)
         .expect("Codex session should exist");
     assert!(matches!(record.runtime, SessionRuntime::None));
+    let idle_record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == idle_session_id)
+        .expect("idle Codex session should exist");
+    assert!(matches!(idle_record.runtime, SessionRuntime::None));
     drop(inner);
 
     let _ = process.kill();
