@@ -5,13 +5,12 @@
 //     workspace pane: its tab bar (drag/drop, context menu, close),
 //     its active-tab body (session transcript, diff preview, source
 //     editor, git status, filesystem, orchestrator canvas,
-//     terminal, etc.), its composer (prompt input + send /
-//     attachments / stop), and the find-in-session toolbar.
+//     terminal, etc.), its composer/footer wiring, and the
+//     find-in-session toolbar UI.
 //   - All of the component-local useState / useMemo / useEffect /
-//     useRef / useLayoutEffect hooks that drive the pane's UI
-//     (session search index + active match tracking, composer
-//     drag-over state, pending scroll requests, paste handler,
-//     drag-and-drop from the tab bar, etc.).
+//     useRef / useLayoutEffect hooks that drive pane-level UI
+//     orchestration (session search index + active match tracking,
+//     composer paste handling, drag-and-drop from the tab bar, etc.).
 //
 // What this file does NOT own:
 //   - Workspace tree structure or recursion — that lives in
@@ -19,19 +18,17 @@
 //     this pane view lets `WorkspaceNodeView` move next without a
 //     circular import.
 //   - Any of the extracted helpers it composes (workspace queries,
-//     scroll position, state adoption, session find, etc.).
+//     scroll/follow state, source-file loading, state adoption,
+//     session find, etc.).
 //   - The renderers for the panels themselves — those live under
 //     `./panels/`.
 //
-// Split out of `ui/src/App.tsx`. Same signature and behaviour as
-// the inline definition it replaced; imports are copied over
-// verbatim from App.tsx so the move is a pure relocation. Unused
-// imports are kept rather than pruned so the diff stays a clean
-// code-move; a follow-up can prune them once the component stops
-// being a moving target.
+// Split out of `ui/src/App.tsx`. Same public signature as the inline
+// definition it replaced; later pure code moves extracted active-context,
+// message projection, scroll/follow state, source-file state, and render
+// callback helpers.
 
 import {
-  startTransition,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -40,14 +37,7 @@ import {
   useState,
   type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
-  type TouchEvent as ReactTouchEvent,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
-import {
-  fetchFile,
-  saveFile,
-} from "./api";
 import {
   resolveControlPanelWorkspaceRoot,
 } from "./session-model-utils";
@@ -59,20 +49,7 @@ import { useStableEvent } from "./panels/use-stable-event";
 import {
   resolveWorkspaceScopedSessionId,
 } from "./control-surface-state";
-import {
-  isSourceFileMissingError,
-  sourceFileStateFromResponse,
-} from "./source-file-state";
-import {
-  resolveSettledScrollMinimumAttempts,
-  syncMessageStackScrollPosition,
-} from "./scroll-position";
-import {
-  MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
-  notifyMessageStackScrollWrite,
-  type MessageStackScrollWriteKind,
-} from "./message-stack-scroll-sync";
-
+import { sourceFileStateFromResponse } from "./source-file-state";
 import { normalizeDisplayPath } from "./path-display";
 import {
   resolvePaneScrollCommand,
@@ -85,17 +62,13 @@ import { DiffPanel } from "./panels/DiffPanel";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { InstructionDebuggerPanel } from "./panels/InstructionDebuggerPanel";
-import { PaneTabs, type PaneTabDecoration } from "./panels/PaneTabs";
+import { PaneTabs } from "./panels/PaneTabs";
 import { OrchestratorTemplatesPanel } from "./panels/OrchestratorTemplatesPanel";
 import { SessionCanvasPanel } from "./panels/SessionCanvasPanel";
 import {
   TerminalPanel,
 } from "./panels/TerminalPanel";
-import {
-  SourcePanel,
-  type SourceFileState,
-  type SourceSaveOptions,
-} from "./panels/SourcePanel";
+import { SourcePanel } from "./panels/SourcePanel";
 import {
   buildSessionSearchIndex,
   buildSessionSearchMatchesFromIndex,
@@ -117,8 +90,6 @@ import {
   type WorkspaceTabDrag,
 } from "./tab-drag";
 import {
-  canNestedScrollableConsumeWheel,
-  clamp,
   buildSessionConversationSignature,
   collectCandidateSourcePaths,
   collectClipboardImageFiles,
@@ -129,9 +100,7 @@ import {
   isMonacoEditorEventTarget,
   isPointerWithinPaneTopArea,
   labelForPaneViewMode,
-  normalizeWheelDelta,
   primaryModifierLabel,
-  pruneSessionFlags,
   resolvePaneDropPlacementFromPointer,
   resolveLiveWaitingIndicatorPrompt,
   type DraftImageAttachment,
@@ -140,9 +109,6 @@ import {
   buildConnectionRetryDisplayStateByMessageId,
 } from "./connection-retry";
 import { useStableMapBySignature } from "./use-stable-map-by-signature";
-import {
-  workspaceFilesChangedEventChangeForPath,
-} from "./workspace-file-events";
 import {
   streamingAssistantTextMessageIdForSession,
   useSessionRenderCallbacks,
@@ -170,11 +136,9 @@ import {
   hasTurnFinalizingOutputAfterLatestUserPrompt,
 } from "./SessionPaneView.waiting-indicator";
 import { resolveSessionPaneScrollStateKey } from "./SessionPaneView.scroll-key";
+import { useSessionPaneScrollState } from "./SessionPaneView.scroll";
+import { useSessionPaneSourceFileState } from "./SessionPaneView.source-file";
 import type { SessionPaneViewProps } from "./SessionPaneView.types";
-
-const SESSION_PAGE_JUMP_VIEWPORT_FACTOR = 0.45;
-
-type NewResponseIndicatorKind = "activity" | "response";
 
 export function SessionPaneView({
   pane,
@@ -310,38 +274,7 @@ export function SessionPaneView({
     shouldRenderGitProjectScope,
     shouldRenderTerminalProjectScope,
   } = useSessionPaneActiveContext({ pane, projectLookup, sessionLookup });
-  const [fileState, setFileState] = useState<SourceFileState>({
-    status: "idle",
-    path: "",
-    content: "",
-    contentHash: null,
-    mtimeMs: null,
-    sizeBytes: null,
-    staleOnDisk: false,
-    externalChangeKind: null,
-    externalContentHash: null,
-    externalMtimeMs: null,
-    externalSizeBytes: null,
-    error: null,
-    language: null,
-  });
-  const [sourceEditorDirty, setSourceEditorDirty] = useState(false);
-  const fileStateRef = useRef(fileState);
-  const sourceEditorDirtyRef = useRef(false);
-  const messageStackRef = useRef<HTMLElement | null>(null);
   const paneRootRef = useRef<HTMLElement | null>(null);
-  const settledScrollToBottomCancelRef = useRef<(() => void) | null>(null);
-  const previousShowWaitingIndicatorByKeyRef = useRef<
-    Record<string, boolean | undefined>
-  >({});
-  const paneProgrammaticBottomFollowRef = useRef<{
-    key: string | null;
-    until: number;
-  }>({ key: null, until: Number.NEGATIVE_INFINITY });
-  const paneTailFollowUserEscapeByKeyRef = useRef<
-    Record<string, true | undefined>
-  >({});
-  const paneLastTouchClientYRef = useRef<number | null>(null);
   const paneTopRef = useRef<HTMLDivElement | null>(null);
   const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<
     TabDropPlacement,
@@ -349,20 +282,6 @@ export function SessionPaneView({
   > | null>(null);
   const [pointerDraggedTab, setPointerDraggedTab] =
     useState<WorkspaceTabDrag | null>(null);
-  const [visitedSessionIds, setVisitedSessionIds] = useState<
-    Record<string, true | undefined>
-  >({});
-  const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
-    Record<string, NewResponseIndicatorKind | undefined>
-  >({});
-  const [liveTailPinnedByKey, setLiveTailPinnedByKey] = useState<
-    Record<string, boolean | undefined>
-  >({});
-
-  useEffect(() => {
-    fileStateRef.current = fileState;
-  }, [fileState]);
-
   function renderWorkspaceTabProjectScope(
     scopeId: string,
     value: string,
@@ -391,9 +310,6 @@ export function SessionPaneView({
   const [sessionFindFocusRequest, setSessionFindFocusRequest] = useState<{
     selectAll: boolean;
   } | null>(null);
-  const sessionSearchItemRefsRef = useRef<Record<string, HTMLElement | null>>(
-    {},
-  );
   const paneHasControlPanel = useMemo(
     () => pane.tabs.some((tab) => tab.kind === "controlPanel"),
     [pane.tabs],
@@ -422,6 +338,26 @@ export function SessionPaneView({
         : [],
     [activeSession, activeSourceTab],
   );
+  const {
+    fileState,
+    handleSourceEditorDirtyChange,
+    handleSourceFileAdopt,
+    handleSourceFileFetchLatest,
+    handleSourceFileReload,
+    handleSourceFileSave,
+    tabDecorations,
+  } = useSessionPaneSourceFileState({
+    activeSourceOriginProjectId,
+    activeSourceOriginSessionId,
+    activeSourceTab,
+    activeSourceWorkspaceRoot,
+    onPaneSourcePathChange,
+    paneId: pane.id,
+    paneSourcePath: pane.sourcePath,
+    paneViewMode: pane.viewMode,
+    sourceCandidatePaths,
+    workspaceFilesChangedEvent,
+  });
   const commandMessages = useMemo(
     () => commandMessagesForPaneViewMode(pane.viewMode, activeSession),
     [activeSession, pane.viewMode],
@@ -597,11 +533,53 @@ export function SessionPaneView({
     (messageId: string) => connectionRetryDisplayStateByMessageId.get(messageId),
     [connectionRetryDisplayStateByMessageId],
   );
-  const newResponseIndicatorKind =
-    newResponseIndicatorByKey[scrollStateKey] ?? null;
-  const showNewResponseIndicator = newResponseIndicatorKind !== null;
-  const newResponseIndicatorLabel =
-    newResponseIndicatorKind === "activity" ? "New activity" : "New response";
+  const paneScrollPositions =
+    paneScrollPositionsRef.current[pane.id] ??
+    (paneScrollPositionsRef.current[pane.id] = {});
+  const paneContentSignatures =
+    paneContentSignaturesRef.current[pane.id] ??
+    (paneContentSignaturesRef.current[pane.id] = {});
+  const paneMessageContentSignatures =
+    paneMessageContentSignaturesRef.current[pane.id] ??
+    (paneMessageContentSignaturesRef.current[pane.id] = {});
+  const {
+    handleConversationSearchItemMount,
+    handleMessageStackScroll,
+    handleMessageStackTouchStart,
+    handleMessageStackUserScrollIntent,
+    liveTailPinned,
+    messageStackRef,
+    newResponseIndicatorLabel,
+    scrollMessageStackByPage,
+    scrollMessageStackToBoundary,
+    scrollSessionMessageStackByPageJump,
+    showNewResponseIndicator,
+  } = useSessionPaneScrollState({
+    activeSession,
+    activeSessionSearchMatch,
+    defaultScrollToBottom,
+    forceSessionScrollToBottomRef,
+    hasSessionFindQuery,
+    isActive,
+    isSending,
+    isSessionTabActive,
+    onScrollToBottomRequestHandled,
+    paneContentSignatures,
+    paneId: pane.id,
+    paneMessageContentSignatures,
+    paneRootRef,
+    paneScrollPositions,
+    paneShouldStickToBottomRef,
+    paneViewMode: pane.viewMode,
+    pendingScrollToBottomRequest,
+    scrollStateKey,
+    sessions,
+    showWaitingIndicator,
+    visibleContentSignature,
+    visibleLastMessageAuthor,
+    visibleMessageContentSignature,
+  });
+
   const showDelegatedChildFooter =
     isDelegatedChildSession &&
     activeTab?.kind === "session" &&
@@ -612,93 +590,6 @@ export function SessionPaneView({
           isStopping ||
           showNewResponseIndicator),
     );
-  const paneScrollPositions =
-    paneScrollPositionsRef.current[pane.id] ??
-    (paneScrollPositionsRef.current[pane.id] = {});
-  const paneContentSignatures =
-    paneContentSignaturesRef.current[pane.id] ??
-    (paneContentSignaturesRef.current[pane.id] = {});
-  const paneMessageContentSignatures =
-    paneMessageContentSignaturesRef.current[pane.id] ??
-    (paneMessageContentSignaturesRef.current[pane.id] = {});
-  const savedScrollPosition = paneScrollPositions[scrollStateKey];
-  const savedScrollShouldStick = savedScrollPosition?.shouldStick === true;
-  const waitingIndicatorShouldStick = savedScrollShouldStick;
-
-  function getTailFollowIntent() {
-    return paneShouldStickToBottomRef.current[pane.id] ?? true;
-  }
-
-  function setTailFollowIntent(nextValue: boolean) {
-    paneShouldStickToBottomRef.current[pane.id] = nextValue;
-    if (nextValue) {
-      delete paneTailFollowUserEscapeByKeyRef.current[scrollStateKey];
-    } else {
-      paneTailFollowUserEscapeByKeyRef.current[scrollStateKey] = true;
-    }
-    setLiveTailPinnedByKey((current) => {
-      if (current[scrollStateKey] === nextValue) {
-        return current;
-      }
-      return {
-        ...current,
-        [scrollStateKey]: nextValue,
-      };
-    });
-  }
-
-  const tailFollowIntent =
-    liveTailPinnedByKey[scrollStateKey] ??
-    savedScrollPosition?.shouldStick ??
-    getTailFollowIntent();
-  const liveTailPinned = tailFollowIntent;
-
-  function hasTailFollowUserEscape() {
-    return Boolean(paneTailFollowUserEscapeByKeyRef.current[scrollStateKey]);
-  }
-
-  function markTailFollowUserEscape() {
-    paneTailFollowUserEscapeByKeyRef.current[scrollStateKey] = true;
-    setTailFollowIntent(false);
-    cancelSettledScrollToBottom();
-  }
-
-  function keepPaneScrollPositionPinned(node: HTMLElement) {
-    paneScrollPositions[scrollStateKey] = {
-      top: node.scrollTop,
-      shouldStick: true,
-    };
-  }
-
-  function beginPaneProgrammaticBottomFollow() {
-    paneProgrammaticBottomFollowRef.current = {
-      key: scrollStateKey,
-      until: performance.now() + MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
-    };
-  }
-
-  function cancelPaneProgrammaticBottomFollow() {
-    paneProgrammaticBottomFollowRef.current = {
-      key: null,
-      until: Number.NEGATIVE_INFINITY,
-    };
-  }
-
-  function isPaneProgrammaticBottomFollowActive() {
-    const bottomFollow = paneProgrammaticBottomFollowRef.current;
-    return (
-      bottomFollow.key === scrollStateKey && bottomFollow.until >= performance.now()
-    );
-  }
-
-  useEffect(() => {
-    if (paneProgrammaticBottomFollowRef.current.key !== scrollStateKey) {
-      paneProgrammaticBottomFollowRef.current = {
-        key: null,
-        until: Number.NEGATIVE_INFINITY,
-      };
-    }
-  }, [scrollStateKey]);
 
   function handleComposerPaste(
     event: ReactClipboardEvent<HTMLTextAreaElement>,
@@ -790,113 +681,6 @@ export function SessionPaneView({
   const handleStopSessionFromFooter = useStableEvent(onStopSession);
   const handleComposerPasteFromFooter = useStableEvent(handleComposerPaste);
 
-  async function handleSourceFileSave(
-    path: string,
-    content: string,
-    sessionId: string | null,
-    projectId: string | null,
-    options?: SourceSaveOptions,
-  ) {
-    if (!sessionId && !projectId) {
-      throw new Error(
-        "This file view is no longer associated with a live session or project.",
-      );
-    }
-
-    const response = await saveFile(path, content, {
-      sessionId,
-      projectId,
-      baseHash:
-        options?.baseHash !== undefined
-          ? options.baseHash
-          : fileState.status === "ready" && fileState.path === path
-            ? fileState.contentHash
-        : null,
-      overwrite: options?.overwrite,
-    });
-    return response;
-  }
-
-  async function handleSourceFileReload(
-    path: string,
-    sessionId: string | null,
-    projectId: string | null,
-  ) {
-    const nextFileState = await handleSourceFileFetchLatest(
-      path,
-      sessionId,
-      projectId,
-    );
-    return nextFileState;
-  }
-
-  async function handleSourceFileFetchLatest(
-    path: string,
-    sessionId: string | null,
-    projectId: string | null,
-  ) {
-    if (!sessionId && !projectId) {
-      throw new Error(
-        "This file view is no longer associated with a live session or project.",
-      );
-    }
-
-    const response = await fetchFile(path, {
-      sessionId,
-      projectId,
-    });
-    return sourceFileStateFromResponse(response);
-  }
-
-  function handleSourceFileAdopt(nextFileState: SourceFileState) {
-    setFileState(nextFileState);
-  }
-
-  const handleSourceEditorDirtyChange = useCallback((isDirty: boolean) => {
-    sourceEditorDirtyRef.current = isDirty;
-    setSourceEditorDirty(isDirty);
-  }, []);
-
-  function setNewResponseIndicator(
-    key: string,
-    visible: boolean,
-    kind: NewResponseIndicatorKind = "response",
-  ) {
-    startTransition(() => {
-      setNewResponseIndicatorByKey((current) => {
-        const currentKind = current[key];
-        if (
-          (!visible && currentKind === undefined) ||
-          (visible &&
-            (currentKind === kind ||
-              (currentKind === "response" && kind === "activity")))
-        ) {
-          return current;
-        }
-
-        const nextState = { ...current };
-        if (visible) {
-          nextState[key] = kind;
-        } else {
-          delete nextState[key];
-        }
-        return nextState;
-      });
-    });
-  }
-
-  function handleConversationSearchItemMount(
-    itemKey: string,
-    node: HTMLElement | null,
-  ) {
-    if (node) {
-      sessionSearchItemRefsRef.current[itemKey] = node;
-      return;
-    }
-
-    delete sessionSearchItemRefsRef.current[itemKey];
-  }
-
   function focusSessionFindInput(selectAll = false) {
     setSessionFindFocusRequest({
       selectAll,
@@ -916,7 +700,6 @@ export function SessionPaneView({
     setIsSessionFindOpen(false);
     setSessionFindQuery("");
     setSessionFindActiveIndex(0);
-    sessionSearchItemRefsRef.current = {};
   }
 
   function stepSessionFind(direction: -1 | 1) {
@@ -932,209 +715,6 @@ export function SessionPaneView({
         sessionSearchMatches.length
       );
     });
-  }
-
-  function scrollToLatestMessage(
-    behavior: ScrollBehavior,
-    force = false,
-    scrollKind?: MessageStackScrollWriteKind,
-  ) {
-    const node = messageStackRef.current;
-    if (!node) {
-      return;
-    }
-
-    const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-    if (Math.abs(node.scrollTop - nextScrollTop) > (force ? 0.5 : 1)) {
-      node.scrollTo({
-        top: nextScrollTop,
-        behavior,
-      });
-      if (scrollKind === "bottom_follow") {
-        beginPaneProgrammaticBottomFollow();
-      } else if (scrollKind) {
-        cancelPaneProgrammaticBottomFollow();
-      }
-      notifyMessageStackScrollWrite(node, {
-        scrollKind,
-      });
-    }
-    setTailFollowIntent(true);
-    paneScrollPositions[scrollStateKey] = {
-      top: nextScrollTop,
-      shouldStick: true,
-    };
-    setNewResponseIndicator(scrollStateKey, false);
-  }
-
-  function scrollVirtualizedMessageStackToBottom(
-    node: HTMLElement,
-    options: {
-      scrollKind?: Extract<
-        MessageStackScrollWriteKind,
-        "bottom_boundary" | "bottom_pin"
-      >;
-      scrollSource?: "programmatic" | "user";
-    } = {},
-  ) {
-    if (!node.querySelector(".virtualized-message-list")) {
-      return false;
-    }
-
-    const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-    if (Math.abs(node.scrollTop - nextScrollTop) > 0.5) {
-      node.scrollTop = nextScrollTop;
-    }
-    notifyMessageStackScrollWrite(node, {
-      scrollKind: options.scrollKind ?? "bottom_pin",
-      scrollSource: options.scrollSource,
-    });
-    setTailFollowIntent(true);
-    paneScrollPositions[scrollStateKey] = {
-      top: Number.MAX_SAFE_INTEGER,
-      shouldStick: true,
-    };
-    setNewResponseIndicator(scrollStateKey, false);
-    return true;
-  }
-
-  function scrollMessageStackByDelta(
-    deltaY: number,
-    options: {
-      scrollKind?: MessageStackScrollWriteKind;
-    } = {},
-  ) {
-    const node = messageStackRef.current;
-    if (!node) {
-      return;
-    }
-
-    const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-    if (maxScrollTop <= 0) {
-      return;
-    }
-
-    const nextScrollTop = clamp(node.scrollTop + deltaY, 0, maxScrollTop);
-    if (Math.abs(nextScrollTop - node.scrollTop) < 0.5) {
-      return;
-    }
-
-    const isUpwardScroll = deltaY < -0.5;
-    if (isUpwardScroll) {
-      paneTailFollowUserEscapeByKeyRef.current[scrollStateKey] = true;
-    }
-    cancelPaneProgrammaticBottomFollow();
-    node.scrollTop = nextScrollTop;
-    notifyMessageStackScrollWrite(node, {
-      scrollKind: options.scrollKind,
-      scrollSource: "user",
-    });
-    const { shouldStick } = syncMessageStackScrollPosition(
-      node,
-      scrollStateKey,
-      paneScrollPositions,
-    );
-    if (shouldStick) {
-      setTailFollowIntent(true);
-      setNewResponseIndicator(scrollStateKey, false);
-    } else {
-      setTailFollowIntent(false);
-      cancelSettledScrollToBottom();
-    }
-  }
-
-  function isMessageStackNearBottom() {
-    const node = messageStackRef.current;
-    if (!node) {
-      return true;
-    }
-    return node.scrollHeight - node.scrollTop - node.clientHeight < 72;
-  }
-
-  function followLatestMessageForPromptSend() {
-    if (getTailFollowIntent() || isMessageStackNearBottom()) {
-      scrollToLatestMessage("smooth", false, "bottom_follow");
-      return undefined;
-    }
-
-    return scheduleSettledScrollToBottom("auto", {
-      maxAttempts: 24,
-      minAttempts: 4,
-    });
-  }
-
-  function scrollMessageStackByPage(direction: -1 | 1) {
-    const node = messageStackRef.current;
-    if (!node) {
-      return;
-    }
-
-    if (direction < 0) {
-      markTailFollowUserEscape();
-    }
-    const distance = Math.max(Math.round(node.clientHeight * 0.85), 160);
-    node.scrollBy({
-      top: distance * direction,
-      behavior: "smooth",
-    });
-    notifyMessageStackScrollWrite(node, {
-      scrollSource: "user",
-    });
-  }
-
-  function scrollSessionMessageStackByPageJump(direction: -1 | 1) {
-    const node = messageStackRef.current;
-    if (!node) {
-      return;
-    }
-
-    const distance = Math.max(
-      Math.round(node.clientHeight * SESSION_PAGE_JUMP_VIEWPORT_FACTOR),
-      1,
-    );
-    scrollMessageStackByDelta(distance * direction, {
-      scrollKind: "page_jump",
-    });
-  }
-
-  function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
-    if (boundary === "bottom") {
-      cancelSettledScrollToBottom();
-      cancelPaneProgrammaticBottomFollow();
-      const node = messageStackRef.current;
-      if (node) {
-        if (
-          !scrollVirtualizedMessageStackToBottom(node, {
-            scrollKind: "bottom_boundary",
-            scrollSource: "user",
-          })
-        ) {
-          scrollToLatestMessage("auto", true, "seek");
-        }
-      }
-      return;
-    }
-
-    const node = messageStackRef.current;
-    if (!node) {
-      return;
-    }
-
-    cancelSettledScrollToBottom();
-    cancelPaneProgrammaticBottomFollow();
-    node.scrollTo({
-      top: 0,
-      behavior: "auto",
-    });
-    notifyMessageStackScrollWrite(node, {
-      scrollKind: "seek",
-      scrollSource: "user",
-    });
-    setTailFollowIntent(false);
-    paneScrollPositions[scrollStateKey] = {
-      top: 0,
-      shouldStick: false,
-    };
   }
 
   function selectAdjacentPaneTab(direction: -1 | 1) {
@@ -1170,27 +750,6 @@ export function SessionPaneView({
       return null;
     }
     return event.key === "PageUp" ? -1 : 1;
-  }
-
-  function isNestedEditablePageKeyTarget(target: EventTarget | null): boolean {
-    if (!(target instanceof HTMLElement)) {
-      return false;
-    }
-
-    if (
-      target instanceof HTMLTextAreaElement ||
-      target instanceof HTMLInputElement ||
-      target instanceof HTMLSelectElement
-    ) {
-      return true;
-    }
-
-    return (
-      target.isContentEditable ||
-      target.contentEditable === "true" ||
-      target.getAttribute("contenteditable") === "" ||
-      target.getAttribute("contenteditable") === "true"
-    );
   }
 
   function handlePaneKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
@@ -1249,63 +808,6 @@ export function SessionPaneView({
       scrollMessageStackByPage(command.direction === "up" ? -1 : 1);
     }
   }
-
-  // The message-stack wheel handler used to be wired via the React
-  // `onWheel` prop on the `<section>` below. React attaches `wheel`
-  // listeners as `{ passive: true }` by default (since React 17), so
-  // the `event.preventDefault()` call inside this handler silently
-  // failed with an `Unable to preventDefault inside passive event
-  // listener invocation` warning spammed to the console on every
-  // wheel tick. The browser's native scroll then executed alongside
-  // this handler's custom `node.scrollTop = nextScrollTop` write —
-  // two scrolls per tick, producing the jagged scroll-up experience
-  // users reported.
-  //
-  // We fix this by registering the listener ourselves via
-  // `addEventListener(..., { passive: false })`, which lets
-  // `preventDefault` take effect and keeps the custom scroll as the
-  // single source of truth. A ref indirection keeps the listener
-  // registration stable across renders while the closure picks up
-  // fresh state every render.
-  const handleMessageStackWheelRef = useRef<((event: WheelEvent) => void) | null>(null);
-  handleMessageStackWheelRef.current = function handleMessageStackWheel(event: WheelEvent) {
-    if (event.defaultPrevented || event.ctrlKey) {
-      return;
-    }
-
-    const node = messageStackRef.current;
-    if (!node) {
-      return;
-    }
-
-    const deltaY = normalizeWheelDelta(event, node);
-    if (Math.abs(deltaY) < 0.5) {
-      return;
-    }
-
-    if (canNestedScrollableConsumeWheel(event.target, node, deltaY)) {
-      return;
-    }
-
-    event.preventDefault();
-    scrollMessageStackByDelta(deltaY, {
-      scrollKind: "incremental",
-    });
-  };
-
-  useEffect(() => {
-    const node = messageStackRef.current;
-    if (!node) {
-      return;
-    }
-    const listener = (event: WheelEvent) => {
-      handleMessageStackWheelRef.current?.(event);
-    };
-    node.addEventListener("wheel", listener, { passive: false });
-    return () => {
-      node.removeEventListener("wheel", listener);
-    };
-  }, []);
 
   useEffect(() => {
     if (canFindInSession) {
@@ -1373,936 +875,12 @@ export function SessionPaneView({
     };
   }, [canFindInSession, isActive]);
 
-  const handleNestedTargetPageKeyRef = useRef<((event: KeyboardEvent) => void) | null>(null);
-  handleNestedTargetPageKeyRef.current = function handleNestedTargetPageKey(
-    event: KeyboardEvent,
-  ) {
-    if (
-      event.defaultPrevented ||
-      (event.key !== "PageUp" && event.key !== "PageDown") ||
-      !isNestedEditablePageKeyTarget(event.target)
-    ) {
-      return;
-    }
-    if (
-      !(event.target instanceof Node) ||
-      !paneRootRef.current?.contains(event.target)
-    ) {
-      return;
-    }
-
-    const command = resolvePaneScrollCommand(
-      {
-        altKey: event.altKey,
-        ctrlKey: event.ctrlKey,
-        key: event.key,
-        metaKey: event.metaKey,
-        shiftKey: event.shiftKey,
-      },
-      event.target,
-    );
-    if (!command) {
-      return;
-    }
-
-    event.preventDefault();
-    if (command.kind === "boundary") {
-      scrollMessageStackToBoundary(
-        command.direction === "up" ? "top" : "bottom",
-      );
-      return;
-    }
-
-    scrollSessionMessageStackByPageJump(
-      command.direction === "up" ? -1 : 1,
-    );
-  };
-
-  useEffect(() => {
-    if (!isActive || pane.viewMode !== "session") {
-      return;
-    }
-
-    const listener = (event: KeyboardEvent) => {
-      handleNestedTargetPageKeyRef.current?.(event);
-    };
-    window.addEventListener("keydown", listener, true);
-    return () => {
-      window.removeEventListener("keydown", listener, true);
-    };
-  }, [isActive, pane.viewMode]);
-
-  function scheduleSettledScrollToBottom(
-    behavior: ScrollBehavior,
-    options: {
-      maxAttempts?: number;
-      minAttempts?: number;
-      onComplete?: () => void;
-      preferVirtualizedBoundary?: boolean;
-      scrollKind?: MessageStackScrollWriteKind;
-    } = {},
-  ) {
-    cancelSettledScrollToBottom();
-
-    let frameId = 0;
-    let cancelled = false;
-    let completed = false;
-    const maxAttempts = options.maxAttempts ?? 12;
-    let remainingAttempts = maxAttempts;
-    const minimumAttempts = resolveSettledScrollMinimumAttempts(
-      maxAttempts,
-      options.minAttempts,
-    );
-    let attemptCount = 0;
-    let previousScrollHeight = -1;
-    let stableFrameCount = 0;
-
-    function complete() {
-      if (cancelled || completed) {
-        return;
-      }
-
-      completed = true;
-      if (settledScrollToBottomCancelRef.current === cancel) {
-        settledScrollToBottomCancelRef.current = null;
-      }
-      options.onComplete?.();
-    }
-
-    const tick = () => {
-      frameId = 0;
-      attemptCount += 1;
-      const node = messageStackRef.current;
-      if (!node) {
-        remainingAttempts -= 1;
-        if (remainingAttempts > 0) {
-          frameId = window.requestAnimationFrame(tick);
-        } else {
-          complete();
-        }
-        return;
-      }
-
-      if (
-        options.preferVirtualizedBoundary &&
-        scrollVirtualizedMessageStackToBottom(node)
-      ) {
-        complete();
-        return;
-      }
-
-      scrollToLatestMessage(
-        behavior,
-        attemptCount <= minimumAttempts,
-        options.scrollKind,
-      );
-
-      const bottomGap = Math.max(
-        node.scrollHeight - node.clientHeight - node.scrollTop,
-        0,
-      );
-      const heightStable =
-        previousScrollHeight >= 0 &&
-        Math.abs(node.scrollHeight - previousScrollHeight) <= 16;
-      if (bottomGap <= 4 && heightStable) {
-        stableFrameCount += 1;
-      } else {
-        stableFrameCount = 0;
-      }
-
-      previousScrollHeight = node.scrollHeight;
-      remainingAttempts -= 1;
-      if (
-        remainingAttempts > 0 &&
-        (attemptCount < minimumAttempts || stableFrameCount < 2)
-      ) {
-        frameId = window.requestAnimationFrame(tick);
-      } else {
-        complete();
-      }
-    };
-
-    const cancel = () => {
-      cancelled = true;
-      if (frameId !== 0) {
-        window.cancelAnimationFrame(frameId);
-      }
-      if (settledScrollToBottomCancelRef.current === cancel) {
-        settledScrollToBottomCancelRef.current = null;
-      }
-    };
-
-    settledScrollToBottomCancelRef.current = cancel;
-    frameId = window.requestAnimationFrame(tick);
-    return cancel;
-  }
-
-  function cancelSettledScrollToBottom() {
-    const cancel = settledScrollToBottomCancelRef.current;
-    settledScrollToBottomCancelRef.current = null;
-    cancel?.();
-  }
-
-  function handleMessageStackTouchStart(event: ReactTouchEvent<HTMLElement>) {
-    paneLastTouchClientYRef.current = event.touches[0]?.clientY ?? null;
-  }
-
-  function isTailFollowEscapeInput(
-    event:
-      | ReactWheelEvent<HTMLElement>
-      | ReactTouchEvent<HTMLElement>
-      | ReactKeyboardEvent<HTMLElement>
-      | ReactMouseEvent<HTMLElement>,
-  ) {
-    if (event.type === "wheel" && "deltaY" in event) {
-      return event.deltaY < -0.5;
-    }
-
-    if (event.type === "touchmove" && "touches" in event) {
-      const currentTouchClientY = event.touches[0]?.clientY ?? null;
-      const previousTouchClientY = paneLastTouchClientYRef.current;
-      paneLastTouchClientYRef.current = currentTouchClientY;
-      return (
-        currentTouchClientY !== null &&
-        previousTouchClientY !== null &&
-        currentTouchClientY > previousTouchClientY + 0.5
-      );
-    }
-
-    if (event.type === "keydown" && "key" in event) {
-      return (
-        event.key === "PageUp" ||
-        event.key === "ArrowUp" ||
-        event.key === "Home" ||
-        (event.key === " " && event.shiftKey)
-      );
-    }
-
-    return event.type === "mousedown" && event.target === event.currentTarget;
-  }
-
-  function handleMessageStackUserScrollIntent(
-    event:
-      | ReactWheelEvent<HTMLElement>
-      | ReactTouchEvent<HTMLElement>
-      | ReactKeyboardEvent<HTMLElement>
-      | ReactMouseEvent<HTMLElement>,
-  ) {
-    cancelPaneProgrammaticBottomFollow();
-    if (isTailFollowEscapeInput(event)) {
-      markTailFollowUserEscape();
-    }
-  }
-
-  function restoreMessageStackScrollTop(targetTop: number) {
-    const node = messageStackRef.current;
-    if (!node) {
-      return false;
-    }
-
-    const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-    if (targetTop > maxScrollTop + 1) {
-      return false;
-    }
-
-    const nextTop = clamp(targetTop, 0, maxScrollTop);
-    node.scrollTop = nextTop;
-    notifyMessageStackScrollWrite(node);
-    paneScrollPositions[scrollStateKey] = {
-      top: targetTop,
-      shouldStick: false,
-    };
-    return true;
-  }
-
-  useLayoutEffect(() => {
-    let restoreCleanup: (() => void) | undefined;
-    const node = messageStackRef.current;
-    if (!node) {
-      return undefined;
-    }
-
-    const shouldForceBottomAfterWorkspaceRebuild =
-      defaultScrollToBottom &&
-      activeSession &&
-      forceSessionScrollToBottomRef.current[activeSession.id];
-    if (shouldForceBottomAfterWorkspaceRebuild) {
-      delete forceSessionScrollToBottomRef.current[activeSession.id];
-      setTailFollowIntent(true);
-      paneScrollPositions[scrollStateKey] = {
-        top: Number.MAX_SAFE_INTEGER,
-        shouldStick: true,
-      };
-      node.scrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-      scrollMessageStackToBoundary("bottom");
-      if (!node.querySelector(".virtualized-message-list")) {
-        restoreCleanup = scheduleSettledScrollToBottom("auto", {
-          maxAttempts: 60,
-        });
-      }
-    } else if (paneScrollPositions[scrollStateKey]) {
-      const saved = paneScrollPositions[scrollStateKey];
-      setTailFollowIntent(saved.shouldStick);
-      if (saved.shouldStick) {
-        restoreCleanup = scheduleSettledScrollToBottom("auto", {
-          maxAttempts: 60,
-          preferVirtualizedBoundary: true,
-        });
-      } else if (!restoreMessageStackScrollTop(saved.top)) {
-        setTailFollowIntent(true);
-        restoreCleanup = scheduleSettledScrollToBottom("auto", {
-          maxAttempts: 60,
-          preferVirtualizedBoundary: true,
-        });
-      }
-    } else if (defaultScrollToBottom) {
-      restoreCleanup = scheduleSettledScrollToBottom("auto", {
-        maxAttempts: 60,
-        preferVirtualizedBoundary: true,
-      });
-      setTailFollowIntent(true);
-      paneScrollPositions[scrollStateKey] = {
-        top: Number.MAX_SAFE_INTEGER,
-        shouldStick: true,
-      };
-    } else {
-      node.scrollTop = 0;
-      notifyMessageStackScrollWrite(node);
-      setTailFollowIntent(false);
-      paneScrollPositions[scrollStateKey] = {
-        top: 0,
-        shouldStick: false,
-      };
-    }
-
-    return () => {
-      restoreCleanup?.();
-    };
-  }, [activeSession?.id, defaultScrollToBottom, scrollStateKey]);
-
-  useLayoutEffect(() => {
-    const previousByKey = previousShowWaitingIndicatorByKeyRef.current;
-    const wasShowing = previousByKey[scrollStateKey] ?? false;
-
-    if (!showWaitingIndicator) {
-      previousByKey[scrollStateKey] = false;
-      return;
-    }
-
-    if (
-      !activeSession ||
-      !isActive ||
-      !isSessionTabActive ||
-      pane.viewMode !== "session"
-    ) {
-      return;
-    }
-
-    if (wasShowing) {
-      return;
-    }
-
-    previousByKey[scrollStateKey] = true;
-
-    if (
-      !getTailFollowIntent() &&
-      !waitingIndicatorShouldStick &&
-      !isMessageStackNearBottom()
-    ) {
-      return;
-    }
-
-    return scheduleSettledScrollToBottom("auto", {
-      maxAttempts: 24,
-      minAttempts: 4,
-      preferVirtualizedBoundary: true,
-      scrollKind: "bottom_follow",
-    });
-  }, [
-    activeSession,
-    isActive,
-    isSessionTabActive,
-    pane.viewMode,
-    scrollStateKey,
-    showWaitingIndicator,
-    waitingIndicatorShouldStick,
-  ]);
-
-  useLayoutEffect(() => {
-    if (!hasSessionFindQuery || !activeSessionSearchMatch) {
-      return;
-    }
-
-    const node =
-      sessionSearchItemRefsRef.current[activeSessionSearchMatch.itemKey];
-    if (!node) {
-      return;
-    }
-
-    setTailFollowIntent(false);
-    node.scrollIntoView({
-      block: "center",
-      behavior: "auto",
-    });
-
-    const container = messageStackRef.current;
-    if (!container) {
-      return;
-    }
-    notifyMessageStackScrollWrite(container);
-
-    paneScrollPositions[scrollStateKey] = {
-      top: container.scrollTop,
-      shouldStick: false,
-    };
-    setNewResponseIndicator(scrollStateKey, false);
-  }, [
-    activeSessionSearchMatch,
-    hasSessionFindQuery,
-    paneScrollPositions,
-    scrollStateKey,
-  ]);
-
-  useLayoutEffect(() => {
-    if (
-      !activeSession ||
-      !isSessionTabActive ||
-      pane.viewMode !== "session" ||
-      visitedSessionIds[activeSession.id]
-    ) {
-      return;
-    }
-
-    if (savedScrollShouldStick) {
-      return;
-    }
-
-    return scheduleSettledScrollToBottom("auto", {
-      preferVirtualizedBoundary: true,
-    });
-  }, [
-    activeSession,
-    isSessionTabActive,
-    pane.viewMode,
-    savedScrollShouldStick,
-    scrollStateKey,
-    visitedSessionIds,
-  ]);
-
-  useEffect(() => {
-    if (!activeSession?.id) {
-      return;
-    }
-
-    setVisitedSessionIds((current) =>
-      current[activeSession.id]
-        ? current
-        : {
-            ...current,
-            [activeSession.id]: true,
-          },
-    );
-  }, [activeSession?.id]);
-
-  useEffect(() => {
-    const availableSessionIds = new Set(sessions.map((session) => session.id));
-    setVisitedSessionIds((current) =>
-      pruneSessionFlags(current, availableSessionIds),
-    );
-  }, [sessions]);
-
-  useEffect(() => {
-    if (!activeSession || !isSessionTabActive) {
-      return;
-    }
-
-    const previousSignature = paneContentSignatures[scrollStateKey];
-    const previousMessageContentSignature =
-      paneMessageContentSignatures[scrollStateKey];
-    if (previousSignature === visibleContentSignature) {
-      return;
-    }
-    paneContentSignatures[scrollStateKey] = visibleContentSignature;
-    paneMessageContentSignatures[scrollStateKey] =
-      visibleMessageContentSignature;
-    if (previousSignature === undefined) {
-      // First content after mount. The useLayoutEffect already tried to
-      // scroll, but messages may not have been available yet (SSE loads
-      // state asynchronously). If the initial intent was to stick to the
-      // bottom, honour it now that content has arrived.
-      const saved = paneScrollPositions[scrollStateKey];
-      if (saved && !saved.shouldStick) {
-        if (!restoreMessageStackScrollTop(saved.top)) {
-          setTailFollowIntent(true);
-          return scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
-        }
-        return;
-      }
-      if (getTailFollowIntent() || saved?.shouldStick) {
-        return scheduleSettledScrollToBottom("auto", {
-          maxAttempts: 60,
-          preferVirtualizedBoundary: true,
-        });
-      }
-      return;
-    }
-
-    const onlyPendingPromptsChanged =
-      pane.viewMode === "session" &&
-      showWaitingIndicator &&
-      previousMessageContentSignature === visibleMessageContentSignature;
-    if (onlyPendingPromptsChanged) {
-      if (
-        getTailFollowIntent() ||
-        paneScrollPositions[scrollStateKey]?.shouldStick === true
-      ) {
-        setNewResponseIndicator(scrollStateKey, false);
-        return scheduleSettledScrollToBottom("smooth", {
-          maxAttempts: 24,
-          minAttempts: 4,
-          scrollKind: "bottom_follow",
-        });
-      }
-      setNewResponseIndicator(scrollStateKey, true, "activity");
-      return;
-    }
-
-    if (hasSessionFindQuery) {
-      setTailFollowIntent(false);
-      if (
-        pane.viewMode === "session" &&
-        visibleLastMessageAuthor === "assistant"
-      ) {
-        setNewResponseIndicator(scrollStateKey, true);
-      }
-      return;
-    }
-
-    const shouldScroll =
-      getTailFollowIntent() ||
-      paneScrollPositions[scrollStateKey]?.shouldStick === true ||
-      visibleLastMessageAuthor === "you";
-    if (!shouldScroll) {
-      if (
-        pane.viewMode === "session" &&
-        visibleLastMessageAuthor === "assistant"
-      ) {
-        setNewResponseIndicator(scrollStateKey, true);
-      }
-      return;
-    }
-
-    if (visibleLastMessageAuthor === "you") {
-      setNewResponseIndicator(scrollStateKey, false);
-      let cleanup: (() => void) | undefined;
-      const frameId = window.requestAnimationFrame(() => {
-        cleanup = followLatestMessageForPromptSend();
-      });
-      return () => {
-        window.cancelAnimationFrame(frameId);
-        cleanup?.();
-      };
-    }
-
-    setNewResponseIndicator(scrollStateKey, false);
-    return scheduleSettledScrollToBottom("smooth", {
-      maxAttempts: 24,
-      minAttempts: 4,
-      scrollKind: "bottom_follow",
-    });
-  }, [
-    activeSession,
-    hasSessionFindQuery,
-    isSessionTabActive,
-    pane.viewMode,
-    scrollStateKey,
-    showWaitingIndicator,
-    visibleContentSignature,
-    visibleLastMessageAuthor,
-    visibleMessageContentSignature,
-  ]);
-
-  useEffect(() => {
-    if (
-      !pendingScrollToBottomRequest ||
-      !isActive ||
-      pane.viewMode !== "session" ||
-      activeSession?.id !== pendingScrollToBottomRequest.sessionId
-    ) {
-      return;
-    }
-
-    const requestToken = pendingScrollToBottomRequest.token;
-    const node = messageStackRef.current;
-    if (node?.querySelector(".virtualized-message-list")) {
-      scrollMessageStackToBoundary("bottom");
-      onScrollToBottomRequestHandled(requestToken);
-      return undefined;
-    }
-
-    return scheduleSettledScrollToBottom("auto", {
-      onComplete: () => {
-        onScrollToBottomRequestHandled(requestToken);
-      },
-    });
-  }, [
-    activeSession?.id,
-    isActive,
-    onScrollToBottomRequestHandled,
-    pane.viewMode,
-    pendingScrollToBottomRequest,
-    scrollStateKey,
-  ]);
-
-  useEffect(() => {
-    if (!isSending || pane.viewMode !== "session") {
-      return;
-    }
-
-    // When the user is already near the bottom on send, skip the
-    // smooth-scroll here. The user prompt is non-optimistic (it
-    // lands only after the POST returns), so this effect would
-    // otherwise smooth-scroll to the OLD bottom while the
-    // visibleContentSignature effect a few frames later
-    // smooth-scrolls to the NEW (taller) bottom — the second
-    // scrollTo cancels the first mid-animation, restarting the
-    // easing curve from the current position to a new target,
-    // which the user perceives as a stutter / "not smooth"
-    // motion. Letting the post-message-land effect drive the
-    // single smooth-scroll keeps the animation linear.
-    //
-    // This branch samples scroll position only when `isSending`
-    // flips. For users already near bottom at that moment, defer
-    // this pre-land effect to the post-message-land effect above.
-    // If the user later scrolls away while the send is still in
-    // flight, this effect does not re-run from that scroll position;
-    // the landed user-message path remains responsible for deciding
-    // whether prompt-follow catchup should run.
-    //
-    // For the far-from-bottom-at-send-start case the auto-scroll
-    // layout effect is gated off (the user explicitly scrolled
-    // away), so we still schedule the settled-poll catchup here to
-    // bring the user's prompt into view once it lands. The
-    // `App.scroll-behavior.test.tsx::"follows the latest user
-    // prompt immediately while a send is in flight"` regression
-    // pins this exact behavior.
-    if (isMessageStackNearBottom()) {
-      return;
-    }
-
-    let cleanup: (() => void) | undefined;
-    const frameId = window.requestAnimationFrame(() => {
-      cleanup = followLatestMessageForPromptSend();
-    });
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      cleanup?.();
-    };
-  }, [isSending, pane.viewMode, scrollStateKey]);
-
-  useEffect(() => {
-    if (pane.viewMode !== "source") {
-      return;
-    }
-
-    if (!pane.sourcePath && sourceCandidatePaths[0]) {
-      onPaneSourcePathChange(pane.id, sourceCandidatePaths[0]);
-    }
-  }, [
-    onPaneSourcePathChange,
-    pane.id,
-    pane.sourcePath,
-    pane.viewMode,
-    sourceCandidatePaths,
-  ]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadFile(path: string) {
-      if (!activeSourceOriginSessionId && !activeSourceOriginProjectId) {
-        setFileState({
-          status: "error",
-          path,
-          content: "",
-          contentHash: null,
-          mtimeMs: null,
-          sizeBytes: null,
-          staleOnDisk: false,
-          externalChangeKind: null,
-          externalContentHash: null,
-          externalMtimeMs: null,
-          externalSizeBytes: null,
-          error:
-            "This file view is no longer associated with a live session or project.",
-          language: null,
-        });
-        sourceEditorDirtyRef.current = false;
-        setSourceEditorDirty(false);
-        return;
-      }
-
-      setFileState({
-        status: "loading",
-        path,
-        content: "",
-        contentHash: null,
-        mtimeMs: null,
-        sizeBytes: null,
-        staleOnDisk: false,
-        externalChangeKind: null,
-        externalContentHash: null,
-        externalMtimeMs: null,
-        externalSizeBytes: null,
-        error: null,
-        language: null,
-      });
-      sourceEditorDirtyRef.current = false;
-      setSourceEditorDirty(false);
-
-      try {
-        const response = await fetchFile(path, {
-          sessionId: activeSourceOriginSessionId,
-          projectId: activeSourceOriginProjectId,
-        });
-        if (cancelled) {
-          return;
-        }
-
-        sourceEditorDirtyRef.current = false;
-        setSourceEditorDirty(false);
-        setFileState(sourceFileStateFromResponse(response));
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setFileState({
-          status: "error",
-          path,
-          content: "",
-          contentHash: null,
-          mtimeMs: null,
-          sizeBytes: null,
-          staleOnDisk: false,
-          externalChangeKind: null,
-          externalContentHash: null,
-          externalMtimeMs: null,
-          externalSizeBytes: null,
-          error: getErrorMessage(error),
-          language: null,
-        });
-        sourceEditorDirtyRef.current = false;
-        setSourceEditorDirty(false);
-      }
-    }
-
-    if (pane.viewMode === "source" && pane.sourcePath) {
-      void loadFile(pane.sourcePath);
-    } else if (pane.viewMode === "source") {
-      setFileState({
-        status: "idle",
-        path: "",
-        content: "",
-        contentHash: null,
-        mtimeMs: null,
-        sizeBytes: null,
-        staleOnDisk: false,
-        externalChangeKind: null,
-        externalContentHash: null,
-        externalMtimeMs: null,
-        externalSizeBytes: null,
-        error: null,
-        language: null,
-      });
-      sourceEditorDirtyRef.current = false;
-      setSourceEditorDirty(false);
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeSourceOriginProjectId,
-    activeSourceOriginSessionId,
-    pane.sourcePath,
-    pane.viewMode,
-  ]);
-
-  useEffect(() => {
-    if (
-      !workspaceFilesChangedEvent ||
-      pane.viewMode !== "source" ||
-      !pane.sourcePath ||
-      (!activeSourceOriginSessionId && !activeSourceOriginProjectId)
-    ) {
-      return;
-    }
-
-    const fileChangeEvent = workspaceFilesChangedEvent;
-    let cancelled = false;
-
-    async function checkOpenSourceFile() {
-      const current = fileStateRef.current;
-      if (
-        current.status !== "ready" ||
-        current.path !== pane.sourcePath ||
-        !current.contentHash
-      ) {
-        return;
-      }
-
-      const fileChange = workspaceFilesChangedEventChangeForPath(
-        fileChangeEvent,
-        current.path,
-        {
-          rootPath: activeSourceWorkspaceRoot,
-          sessionId: activeSourceOriginSessionId,
-        },
-      );
-      if (!fileChange) {
-        return;
-      }
-
-      if (fileChange.kind === "deleted") {
-        setFileState((latest) =>
-          latest.status === "ready" &&
-          latest.path === current.path &&
-          latest.contentHash === current.contentHash
-            ? {
-                ...latest,
-                staleOnDisk: true,
-                externalChangeKind: "deleted",
-                externalContentHash: null,
-                externalMtimeMs: fileChange.mtimeMs ?? null,
-                externalSizeBytes: fileChange.sizeBytes ?? null,
-              }
-            : latest,
-        );
-        return;
-      }
-
-      try {
-        const response = await fetchFile(current.path, {
-          sessionId: activeSourceOriginSessionId,
-          projectId: activeSourceOriginProjectId,
-        });
-        if (cancelled) {
-          return;
-        }
-
-        const nextHash = response.contentHash ?? null;
-        if (!nextHash || nextHash === current.contentHash) {
-          if (current.staleOnDisk) {
-            setFileState((latest) =>
-              latest.status === "ready" &&
-              latest.path === current.path &&
-              latest.contentHash === current.contentHash
-                ? {
-                    ...latest,
-                    staleOnDisk: false,
-                    externalChangeKind: null,
-                    externalContentHash: null,
-                    externalMtimeMs: null,
-                    externalSizeBytes: null,
-                  }
-                : latest,
-            );
-          }
-          return;
-        }
-
-        if (sourceEditorDirtyRef.current) {
-          setFileState((latest) =>
-            latest.status === "ready" &&
-            latest.path === current.path &&
-            latest.contentHash === current.contentHash
-              ? {
-                  ...latest,
-                  staleOnDisk: true,
-                  externalChangeKind: fileChange.kind,
-                  externalContentHash: nextHash,
-                  externalMtimeMs: response.mtimeMs ?? null,
-                  externalSizeBytes: response.sizeBytes ?? null,
-                }
-              : latest,
-          );
-          return;
-        }
-
-        setFileState(sourceFileStateFromResponse(response));
-      } catch (error) {
-        if (!cancelled && isSourceFileMissingError(error)) {
-          setFileState((latest) =>
-            latest.status === "ready" &&
-            latest.path === current.path &&
-            latest.contentHash === current.contentHash
-              ? {
-                  ...latest,
-                  staleOnDisk: true,
-                  externalChangeKind: "deleted",
-                  externalContentHash: null,
-                  externalMtimeMs: fileChange.mtimeMs ?? null,
-                  externalSizeBytes: fileChange.sizeBytes ?? null,
-                }
-              : latest,
-          );
-        }
-        // Other transient read errors stay out of the editor. The explicit file
-        // load and save paths still surface failures where the user can act.
-      }
-    }
-
-    void checkOpenSourceFile();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeSourceOriginProjectId,
-    activeSourceOriginSessionId,
-    activeSourceWorkspaceRoot,
-    pane.sourcePath,
-    pane.viewMode,
-    workspaceFilesChangedEvent,
-  ]);
-
   useEffect(() => {
     if (!showDropOverlay) {
       setActiveDropPlacement(null);
       setPointerDraggedTab(null);
     }
   }, [showDropOverlay]);
-
-  const tabDecorations = useMemo<Record<string, PaneTabDecoration>>(() => {
-    if (!activeSourceTab || fileState.status !== "ready") {
-      return {};
-    }
-
-    let decoration: PaneTabDecoration | null = null;
-    if (fileState.staleOnDisk && sourceEditorDirty) {
-      decoration = {
-        label: "Conflict",
-        tone: "danger",
-        title: "This file changed on disk while you have unsaved edits.",
-      };
-    } else if (fileState.staleOnDisk) {
-      decoration = {
-        label: "Changed",
-        tone: "info",
-        title: "This file changed on disk.",
-      };
-    } else if (sourceEditorDirty) {
-      decoration = {
-        label: "Unsaved",
-        tone: "warning",
-        title: "This file has unsaved editor changes.",
-      };
-    }
-
-    return decoration ? { [activeSourceTab.id]: decoration } : {};
-  }, [activeSourceTab, fileState, sourceEditorDirty]);
 
   const delegationActions = useMemo(
     () => ({
@@ -2659,47 +1237,7 @@ export function SessionPaneView({
             ? "Session transcript"
             : undefined
         }
-        onScroll={(event) => {
-          const node = event.currentTarget;
-          const previousScrollPosition = paneScrollPositions[scrollStateKey];
-          const previousTop = previousScrollPosition?.top;
-          const movedUpFromRecordedPosition =
-            typeof previousTop === "number" &&
-            previousTop < Number.MAX_SAFE_INTEGER / 2 &&
-            node.scrollTop < previousTop - 1;
-          const { shouldStick } = syncMessageStackScrollPosition(
-            node,
-            scrollStateKey,
-            paneScrollPositions,
-          );
-          if (isPaneProgrammaticBottomFollowActive()) {
-            const targetTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-            setTailFollowIntent(true);
-            paneScrollPositions[scrollStateKey] = {
-              top: targetTop,
-              shouldStick: true,
-            };
-            setNewResponseIndicator(scrollStateKey, false);
-            if (targetTop - node.scrollTop <= 4) {
-              cancelPaneProgrammaticBottomFollow();
-            }
-            return;
-          }
-          if (shouldStick) {
-            setTailFollowIntent(true);
-            setNewResponseIndicator(scrollStateKey, false);
-          } else if (
-            hasTailFollowUserEscape() ||
-            movedUpFromRecordedPosition ||
-            !getTailFollowIntent()
-          ) {
-            setTailFollowIntent(false);
-            cancelSettledScrollToBottom();
-          } else {
-            keepPaneScrollPositionPinned(node);
-            setNewResponseIndicator(scrollStateKey, false);
-          }
-        }}
+        onScroll={handleMessageStackScroll}
         onWheel={handleMessageStackUserScrollIntent}
         onTouchStart={handleMessageStackTouchStart}
         onTouchMove={handleMessageStackUserScrollIntent}

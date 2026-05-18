@@ -46,7 +46,7 @@ the Implementation Tasks section.
 
 ## `src/telegram.rs` past 1500-line architecture rubric threshold
 
-**Severity:** Medium - file now exceeds 1766 lines after round 56. CLAUDE.md asks for smaller modules.
+**Severity:** Medium - `src/telegram.rs` is now about 4,143 lines. CLAUDE.md asks for smaller modules.
 
 `src/telegram.rs`. Round 56 added `backup_corrupt_telegram_bot_file`, `telegram_command_mentions_other_bot`, and digest-failure branches on top of the round-55 baseline. Mixes: HTTP client, TermAl client, wire types, command parser, digest renderer, assistant-forwarding cursor logic, corrupt-file backup helper, and the relay loop. `telegram_settings.rs` already extracted the UI surface; the next natural cut is `telegram_relay.rs` + `telegram_clients.rs` + `telegram_wire.rs`.
 
@@ -122,7 +122,7 @@ the Implementation Tasks section.
 
 ## `app-live-state.ts` reconnect state machine continues to grow
 
-**Severity:** Low - `ui/src/app-live-state.ts:2504 lines`. TS utility threshold (1500) exceeded; new `pendingBadLiveEventRecovery` adds another flag-shaped piece of reconnect bookkeeping. The reconnect/resync state machine inside `useEffect` now coordinates 6+ pieces of cross-cutting state.
+**Severity:** Low - `ui/src/app-live-state.ts` is about 3,205 lines. TS utility threshold (1500) exceeded; `pendingBadLiveEventRecovery` adds another flag-shaped piece of reconnect bookkeeping. The reconnect/resync state machine inside `useEffect` now coordinates 6+ pieces of cross-cutting state.
 
 **Proposal:**
 - Extract a `ReconnectStateMachine` (or similar) module that owns the flag set + transitions and exposes named events (`onSseError`, `onSseReopen`, `onBadLiveEvent`, `onSnapshotAdopted`, `onLiveEventConfirmed`).
@@ -145,20 +145,6 @@ Many production SQLite helpers in `src/persist.rs` are `#[cfg(not(test))]`, so e
 - Add coverage for post-commit permission failures, cache invalidation reset, and fatal redirection/reparse checks.
 - Keep legacy JSON fixture tests separate from production runtime persistence tests.
 
-## `SessionPaneView.tsx` still past architecture file-size threshold
-
-**Severity:** Low - `ui/src/SessionPaneView.tsx` is still 3,262 lines after the latest helper splits, past the TSX component threshold (~2,000 lines). `ui/src/app-session-actions.ts` is now at the 1,500-line utility-module threshold after its Codex-thread, marker, and draft-attachment action handlers were extracted.
-
-The waiting-indicator helpers now live in `ui/src/SessionPaneView.waiting-indicator.ts`, the active-tab resolver now lives in `ui/src/SessionPaneView.active-tab.ts`, active tab/session/workspace derivation now lives in `ui/src/SessionPaneView.active-context.ts`, pane message-list selection and visible-message projection now live in `ui/src/SessionPaneView.messages.ts`, the pane scroll-key resolver now lives in `ui/src/SessionPaneView.scroll-key.ts`, and the `SessionPaneView` prop contract now lives in `ui/src/SessionPaneView.types.ts`. Those moves reduced local clutter and gave the helpers direct unit-testable surfaces, but the main pane component remains over threshold.
-
-**Current behavior:**
-- `SessionPaneView.tsx` still owns pane orchestration, tab rendering, scroll/follow behavior, panel selection, and composer/footer wiring.
-- The main component now has active-context and small helper splits, but the production TSX module is still above its review threshold.
-
-**Proposal:**
-- Continue with dedicated pure-code-move commits per CLAUDE.md.
-- For `SessionPaneView.tsx`: extract session-find/scroll-follow and panel body rendering clusters.
-
 ## `app-live-state.ts` past 1,500-line review threshold for TypeScript utility modules
 
 **Severity:** Low - `ui/src/app-live-state.ts`. File is still about 3,205 lines after this round. The architecture rubric sets a pragmatic ~1,500-line threshold for TypeScript utility modules. Hydration adoption, hydration constants/pure helpers, workspace-file event buffering, lightweight state-event profiling/JSON metadata helpers, delta-event guards, delegation-wait list helpers, exported hook contract types, and unknown-model confirmation pruning have moved out, but the module still mixes retry scheduling, reconnect recovery, hydration, and the main state machine.
@@ -173,7 +159,7 @@ The waiting-indicator helpers now live in `ui/src/SessionPaneView.waiting-indica
 
 ## `src/tests/remote.rs` past the 5,000-line review threshold
 
-**Severity:** Low - `src/tests/remote.rs` is now 9,202 lines after this round's +471-line addition, well past the project's review-threshold for test files. The new replay-cache work clusters cohesively between lines ~2,810 and ~4,040 (the `RemoteDeltaReplayCache` shape helper, the `local_replay_test_remote` / `seed_loaded_remote_proxy_session` / `assert_delta_publishes_once_then_replay_skips` / `assert_remote_delta_replay_cache_shape` / `test_remote_delta_replay_key` helpers, and the `remote_delta_replay_*` tests).
+**Severity:** Low - `src/tests/remote.rs` is now about 12,296 lines, well past the project's review-threshold for test files. The replay-cache work clusters cohesively between lines ~2,810 and ~4,040 (the `RemoteDeltaReplayCache` shape helper, the `local_replay_test_remote` / `seed_loaded_remote_proxy_session` / `assert_delta_publishes_once_then_replay_skips` / `assert_remote_delta_replay_cache_shape` / `test_remote_delta_replay_key` helpers, and the `remote_delta_replay_*` tests).
 
 The growth is incremental across many rounds of replay-cache hardening, not a single landing — but extracting the cluster keeps the rest of the file's per-test density manageable. Per `CLAUDE.md`, splits must be pure code moves and live in their own commit.
 
@@ -238,20 +224,18 @@ still coming from the previous React `sessions` commit.
   lagging React-state-derived sibling prop and asserts the active pane never
   renders a torn combination.
 
-## `message-cards.tsx` still owns Markdown, Mermaid, KaTeX, and diff rendering as one module
+## `message-cards.tsx` still mixes message composition with deferred Markdown and diff cards
 
-**Severity:** Low - `ui/src/message-cards.tsx` is still a broad renderer module, though deferred heavy-content wrapping and syntax-highlighted code blocks now live in focused modules.
+**Severity:** Low - `ui/src/message-cards.tsx` is now about 1,117 lines and no longer owns the Markdown/Mermaid/KaTeX runtime, but it still combines message routing, deferred Markdown wrappers, text/thinking message shells, approval/parallel/subagent cards, and diff cards.
 
-The activation provider, viewport-gated heavy-content wrapper, and code block renderer now have clearer boundaries. The remaining heavy rendering paths still share one file with message-card composition, which keeps future Markdown, Mermaid, KaTeX, and diff performance work coupled to a large renderer surface.
+The Markdown/Mermaid/KaTeX renderer now lives in `ui/src/markdown-content.tsx`, input request cards live in `ui/src/message-input-request-cards.tsx`, the activation provider lives in `ui/src/deferred-heavy-content-activation.tsx`, the viewport-gated wrapper lives in `ui/src/deferred-heavy-content.tsx`, and syntax-highlighted/deferred code blocks live in `ui/src/highlighted-code-block.tsx`.
 
 **Current behavior:**
-- Markdown, Mermaid, KaTeX, diff, and message-card composition still live in `ui/src/message-cards.tsx`.
-- The deferred activation provider/hook lives in `ui/src/deferred-heavy-content-activation.tsx`.
-- The viewport-gated wrapper lives in `ui/src/deferred-heavy-content.tsx`.
-- Syntax-highlighted and deferred code block rendering lives in `ui/src/highlighted-code-block.tsx`.
+- `message-cards.tsx` still owns `DeferredMarkdownContent`, `TextMessage`, `ThinkingMessage`, `DiffCard`, and the top-level `MessageCard` routing surface.
+- Diff rendering and deferred Markdown activation policy still share the same file as generic message composition.
 
 **Proposal:**
-- Extract the remaining heavy Markdown, Mermaid, KaTeX, and diff rendering paths into focused modules so virtualization policy and content rendering can evolve independently.
+- Extract `DeferredMarkdownContent` and `DiffCard` into focused modules before the next message-rendering performance cut.
 
 ## Focused live sessions monopolize the main thread during state adoption
 
