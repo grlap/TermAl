@@ -120,13 +120,17 @@ the Implementation Tasks section.
 - Keep digest-only forwarding as the default for Telegram integrations.
 - Document the third-party content exposure and add any practical redaction/truncation before full forwarding.
 
-## `app-live-state.ts` reconnect state machine continues to grow
+## Live transport reconnect state machine still needs transition extraction
 
-**Severity:** Low - `ui/src/app-live-state.ts` is about 3,205 lines. TS utility threshold (1500) exceeded; `pendingBadLiveEventRecovery` adds another flag-shaped piece of reconnect bookkeeping. The reconnect/resync state machine inside `useEffect` now coordinates 6+ pieces of cross-cutting state.
+**Severity:** Low - `ui/src/app-live-state-transport.ts` is about 1,359 lines after the live-state split, but the reconnect/resync effect still coordinates several closure-local flags including `pendingBadLiveEventRecovery`, `allowReconnectRecoveryWithoutExplicitOpen`, and delegation repair proof state.
+
+**Current behavior:**
+- `ui/src/app-live-state.ts`, `ui/src/app-live-state-transport.ts`, `ui/src/app-live-state-transport-events.ts`, and `ui/src/app-live-state-render-schedulers.ts` are now under the TypeScript utility review threshold.
+- Reconnect transition state is focused in the transport module, but the flag set and transition rules are still implicit in nested effect helpers.
 
 **Proposal:**
 - Extract a `ReconnectStateMachine` (or similar) module that owns the flag set + transitions and exposes named events (`onSseError`, `onSseReopen`, `onBadLiveEvent`, `onSnapshotAdopted`, `onLiveEventConfirmed`).
-- Defer to a pure code-move commit per CLAUDE.md.
+- Add focused tests for the extracted transition helper before changing behavior.
 
 ## Production SQLite persistence is bypassed in the test build
 
@@ -144,18 +148,6 @@ Many production SQLite helpers in `src/persist.rs` are `#[cfg(not(test))]`, so e
 - Add coverage for full snapshot save/load, delta upsert, metadata-only update, hidden/deleted session row removal, and startup load from SQLite.
 - Add coverage for post-commit permission failures, cache invalidation reset, and fatal redirection/reparse checks.
 - Keep legacy JSON fixture tests separate from production runtime persistence tests.
-
-## `app-live-state.ts` past 1,500-line review threshold for TypeScript utility modules
-
-**Severity:** Low - `ui/src/app-live-state.ts`. File is still about 3,205 lines after this round. The architecture rubric sets a pragmatic ~1,500-line threshold for TypeScript utility modules. Hydration adoption, hydration constants/pure helpers, workspace-file event buffering, lightweight state-event profiling/JSON metadata helpers, delta-event guards, delegation-wait list helpers, exported hook contract types, and unknown-model confirmation pruning have moved out, but the module still mixes retry scheduling, reconnect recovery, hydration, and the main state machine.
-
-**Current behavior:**
-- Single module still mixes hydration matching, retry scheduling, reconnect recovery, and the main state machine.
-- Per-cluster grep tax growing with each round.
-
-**Proposal:**
-- Defer to a dedicated pure-code-move commit per CLAUDE.md.
-- Extract reconnect recovery and hydration retry scheduling into focused helpers with matching unit tests.
 
 ## `src/tests/remote.rs` past the 5,000-line review threshold
 
