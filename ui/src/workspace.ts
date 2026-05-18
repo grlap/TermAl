@@ -1,461 +1,109 @@
 import type { GitDiffDocumentContent, GitDiffRequestPayload, GitDiffSection } from "./api";
 import type { DiffMessage, Session } from "./types";
-
-export type SessionPaneViewMode = "session" | "prompt" | "commands" | "diffs";
-export type PaneViewMode =
-  | SessionPaneViewMode
-  | "canvas"
-  | "controlPanel"
-  | "orchestratorList"
-  | "orchestratorCanvas"
-  | "sessionList"
-  | "projectList"
-  | "source"
-  | "filesystem"
-  | "gitStatus"
-  | "terminal"
-  | "instructionDebugger"
-  | "diffPreview";
-
-export type WorkspaceSessionTab = {
-  id: string;
-  kind: "session";
-  sessionId: string;
-};
-
-export type WorkspaceSourceTab = {
-  id: string;
-  kind: "source";
-  path: string | null;
-  focusLineNumber?: number | null;
-  focusColumnNumber?: number | null;
-  focusToken?: string | null;
-  originSessionId: string | null;
-  originProjectId?: string | null;
-};
-
-export type WorkspaceFilesystemTab = {
-  id: string;
-  kind: "filesystem";
-  rootPath: string | null;
-  originSessionId: string | null;
-  originProjectId?: string | null;
-};
-
-export type WorkspaceGitStatusTab = {
-  id: string;
-  kind: "gitStatus";
-  workdir: string | null;
-  originSessionId: string | null;
-  originProjectId?: string | null;
-};
-
-export type WorkspaceTerminalTab = {
-  id: string;
-  kind: "terminal";
-  workdir: string | null;
-  originSessionId: string | null;
-  originProjectId?: string | null;
-};
-
-export type WorkspaceControlPanelTab = {
-  id: string;
-  kind: "controlPanel";
-  originSessionId: string | null;
-  originProjectId?: string | null;
-};
-
-export type WorkspaceOrchestratorListTab = {
-  id: string;
-  kind: "orchestratorList";
-  originSessionId: string | null;
-  originProjectId?: string | null;
-};
-
-export type WorkspaceCanvasCard = {
-  sessionId: string;
-  x: number;
-  y: number;
-};
-
-export type WorkspaceCanvasTab = {
-  id: string;
-  kind: "canvas";
-  cards: WorkspaceCanvasCard[];
-  zoom?: number;
-  originSessionId: string | null;
-  originProjectId?: string | null;
-};
-
-export type WorkspaceOrchestratorCanvasTab = {
-  id: string;
-  kind: "orchestratorCanvas";
-  originSessionId: string | null;
-  originProjectId?: string | null;
-  templateId?: string | null;
-  startMode?: "new";
-};
-
-export type WorkspaceSessionListTab = {
-  id: string;
-  kind: "sessionList";
-  originSessionId: string | null;
-  originProjectId?: string | null;
-};
-
-export type WorkspaceProjectListTab = {
-  id: string;
-  kind: "projectList";
-  originSessionId: string | null;
-  originProjectId?: string | null;
-};
-
-export type WorkspaceInstructionDebuggerTab = {
-  id: string;
-  kind: "instructionDebugger";
-  workdir: string | null;
-  originSessionId: string | null;
-  originProjectId?: string | null;
-};
-
-export type WorkspaceDiffPreviewTab = {
-  id: string;
-  kind: "diffPreview";
-  changeType: DiffMessage["changeType"];
-  changeSetId?: string | null;
-  diff: string;
-  documentEnrichmentNote?: string | null;
-  documentContent?: GitDiffDocumentContent | null;
-  diffMessageId: string;
-  filePath: string | null;
-  gitSectionId?: GitDiffSection | null;
-  language?: string | null;
-  originSessionId: string | null;
-  originProjectId?: string | null;
-  summary: string;
-  gitDiffRequestKey?: string | null;
-  gitDiffRequest?: GitDiffRequestPayload | null;
-  isLoading?: boolean;
-  loadError?: string | null;
-};
-
-export type WorkspaceTab =
-  | WorkspaceSessionTab
-  | WorkspaceSourceTab
-  | WorkspaceFilesystemTab
-  | WorkspaceGitStatusTab
-  | WorkspaceTerminalTab
-  | WorkspaceControlPanelTab
-  | WorkspaceOrchestratorListTab
-  | WorkspaceCanvasTab
-  | WorkspaceOrchestratorCanvasTab
-  | WorkspaceSessionListTab
-  | WorkspaceProjectListTab
-  | WorkspaceInstructionDebuggerTab
-  | WorkspaceDiffPreviewTab;
-
-type WorkspaceOriginOnlyTab =
-  | WorkspaceControlPanelTab
-  | WorkspaceOrchestratorListTab
-  | WorkspaceSessionListTab
-  | WorkspaceProjectListTab;
-
-export type WorkspacePane = {
-  id: string;
-  tabs: WorkspaceTab[];
-  activeTabId: string | null;
-  activeSessionId: string | null;
-  viewMode: PaneViewMode;
-  lastSessionViewMode: SessionPaneViewMode;
-  sourcePath: string | null;
-};
-
-type WorkspaceSourceFocus = {
-  line: number | null;
-  column: number | null;
-  token: string | null;
-};
-
-type OpenSourceTabOptions = {
-  line?: number | null;
-  column?: number | null;
-  openInNewTab?: boolean;
-};
-
-export type WorkspaceNode =
-  | {
-      type: "pane";
-      paneId: string;
-    }
-  | {
-      id: string;
-      type: "split";
-      direction: "row" | "column";
-      ratio: number;
-      first: WorkspaceNode;
-      second: WorkspaceNode;
-    };
-
-export type WorkspaceState = {
-  root: WorkspaceNode | null;
-  panes: WorkspacePane[];
-  activePaneId: string | null;
-};
-
-export type TabDropPlacement = "left" | "right" | "top" | "bottom" | "tabs";
-export const DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO = 0.24;
-export const WORKSPACE_CANVAS_DEFAULT_ZOOM = 1;
-export const WORKSPACE_CANVAS_MIN_ZOOM = 0.5;
-export const WORKSPACE_CANVAS_MAX_ZOOM = 2;
+import {
+  EMPTY_WORKSPACE_SOURCE_FOCUS,
+  canvasZoomProps,
+  createOpenSourceFocus,
+  normalizeWorkspaceCanvasCard,
+  normalizeWorkspaceCanvasCards,
+  normalizeWorkspaceCanvasZoom,
+  normalizeWorkspaceIdentifier,
+  normalizeWorkspacePath,
+  normalizeWorkspaceSourceFocus,
+  projectOriginProps,
+  sourceFocusProps,
+} from "./workspace-normalize";
+export { normalizeWorkspaceCanvasZoom } from "./workspace-normalize";
+import {
+  createCanvasTab,
+  createControlPanelTab,
+  createDiffPreviewTab,
+  createFilesystemTab,
+  createGitStatusTab,
+  createInstructionDebuggerTab,
+  createOrchestratorCanvasTab,
+  createOrchestratorListTab,
+  createProjectListTab,
+  createSessionListTab,
+  createSessionTab,
+  createSourceTab,
+  createTerminalTab,
+} from "./workspace-tabs";
+export {
+  createCanvasTab,
+  createControlPanelTab,
+  createDiffPreviewTab,
+  createFilesystemTab,
+  createGitStatusTab,
+  createInstructionDebuggerTab,
+  createOrchestratorCanvasTab,
+  createOrchestratorListTab,
+  createProjectListTab,
+  createSessionListTab,
+  createSessionTab,
+  createSourceTab,
+  createTerminalTab,
+} from "./workspace-tabs";
+export type {
+  OpenSourceTabOptions,
+  PaneViewMode,
+  SessionPaneViewMode,
+  TabDropPlacement,
+  WorkspaceCanvasCard,
+  WorkspaceCanvasTab,
+  WorkspaceControlPanelTab,
+  WorkspaceDiffPreviewTab,
+  WorkspaceFilesystemTab,
+  WorkspaceGitStatusTab,
+  WorkspaceInstructionDebuggerTab,
+  WorkspaceNode,
+  WorkspaceOrchestratorCanvasTab,
+  WorkspaceOrchestratorListTab,
+  WorkspaceOriginOnlyTab,
+  WorkspacePane,
+  WorkspaceProjectListTab,
+  WorkspaceSessionListTab,
+  WorkspaceSessionTab,
+  WorkspaceSourceFocus,
+  WorkspaceSourceTab,
+  WorkspaceState,
+  WorkspaceTab,
+  WorkspaceTerminalTab,
+} from "./workspace-types";
+import {
+  DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
+  WORKSPACE_CANVAS_DEFAULT_ZOOM,
+  type OpenSourceTabOptions,
+  type PaneViewMode,
+  type SessionPaneViewMode,
+  type TabDropPlacement,
+  type WorkspaceCanvasCard,
+  type WorkspaceCanvasTab,
+  type WorkspaceControlPanelTab,
+  type WorkspaceDiffPreviewTab,
+  type WorkspaceFilesystemTab,
+  type WorkspaceGitStatusTab,
+  type WorkspaceInstructionDebuggerTab,
+  type WorkspaceNode,
+  type WorkspaceOrchestratorListTab,
+  type WorkspaceOriginOnlyTab,
+  type WorkspacePane,
+  type WorkspaceProjectListTab,
+  type WorkspaceSessionListTab,
+  type WorkspaceSessionTab,
+  type WorkspaceSourceFocus,
+  type WorkspaceSourceTab,
+  type WorkspaceState,
+  type WorkspaceTab,
+  type WorkspaceTerminalTab,
+} from "./workspace-types";
+export {
+  DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
+  WORKSPACE_CANVAS_DEFAULT_ZOOM,
+  WORKSPACE_CANVAS_MAX_ZOOM,
+  WORKSPACE_CANVAS_MIN_ZOOM,
+} from "./workspace-types";
 const DEFAULT_ADJACENT_PANE_SPLIT_RATIO = 0.5;
-
-export function createSessionTab(sessionId: string): WorkspaceSessionTab {
-  return {
-    id: crypto.randomUUID(),
-    kind: "session",
-    sessionId,
-  };
-}
-
-export function createSourceTab(
-  path: string | null = null,
-  originSessionId: string | null = null,
-  originProjectId: string | null = null,
-  focus: WorkspaceSourceFocus = EMPTY_WORKSPACE_SOURCE_FOCUS,
-): WorkspaceSourceTab {
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
-  const normalizedFocus = normalizeWorkspaceSourceFocus(focus);
-
-  return {
-    id: crypto.randomUUID(),
-    kind: "source",
-    path: normalizeWorkspacePath(path),
-    originSessionId,
-    ...projectOriginProps(normalizedOriginProjectId),
-    ...sourceFocusProps(normalizedFocus),
-  };
-}
-
-export function createFilesystemTab(
-  rootPath: string | null = null,
-  originSessionId: string | null = null,
-  originProjectId: string | null = null,
-): WorkspaceFilesystemTab {
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
-
-  return {
-    id: crypto.randomUUID(),
-    kind: "filesystem",
-    rootPath: normalizeWorkspacePath(rootPath),
-    originSessionId,
-    ...projectOriginProps(normalizedOriginProjectId),
-  };
-}
-
-export function createGitStatusTab(
-  workdir: string | null = null,
-  originSessionId: string | null = null,
-  originProjectId: string | null = null,
-): WorkspaceGitStatusTab {
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
-
-  return {
-    id: crypto.randomUUID(),
-    kind: "gitStatus",
-    workdir: normalizeWorkspacePath(workdir),
-    originSessionId,
-    ...projectOriginProps(normalizedOriginProjectId),
-  };
-}
-
-export function createTerminalTab(
-  workdir: string | null = null,
-  originSessionId: string | null = null,
-  originProjectId: string | null = null,
-): WorkspaceTerminalTab {
-  const normalizedOriginSessionId = normalizeWorkspaceIdentifier(originSessionId);
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
-
-  return {
-    id: crypto.randomUUID(),
-    kind: "terminal",
-    workdir: normalizeWorkspacePath(workdir),
-    originSessionId: normalizedOriginSessionId,
-    ...projectOriginProps(normalizedOriginProjectId),
-  };
-}
-
-export function createControlPanelTab(
-  originSessionId: string | null = null,
-  originProjectId: string | null = null,
-): WorkspaceControlPanelTab {
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
-
-  return {
-    id: crypto.randomUUID(),
-    kind: "controlPanel",
-    originSessionId,
-    ...projectOriginProps(normalizedOriginProjectId),
-  };
-}
-
-export function createOrchestratorListTab(
-  originSessionId: string | null = null,
-  originProjectId: string | null = null,
-): WorkspaceOrchestratorListTab {
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
-
-  return {
-    id: crypto.randomUUID(),
-    kind: "orchestratorList",
-    originSessionId,
-    ...projectOriginProps(normalizedOriginProjectId),
-  };
-}
-
-export function createCanvasTab(
-  originSessionId: string | null = null,
-  originProjectId: string | null = null,
-  cards: readonly WorkspaceCanvasCard[] = [],
-  zoom: number = WORKSPACE_CANVAS_DEFAULT_ZOOM,
-): WorkspaceCanvasTab {
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
-
-  return {
-    id: crypto.randomUUID(),
-    kind: "canvas",
-    cards: normalizeWorkspaceCanvasCards(cards),
-    ...canvasZoomProps(normalizeWorkspaceCanvasZoom(zoom)),
-    originSessionId,
-    ...projectOriginProps(normalizedOriginProjectId),
-  };
-}
-
-export function createOrchestratorCanvasTab(
-  originSessionId: string | null = null,
-  originProjectId: string | null = null,
-  templateId: string | null = null,
-  startMode: "new" | null = null,
-): WorkspaceOrchestratorCanvasTab {
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
-  const normalizedTemplateId = normalizeWorkspaceIdentifier(templateId);
-
-  return {
-    id: crypto.randomUUID(),
-    kind: "orchestratorCanvas",
-    originSessionId,
-    ...projectOriginProps(normalizedOriginProjectId),
-    ...(normalizedTemplateId ? { templateId: normalizedTemplateId } : {}),
-    ...(startMode === "new" ? { startMode } : {}),
-  };
-}
-
-export function createSessionListTab(
-  originSessionId: string | null = null,
-  originProjectId: string | null = null,
-): WorkspaceSessionListTab {
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
-
-  return {
-    id: crypto.randomUUID(),
-    kind: "sessionList",
-    originSessionId,
-    ...projectOriginProps(normalizedOriginProjectId),
-  };
-}
-
-export function createProjectListTab(
-  originSessionId: string | null = null,
-  originProjectId: string | null = null,
-): WorkspaceProjectListTab {
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
-
-  return {
-    id: crypto.randomUUID(),
-    kind: "projectList",
-    originSessionId,
-    ...projectOriginProps(normalizedOriginProjectId),
-  };
-}
-
-export function createInstructionDebuggerTab(
-  workdir: string | null = null,
-  originSessionId: string | null = null,
-  originProjectId: string | null = null,
-): WorkspaceInstructionDebuggerTab {
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
-
-  return {
-    id: crypto.randomUUID(),
-    kind: "instructionDebugger",
-    workdir: normalizeWorkspacePath(workdir),
-    originSessionId,
-    ...projectOriginProps(normalizedOriginProjectId),
-  };
-}
-
-export function createDiffPreviewTab({
-  changeType,
-  changeSetId = null,
-  diff,
-  documentEnrichmentNote = null,
-  documentContent = null,
-  diffMessageId,
-  filePath = null,
-  gitSectionId = null,
-  language = null,
-  originSessionId = null,
-  originProjectId = null,
-  summary,
-  gitDiffRequestKey = null,
-  gitDiffRequest = null,
-  isLoading = false,
-  loadError = null,
-}: {
-  changeType: DiffMessage["changeType"];
-  changeSetId?: string | null;
-  diff: string;
-  documentEnrichmentNote?: string | null;
-  documentContent?: GitDiffDocumentContent | null;
-  diffMessageId: string;
-  filePath?: string | null;
-  gitSectionId?: GitDiffSection | null;
-  language?: string | null;
-  originSessionId?: string | null;
-  originProjectId?: string | null;
-  summary: string;
-  gitDiffRequestKey?: string | null;
-  gitDiffRequest?: GitDiffRequestPayload | null;
-  isLoading?: boolean;
-  loadError?: string | null;
-}): WorkspaceDiffPreviewTab {
-  const normalizedChangeSetId = normalizeWorkspaceIdentifier(changeSetId);
-  const normalizedDocumentEnrichmentNote = normalizeWorkspaceText(documentEnrichmentNote);
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
-  const normalizedGitDiffRequestKey = normalizeWorkspaceIdentifier(gitDiffRequestKey);
-  const normalizedLoadError = normalizeWorkspaceIdentifier(loadError);
-
-  return {
-    id: crypto.randomUUID(),
-    kind: "diffPreview",
-    changeType,
-    ...(normalizedChangeSetId ? { changeSetId: normalizedChangeSetId } : {}),
-    diff,
-    ...(normalizedDocumentEnrichmentNote ? { documentEnrichmentNote: normalizedDocumentEnrichmentNote } : {}),
-    ...(documentContent ? { documentContent } : {}),
-    diffMessageId,
-    filePath: normalizeWorkspacePath(filePath),
-    ...(gitSectionId ? { gitSectionId } : {}),
-    language,
-    originSessionId,
-    ...projectOriginProps(normalizedOriginProjectId),
-    summary,
-    ...(normalizedGitDiffRequestKey ? { gitDiffRequestKey: normalizedGitDiffRequestKey } : {}),
-    ...(gitDiffRequest ? { gitDiffRequest } : {}),
-    ...(isLoading ? { isLoading: true } : {}),
-    ...(normalizedLoadError ? { loadError: normalizedLoadError } : {}),
-  };
-}
 
 export function normalizeWorkspaceStatePaths(workspace: WorkspaceState): WorkspaceState {
   return {
@@ -3122,53 +2770,6 @@ function getActiveTab(pane: WorkspacePane) {
   return pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
 }
 
-const EMPTY_WORKSPACE_SOURCE_FOCUS: WorkspaceSourceFocus = {
-  line: null,
-  column: null,
-  token: null,
-};
-
-function createOpenSourceFocus(options?: OpenSourceTabOptions | null) {
-  const line = normalizeWorkspaceLineNumber(options?.line);
-  if (!line) {
-    return EMPTY_WORKSPACE_SOURCE_FOCUS;
-  }
-
-  return normalizeWorkspaceSourceFocus({
-    line,
-    column: options?.column ?? null,
-    token: crypto.randomUUID(),
-  });
-}
-
-function normalizeWorkspaceSourceFocus(
-  focus: Partial<WorkspaceSourceFocus> | null | undefined,
-): WorkspaceSourceFocus {
-  const line = normalizeWorkspaceLineNumber(focus?.line);
-  if (!line) {
-    return EMPTY_WORKSPACE_SOURCE_FOCUS;
-  }
-
-  const token = typeof focus?.token === "string" ? focus.token.trim() : "";
-  return {
-    line,
-    column: normalizeWorkspaceLineNumber(focus?.column),
-    token: token || null,
-  };
-}
-
-function sourceFocusProps(focus: WorkspaceSourceFocus) {
-  if (!focus.line) {
-    return {};
-  }
-
-  return {
-    focusLineNumber: focus.line,
-    ...(focus.column ? { focusColumnNumber: focus.column } : {}),
-    ...(focus.token ? { focusToken: focus.token } : {}),
-  };
-}
-
 function setSourceTabFocus(
   workspace: WorkspaceState,
   sourceTabId: string,
@@ -3202,104 +2803,6 @@ function setSourceTabFocus(
       });
     }),
   };
-}
-
-function normalizeWorkspaceLineNumber(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return null;
-  }
-
-  const normalized = Math.trunc(value);
-  return normalized >= 1 ? normalized : null;
-}
-
-const WINDOWS_UNC_VERBATIM_PREFIX = "\\\\?\\UNC\\";
-const WINDOWS_VERBATIM_PREFIX = "\\\\?\\";
-
-function normalizeWorkspacePath(path: string | null | undefined) {
-  const trimmed = path?.trim();
-  if (!trimmed) {
-    return null;
-  }
-  if (trimmed.startsWith(WINDOWS_UNC_VERBATIM_PREFIX)) {
-    return `\\\\${trimmed.slice(WINDOWS_UNC_VERBATIM_PREFIX.length)}`;
-  }
-  if (trimmed.startsWith(WINDOWS_VERBATIM_PREFIX)) {
-    return trimmed.slice(WINDOWS_VERBATIM_PREFIX.length);
-  }
-  return trimmed;
-}
-
-function normalizeWorkspaceIdentifier(value: string | null | undefined) {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function normalizeWorkspaceText(value: string | null | undefined) {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  return value.trim() ? value : null;
-}
-
-function projectOriginProps(originProjectId: string | null) {
-  return originProjectId ? { originProjectId } : {};
-}
-
-function canvasZoomProps(zoom: number) {
-  return zoom === WORKSPACE_CANVAS_DEFAULT_ZOOM ? {} : { zoom };
-}
-
-export function normalizeWorkspaceCanvasZoom(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return WORKSPACE_CANVAS_DEFAULT_ZOOM;
-  }
-
-  const clamped = Math.min(Math.max(value, WORKSPACE_CANVAS_MIN_ZOOM), WORKSPACE_CANVAS_MAX_ZOOM);
-  return Math.round(clamped * 1000) / 1000;
-}
-
-function normalizeWorkspaceCanvasCards(cards: readonly WorkspaceCanvasCard[]) {
-  const seenSessionIds = new Set<string>();
-  const normalizedCards: WorkspaceCanvasCard[] = [];
-
-  for (const card of cards) {
-    const normalizedCard = normalizeWorkspaceCanvasCard(card);
-    if (!normalizedCard || seenSessionIds.has(normalizedCard.sessionId)) {
-      continue;
-    }
-
-    seenSessionIds.add(normalizedCard.sessionId);
-    normalizedCards.push(normalizedCard);
-  }
-
-  return normalizedCards;
-}
-
-function normalizeWorkspaceCanvasCard(card: WorkspaceCanvasCard | null | undefined) {
-  const sessionId = normalizeWorkspaceIdentifier(card?.sessionId);
-  if (!sessionId) {
-    return null;
-  }
-
-  return {
-    sessionId,
-    x: normalizeWorkspaceCanvasCoordinate(card?.x),
-    y: normalizeWorkspaceCanvasCoordinate(card?.y),
-  };
-}
-
-function normalizeWorkspaceCanvasCoordinate(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return 0;
-  }
-
-  return Math.round(value);
 }
 
 function resolveOriginSessionId(
@@ -3431,4 +2934,3 @@ function updateSplitRatioInNode(node: WorkspaceNode, splitId: string, ratio: num
     second: updateSplitRatioInNode(node.second, splitId, ratio),
   };
 }
-

@@ -1,5 +1,3 @@
-Non-hang version: shared Codex delegation cleanup uses nonblocking detach after `turn/completed`.
-
 # Bugs & Known Issues
 
 This file tracks only reproduced, current issues and open review follow-up
@@ -9,26 +7,20 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Shared Codex runtime can leave sessions stuck instead of recovering
+## Shared Codex recovery edge cases need hardening
 
-**Severity:** High - the shared `codex app-server` is the expected Codex runtime, but TermAl must retire it promptly when the transport is no longer usable. If a closed stdin, startup timeout, or wedged request leaves the runtime attached, later Codex turns can keep routing into the bad runtime and appear stuck.
+**Severity:** Medium - less common shared-runtime failure paths still need targeted recovery proof.
 
 **Current behavior:**
-- `session-666` reproduced this with a trivial `reply hi`: the first turn failed with `shared Codex app-server exited with status signal: 2 (SIGINT)`.
-- A controlled delegate repro (`session-690`) that attempted the closed/unknown terminal-stdin path left both the delegate and `session-666` active until the shared Codex app-server was killed and the server restarted.
-- Clean traces for `session-689`, `session-701`, and `session-723` reached `turn/completed` -> `finish_apply`, and `session-666` could answer `hi` immediately after the `Unknown process id` terminal-tool diagnostic. That diagnostic alone is not sufficient to wedge the app-server.
-- The first concrete post-completion cleanup race candidate was in terminal read-only delegation cleanup: `publish_delegation_refresh_side_effects` used the generic `shutdown_removed_runtime`, which sends `turn/interrupt` before detaching a shared Codex session. Naturally terminal delegation children now detach their shared-session bookkeeping without interrupting the already-finished turn, with regression coverage proving no `InterruptTurn` is queued and the shared process stays alive. Explicitly canceled delegation cleanup still uses the interrupting removal path, with stop-conflict coverage proving `InterruptTurn` is not skipped.
-- A live smoke delegate (`session-745`) completed with `turn/completed` -> `finish_apply`, then emitted `delegation_runtime_cleanup_start ... terminal_detach` without a matching `delegation_runtime_cleanup_done/error`. That explained why the child result existed but was not posted back to the parent chat.
-- Root cause: shared Codex event routing holds `runtime.sessions` while applying `turn/completed`; `finish_turn` can refresh the completed delegation and terminal cleanup tried to synchronously `detach()` the same shared session, self-deadlocking before `publish_delegation_lifecycle_delta`.
-- Natural terminal delegation cleanup now uses nonblocking shared-session detach: immediate detach when the mutex is free, or deferred detach on a cleanup thread when `turn/completed` already owns the mutex. Regression coverage holds `runtime.sessions` and proves parent-result cleanup does not block.
-- Startup timeouts now retire the shared runtime so future turns get a fresh app-server instead of reusing a known-bad transport.
-- The desired behavior is recovery on shared-runtime failure, not splitting delegate and user traffic into separate app-servers.
+- The closed/unknown process-id delegate repro has not been rerun on the nonblocking-detach build.
+- Old thread-setup timeout waiters can retire the shared runtime after a session has stopped/rebound.
+- Runtime-exit fanout can dispatch queued prompts before `shared_codex_runtime` is cleared.
+- Terminal `task_complete` before canonical final assistant events still needs duplicate-output coverage.
 
 **Proposal:**
-- Live-retest the completed-delegate recycle path after restarting with the nonblocking detach build: a successful run should show `delegation_runtime_cleanup_start`, `shared_session_detach_deferred` when the event lock is held, then `delegation_runtime_cleanup_done`, parent-result publication, and later `shared_session_detach_deferred_done`.
-- Then rerun the closed/unknown process-id delegate repro, send a trivial prompt in another Codex session, and confirm it completes without the shared app-server receiving SIGINT or the UI/runtime remaining busy.
-- Keep the writer-context watchdog trace until the live repro proves the cleanup race is closed or identifies a different blocked JSON-RPC command.
-- Add a higher-level integration regression that starts a stuck delegate, sends a trivial prompt in another Codex session, and asserts the second session completes after recovery or fails fast without remaining active indefinitely.
+- Rerun the closed/unknown process-id delegate repro and confirm another Codex session completes without shared app-server SIGINT or stuck busy state.
+- Add targeted regression coverage for the timeout, runtime-exit fanout, and terminal duplicate-output paths.
+- Keep `TERMAL_SHARED_CODEX_TRACE=1` instrumentation until those recovery paths are fixed or downgraded.
 
 ## `forward_new_assistant_message_outcome` is now ~400 lines with interleaved early-returns
 
@@ -96,21 +88,6 @@ the Implementation Tasks section.
 **Proposal:**
 - Split UI config and runtime cursor/chat state into separate files, or guard all writers with an OS-level file lock.
 - Add cross-process interleaving coverage proving config and runtime state both survive competing writes.
-
-## `AgentSessionPanel.tsx` exceeds 2000-line architecture rubric threshold
-
-**Severity:** Note - `ui/src/panels/AgentSessionPanel.tsx` remains over the documented TSX file-size budget after the composer auto-resize state machine was split out to `ui/src/panels/useComposerAutoResize.ts`, agent-command submission helpers moved to `ui/src/panels/session-agent-command-submission.ts`, public, body, composer, and conversation-list prop types moved to `ui/src/panels/AgentSessionPanel.types.ts`, waiting-output helpers were reused from `ui/src/SessionPaneView.waiting-indicator.ts`, the panel waiting-indicator predicate moved to `ui/src/panels/AgentSessionPanel.waiting-indicator.ts`, and first-paint transcript tail-windowing moved to `ui/src/panels/useInitialActiveTranscriptMessages.ts`.
-
-The resize/transition refs are now isolated, but the panel still mixes session header, footer orchestration, command palette, attachments, and send/delegate control flow. The next split should keep reducing production TSX surface rather than adding more local state.
-
-**Current behavior:**
-- `AgentSessionPanel.tsx` is about 2,412 lines.
-- `AgentSessionPanel.test.tsx` was split into focused sibling files; `AgentSessionPanel.tsx` remains over the production TSX threshold.
-- Composer auto-resize, transition restoration, agent-command submission/error handling, public/body/conversation-list prop types, waiting-output classification, panel waiting-indicator gating, and initial transcript tail-windowing now live in focused helpers, but the remaining composer orchestration is still embedded in the broader panel.
-
-**Proposal:**
-- Continue extracting focused panel concerns, such as composer command-palette orchestration or footer/send controls, into smaller hook/component modules with split-provenance headers.
-- Keep targeted tests with the extracted concerns so the remaining panel can become mostly composition.
 
 ## Telegram-forwarded text has no per-chat rate cap
 
