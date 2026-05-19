@@ -1,10 +1,8 @@
 # SQLite Session Storage Plan
 
-TermAl currently persists application state in one large JSON document at
-`~/.termal/sessions.json`. That file includes every visible session and every
-message. As conversation history grows, ordinary actions such as creating a new
-session can become slow because the backend and browser repeatedly clone,
-serialize, parse, and reconcile unrelated historical messages.
+TermAl persists application state in `~/.termal/termal.sqlite`. Earlier builds
+used one large JSON document, but the current code no longer carries a
+`sessions.json` import path.
 
 The target design is SQLite-backed storage with lightweight app state snapshots
 and lazy session/message loading.
@@ -14,9 +12,6 @@ and lazy session/message loading.
 - Session creation should not scale with total historical message count.
 - `/api/state` should be fast enough for startup, SSE reconnects, and ordinary
   state adoption.
-- Existing `~/.termal/sessions.json` data must import automatically once.
-- The old JSON file should be renamed after successful import so sessions are
-  not imported twice.
 - Runtime behavior should remain local-only, with no database server and no
   cloud dependency.
 
@@ -34,16 +29,7 @@ Use a single SQLite database under the TermAl data directory:
 ```text
 ~/.termal/
   termal.sqlite
-  sessions.imported-YYYY-MM-DD-HHMMSS.json
 ```
-
-After a successful first import, rename:
-
-```text
-sessions.json -> sessions.imported-YYYY-MM-DD-HHMMSS.json
-```
-
-That renamed file is both the backup and the guard against accidental reimport.
 
 ## Restartable Slice Schema
 
@@ -210,20 +196,15 @@ State SSE should stay summary-oriented. Message-heavy changes should be deltas:
 Loaded sessions apply message deltas. Unloaded sessions update only summary
 state and preview.
 
-## Import Flow
+## Startup Flow
 
 On startup:
 
-1. If `termal.sqlite` exists, open it and skip JSON import.
-2. If SQLite does not exist and `sessions.json` exists, load the JSON once.
-3. Create SQLite schema in a transaction.
-4. Insert global state, projects, workspace layouts, orchestrators, sessions,
-   messages, and queued prompts.
-5. Commit the transaction.
-6. Rename `sessions.json` to `sessions.imported-YYYY-MM-DD-HHMMSS.json`.
-7. Start TermAl from SQLite state.
-
-If import fails, leave `sessions.json` unchanged and report the startup error.
+1. Open `termal.sqlite` when it exists.
+2. Create the SQLite schema when the database is new.
+3. Load metadata, session rows, and delegation rows from SQLite.
+4. Start TermAl from SQLite state, or bootstrap an empty local state when the
+   database has no app metadata yet.
 
 ## Frontend Changes
 
@@ -267,8 +248,6 @@ Creating a session should:
 The first restartable slice is implemented:
 
 - Production startup stores state in `~/.termal/termal.sqlite`.
-- If `~/.termal/sessions.json` exists and SQLite does not, startup imports it
-  once and renames it to `sessions.imported-YYYY-MM-DD-HHMMSS.json`.
 - SQLite stores global metadata separately from per-session JSON rows.
 - Creating or forking a session persists only global counters plus the created
   session row.
@@ -286,9 +265,7 @@ targeted row updates for non-create mutations.
 
 Backend tests:
 
-- Imports an old monolithic `sessions.json` into SQLite.
-- Renames the imported JSON file only after a successful transaction.
-- Does not reimport when the SQLite database already exists.
+- Exercise SQLite startup load/save directly under `cargo test`.
 - `GET /api/state` excludes full message arrays.
 - `GET /api/sessions/{id}` returns full session details.
 - Creating a session inserts one session row and does not load/write unrelated

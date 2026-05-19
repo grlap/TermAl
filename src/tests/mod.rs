@@ -607,8 +607,9 @@ fn write_test_http_response(
 }
 
 fn test_app_state() -> AppState {
-    let persistence_path =
-        std::env::temp_dir().join(format!("termal-test-{}.json", Uuid::new_v4()));
+    let state_root = std::env::temp_dir().join(format!("termal-test-state-{}", Uuid::new_v4()));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let persistence_path = state_root.join("termal.sqlite");
 
     AppState {
         server_instance_id: Uuid::new_v4().to_string(),
@@ -790,6 +791,18 @@ fn write_test_codex_threads_db(
             )
             .expect("thread row should insert");
     }
+}
+
+fn sqlite_metadata_state_value(path: &FsPath) -> Value {
+    let connection = rusqlite::Connection::open(path).expect("sqlite state should open");
+    let encoded: String = connection
+        .query_row(
+            "SELECT value_json FROM app_state WHERE key = 'metadataState'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("sqlite metadata state should exist");
+    serde_json::from_str(&encoded).expect("sqlite metadata state should deserialize")
 }
 
 fn test_session_id(state: &AppState, agent: Agent) -> String {

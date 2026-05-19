@@ -9,13 +9,11 @@ metadata:
 
 Review staged, unstaged, and untracked changes using multiple specialized reviewers.
 
-**IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) may only be used when the current session write policy allows workspace mutation; read-only delegated reviewers must not run them.**
+**IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Do not run mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) as part of this command.**
 
-**IMPORTANT: This command is review-only. Do NOT attempt to fix any bugs, edit source files, edit tests, run formatters that modify files, or otherwise change implementation code. If the current session can edit files, the only allowed file update is `docs/bugs.md` in Step 6. If the current session is a read-only delegated reviewer, do not edit `docs/bugs.md`; instead include the exact bug-ledger updates the parent session should apply.**
+**IMPORTANT: This command is review-only. Do NOT attempt to fix any bugs, edit source files, edit tests, run formatters that modify files, or otherwise change implementation code. The only allowed file update is `docs/bugs.md` in Step 6.**
 
 ## Step 1: Build check
-
-In read-only delegated reviewer sessions, build/typecheck commands are advisory and may be skipped if they would write build artifacts or are blocked by policy, missing toolchain, or unavailable dependencies. Report the limitation and continue with static review. In writable sessions, treat the checks below as required gates.
 
 Run `cargo check` to ensure the Rust backend compiles.
 If it produces ANY errors — **STOP immediately**.
@@ -45,9 +43,7 @@ Read each file to get:
 
 ## Step 4: Run reviewers
 
-If this command is running inside a TermAl delegated child reviewer session, identified by the injected prompt block `You are a delegated child session for TermAl delegation`, do **not** launch Claude Task agents, Codex subagents, shell-launched agents, TermAl nested delegations via `termal_spawn_session`, or any other nested reviewer process. In that mode, run each reviewer lens yourself in this same session using the prompt below as the lens checklist. This keeps `/review-with-delegate` as a two-child TermAl delegation flow instead of recursively spawning reviewer trees that are invisible to the parent fan-in.
-
-If this command is running in a normal writable parent session, run all reviewer lenses in parallel when the host agent provides a native parallel Task-agent facility. If no such facility is available, run the lenses yourself sequentially in the same session.
+Run each reviewer lens in this same session using the prompt below as the lens checklist. Do not launch TermAl delegations, Claude Task agents, Codex subagents, shell-launched agents, raw HTTP reviewers, or nested review commands from `/review-local`; use `/review-with-delegate` for cross-agent delegated review.
 
 For each reviewer found in Step 3, use this prompt:
 
@@ -72,26 +68,25 @@ to record in docs/bugs.md.
 
 ## Project Context
 This is TermAl — a WhatsApp-style control room for managing AI coding agents locally.
-- Backend: Rust (Axum + Tokio), single file: src/main.rs (~7600 lines)
-- Frontend: React 18 + TypeScript (Vite), main file: ui/src/App.tsx (~4500 lines)
+- Backend: Rust (Axum + Tokio), with modules under `src/` and `src/main.rs` as the entrypoint
+- Frontend: React 18 + TypeScript (Vite), with `ui/src/App.tsx` plus split feature modules
 - Agent integration: Claude Code (NDJSON/stdio), Codex (JSON-RPC/stdio), Gemini/Cursor (ACP)
 - Real-time: SSE with monotonic revision counter, delta events for streaming
 - State: Arc<Mutex<StateInner>> with commit_locked() pattern
-- Persistence: single JSON file at ~/.termal/sessions.json
+- Persistence: embedded SQLite at `~/.termal/termal.sqlite` for app state, sessions, and delegations; `~/.termal/orchestrators.json` for reusable orchestrator templates; `~/.termal/telegram-bot.json` for optional Telegram relay metadata/state
 - Workspace: binary tree of panes with draggable tabs
 - Styling: custom CSS with CSS variables, 17 themes (no Tailwind)
-- Testing: Vitest + React Testing Library (frontend only currently)
-- No database, no auth, no cloud sync (Phase 1 local-only)
+- Testing: Rust `cargo test`; frontend Vitest + React Testing Library
+- Local-only: no auth and no cloud sync; SQLite is embedded, not a database server
 Read docs/architecture.md or relevant source files for deeper context if needed.
 
 ## Known Accepted Patterns (do NOT flag these)
-- Single large files (main.rs, App.tsx) — intentional tradeoff for iteration speed
+- Large-file cleanup is ongoing. Do not flag untouched legacy files solely for size, but do flag reviewed files that exceed the active architecture threshold when the issue is not already tracked in `docs/bugs.md`.
 - `expect("state mutex poisoned")` on mutex locks — project convention
 - `std::thread::spawn` for agent runtime threads (intentional — blocking stdio)
 - `0.0.0.0` binding on the HTTP server (configurable, documented as local-only)
 - No authentication (Phase 1 is single-user local)
-- Legacy compatibility means supporting older persisted schema or older local/internal API shapes from previous development builds, such as obsolete orchestrator fields.
-- Do NOT flag missing schema upgrades, migrations, or backward compatibility for ~/.termal/*.json, browser localStorage state, or local/internal API contracts from previous local-only development builds.
+- Do NOT require backward compatibility for obsolete local-only development persistence schemas, `~/.termal/sessions.json`, browser localStorage state, or local/internal API contracts unless current code/docs explicitly promise a migration.
 - Path normalization and canonicalization for current inputs are not legacy compatibility work.
 - Windows, macOS, and Linux are P0 platforms. Flag regressions on those platforms; do not require support beyond them unless the current change claims it.
 - Agent-specific protocol differences (Claude=NDJSON, Codex=JSON-RPC) — by design
@@ -112,8 +107,6 @@ If no issues found, say "No issues found."
 
 **Summary:** [1-2 sentence overall assessment]
 ```
-
-In parent sessions with native Task-agent support, run ALL reviewer agents in parallel using multiple Task tool calls in a single message. In TermAl delegated child reviewer sessions, do not use Task tool calls or TermAl delegation MCP tools; execute the same lenses inline and report that nested reviewer spawning was intentionally skipped.
 
 ## Step 5: Consolidate
 
@@ -146,7 +139,7 @@ Present the consolidated note directly to the user. Do NOT write the review note
 
 ## Step 6: Update `docs/bugs.md`
 
-After presenting the review to the user, update `docs/bugs.md` to reflect the findings if the current session write policy allows file edits. Do not modify any other file. If the current session is a read-only delegated reviewer, do not edit `docs/bugs.md`; instead include a "Suggested `docs/bugs.md` updates" section with the entries/tasks/removals the parent should apply. If any reviewer found any issue, observation, test gap, or note of any severity in a writable session, `docs/bugs.md` MUST be updated before the command is complete. Read the file first to understand the current structure, then apply these three operations:
+After presenting the review to the user, update `docs/bugs.md` to reflect the findings. Do not modify any other file. If file edits are unavailable under the active session policy, include a "Suggested `docs/bugs.md` updates" section with the entries/tasks/removals that should be applied. If any reviewer found any issue, observation, test gap, or note of any severity, `docs/bugs.md` MUST be updated before the command is complete. Read the file first to understand the current structure, then apply these three operations:
 
 ### 6a. Remove resolved bugs
 
@@ -190,4 +183,3 @@ Remove any task items that the reviewed changes have completed (e.g., if a test 
 ### 6d. Skip if clean
 
 Only skip `docs/bugs.md` when the review found no issues, no observations, no notes, no test gaps, no resolved active bugs, and no completed tasks. Tell the user "bugs.md is up to date — no changes needed."
-

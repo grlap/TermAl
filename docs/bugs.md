@@ -103,23 +103,6 @@ the Implementation Tasks section.
 - Extract a `ReconnectStateMachine` (or similar) module that owns the flag set + transitions and exposes named events (`onSseError`, `onSseReopen`, `onBadLiveEvent`, `onSnapshotAdopted`, `onLiveEventConfirmed`).
 - Add focused tests for the extracted transition helper before changing behavior.
 
-## Production SQLite persistence is bypassed in the test build
-
-**Severity:** Medium - `src/app_boot.rs:229`. The runtime persistence changes now depend on SQLite schema setup, startup load, metadata writes, per-session row updates, tombstone cleanup, and cached delta persistence, but `#[cfg(test)]` still routes the background persist worker through the old full-state JSON fallback.
-
-Many production SQLite helpers in `src/persist.rs` are `#[cfg(not(test))]`, so existing persistence tests can pass while the real runtime SQLite write/load/delete behavior remains unexercised. The newest post-commit hardening policy (`verify_persist_commit_integrity`, fatal owner-only permission verification, cache invalidation reset, and fatal pre-transaction redirection checks) is part of that production-only surface.
-
-**Current behavior:**
-- Test builds bypass `persist_delta_via_cache` and related SQLite write paths.
-- Production SQLite load/save helpers are mostly compiled out under `cargo test`.
-- Current tests cover retry bookkeeping and legacy JSON fixtures, but not the runtime SQLite persistence contract or the post-commit hardening decisions.
-
-**Proposal:**
-- Make the SQLite persistence path testable under `cargo test` with temp database files.
-- Add coverage for full snapshot save/load, delta upsert, metadata-only update, hidden/deleted session row removal, and startup load from SQLite.
-- Add coverage for post-commit permission failures, cache invalidation reset, and fatal redirection/reparse checks.
-- Keep legacy JSON fixture tests separate from production runtime persistence tests.
-
 ## Session store publication can race ahead of React session state
 
 **Severity:** Medium - the new `session-store` publishes some session slices before the corresponding React `sessions` state commits, so the UI can mix newer store-backed session data with older prop-derived session state in one render.
@@ -150,19 +133,6 @@ still coming from the previous React `sessions` commit.
 - Add an integration test that forces a store-backed session update plus a
   lagging React-state-derived sibling prop and asserts the active pane never
   renders a torn combination.
-
-## `message-cards.tsx` still mixes message composition with deferred Markdown and diff cards
-
-**Severity:** Low - `ui/src/message-cards.tsx` is now about 1,117 lines and no longer owns the Markdown/Mermaid/KaTeX runtime, but it still combines message routing, deferred Markdown wrappers, text/thinking message shells, approval/parallel/subagent cards, and diff cards.
-
-The Markdown/Mermaid/KaTeX renderer now lives in `ui/src/markdown-content.tsx`, input request cards live in `ui/src/message-input-request-cards.tsx`, the activation provider lives in `ui/src/deferred-heavy-content-activation.tsx`, the viewport-gated wrapper lives in `ui/src/deferred-heavy-content.tsx`, and syntax-highlighted/deferred code blocks live in `ui/src/highlighted-code-block.tsx`.
-
-**Current behavior:**
-- `message-cards.tsx` still owns `DeferredMarkdownContent`, `TextMessage`, `ThinkingMessage`, `DiffCard`, and the top-level `MessageCard` routing surface.
-- Diff rendering and deferred Markdown activation policy still share the same file as generic message composition.
-
-**Proposal:**
-- Extract `DeferredMarkdownContent` and `DiffCard` into focused modules before the next message-rendering performance cut.
 
 ## Focused live sessions monopolize the main thread during state adoption
 
@@ -244,8 +214,10 @@ Before the broadcaster thread, `commit_locked` published state synchronously (`s
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
 - [ ] P2: Add equal-revision gap repair snapshot adoption coverage:
   skip a non-session revision, optimistically apply a later session delta, then return `/api/state` at the same revision and assert the skipped global state is adopted instead of rejected as stale.
-- [ ] P2: Add production SQLite persistence coverage:
-  make the SQLite runtime persistence path available under `cargo test`, then cover temp-database full snapshot save/load, delta upsert, metadata-only update, hidden/deleted row removal, and startup load.
+- [ ] P2: Add remaining production SQLite persistence coverage:
+  with the SQLite runtime path now compiled under `cargo test`, cover targeted delta upsert, metadata-only update, hidden/deleted row removal, malformed SQLite row/load errors, and startup load assertions that exercise the split `app_state` / `sessions` / `delegations` tables directly.
+- [ ] P2: Restore Windows AppState bootstrap path-normalization coverage:
+  reintroduce a Windows-gated `AppState::new_with_paths` test using a temp `termal.sqlite` store and a `\\?\` workdir, asserting `default_workdir`, the default project root, and bootstrapped Codex/Claude live session workdirs all normalize to the canonical root.
 - [ ] P2: Add Windows state-path redirection coverage:
   cover SQLite main-file symlinks, sidecar symlinks, and `.termal` directory junction/symlink cases behind Windows-gated tests.
 - [ ] P2: Add post-shutdown persistence ordering coverage:

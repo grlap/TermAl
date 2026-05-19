@@ -473,10 +473,8 @@ Stored locally in app data directory:
 
 ```
 ~/.termal/
-├── sessions.json          # Session configs (name, agent, workdir, model)
-├── history/
-│   ├── <session-id>.jsonl # Message history per session
-└── settings.json          # App preferences
+├── termal.sqlite          # App state, sessions, preferences, workspace layout
+└── settings.json          # Auxiliary local settings
 ```
 
 ---

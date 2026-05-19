@@ -8,7 +8,7 @@ fn temp_delegation_state_paths() -> (PathBuf, PathBuf, PathBuf) {
     fs::create_dir_all(&state_root).expect("state root should exist");
     (
         project_root,
-        state_root.join("sessions.json"),
+        state_root.join("termal.sqlite"),
         state_root.join("orchestrators.json"),
     )
 }

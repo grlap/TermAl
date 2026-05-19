@@ -13,6 +13,8 @@ Review current staged and unstaged changes by delegating `/review-local` to both
 
 **IMPORTANT: This command must use TermAl MCP delegation tools to attempt exactly two reviewer session spawns. Do NOT use raw `claude -p`, Codex platform subagents, Claude Task agents, shell polling, raw HTTP, nested TermAl delegations, or any non-TermAl MCP review path to spawn or wait for reviewers. The delegated child sessions execute `/review-local` in read-only TermAl reviewer mode, where nested reviewer spawning is explicitly disabled. If the required TermAl MCP tools are unavailable, stop and report that `/review-with-delegate` requires the TermAl delegation MCP bridge.**
 
+Delegated child reviewers run with `writePolicy: readOnly`. They may use read-only git/file inspection commands freely, but must not edit files, run mutating git commands, launch nested reviewer agents, or update `docs/bugs.md` themselves. If a child reviewer cannot run `cargo check`, frontend typecheck, or another validation command because the read-only policy blocks build artifacts or caches, it should report the limitation and continue with static review. The parent session applies any `docs/bugs.md` updates in Step 5.
+
 Required MCP tools:
 - `termal_spawn_session`
 - `termal_get_session_status`

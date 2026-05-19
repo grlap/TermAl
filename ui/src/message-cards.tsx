@@ -1,7 +1,6 @@
 import {
   memo,
   useEffect,
-  useMemo,
   useState,
 } from "react";
 import { ExpandedPromptPanel } from "./ExpandedPromptPanel";
@@ -10,7 +9,6 @@ import {
   CollapseIcon,
   CopyIcon,
   ExpandIcon,
-  PreviewIcon,
 } from "./message-card-icons";
 import {
   MessageAttachmentList,
@@ -18,11 +16,10 @@ import {
   promptCommandMetaLabel,
 } from "./message-card-meta";
 import { copyTextToClipboard } from "./clipboard";
-import { buildDiffPreviewModel } from "./diff-preview";
-import { DeferredHeavyContent } from "./deferred-heavy-content";
+import { DeferredMarkdownContent } from "./deferred-markdown-content";
+import { DiffCard } from "./diff-card";
 import { FileChangesCard } from "./file-changes-card";
 import { DeferredHighlightedCodeBlock } from "./highlighted-code-block";
-import { MarkdownContent } from "./markdown-content";
 import {
   CodexAppRequestCard,
   McpElicitationRequestCard,
@@ -30,11 +27,6 @@ import {
 } from "./message-input-request-cards";
 import type { MarkdownFileLinkTarget } from "./markdown-links";
 import {
-  normalizeDisplayPath,
-  relativizePathToWorkspace,
-} from "./path-display";
-import {
-  containsSearchMatch,
   renderHighlightedText,
   type SearchHighlightTone,
 } from "./search-highlight";
@@ -63,54 +55,11 @@ import {
   type ConnectionRetryDisplayState,
 } from "./connection-retry";
 import { ConnectionRetryCard } from "./connection-retry-card";
-import {
-  buildMarkdownPreviewText,
-  estimateMarkdownBlockHeight,
-  measureTextBlock,
-} from "./deferred-render";
 import { ParallelAgentsCard } from "./parallel-agents-card";
 import type { MonacoAppearance } from "./monaco";
 import {
   MessageNavigationButtons,
 } from "./panels/conversation-navigation";
-
-// Markdown qualifies as "heavy" — and therefore goes through
-// `DeferredMarkdownContent`'s IntersectionObserver-gated render path —
-// when EITHER the line count OR the character count crosses these
-// thresholds. Both gates are OR'd, so a long single-line table or a
-// short-but-very-wide block still qualifies.
-//
-// Tuning history:
-//   - 1800 chars / 24 lines: original conservative gate, sized so that
-//     even mid-size assistant explanations (a few paragraphs of prose,
-//     no code) deferred. This made fast scrolling feel laggy because
-//     ordinary message bodies blanked out and re-painted on dwell.
-//   - 9000 chars / 24 lines (current): only genuinely heavy content
-//     (long-form docs, large markdown tables, dumped logs in a fenced
-//     block, big mermaid sources) goes through the deferred path;
-//     typical assistant prose paints synchronously like plain text and
-//     never flickers during fast scroll.
-//
-// Mermaid note: any ```mermaid``` fence inside the body triggers a
-// real mermaid render in a sandboxed iframe (`MermaidDiagram` →
-// `renderTermalMermaidDiagram`), capped at
-// `MAX_MERMAID_DIAGRAMS_PER_DOCUMENT` (20). The first render of a
-// non-trivial flowchart can take hundreds of ms, so messages with
-// embedded mermaid are exactly the case the deferred wrapper exists
-// to protect — even if the surrounding prose is short, the character
-// count of the source fence usually pushes the body past this gate.
-//
-// If you raise these further, weigh the cost: every non-deferred
-// markdown body re-runs the full remark/rehype/KaTeX/highlight pipeline
-// on each mount/unmount the virtualizer performs. The deferred wrapper
-// exists specifically to keep those pipelines off the hot path while
-// the user is still scrolling. The cooldown that gates the deferred
-// path between scroll inputs lives in
-// `panels/VirtualizedConversationMessageList.tsx` as
-// `DEFERRED_HEAVY_ACTIVATION_COOLDOWN_MS` — keep these two tunings in
-// mind as a pair.
-const HEAVY_MARKDOWN_CHARACTER_THRESHOLD = 9000;
-const HEAVY_MARKDOWN_LINE_THRESHOLD = 24;
 
 // Stable no-op defaults for the optional callback props on
 // `MessageCard`. NOTE: React's `memo` comparator receives the
@@ -141,6 +90,7 @@ const NOOP_CODEX_APP_REQUEST_SUBMIT: (
 // `./markdown-links`.
 export type { MarkdownFileLinkTarget } from "./markdown-links";
 export { areMarkdownLineMarkersEqual } from "./markdown-line-markers";
+export { DiffCard } from "./diff-card";
 export { MarkdownContent } from "./markdown-content";
 export { MessageMetaMarkerMenuProvider } from "./message-meta-marker-menu-context";
 
@@ -469,97 +419,6 @@ export const MessageCard = memo(
   },
 );
 
-/*
- * Streaming-stable assistant markdown wrapper.
- *
- * Always returns the same JSX shape — `<DeferredHeavyContent>` wrapping
- * `<MarkdownContent>` — regardless of whether the message is mid-stream
- * or settled, light or heavy, has a search match or not. This is what
- * gives `<MarkdownContent>` a stable React tree position across the
- * streaming → settled transition and prevents the full subtree remount
- * that previously caused visible flicker (Mermaid diagrams re-rendering,
- * KaTeX nodes re-mounting, code blocks losing scroll position, tables
- * blinking) the moment a turn ended.
- *
- * `isStreaming` is honored two ways:
- *   - It is passed through to `MarkdownContent`, which uses it to gate
- *     the partial-block deferral splitter (`markdown-streaming-split.ts`).
- *   - It forces `preferImmediateRender = true` on the outer
- *     `DeferredHeavyContent`, so streaming content never goes behind
- *     the heavy-content activation gate. The placeholder (used by the
- *     gate when `shouldGate` is true) is correspondingly elided so it
- *     can never appear during streaming.
- *
- * `DeferredHeavyContent`'s `isActivated` state is monotonic (only flips
- * from false → true), so when a heavy message transitions out of
- * streaming, the wrapper stays activated and content stays visible —
- * the parent's `preferImmediateRender` only matters for the initial
- * mount of a settled heavy bubble.
- */
-function DeferredMarkdownContent({
-  appearance = "dark",
-  documentPath = null,
-  isStreaming = false,
-  markdown,
-  onOpenSourceLink,
-  preferImmediateRender = false,
-  searchQuery = "",
-  searchHighlightTone = "match",
-  workspaceRoot = null,
-}: {
-  appearance?: MonacoAppearance;
-  documentPath?: string | null;
-  isStreaming?: boolean;
-  markdown: string;
-  onOpenSourceLink?: (target: MarkdownFileLinkTarget) => void;
-  preferImmediateRender?: boolean;
-  searchQuery?: string;
-  searchHighlightTone?: SearchHighlightTone;
-  workspaceRoot?: string | null;
-}) {
-  const metrics = useMemo(() => measureTextBlock(markdown), [markdown]);
-  const showSearchHighlight = containsSearchMatch(markdown, searchQuery);
-  // Heavy-content activation gate: only engages for settled, large,
-  // non-search bubbles. Streaming content always renders immediately
-  // (the user is watching it being authored). Search results always
-  // render immediately (the highlighted match must be visible).
-  const shouldGate =
-    !isStreaming &&
-    !showSearchHighlight &&
-    (metrics.lineCount >= HEAVY_MARKDOWN_LINE_THRESHOLD ||
-      markdown.length >= HEAVY_MARKDOWN_CHARACTER_THRESHOLD);
-  const effectivePreferImmediateRender = !shouldGate || preferImmediateRender;
-
-  return (
-    <DeferredHeavyContent
-      estimatedHeight={
-        shouldGate ? estimateMarkdownBlockHeight(metrics.lineCount) : 0
-      }
-      preferImmediateRender={effectivePreferImmediateRender}
-      placeholder={
-        shouldGate ? (
-          <div className="markdown-copy deferred-markdown-placeholder">
-            <p className="plain-text-copy">
-              {buildMarkdownPreviewText(markdown)}
-            </p>
-          </div>
-        ) : null
-      }
-    >
-      <MarkdownContent
-        appearance={appearance}
-        documentPath={documentPath}
-        isStreaming={isStreaming}
-        markdown={markdown}
-        onOpenSourceLink={onOpenSourceLink}
-        searchQuery={searchQuery}
-        searchHighlightTone={searchHighlightTone}
-        workspaceRoot={workspaceRoot}
-      />
-    </DeferredHeavyContent>
-  );
-}
-
 function ThinkingCard({
   appearance = "dark",
   message,
@@ -763,169 +622,6 @@ export function CommandCard({
                 title={isOutputExpanded ? "Collapse output" : "Expand output"}
               >
                 {isOutputExpanded ? <CollapseIcon /> : <ExpandIcon />}
-              </button>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-export function DiffCard({
-  message,
-  onOpenPreview,
-  preferImmediateHeavyRender = false,
-  searchQuery = "",
-  searchHighlightTone = "match",
-  workspaceRoot = null,
-}: {
-  message: DiffMessage;
-  onOpenPreview: () => void;
-  preferImmediateHeavyRender?: boolean;
-  searchQuery?: string;
-  searchHighlightTone?: SearchHighlightTone;
-  workspaceRoot?: string | null;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const diffStats = useMemo(() => {
-    const changeSummary = buildDiffPreviewModel(
-      message.diff,
-      message.changeType,
-    ).changeSummary;
-    return {
-      addedLineCount:
-        changeSummary.changedLineCount + changeSummary.addedLineCount,
-      removedLineCount:
-        changeSummary.changedLineCount + changeSummary.removedLineCount,
-    };
-  }, [message.changeType, message.diff]);
-  const displayPath = useMemo(
-    () => relativizePathToWorkspace(message.filePath, workspaceRoot),
-    [message.filePath, workspaceRoot],
-  );
-  const canExpandDiff =
-    message.diff.split("\n").length > 14 || message.diff.length > 900;
-  const isExpanded =
-    !canExpandDiff || expanded || searchQuery.trim().length > 0;
-
-  useEffect(() => {
-    if (!copied) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setCopied(false);
-    }, 1600);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [copied]);
-
-  async function handleCopy() {
-    try {
-      await copyTextToClipboard(message.diff);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  }
-
-  return (
-    <article className="message-card utility-card diff-card">
-      <MessageMeta author={message.author} timestamp={message.timestamp} />
-      <div className="card-label">
-        {message.changeType === "create" ? "New file" : "File edit"}
-      </div>
-      <div className="command-panel diff-panel">
-        <div className="command-row diff-file-row">
-          <div className="command-row-label diff-file-label">
-            <span>FILE</span>
-            {diffStats.addedLineCount > 0 || diffStats.removedLineCount > 0 ? (
-              <div className="diff-file-stats">
-                {diffStats.addedLineCount > 0 ? (
-                  <span className="diff-preview-stat diff-preview-stat-added">
-                    +{diffStats.addedLineCount}
-                  </span>
-                ) : null}
-                {diffStats.removedLineCount > 0 ? (
-                  <span className="diff-preview-stat diff-preview-stat-removed">
-                    -{diffStats.removedLineCount}
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-          <div className="command-row-body">
-            <div
-              className="diff-file-path"
-              title={
-                displayPath !== message.filePath ? message.filePath : undefined
-              }
-            >
-              {renderHighlightedText(
-                displayPath,
-                searchQuery,
-                searchHighlightTone,
-              )}
-            </div>
-            <p className="diff-file-summary">
-              {renderHighlightedText(
-                message.summary,
-                searchQuery,
-                searchHighlightTone,
-              )}
-            </p>
-          </div>
-        </div>
-        <div className="command-row diff-row">
-          <div className="command-row-label">DIFF</div>
-          <div className="command-row-body">
-            <div
-              className={`diff-preview-shell ${isExpanded ? "expanded" : "collapsed"}`}
-            >
-              <DeferredHighlightedCodeBlock
-                className="diff-block diff-preview-text"
-                code={message.diff}
-                language={message.language ?? "diff"}
-                pathHint={message.filePath}
-                preferImmediateRender={preferImmediateHeavyRender}
-                searchQuery={searchQuery}
-                searchHighlightTone={searchHighlightTone}
-              />
-            </div>
-          </div>
-          <div className="command-row-actions">
-            <button
-              className="command-icon-button"
-              type="button"
-              onClick={onOpenPreview}
-              aria-label="Open diff preview"
-              title="Open diff preview"
-            >
-              <PreviewIcon />
-            </button>
-            <button
-              className={`command-icon-button${copied ? " copied" : ""}`}
-              type="button"
-              onClick={() => void handleCopy()}
-              aria-label={copied ? "Diff copied" : "Copy diff"}
-              title={copied ? "Copied" : "Copy diff"}
-            >
-              {copied ? <CheckIcon /> : <CopyIcon />}
-            </button>
-            {canExpandDiff ? (
-              <button
-                className="command-icon-button"
-                type="button"
-                onClick={() => setExpanded((open) => !open)}
-                aria-label={isExpanded ? "Collapse diff" : "Expand diff"}
-                aria-pressed={isExpanded}
-                title={isExpanded ? "Collapse diff" : "Expand diff"}
-              >
-                {isExpanded ? <CollapseIcon /> : <ExpandIcon />}
               </button>
             ) : null}
           </div>

@@ -783,7 +783,7 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
         .to_string_lossy()
         .into_owned();
-    let persistence_path = state_root.join("sessions.json");
+    let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
     let failing_persistence_path = state_root.join("persist-failure");
     fs::create_dir_all(&failing_persistence_path)
@@ -795,9 +795,9 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
-    // Restart assertions read the JSON fixture immediately; keep all setup
-    // commits on the synchronous test fallback instead of racing the
-    // background persist worker.
+    // Restart assertions read the SQLite file immediately; keep all setup
+    // commits on the synchronous fallback instead of racing the background
+    // persist worker.
     state.persist_tx = mpsc::channel().0;
     let project_id = create_test_project(&state, &project_root, "Persist Failure Restart");
     let template = state
@@ -947,7 +947,7 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
         .to_string_lossy()
         .into_owned();
-    let persistence_path = state_root.join("sessions.json");
+    let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
     let failing_persistence_path = state_root.join("persist-failure");
     fs::create_dir_all(&failing_persistence_path)
@@ -959,9 +959,9 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
-    // Restart assertions read the JSON fixture immediately; keep all setup
-    // commits on the synchronous test fallback instead of racing the
-    // background persist worker.
+    // Restart assertions read the SQLite file immediately; keep all setup
+    // commits on the synchronous fallback instead of racing the background
+    // persist worker.
     state.persist_tx = mpsc::channel().0;
     let project_id = create_test_project(&state, &project_root, "Persist Failure Restart Queue");
     let template = state
@@ -1101,7 +1101,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
         .to_string_lossy()
         .into_owned();
-    let persistence_path = state_root.join("sessions.json");
+    let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
     let failing_persistence_path = state_root.join("persist-failure");
     fs::create_dir_all(&failing_persistence_path)
@@ -2086,7 +2086,7 @@ fn load_state_preserves_pending_transitions_when_stop_in_progress_has_no_stopped
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
         .to_string_lossy()
         .into_owned();
-    let persistence_path = state_root.join("sessions.json");
+    let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
     let mut state = AppState::new_with_paths(
@@ -2225,7 +2225,7 @@ fn load_state_recovers_completed_stop_when_active_children_finished_during_stop(
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
         .to_string_lossy()
         .into_owned();
-    let persistence_path = state_root.join("sessions.json");
+    let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
     let mut state = AppState::new_with_paths(
@@ -2303,10 +2303,7 @@ fn load_state_recovers_completed_stop_when_active_children_finished_during_stop(
         .finish_turn_ok_if_runtime_matches(&planner_session_id, &planner_token)
         .expect("planner completion should persist while stop is in flight");
 
-    let persisted_mid_stop: Value = serde_json::from_slice(
-        &fs::read(&persistence_path).expect("mid-stop state file should exist"),
-    )
-    .expect("mid-stop state should deserialize");
+    let persisted_mid_stop = sqlite_metadata_state_value(&persistence_path);
     let persisted_mid_stop_instance = persisted_mid_stop["orchestratorInstances"]
         .as_array()
         .expect("persisted orchestrator instances should be present")
@@ -2398,7 +2395,7 @@ fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() 
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
         .to_string_lossy()
         .into_owned();
-    let persistence_path = state_root.join("sessions.json");
+    let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
     let mut state = AppState::new_with_paths(
@@ -2568,7 +2565,7 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
         .to_string_lossy()
         .into_owned();
-    let persistence_path = state_root.join("sessions.json");
+    let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
     let mut state = AppState::new_with_paths(

@@ -184,9 +184,7 @@ impl AppState {
         let persist_thread_handle = std::thread::Builder::new()
             .name("termal-persist".to_owned())
             .spawn(move || {
-                #[cfg(not(test))]
                 let mut cache = SqlitePersistConnectionCache::new();
-                #[cfg_attr(test, allow(unused_mut, unused_variables))]
                 let mut watermark: u64 = 0;
                 let mut retry_state = PersistWorkerRetryState::default();
                 loop {
@@ -211,7 +209,6 @@ impl AppState {
                         }
                     }
 
-                    #[cfg(not(test))]
                     let result: Result<()> = (|| {
                         let delta = {
                             let mut inner = inner_for_persist.lock().expect("state mutex poisoned");
@@ -265,18 +262,6 @@ impl AppState {
                         watermark = next_watermark;
                         Ok(())
                     })();
-
-                    #[cfg(test)]
-                    let result: Result<()> = {
-                        // Tests run the old full-state JSON path so
-                        // existing persist-related assertions keep
-                        // working without knowing about stamps.
-                        let persisted = {
-                            let inner = inner_for_persist.lock().expect("state mutex poisoned");
-                            PersistedState::from_inner(&inner)
-                        };
-                        persist_state_from_persisted(&persist_path_for_persist, &persisted)
-                    };
 
                     if let Err(err) = &result {
                         eprintln!("[termal] background persist failed: {err:#}");

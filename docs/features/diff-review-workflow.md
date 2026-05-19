@@ -182,7 +182,7 @@ Persist review state under the existing TermAl workspace data directory:
 
 ```text
 .termal/
-  sessions.json
+  termal.sqlite
   reviews/
     <change-set-id>.json
     <change-set-id>.md   # optional export later
@@ -348,4 +348,3 @@ Integration:
 - Review comments can be added at change-set, file, hunk, and line scope.
 - Review comments persist to `.termal/reviews/<changeSetId>.json`.
 - A later agent turn can be pointed at that file and identify open comments without ambiguity.
-

@@ -2,9 +2,9 @@
 //!
 //! `PersistedState` is the on-disk schema for TermAl's entire backend
 //! state: preferences, projects, remotes, sessions, orchestrators, and
-//! workspace layouts. It is persisted as a JSON file (legacy format)
-//! and/or via the SQLite-backed store in `src/persist.rs`, which owns
-//! both encoding paths and the `load_state` entry point exercised here.
+//! workspace layouts. Runtime persistence uses the SQLite-backed store in
+//! `src/persist.rs`, while schema-shape tests deserialize in memory when they
+//! need to corrupt individual fields deliberately.
 //!
 //! Schema validation on load is deliberately strict: any missing
 //! required field produces an error rather than a silent default, so a
@@ -14,10 +14,10 @@
 //! canonical form, so a file saved on one machine reloads cleanly on
 //! another.
 //!
-//! The `persisted_state_load_error_after_mutation` helper takes a
-//! mutation closure, writes the mutated state to disk, reloads it, and
-//! returns the error string — each required-field test stays focused on
-//! a single missing-field assertion.
+//! The `persisted_state_load_error_after_mutation` helper takes a mutation
+//! closure, deserializes the mutated value through the persisted-state schema,
+//! and returns the error string. Each required-field test stays focused on a
+//! single missing-field assertion without reviving the removed JSON file path.
 
 use super::*;
 
@@ -25,21 +25,27 @@ fn persisted_state_load_error_after_mutation<F>(inner: StateInner, mutate: F) ->
 where
     F: FnOnce(&mut Value),
 {
-    let path =
-        std::env::temp_dir().join(format!("termal-state-load-error-{}.json", Uuid::new_v4()));
-    persist_state(&path, &inner).expect("persisted state should be written");
-
-    let mut encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap())
-        .expect("persisted state should deserialize");
+    let mut encoded = persisted_state_value(&inner);
     mutate(&mut encoded);
-    fs::write(&path, serde_json::to_vec(&encoded).unwrap()).expect("persisted state should update");
 
-    let err = match load_state(&path) {
+    let err = match state_inner_from_persisted_value(encoded) {
         Ok(_) => panic!("mutated persisted state should fail to load"),
         Err(err) => err,
     };
-    let _ = fs::remove_file(path);
     format!("{err:#}")
+}
+
+fn persisted_state_value(inner: &StateInner) -> Value {
+    serde_json::to_value(PersistedState::from_inner(inner))
+        .expect("persisted state should serialize")
+}
+
+fn state_inner_from_persisted_value(encoded: Value) -> Result<StateInner> {
+    let persisted: PersistedState =
+        serde_json::from_value(encoded).context("failed to deserialize persisted state")?;
+    persisted
+        .into_inner()
+        .context("failed to validate state from in-memory persisted state")
 }
 
 // Pins that legacy Windows `\\?\` verbatim prefixes on a project
@@ -56,11 +62,6 @@ fn persisted_state_normalizes_legacy_local_verbatim_paths() {
         .to_string_lossy()
         .into_owned();
     let legacy_root = format!(r"\\?\{normalized_root}");
-    let path = std::env::temp_dir().join(format!(
-        "termal-legacy-verbatim-state-{}.json",
-        Uuid::new_v4()
-    ));
-
     let mut inner = StateInner::new();
     let project = inner.create_project(None, normalized_root.clone(), default_local_remote_id());
     inner.create_session(
@@ -70,21 +71,14 @@ fn persisted_state_normalizes_legacy_local_verbatim_paths() {
         Some(project.id),
         None,
     );
-    persist_state(&path, &inner).expect("persisted state should be written");
-
-    let mut encoded: Value =
-        serde_json::from_slice(&fs::read(&path).unwrap()).expect("state should deserialize");
+    let mut encoded = persisted_state_value(&inner);
     encoded["projects"][0]["rootPath"] = Value::String(legacy_root.clone());
     encoded["sessions"][0]["session"]["workdir"] = Value::String(legacy_root);
-    fs::write(&path, serde_json::to_vec(&encoded).unwrap()).expect("persisted state should update");
 
-    let loaded = load_state(&path)
-        .expect("persisted state should load")
-        .expect("persisted state should exist");
+    let loaded = state_inner_from_persisted_value(encoded).expect("persisted state should load");
     assert_eq!(loaded.projects[0].root_path, normalized_root);
     assert_eq!(loaded.sessions[0].session.workdir, normalized_root);
 
-    let _ = fs::remove_file(path);
     let _ = fs::remove_dir_all(project_root);
 }
 
@@ -104,11 +98,6 @@ fn persisted_state_normalizes_legacy_workspace_layout_paths() {
     let legacy_root = format!(r"\\?\{normalized_root}");
     let normalized_file = format!(r"{normalized_root}\src\main.rs");
     let legacy_file = format!(r"\\?\{normalized_file}");
-    let path = std::env::temp_dir().join(format!(
-        "termal-layout-verbatim-state-{}.json",
-        Uuid::new_v4()
-    ));
-
     let mut inner = StateInner::new();
     inner.workspace_layouts.insert(
         "workspace-1".to_owned(),
@@ -175,11 +164,8 @@ fn persisted_state_normalizes_legacy_workspace_layout_paths() {
             }),
         },
     );
-    persist_state(&path, &inner).expect("persisted state should be written");
-
-    let loaded = load_state(&path)
-        .expect("persisted state should load")
-        .expect("persisted state should exist");
+    let loaded = state_inner_from_persisted_value(persisted_state_value(&inner))
+        .expect("persisted state should load");
     let layout = loaded
         .workspace_layouts
         .get("workspace-1")
@@ -227,55 +213,6 @@ fn persisted_state_normalizes_legacy_workspace_layout_paths() {
         Some(normalized_file.as_str())
     );
 
-    let _ = fs::remove_file(path);
-    let _ = fs::remove_dir_all(project_root);
-}
-
-// Pins that `AppState::new_with_paths` normalizes a legacy `\\?\`
-// verbatim workdir passed in at bootstrap, so the default project and
-// the bootstrapped Codex/Claude live sessions all share the canonical
-// root. Guards against bootstrap paths diverging from persisted ones.
-#[test]
-fn app_state_bootstrap_normalizes_legacy_local_verbatim_workdir() {
-    let project_root =
-        std::env::temp_dir().join(format!("termal-bootstrap-verbatim-path-{}", Uuid::new_v4()));
-    let state_root =
-        std::env::temp_dir().join(format!("termal-bootstrap-state-root-{}", Uuid::new_v4()));
-    fs::create_dir_all(&project_root).expect("project root should exist");
-    fs::create_dir_all(&state_root).expect("state root should exist");
-    let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
-        .to_string_lossy()
-        .into_owned();
-    let legacy_root = format!(r"\\?\{normalized_root}");
-    let persistence_path = state_root.join("sessions.json");
-    let orchestrator_templates_path = state_root.join("orchestrators.json");
-
-    let state = AppState::new_with_paths(
-        legacy_root,
-        persistence_path.clone(),
-        orchestrator_templates_path.clone(),
-    )
-    .expect("state should initialize");
-
-    assert_eq!(state.default_workdir, normalized_root);
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    assert_eq!(inner.projects.len(), 1);
-    assert_eq!(inner.projects[0].root_path, normalized_root);
-    let bootstrapped_sessions = inner
-        .sessions
-        .iter()
-        .filter(|record| matches!(record.session.name.as_str(), "Codex Live" | "Claude Live"))
-        .collect::<Vec<_>>();
-    assert_eq!(bootstrapped_sessions.len(), 2);
-    assert!(
-        bootstrapped_sessions
-            .iter()
-            .all(|record| record.session.workdir == normalized_root)
-    );
-    drop(inner);
-    drop(state);
-
-    let _ = fs::remove_dir_all(state_root);
     let _ = fs::remove_dir_all(project_root);
 }
 
@@ -289,10 +226,12 @@ fn persisted_state_preserves_significant_local_path_spaces() {
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
         .to_string_lossy()
         .into_owned();
-    let path = std::env::temp_dir().join(format!(
-        "termal-significant-path-space-state-{}.json",
+    let state_root = std::env::temp_dir().join(format!(
+        "termal-significant-path-space-state-{}",
         Uuid::new_v4()
     ));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let path = state_root.join("termal.sqlite");
 
     assert!(normalized_root.ends_with(' '));
 
@@ -314,6 +253,7 @@ fn persisted_state_preserves_significant_local_path_spaces() {
     assert_eq!(loaded.sessions[0].session.workdir, normalized_root);
 
     let _ = fs::remove_file(path);
+    let _ = fs::remove_dir_all(state_root);
     let _ = fs::remove_dir_all(project_root);
 }
 
@@ -609,10 +549,6 @@ fn persisted_state_requires_codex_thread_state_for_live_threads() {
 // routed or billed against the wrong caller on resume.
 #[test]
 fn persisted_state_requires_queued_prompt_source() {
-    let path = std::env::temp_dir().join(format!(
-        "termal-queued-prompt-source-required-{}",
-        Uuid::new_v4()
-    ));
     let mut inner = StateInner::new();
     let record = inner.create_session(
         Agent::Codex,
@@ -636,9 +572,7 @@ fn persisted_state_requires_queued_prompt_source() {
         },
         Vec::new(),
     );
-    persist_state(&path, &inner).unwrap();
-
-    let mut encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let mut encoded = persisted_state_value(&inner);
     let sessions = encoded["sessions"]
         .as_array_mut()
         .expect("persisted sessions should be an array");
@@ -649,9 +583,8 @@ fn persisted_state_requires_queued_prompt_source() {
         .as_object_mut()
         .expect("queued prompt should be an object")
         .remove("source");
-    fs::write(&path, serde_json::to_vec(&encoded).unwrap()).unwrap();
 
-    let err = match load_state(&path) {
+    let err = match state_inner_from_persisted_value(encoded) {
         Ok(_) => panic!("persisted state without queued prompt source should fail"),
         Err(err) => err,
     };
@@ -660,14 +593,10 @@ fn persisted_state_requires_queued_prompt_source() {
         err_text.contains("missing field `source`"),
         "unexpected load_state error: {err_text}"
     );
-
-    let _ = fs::remove_file(path);
 }
 
 #[test]
 fn persisted_state_omits_runtime_session_mutation_stamp_on_save() {
-    let path =
-        std::env::temp_dir().join(format!("termal-runtime-mutation-stamp-{}", Uuid::new_v4()));
     let mut inner = StateInner::new();
     let record = inner.create_session(
         Agent::Claude,
@@ -683,10 +612,7 @@ fn persisted_state_omits_runtime_session_mutation_stamp_on_save() {
     inner.sessions[index].mutation_stamp = 99;
     inner.sessions[index].session.session_mutation_stamp = Some(99);
 
-    persist_state(&path, &inner).expect("persisted state should be written");
-
-    let encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap())
-        .expect("persisted state should deserialize");
+    let encoded = persisted_state_value(&inner);
     {
         let persisted_session = encoded["sessions"][0]["session"]
             .as_object()
@@ -696,16 +622,10 @@ fn persisted_state_omits_runtime_session_mutation_stamp_on_save() {
             "runtime mutation stamps must not be serialized into persisted sessions"
         );
     }
-
-    let _ = fs::remove_file(path);
 }
 
 #[test]
 fn persisted_state_clears_runtime_session_mutation_stamp_on_load() {
-    let path = std::env::temp_dir().join(format!(
-        "termal-runtime-mutation-stamp-load-{}",
-        Uuid::new_v4()
-    ));
     let mut inner = StateInner::new();
     inner.create_session(
         Agent::Claude,
@@ -714,27 +634,18 @@ fn persisted_state_clears_runtime_session_mutation_stamp_on_load() {
         None,
         None,
     );
-    persist_state(&path, &inner).expect("persisted state should be written");
-
-    let mut encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap())
-        .expect("persisted state should deserialize");
+    let mut encoded = persisted_state_value(&inner);
     encoded["sessions"][0]["session"]
         .as_object_mut()
         .expect("persisted session should be an object")
         .insert("sessionMutationStamp".to_owned(), Value::from(99));
-    fs::write(&path, serde_json::to_vec(&encoded).unwrap()).expect("persisted state should update");
 
-    let loaded = load_state(&path)
-        .expect("persisted state should load")
-        .expect("persisted state should exist");
+    let loaded = state_inner_from_persisted_value(encoded).expect("persisted state should load");
     assert_eq!(loaded.sessions[0].session.session_mutation_stamp, None);
-
-    let _ = fs::remove_file(path);
 }
 
 #[test]
 fn persisted_state_round_trips_conversation_markers() {
-    let path = std::env::temp_dir().join(format!("termal-conversation-markers-{}", Uuid::new_v4()));
     let mut inner = StateInner::new();
     let record = inner.create_session(
         Agent::Codex,
@@ -766,18 +677,13 @@ fn persisted_state_round_trips_conversation_markers() {
             created_by: ConversationMarkerAuthor::User,
         });
 
-    persist_state(&path, &inner).expect("persisted state should be written");
-
-    let encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap())
-        .expect("persisted state should deserialize");
+    let encoded = persisted_state_value(&inner);
     assert_eq!(
         encoded["sessions"][0]["session"]["markers"][0]["name"],
         Value::String("Use the overview rail".to_owned())
     );
 
-    let loaded = load_state(&path)
-        .expect("persisted state should load")
-        .expect("persisted state should exist");
+    let loaded = state_inner_from_persisted_value(encoded).expect("persisted state should load");
     let markers = &loaded.sessions[0].session.markers;
     assert_eq!(markers.len(), 1);
     assert_eq!(markers[0].id, "marker-1");
@@ -785,16 +691,10 @@ fn persisted_state_round_trips_conversation_markers() {
     assert_eq!(markers[0].kind, ConversationMarkerKind::Decision);
     assert_eq!(markers[0].created_by, ConversationMarkerAuthor::User);
     assert_eq!(markers[0].end_message_id.as_deref(), Some("message-3"));
-
-    let _ = fs::remove_file(path);
 }
 
 #[test]
 fn persisted_state_defaults_missing_conversation_markers() {
-    let path = std::env::temp_dir().join(format!(
-        "termal-conversation-markers-missing-{}",
-        Uuid::new_v4()
-    ));
     let mut inner = StateInner::new();
     inner.create_session(
         Agent::Claude,
@@ -803,30 +703,18 @@ fn persisted_state_defaults_missing_conversation_markers() {
         None,
         None,
     );
-    persist_state(&path, &inner).expect("persisted state should be written");
-
-    let mut encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap())
-        .expect("persisted state should deserialize");
+    let mut encoded = persisted_state_value(&inner);
     encoded["sessions"][0]["session"]
         .as_object_mut()
         .expect("persisted session should be an object")
         .remove("markers");
-    fs::write(&path, serde_json::to_vec(&encoded).unwrap()).expect("persisted state should update");
 
-    let loaded = load_state(&path)
-        .expect("persisted state should load")
-        .expect("persisted state should exist");
+    let loaded = state_inner_from_persisted_value(encoded).expect("persisted state should load");
     assert!(loaded.sessions[0].session.markers.is_empty());
-
-    let _ = fs::remove_file(path);
 }
 
 #[test]
 fn persisted_state_maps_unknown_conversation_marker_kind_to_custom() {
-    let path = std::env::temp_dir().join(format!(
-        "termal-conversation-marker-kind-{}",
-        Uuid::new_v4()
-    ));
     let mut inner = StateInner::new();
     let record = inner.create_session(
         Agent::Codex,
@@ -857,87 +745,15 @@ fn persisted_state_maps_unknown_conversation_marker_kind_to_custom() {
             updated_at: "2026-05-01 10:00:00".to_owned(),
             created_by: ConversationMarkerAuthor::System,
         });
-    persist_state(&path, &inner).expect("persisted state should be written");
-
-    let mut encoded: Value = serde_json::from_slice(&fs::read(&path).unwrap())
-        .expect("persisted state should deserialize");
+    let mut encoded = persisted_state_value(&inner);
     encoded["sessions"][0]["session"]["markers"][0]["kind"] =
         Value::String("obsoleteKind".to_owned());
-    fs::write(&path, serde_json::to_vec(&encoded).unwrap()).expect("persisted state should update");
 
-    let loaded = load_state(&path)
-        .expect("persisted state should load")
-        .expect("persisted state should exist");
+    let loaded = state_inner_from_persisted_value(encoded).expect("persisted state should load");
     assert_eq!(
         loaded.sessions[0].session.markers[0].kind,
         ConversationMarkerKind::Custom
     );
-
-    let _ = fs::remove_file(path);
-}
-
-#[test]
-fn persisted_state_rejects_oversized_legacy_json_before_reading() {
-    let path =
-        std::env::temp_dir().join(format!("termal-oversized-legacy-state-{}", Uuid::new_v4()));
-    fs::write(&path, b"{}").expect("oversized state fixture should be written");
-
-    let err = match read_json_persisted_state_with_limit(&path, 1) {
-        Ok(_) => panic!("oversized persisted state should fail to load"),
-        Err(err) => err,
-    };
-    let err_text = format!("{err:#}");
-    assert!(
-        err_text.contains("is too large"),
-        "unexpected load_state error: {err_text}"
-    );
-    assert!(
-        err_text.contains("max 1 bytes"),
-        "error should include the byte cap: {err_text}"
-    );
-    assert!(
-        err_text.contains(LEGACY_JSON_STATE_MAX_BYTES_ENV),
-        "error should name the import-size override: {err_text}"
-    );
-
-    let _ = fs::remove_file(path);
-}
-
-#[test]
-fn max_legacy_json_state_bytes_pin() {
-    assert_eq!(MAX_LEGACY_JSON_STATE_BYTES, 100 * 1024 * 1024);
-}
-
-#[test]
-fn legacy_json_state_max_bytes_override_parses_positive_byte_count() {
-    assert_eq!(
-        parse_legacy_json_state_max_bytes_override("209715200").expect("override should parse"),
-        200 * 1024 * 1024
-    );
-}
-
-#[test]
-fn legacy_json_state_max_bytes_override_rejects_zero() {
-    let err = parse_legacy_json_state_max_bytes_override("0")
-        .expect_err("zero-byte override should fail");
-    let err_text = format!("{err:#}");
-    assert!(
-        err_text.contains("must be greater than 0"),
-        "unexpected override error: {err_text}"
-    );
-}
-
-#[test]
-fn legacy_json_state_max_bytes_override_rejects_invalid_inputs() {
-    for raw in ["abc", "100MB", "", "   ", "-1"] {
-        let err = parse_legacy_json_state_max_bytes_override(raw)
-            .expect_err("invalid override should fail");
-        let err_text = format!("{err:#}");
-        assert!(
-            err_text.contains("must be a positive integer byte count"),
-            "unexpected override error for {raw:?}: {err_text}"
-        );
-    }
 }
 
 // Builds an `AppState` like `test_app_state` but with a LIVE
@@ -945,12 +761,13 @@ fn legacy_json_state_max_bytes_override_rejects_invalid_inputs() {
 // `PersistRequest` signals. The default `test_app_state` drops
 // the receiver on construction so every `persist_tx.send(...)`
 // returns `Err(Disconnected)` and tests automatically take the
-// synchronous fallback path — which is good for JSON round-trip
-// tests but hides whether a code path correctly routes async.
+// synchronous SQLite fallback path, which hides whether a code path
+// correctly routes async.
 fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<PersistRequest>) {
     let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
-    let persistence_path =
-        std::env::temp_dir().join(format!("termal-test-{}.json", Uuid::new_v4()));
+    let state_root = std::env::temp_dir().join(format!("termal-test-state-{}", Uuid::new_v4()));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let persistence_path = state_root.join("termal.sqlite");
     let state = AppState {
         server_instance_id: Uuid::new_v4().to_string(),
         default_workdir: "/tmp".to_owned(),
@@ -1533,7 +1350,7 @@ fn commit_delta_locked_after_shutdown_falls_back_to_synchronous_persist() {
     let state_root =
         std::env::temp_dir().join(format!("termal-post-shutdown-commit-state-{unique_suffix}"));
     fs::create_dir_all(&state_root).expect("state root should exist");
-    let persistence_path = state_root.join("sessions.json");
+    let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
     let durable_session_id;
@@ -1640,7 +1457,7 @@ fn graceful_shutdown_drain_persists_final_mutation_across_reload() {
     let state_root =
         std::env::temp_dir().join(format!("termal-graceful-shutdown-state-{unique_suffix}"));
     fs::create_dir_all(&state_root).expect("state root should exist");
-    let persistence_path = state_root.join("sessions.json");
+    let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
     let durable_session_ids;
@@ -1654,9 +1471,8 @@ fn graceful_shutdown_drain_persists_final_mutation_across_reload() {
 
         // Commit a burst through the production path. Each `commit_locked`
         // bumps the revision and signals `PersistRequest::Delta` to the
-        // background worker, which the test-build worker drains and writes
-        // via `persist_state_from_persisted` (the JSON fallback that runs
-        // under `#[cfg(test)]`). A burst keeps this test sensitive to the
+        // background worker, which now uses the same SQLite delta path in
+        // tests and production. A burst keeps this test sensitive to the
         // shutdown drain ordering instead of relying on a single mutation
         // that the worker might happen to flush before shutdown begins.
         let project = create_test_project(&state, &project_root, "Graceful Shutdown Durability");
@@ -1670,8 +1486,7 @@ fn graceful_shutdown_drain_persists_final_mutation_across_reload() {
         // `PersistRequest::Shutdown` and joins; the worker's loop drains
         // every queued Delta + the Shutdown signal, runs one final tick
         // that captures the whole burst, and only then exits. After
-        // the join returns, the JSON file on disk MUST contain the
-        // sessions.
+        // the join returns, SQLite on disk MUST contain the sessions.
         state.shutdown_persist_blocking();
     }
 

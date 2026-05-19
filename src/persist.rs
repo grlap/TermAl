@@ -19,25 +19,9 @@ fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
 }
 
 const SQLITE_SCHEMA_VERSION: &str = "1";
-#[cfg(not(test))]
-const SQLITE_LEGACY_STATE_KEY: &str = "persistedState";
-#[cfg(not(test))]
 const SQLITE_METADATA_KEY: &str = "metadataState";
-#[cfg(not(test))]
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
-// Test-only legacy JSON loaders support fixture round trips and migration
-// regressions. Production `load_state` reads SQLite directly; this cap and
-// escape hatch are fixture-safety tools, not a runtime import guardrail.
-#[cfg(test)]
-const MAX_LEGACY_JSON_STATE_BYTES: u64 = 100 * 1024 * 1024;
-#[cfg(test)]
-const LEGACY_JSON_STATE_MAX_BYTES_ENV: &str = "TERMAL_LEGACY_STATE_MAX_BYTES";
-#[cfg(test)]
-const BYTES_PER_MIB: u64 = 1024 * 1024;
-#[cfg(test)]
-static LEGACY_JSON_STATE_MAX_BYTES_OVERRIDE_WARNED: AtomicBool = AtomicBool::new(false);
 
-#[cfg(not(test))]
 fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
     if let Some(parent) = path.parent() {
         harden_local_state_directory_permissions(parent)?;
@@ -172,6 +156,11 @@ fn harden_local_state_directory_permissions(_path: &FsPath) -> Result<()> {
     Ok(())
 }
 
+#[cfg(all(test, not(unix)))]
+fn harden_local_state_directory_permissions(_path: &FsPath) -> Result<()> {
+    Ok(())
+}
+
 #[cfg(all(not(test), not(unix), not(windows)))]
 fn reject_existing_state_directory_redirection(_path: &FsPath) -> Result<()> {
     Ok(())
@@ -204,7 +193,6 @@ fn harden_sqlite_state_file_permissions(path: &FsPath) -> Result<()> {
     Ok(())
 }
 
-#[cfg(any(unix, not(test)))]
 fn harden_persist_commit_files(path: &FsPath) -> Result<()> {
     harden_sqlite_state_file_permissions(path).with_context(|| {
         format!(
@@ -214,7 +202,6 @@ fn harden_persist_commit_files(path: &FsPath) -> Result<()> {
     })
 }
 
-#[cfg(any(unix, not(test)))]
 fn verify_persist_commit_integrity(path: &FsPath) -> Result<()> {
     let hardening_result = harden_persist_commit_files(path);
     if let Err(redirection_err) = reject_existing_sqlite_state_path_redirection(path) {
@@ -244,6 +231,11 @@ fn harden_sqlite_state_file_permissions(_path: &FsPath) -> Result<()> {
     Ok(())
 }
 
+#[cfg(all(test, not(unix)))]
+fn harden_sqlite_state_file_permissions(_path: &FsPath) -> Result<()> {
+    Ok(())
+}
+
 #[cfg(unix)]
 fn reject_existing_sqlite_state_file_symlinks(path: &FsPath) -> Result<()> {
     reject_existing_state_file_symlink(path)?;
@@ -263,6 +255,11 @@ fn reject_existing_sqlite_state_file_symlinks(path: &FsPath) -> Result<()> {
 }
 
 #[cfg(all(not(test), not(unix), not(windows)))]
+fn reject_existing_sqlite_state_file_symlinks(_path: &FsPath) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(all(test, not(unix)))]
 fn reject_existing_sqlite_state_file_symlinks(_path: &FsPath) -> Result<()> {
     Ok(())
 }
@@ -294,12 +291,24 @@ fn reject_existing_windows_state_path_redirection(path: &FsPath) -> Result<()> {
     }
 }
 
-#[cfg(any(unix, not(test)))]
 fn reject_existing_sqlite_state_path_redirection(path: &FsPath) -> Result<()> {
     if let Some(parent) = path.parent() {
         reject_existing_state_directory_redirection(parent)?;
     }
     reject_existing_sqlite_state_file_symlinks(path)
+}
+
+#[cfg(test)]
+fn create_local_state_directory(path: &FsPath) -> Result<()> {
+    fs::create_dir_all(path).with_context(|| format!("failed to create `{}`", path.display()))?;
+    #[cfg(unix)]
+    harden_local_state_directory_permissions(path)?;
+    Ok(())
+}
+
+#[cfg(all(test, not(unix)))]
+fn reject_existing_state_directory_redirection(_path: &FsPath) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -589,91 +598,7 @@ mod state_permission_hardening_tests {
     }
 }
 
-#[cfg(test)]
-fn persisted_state_size_limit_label(max_bytes: u64) -> String {
-    if max_bytes % BYTES_PER_MIB == 0 {
-        format!("{} MiB", max_bytes / BYTES_PER_MIB)
-    } else {
-        format!("{max_bytes} bytes")
-    }
-}
-
-#[cfg(test)]
-fn parse_legacy_json_state_max_bytes_override(raw: &str) -> Result<u64> {
-    let trimmed = raw.trim();
-    let max_bytes = trimmed.parse::<u64>().with_context(|| {
-        format!("{LEGACY_JSON_STATE_MAX_BYTES_ENV} must be a positive integer byte count")
-    })?;
-    if max_bytes == 0 {
-        bail!("{LEGACY_JSON_STATE_MAX_BYTES_ENV} must be greater than 0");
-    }
-    Ok(max_bytes)
-}
-
-#[cfg(test)]
-fn legacy_json_state_max_bytes() -> Result<u64> {
-    match std::env::var(LEGACY_JSON_STATE_MAX_BYTES_ENV) {
-        Ok(value) => {
-            let max_bytes = parse_legacy_json_state_max_bytes_override(&value)?;
-            if !LEGACY_JSON_STATE_MAX_BYTES_OVERRIDE_WARNED.swap(true, Ordering::Relaxed) {
-                eprintln!(
-                    "[termal] legacy state max bytes overridden via {LEGACY_JSON_STATE_MAX_BYTES_ENV} = {max_bytes}; default is {}",
-                    persisted_state_size_limit_label(MAX_LEGACY_JSON_STATE_BYTES)
-                );
-            }
-            Ok(max_bytes)
-        }
-        Err(std::env::VarError::NotPresent) => Ok(MAX_LEGACY_JSON_STATE_BYTES),
-        Err(std::env::VarError::NotUnicode(_)) => bail!(
-            "{LEGACY_JSON_STATE_MAX_BYTES_ENV} must be valid Unicode containing a positive integer byte count"
-        ),
-    }
-}
-
-#[cfg(test)]
-fn read_json_persisted_state_with_limit(
-    path: &FsPath,
-    max_bytes: u64,
-) -> Result<PersistedState> {
-    let metadata =
-        fs::metadata(path).with_context(|| format!("failed to inspect `{}`", path.display()))?;
-    let actual_bytes = metadata.len();
-    if actual_bytes > max_bytes {
-        let state_path = path.display();
-        let max_bytes_label = persisted_state_size_limit_label(max_bytes);
-        bail!(
-            "persisted state `{state_path}` is too large ({actual_bytes} bytes, max {max_bytes_label}). To import this trusted legacy state once, set `{LEGACY_JSON_STATE_MAX_BYTES_ENV}` to a byte value of at least {actual_bytes} and restart TermAl; after a successful import the JSON file is migrated to SQLite and renamed."
-        );
-    }
-
-    let raw = fs::read(path).with_context(|| format!("failed to read `{}`", path.display()))?;
-    let encoded: Value = serde_json::from_slice(&raw)
-        .with_context(|| format!("failed to parse `{}`", path.display()))?;
-    serde_json::from_value(encoded)
-        .with_context(|| format!("failed to deserialize state from `{}`", path.display()))
-}
-
-#[cfg(test)]
-fn read_json_persisted_state(path: &FsPath) -> Result<PersistedState> {
-    let max_bytes = legacy_json_state_max_bytes()?;
-    read_json_persisted_state_with_limit(path, max_bytes)
-}
-
-/// Loads state.
-#[cfg(test)]
-fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    let persisted = read_json_persisted_state(path)?;
-    Ok(Some(persisted.into_inner().with_context(|| {
-        format!("failed to validate state from `{}`", path.display())
-    })?))
-}
-
-/// Loads state from SQLite in production.
-#[cfg(not(test))]
+/// Loads state from SQLite.
 fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
     if !path.exists() {
         return Ok(None);
@@ -783,7 +708,6 @@ mod sqlite_schema_tests {
     }
 }
 
-#[cfg(not(test))]
 fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
     let connection = open_sqlite_state_connection(path)?;
     ensure_sqlite_state_schema(&connection)?;
@@ -793,24 +717,9 @@ fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
     harden_sqlite_state_file_permissions(path)?;
     let session_records = load_session_records_from_sqlite(&connection, path)?;
     let delegation_records = load_delegation_records_from_sqlite(&connection, path)?;
-    // The legacy lookup is only consulted when the primary key is
-    // missing. `.or(...)` would eagerly run both queries (both sides
-    // of `.or` must be evaluated before the combinator sees them),
-    // which pays for a second `SELECT ... FROM app_state WHERE key = ?`
-    // round-trip against the connection on every startup — silent
-    // but wasteful on the happy path where `SQLITE_METADATA_KEY` is
-    // always present post-migration. Structure as `if let` chains so
-    // the legacy query only runs when the primary returns `None`.
-    let encoded =
-        if let Some(encoded) = sqlite_app_state_value(&connection, SQLITE_METADATA_KEY, path)? {
-            encoded
-        } else if let Some(encoded) =
-            sqlite_app_state_value(&connection, SQLITE_LEGACY_STATE_KEY, path)?
-        {
-            encoded
-        } else {
-            return Ok(None);
-        };
+    let Some(encoded) = sqlite_app_state_value(&connection, SQLITE_METADATA_KEY, path)? else {
+        return Ok(None);
+    };
     let mut persisted: PersistedState = serde_json::from_str(&encoded)
         .with_context(|| format!("failed to parse persisted state from `{}`", path.display()))?;
     if !session_records.is_empty() {
@@ -838,7 +747,6 @@ fn apply_sqlite_delegation_records(
     true
 }
 
-#[cfg(not(test))]
 fn sqlite_app_state_value(
     connection: &rusqlite::Connection,
     key: &str,
@@ -856,7 +764,6 @@ fn sqlite_app_state_value(
     }
 }
 
-#[cfg(not(test))]
 fn load_session_records_from_sqlite(
     connection: &rusqlite::Connection,
     path: &FsPath,
@@ -887,7 +794,6 @@ fn load_session_records_from_sqlite(
     Ok(records)
 }
 
-#[cfg(not(test))]
 fn load_delegation_records_from_sqlite(
     connection: &rusqlite::Connection,
     path: &FsPath,
@@ -918,7 +824,6 @@ fn load_delegation_records_from_sqlite(
     Ok(records)
 }
 
-#[cfg(not(test))]
 fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) -> Result<()> {
     let metadata = persisted.metadata_only();
     persist_state_parts_to_sqlite(
@@ -931,7 +836,6 @@ fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) 
     )
 }
 
-#[cfg(not(test))]
 fn persist_created_session(
     path: &FsPath,
     inner: &StateInner,
@@ -941,17 +845,6 @@ fn persist_created_session(
     persist_persisted_state_to_sqlite(path, &persisted)
 }
 
-#[cfg(test)]
-fn persist_created_session(
-    path: &FsPath,
-    inner: &StateInner,
-    _record: &SessionRecord,
-) -> Result<()> {
-    let persisted = PersistedState::from_inner(inner);
-    persist_state_from_persisted(path, &persisted)
-}
-
-#[cfg(not(test))]
 fn persist_state_parts_to_sqlite(
     path: &FsPath,
     metadata: &PersistedState,
@@ -983,7 +876,6 @@ fn persist_state_parts_to_sqlite(
 /// for this connection. Used by the background persist thread so the
 /// per-persist hot path does not pay for opening a fresh connection or
 /// re-running the schema-version upsert on every commit.
-#[cfg(not(test))]
 fn persist_state_parts_via_connection(
     connection: &mut rusqlite::Connection,
     path: &FsPath,
@@ -1058,13 +950,11 @@ fn persist_state_parts_via_connection(
 /// every call. The persist thread writes many times during an active
 /// session, so amortizing that fixed cost to one open-and-validate per
 /// thread lifetime removes the biggest per-persist overhead.
-#[cfg(not(test))]
 struct SqlitePersistConnectionCache {
     path: Option<PathBuf>,
     connection: Option<rusqlite::Connection>,
 }
 
-#[cfg(not(test))]
 impl SqlitePersistConnectionCache {
     fn new() -> Self {
         Self {
@@ -1153,7 +1043,6 @@ impl SqlitePersistConnectionCache {
 /// transaction calls would require splitting the inner helper
 /// into "pre-connection / transaction / post-connection" phases
 /// with extra plumbing; not worth it for this severity.
-#[cfg(not(test))]
 fn persist_delta_via_cache(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,
@@ -1166,7 +1055,6 @@ fn persist_delta_via_cache(
     result
 }
 
-#[cfg(not(test))]
 fn persist_delta_via_cache_inner(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,
@@ -1272,21 +1160,8 @@ fn persist_delta_via_cache_inner(
 }
 
 /// Persists state from a pre-built `PersistedState` snapshot.
-#[cfg(not(test))]
 fn persist_state_from_persisted(path: &FsPath, persisted: &PersistedState) -> Result<()> {
     persist_persisted_state_to_sqlite(path, persisted)
-}
-
-#[cfg(test)]
-fn persist_state_from_persisted(path: &FsPath, persisted: &PersistedState) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create `{}`", parent.display()))?;
-    }
-
-    let encoded =
-        serde_json::to_vec_pretty(persisted).context("failed to serialize persisted state")?;
-    fs::write(path, encoded).with_context(|| format!("failed to write `{}`", path.display()))
 }
 
 /// Persists state directly from `StateInner` (used in tests for synchronous

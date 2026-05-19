@@ -89,7 +89,6 @@ impl PersistedState {
     /// source types (a `StateInner` vs. a sibling `PersistedState`).
     /// Adding a new top-level field to `PersistedState` requires
     /// updating both.
-    #[cfg(not(test))]
     fn metadata_only(&self) -> Self {
         Self {
             codex: self.codex.clone(),

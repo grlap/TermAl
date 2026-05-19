@@ -20,7 +20,7 @@ ownership.
 
 - The browser never connects to remote TermAl servers directly.
 - The built-in `local` remote is always present, enabled, and non-removable.
-- Remote configuration lives in app preferences inside `~/.termal/sessions.json`.
+- Remote configuration lives in app preferences inside `~/.termal/termal.sqlite`.
 - Each project stores an optional `remoteId`; omitted or `local` means local.
 - Sessions and orchestrator instances inherit routing from their project.
 - Remote-backed browser-visible sessions are local proxy records with stored
