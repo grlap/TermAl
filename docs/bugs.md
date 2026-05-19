@@ -149,42 +149,6 @@ Many production SQLite helpers in `src/persist.rs` are `#[cfg(not(test))]`, so e
 - Add coverage for post-commit permission failures, cache invalidation reset, and fatal redirection/reparse checks.
 - Keep legacy JSON fixture tests separate from production runtime persistence tests.
 
-## `src/tests/remote.rs` past the 5,000-line review threshold
-
-**Severity:** Low - `src/tests/remote.rs` is now about 12,296 lines, well past the project's review-threshold for test files. The replay-cache work clusters cohesively between lines ~2,810 and ~4,040 (the `RemoteDeltaReplayCache` shape helper, the `local_replay_test_remote` / `seed_loaded_remote_proxy_session` / `assert_delta_publishes_once_then_replay_skips` / `assert_remote_delta_replay_cache_shape` / `test_remote_delta_replay_key` helpers, and the `remote_delta_replay_*` tests).
-
-The growth is incremental across many rounds of replay-cache hardening, not a single landing — but extracting the cluster keeps the rest of the file's per-test density manageable. Per `CLAUDE.md`, splits must be pure code moves and live in their own commit.
-
-**Current behavior:**
-- Single `src/tests/remote.rs` mixes hydration tests, orchestrator-sync tests, replay-cache tests, and protocol-shape tests.
-- Per-cluster grep is harder than necessary; future replay-cache work continues to grow the file.
-
-**Proposal:**
-- Extract the replay-cache cluster (lines ~2,810–4,040) into `src/tests/remote_delta_replay.rs` as a pure code move — including the helpers and all `remote_delta_replay_*` tests.
-- Defer to a dedicated split commit; do not couple with feature changes.
-
-## Remote test module size slows review and triage
-
-**Severity:** Note - `src/tests/remote.rs` is large enough that focused remote
-review now has to scan many unrelated scenarios.
-
-The file contains hydration, delta, orchestrator, proxy, and sync-gap coverage
-in one module. New hydration/replay tests are coherent, but keeping every remote
-scenario in the same file makes future review targeting and regression triage
-harder, especially as the metadata-first remote work continues adding focused
-cases.
-
-**Current behavior:**
-- Remote tests for several boundaries live in one oversized module.
-- New review findings repeatedly point into the same large file, making
-  ownership and intended fixture reuse harder to see.
-
-**Proposal:**
-- Split remote tests by boundary, for example `remote_hydration.rs`,
-  `remote_deltas.rs`, and `remote_orchestrators.rs`.
-- Move shared fake-server and remote-session helpers into a small support
-  module used by those test files.
-
 ## Session store publication can race ahead of React session state
 
 **Severity:** Medium - the new `session-store` publishes some session slices before the corresponding React `sessions` state commits, so the UI can mix newer store-backed session data with older prop-derived session state in one render.
