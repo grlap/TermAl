@@ -5495,6 +5495,26 @@ Findings:\n\
 }
 
 #[test]
+fn delegation_result_packet_explicit_none_does_not_recover_actionable_preamble() {
+    let parsed = parse_delegation_result_packet(
+        "# Code Review\n\n\
+## Actionable\n\
+- **[Medium]** `src/state.rs:66-109` \u{2014} Stale preamble finding.\n\n\
+## Result\n\n\
+Status: completed\n\n\
+Summary:\n\
+Reviewed again and found no issues.\n\n\
+Findings:\n\
+- None",
+    )
+    .expect("explicit no-findings result should parse");
+
+    assert_eq!(parsed.status, DelegationStatus::Completed);
+    assert_eq!(parsed.summary, "Reviewed again and found no issues.");
+    assert!(parsed.findings.is_empty());
+}
+
+#[test]
 fn delegation_result_packet_drops_trailing_colon_from_invalid_finding_line() {
     let parsed = parse_delegation_result_packet(
         "## Result\n\nStatus: completed\n\nSummary:\nReady.\n\nFindings:\n- Low src/foo.rs: - Missing line number.",

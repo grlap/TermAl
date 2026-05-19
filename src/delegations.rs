@@ -3270,8 +3270,9 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
         .iter()
         .filter_map(|line| parse_delegation_finding_line(line))
         .collect::<Vec<_>>();
+    let findings_explicitly_empty = delegation_result_findings_explicitly_empty(&finding_lines);
     let findings_refer_to_prior_sections = delegation_findings_refer_to_prior_sections(&findings);
-    if findings.is_empty() || findings_refer_to_prior_sections {
+    if !findings_explicitly_empty && (findings.is_empty() || findings_refer_to_prior_sections) {
         let preamble_findings = parse_delegation_review_actionable_findings(preamble);
         if !preamble_findings.is_empty() {
             findings = preamble_findings;
@@ -3307,7 +3308,7 @@ fn delegation_result_section_heading(cleaned: &str) -> Option<DelegationResultSe
 
 fn parse_delegation_note_line(line: &str) -> Option<String> {
     let text = normalize_delegation_result_list_item(line);
-    if text.is_empty() || text.eq_ignore_ascii_case("none") {
+    if text.is_empty() || is_delegation_no_findings_marker(text) {
         return None;
     }
     Some(text.to_owned())
@@ -3315,7 +3316,7 @@ fn parse_delegation_note_line(line: &str) -> Option<String> {
 
 fn parse_delegation_finding_line(line: &str) -> Option<DelegationFinding> {
     let text = normalize_delegation_result_list_item(line);
-    if text.is_empty() || text.eq_ignore_ascii_case("none") {
+    if text.is_empty() || is_delegation_no_findings_marker(text) {
         return None;
     }
     let (head, message) = text
@@ -3335,6 +3336,21 @@ fn parse_delegation_finding_line(line: &str) -> Option<DelegationFinding> {
         line,
         message: message.to_owned(),
     })
+}
+
+fn delegation_result_findings_explicitly_empty(lines: &[&str]) -> bool {
+    let mut saw_empty_marker = false;
+    for line in lines {
+        let text = normalize_delegation_result_list_item(line);
+        if text.is_empty() {
+            continue;
+        }
+        if !is_delegation_no_findings_marker(text) {
+            return false;
+        }
+        saw_empty_marker = true;
+    }
+    saw_empty_marker
 }
 
 fn delegation_findings_refer_to_prior_sections(findings: &[DelegationFinding]) -> bool {
@@ -3377,12 +3393,7 @@ fn parse_delegation_review_actionable_findings(preamble: &str) -> Vec<Delegation
 
 fn parse_delegation_review_actionable_finding_line(line: &str) -> Option<DelegationFinding> {
     let text = normalize_delegation_result_list_item(line);
-    if text.is_empty()
-        || text.eq_ignore_ascii_case("none")
-        || text.eq_ignore_ascii_case("none.")
-        || text.eq_ignore_ascii_case("no issues found")
-        || text.eq_ignore_ascii_case("no issues found.")
-    {
+    if text.is_empty() || is_delegation_no_findings_marker(text) {
         return None;
     }
     let (severity, rest) = parse_delegation_review_severity(text)?;
@@ -3503,6 +3514,13 @@ fn normalize_delegation_result_list_item(line: &str) -> &str {
         .or_else(|| line.trim().strip_prefix("* "))
         .unwrap_or_else(|| line.trim())
         .trim()
+}
+
+fn is_delegation_no_findings_marker(text: &str) -> bool {
+    matches!(
+        text.trim().to_ascii_lowercase().as_str(),
+        "none" | "none." | "no findings" | "no findings." | "no issues found" | "no issues found."
+    )
 }
 
 fn delegation_result_marker_start(text: &str) -> Option<usize> {

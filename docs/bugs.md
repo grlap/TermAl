@@ -7,36 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Delegation result parser can override explicit no-findings packets from preamble Actionable text
-
-**Severity:** Medium - completed child delegations can report false findings when the final result packet explicitly says there are none.
-
-`src/delegations.rs:3274` falls back to parsing top-level `## Actionable` preamble text when the structured `## Result` packet has no parsed findings or only deferential note text. Explicit no-findings packets such as `Findings: - None` also parse to an empty findings list, so stale preamble bullets from earlier review text can be promoted into the final delegation result.
-
-**Current behavior:**
-- Preamble `## Actionable` findings are recovered for deferential result packets.
-- Explicit `Findings: - None` result packets are not distinguished from absent findings.
-- Parent fan-in and `docs/bugs.md` updates can inherit stale false positives.
-
-**Proposal:**
-- Distinguish explicit no-findings markers from absent/deferential findings.
-- Only recover preamble actionable findings when the result packet is absent or clearly deferential.
-- Add coverage for `## Actionable` preamble text followed by explicit `Findings: - None`.
-
-## State broadcaster startup comment still documents mailbox backpressure
-
-**Severity:** Low - one source comment still describes the old SSE mailbox capacity behavior.
-
-`src/app_boot.rs:286-288` still says state-broadcast producers "backpressure at the mailbox capacity." The current `StateBroadcastMailbox` drops the oldest pending work on overflow, and `src/state.rs`, `src/sse_broadcast.rs`, and `docs/architecture.md` now document that drop-oldest plus revision-gap repair contract.
-
-**Current behavior:**
-- The runtime mailbox no longer blocks producers at capacity.
-- The broadcaster startup comment still documents backpressure.
-- Future changes can be reviewed against the wrong SSE overflow contract.
-
-**Proposal:**
-- Update the `src/app_boot.rs` broadcaster-thread comment to describe drop-oldest overflow and client repair through revision gaps / `/api/state`.
-
 ## `forward_new_assistant_message_outcome` is still ~450 lines with interleaved early-returns
 
 **Severity:** Note - `src/telegram_forwarding.rs:452-899`. The forwarding path now mixes active-baseline transitions, footer retry, chunk retry/skip state, and visible-content suppression. Future contributors will struggle to trace which baseline shape is preserved across the merge.
@@ -232,8 +202,6 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   exercise `/api/events` with a queued state snapshot followed by deltas and assert the emitted stream preserves the required recovery/order contract, including mailbox capacity/drop-repair behavior.
 - [ ] P2: Cover state-broadcast mailbox snapshot-head overflow:
   publish a snapshot followed by enough deltas to fill the queue, then publish one more delta and assert the dropped-head Snapshot case matches the documented drop-oldest repair contract.
-- [ ] P2: Cover delegation result parser explicit-none preamble handling:
-  add a `parse_delegation_result_packet` test where a preamble has `## Actionable` bullets but the final `## Result` says `Findings: - None`, and assert no stale preamble finding is reported.
 - [ ] P2: Cover `parse_delegation_finding_location` line ranges on the standard `Findings:` path:
   assert a result-packet finding such as `src/state.rs:66-109` resolves to `line = Some(66)` outside the preamble recovery path.
 - [ ] P2: Cover alternative actionable-finding shapes in delegation result recovery:

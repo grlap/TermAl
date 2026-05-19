@@ -284,8 +284,9 @@ impl AppState {
         // but a snapshot queued before a delta must be sent before that delta;
         // otherwise the browser can see delta N+1 while still waiting for
         // state N and trigger an avoidable `/api/state` repair fetch. If a
-        // large snapshot stalls this thread, producers backpressure at the
-        // mailbox capacity rather than accumulating unbounded delta payloads.
+        // large snapshot stalls this thread, the mailbox drops the oldest
+        // pending work at capacity and clients repair any revision gap through
+        // the existing `/api/state` recovery path.
         let state_events_for_broadcast = state_events_sender.clone();
         let delta_events_sender = broadcast::channel(256).0;
         let delta_events_for_broadcast = delta_events_sender.clone();
