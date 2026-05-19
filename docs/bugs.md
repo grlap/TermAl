@@ -7,18 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Shared Codex closed-process delegate repro needs live confirmation
-
-**Severity:** Low - the code-level recovery paths now have targeted coverage, but the original closed/unknown process-id delegate repro still needs a live smoke rerun.
-
-**Current behavior:**
-- The closed/unknown process-id delegate repro has not been rerun on the guarded shared Codex recovery build.
-- `TERMAL_SHARED_CODEX_TRACE=1` remains useful until that live smoke is clean.
-
-**Proposal:**
-- Rerun the closed/unknown process-id delegate repro and confirm another Codex session completes without shared app-server SIGINT or stuck busy state.
-- If the repro is clean, remove this entry and consider dropping the temporary shared Codex trace instrumentation.
-
 ## `forward_new_assistant_message_outcome` is still ~450 lines with interleaved early-returns
 
 **Severity:** Note - `src/telegram_forwarding.rs:452-899`. The forwarding path now mixes active-baseline transitions, footer retry, chunk retry/skip state, and visible-content suppression. Future contributors will struggle to trace which baseline shape is preserved across the merge.
