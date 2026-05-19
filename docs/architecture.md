@@ -1101,7 +1101,13 @@ termal/
 |   |-- review.rs            # review-document persistence + change-set-id validation
 |   |-- workspace_queries.rs # workspace layout CRUD + agent command listing
 |   |-- workspace_watch.rs   # workspace file watcher threads
-|   |-- telegram.rs          # Telegram digest/action relay mode
+|   |-- telegram_runtime.rs  # Telegram relay lifecycle and environment config
+|   |-- telegram_state.rs    # Telegram relay persisted state and redaction
+|   |-- telegram_clients.rs  # Telegram/TermAl API clients and wire DTOs
+|   |-- telegram_messages.rs # Telegram send-message chunking helpers
+|   |-- telegram_forwarding.rs # assistant reply forwarding state machine
+|   |-- telegram_digest.rs   # project/session digest rendering and command replies
+|   |-- telegram.rs          # Telegram update/callback/prompt handling
 |   |
 |   `-- tests/               # backend regression tests, split by domain
 |       |-- mod.rs           # shared fixtures: TestRecorder, HTTP test server, handle factories

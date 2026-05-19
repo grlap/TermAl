@@ -16,6 +16,35 @@ const TELEGRAM_CALLBACK_ERROR_MAX_CHARS: usize = 180;
 const TELEGRAM_SAFE_USER_ERROR_DETAIL: &str = "Check TermAl for details, then try again.";
 const TELEGRAM_CALLBACK_DATA_MAX_BYTES: usize = 64;
 
+fn required_env_var(key: &str) -> Result<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("{key} is required"))
+}
+
+/// Parses optional i64 environment.
+fn parse_optional_i64_env(key: &str) -> Result<Option<i64>> {
+    std::env::var(key)
+        .ok()
+        .map(|value| {
+            value
+                .parse::<i64>()
+                .with_context(|| format!("{key} is not a valid integer: {value}"))
+        })
+        .transpose()
+}
+
+/// Returns the default TermAl API base URL.
+fn default_termal_api_base_url() -> String {
+    let port = std::env::var("TERMAL_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(8787);
+    format!("http://127.0.0.1:{port}")
+}
+
 /// Runs Telegram bot.
 fn run_telegram_bot() -> Result<()> {
     let cwd_path = std::env::current_dir().context("failed to resolve current directory")?;

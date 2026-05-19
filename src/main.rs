@@ -13,7 +13,7 @@ CLI args
 The crate still compiles as one module so shared backend types stay crate-visible
 without a dense web of pub mod exports, but the behavior is split across
 src/api.rs, src/state.rs, src/runtime.rs, src/turns.rs, src/remote.rs,
-src/orchestrators.rs, and src/telegram.rs.
+src/orchestrators.rs, and the Telegram relay fragments named below.
 */
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
@@ -618,6 +618,7 @@ include!("orchestrator_transitions.rs");
 include!("telegram_runtime.rs");
 include!("telegram_state.rs");
 include!("telegram_clients.rs");
+include!("telegram_messages.rs");
 include!("telegram_forwarding.rs");
 include!("telegram_digest.rs");
 include!("telegram.rs");

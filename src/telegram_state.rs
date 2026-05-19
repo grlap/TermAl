@@ -628,7 +628,3 @@ fn telegram_token_boundary_byte(byte: u8) -> bool {
             b'\\' | b'=' | b':' | b',' | b'.' | b';' | b')' | b']' | b'}'
         )
 }
-
-fn telegram_prompt_exceeds_byte_limit(text: &str) -> bool {
-    text.len() > MAX_DELEGATION_PROMPT_BYTES
-}

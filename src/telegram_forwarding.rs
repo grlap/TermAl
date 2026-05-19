@@ -5,6 +5,21 @@ Tracks assistant text cursors, chunk retry state, footer delivery, and selected
 session baselines for Telegram-originated prompts.
 */
 
+const TELEGRAM_ASSISTANT_CHUNK_SEND_FAILURE_LIMIT: usize = 3;
+
+fn telegram_assistant_chunk_skipped_notice(
+    chunk_index: usize,
+    chunk_count: usize,
+    failed_attempts: usize,
+) -> String {
+    format!(
+        "[Telegram skipped assistant reply chunk {}/{} after {} failed delivery attempts.]",
+        chunk_index + 1,
+        chunk_count,
+        failed_attempts
+    )
+}
+
 /// Syncs Telegram digest.
 fn sync_telegram_digest(
     telegram: &impl TelegramDigestMessageSender,

@@ -24,7 +24,7 @@ the Implementation Tasks section.
 
 ## `forward_new_assistant_message_outcome` is still ~450 lines with interleaved early-returns
 
-**Severity:** Note - `src/telegram_forwarding.rs:437-884`. The forwarding path now mixes active-baseline transitions, footer retry, chunk retry/skip state, and visible-content suppression. Future contributors will struggle to trace which baseline shape is preserved across the merge.
+**Severity:** Note - `src/telegram_forwarding.rs:452-899`. The forwarding path now mixes active-baseline transitions, footer retry, chunk retry/skip state, and visible-content suppression. Future contributors will struggle to trace which baseline shape is preserved across the merge.
 
 **Current behavior:**
 - Single function ~450 lines.
@@ -35,7 +35,7 @@ the Implementation Tasks section.
 
 ## `TelegramRelayRuntime` is a file-level global rather than `AppState`-owned state
 
-**Severity:** Note - `src/telegram_runtime.rs:350-360`. `TelegramRelayRuntime` and `TELEGRAM_RELAY_RUNTIME` are file-level globals (`LazyLock<Mutex<...>>`). `AppState` has no visibility into the relay's running state, so any future health-monitor, restart-on-error, or readiness-signaling logic ends up reading globals instead of methods on `AppState`.
+**Severity:** Note - `src/telegram_runtime.rs:379-389`. `TelegramRelayRuntime` and `TELEGRAM_RELAY_RUNTIME` are file-level globals (`LazyLock<Mutex<...>>`). `AppState` has no visibility into the relay's running state, so any future health-monitor, restart-on-error, or readiness-signaling logic ends up reading globals instead of methods on `AppState`.
 
 **Current behavior:**
 - Runtime state lives in module-level statics.
@@ -43,24 +43,6 @@ the Implementation Tasks section.
 
 **Proposal:**
 - Move the runtime into `AppState` and own its lifecycle on the state object.
-
-## Telegram split leaves helper ownership and docs mismatched
-
-**Severity:** Low - the Telegram file-size split is below the architecture threshold, but several helpers and docs still point at the old single-file boundary.
-
-The current split leaves runtime environment helpers in `src/telegram_digest.rs`, assistant-forwarding retry/chunk helpers in `src/telegram_digest.rs`, and prompt byte-limit validation in `src/telegram_state.rs`. `docs/architecture.md` and the `src/main.rs` composition guide still describe Telegram as a single `src/telegram.rs` boundary.
-
-**Current behavior:**
-- Runtime env helpers (`required_env_var`, `parse_optional_i64_env`, `default_termal_api_base_url`) live in `src/telegram_digest.rs`.
-- Forwarding retry/chunk helpers such as `TELEGRAM_ASSISTANT_CHUNK_SEND_FAILURE_LIMIT`, `telegram_assistant_chunk_skipped_notice`, and `chunk_telegram_message_text` live in `src/telegram_digest.rs`.
-- `telegram_prompt_exceeds_byte_limit` lives in `src/telegram_state.rs`.
-- Architecture docs and the top-level composition comment still describe Telegram as a single `src/telegram.rs` boundary.
-
-**Proposal:**
-- Move env helpers to `src/telegram_runtime.rs`.
-- Move forwarding retry helpers to `src/telegram_forwarding.rs`, or split shared chunking into a deliberately named helper fragment.
-- Move prompt byte-limit validation next to Telegram update/prompt handling.
-- Update `docs/architecture.md` and `src/main.rs` comments to name the Telegram fragments.
 
 ## Telegram settings updates live outside the app state/revision model
 
@@ -97,7 +79,7 @@ The current split leaves runtime environment helpers in `src/telegram_digest.rs`
 
 **Severity:** Medium - any linked chat can still fan out prompt submissions quickly enough to create a burst of local backend and agent work.
 
-`src/telegram.rs:167-179` now rejects Telegram prompts above `MAX_DELEGATION_PROMPT_BYTES = 64 * 1024` before calling `forward_telegram_text_to_project`, but accepted prompts are still not rate-limited per chat. Command and callback actions dispatch backend work at `src/telegram.rs:144-163` and `src/telegram.rs:245-272`. A linked chat can submit many below-limit prompts or action commands in quick succession, each becoming local backend work and possibly an agent turn.
+`src/telegram.rs:168-178` now rejects Telegram prompts above `MAX_DELEGATION_PROMPT_BYTES = 64 * 1024` before calling `forward_telegram_text_to_project`, but accepted prompts are still not rate-limited per chat. Command and callback actions dispatch backend work at `src/telegram.rs:145-164` and `src/telegram.rs:245-272`. A linked chat can submit many below-limit prompts or action commands in quick succession, each becoming local backend work and possibly an agent turn.
 
 **Current behavior:**
 - Oversized Telegram prompts are rejected by UTF-8 byte length.
@@ -112,7 +94,7 @@ The current split leaves runtime environment helpers in `src/telegram_digest.rs`
 
 **Severity:** Medium - assistant replies can include code, local file paths, file contents, or secrets and are sent to a third-party service without an explicit opt-in.
 
-`src/telegram_forwarding.rs:715-884`. The relay chunks and forwards the full settled assistant message body to Telegram once the session is no longer active. This goes beyond the compact project digest and sends arbitrary model output off-machine by default.
+`src/telegram_forwarding.rs:730-899`. The relay chunks and forwards the full settled assistant message body to Telegram once the session is no longer active. This goes beyond the compact project digest and sends arbitrary model output off-machine by default.
 
 **Current behavior:**
 - The Telegram digest path is compact, but settled assistant messages are forwarded in full.

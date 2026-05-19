@@ -32,6 +32,10 @@ struct TelegramPromptForwardOutcome {
     final_sync_satisfied: bool,
 }
 
+fn telegram_prompt_exceeds_byte_limit(text: &str) -> bool {
+    text.len() > MAX_DELEGATION_PROMPT_BYTES
+}
+
 fn handle_telegram_update(
     telegram: &impl TelegramCallbackResponder,
     termal: &(impl TelegramPromptClient + TelegramActionClient),
