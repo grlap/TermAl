@@ -255,10 +255,11 @@ fn clear_shared_codex_completed_turn_state_fields(
     clear_shared_codex_turn_recorder_state(recorder_state);
 }
 
-/// Clears every shared-session per-turn field (pending turn-start
-/// request id, active turn id, turn-started flag, plus completed-turn
-/// state) so the next turn starts from a clean slate.
+/// Clears every shared-session per-turn field (pending thread setup /
+/// turn-start request ids, active turn id, turn-started flag, plus
+/// completed-turn state) so the next turn starts from a clean slate.
 fn clear_shared_codex_turn_session_state(session_state: &mut SharedCodexSessionState) {
+    session_state.pending_thread_setup_request_id = None;
     session_state.pending_turn_start_request_id = None;
     session_state.turn_id = None;
     session_state.turn_started = false;

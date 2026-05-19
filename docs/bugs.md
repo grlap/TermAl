@@ -7,20 +7,17 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Shared Codex recovery edge cases need hardening
+## Shared Codex closed-process delegate repro needs live confirmation
 
-**Severity:** Medium - less common shared-runtime failure paths still need targeted recovery proof.
+**Severity:** Low - the code-level recovery paths now have targeted coverage, but the original closed/unknown process-id delegate repro still needs a live smoke rerun.
 
 **Current behavior:**
-- The closed/unknown process-id delegate repro has not been rerun on the nonblocking-detach build.
-- Old thread-setup timeout waiters can retire the shared runtime after a session has stopped/rebound.
-- Runtime-exit fanout can dispatch queued prompts before `shared_codex_runtime` is cleared.
-- Terminal `task_complete` before canonical final assistant events still needs duplicate-output coverage.
+- The closed/unknown process-id delegate repro has not been rerun on the guarded shared Codex recovery build.
+- `TERMAL_SHARED_CODEX_TRACE=1` remains useful until that live smoke is clean.
 
 **Proposal:**
 - Rerun the closed/unknown process-id delegate repro and confirm another Codex session completes without shared app-server SIGINT or stuck busy state.
-- Add targeted regression coverage for the timeout, runtime-exit fanout, and terminal duplicate-output paths.
-- Keep `TERMAL_SHARED_CODEX_TRACE=1` instrumentation until those recovery paths are fixed or downgraded.
+- If the repro is clean, remove this entry and consider dropping the temporary shared Codex trace instrumentation.
 
 ## `forward_new_assistant_message_outcome` is still ~450 lines with interleaved early-returns
 

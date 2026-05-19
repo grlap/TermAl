@@ -292,6 +292,7 @@ fn handle_shared_codex_app_server_message(
     // entry so early events from Codex are not dropped.
     let session_state = shared_sessions.entry(session_id.clone()).or_default();
     let SharedCodexSessionState {
+        pending_thread_setup_request_id: _,
         pending_turn_start_request_id,
         recorder: recorder_state,
         thread_id,
@@ -1107,8 +1108,9 @@ fn handle_shared_codex_thread_compacted(
 
 /// Reconciles a fully-delivered agent-message item against whatever
 /// has already been streamed for the same `item_id`. If nothing was
-/// streamed, the trimmed text is pushed wholesale; otherwise the
-/// delta-suffix dedup logic computes append/replace/no-change against
+/// streamed, the trimmed text opens a streaming message so later final
+/// variants for the same item can still append/replace in place; otherwise
+/// the delta-suffix dedup logic computes append/replace/no-change against
 /// the already-seen stream content. Finalizes any prior streaming text
 /// when switching to a new `item_id`.
 fn record_completed_codex_agent_message(
@@ -1130,8 +1132,14 @@ fn record_completed_codex_agent_message(
     }
 
     if !turn_state.streamed_agent_message_item_ids.contains(item_id) {
+        turn_state
+            .streamed_agent_message_item_ids
+            .insert(item_id.to_owned());
+        turn_state
+            .streamed_agent_message_text_by_item_id
+            .insert(item_id.to_owned(), trimmed.to_owned());
         begin_codex_assistant_output(turn_state, recorder)?;
-        recorder.push_text(trimmed)?;
+        recorder.text_delta(trimmed)?;
         return remember_codex_first_assistant_message_id(state, session_id, turn_state);
     }
 

@@ -483,6 +483,7 @@ fn reset_recorder_state_fields(recorder_state: &mut SessionRecorderState) {
 /// Tracks shared Codex session state.
 #[derive(Default)]
 struct SharedCodexSessionState {
+    pending_thread_setup_request_id: Option<String>,
     pending_turn_start_request_id: Option<String>,
     recorder: SessionRecorderState,
     thread_id: Option<String>,

@@ -436,6 +436,7 @@ fn clear_shared_codex_turn_recorder_state_resets_all_fields() {
 #[test]
 fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_thread_id() {
     let mut session_state = SharedCodexSessionState {
+        pending_thread_setup_request_id: Some("thread-start-1".to_owned()),
         pending_turn_start_request_id: Some("turn-start-1".to_owned()),
         recorder: SessionRecorderState {
             command_messages: HashMap::from([("cmd-1".to_owned(), "Running".to_owned())]),
@@ -469,6 +470,7 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
 
     clear_shared_codex_turn_session_state(&mut session_state);
 
+    assert_eq!(session_state.pending_thread_setup_request_id, None);
     assert_eq!(session_state.pending_turn_start_request_id, None);
     assert_eq!(session_state.thread_id.as_deref(), Some("thread-1"));
     assert_eq!(session_state.turn_id, None);

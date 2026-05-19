@@ -6,9 +6,9 @@
 //! from which it can be derived) and the runtime must fan each event out to
 //! the right per-session transcript — `SharedCodexSessionState` in
 //! `src/runtime.rs` tracks the active `turn_id`, a grace-period
-//! `completed_turn_id`, the pending-turn-start request id, and the recorder
-//! bookkeeping that ties item-completed / content-delta / final messages
-//! back to a single on-screen assistant message.
+//! `completed_turn_id`, pending thread-setup / turn-start request ids, and
+//! the recorder bookkeeping that ties item-completed / content-delta / final
+//! messages back to a single on-screen assistant message.
 //!
 //! Routing is fragile because events race: a `codex/event/agent_message`
 //! final can arrive AFTER `turn/completed`, still-in-flight chunks for the
@@ -560,6 +560,211 @@ fn shared_codex_terminal_task_complete_after_agent_message_does_not_duplicate_fi
     assert!(matches!(
         session.messages.first(),
         Some(Message::Text { text, .. }) if text == "Final answer before task_complete."
+    ));
+}
+
+// Pins that terminal task_complete can act as an early finalization fallback
+// without duplicating the canonical final agent_message if Codex sends it
+// during the completed-turn grace window.
+#[test]
+fn shared_codex_terminal_task_complete_before_agent_message_does_not_duplicate_final_text() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-terminal-task-complete-before-final");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                turn_id: Some("turn-terminal-before-final".to_owned()),
+                turn_started: true,
+                ..SharedCodexSessionState::default()
+            },
+        );
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let task_complete = json!({
+        "method": "codex/event/task_complete",
+        "params": {
+            "msg": {
+                "last_agent_message": "Final answer from task_complete.",
+                "turn_id": "turn-terminal-before-final",
+                "type": "task_complete"
+            }
+        }
+    });
+    let final_message = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "id": "turn-terminal-before-final",
+            "msg": {
+                "message": "Final answer from task_complete.",
+                "phase": "final_answer",
+                "type": "agent_message"
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &task_complete,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &final_message,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .unwrap();
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(session.preview, "Final answer from task_complete.");
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Final answer from task_complete."
+    ));
+}
+
+// Pins that a terminal task_complete fallback remains open for reconciliation:
+// if Codex later sends a canonical final agent_message with extra text, the
+// transcript is updated in place rather than receiving a second assistant block.
+#[test]
+fn shared_codex_terminal_task_complete_before_agent_message_appends_final_suffix() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-terminal-task-complete-before-final-suffix");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("conversation-123".to_owned()),
+                turn_id: Some("turn-terminal-before-final-suffix".to_owned()),
+                turn_started: true,
+                ..SharedCodexSessionState::default()
+            },
+        );
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let task_complete = json!({
+        "method": "codex/event/task_complete",
+        "params": {
+            "msg": {
+                "last_agent_message": "Final answer from task_complete.",
+                "turn_id": "turn-terminal-before-final-suffix",
+                "type": "task_complete"
+            }
+        }
+    });
+    let final_message = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "id": "turn-terminal-before-final-suffix",
+            "msg": {
+                "message": "Final answer from task_complete. More detail.",
+                "phase": "final_answer",
+                "type": "agent_message"
+            }
+        }
+    });
+
+    handle_shared_codex_app_server_message(
+        &task_complete,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .unwrap();
+    handle_shared_codex_app_server_message(
+        &final_message,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .unwrap();
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(
+        session.preview,
+        "Final answer from task_complete. More detail."
+    );
+    assert_eq!(session.messages.len(), 1);
+    assert!(matches!(
+        session.messages.first(),
+        Some(Message::Text { text, .. }) if text == "Final answer from task_complete. More detail."
     ));
 }
 
@@ -3479,6 +3684,7 @@ fn shared_codex_turn_completed_error_clears_recorder_state() {
         .insert(
             session_id.clone(),
             SharedCodexSessionState {
+                pending_thread_setup_request_id: Some("thread-start-1".to_owned()),
                 pending_turn_start_request_id: Some("turn-start-1".to_owned()),
                 recorder: SessionRecorderState {
                     command_messages: HashMap::from([(
@@ -3594,6 +3800,7 @@ fn shared_codex_error_notification_clears_recorder_state() {
         .insert(
             session_id.clone(),
             SharedCodexSessionState {
+                pending_thread_setup_request_id: Some("thread-start-1".to_owned()),
                 pending_turn_start_request_id: Some("turn-start-1".to_owned()),
                 recorder: SessionRecorderState {
                     command_messages: HashMap::from([(
@@ -5401,6 +5608,215 @@ fn shared_codex_startup_timeout_tears_down_runtime() {
 
     drop(inner);
     drop(runtime_token);
+}
+
+// Pins that an old thread-setup waiter cannot retire the shared app-server
+// after its session has already stopped or rebound away from that runtime.
+#[test]
+fn shared_codex_stale_thread_setup_timeout_does_not_clear_shared_runtime() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, _process) =
+        test_shared_codex_runtime("shared-codex-stale-thread-setup-timeout");
+
+    {
+        let mut shared_runtime = state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        *shared_runtime = Some(runtime.clone());
+    }
+
+    handle_shared_codex_thread_setup_response_error_if_current(
+        &runtime.sessions,
+        &state,
+        &runtime.runtime_id,
+        &session_id,
+        "old-thread-setup-request",
+        CodexResponseError::Timeout(
+            "timed out waiting for Codex app-server response to `thread/start`".to_owned(),
+        ),
+    );
+
+    assert!(
+        state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .as_ref()
+            .is_some_and(|shared_runtime| shared_runtime.runtime_id == runtime.runtime_id)
+    );
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("session should remain present");
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert!(session.messages.is_empty());
+}
+
+// Pins that a stale thread-setup waiter cannot fail a newer setup attempt
+// on the same shared app-server runtime after the session has restarted.
+#[test]
+fn shared_codex_stale_thread_setup_timeout_ignores_newer_same_runtime_request() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-stale-thread-setup-same-runtime");
+
+    {
+        let mut shared_runtime = state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        *shared_runtime = Some(runtime.clone());
+    }
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "New thread setup is active".to_owned();
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                pending_thread_setup_request_id: Some("new-thread-setup-request".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+
+    handle_shared_codex_thread_setup_response_error_if_current(
+        &runtime.sessions,
+        &state,
+        &runtime.runtime_id,
+        &session_id,
+        "old-thread-setup-request",
+        CodexResponseError::Timeout(
+            "timed out waiting for Codex app-server response to `thread/start`".to_owned(),
+        ),
+    );
+
+    assert!(
+        state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .as_ref()
+            .is_some_and(|shared_runtime| shared_runtime.runtime_id == runtime.runtime_id)
+    );
+
+    let pending_request_id = runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .get(&session_id)
+        .and_then(|session| session.pending_thread_setup_request_id.clone());
+    assert_eq!(
+        pending_request_id.as_deref(),
+        Some("new-thread-setup-request")
+    );
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("session should remain present");
+    assert_eq!(session.status, SessionStatus::Active);
+    assert_eq!(session.preview, "New thread setup is active");
+    assert!(session.messages.is_empty());
+}
+
+// Pins the runtime-exit queued-dispatch ordering: for a dying shared Codex
+// runtime, the AppState shared-runtime slot is cleared before the queued turn
+// dispatcher attempts recovery work.
+#[test]
+fn shared_codex_runtime_exit_clears_shared_slot_before_queued_dispatch_attempt() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-runtime-exit-clear-before-dispatch");
+    let runtime_token = RuntimeToken::Codex(runtime.runtime_id.clone());
+
+    {
+        let mut shared_runtime = state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        *shared_runtime = Some(runtime.clone());
+    }
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        let queued_prompt_id = inner.next_message_id();
+        let record = &mut inner.sessions[index];
+        record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        record.session.status = SessionStatus::Active;
+        record.session.preview = "Waiting for Codex".to_owned();
+        record.remote_id = Some("remote-proxy-to-block-dispatch-spawn".to_owned());
+        record.remote_session_id = Some("remote-session".to_owned());
+        record.queued_prompts.push_back(QueuedPromptRecord {
+            source: QueuedPromptSource::User,
+            attachments: Vec::new(),
+            pending_prompt: PendingPrompt {
+                attachments: Vec::new(),
+                id: queued_prompt_id,
+                timestamp: stamp_now(),
+                text: "queued recovery prompt".to_owned(),
+                expanded_text: None,
+            },
+        });
+    }
+
+    let error = state
+        .handle_runtime_exit_if_matches(
+            &session_id,
+            &runtime_token,
+            Some("shared app-server exited"),
+        )
+        .expect_err("remote proxy queued dispatch should fail after slot clear");
+    assert!(
+        format!("{error:#}").contains("remote proxy sessions must dispatch"),
+        "unexpected runtime-exit error: {error:#}"
+    );
+    assert!(
+        state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .is_none(),
+        "shared runtime slot should be cleared before queued dispatch can fail"
+    );
 }
 
 // Pins that an item/agentMessage/delta arriving while turn_started=false

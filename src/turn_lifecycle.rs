@@ -513,6 +513,21 @@ impl AppState {
             eprintln!("state warning> failed to refresh delegation after runtime exit: {err:#}");
         }
 
+        // A shared Codex process hosts multiple logical sessions. Once a
+        // runtime-exit path has cleared this session's stale handle, any queued
+        // prompt must spawn or attach to a fresh shared app-server rather than
+        // reusing the dying runtime still stored on AppState.
+        let clear_codex_runtime_result = if should_dispatch_next {
+            match token {
+                RuntimeToken::Codex(runtime_id) => {
+                    Some(self.clear_shared_codex_runtime_if_matches(runtime_id))
+                }
+                RuntimeToken::Claude(_) | RuntimeToken::Acp(_) => None,
+            }
+        } else {
+            None
+        };
+
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
@@ -522,6 +537,9 @@ impl AppState {
             }
         } else {
             self.resume_pending_orchestrator_transitions()?;
+        }
+        if let Some(result) = clear_codex_runtime_result {
+            result?;
         }
 
         Ok(())

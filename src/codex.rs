@@ -928,7 +928,14 @@ fn handle_shared_codex_prompt_command(
         format!("jsonrpc_request method={method} id={request_id} session={session_id}"),
     );
     let pending =
-        start_codex_json_rpc_request_with_id(writer, pending_requests, request_id, method, params)?;
+        start_codex_json_rpc_request_with_id(writer, pending_requests, request_id.clone(), method, params)?;
+    {
+        let mut sessions = sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        let session_state = sessions.entry(session_id.to_owned()).or_default();
+        session_state.pending_thread_setup_request_id = Some(request_id.clone());
+    }
 
     let waiter_pending = pending_requests.clone();
     let waiter_state = state.clone();
@@ -948,6 +955,14 @@ fn handle_shared_codex_prompt_command(
 
         match result {
             Ok(setup_result) => {
+                if !take_matching_shared_codex_thread_setup_request(
+                    &waiter_sessions,
+                    &waiter_session_id,
+                    &request_id,
+                ) {
+                    return;
+                }
+
                 let thread_id = match setup_result.pointer("/thread/id").and_then(Value::as_str) {
                     Some(id) => id.to_owned(),
                     None => {
@@ -1039,12 +1054,16 @@ fn handle_shared_codex_prompt_command(
                         .handle_shared_codex_runtime_exit(&waiter_runtime_id, Some(&detail));
                 }
             }
-            Err(err) => handle_shared_codex_startup_response_error(
-                &waiter_state,
-                &waiter_runtime_id,
-                &waiter_session_id,
-                err,
-            ),
+            Err(err) => {
+                handle_shared_codex_thread_setup_response_error_if_current(
+                    &waiter_sessions,
+                    &waiter_state,
+                    &waiter_runtime_id,
+                    &waiter_session_id,
+                    &request_id,
+                    err,
+                );
+            }
         }
     });
     Ok(())
@@ -1285,6 +1304,45 @@ fn handle_shared_codex_startup_response_error(
             }
         }
     }
+}
+
+fn take_matching_shared_codex_thread_setup_request(
+    sessions: &SharedCodexSessionMap,
+    session_id: &str,
+    request_id: &str,
+) -> bool {
+    let mut sessions = sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    let Some(session_state) = sessions.get_mut(session_id) else {
+        return false;
+    };
+    if session_state.pending_thread_setup_request_id.as_deref() != Some(request_id) {
+        return false;
+    }
+    session_state.pending_thread_setup_request_id = None;
+    true
+}
+
+/// Applies thread-setup failures only for the currently pending setup
+/// request, so stale waiters from a stopped/restarted session cannot retire
+/// a newer turn on the same shared Codex app-server.
+fn handle_shared_codex_thread_setup_response_error_if_current(
+    sessions: &SharedCodexSessionMap,
+    state: &AppState,
+    runtime_id: &str,
+    session_id: &str,
+    request_id: &str,
+    err: CodexResponseError,
+) {
+    if !take_matching_shared_codex_thread_setup_request(sessions, session_id, request_id) {
+        return;
+    }
+    let runtime_token = RuntimeToken::Codex(runtime_id.to_owned());
+    if !state.session_matches_runtime_token(session_id, &runtime_token) {
+        return;
+    }
+    handle_shared_codex_startup_response_error(state, runtime_id, session_id, err);
 }
 
 fn fail_shared_codex_turn_without_runtime_exit(
