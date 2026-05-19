@@ -1,5 +1,5 @@
 import type { Session } from "./types";
-import { reconcileSessions } from "./session-reconcile";
+import { reconcileSessions, reconcileSingleSession } from "./session-reconcile";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
@@ -239,6 +239,36 @@ describe("reconcileSessions", () => {
     expect(merged[0].parentDelegationId).toBe("delegation-1");
     expect(merged[0].messagesLoaded).toBe(true);
     expect(merged[0].messages).toEqual(next[0].messages);
+  });
+
+  it("preserves delegated child ownership through targeted hydration reconcile", () => {
+    const previous = makeSession("child-session", {
+      parentDelegationId: "delegation-1",
+      messages: [],
+      messagesLoaded: false,
+      sessionMutationStamp: 7,
+    });
+    const next = makeSession("child-session", {
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "assistant",
+          text: "Done",
+        },
+      ],
+      messagesLoaded: true,
+      sessionMutationStamp: 7,
+    });
+
+    const merged = reconcileSingleSession(previous, next, {
+      disableMutationStampFastPath: true,
+    });
+
+    expect(merged.parentDelegationId).toBe("delegation-1");
+    expect(merged.messagesLoaded).toBe(true);
+    expect(merged.messages).toEqual(next.messages);
   });
 
   it("preserves pending prompts when summary snapshots redact prompt content", () => {

@@ -202,16 +202,6 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   exercise `/api/events` with a queued state snapshot followed by deltas and assert the emitted stream preserves the required recovery/order contract, including mailbox capacity/drop-repair behavior.
 - [ ] P2: Cover state-broadcast mailbox snapshot-head overflow:
   publish a snapshot followed by enough deltas to fill the queue, then publish one more delta and assert the dropped-head Snapshot case matches the documented drop-oldest repair contract.
-- [ ] P2: Cover `parse_delegation_finding_location` line ranges on the standard `Findings:` path:
-  assert a result-packet finding such as `src/state.rs:66-109` resolves to `line = Some(66)` outside the preamble recovery path.
-- [ ] P2: Cover alternative actionable-finding shapes in delegation result recovery:
-  exercise non-bold `[Severity]`, plain `**Severity**`, regular hyphen separators, and en-dash separators in `parse_delegation_review_actionable_findings`.
-- [ ] P2: Add focused `repair_delegation_child_session_links` unit coverage:
-  cover already-correct links as a no-op, missing child parent links as backfilled, and delegation records whose child session is absent as skipped without panic.
-- [ ] P2: Extract delegation result parser tests from `src/tests/delegations.rs`:
-  move parser/refresh-focused cases into a smaller test module before adding more result-packet coverage to the already-large delegation test file.
-- [ ] P2: Document delegated-session reconcile assumptions:
-  add a short comment for `preserveExistingParentDelegationId` explaining that `parentDelegationId` is monotonic for delegation children, and make the single-session hydration reconcile call read through a named helper or exported focused reconciler.
 - [ ] P2: Add remaining production SQLite persistence coverage:
   with the SQLite runtime path now compiled under `cargo test`, cover targeted delta upsert, metadata-only update, hidden/deleted row removal, malformed SQLite row/load errors, and startup load assertions that exercise the split `app_state` / `sessions` / `delegations` tables directly.
 - [ ] P2: Restore Windows AppState bootstrap path-normalization coverage:

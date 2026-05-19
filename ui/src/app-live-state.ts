@@ -98,7 +98,7 @@ import {
   type AdoptFetchedSessionOutcome,
   type SessionHydrationRequestContext,
 } from "./session-hydration-adoption";
-import { reconcileSessions } from "./session-reconcile";
+import { reconcileSessions, reconcileSingleSession } from "./session-reconcile";
 import {
   openSessionInWorkspaceState,
   reconcileWorkspaceState,
@@ -869,11 +869,11 @@ export function useAppLiveState(
       ...session,
       messagesLoaded: adoptOutcome === "adopted",
     };
-    const reconciledHydratedSession = reconcileSessions(
-      [currentSession],
-      [hydratedSession],
+    const reconciledHydratedSession = reconcileSingleSession(
+      currentSession,
+      hydratedSession,
       { disableMutationStampFastPath: true },
-    )[0];
+    );
     const nextSessions = latestSessions.map((entry, index) =>
       index === latestExistingIndex ? reconciledHydratedSession : entry,
     );

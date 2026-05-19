@@ -73,6 +73,19 @@ export function reconcileSessions(
   return changed ? merged : previous;
 }
 
+/**
+ * Reconciles one targeted session hydration response against the currently
+ * retained session. This is the single-session form of `reconcileSessions`
+ * for call sites that already resolved identity and do not need list merging.
+ */
+export function reconcileSingleSession(
+  previous: Session,
+  next: Session,
+  options?: ReconcileSessionsOptions,
+): Session {
+  return reconcileSession(previous, next, options);
+}
+
 function sameSessionSummary(previous: Session, next: Session) {
   return (
     previous.name === next.name &&
@@ -106,6 +119,8 @@ function preserveExistingParentDelegationId(
   previous: Session,
   next: Session,
 ): Session {
+  // Delegation child ownership is monotonic. Summary/hydration payloads can
+  // omit the field, but omission must not make a delegated child visible.
   if (next.parentDelegationId || !previous.parentDelegationId) {
     return next;
   }

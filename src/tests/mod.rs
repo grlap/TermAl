@@ -25,6 +25,8 @@ mod codex_protocol;
 mod codex_threads;
 mod conversation_markers;
 mod cursor;
+mod delegation_child_links;
+mod delegation_result_parser;
 mod delegations;
 mod file_changes;
 mod git;
