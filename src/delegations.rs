@@ -3211,9 +3211,9 @@ enum DelegationResultSection {
 
 fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> {
     let search_window = delegation_result_search_window(text);
-    let mut lines = search_window
-        .lines()
-        .skip_while(|line| !line.trim().eq_ignore_ascii_case("## Result"));
+    let result_marker_start = delegation_result_marker_start(search_window)?;
+    let preamble = &search_window[..result_marker_start];
+    let mut lines = search_window[result_marker_start..].lines();
     lines.next()?;
 
     let mut status = None;
@@ -3266,13 +3266,24 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
         summary
     };
 
+    let mut findings = finding_lines
+        .iter()
+        .filter_map(|line| parse_delegation_finding_line(line))
+        .collect::<Vec<_>>();
+    let findings_refer_to_prior_sections = delegation_findings_refer_to_prior_sections(&findings);
+    if findings.is_empty() || findings_refer_to_prior_sections {
+        let preamble_findings = parse_delegation_review_actionable_findings(preamble);
+        if !preamble_findings.is_empty() {
+            findings = preamble_findings;
+        } else if findings_refer_to_prior_sections {
+            return None;
+        }
+    }
+
     Some(ParsedDelegationResult {
         status,
         summary,
-        findings: finding_lines
-            .iter()
-            .filter_map(|line| parse_delegation_finding_line(line))
-            .collect(),
+        findings,
         notes: note_lines
             .iter()
             .filter_map(|line| parse_delegation_note_line(line))
@@ -3326,6 +3337,118 @@ fn parse_delegation_finding_line(line: &str) -> Option<DelegationFinding> {
     })
 }
 
+fn delegation_findings_refer_to_prior_sections(findings: &[DelegationFinding]) -> bool {
+    !findings.is_empty()
+        && findings.iter().all(|finding| {
+        let message = finding.message.to_ascii_lowercase();
+        message.contains("see the actionable")
+            || message.contains("actionable and informational")
+            || message.contains("actionable section")
+            || message.contains("sections above")
+    })
+}
+
+fn parse_delegation_review_actionable_findings(preamble: &str) -> Vec<DelegationFinding> {
+    let mut findings = Vec::new();
+    let mut in_actionable = false;
+    for line in preamble.lines() {
+        let cleaned = line.trim();
+        if cleaned.starts_with("## ") {
+            in_actionable = cleaned
+                .trim_start_matches('#')
+                .trim()
+                .eq_ignore_ascii_case("Actionable");
+            continue;
+        }
+        if !in_actionable
+            || line
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace)
+        {
+            continue;
+        }
+        if let Some(finding) = parse_delegation_review_actionable_finding_line(line) {
+            findings.push(finding);
+        }
+    }
+    findings
+}
+
+fn parse_delegation_review_actionable_finding_line(line: &str) -> Option<DelegationFinding> {
+    let text = normalize_delegation_result_list_item(line);
+    if text.is_empty()
+        || text.eq_ignore_ascii_case("none")
+        || text.eq_ignore_ascii_case("none.")
+        || text.eq_ignore_ascii_case("no issues found")
+        || text.eq_ignore_ascii_case("no issues found.")
+    {
+        return None;
+    }
+    let (severity, rest) = parse_delegation_review_severity(text)?;
+    let (location, message) = split_delegation_review_location_and_message(rest)?;
+    let (file, line) = parse_delegation_review_location(location);
+    Some(DelegationFinding {
+        severity: severity.to_owned(),
+        file,
+        line,
+        message: message.to_owned(),
+    })
+}
+
+fn parse_delegation_review_severity(text: &str) -> Option<(&str, &str)> {
+    let text = text.trim();
+    if let Some(rest) = text.strip_prefix("**[") {
+        let (severity, rest) = rest.split_once("]**")?;
+        return Some((severity.trim(), rest.trim()));
+    }
+    if let Some(rest) = text.strip_prefix("**") {
+        let (severity, rest) = rest.split_once("**")?;
+        return Some((severity.trim(), rest.trim()));
+    }
+    if let Some(rest) = text.strip_prefix('[') {
+        let (severity, rest) = rest.split_once(']')?;
+        return Some((severity.trim(), rest.trim()));
+    }
+    None
+}
+
+fn split_delegation_review_location_and_message(text: &str) -> Option<(&str, &str)> {
+    [" — ", " - ", " – "]
+        .iter()
+        .find_map(|separator| text.split_once(separator))
+        .map(|(location, message)| (location.trim(), message.trim()))
+        .filter(|(location, message)| !location.is_empty() && !message.is_empty())
+}
+
+fn parse_delegation_review_location(location: &str) -> (Option<String>, Option<u32>) {
+    let location = location.trim();
+    if let Some((label, target)) = parse_markdown_link_location(location) {
+        let parsed_label = parse_delegation_finding_location(label);
+        let parsed_target = parse_delegation_finding_location(target);
+        if parsed_label.0.is_some() && parsed_label.1.is_some() {
+            return parsed_label;
+        }
+        if parsed_label.0.is_some() && parsed_target.1.is_some() {
+            return (parsed_label.0, parsed_target.1);
+        }
+        if parsed_label.0.is_some() {
+            return parsed_label;
+        }
+        return parsed_target;
+    }
+    parse_delegation_finding_location(location)
+}
+
+fn parse_markdown_link_location(location: &str) -> Option<(&str, &str)> {
+    let location = location.trim();
+    let label_end = location.strip_prefix('[')?.find("](")?;
+    let label = &location[1..1 + label_end];
+    let target_start = 1 + label_end + 2;
+    let target_end = location[target_start..].find(')')? + target_start;
+    Some((label, &location[target_start..target_end]))
+}
+
 fn parse_delegation_finding_head(head: &str) -> (&str, &str) {
     let head = head.trim();
     if let Some((severity, location)) = head.rsplit_once(char::is_whitespace) {
@@ -3360,7 +3483,9 @@ fn parse_delegation_finding_location(location: &str) -> (Option<String>, Option<
     }
     if let Some((file, line)) = location.rsplit_once(':') {
         let file = file.trim().trim_matches('`');
-        if let Ok(line) = line.parse::<u32>() {
+        let line = line.trim();
+        let line_start = line.split_once('-').map(|(start, _)| start).unwrap_or(line);
+        if let Ok(line) = line_start.parse::<u32>() {
             if !file.is_empty() {
                 return (Some(file.to_owned()), Some(line));
             }
@@ -3378,6 +3503,21 @@ fn normalize_delegation_result_list_item(line: &str) -> &str {
         .or_else(|| line.trim().strip_prefix("* "))
         .unwrap_or_else(|| line.trim())
         .trim()
+}
+
+fn delegation_result_marker_start(text: &str) -> Option<usize> {
+    let mut offset = 0;
+    for segment in text.split_inclusive('\n') {
+        let line = segment.trim_end_matches('\n').trim_end_matches('\r');
+        if line.trim().eq_ignore_ascii_case("## Result") {
+            return Some(offset);
+        }
+        offset += segment.len();
+    }
+    if offset < text.len() && text[offset..].trim().eq_ignore_ascii_case("## Result") {
+        return Some(offset);
+    }
+    None
 }
 
 fn delegation_result_search_window(text: &str) -> &str {

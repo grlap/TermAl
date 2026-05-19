@@ -863,13 +863,19 @@ export function useAppLiveState(
     ) {
       return adoptOutcome;
     }
+    const currentSession = latestSessions[latestExistingIndex];
 
     const hydratedSession = {
       ...session,
       messagesLoaded: adoptOutcome === "adopted",
     };
+    const reconciledHydratedSession = reconcileSessions(
+      [currentSession],
+      [hydratedSession],
+      { disableMutationStampFastPath: true },
+    )[0];
     const nextSessions = latestSessions.map((entry, index) =>
-      index === latestExistingIndex ? hydratedSession : entry,
+      index === latestExistingIndex ? reconciledHydratedSession : entry,
     );
     if (previousRevision === null || revision > previousRevision) {
       // A fresh server instance starts a new revision counter, so adopting its
@@ -882,7 +888,7 @@ export function useAppLiveState(
       lastSeenServerInstanceIdRef.current = serverInstanceId;
     }
     sessionsRef.current = nextSessions;
-    upsertSessionSlice(hydratedSession);
+    upsertSessionSlice(reconciledHydratedSession);
     flushAndCancelPendingSessionRender(nextSessions);
     setSessions(nextSessions);
     hydrationMismatchSessionIdsRef.current.delete(session.id);

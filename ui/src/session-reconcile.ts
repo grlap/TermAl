@@ -96,9 +96,24 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.sessionMutationStamp === next.sessionMutationStamp &&
     previous.status === next.status &&
     previous.preview === next.preview &&
+    previous.parentDelegationId === next.parentDelegationId &&
     (previous.messageCount ?? null) === (next.messageCount ?? null) &&
     sameConversationMarkers(previous.markers, next.markers)
   );
+}
+
+function preserveExistingParentDelegationId(
+  previous: Session,
+  next: Session,
+): Session {
+  if (next.parentDelegationId || !previous.parentDelegationId) {
+    return next;
+  }
+
+  return {
+    ...next,
+    parentDelegationId: previous.parentDelegationId,
+  };
 }
 
 function reconcileSession(
@@ -106,36 +121,45 @@ function reconcileSession(
   next: Session,
   options?: ReconcileSessionsOptions,
 ): Session {
-  if (next.messagesLoaded === false) {
-    return reconcileSummarySession(previous, next, options);
+  const nextSession = preserveExistingParentDelegationId(previous, next);
+
+  if (nextSession.messagesLoaded === false) {
+    return reconcileSummarySession(previous, nextSession, options);
   }
 
   if (
     !options?.disableMutationStampFastPath &&
     previous.sessionMutationStamp !== null &&
     previous.sessionMutationStamp !== undefined &&
-    previous.sessionMutationStamp === next.sessionMutationStamp &&
-    previous.remoteId === next.remoteId &&
-    (next.messagesLoaded !== true || previous.messagesLoaded === true)
+    previous.sessionMutationStamp === nextSession.sessionMutationStamp &&
+    previous.remoteId === nextSession.remoteId &&
+    (nextSession.messagesLoaded !== true || previous.messagesLoaded === true)
   ) {
     return previous;
   }
-  const messages = reconcileMessages(previous.messages, next.messages);
-  const pendingPrompts = reconcilePendingPrompts(previous.pendingPrompts, next.pendingPrompts);
+  const messages = reconcileMessages(previous.messages, nextSession.messages);
+  const pendingPrompts = reconcilePendingPrompts(
+    previous.pendingPrompts,
+    nextSession.pendingPrompts,
+  );
 
-  if (sameSessionSummary(previous, next) && messages === previous.messages && pendingPrompts === previous.pendingPrompts) {
+  if (
+    sameSessionSummary(previous, nextSession) &&
+    messages === previous.messages &&
+    pendingPrompts === previous.pendingPrompts
+  ) {
     return previous;
   }
 
   if (pendingPrompts) {
     return {
-      ...next,
+      ...nextSession,
       messages,
       pendingPrompts,
     };
   }
 
-  const { pendingPrompts: _discard, ...rest } = next;
+  const { pendingPrompts: _discard, ...rest } = nextSession;
   return {
     ...rest,
     messages,

@@ -2538,6 +2538,75 @@ fn delegation_records_persist_and_reload_with_child_link() {
     let _ = fs::remove_dir_all(state_root);
 }
 
+#[test]
+fn persisted_delegation_records_repair_missing_child_parent_link_on_reload() {
+    let (project_root, persistence_path, templates_path) = temp_delegation_state_paths();
+    let delegation_id;
+    let child_session_id;
+    {
+        let state = AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+        )
+        .expect("state should boot");
+        install_delegation_codex_runtime(&state, "delegation-persist-runtime");
+        let parent_session_id = test_session_id(&state, Agent::Codex);
+        let created = state
+            .create_read_only_delegation(
+                &parent_session_id,
+                CreateDelegationRequest {
+                    prompt: "Inspect the backend persistence shape.".to_owned(),
+                    title: Some("Persistence Review".to_owned()),
+                    cwd: None,
+                    agent: Some(Agent::Codex),
+                    model: None,
+                    mode: Some(DelegationMode::Reviewer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                },
+            )
+            .expect("delegation should be created");
+        delegation_id = created.delegation.id.clone();
+        child_session_id = created.delegation.child_session_id.clone();
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let child_index = inner
+                .find_session_index(&child_session_id)
+                .expect("child session should exist");
+            inner.sessions[child_index].session.parent_delegation_id = None;
+            persist_state(&persistence_path, &inner)
+                .expect("corrupted persisted state should be written");
+        }
+        state.shutdown_persist_blocking();
+    }
+
+    let restarted = AppState::new_with_paths(
+        project_root.to_string_lossy().into_owned(),
+        persistence_path.clone(),
+        templates_path.clone(),
+    )
+    .expect("state should reload");
+    let inner = restarted.inner.lock().expect("state mutex poisoned");
+    let child = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == child_session_id)
+        .expect("child session should reload");
+    assert_eq!(
+        child.session.parent_delegation_id.as_deref(),
+        Some(delegation_id.as_str())
+    );
+    drop(inner);
+    restarted.shutdown_persist_blocking();
+
+    let state_root = persistence_path
+        .parent()
+        .expect("persistence path should have a parent")
+        .to_path_buf();
+    let _ = fs::remove_dir_all(project_root);
+    let _ = fs::remove_dir_all(state_root);
+}
+
 #[tokio::test]
 async fn delegation_routes_create_status_and_unavailable_result() {
     let state = test_app_state();
@@ -5242,6 +5311,60 @@ fn delegation_idle_child_without_result_packet_fails() {
 }
 
 #[test]
+fn delegation_completed_child_recovers_actionable_findings_when_result_packet_defers() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review and return a result packet.".to_owned(),
+                title: Some("Deferred Packet Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Claude),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &created.delegation.child_session_id,
+        "# Code Review\n\n\
+## Changes Reviewed\n- `src/state.rs`\n\n\
+## Actionable\n\
+- **[Medium]** `src/state.rs:66-109` \u{2014} State mutex waits behind the bounded mailbox.\n\
+  - Why it matters: unrelated requests can stall.\n\n\
+## Informational\n- No other issues found.\n\n\
+## Result\n\n\
+Status: completed\n\n\
+Findings:\n\
+- Note - See the Actionable and Informational sections above; the headline finding is the state-mutex coupling.\n",
+    );
+    state
+        .refresh_delegation_for_child_session(&created.delegation.child_session_id)
+        .expect("refresh should complete");
+    let response = state
+        .get_delegation_result(&parent_session_id, &created.delegation.id)
+        .expect("completed delegation should expose a result");
+
+    assert_eq!(response.result.status, DelegationStatus::Completed);
+    assert_eq!(
+        response.result.findings,
+        vec![DelegationFinding {
+            severity: "Medium".to_owned(),
+            file: Some("src/state.rs".to_owned()),
+            line: Some(66),
+            message: "State mutex waits behind the bounded mailbox.".to_owned(),
+        }]
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn delegation_result_packet_accepts_preamble_and_case_drift() {
     let parsed = parse_delegation_result_packet(
         "Done, here is the packet:\n\n## result\n\nstatus: completed\n\nsummary:\nReady.",
@@ -5314,6 +5437,60 @@ fn delegation_result_packet_parses_findings_notes_and_inspected_files() {
             "Inspected src/delegations.rs".to_owned(),
             "Inspected ui/src/delegation-commands.ts".to_owned(),
         ]
+    );
+}
+
+#[test]
+fn delegation_result_packet_recovers_actionable_findings_when_final_packet_defers() {
+    let parsed = parse_delegation_result_packet(
+        "# Code Review\n\n\
+## Actionable\n\
+- **[Medium]** `src/state.rs:66-109` \u{2014} State mutex waits behind the bounded mailbox.\n\
+- **[Low]** [docs/bugs.md](/Users/greg/GitHub/Personal/termal/docs/bugs.md:217) \u{2014} Task wording drifted.\n\
+  - Why it matters: parent fan-in needs concrete findings.\n\n\
+## Informational\n\
+- No other issues found.\n\n\
+## Result\n\n\
+Status: completed\n\n\
+Findings:\n\
+- Note - See the Actionable and Informational sections above; the headline finding is the state-mutex coupling.\n\n\
+Files Inspected:\n\
+- src/state.rs",
+    )
+    .expect("deferential packet should recover structured actionable findings");
+
+    assert_eq!(
+        parsed.findings,
+        vec![
+            DelegationFinding {
+                severity: "Medium".to_owned(),
+                file: Some("src/state.rs".to_owned()),
+                line: Some(66),
+                message: "State mutex waits behind the bounded mailbox.".to_owned(),
+            },
+            DelegationFinding {
+                severity: "Low".to_owned(),
+                file: Some("docs/bugs.md".to_owned()),
+                line: Some(217),
+                message: "Task wording drifted.".to_owned(),
+            },
+        ]
+    );
+    assert_eq!(parsed.notes, vec!["Inspected src/state.rs".to_owned()]);
+}
+
+#[test]
+fn delegation_result_packet_rejects_deferential_findings_without_actionable_preamble() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+Findings:\n\
+- Note - See the Actionable and Informational sections above; the headline finding is elsewhere.",
+    );
+
+    assert!(
+        parsed.is_none(),
+        "deferential findings without a parseable Actionable section should not complete"
     );
 }
 

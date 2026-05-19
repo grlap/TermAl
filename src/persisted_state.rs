@@ -170,6 +170,7 @@ impl PersistedState {
         inner.normalize_local_paths();
         inner.validate_projects_consistent()?;
         inner.recover_interrupted_sessions();
+        inner.repair_delegation_child_session_links();
         inner.rebuild_running_read_only_delegations();
         inner.normalize_orchestrator_instances_with_persisted_non_running(
             &persisted_non_running_session_ids,

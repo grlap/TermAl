@@ -53,10 +53,12 @@ enum StateBroadcastWork {
     DeltaPayload(String),
 }
 
+const STATE_BROADCAST_MAILBOX_CAPACITY: usize = 256;
+
 #[derive(Default)]
 struct StateBroadcastMailbox {
     pending: Mutex<VecDeque<StateBroadcastWork>>,
-    ready: Condvar,
+    work_available: Condvar,
 }
 
 impl StateBroadcastMailbox {
@@ -65,15 +67,15 @@ impl StateBroadcastMailbox {
             .pending
             .lock()
             .expect("state broadcast mailbox mutex poisoned");
-        match pending.back_mut() {
-            Some(StateBroadcastWork::Snapshot(existing)) => {
-                *existing = snapshot;
+        if let Some(StateBroadcastWork::Snapshot(existing)) = pending.back_mut() {
+            *existing = snapshot;
+        } else {
+            if pending.len() >= STATE_BROADCAST_MAILBOX_CAPACITY {
+                pending.pop_front();
             }
-            _ => {
-                pending.push_back(StateBroadcastWork::Snapshot(snapshot));
-            }
+            pending.push_back(StateBroadcastWork::Snapshot(snapshot));
         }
-        self.ready.notify_one();
+        self.work_available.notify_one();
     }
 
     fn publish_delta_payload(&self, payload: String) {
@@ -81,8 +83,11 @@ impl StateBroadcastMailbox {
             .pending
             .lock()
             .expect("state broadcast mailbox mutex poisoned");
+        if pending.len() >= STATE_BROADCAST_MAILBOX_CAPACITY {
+            pending.pop_front();
+        }
         pending.push_back(StateBroadcastWork::DeltaPayload(payload));
-        self.ready.notify_one();
+        self.work_available.notify_one();
     }
 
     fn recv_next(&self) -> StateBroadcastWork {
@@ -95,7 +100,7 @@ impl StateBroadcastMailbox {
                 return work;
             }
             pending = self
-                .ready
+                .work_available
                 .wait(pending)
                 .expect("state broadcast mailbox mutex poisoned");
         }
@@ -103,11 +108,13 @@ impl StateBroadcastMailbox {
 
     #[cfg(test)]
     fn take_pending_for_test(&self) -> Vec<StateBroadcastWork> {
-        self.pending
+        let drained = self
+            .pending
             .lock()
             .expect("state broadcast mailbox mutex poisoned")
             .drain(..)
-            .collect()
+            .collect();
+        drained
     }
 }
 
@@ -171,6 +178,79 @@ mod state_broadcast_mailbox_tests {
         match &pending[2] {
             StateBroadcastWork::Snapshot(value) => assert_eq!(value.revision, 5),
             StateBroadcastWork::DeltaPayload(_) => panic!("expected coalesced snapshot third"),
+        }
+    }
+
+    #[test]
+    fn state_broadcast_mailbox_coalesces_latest_snapshot_when_full() {
+        let mailbox = StateBroadcastMailbox::default();
+
+        for index in 1..STATE_BROADCAST_MAILBOX_CAPACITY {
+            mailbox.publish_delta_payload(format!("delta-{index}"));
+        }
+        mailbox.publish_snapshot(snapshot(1));
+        mailbox.publish_snapshot(snapshot(2));
+
+        let pending = mailbox.take_pending_for_test();
+        assert_eq!(pending.len(), STATE_BROADCAST_MAILBOX_CAPACITY);
+        match pending.last() {
+            Some(StateBroadcastWork::Snapshot(latest)) => assert_eq!(latest.revision, 2),
+            _ => panic!("expected latest snapshot to replace the queued snapshot"),
+        }
+    }
+
+    #[test]
+    fn state_broadcast_mailbox_drops_oldest_delta_when_full() {
+        let mailbox = Arc::new(StateBroadcastMailbox::default());
+        for index in 0..STATE_BROADCAST_MAILBOX_CAPACITY {
+            mailbox.publish_delta_payload(format!("delta-{index}"));
+        }
+
+        let (published_tx, published_rx) = std::sync::mpsc::channel();
+        let publisher_mailbox = mailbox.clone();
+        let publisher = std::thread::spawn(move || {
+            publisher_mailbox.publish_delta_payload("delta-over-capacity".to_owned());
+            published_tx
+                .send(())
+                .expect("completion signal should send");
+        });
+
+        published_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("publisher should not wait while the mailbox is full");
+        publisher.join().expect("publisher thread should not panic");
+
+        let pending = mailbox.take_pending_for_test();
+        assert_eq!(pending.len(), STATE_BROADCAST_MAILBOX_CAPACITY);
+        match pending.first() {
+            Some(StateBroadcastWork::DeltaPayload(value)) => assert_eq!(value, "delta-1"),
+            _ => panic!("expected oldest retained delta first"),
+        }
+        match pending.last() {
+            Some(StateBroadcastWork::DeltaPayload(value)) => {
+                assert_eq!(value, "delta-over-capacity")
+            }
+            _ => panic!("expected over-capacity delta to enqueue immediately"),
+        }
+    }
+
+    #[test]
+    fn state_broadcast_mailbox_drops_oldest_delta_for_snapshot_when_full() {
+        let mailbox = StateBroadcastMailbox::default();
+        for index in 0..STATE_BROADCAST_MAILBOX_CAPACITY {
+            mailbox.publish_delta_payload(format!("delta-{index}"));
+        }
+        mailbox.publish_snapshot(snapshot(99));
+
+        let pending = mailbox.take_pending_for_test();
+        assert_eq!(pending.len(), STATE_BROADCAST_MAILBOX_CAPACITY);
+        match pending.first() {
+            Some(StateBroadcastWork::DeltaPayload(value)) => assert_eq!(value, "delta-1"),
+            _ => panic!("expected oldest retained delta first"),
+        }
+        match pending.last() {
+            Some(StateBroadcastWork::Snapshot(latest)) => assert_eq!(latest.revision, 99),
+            _ => panic!("expected snapshot to enqueue immediately"),
         }
     }
 }
@@ -445,16 +525,17 @@ struct AppState {
     /// waiter registration" / "Graceful shutdown blocks forever waiting
     /// for SSE streams to drain".
     shutdown_signal_tx: Arc<tokio::sync::watch::Sender<bool>>,
-    /// Background SSE state-broadcast mailbox. `publish_snapshot` stores a
-    /// pre-built `StateResponse` here; a dedicated thread serializes the
-    /// latest snapshot to JSON and forwards the payload to `state_events`,
-    /// so the state mutex is never held during the O(sessions × messages)
-    /// serialization pass. The mailbox has one logical slot: bursts overwrite
-    /// superseded snapshots before they can queue. That is safe because state
-    /// events are idempotent full-state snapshots — subscribers always
-    /// converge on the latest revision either way, and delta events
-    /// (`publish_delta`) still fire in order for every revision via a
-    /// separate channel.
+    /// Background SSE state/delta broadcast mailbox. `publish_snapshot`
+    /// stores a pre-built `StateResponse` here; a dedicated thread serializes
+    /// snapshots to JSON and forwards each queued item to the matching SSE
+    /// broadcast channel, so the state mutex is never held during the
+    /// O(sessions × messages) serialization pass. Consecutive snapshots
+    /// coalesce, but retained snapshot-before-delta ordering is preserved so
+    /// browsers do not observe delta N+1 before state N. The queue is bounded
+    /// and drops the oldest pending work when full, matching the bounded nature
+    /// of the downstream broadcast channels without blocking producers that
+    /// still hold the state mutex. Dropped deltas surface as ordinary revision
+    /// gaps to clients, which then repair from `/api/state`.
     state_broadcast_mailbox: Option<Arc<StateBroadcastMailbox>>,
     /// Lazily created shared Codex app-server reused across Codex sessions.
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,

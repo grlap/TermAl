@@ -179,6 +179,39 @@ impl StateInner {
         record
     }
 
+    /// Backfills the child-session parent pointer from persisted delegation
+    /// records. This keeps older SQLite rows hidden in session lists even if
+    /// the `Session` row predates `parent_delegation_id`.
+    fn repair_delegation_child_session_links(&mut self) {
+        let links = self
+            .delegations
+            .iter()
+            .map(|delegation| {
+                (
+                    delegation.child_session_id.clone(),
+                    delegation.id.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        for (child_session_id, delegation_id) in links {
+            let Some(child_index) = self.find_session_index(&child_session_id) else {
+                continue;
+            };
+            if self.sessions[child_index]
+                .session
+                .parent_delegation_id
+                .as_deref()
+                == Some(delegation_id.as_str())
+            {
+                continue;
+            }
+            if let Some(record) = self.session_mut_by_index(child_index) {
+                record.session.parent_delegation_id = Some(delegation_id);
+            }
+        }
+    }
+
     /// Adds a Codex `threadId` to the user's ignore list so it is
     /// skipped on subsequent startup discovery scans (see
     /// `state_boot.rs::import_discovered_codex_threads`).

@@ -179,6 +179,68 @@ describe("reconcileSessions", () => {
     expect(merged[0].markers).toEqual(next[0].markers);
   });
 
+  it("preserves delegated child ownership when a summary update omits it", () => {
+    const previous = [
+      makeSession("child-session", {
+        parentDelegationId: "delegation-1",
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Reviewing",
+          },
+        ],
+        messagesLoaded: true,
+      }),
+    ];
+    const next = [
+      makeSession("child-session", {
+        messagesLoaded: false,
+        messageCount: 1,
+        preview: "Completed",
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].parentDelegationId).toBe("delegation-1");
+    expect(merged[0].messages).toBe(previous[0].messages);
+    expect(merged[0].messagesLoaded).toBe(true);
+    expect(merged[0].preview).toBe("Completed");
+  });
+
+  it("preserves delegated child ownership when a full hydration response omits it", () => {
+    const previous = [
+      makeSession("child-session", {
+        parentDelegationId: "delegation-1",
+        messages: [],
+        messagesLoaded: false,
+      }),
+    ];
+    const next = [
+      makeSession("child-session", {
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Done",
+          },
+        ],
+        messagesLoaded: true,
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].parentDelegationId).toBe("delegation-1");
+    expect(merged[0].messagesLoaded).toBe(true);
+    expect(merged[0].messages).toEqual(next[0].messages);
+  });
+
   it("preserves pending prompts when summary snapshots redact prompt content", () => {
     const pendingPrompt = {
       id: "prompt-1",

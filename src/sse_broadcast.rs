@@ -44,14 +44,16 @@
 // `StateResponse` *inside* the state lock (required — snapshot
 // fields read `inner`) but hands the owned snapshot off to a
 // dedicated broadcaster thread for JSON serialization via `publish_snapshot`.
-// The mailbox coalesces consecutive snapshots but keeps deltas ordered behind
-// any snapshot that was queued first, so delta N+1 cannot overtake state N.
-// That keeps the state mutex off the slow-serialization critical path for
-// commit-heavy routes like `put_workspace_layout` without making clients repair
-// artificial revision gaps. When there is no broadcaster mailbox (notably: test
-// builds that construct `AppState` without spawning the broadcaster thread) we
-// fall back to synchronous serialize + broadcast so tests can still assert SSE
-// behaviour.
+// The mailbox coalesces consecutive snapshots and keeps retained deltas ordered
+// behind any retained snapshot that was queued first, so delta N+1 cannot
+// overtake state N. When it reaches capacity, it drops the oldest pending work
+// rather than blocking producers while they hold `StateInner`; dropped deltas
+// surface as normal revision gaps and clients repair from `/api/state`. That
+// keeps the state mutex off the slow-serialization critical path for
+// commit-heavy routes like `put_workspace_layout`. When there is no broadcaster
+// mailbox (notably: test builds that construct `AppState` without spawning the
+// broadcaster thread) we fall back to synchronous serialize + broadcast so tests
+// can still assert SSE behaviour.
 
 impl AppState {
     /// Central commit path: bumps the revision, wakes the persist
@@ -555,10 +557,11 @@ impl AppState {
     ///
     /// Sends the owned snapshot to the background broadcaster mailbox, whose
     /// thread serializes to JSON and forwards to `state_events` off the
-    /// critical path. The mailbox coalesces consecutive snapshots, but preserves
-    /// snapshot-before-delta order. Falls back to synchronous serialize +
-    /// broadcast if no mailbox exists (test builds that construct `AppState`
-    /// manually without a broadcaster thread).
+    /// critical path. The mailbox coalesces consecutive snapshots, preserves
+    /// retained snapshot-before-delta order, and drops oldest pending work on
+    /// overflow instead of blocking a producer under the state mutex. Falls
+    /// back to synchronous serialize + broadcast if no mailbox exists (test
+    /// builds that construct `AppState` manually without a broadcaster thread).
     fn publish_snapshot(&self, snapshot: StateResponse) {
         if let Some(mailbox) = &self.state_broadcast_mailbox {
             mailbox.publish_snapshot(snapshot);
