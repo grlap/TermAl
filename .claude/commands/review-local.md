@@ -11,20 +11,9 @@ Review staged, unstaged, and untracked changes using multiple specialized review
 
 **IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Do not run mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) as part of this command.**
 
-**IMPORTANT: This command is review-only. Do NOT attempt to fix any bugs, edit source files, edit tests, run formatters that modify files, or otherwise change implementation code. The only allowed file update is `docs/bugs.md` in Step 6.**
+**IMPORTANT: This command is review-only. Do NOT attempt to fix any bugs, edit source files, edit tests, run formatters that modify files, or otherwise change implementation code. The only allowed file update is `docs/bugs.md` in Step 5.**
 
-## Step 1: Build check
-
-Run `cargo check` to ensure the Rust backend compiles.
-If it produces ANY errors — **STOP immediately**.
-Present the full output to the user and do NOT proceed to further steps.
-Warnings are acceptable — report them but continue.
-
-Then run `cd ui && npx tsc --noEmit` to type-check the frontend.
-If it produces ANY errors — **STOP immediately**.
-Present the full output to the user and do NOT proceed to further steps.
-
-## Step 2: Get the changes
+## Step 1: Get the changes
 
 Run `git status --short`, `git diff`, `git diff --cached`, and `git ls-files --others --exclude-standard` to get all staged, unstaged, and untracked changes.
 If there are no staged, unstaged, or untracked changes, tell the user and stop.
@@ -33,7 +22,7 @@ Also run `git diff --name-only` and `git diff --cached --name-only` to get the l
 For untracked files, include the `git ls-files --others --exclude-standard` list in the reviewer prompt because untracked files do not appear in `git diff`.
 Do NOT read full file contents upfront — reviewers will read files on-demand as needed. For untracked files, reviewers must inspect file contents directly on demand.
 
-## Step 3: Discover reviewers
+## Step 2: Discover reviewers
 
 Run `find .claude/reviewers -name "*.md" 2>/dev/null` via Bash to find all available reviewer lens files.
 (Do NOT use the Glob tool here — it silently fails on Windows paths.)
@@ -41,7 +30,7 @@ Read each file to get:
 - The reviewer name (from the filename, e.g., `rust.md` → "Rust")
 - The review instructions (the file content)
 
-## Step 4: Run reviewers
+## Step 3: Run reviewers
 
 Run each reviewer lens in this same session using the prompt below as the lens checklist. Do not launch TermAl delegations, Claude Task agents, Codex subagents, shell-launched agents, raw HTTP reviewers, or nested review commands from `/review-local`; use `/review-with-delegate` for cross-agent delegated review.
 
@@ -108,7 +97,7 @@ If no issues found, say "No issues found."
 **Summary:** [1-2 sentence overall assessment]
 ```
 
-## Step 5: Consolidate
+## Step 4: Consolidate
 
 After all reviewers complete, merge their findings into a single review note:
 
@@ -137,11 +126,11 @@ Deduplicate: if two reviewers flag the same issue, merge them (note which review
 
 Present the consolidated note directly to the user. Do NOT write the review note to a separate file.
 
-## Step 6: Update `docs/bugs.md`
+## Step 5: Update `docs/bugs.md`
 
 After presenting the review to the user, update `docs/bugs.md` to reflect the findings. Do not modify any other file. If file edits are unavailable under the active session policy, include a "Suggested `docs/bugs.md` updates" section with the entries/tasks/removals that should be applied. If any reviewer found any issue, observation, test gap, or note of any severity, `docs/bugs.md` MUST be updated before the command is complete. Read the file first to understand the current structure, then apply these three operations:
 
-### 6a. Remove resolved bugs
+### 5a. Remove resolved bugs
 
 If the reviewed changes fix any **active bug entries** (the `## Heading` sections with Severity/Current behavior/Proposal), **delete those entries entirely** from `docs/bugs.md`.
 
@@ -149,7 +138,7 @@ If the reviewed changes fix any **active bug entries** (the `## Heading` section
 
 If the reader needs to see what changed, that is what `git log` and PR descriptions are for — not `docs/bugs.md`.
 
-### 6b. Add new bug entries
+### 5b. Add new bug entries
 
 For each finding from the review (any severity: Critical, High, Medium, Low, or Note) that is NOT already tracked in bugs.md, add a new bug entry in the active section (between the preamble and the first existing bug entry, or wherever severity-ordering fits). Use the existing format:
 
@@ -169,7 +158,7 @@ For each finding from the review (any severity: Critical, High, Medium, Low, or 
 
 If a finding is already tracked in `docs/bugs.md`, do not create a duplicate. Update the existing bug entry or task item as needed to reflect the current review evidence, affected files, severity, or proposal. Do not leave `docs/bugs.md` unchanged when the review found something.
 
-### 6c. Add or update task list items
+### 5c. Add or update task list items
 
 For **test gaps and coverage improvements** identified by the review, add P2 task items to the Implementation Tasks section. Match the existing format:
 
@@ -180,6 +169,6 @@ For **test gaps and coverage improvements** identified by the review, add P2 tas
 
 Remove any task items that the reviewed changes have completed (e.g., if a test gap was filled, remove that task).
 
-### 6d. Skip if clean
+### 5d. Skip if clean
 
 Only skip `docs/bugs.md` when the review found no issues, no observations, no notes, no test gaps, no resolved active bugs, and no completed tasks. Tell the user "bugs.md is up to date — no changes needed."

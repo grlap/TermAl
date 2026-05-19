@@ -277,29 +277,37 @@ impl AppState {
         let state_events_sender = broadcast::channel::<String>(128).0;
         let state_broadcast_mailbox = Arc::new(StateBroadcastMailbox::default());
 
-        // Background state-broadcast thread: reads the latest pending state
-        // snapshot from a single-slot mailbox, serializes it to JSON, and
-        // forwards the payload to the SSE state-events broadcast channel.
-        // Intermediate revisions are safe to skip because a state event is a
-        // full-state snapshot, not a delta. Subscribers converge on the
-        // latest revision either way, and delta events fire in order for
-        // every revision on a separate channel.
+        // Background state-broadcast thread: drains an ordered mailbox of
+        // state snapshots and delta payloads, serializes snapshots to JSON, and
+        // forwards each payload to the matching SSE broadcast channel.
+        // Consecutive state snapshots coalesce before they reach this thread,
+        // but a snapshot queued before a delta must be sent before that delta;
+        // otherwise the browser can see delta N+1 while still waiting for
+        // state N and trigger an avoidable `/api/state` repair fetch.
         let state_events_for_broadcast = state_events_sender.clone();
+        let delta_events_sender = broadcast::channel(256).0;
+        let delta_events_for_broadcast = delta_events_sender.clone();
         let state_broadcast_mailbox_for_thread = state_broadcast_mailbox.clone();
         std::thread::Builder::new()
             .name("termal-state-broadcast".to_owned())
             .spawn(move || {
                 loop {
-                    let snapshot = state_broadcast_mailbox_for_thread.recv_latest();
-                    match serde_json::to_string(&snapshot) {
-                        Ok(payload) => {
-                            let _ = state_events_for_broadcast.send(payload);
+                    match state_broadcast_mailbox_for_thread.recv_next() {
+                        StateBroadcastWork::Snapshot(snapshot) => {
+                            match serde_json::to_string(&snapshot) {
+                                Ok(payload) => {
+                                    let _ = state_events_for_broadcast.send(payload);
+                                }
+                                Err(err) => {
+                                    eprintln!(
+                                        "warning: failed to serialize SSE state snapshot at revision {}: {err}",
+                                        snapshot.revision,
+                                    );
+                                }
+                            }
                         }
-                        Err(err) => {
-                            eprintln!(
-                                "warning: failed to serialize SSE state snapshot at revision {}: {err}",
-                                snapshot.revision,
-                            );
+                        StateBroadcastWork::DeltaPayload(payload) => {
+                            let _ = delta_events_for_broadcast.send(payload);
                         }
                     }
                 }
@@ -321,7 +329,7 @@ impl AppState {
             orchestrator_templates_lock: Arc::new(Mutex::new(())),
             review_documents_lock: Arc::new(Mutex::new(())),
             state_events: state_events_sender,
-            delta_events: broadcast::channel(256).0,
+            delta_events: delta_events_sender,
             file_events: broadcast::channel(256).0,
             file_events_revision: Arc::new(AtomicU64::new(0)),
             persist_tx,

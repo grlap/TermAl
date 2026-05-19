@@ -3436,6 +3436,94 @@ describe("App live state — reconnect", () => {
     }
   });
 
+  it("clears reconnecting when the health watchdog observes an open stream after a missed open event", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    vi.useFakeTimers();
+    const session = makeSession("session-1", {
+      name: "Codex Session",
+      status: "idle",
+      preview: "Original preview.",
+      messages: [],
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        return jsonResponse(
+          makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [session],
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const scrollIntoViewSpy = stubScrollIntoView();
+
+    try {
+      await renderApp();
+      const eventSource = latestEventSource();
+
+      act(() => {
+        eventSource.readyState = 1;
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [session],
+        });
+      });
+      await settleAsyncUi();
+      expect(screen.getByText("Codex Session")).toBeInTheDocument();
+
+      act(() => {
+        eventSource.readyState = 0;
+        eventSource.dispatchError();
+      });
+      expect(
+        screen.getByLabelText("Control panel backend reconnecting"),
+      ).toBeInTheDocument();
+
+      // Real browsers can have `readyState === OPEN` even if our `onopen`
+      // transition was missed or raced. The health watchdog should reconcile
+      // the badge with the open stream instead of leaving it stuck spinning.
+      act(() => {
+        eventSource.readyState = 1;
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      await settleAsyncUi();
+
+      expect(
+        screen.queryByLabelText("Control panel backend reconnecting"),
+      ).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      scrollIntoViewSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("recreates the EventSource after an error when the browser does not reopen quickly", async () => {
     // Scenario: the dev-mode Vite proxy returns 502 during the brief
     // backend-restart gap, or the browser leaves EventSource in CONNECTING

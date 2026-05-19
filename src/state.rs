@@ -48,30 +48,51 @@ enum PersistRequest {
     Shutdown,
 }
 
+enum StateBroadcastWork {
+    Snapshot(StateResponse),
+    DeltaPayload(String),
+}
+
 #[derive(Default)]
 struct StateBroadcastMailbox {
-    pending: Mutex<Option<StateResponse>>,
+    pending: Mutex<VecDeque<StateBroadcastWork>>,
     ready: Condvar,
 }
 
 impl StateBroadcastMailbox {
-    fn publish(&self, snapshot: StateResponse) {
+    fn publish_snapshot(&self, snapshot: StateResponse) {
         let mut pending = self
             .pending
             .lock()
             .expect("state broadcast mailbox mutex poisoned");
-        *pending = Some(snapshot);
+        match pending.back_mut() {
+            Some(StateBroadcastWork::Snapshot(existing)) => {
+                *existing = snapshot;
+            }
+            _ => {
+                pending.push_back(StateBroadcastWork::Snapshot(snapshot));
+            }
+        }
         self.ready.notify_one();
     }
 
-    fn recv_latest(&self) -> StateResponse {
+    fn publish_delta_payload(&self, payload: String) {
+        let mut pending = self
+            .pending
+            .lock()
+            .expect("state broadcast mailbox mutex poisoned");
+        pending.push_back(StateBroadcastWork::DeltaPayload(payload));
+        self.ready.notify_one();
+    }
+
+    fn recv_next(&self) -> StateBroadcastWork {
         let mut pending = self
             .pending
             .lock()
             .expect("state broadcast mailbox mutex poisoned");
         loop {
-            if let Some(snapshot) = pending.take() {
-                return snapshot;
+            if let Some(work) = pending.pop_front() {
+                return work;
             }
             pending = self
                 .ready
@@ -81,11 +102,12 @@ impl StateBroadcastMailbox {
     }
 
     #[cfg(test)]
-    fn take_pending_for_test(&self) -> Option<StateResponse> {
+    fn take_pending_for_test(&self) -> Vec<StateBroadcastWork> {
         self.pending
             .lock()
             .expect("state broadcast mailbox mutex poisoned")
-            .take()
+            .drain(..)
+            .collect()
     }
 }
 
@@ -113,15 +135,43 @@ mod state_broadcast_mailbox_tests {
     fn state_broadcast_mailbox_keeps_only_latest_pending_snapshot() {
         let mailbox = StateBroadcastMailbox::default();
 
-        mailbox.publish(snapshot(1));
-        mailbox.publish(snapshot(2));
-        mailbox.publish(snapshot(3));
+        mailbox.publish_snapshot(snapshot(1));
+        mailbox.publish_snapshot(snapshot(2));
+        mailbox.publish_snapshot(snapshot(3));
 
-        let latest = mailbox
-            .take_pending_for_test()
-            .expect("latest snapshot should be pending");
-        assert_eq!(latest.revision, 3);
-        assert!(mailbox.take_pending_for_test().is_none());
+        let pending = mailbox.take_pending_for_test();
+        assert_eq!(pending.len(), 1);
+        match &pending[0] {
+            StateBroadcastWork::Snapshot(latest) => assert_eq!(latest.revision, 3),
+            StateBroadcastWork::DeltaPayload(_) => panic!("expected latest snapshot"),
+        }
+        assert!(mailbox.take_pending_for_test().is_empty());
+    }
+
+    #[test]
+    fn state_broadcast_mailbox_preserves_state_before_following_delta() {
+        let mailbox = StateBroadcastMailbox::default();
+
+        mailbox.publish_snapshot(snapshot(1));
+        mailbox.publish_snapshot(snapshot(2));
+        mailbox.publish_delta_payload("delta-3".to_owned());
+        mailbox.publish_snapshot(snapshot(4));
+        mailbox.publish_snapshot(snapshot(5));
+
+        let pending = mailbox.take_pending_for_test();
+        assert_eq!(pending.len(), 3);
+        match &pending[0] {
+            StateBroadcastWork::Snapshot(value) => assert_eq!(value.revision, 2),
+            StateBroadcastWork::DeltaPayload(_) => panic!("expected coalesced snapshot first"),
+        }
+        match &pending[1] {
+            StateBroadcastWork::DeltaPayload(value) => assert_eq!(value, "delta-3"),
+            StateBroadcastWork::Snapshot(_) => panic!("expected delta second"),
+        }
+        match &pending[2] {
+            StateBroadcastWork::Snapshot(value) => assert_eq!(value.revision, 5),
+            StateBroadcastWork::DeltaPayload(_) => panic!("expected coalesced snapshot third"),
+        }
     }
 }
 

@@ -91,6 +91,23 @@ the Implementation Tasks section.
 - Keep digest-only forwarding as the default for Telegram integrations.
 - Document the third-party content exposure and add any practical redaction/truncation before full forwarding.
 
+## Ordered SSE broadcaster mailbox can grow without bound
+
+**Severity:** Medium - streaming deltas can accumulate in memory while the broadcaster serializes an earlier large state snapshot.
+
+`src/state.rs:58` changes the state broadcast mailbox from a single latest-snapshot slot to a mixed `VecDeque<StateBroadcastWork>`. Consecutive snapshots still coalesce, but `publish_delta_payload` appends every delta payload without a queue bound or overflow recovery path. During a large snapshot serialization, active session deltas can pile up before they ever reach the bounded `broadcast::channel(256)`.
+
+**Current behavior:**
+- Consecutive snapshots coalesce.
+- Delta payloads are always pushed into the mailbox.
+- The mailbox has no capacity limit, lag marker, or coalescing rule for delta bursts.
+- `AppState::state_broadcast_mailbox` still has a source comment describing the older latest-state-snapshot slot.
+
+**Proposal:**
+- Bound the ordered mailbox or move ordering to a bounded typed channel.
+- On overflow, emit or schedule the existing lagged recovery marker plus snapshot so clients repair from authoritative state.
+- Update the stale `AppState::state_broadcast_mailbox` source comment while clarifying the final capacity/overflow contract.
+
 ## Live transport reconnect state machine still needs transition extraction
 
 **Severity:** Low - `ui/src/app-live-state-transport.ts` is about 1,359 lines after the live-state split, but the reconnect/resync effect still coordinates several closure-local flags including `pendingBadLiveEventRecovery`, `allowReconnectRecoveryWithoutExplicitOpen`, and delegation repair proof state.
@@ -98,10 +115,12 @@ the Implementation Tasks section.
 **Current behavior:**
 - `ui/src/app-live-state.ts`, `ui/src/app-live-state-transport.ts`, `ui/src/app-live-state-transport-events.ts`, and `ui/src/app-live-state-render-schedulers.ts` are now under the TypeScript utility review threshold.
 - Reconnect transition state is focused in the transport module, but the flag set and transition rules are still implicit in nested effect helpers.
+- The missed-`onopen` reconnecting badge path now has a regression test, but the direct `onerror`-with-`readyState === OPEN` branch still lacks focused coverage.
+- The shared open-transition helper also resets the workspace-files-changed event gate from the health-watchdog path; that behavior should be documented or pinned in the transition helper when extracted.
 
 **Proposal:**
 - Extract a `ReconnectStateMachine` (or similar) module that owns the flag set + transitions and exposes named events (`onSseError`, `onSseReopen`, `onBadLiveEvent`, `onSnapshotAdopted`, `onLiveEventConfirmed`).
-- Add focused tests for the extracted transition helper before changing behavior.
+- Add focused tests for the extracted transition helper before changing behavior, including direct `onerror` with `readyState === OPEN` and the workspace-file event gate reset contract.
 
 ## Session store publication can race ahead of React session state
 
@@ -178,24 +197,6 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
 - Alternative: batch-measurement pass when the virtualization window shifts — hide the wrapper briefly, mount the newly-entering cards, wait for all their measurements, then reveal.
 - Not: raise the estimator cap. Large overshoots trade one visible artifact for a worse one.
 
-## SSE state broadcaster can reorder state events against deltas
-
-**Severity:** Medium - under a burst of mutations, a delta event can arrive at the client before the state event for the same revision, triggering avoidable `/api/state` resync fetches.
-
-Before the broadcaster thread, `commit_locked` published state synchronously (`state_events.send(payload)` under the state mutex), so state N always hit the SSE stream before any follow-up delta N+1. Now `publish_snapshot` enqueues the owned `StateResponse` to an mpsc channel and returns; the broadcaster thread drains and serializes on its own schedule. `publish_delta` remains synchronous. A caller that does `commit_locked(...)?` + `publish_delta(...)` can therefore race: the delta hits `delta_events` before the broadcaster drains state N. The frontend's `decideDeltaRevisionAction` requires `delta.revision === current + 1`; if state N hasn't advanced `latestStateRevisionRef` yet, the delta is treated as a gap and the client fires a full `fetchState`.
-
-**Current behavior:**
-- `publish_snapshot` is async (channel + broadcaster thread).
-- `publish_delta` is sync.
-- Client can observe delta N+1 before state N.
-- Extra `/api/state` resync fetches fire under sustained mutation bursts.
-- Correctness preserved (resync fixes the view), but behavior is chatty and pushes load onto `/api/state` — which is exactly the path we just made cheaper.
-
-**Proposal:**
-- Route deltas through the same broadcaster thread so state and delta events for the same revision stream in order. Coalescing is fine because deltas are idempotent after a state snapshot.
-- Or: have `publish_snapshot` synchronously send a revision-only "marker" into `state_events` immediately and let the broadcaster thread serialize and send the full payload; the client's `latestStateRevisionRef` advances on the marker.
-- Or: document the tradeoff and rely on the existing `/api/state` resync fallback; track the extra traffic.
-
 ## Implementation Tasks
 
 - [ ] P2: Cover first-chunk Telegram forward failure:
@@ -214,6 +215,8 @@ Before the broadcaster thread, `commit_locked` published state synchronously (`s
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
 - [ ] P2: Add equal-revision gap repair snapshot adoption coverage:
   skip a non-session revision, optimistically apply a later session delta, then return `/api/state` at the same revision and assert the skipped global state is adopted instead of rejected as stale.
+- [ ] P2: Add end-to-end ordered SSE broadcaster coverage:
+  exercise `/api/events` with a queued state snapshot followed by deltas and assert the emitted stream preserves the required recovery/order contract, including mailbox overflow or lagged recovery behavior.
 - [ ] P2: Add remaining production SQLite persistence coverage:
   with the SQLite runtime path now compiled under `cargo test`, cover targeted delta upsert, metadata-only update, hidden/deleted row removal, malformed SQLite row/load errors, and startup load assertions that exercise the split `app_state` / `sessions` / `delegations` tables directly.
 - [ ] P2: Restore Windows AppState bootstrap path-normalization coverage:

@@ -186,6 +186,7 @@ export function useAppLiveStateTransport(
     // frames can be buffered from before the error, so only state events or
     // cause-specific recovery contracts may use this as no-open live proof.
     let reconnectErrorPendingLiveProof = false;
+    let observedEventSourceOpen = false;
     // True only between a bad reopened SSE payload and the next confirmed live
     // event or outage reset. This separates "bad SSE needs proof" from
     // ordinary reconnect wake-gap polling after `/api/state` progress.
@@ -320,6 +321,28 @@ export function useAppLiveStateTransport(
     function clearDelegationRepairReconnectProof() {
       delegationRepairAdoptedSinceLastReconnectError = false;
       lastDelegationRepairRequestedRevision = null;
+    }
+
+    function markEventSourceOpen() {
+      observedEventSourceOpen = true;
+      resetWorkspaceFilesChangedEventGate();
+      sawReconnectOpenSinceLastError = true;
+      // Reset the post-CLOSED recovery counter and clear any pending
+      // recovery timer — the live stream is healthy again, so the next
+      // failure cycle should start fresh at the lowest backoff.
+      sseRecoveryAttemptRef.current = 0;
+      if (sseRecoveryTimerRef.current !== null) {
+        window.clearTimeout(sseRecoveryTimerRef.current);
+        sseRecoveryTimerRef.current = null;
+      }
+      if (latestStateRevisionRef.current !== null) {
+        // A restarted backend can reconnect with the same persisted revision but a
+        // more complete authoritative snapshot than the client currently has.
+        forceAdoptNextStateEventRef.current = true;
+      }
+      setBackendConnectionState("connected");
+      setBackendConnectionIssueDetail(null);
+      clearRecoveredBackendRequestError();
     }
 
     function confirmReconnectRecoveryFromLiveEvent({
@@ -1133,24 +1156,7 @@ export function useAppLiveStateTransport(
     );
     eventSource.onopen = () => {
       if (!cancelled) {
-        resetWorkspaceFilesChangedEventGate();
-        sawReconnectOpenSinceLastError = true;
-        // Reset the post-CLOSED recovery counter and clear any pending
-        // recovery timer — the live stream is healthy again, so the next
-        // failure cycle should start fresh at the lowest backoff.
-        sseRecoveryAttemptRef.current = 0;
-        if (sseRecoveryTimerRef.current !== null) {
-          window.clearTimeout(sseRecoveryTimerRef.current);
-          sseRecoveryTimerRef.current = null;
-        }
-        if (latestStateRevisionRef.current !== null) {
-          // A restarted backend can reconnect with the same persisted revision but a
-          // more complete authoritative snapshot than the client currently has.
-          forceAdoptNextStateEventRef.current = true;
-        }
-        setBackendConnectionState("connected");
-        setBackendConnectionIssueDetail(null);
-        clearRecoveredBackendRequestError();
+        markEventSourceOpen();
       }
     };
     eventSource.onerror = () => {
@@ -1159,6 +1165,7 @@ export function useAppLiveStateTransport(
       }
 
       const hadReconnectOpenSinceLastError = sawReconnectOpenSinceLastError;
+      observedEventSourceOpen = false;
       sawReconnectOpenSinceLastError = false;
       reconnectRecoveryConfirmedSinceLastError = false;
       pendingBadLiveEventRecovery = false;
@@ -1166,6 +1173,13 @@ export function useAppLiveStateTransport(
       reconnectErrorPendingLiveProof = true;
       clearDelegationRepairReconnectProof();
       clearForceAdoptNextStateEvent();
+      const readyState = (eventSource as { readyState?: unknown }).readyState;
+      const eventSourceOpen =
+        typeof readyState === "number" && readyState === 1;
+      if (eventSourceOpen) {
+        markEventSourceOpen();
+        return;
+      }
       const isOnline = readNavigatorOnline();
       const hasHydratedState = latestStateRevisionRef.current !== null;
       setBackendConnectionState(
@@ -1185,7 +1199,6 @@ export function useAppLiveStateTransport(
       // backoff to avoid hammering the proxy. Numeric `2` instead of
       // `EventSource.CLOSED`: tests stub the global `EventSource` with
       // `EventSourceMock`, so `EventSource.CLOSED` is `undefined`.
-      const readyState = (eventSource as { readyState?: unknown }).readyState;
       const eventSourceClosed =
         typeof readyState === "number" && readyState === 2;
       if (eventSourceClosed && isOnline) {
@@ -1250,8 +1263,12 @@ export function useAppLiveStateTransport(
       const isOpen = typeof readyState === "number" && readyState === 1;
       if (isOpen) {
         sseStaleSinceMs = null;
+        if (!observedEventSourceOpen && !pendingBadLiveEventRecovery) {
+          markEventSourceOpen();
+        }
         return;
       }
+      observedEventSourceOpen = false;
       if (typeof readyState !== "number") {
         // The mock used in tests leaves `readyState` undefined unless a
         // test explicitly opts in. Treat that as "watchdog inert" so

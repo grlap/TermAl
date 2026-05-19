@@ -127,7 +127,7 @@ All client-visible state changes go through `commit_locked()`:
 commit_locked(&mut inner)
   → inner.revision += 1
   → persist_tx.send(PersistRequest::Delta) // wake the background persist thread
-  → publish_state_locked(inner)            // broadcast metadata-first StateResponse on SSE
+  → publish_state_locked(inner)            // queue metadata-first StateResponse for SSE
   → Ok(revision)
 ```
 
@@ -151,7 +151,7 @@ raw `&mut inner.sessions[idx]` would skip the stamp and the delta
 persist would drop the update. See `src/state_inner.rs` for the
 helpers.
 
-Streaming paths (`append_text_delta`, `update_command_message`) bump revision and publish a `DeltaEvent` instead of a full snapshot, avoiding the cost of serializing all sessions on every token. They use `commit_delta_locked()` which bumps revision + wakes the persist thread but skips the full-state broadcast; callers emit the matching `DeltaEvent` explicitly via `publish_delta()` under the same lock.
+Streaming paths (`append_text_delta`, `update_command_message`) bump revision and publish a `DeltaEvent` instead of a full snapshot, avoiding the cost of serializing all sessions on every token. They use `commit_delta_locked()` which bumps revision + wakes the persist thread but skips the full-state broadcast; callers emit the matching `DeltaEvent` explicitly via `publish_delta()` under the same lock. `publish_state_locked()` and `publish_delta()` both feed one ordered broadcaster mailbox: consecutive snapshots can coalesce, but a snapshot queued before a delta is sent before that delta so the frontend does not see an artificial revision gap.
 
 Internal bookkeeping that the frontend doesn't need (e.g. recording Codex sandbox mode after runtime config) uses `persist_internal_locked()` directly without bumping revision.
 

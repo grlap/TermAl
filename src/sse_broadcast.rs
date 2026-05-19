@@ -11,14 +11,16 @@
 //
 // Two flavours of event leave the backend:
 //
-// - **State snapshots** — the metadata-first `StateResponse` shape, serialized
-//   once per commit and pushed on the `state_events` channel. Used by
+// - **State snapshots** — the metadata-first `StateResponse` shape, queued
+//   once per commit and pushed on the `state_events` channel by the ordered
+//   broadcaster thread. Used by
 //   new SSE clients and remote proxies that need a ground-truth
 //   snapshot after reconnect.
 // - **Delta events** (`DeltaEvent` in `wire.rs`) — narrow per-field
-//   updates pushed on the `delta_events` channel. Clients that stay
-//   connected apply them to their local copy without re-parsing the
-//   whole state tree.
+//   updates queued behind any earlier state snapshot and then pushed on the
+//   `delta_events` channel by that same broadcaster thread. Clients that stay
+//   connected apply them to their local copy without re-parsing the whole state
+//   tree.
 //
 // There is also a third channel — `file_events` — for file-system
 // watch notifications (see `workspace_watch.rs`). These are not tied
@@ -41,14 +43,14 @@
 // Snapshot serialization offload. `publish_state_locked` builds the
 // `StateResponse` *inside* the state lock (required — snapshot
 // fields read `inner`) but hands the owned snapshot off to a
-// dedicated broadcaster thread for JSON serialization via
-// `publish_snapshot`. The handoff is a single latest-snapshot mailbox,
-// so bursty commits overwrite superseded snapshots before they can
-// accumulate. That keeps the state mutex off the slow-serialization
-// critical path for commit-heavy routes like `put_workspace_layout`.
-// When there is no broadcaster mailbox (notably: test builds that
-// construct `AppState` without spawning the broadcaster thread) we fall back to
-// synchronous serialize + broadcast so tests can still assert SSE
+// dedicated broadcaster thread for JSON serialization via `publish_snapshot`.
+// The mailbox coalesces consecutive snapshots but keeps deltas ordered behind
+// any snapshot that was queued first, so delta N+1 cannot overtake state N.
+// That keeps the state mutex off the slow-serialization critical path for
+// commit-heavy routes like `put_workspace_layout` without making clients repair
+// artificial revision gaps. When there is no broadcaster mailbox (notably: test
+// builds that construct `AppState` without spawning the broadcaster thread) we
+// fall back to synchronous serialize + broadcast so tests can still assert SSE
 // behaviour.
 
 impl AppState {
@@ -365,13 +367,16 @@ impl AppState {
         self.shutdown_signal_tx.send_replace(true);
     }
 
-    /// Serializes a `DeltaEvent` to JSON and fans it out on the
-    /// delta-events channel. Callers typically follow up with
-    /// [`Self::commit_delta_locked`] under the same lock so the
-    /// revision tick and the delta land atomically from the client's
-    /// perspective.
+    /// Serializes a `DeltaEvent` to JSON and queues it on the ordered
+    /// state/delta broadcaster. Callers typically follow up with
+    /// [`Self::commit_delta_locked`] under the same lock so the revision tick
+    /// and the delta land atomically from the client's perspective.
     fn publish_delta(&self, event: &DeltaEvent) {
         if let Ok(payload) = serde_json::to_string(event) {
+            if let Some(mailbox) = &self.state_broadcast_mailbox {
+                mailbox.publish_delta_payload(payload);
+                return;
+            }
             let _ = self.delta_events.send(payload);
         }
     }
@@ -532,14 +537,14 @@ impl AppState {
     }
 
     /// Fire-and-forget metadata-first snapshot broadcast, paired with
-    /// [`Self::publish_delta`] for deltas; serialization errors are
-    /// logged but do not propagate.
+    /// [`Self::publish_delta`] for deltas; serialization errors are logged but
+    /// do not propagate.
     ///
     /// The snapshot is built from `inner` while the caller still holds
     /// the state mutex (required — `inner` fields are read here), but
     /// JSON serialization is offloaded to a dedicated broadcaster
-    /// thread via [`Self::publish_snapshot`]. This keeps the state
-    /// mutex off the serialization critical path for requests (e.g.,
+    /// thread via [`Self::publish_snapshot`]. This keeps the state mutex off
+    /// the serialization critical path for requests (e.g.,
     /// `put_workspace_layout`) that commit under the lock.
     fn publish_state_locked(&self, inner: &StateInner) {
         let snapshot = self.snapshot_from_inner(inner);
@@ -550,13 +555,13 @@ impl AppState {
     ///
     /// Sends the owned snapshot to the background broadcaster mailbox, whose
     /// thread serializes to JSON and forwards to `state_events` off the
-    /// critical path. The mailbox retains only the latest pending snapshot.
-    /// Falls back to synchronous serialize + broadcast if no mailbox exists
-    /// (test builds that construct `AppState` manually without a broadcaster
-    /// thread).
+    /// critical path. The mailbox coalesces consecutive snapshots, but preserves
+    /// snapshot-before-delta order. Falls back to synchronous serialize +
+    /// broadcast if no mailbox exists (test builds that construct `AppState`
+    /// manually without a broadcaster thread).
     fn publish_snapshot(&self, snapshot: StateResponse) {
         if let Some(mailbox) = &self.state_broadcast_mailbox {
-            mailbox.publish(snapshot);
+            mailbox.publish_snapshot(snapshot);
             return;
         }
 
