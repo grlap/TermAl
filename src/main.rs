@@ -615,6 +615,11 @@ include!("paths.rs");
 include!("orchestrators.rs");
 include!("orchestrator_lifecycle.rs");
 include!("orchestrator_transitions.rs");
+include!("telegram_runtime.rs");
+include!("telegram_state.rs");
+include!("telegram_clients.rs");
+include!("telegram_forwarding.rs");
+include!("telegram_digest.rs");
 include!("telegram.rs");
 
 /// Marks the listening socket as non-inheritable so child processes (agent
