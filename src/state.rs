@@ -118,6 +118,29 @@ impl StateBroadcastMailbox {
     }
 }
 
+fn forward_state_broadcast_work(
+    work: StateBroadcastWork,
+    state_events: &broadcast::Sender<String>,
+    delta_events: &broadcast::Sender<String>,
+) {
+    match work {
+        StateBroadcastWork::Snapshot(snapshot) => match serde_json::to_string(&snapshot) {
+            Ok(payload) => {
+                let _ = state_events.send(payload);
+            }
+            Err(err) => {
+                eprintln!(
+                    "warning: failed to serialize SSE state snapshot at revision {}: {err}",
+                    snapshot.revision,
+                );
+            }
+        },
+        StateBroadcastWork::DeltaPayload(payload) => {
+            let _ = delta_events.send(payload);
+        }
+    }
+}
+
 #[cfg(test)]
 mod state_broadcast_mailbox_tests {
     use super::*;

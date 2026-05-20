@@ -39,35 +39,141 @@ impl Drop for HttpRouteTestFiles {
     }
 }
 
-fn test_app_state_with_ordered_state_broadcaster() -> AppState {
-    let state = test_app_state();
-    let mailbox = Arc::new(StateBroadcastMailbox::default());
-    let state_events_for_broadcast = state.state_events.clone();
-    let delta_events_for_broadcast = state.delta_events.clone();
-    let mailbox_for_thread = mailbox.clone();
+struct TempProjectRoot {
+    path: PathBuf,
+}
 
-    std::thread::Builder::new()
-        .name("termal-test-state-broadcast".to_owned())
-        .spawn(move || {
-            loop {
-                match mailbox_for_thread.recv_next() {
-                    StateBroadcastWork::Snapshot(snapshot) => {
-                        let payload = serde_json::to_string(&snapshot)
-                            .expect("test snapshot should serialize");
-                        let _ = state_events_for_broadcast.send(payload);
-                    }
-                    StateBroadcastWork::DeltaPayload(payload) => {
-                        let _ = delta_events_for_broadcast.send(payload);
-                    }
-                }
-            }
-        })
-        .expect("test state broadcaster thread should spawn");
-
-    AppState {
-        state_broadcast_mailbox: Some(mailbox),
-        ..state
+impl TempProjectRoot {
+    fn create(prefix: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("{prefix}-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).expect("temp project root should exist");
+        Self { path }
     }
+}
+
+impl Drop for TempProjectRoot {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+struct OrderedStateBroadcasterHarness {
+    state: AppState,
+    session_id: String,
+    mailbox: Arc<StateBroadcastMailbox>,
+    start_tx: Option<mpsc::Sender<()>>,
+    processed_rx: mpsc::Receiver<()>,
+    stop: Arc<AtomicBool>,
+    thread_handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl OrderedStateBroadcasterHarness {
+    fn new() -> Self {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+        let mailbox = Arc::new(StateBroadcastMailbox::default());
+        let state_events_for_broadcast = state.state_events.clone();
+        let delta_events_for_broadcast = state.delta_events.clone();
+        let mailbox_for_thread = mailbox.clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_for_thread = stop.clone();
+        let (start_tx, start_rx) = mpsc::channel();
+        let (processed_tx, processed_rx) = mpsc::channel();
+
+        let thread_handle = std::thread::Builder::new()
+            .name("termal-test-state-broadcast".to_owned())
+            .spawn(move || {
+                if start_rx.recv().is_err() {
+                    return;
+                }
+                loop {
+                    let work = mailbox_for_thread.recv_next();
+                    if stop_for_thread.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    forward_state_broadcast_work(
+                        work,
+                        &state_events_for_broadcast,
+                        &delta_events_for_broadcast,
+                    );
+                    let _ = processed_tx.send(());
+                }
+            })
+            .expect("test state broadcaster thread should spawn");
+
+        Self {
+            state: AppState {
+                state_broadcast_mailbox: Some(mailbox.clone()),
+                ..state
+            },
+            session_id,
+            mailbox,
+            start_tx: Some(start_tx),
+            processed_rx,
+            stop,
+            thread_handle: Some(thread_handle),
+        }
+    }
+
+    fn release(&mut self) {
+        if let Some(start_tx) = self.start_tx.take() {
+            start_tx
+                .send(())
+                .expect("test broadcaster start gate should open");
+        }
+    }
+
+    fn wait_for_processed(&self, expected_count: usize) {
+        for _ in 0..expected_count {
+            self.processed_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("test broadcaster should process queued work");
+        }
+    }
+}
+
+impl Drop for OrderedStateBroadcasterHarness {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(start_tx) = self.start_tx.take() {
+            let _ = start_tx.send(());
+        }
+        self.mailbox
+            .publish_delta_payload("__termal_test_stop__".to_owned());
+        if let Some(thread_handle) = self.thread_handle.take() {
+            let _ = thread_handle.join();
+        }
+    }
+}
+
+fn push_test_text_message(state: &AppState, session_id: &str, text: impl Into<String>) -> String {
+    let message_id = state.allocate_message_id();
+    state
+        .push_message(
+            session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: text.into(),
+                expanded_text: None,
+            },
+        )
+        .expect("test message should be recorded");
+    message_id
+}
+
+fn create_ordered_sse_test_project(state: &AppState) -> TempProjectRoot {
+    let project_root = TempProjectRoot::create("termal-ordered-sse-project");
+    state
+        .create_project(CreateProjectRequest {
+            name: Some("Ordered SSE Project".to_owned()),
+            root_path: project_root.path.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .expect("project creation should queue a state snapshot");
+    project_root
 }
 
 // Pins `POST /api/sessions` — asserts 201 Created with a
@@ -952,9 +1058,69 @@ async fn state_events_route_streams_initial_state_and_live_deltas() {
 // delta even when both are pending before the route is polled again.
 #[tokio::test]
 async fn state_events_route_preserves_queued_snapshot_before_following_delta() {
-    let state = test_app_state_with_ordered_state_broadcaster();
+    let mut harness = OrderedStateBroadcasterHarness::new();
+    let state = harness.state.clone();
     let _files = HttpRouteTestFiles::capture(&state);
-    let session_id = test_session_id(&state, Agent::Codex);
+    let session_id = harness.session_id.clone();
+    let app = app_router(state.clone());
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+
+    let initial_event = next_sse_event(&mut body).await;
+    let (initial_name, initial_data) = parse_sse_event(&initial_event);
+    assert_eq!(initial_name, "state");
+    let initial_state: StateResponse =
+        serde_json::from_str(&initial_data).expect("initial SSE payload should parse");
+    let expected_snapshot_revision = initial_state.revision + 1;
+    let expected_delta_revision = expected_snapshot_revision + 1;
+
+    let _project_root = create_ordered_sse_test_project(&state);
+    let message_id = push_test_text_message(&state, &session_id, "Ordered delta");
+    harness.release();
+    harness.wait_for_processed(2);
+
+    let snapshot_event = next_sse_event(&mut body).await;
+    let (snapshot_name, snapshot_data) = parse_sse_event(&snapshot_event);
+    assert_eq!(snapshot_name, "state");
+    let snapshot_state: StateResponse =
+        serde_json::from_str(&snapshot_data).expect("queued state payload should parse");
+    assert_eq!(snapshot_state.revision, expected_snapshot_revision);
+    assert!(
+        snapshot_state
+            .projects
+            .iter()
+            .any(|project| project.name == "Ordered SSE Project")
+    );
+
+    let delta_event = next_sse_event(&mut body).await;
+    let (delta_name, delta_data) = parse_sse_event(&delta_event);
+    assert_eq!(delta_name, "delta");
+    let delta: Value = serde_json::from_str(&delta_data).expect("delta SSE payload should parse");
+    assert_eq!(delta["type"], "messageCreated");
+    assert_eq!(delta["sessionId"], session_id);
+    assert_eq!(delta["messageId"], message_id);
+    assert_eq!(delta["revision"].as_u64(), Some(expected_delta_revision));
+}
+
+// Pins the ordered broadcaster's downstream recovery contract through the real
+// `/api/events` route: when the mailbox feeds more deltas into the bounded SSE
+// broadcast channel than a client can retain, the route must emit the explicit
+// lagged marker followed by an authoritative recovery state.
+#[tokio::test]
+async fn state_events_route_recovers_after_ordered_broadcaster_delta_overflow() {
+    let mut harness = OrderedStateBroadcasterHarness::new();
+    let state = harness.state.clone();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = harness.session_id.clone();
     let app = app_router(state.clone());
     let response = request_response(
         &app,
@@ -974,54 +1140,35 @@ async fn state_events_route_preserves_queued_snapshot_before_following_delta() {
     let initial_state: StateResponse =
         serde_json::from_str(&initial_data).expect("initial SSE payload should parse");
 
-    let project_root =
-        std::env::temp_dir().join(format!("termal-ordered-sse-project-{}", Uuid::new_v4()));
-    fs::create_dir_all(&project_root).expect("project root should exist");
-    state
-        .create_project(CreateProjectRequest {
-            name: Some("Ordered SSE Project".to_owned()),
-            root_path: project_root.to_string_lossy().into_owned(),
-            remote_id: default_local_remote_id(),
-        })
-        .expect("project creation should queue a state snapshot");
-    let message_id = state.allocate_message_id();
-    state
-        .push_message(
-            &session_id,
-            Message::Text {
-                attachments: Vec::new(),
-                id: message_id.clone(),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                text: "Ordered delta".to_owned(),
-                expanded_text: None,
-            },
-        )
-        .expect("message creation should queue a following delta");
+    const DELTA_COUNT: usize = 64;
+    for index in 0..DELTA_COUNT {
+        push_test_text_message(&state, &session_id, format!("Overflow delta {index}"));
+    }
+    let expected_recovery_revision = initial_state.revision + DELTA_COUNT as u64;
+    harness.release();
+    harness.wait_for_processed(DELTA_COUNT);
 
-    let snapshot_event = next_sse_event(&mut body).await;
-    let (snapshot_name, snapshot_data) = parse_sse_event(&snapshot_event);
-    assert_eq!(snapshot_name, "state");
-    let snapshot_state: StateResponse =
-        serde_json::from_str(&snapshot_data).expect("queued state payload should parse");
-    assert!(snapshot_state.revision > initial_state.revision);
+    let lagged_event = next_sse_event(&mut body).await;
     assert!(
-        snapshot_state
-            .projects
-            .iter()
-            .any(|project| project.name == "Ordered SSE Project")
+        lagged_event.contains("event: lagged"),
+        "expected lagged marker, got {lagged_event:?}"
     );
+    assert!(
+        lagged_event
+            .lines()
+            .any(|line| line.trim_end_matches('\r') == "data: 1"),
+        "lagged marker must carry a non-empty reserved payload: {lagged_event:?}"
+    );
+    let (lagged_name, lagged_data) = parse_sse_event(&lagged_event);
+    assert_eq!(lagged_name, "lagged");
+    assert_eq!(lagged_data, "1");
 
-    let delta_event = next_sse_event(&mut body).await;
-    let (delta_name, delta_data) = parse_sse_event(&delta_event);
-    assert_eq!(delta_name, "delta");
-    let delta: Value = serde_json::from_str(&delta_data).expect("delta SSE payload should parse");
-    assert_eq!(delta["type"], "messageCreated");
-    assert_eq!(delta["sessionId"], session_id);
-    assert_eq!(delta["messageId"], message_id);
-    assert!(delta["revision"].as_u64().unwrap() > snapshot_state.revision);
-
-    let _ = fs::remove_dir_all(project_root);
+    let recovery_event = next_sse_event(&mut body).await;
+    let (recovery_name, recovery_data) = parse_sse_event(&recovery_event);
+    assert_eq!(recovery_name, "state");
+    let recovery_state: StateResponse =
+        serde_json::from_str(&recovery_data).expect("recovery state payload should parse");
+    assert_eq!(recovery_state.revision, expected_recovery_revision);
 }
 
 #[tokio::test]

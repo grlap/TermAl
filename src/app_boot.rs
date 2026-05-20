@@ -295,24 +295,11 @@ impl AppState {
             .name("termal-state-broadcast".to_owned())
             .spawn(move || {
                 loop {
-                    match state_broadcast_mailbox_for_thread.recv_next() {
-                        StateBroadcastWork::Snapshot(snapshot) => {
-                            match serde_json::to_string(&snapshot) {
-                                Ok(payload) => {
-                                    let _ = state_events_for_broadcast.send(payload);
-                                }
-                                Err(err) => {
-                                    eprintln!(
-                                        "warning: failed to serialize SSE state snapshot at revision {}: {err}",
-                                        snapshot.revision,
-                                    );
-                                }
-                            }
-                        }
-                        StateBroadcastWork::DeltaPayload(payload) => {
-                            let _ = delta_events_for_broadcast.send(payload);
-                        }
-                    }
+                    forward_state_broadcast_work(
+                        state_broadcast_mailbox_for_thread.recv_next(),
+                        &state_events_for_broadcast,
+                        &delta_events_for_broadcast,
+                    );
                 }
             })
             .expect("failed to spawn state broadcast thread");
