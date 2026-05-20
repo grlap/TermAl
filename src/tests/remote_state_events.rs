@@ -1444,6 +1444,14 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
         session_fetch_count, 1,
         "same-session burst should issue only one targeted hydration fetch: {request_lines:?}",
     );
+    assert!(
+        !state
+            .remote_delta_hydrations_in_flight
+            .lock()
+            .expect("remote delta hydration mutex poisoned")
+            .contains(&(remote.id.clone(), summary_session.id.clone())),
+        "successful hydration should clear the in-flight guard for the remote session",
+    );
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     let index = inner

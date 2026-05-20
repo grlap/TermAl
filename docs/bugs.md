@@ -212,8 +212,6 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   force the final shutdown persist attempt to fail once and then succeed, and assert the worker does not exit before the successful write.
 - [ ] P2: Add non-send action restart live-stream delta-on-recreated-stream coverage:
   the round-13 fix proves `forceSseReconnect()` is called on cross-instance `adoptActionState` recovery, but does not dispatch live deltas through the recreated EventSource. Submit an approval/input-style action after backend restart, then dispatch assistant deltas on the new `EventSourceMock` and assert they render in the active transcript bubble.
-- [ ] P2: Add remote hydration dedupe production-path coverage:
-  drive bursty same-session remote deltas through the production hydration path, assert only one remote session fetch is issued, and assert the in-flight guard is cleared after successful hydration.
 - [ ] P2: Add failed manual retry reconnect-rearm regression:
   cover manual retry hitting a transient failure, then the next scheduled attempt adopting a newer same-instance snapshot while polling still continues until SSE confirms.
 - [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:
