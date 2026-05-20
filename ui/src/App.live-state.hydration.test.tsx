@@ -679,7 +679,7 @@ describe("App live state - delta-gap core", () => {
     });
   });
 
-  it("applies an advancing session text delta across an unrelated global revision gap", async () => {
+  it("adopts equal-revision state repair after a skipped global revision and session delta", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
@@ -717,6 +717,12 @@ describe("App live state - delta-gap core", () => {
       });
       const stateResync = createDeferred<Response>();
       const sessionHydration = createDeferred<Response>();
+      const recoveredProject = {
+        id: "project-recovered",
+        name: "Recovered Project",
+        rootPath: "/tmp/recovered",
+        remoteId: null,
+      };
       let stateRequestCount = 0;
       let sessionHydrationRequestCount = 0;
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -821,7 +827,7 @@ describe("App live state - delta-gap core", () => {
             jsonResponse(
               makeStateResponse({
                 revision: 4,
-                projects: [],
+                projects: [recoveredProject],
                 orchestrators: [],
                 workspaces: [],
                 sessions: [repairedSession],
@@ -836,6 +842,13 @@ describe("App live state - delta-gap core", () => {
             }),
           );
           await flushUiWork();
+        });
+        await settleAsyncUi();
+        await clickAndSettle(screen.getByRole("combobox", { name: "Project" }));
+        await waitFor(() => {
+          expect(
+            screen.getByRole("option", { name: /Recovered Project/ }),
+          ).toBeInTheDocument();
         });
       } finally {
         scrollIntoViewSpy.mockRestore();
