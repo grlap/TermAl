@@ -4050,7 +4050,7 @@ describe("Backend connection state", () => {
     }
   });
 
-  it("re-arms reconnect polling after a failed manual retry", async () => {
+  it("keeps polling after failed manual retry and same-instance recovery until live SSE confirms", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
@@ -4160,6 +4160,7 @@ describe("Backend connection state", () => {
       });
       expect(countStateFetches()).toBe(baseCount + 3);
       expect(screen.getByText("Recovered Session")).toBeInTheDocument();
+      expect(screen.getByText("Recovered preview")).toBeInTheDocument();
       expect(
         screen.getByLabelText("Control panel backend reconnecting"),
       ).toBeInTheDocument();
@@ -4196,6 +4197,7 @@ describe("Backend connection state", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(FRAME_ADVANCE_MS);
       });
+      expect(screen.getByText("Live retry recovery.")).toBeInTheDocument();
       expectNoControlPanelConnectionIssue();
 
       await act(async () => {

@@ -210,8 +210,6 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   force the final shutdown persist attempt to fail once and then succeed, and assert the worker does not exit before the successful write.
 - [ ] P2: Add non-send action restart live-stream delta-on-recreated-stream coverage:
   the round-13 fix proves `forceSseReconnect()` is called on cross-instance `adoptActionState` recovery, but does not dispatch live deltas through the recreated EventSource. Submit an approval/input-style action after backend restart, then dispatch assistant deltas on the new `EventSourceMock` and assert they render in the active transcript bubble.
-- [ ] P2: Add failed manual retry reconnect-rearm regression:
-  cover manual retry hitting a transient failure, then the next scheduled attempt adopting a newer same-instance snapshot while polling still continues until SSE confirms.
 - [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:
   refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
 - [ ] P2: Cover Telegram relay active-project reconciliation:
