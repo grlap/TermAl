@@ -23,6 +23,7 @@ import { ThemedCombobox } from "./themed-combobox";
 
 type TelegramSettingsDraft = {
   enabled: boolean;
+  forwardAssistantReplies: boolean;
   botToken: string;
   subscribedProjectIds: string[];
   defaultProjectId: string;
@@ -34,6 +35,7 @@ function createTelegramDraft(
 ): TelegramSettingsDraft {
   return {
     enabled: status?.enabled ?? false,
+    forwardAssistantReplies: status?.forwardAssistantReplies ?? false,
     botToken: "",
     subscribedProjectIds: status?.subscribedProjectIds ?? [],
     defaultProjectId: status?.defaultProjectId ?? "",
@@ -235,6 +237,7 @@ export function TelegramPreferencesPanel({
     try {
       const nextStatus = await updateTelegramConfig({
         enabled: draft.enabled,
+        forwardAssistantReplies: draft.forwardAssistantReplies,
         botToken: draft.botToken.trim() ? draft.botToken.trim() : undefined,
         subscribedProjectIds: nextProjectIds,
         defaultProjectId: draft.defaultProjectId || null,
@@ -369,6 +372,18 @@ export function TelegramPreferencesPanel({
               onChange={(event) => updateDraft({ enabled: event.target.checked })}
             />
             <span>Enable relay</span>
+          </label>
+
+          <label className="remote-settings-toggle">
+            <input
+              type="checkbox"
+              checked={draft.forwardAssistantReplies}
+              disabled={isLoading || isSaving}
+              onChange={(event) =>
+                updateDraft({ forwardAssistantReplies: event.target.checked })
+              }
+            />
+            <span>Forward assistant replies</span>
           </label>
 
           <div className="session-control-group">

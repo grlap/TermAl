@@ -347,6 +347,7 @@ fn telegram_test_config() -> TelegramTestConfig {
             bot_username: Some("termal_bot".to_owned()),
             bot_token: "123456:TESTTOKEN".to_owned(),
             chat_id: Some(42),
+            forward_assistant_replies: true,
             poll_timeout_secs: 1,
             project_id: "project-1".to_owned(),
             public_base_url: None,
@@ -886,6 +887,68 @@ fn telegram_linked_foreign_bot_command_is_ignored() {
 
     assert!(!changed);
     assert!(telegram.sent_texts.borrow().is_empty());
+}
+
+#[test]
+fn telegram_chat_work_rate_limit_is_per_chat_and_windowed() {
+    let mut state = TelegramBotState::default();
+    let now = std::time::Instant::now();
+    for _ in 0..TELEGRAM_CHAT_WORK_RATE_LIMIT_MAX {
+        assert!(!telegram_chat_work_is_rate_limited_at(&mut state, 42, now));
+    }
+    assert!(telegram_chat_work_is_rate_limited_at(&mut state, 42, now));
+    assert!(!telegram_chat_work_is_rate_limited_at(&mut state, 43, now));
+    assert!(!telegram_chat_work_is_rate_limited_at(
+        &mut state,
+        42,
+        now + TELEGRAM_CHAT_WORK_RATE_LIMIT_WINDOW + Duration::from_millis(1),
+    ));
+}
+
+#[test]
+fn telegram_callback_rate_limit_blocks_dispatch() {
+    let mut state = TelegramBotState::default();
+    let now = std::time::Instant::now();
+    for _ in 0..TELEGRAM_CHAT_WORK_RATE_LIMIT_MAX {
+        assert!(!telegram_chat_work_is_rate_limited_at(&mut state, 42, now));
+    }
+
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramActionClient::succeeded(telegram_project_digest(Some("session-1")));
+    let config = telegram_test_config();
+
+    let changed = handle_telegram_callback_query(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        TelegramCallbackQuery {
+            id: "callback-1".to_owned(),
+            data: Some(
+                telegram_digest_callback_data("project-1", "review-in-termal")
+                    .expect("callback data should fit"),
+            ),
+            message: Some(TelegramChatMessage {
+                message_id: 7,
+                chat: TelegramChat {
+                    id: 42,
+                    _kind: "private".to_owned(),
+                },
+                text: Some("digest".to_owned()),
+            }),
+        },
+    )
+    .expect("rate-limited callback should be handled");
+
+    assert!(!changed);
+    assert!(termal.dispatches.borrow().is_empty());
+    assert_eq!(
+        telegram.answered_callbacks.borrow().as_slice(),
+        [(
+            "callback-1".to_owned(),
+            TELEGRAM_CHAT_WORK_RATE_LIMIT_TEXT.to_owned()
+        )]
+    );
 }
 
 #[test]
@@ -2460,6 +2523,57 @@ fn telegram_prompt_without_prior_assistant_baseline_forwards_first_reply() {
     assert_eq!(cursor.message_id.as_deref(), Some("message-1"));
     assert_eq!(cursor.text_chars, Some("First reply".chars().count()));
     assert_eq!(state.forward_next_assistant_message_session_id, None);
+}
+
+#[test]
+fn telegram_prompt_does_not_arm_assistant_forwarding_without_opt_in() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(telegram_project_digest(Some("session-1"))),
+            Ok(telegram_project_digest(Some("session-1"))),
+        ],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "message-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Pre-existing reply".to_owned(),
+                }],
+            },
+        },
+    );
+    let mut config = telegram_test_config();
+    config.forward_assistant_replies = false;
+    let mut state = TelegramBotState::default();
+
+    let outcome = forward_telegram_text_to_project_for_relay(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        42,
+        "hello from Telegram",
+    )
+    .expect("prompt should forward without assistant forwarding opt-in");
+
+    assert!(outcome.final_sync_satisfied);
+    assert_eq!(
+        termal.sent_prompts.borrow().as_slice(),
+        [("session-1".to_owned(), "hello from Telegram".to_owned())]
+    );
+    assert!(state.assistant_forwarding_cursors.is_empty());
+    assert!(state.forward_next_assistant_message_session_ids.is_empty());
+    assert_eq!(state.forward_next_assistant_message_session_id, None);
+    assert!(
+        termal
+            .events
+            .borrow()
+            .iter()
+            .all(|event| !event.starts_with("session:")),
+        "assistant session reads should be skipped when full forwarding is off"
+    );
 }
 
 #[test]
@@ -5708,6 +5822,7 @@ fn telegram_status_response_keeps_empty_project_list_on_wire() {
     let value = serde_json::to_value(TelegramStatusResponse {
         configured: false,
         enabled: false,
+        forward_assistant_replies: false,
         running: false,
         lifecycle: TelegramLifecycle::Manual,
         linked_chat_id: None,
@@ -5727,6 +5842,7 @@ fn telegram_status_response_serializes_in_process_lifecycle() {
     let value = serde_json::to_value(TelegramStatusResponse {
         configured: true,
         enabled: true,
+        forward_assistant_replies: true,
         running: true,
         lifecycle: TelegramLifecycle::InProcess,
         linked_chat_id: None,
@@ -6909,6 +7025,7 @@ fn telegram_config_update_rejects_too_many_subscribed_projects() {
     let err = state
         .update_telegram_config(UpdateTelegramConfigRequest {
             enabled: None,
+            forward_assistant_replies: None,
             bot_token: None,
             subscribed_project_ids: Some(
                 (0..=TELEGRAM_SUBSCRIBED_PROJECT_IDS_MAX_COUNT)
@@ -6939,6 +7056,7 @@ fn telegram_config_update_allows_enabled_without_token_or_project_target() {
     let response = state
         .update_telegram_config(UpdateTelegramConfigRequest {
             enabled: Some(true),
+            forward_assistant_replies: None,
             bot_token: None,
             subscribed_project_ids: Some(Vec::new()),
             default_project_id: None,
@@ -6976,6 +7094,7 @@ fn telegram_config_update_reflects_in_process_relay_runtime_status() {
     let response = state
         .update_telegram_config(UpdateTelegramConfigRequest {
             enabled: Some(true),
+            forward_assistant_replies: None,
             bot_token: Some(Some("123456:secret".to_owned())),
             subscribed_project_ids: Some(vec![project_id.clone()]),
             default_project_id: None,
@@ -7002,6 +7121,7 @@ fn telegram_config_update_reflects_in_process_relay_runtime_status() {
     let stopped = state
         .update_telegram_config(UpdateTelegramConfigRequest {
             enabled: Some(false),
+            forward_assistant_replies: None,
             bot_token: None,
             subscribed_project_ids: None,
             default_project_id: None,
@@ -7055,6 +7175,7 @@ fn telegram_config_update_blank_token_clears_saved_token_before_project_target_c
     let response = state
         .update_telegram_config(UpdateTelegramConfigRequest {
             enabled: Some(true),
+            forward_assistant_replies: None,
             bot_token: Some(Some("   ".to_owned())),
             subscribed_project_ids: Some(Vec::new()),
             default_project_id: None,
@@ -7111,6 +7232,7 @@ fn telegram_config_update_rejects_saved_token_without_project_target() {
     let err = state
         .update_telegram_config(UpdateTelegramConfigRequest {
             enabled: Some(true),
+            forward_assistant_replies: None,
             bot_token: None,
             subscribed_project_ids: Some(Vec::new()),
             default_project_id: None,

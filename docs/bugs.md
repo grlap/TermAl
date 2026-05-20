@@ -60,36 +60,92 @@ the Implementation Tasks section.
 - Split UI config and runtime cursor/chat state into separate files, or guard all writers with an OS-level file lock.
 - Add cross-process interleaving coverage proving config and runtime state both survive competing writes.
 
-## Telegram-forwarded text has no per-chat rate cap
+## Telegram assistant-reply opt-in lacks a third-party content warning
 
-**Severity:** Medium - any linked chat can still fan out prompt submissions quickly enough to create a burst of local backend and agent work.
+**Severity:** Low - the settings UI now requires an explicit opt-in before full assistant replies are forwarded, but the toggle does not explain that full assistant output may be sent to Telegram.
 
-`src/telegram.rs:168-178` now rejects Telegram prompts above `MAX_DELEGATION_PROMPT_BYTES = 64 * 1024` before calling `forward_telegram_text_to_project`, but accepted prompts are still not rate-limited per chat. Command and callback actions dispatch backend work at `src/telegram.rs:145-164` and `src/telegram.rs:245-272`. A linked chat can submit many below-limit prompts or action commands in quick succession, each becoming local backend work and possibly an agent turn.
-
-**Current behavior:**
-- Oversized Telegram prompts are rejected by UTF-8 byte length.
-- Below-limit prompts and action commands are forwarded unchanged.
-- No per-minute or burst cap exists per linked chat before backend work starts.
-- The default 1-second poll cadence can ingest those bursts quickly.
-
-**Proposal:**
-- Add a per-minute / per-chat prompt and action-command rate cap so a linked chat cannot fan out N HTTP calls per second.
-
-## Telegram relay forwards full assistant text to Telegram by default
-
-**Severity:** Medium - assistant replies can include code, local file paths, file contents, or secrets and are sent to a third-party service without an explicit opt-in.
-
-`src/telegram_forwarding.rs:730-899`. The relay chunks and forwards the full settled assistant message body to Telegram once the session is no longer active. This goes beyond the compact project digest and sends arbitrary model output off-machine by default.
+`ui/src/preferences/telegram-preferences-panel.tsx:386` labels the setting only as "Forward assistant replies". Enabling it can still send arbitrary assistant output to a third-party service, including code, local file paths, file contents, or secrets that appeared in the conversation.
 
 **Current behavior:**
-- The Telegram digest path is compact, but settled assistant messages are forwarded in full.
-- Assistant text may contain local workspace details or user-provided secrets.
-- Users enabling the relay do not get a separate opt-in for full-content forwarding.
+- Full assistant forwarding is disabled by default.
+- The opt-in control has no nearby warning about third-party content exposure.
+- Users can enable the setting without seeing what class of content leaves the machine.
 
 **Proposal:**
-- Make full assistant text forwarding an explicit opt-in setting.
-- Keep digest-only forwarding as the default for Telegram integrations.
-- Document the third-party content exposure and add any practical redaction/truncation before full forwarding.
+- Add a concise settings hint near the toggle explaining that full assistant replies are sent to Telegram when enabled.
+- Cover the warning text and saved toggle state in the Telegram preferences tests.
+
+## Telegram status frontend type treats required `forwardAssistantReplies` as optional
+
+**Severity:** Low - the backend always serializes `forwardAssistantReplies`, but the frontend response type and fixtures allow it to be missing.
+
+`src/wire.rs:1113-1117` defines `TelegramStatusResponse.forward_assistant_replies` as a required response field. `ui/src/api.ts:709` marks the matching `forwardAssistantReplies` property optional, and existing API/preferences fixtures omit it. This weakens the current API contract and can hide regressions where the UI falls back to `false` because the response field was dropped.
+
+**Current behavior:**
+- Backend status responses always include `forwardAssistantReplies`.
+- Frontend typing accepts responses without the field.
+- API and preferences tests do not pin the field in status fixtures or config-save payloads.
+
+**Proposal:**
+- Make `TelegramStatusResponse.forwardAssistantReplies` required in `ui/src/api.ts`.
+- Update Telegram API/preference fixtures and save assertions to include the field.
+- Add API helper coverage proving `forwardAssistantReplies` round-trips in config updates.
+
+## Telegram assistant-reply forwarding environment toggle is missing from the feature docs
+
+**Severity:** Low - the runtime now supports `TERMAL_TELEGRAM_FORWARD_ASSISTANT_REPLIES`, but the Telegram feature documentation does not list it with the other relay environment settings.
+
+`docs/features/telegram-ui-integration.md:353-358` documents Telegram environment variables, but omits the assistant-reply forwarding override. Operators reading the feature docs can miss that full assistant replies can be enabled or disabled through environment configuration.
+
+**Current behavior:**
+- The code recognizes `TERMAL_TELEGRAM_FORWARD_ASSISTANT_REPLIES`.
+- The Telegram feature docs do not describe the variable or its content-forwarding implications.
+
+**Proposal:**
+- Add the environment variable to the Telegram feature docs.
+- Note that enabling it allows full assistant output to be sent through Telegram.
+
+## Telegram chat work rate limiting misses some command paths
+
+**Severity:** Low - the per-chat work limiter only guards action dispatches and free-text prompt sends, leaving other commands able to trigger repeated backend work.
+
+`src/telegram.rs:143-197` applies `telegram_chat_work_is_rate_limited(...)` to `Action` commands, and the prompt path checks it later, but `/status`, `/projects`, `/sessions`, `/project`, `/session`, and help fallback paths can still be repeated without hitting the same limiter. Those paths are local-only but can still create avoidable digest/list work for one chat.
+
+**Current behavior:**
+- Action dispatches and free-text prompts are rate-limited.
+- Status, project/session listing and selection, and help fallback commands are not covered by the same work limiter.
+
+**Proposal:**
+- Apply a shared work-command limiter before Telegram commands that perform backend fetch/list/select work.
+- Keep cheap ignore paths for commands addressed to other bots outside the limiter.
+
+## Telegram chat work rate-limit buckets are never pruned
+
+**Severity:** Note - idle chat entries remain in `chat_work_rate_limit` after their timestamp deque has been drained.
+
+`src/telegram.rs:53-64` removes expired timestamps from each chat's `VecDeque`, but it leaves the per-chat map entry in place even when the deque becomes empty. A long-running relay that sees many one-off chat ids can retain empty buckets indefinitely.
+
+**Current behavior:**
+- Expired timestamps are popped from the per-chat deque.
+- Empty chat entries remain in `chat_work_rate_limit`.
+
+**Proposal:**
+- Remove a chat id from the map when its rate-limit deque becomes empty and the current update is not recorded.
+- Add focused coverage for the pruning behavior.
+
+## Authoritative reconnect confirmation discards its success signal
+
+**Severity:** Note - the authoritative snapshot reconnect path ignores the boolean returned by the shared reconnect-finish helper.
+
+`ui/src/app-live-state-transport.ts:392-395` calls `finishReconnectRecoveryConfirmation()` but does not return its result, unlike the live-event, delta-event, and state-event confirmation paths. The current helper always returns `true`, so this is not a runtime regression today, but it makes the authoritative path diverge from the others and can hide a future failure signal if the helper grows one.
+
+**Current behavior:**
+- Live, delta, and state confirmation helpers return the shared finish result.
+- Authoritative snapshot confirmation drops the shared finish result.
+
+**Proposal:**
+- Return the shared finish result from `confirmReconnectRecoveryFromAuthoritativeSnapshot()`.
+- Add a narrow reconnect transport test that pins the authoritative confirmation return behavior.
 
 ## Session store publication can race ahead of React session state
 
@@ -166,35 +222,6 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
 - Alternative: batch-measurement pass when the virtualization window shifts — hide the wrapper briefly, mount the newly-entering cards, wait for all their measurements, then reveal.
 - Not: raise the estimator cap. Large overshoots trade one visible artifact for a worse one.
 
-## Reconnect confirmation wrappers duplicate recovery side effects
-
-**Severity:** Low - the reconnect-state extraction left four transport wrappers repeating the same post-confirmation effects, so future recovery-state edits can drift between live, delta, state, and snapshot paths.
-
-`ui/src/app-live-state-transport.ts:347-399` calls `clearReconnectStateResyncTimeout()`, `resetReconnectStateResyncBackoff()`, and `setBackendConnectionState("connected")` in every `confirmReconnectRecoveryFrom*` wrapper. The preconditions are intentionally different, but the successful confirmation side effects are identical.
-
-**Current behavior:**
-- Live, delta, state, and authoritative snapshot confirmation paths each duplicate the same finalization calls.
-- The state-vs-delta proof asymmetry now lives in `ReconnectStateMachine`, but transport-side finalization can still diverge if a future edit updates only one wrapper.
-
-**Proposal:**
-- Extract a local reconnect-recovery finalizer or move the common side effects behind one transport helper.
-- Keep the distinct proof preconditions visible at the call sites or in `ReconnectStateMachine` docs.
-
-## Delegation marker ID validation accepts an empty suffix
-
-**Severity:** Low - the startup delegation-link repair parser accepts `delegation-` as a valid marker id even though generated delegation ids always include a non-empty suffix.
-
-`src/state_inner.rs:737-742` checks only `starts_with("delegation-")` and ASCII alphanumeric / hyphen characters. A malformed delegated-child bootstrap prompt with a bare `delegation-` id can still pass validation if the child-session line matches the current session.
-
-**Current behavior:**
-- `is_valid_delegation_marker_id("delegation-")` returns true.
-- The repair fallback can persist a syntactically empty delegation id as `parent_delegation_id`.
-- Negative marker tests do not pin the empty-suffix case.
-
-**Proposal:**
-- Require at least one valid id character after the `delegation-` prefix, or match the generated delegation-id shape more tightly.
-- Add coverage for the bare-prefix marker case.
-
 ## Implementation Tasks
 
 - [ ] P2: Cover first-chunk Telegram forward failure:
@@ -208,17 +235,21 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
 - [ ] P2: Add Telegram settings file concurrency regressions:
   simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
-  cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
+  cover API error display, stale default-session clearing, default-project auto-subscription, assistant-reply forwarding opt-in warning/save behavior, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
+- [ ] P2: Add Telegram API helper coverage for assistant-reply forwarding:
+  pin `forwardAssistantReplies` in status fixtures, frontend response typing, and `/api/telegram/config` request-body assertions so the UI cannot silently drop the opt-in field.
+- [ ] P2: Document Telegram assistant-reply forwarding environment configuration:
+  add `TERMAL_TELEGRAM_FORWARD_ASSISTANT_REPLIES` to the Telegram feature docs and describe the third-party content-forwarding impact.
+- [ ] P2: Add Telegram chat work rate-limit coverage:
+  cover action command limiting, free-text prompt limiting, the `telegram_chat_work_is_rate_limited` wrapper, read/select command limiter coverage, and empty bucket pruning.
+- [ ] P2: Add assistant-reply forwarding disabled-path regressions:
+  cover `sync_telegram_digest` and `select_telegram_project_session` with `forward_assistant_replies=false` so digest and selection paths cannot accidentally forward assistant replies.
+- [ ] P2: Clarify pending queued-prompt cancel tooltip behavior:
+  either restore/replace the removed `PendingPromptCard` `title` affordance or document the intentional aria-label-only behavior in the component/test coverage.
+- [ ] P2: Add authoritative reconnect confirmation return coverage:
+  assert `confirmReconnectRecoveryFromAuthoritativeSnapshot()` propagates the shared reconnect-finish result like the live, delta, and state confirmation paths.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
-- [ ] P2: Document delegation marker repair invariants:
-  add source comments for the delegation prompt-builder/parser contract, the leading-marker-only rule, the marker-id validator contract, the eager-stamp behavior of `session_mut_by_index` during startup repair, and the defense-in-depth checks that keep marker backfill from trusting quoted prompts.
-- [ ] P2: Add malformed delegation marker tail coverage:
-  spec-lock negative cases for bare `delegation-` ids, missing punctuation/newline after the delegated-child marker id, missing or mismatched `Child session:` lines, and malformed backtick tails so parser looseness cannot regress.
-- [ ] P2: Add delegation repair positive-pin coverage:
-  cover a valid-format but unmatched `parent_delegation_id` in `repair_delegation_child_session_links` so startup repair keeps legitimate-looking existing parent ids unchanged when no matching delegation row or marker-derived link exists.
-- [ ] P2: Cover reconnect authoritative-snapshot confirmation directly:
-  add a `ReconnectStateMachine.confirmAuthoritativeSnapshot()` unit test and brief method docs for boolean-return contracts, proof-flag side effects, and the intentional state/delta snapshot proof asymmetry.
 - [ ] P2: Add remaining production SQLite persistence coverage:
   with the SQLite runtime path now compiled under `cargo test`, cover targeted delta upsert, metadata-only update, hidden/deleted row removal, malformed SQLite row/load errors, and startup load assertions that exercise the split `app_state` / `sessions` / `delegations` tables directly.
 - [ ] P2: Restore Windows AppState bootstrap path-normalization coverage:

@@ -1632,6 +1632,8 @@ impl AppState {
 
 fn build_delegation_prompt(record: &DelegationRecord) -> String {
     let write_policy = delegation_prompt_write_policy(&record.write_policy);
+    // Keep the leading marker, `DelegationRecord::id`, and child-session line in
+    // lockstep with startup repair in `state_inner.rs`.
     format!(
         "{} `{}`.\n\
 \n\

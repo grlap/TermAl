@@ -78,6 +78,7 @@ impl TelegramStatusResponse {
         Self {
             configured,
             enabled: config.enabled,
+            forward_assistant_replies: config.forward_assistant_replies,
             running: relay.running,
             lifecycle: relay.lifecycle,
             linked_chat_id: state.chat_id,
@@ -122,6 +123,9 @@ impl AppState {
 
         if let Some(enabled) = request.enabled {
             file.config.enabled = enabled;
+        }
+        if let Some(forward_assistant_replies) = request.forward_assistant_replies {
+            file.config.forward_assistant_replies = forward_assistant_replies;
         }
         if let Some(bot_token) = request.bot_token {
             let bot_token = normalize_optional_secret(bot_token);
@@ -898,6 +902,7 @@ fn validate_telegram_target_id(label: &str, value: &str) -> Result<(), ApiError>
 
 fn telegram_configs_equal(left: &TelegramUiConfig, right: &TelegramUiConfig) -> bool {
     left.enabled == right.enabled
+        && left.forward_assistant_replies == right.forward_assistant_replies
         && left.subscribed_project_ids == right.subscribed_project_ids
         && left.default_project_id == right.default_project_id
         && left.default_session_id == right.default_session_id

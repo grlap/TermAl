@@ -10,9 +10,9 @@ describe("ReconnectStateMachine", () => {
 
     expect(state.confirmDeltaEvent()).toBe(false);
     expect(state.recoveryConfirmedSinceLastError).toBe(false);
-    expect(
-      state.confirmDeltaEvent({ eventSourceReadyStateIsOpen: true }),
-    ).toBe(true);
+    expect(state.confirmDeltaEvent({ eventSourceReadyStateIsOpen: true })).toBe(
+      true,
+    );
     expect(state.recoveryConfirmedSinceLastError).toBe(true);
   });
 
@@ -47,10 +47,24 @@ describe("ReconnectStateMachine", () => {
     expect(state.pendingBadLiveEventRecovery).toBe(true);
     expect(state.delegationRepairAdoptedSinceLastReconnectError).toBe(true);
 
-    expect(
-      state.confirmDeltaEvent({ eventSourceReadyStateIsOpen: true }),
-    ).toBe(true);
+    expect(state.confirmDeltaEvent({ eventSourceReadyStateIsOpen: true })).toBe(
+      true,
+    );
 
+    expect(state.pendingBadLiveEventRecovery).toBe(false);
+    expect(state.delegationRepairAdoptedSinceLastReconnectError).toBe(false);
+  });
+
+  it("treats authoritative snapshot adoption as confirmed recovery", () => {
+    const state = new ReconnectStateMachine();
+
+    state.onBadLiveEvent();
+    state.setLastDelegationRepairRequestedRevision(7);
+    expect(state.markDelegationRepairAdoptedIfCoversRevision(7, 7)).toBe(true);
+
+    state.confirmAuthoritativeSnapshot();
+
+    expect(state.recoveryConfirmedSinceLastError).toBe(true);
     expect(state.pendingBadLiveEventRecovery).toBe(false);
     expect(state.delegationRepairAdoptedSinceLastReconnectError).toBe(false);
   });

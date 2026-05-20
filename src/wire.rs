@@ -1087,6 +1087,8 @@ struct UpdateAppSettingsRequest {
 struct TelegramUiConfig {
     #[serde(default)]
     enabled: bool,
+    #[serde(default)]
+    forward_assistant_replies: bool,
     #[serde(default, skip_serializing)]
     bot_token: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1111,6 +1113,7 @@ enum TelegramLifecycle {
 struct TelegramStatusResponse {
     configured: bool,
     enabled: bool,
+    forward_assistant_replies: bool,
     running: bool,
     lifecycle: TelegramLifecycle,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1136,6 +1139,7 @@ struct TelegramStatusResponse {
 #[serde(rename_all = "camelCase")]
 struct UpdateTelegramConfigRequest {
     enabled: Option<bool>,
+    forward_assistant_replies: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_nullable_marker_field")]
     bot_token: Option<Option<String>>,
     subscribed_project_ids: Option<Vec<String>>,

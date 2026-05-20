@@ -36,6 +36,21 @@ fn parse_optional_i64_env(key: &str) -> Result<Option<i64>> {
         .transpose()
 }
 
+fn parse_optional_bool_env(key: &str) -> Result<Option<bool>> {
+    let Some(value) = std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    match value.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(Some(true)),
+        "0" | "false" | "no" | "off" => Ok(Some(false)),
+        _ => bail!("{key} must be one of true/false, yes/no, on/off, or 1/0"),
+    }
+}
+
 /// Returns the default TermAl API base URL.
 fn default_termal_api_base_url() -> String {
     let port = std::env::var("TERMAL_PORT")
@@ -206,6 +221,7 @@ struct TelegramBotConfig {
     bot_username: Option<String>,
     bot_token: String,
     chat_id: Option<i64>,
+    forward_assistant_replies: bool,
     poll_timeout_secs: u64,
     project_id: String,
     public_base_url: Option<String>,
@@ -228,6 +244,8 @@ impl TelegramBotConfig {
             .map(|value| value.trim().trim_end_matches('/').to_owned())
             .filter(|value| !value.is_empty());
         let chat_id = parse_optional_i64_env("TERMAL_TELEGRAM_CHAT_ID")?;
+        let forward_assistant_replies =
+            parse_optional_bool_env("TERMAL_TELEGRAM_FORWARD_ASSISTANT_REPLIES")?.unwrap_or(false);
         let poll_timeout_secs = std::env::var("TERMAL_TELEGRAM_POLL_TIMEOUT_SECS")
             .ok()
             .map(|value| {
@@ -245,6 +263,7 @@ impl TelegramBotConfig {
             bot_username: None,
             bot_token,
             chat_id,
+            forward_assistant_replies,
             poll_timeout_secs,
             project_id: project_id.clone(),
             public_base_url,
@@ -283,6 +302,7 @@ impl TelegramBotConfig {
             bot_username: None,
             bot_token,
             chat_id: file.state.chat_id,
+            forward_assistant_replies: file.config.forward_assistant_replies,
             poll_timeout_secs: TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS,
             project_id,
             public_base_url: None,

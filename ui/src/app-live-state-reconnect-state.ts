@@ -18,9 +18,7 @@ export type ReconnectRecoveryStateSnapshot = {
   readonly sawReconnectOpenSinceLastError: boolean;
 };
 
-export class ReconnectStateMachine
-  implements ReconnectRecoveryStateSnapshot
-{
+export class ReconnectStateMachine implements ReconnectRecoveryStateSnapshot {
   private allowReconnectRecoveryWithoutExplicitOpen = false;
   private lastDelegationRepairRequestedRevision: number | null = null;
   private reconnectErrorPendingLiveProof = false;
@@ -34,13 +32,14 @@ export class ReconnectStateMachine
     return this.reconnectRecoveryConfirmedSinceLastError;
   }
 
+  /** Records a browser `onopen` proof for the current EventSource cycle. */
   onSseOpen() {
     this.sawReconnectOpenSinceLastError = true;
   }
 
+  /** Starts a new reconnect cycle and reports whether the failed stream had opened. */
   onSseError() {
-    const hadReconnectOpenSinceLastError =
-      this.sawReconnectOpenSinceLastError;
+    const hadReconnectOpenSinceLastError = this.sawReconnectOpenSinceLastError;
     this.sawReconnectOpenSinceLastError = false;
     this.reconnectRecoveryConfirmedSinceLastError = false;
     this.pendingBadLiveEventRecovery = false;
@@ -54,6 +53,7 @@ export class ReconnectStateMachine
     return { hadReconnectOpenSinceLastError };
   }
 
+  /** Resets all recovery proofs before a user-triggered reconnect. */
   onManualRetry() {
     this.sawReconnectOpenSinceLastError = false;
     this.reconnectRecoveryConfirmedSinceLastError = false;
@@ -63,10 +63,12 @@ export class ReconnectStateMachine
     this.clearDelegationRepairProof();
   }
 
+  /** Allows one same-instance manual retry recovery to be proven by live data. */
   onManualRetrySameInstanceProgress() {
     this.allowReconnectRecoveryWithoutExplicitOpen = true;
   }
 
+  /** Marks the current live event as bad until an authoritative repair lands. */
   onBadLiveEvent() {
     this.pendingBadLiveEventRecovery = true;
     this.reconnectRecoveryConfirmedSinceLastError = false;
@@ -74,13 +76,11 @@ export class ReconnectStateMachine
     this.clearDelegationRepairProof();
   }
 
+  /** Records confirmed recovery when an explicit or allowed implicit open proof exists. */
   markRecoveryConfirmedAfterReopen({
     allowWithoutConfirmedOpen = false,
   }: ConfirmLiveEventOptions = {}) {
-    if (
-      !this.sawReconnectOpenSinceLastError &&
-      !allowWithoutConfirmedOpen
-    ) {
+    if (!this.sawReconnectOpenSinceLastError && !allowWithoutConfirmedOpen) {
       return false;
     }
 
@@ -88,6 +88,7 @@ export class ReconnectStateMachine
     return true;
   }
 
+  /** Confirms recovery from live data and clears pending repair proof flags. */
   confirmLiveEvent(options?: ConfirmLiveEventOptions) {
     if (!this.markRecoveryConfirmedAfterReopen(options)) {
       return false;
@@ -100,6 +101,7 @@ export class ReconnectStateMachine
     return true;
   }
 
+  /** Confirms recovery from a delta only when it cannot be stale buffered data. */
   confirmDeltaEvent({
     eventSourceReadyStateIsOpen = false,
   }: ConfirmSseEventOptions = {}) {
@@ -110,6 +112,7 @@ export class ReconnectStateMachine
     });
   }
 
+  /** Confirms recovery from a state snapshot, which may repair after a missed open. */
   confirmStateEvent({
     eventSourceReadyStateIsOpen = false,
   }: ConfirmSseEventOptions = {}) {
@@ -121,6 +124,7 @@ export class ReconnectStateMachine
     });
   }
 
+  /** Confirms recovery after an explicit `/api/state` repair snapshot is adopted. */
   confirmAuthoritativeSnapshot() {
     this.reconnectRecoveryConfirmedSinceLastError = true;
     this.pendingBadLiveEventRecovery = false;
@@ -129,10 +133,12 @@ export class ReconnectStateMachine
     this.clearDelegationRepairProof();
   }
 
+  /** Tracks the revision requested for delegation-repair snapshot adoption. */
   setLastDelegationRepairRequestedRevision(revision: number) {
     this.lastDelegationRepairRequestedRevision = revision;
   }
 
+  /** Marks delegation-repair proof once a snapshot covers the requested revision. */
   markDelegationRepairAdoptedIfCoversRevision(
     stateRevision: number,
     forceAdoptEqualOrNewerRevision: number | null,
@@ -149,6 +155,7 @@ export class ReconnectStateMachine
     return true;
   }
 
+  /** Clears transient proof that a delegation-repair snapshot was adopted. */
   clearDelegationRepairProof() {
     this.delegationRepairAdoptedSinceLastReconnectError = false;
     this.lastDelegationRepairRequestedRevision = null;

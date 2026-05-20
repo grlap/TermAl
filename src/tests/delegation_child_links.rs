@@ -157,6 +157,45 @@ fn delegation_marker_parser_requires_matching_child_session_id() {
 }
 
 #[test]
+fn delegation_marker_parser_rejects_bare_delegation_prefix() {
+    let (_inner, _parent_id, child_id) = delegation_link_inner();
+    let prompt =
+        format!("{DELEGATED_CHILD_SESSION_MARKER} `delegation-`.\n\nChild session: `{child_id}`\n");
+
+    assert_eq!(
+        delegation_id_from_delegated_child_marker(&prompt, &child_id).as_deref(),
+        None
+    );
+}
+
+#[test]
+fn delegation_marker_parser_rejects_malformed_prompt_tail() {
+    let (_inner, _parent_id, child_id) = delegation_link_inner();
+    let delegation_id = "delegation-malformed-tail-test";
+    let cases = [
+        format!(
+            "{DELEGATED_CHILD_SESSION_MARKER} `{delegation_id}`\n\nChild session: `{child_id}`\n"
+        ),
+        format!("{DELEGATED_CHILD_SESSION_MARKER} `{delegation_id}`."),
+        format!(
+            "{DELEGATED_CHILD_SESSION_MARKER} `{delegation_id}`.\n\nChild session: `{child_id}` extra\n"
+        ),
+        format!("{DELEGATED_CHILD_SESSION_MARKER} `{delegation_id}`.\n\nMode: Reviewer\n"),
+        format!(
+            "{DELEGATED_CHILD_SESSION_MARKER} `{delegation_id}.\n\nChild session: `{child_id}`\n"
+        ),
+    ];
+
+    for prompt in cases {
+        assert_eq!(
+            delegation_id_from_delegated_child_marker(&prompt, &child_id).as_deref(),
+            None,
+            "prompt should be rejected: {prompt:?}"
+        );
+    }
+}
+
+#[test]
 fn repair_delegation_child_session_links_ignores_quoted_marker_in_regular_session() {
     let (mut inner, _parent_id, child_id) = delegation_link_inner();
     push_text_message(
@@ -362,6 +401,34 @@ fn repair_delegation_child_session_links_clears_invalid_false_positive_parent_id
         None
     );
     assert!(inner.sessions[child_index].mutation_stamp > before_repair_stamp);
+}
+
+#[test]
+fn repair_delegation_child_session_links_keeps_unmatched_valid_parent_id() {
+    let (mut inner, _parent_id, child_id) = delegation_link_inner();
+    let child_index = inner
+        .find_session_index(&child_id)
+        .expect("session should exist");
+    inner.sessions[child_index].session.parent_delegation_id =
+        Some("delegation-existing-unmatched".to_owned());
+    let before_repair_stamp = inner.sessions[child_index].mutation_stamp;
+
+    inner.repair_delegation_child_session_links();
+
+    let child_index = inner
+        .find_session_index(&child_id)
+        .expect("session should still exist");
+    assert_eq!(
+        inner.sessions[child_index]
+            .session
+            .parent_delegation_id
+            .as_deref(),
+        Some("delegation-existing-unmatched")
+    );
+    assert_eq!(
+        inner.sessions[child_index].mutation_stamp,
+        before_repair_stamp
+    );
 }
 
 #[test]

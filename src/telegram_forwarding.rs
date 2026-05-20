@@ -56,15 +56,17 @@ fn sync_telegram_digest(
     // Forward assistant text on every poll, not only when the compact digest
     // changes. The forwarder has its own id+char-count dedupe, so this catches
     // fresh replies whose truncated digest preview stayed byte-identical.
-    dirty |= forward_relevant_assistant_messages(
-        telegram,
-        termal,
-        state,
-        chat_id,
-        selected_session_id
-            .as_deref()
-            .or(digest.primary_session_id.as_deref()),
-    );
+    if config.forward_assistant_replies {
+        dirty |= forward_relevant_assistant_messages(
+            telegram,
+            termal,
+            state,
+            chat_id,
+            selected_session_id
+                .as_deref()
+                .or(digest.primary_session_id.as_deref()),
+        );
+    }
 
     Ok(dirty)
 }

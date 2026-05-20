@@ -66,6 +66,8 @@ struct TelegramBotState {
     /// immediately before accepting a Telegram-originated prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     forward_next_assistant_message_session_id: Option<String>,
+    #[serde(skip)]
+    chat_work_rate_limit: HashMap<i64, VecDeque<std::time::Instant>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]

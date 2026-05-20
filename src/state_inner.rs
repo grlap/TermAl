@@ -185,6 +185,9 @@ impl StateInner {
     /// recover the link from the delegated-child marker persisted in the child
     /// prompt; this handles historical rows where the child session survived
     /// but the dedicated delegation table row did not.
+    ///
+    /// `session_mut_by_index` eagerly bumps the mutation stamp, so this repair
+    /// only calls it after deciding the row must change.
     fn repair_delegation_child_session_links(&mut self) {
         let mut links = self
             .delegations
@@ -232,6 +235,9 @@ impl StateInner {
             if !has_invalid_parent_id {
                 continue;
             }
+            // Marker-derived links use the same validator. Clearing only invalid
+            // ids preserves legitimate-looking parent ids that may be repaired
+            // once their delegation row returns.
             if let Some(record) = self.session_mut_by_index(child_index) {
                 record.session.parent_delegation_id = None;
             }
@@ -707,6 +713,9 @@ fn delegation_id_from_delegated_child_marker(
     text: &str,
     expected_child_session_id: &str,
 ) -> Option<String> {
+    // This mirrors `build_delegation_prompt`: the marker must be the leading
+    // prompt text, and the child-session line must match the repaired session.
+    // That keeps quoted prompts in ordinary sessions from becoming parent links.
     let after_marker = text.trim_start().strip_prefix(DELEGATED_CHILD_SESSION_MARKER)?;
     let after_opening_tick = after_marker.strip_prefix(" `")?;
     let closing_tick = after_opening_tick.find('`')?;
@@ -735,8 +744,11 @@ fn child_session_id_from_delegated_child_marker(text: &str) -> Option<&str> {
 }
 
 fn is_valid_delegation_marker_id(delegation_id: &str) -> bool {
-    delegation_id.starts_with("delegation-")
-        && delegation_id
+    let Some(suffix) = delegation_id.strip_prefix("delegation-") else {
+        return false;
+    };
+    !suffix.is_empty()
+        && suffix
             .chars()
             .all(|candidate| candidate.is_ascii_alphanumeric() || candidate == '-')
 }

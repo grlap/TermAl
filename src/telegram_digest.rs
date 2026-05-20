@@ -204,9 +204,11 @@ fn select_telegram_project_session(
     let changed = state.selected_session_id.as_deref() != Some(session.id.as_str());
     dirty |= changed;
     state.selected_session_id = Some(session.id.clone());
-    match prepare_assistant_forwarding_for_telegram_prompt(termal, &session.id) {
-        Ok(plan) => dirty |= apply_assistant_forwarding_plan(state, plan),
-        Err(err) => log_telegram_error("failed to baseline selected Telegram session", &err),
+    if config.forward_assistant_replies {
+        match prepare_assistant_forwarding_for_telegram_prompt(termal, &session.id) {
+            Ok(plan) => dirty |= apply_assistant_forwarding_plan(state, plan),
+            Err(err) => log_telegram_error("failed to baseline selected Telegram session", &err),
+        }
     }
     let label = telegram_session_label(session);
     telegram.send_message(

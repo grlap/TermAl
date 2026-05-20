@@ -32,8 +32,36 @@ struct TelegramPromptForwardOutcome {
     final_sync_satisfied: bool,
 }
 
+const TELEGRAM_CHAT_WORK_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
+const TELEGRAM_CHAT_WORK_RATE_LIMIT_MAX: usize = 20;
+const TELEGRAM_CHAT_WORK_RATE_LIMIT_TEXT: &str =
+    "Telegram actions are rate-limited. Try again in a moment.";
+
 fn telegram_prompt_exceeds_byte_limit(text: &str) -> bool {
     text.len() > MAX_DELEGATION_PROMPT_BYTES
+}
+
+fn telegram_chat_work_is_rate_limited(state: &mut TelegramBotState, chat_id: i64) -> bool {
+    telegram_chat_work_is_rate_limited_at(state, chat_id, std::time::Instant::now())
+}
+
+fn telegram_chat_work_is_rate_limited_at(
+    state: &mut TelegramBotState,
+    chat_id: i64,
+    now: std::time::Instant,
+) -> bool {
+    let entries = state.chat_work_rate_limit.entry(chat_id).or_default();
+    while entries
+        .front()
+        .is_some_and(|entry| now.duration_since(*entry) >= TELEGRAM_CHAT_WORK_RATE_LIMIT_WINDOW)
+    {
+        entries.pop_front();
+    }
+    if entries.len() >= TELEGRAM_CHAT_WORK_RATE_LIMIT_MAX {
+        return true;
+    }
+    entries.push_back(now);
+    false
 }
 
 fn handle_telegram_update(
@@ -143,6 +171,10 @@ fn handle_telegram_message_for_relay(
             )
             .map(TelegramUpdateHandlingOutcome::unsynced),
             TelegramIncomingCommand::Action(action_id) => {
+                if telegram_chat_work_is_rate_limited(state, chat_id) {
+                    telegram.send_message(chat_id, TELEGRAM_CHAT_WORK_RATE_LIMIT_TEXT, None)?;
+                    return Ok(TelegramUpdateHandlingOutcome::default());
+                }
                 let (project_id, mut dirty) = resolve_telegram_active_project_id(config, state);
                 match termal.dispatch_project_action(&project_id, action_id.as_str()) {
                     Ok(digest) => {
@@ -174,6 +206,10 @@ fn handle_telegram_message_for_relay(
             ),
             None,
         )?;
+        return Ok(TelegramUpdateHandlingOutcome::default());
+    }
+    if telegram_chat_work_is_rate_limited(state, chat_id) {
+        telegram.send_message(chat_id, TELEGRAM_CHAT_WORK_RATE_LIMIT_TEXT, None)?;
         return Ok(TelegramUpdateHandlingOutcome::default());
     }
 
@@ -242,6 +278,11 @@ fn handle_telegram_callback_query(
             return Ok(false);
         }
     };
+    if telegram_chat_work_is_rate_limited(state, chat_id) {
+        let _ =
+            telegram.answer_callback_query(&callback_query.id, TELEGRAM_CHAT_WORK_RATE_LIMIT_TEXT);
+        return Ok(false);
+    }
     let mut dirty = false;
     let digest = match termal.dispatch_project_action(&project_id, action_id.as_str()) {
         Ok(digest) => digest,
@@ -303,7 +344,9 @@ fn forward_telegram_text_to_project_for_relay(
     let (selected_session_id, selected_session_dirty) =
         resolve_telegram_selected_project_session(termal, &project_id, state)?;
     dirty |= selected_session_dirty;
-    if let Some(session_id) = selected_session_id.as_deref() {
+    if config.forward_assistant_replies
+        && let Some(session_id) = selected_session_id.as_deref()
+    {
         match ensure_selected_session_forwarding_baseline(termal, state, session_id) {
             Ok(changed) => dirty |= changed,
             Err(err) => log_telegram_error("failed to baseline selected Telegram session", &err),
@@ -324,12 +367,17 @@ fn forward_telegram_text_to_project_for_relay(
         });
     };
 
-    let pre_send_assistant_forwarding_plan =
-        prepare_assistant_forwarding_for_telegram_prompt(termal, session_id)?;
+    let pre_send_assistant_forwarding_plan = if config.forward_assistant_replies {
+        Some(prepare_assistant_forwarding_for_telegram_prompt(
+            termal, session_id,
+        )?)
+    } else {
+        None
+    };
     termal.send_session_message(session_id, text)?;
-    let assistant_forwarding_baseline_changed =
-        apply_assistant_forwarding_plan(state, pre_send_assistant_forwarding_plan);
-    dirty |= assistant_forwarding_baseline_changed;
+    if let Some(plan) = pre_send_assistant_forwarding_plan {
+        dirty |= apply_assistant_forwarding_plan(state, plan);
+    }
     let next_digest = match termal.get_project_digest(&project_id) {
         Ok(digest) => digest,
         Err(err) => {
@@ -358,8 +406,10 @@ fn forward_telegram_text_to_project_for_relay(
     // case where the agent finishes synchronously, and it keeps the
     // forward-once contract centralized at the few places digests
     // are sent.
-    dirty |=
-        forward_relevant_assistant_messages(telegram, termal, state, chat_id, Some(session_id));
+    if config.forward_assistant_replies {
+        dirty |=
+            forward_relevant_assistant_messages(telegram, termal, state, chat_id, Some(session_id));
+    }
     Ok(TelegramPromptForwardOutcome {
         dirty,
         final_sync_satisfied: true,

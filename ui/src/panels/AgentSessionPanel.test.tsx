@@ -625,6 +625,26 @@ describe("AgentSessionPanel conversation caching", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("does not attach a native tooltip to queued prompt cancel buttons", () => {
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        messages: [],
+        pendingPrompts: [
+          {
+            id: "pending-prompt-a",
+            timestamp: "10:02",
+            text: "Queued follow-up",
+          },
+        ],
+      }),
+      showWaitingIndicator: false,
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Cancel queued prompt" }),
+    ).not.toHaveAttribute("title");
+  });
+
   it("keeps the live-turn tail calm while assistant output grows above queued prompts", () => {
     const scrollNode = document.createElement("section");
     let scrollTop = 120;

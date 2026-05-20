@@ -344,6 +344,13 @@ export function useAppLiveStateTransport(
       return readyState === 1;
     }
 
+    function finishReconnectRecoveryConfirmation() {
+      clearReconnectStateResyncTimeout();
+      resetReconnectStateResyncBackoff();
+      setBackendConnectionState("connected");
+      return true;
+    }
+
     function confirmReconnectRecoveryFromLiveEvent({
       allowWithoutConfirmedOpen = false,
     }: { allowWithoutConfirmedOpen?: boolean } = {}): boolean {
@@ -355,10 +362,7 @@ export function useAppLiveStateTransport(
         return false;
       }
 
-      clearReconnectStateResyncTimeout();
-      resetReconnectStateResyncBackoff();
-      setBackendConnectionState("connected");
-      return true;
+      return finishReconnectRecoveryConfirmation();
     }
 
     function confirmReconnectRecoveryFromDeltaEvent() {
@@ -370,10 +374,7 @@ export function useAppLiveStateTransport(
         return false;
       }
 
-      clearReconnectStateResyncTimeout();
-      resetReconnectStateResyncBackoff();
-      setBackendConnectionState("connected");
-      return true;
+      return finishReconnectRecoveryConfirmation();
     }
 
     function confirmReconnectRecoveryFromStateEvent() {
@@ -385,17 +386,12 @@ export function useAppLiveStateTransport(
         return false;
       }
 
-      clearReconnectStateResyncTimeout();
-      resetReconnectStateResyncBackoff();
-      setBackendConnectionState("connected");
-      return true;
+      return finishReconnectRecoveryConfirmation();
     }
 
     function confirmReconnectRecoveryFromAuthoritativeSnapshot() {
       reconnectState.confirmAuthoritativeSnapshot();
-      clearReconnectStateResyncTimeout();
-      resetReconnectStateResyncBackoff();
-      setBackendConnectionState("connected");
+      finishReconnectRecoveryConfirmation();
     }
 
     function beginBadLiveEventRecovery() {

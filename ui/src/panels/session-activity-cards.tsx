@@ -113,7 +113,6 @@ export const PendingPromptCard = memo(function PendingPromptCard({
             type="button"
             onClick={onCancel}
             aria-label="Cancel queued prompt"
-            title="Cancel queued prompt"
           >
             x
           </button>
