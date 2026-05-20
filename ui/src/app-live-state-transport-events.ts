@@ -1,8 +1,9 @@
 // app-live-state-transport-events.ts
 //
 // Owns: EventSource event handlers for app-live-state-transport.
-// The surrounding transport hook owns timers, reconnect state flags,
-// EventSource setup/teardown, and the state-resync loop.
+// The surrounding transport hook owns timers, EventSource setup/teardown,
+// and the state-resync loop; app-live-state-reconnect-state owns the
+// reconnect proof flags consumed here.
 //
 // Split out of: ui/src/app-live-state-transport.ts.
 
@@ -49,16 +50,11 @@ import {
 } from "./backend-connection";
 import type { AdoptStateOptions } from "./app-live-state-types";
 import type { RequestStateResyncOptions } from "./app-live-state-resync-options";
+import type { ReconnectRecoveryStateSnapshot } from "./app-live-state-reconnect-state";
 
 type SessionHydrationOptions = {
   allowDivergentTextRepairAfterNewerRevision?: boolean;
   queueAfterCurrent?: boolean;
-};
-
-type TransportRecoveryStateSnapshot = {
-  readonly delegationRepairAdoptedSinceLastReconnectError: boolean;
-  readonly pendingBadLiveEventRecovery: boolean;
-  readonly sawReconnectOpenSinceLastError: boolean;
 };
 
 type AppLiveStateTransportEventHandlersContext = {
@@ -122,7 +118,7 @@ type AppLiveStateTransportEventHandlersContext = {
     now?: number,
     options?: { clearWatchdogCooldown?: boolean },
   ) => void;
-  transportState: TransportRecoveryStateSnapshot;
+  transportState: ReconnectRecoveryStateSnapshot;
   triggerRecoveryForDelta: (
     delta: DeltaEvent,
     options?: {

@@ -1270,6 +1270,9 @@ fn git_diff_worktree_reader_allows_non_utf8_symlink_targets() {
     if let Err(err) = fs::write(&target_path, "# Target\n") {
         fs::remove_dir_all(&repo_root).unwrap();
         if cfg!(target_os = "macos") && err.raw_os_error() == Some(92) {
+            // macOS can reject arbitrary non-UTF8 filenames with EILSEQ before
+            // the reader under test runs; skip only that platform filesystem
+            // limitation.
             return;
         }
         panic!("failed to create non-UTF-8 target path: {err}");

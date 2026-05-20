@@ -311,11 +311,17 @@ fn verify_scoped_write_path_after_parent_creation(
     Ok(normalize_user_facing_path(&canonical_parent.join(file_name)))
 }
 
-/// Normalizes user facing path.
+/// Normalizes user-facing paths for equality and containment checks.
+///
+/// Callers must apply this to both roots and candidates before comparing them:
+/// macOS can canonicalize public paths through `/private`, and Windows can
+/// return verbatim prefixes, so normalizing only one side can create false
+/// "outside project" results.
 fn normalize_user_facing_path(path: &FsPath) -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         for (private_prefix, public_prefix) in [
+            (FsPath::new("/private/etc"), FsPath::new("/etc")),
             (FsPath::new("/private/var"), FsPath::new("/var")),
             (FsPath::new("/private/tmp"), FsPath::new("/tmp")),
         ] {

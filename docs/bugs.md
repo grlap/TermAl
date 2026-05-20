@@ -91,20 +91,6 @@ the Implementation Tasks section.
 - Keep digest-only forwarding as the default for Telegram integrations.
 - Document the third-party content exposure and add any practical redaction/truncation before full forwarding.
 
-## Live transport reconnect state machine still needs transition extraction
-
-**Severity:** Low - `ui/src/app-live-state-transport.ts` is about 1,359 lines after the live-state split, but the reconnect/resync effect still coordinates several closure-local flags including `pendingBadLiveEventRecovery`, `allowReconnectRecoveryWithoutExplicitOpen`, and delegation repair proof state.
-
-**Current behavior:**
-- `ui/src/app-live-state.ts`, `ui/src/app-live-state-transport.ts`, `ui/src/app-live-state-transport-events.ts`, and `ui/src/app-live-state-render-schedulers.ts` are now under the TypeScript utility review threshold.
-- Reconnect transition state is focused in the transport module, but the flag set and transition rules are still implicit in nested effect helpers.
-- The missed-`onopen` reconnecting badge path and the delta-event direct `onerror`-with-`readyState === OPEN` branch now have regression coverage, but state-event recovery still does not consult the shared ready-state proof and some inline `readyState` peeks remain outside the helper.
-- The shared open-transition helper also resets the workspace-files-changed event gate from the health-watchdog path; that behavior should be documented or pinned in the transition helper when extracted.
-
-**Proposal:**
-- Extract a `ReconnectStateMachine` (or similar) module that owns the flag set + transitions and exposes named events (`onSseError`, `onSseReopen`, `onBadLiveEvent`, `onSnapshotAdopted`, `onLiveEventConfirmed`).
-- Add focused tests for the extracted transition helper before changing behavior, including state/delta direct `onerror` with `readyState === OPEN`, shared ready-state helper use, and the workspace-file event gate reset contract.
-
 ## Session store publication can race ahead of React session state
 
 **Severity:** Medium - the new `session-store` publishes some session slices before the corresponding React `sessions` state commits, so the UI can mix newer store-backed session data with older prop-derived session state in one render.
@@ -180,6 +166,35 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
 - Alternative: batch-measurement pass when the virtualization window shifts — hide the wrapper briefly, mount the newly-entering cards, wait for all their measurements, then reveal.
 - Not: raise the estimator cap. Large overshoots trade one visible artifact for a worse one.
 
+## Reconnect confirmation wrappers duplicate recovery side effects
+
+**Severity:** Low - the reconnect-state extraction left four transport wrappers repeating the same post-confirmation effects, so future recovery-state edits can drift between live, delta, state, and snapshot paths.
+
+`ui/src/app-live-state-transport.ts:347-399` calls `clearReconnectStateResyncTimeout()`, `resetReconnectStateResyncBackoff()`, and `setBackendConnectionState("connected")` in every `confirmReconnectRecoveryFrom*` wrapper. The preconditions are intentionally different, but the successful confirmation side effects are identical.
+
+**Current behavior:**
+- Live, delta, state, and authoritative snapshot confirmation paths each duplicate the same finalization calls.
+- The state-vs-delta proof asymmetry now lives in `ReconnectStateMachine`, but transport-side finalization can still diverge if a future edit updates only one wrapper.
+
+**Proposal:**
+- Extract a local reconnect-recovery finalizer or move the common side effects behind one transport helper.
+- Keep the distinct proof preconditions visible at the call sites or in `ReconnectStateMachine` docs.
+
+## Delegation marker ID validation accepts an empty suffix
+
+**Severity:** Low - the startup delegation-link repair parser accepts `delegation-` as a valid marker id even though generated delegation ids always include a non-empty suffix.
+
+`src/state_inner.rs:737-742` checks only `starts_with("delegation-")` and ASCII alphanumeric / hyphen characters. A malformed delegated-child bootstrap prompt with a bare `delegation-` id can still pass validation if the child-session line matches the current session.
+
+**Current behavior:**
+- `is_valid_delegation_marker_id("delegation-")` returns true.
+- The repair fallback can persist a syntactically empty delegation id as `parent_delegation_id`.
+- Negative marker tests do not pin the empty-suffix case.
+
+**Proposal:**
+- Require at least one valid id character after the `delegation-` prefix, or match the generated delegation-id shape more tightly.
+- Add coverage for the bare-prefix marker case.
+
 ## Implementation Tasks
 
 - [ ] P2: Cover first-chunk Telegram forward failure:
@@ -196,12 +211,14 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
-- [ ] P2: Add direct partial summary-message adoption coverage:
-  exercise `reconcileSummarySession` with an unloaded previous session, a shorter local message list, and a summary payload carrying partial messages; assert the partial messages are adopted without marking the session fully loaded.
-- [ ] P2: Align reconnect ready-state recovery paths:
-  make `confirmReconnectRecoveryFromStateEvent` use the same `eventSourceReadyStateIsOpen()` proof as delta recovery, replace remaining inline ready-state peeks with the helper where practical, and cover state-event plus delta-event direct `onerror`/OPEN recovery symmetry.
-- [ ] P2: Clarify macOS path-normalization review follow-ups:
-  document that `normalize_user_facing_path` must be applied to both sides of containment checks, annotate the macOS `EILSEQ`/errno-92 non-UTF8 symlink skip, and decide whether `/private/etc` needs the same user-facing firmlink rewrite coverage as `/private/var` and `/private/tmp`.
+- [ ] P2: Document delegation marker repair invariants:
+  add source comments for the delegation prompt-builder/parser contract, the leading-marker-only rule, the marker-id validator contract, the eager-stamp behavior of `session_mut_by_index` during startup repair, and the defense-in-depth checks that keep marker backfill from trusting quoted prompts.
+- [ ] P2: Add malformed delegation marker tail coverage:
+  spec-lock negative cases for bare `delegation-` ids, missing punctuation/newline after the delegated-child marker id, missing or mismatched `Child session:` lines, and malformed backtick tails so parser looseness cannot regress.
+- [ ] P2: Add delegation repair positive-pin coverage:
+  cover a valid-format but unmatched `parent_delegation_id` in `repair_delegation_child_session_links` so startup repair keeps legitimate-looking existing parent ids unchanged when no matching delegation row or marker-derived link exists.
+- [ ] P2: Cover reconnect authoritative-snapshot confirmation directly:
+  add a `ReconnectStateMachine.confirmAuthoritativeSnapshot()` unit test and brief method docs for boolean-return contracts, proof-flag side effects, and the intentional state/delta snapshot proof asymmetry.
 - [ ] P2: Add remaining production SQLite persistence coverage:
   with the SQLite runtime path now compiled under `cargo test`, cover targeted delta upsert, metadata-only update, hidden/deleted row removal, malformed SQLite row/load errors, and startup load assertions that exercise the split `app_state` / `sessions` / `delegations` tables directly.
 - [ ] P2: Restore Windows AppState bootstrap path-normalization coverage:

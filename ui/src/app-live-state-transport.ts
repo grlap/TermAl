@@ -17,7 +17,11 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from "react";
-import { fetchState, isBackendUnavailableError, type StateResponse } from "./api";
+import {
+  fetchState,
+  isBackendUnavailableError,
+  type StateResponse,
+} from "./api";
 import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
   LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,
@@ -62,10 +66,9 @@ import {
   RECONNECT_STATE_RESYNC_DELAY_MS,
   RECONNECT_STATE_RESYNC_MAX_DELAY_MS,
 } from "./app-shell-internals";
-import type {
-  AdoptStateOptions,
-} from "./app-live-state-types";
+import type { AdoptStateOptions } from "./app-live-state-types";
 import { createAppLiveStateTransportEventHandlers } from "./app-live-state-transport-events";
+import { ReconnectStateMachine } from "./app-live-state-reconnect-state";
 
 type SessionHydrationOptions = {
   allowDivergentTextRepairAfterNewerRevision?: boolean;
@@ -115,7 +118,9 @@ type UseAppLiveStateTransportParams = {
   setSseEpoch: Dispatch<SetStateAction<number>>;
   sseEpoch: number;
   sseRecoveryAttemptRef: MutableRefObject<number>;
-  sseRecoveryTimerRef: MutableRefObject<ReturnType<typeof window.setTimeout> | null>;
+  sseRecoveryTimerRef: MutableRefObject<ReturnType<
+    typeof window.setTimeout
+  > | null>;
   startSessionHydration: (
     sessionId: string,
     options?: SessionHydrationOptions,
@@ -179,23 +184,8 @@ export function useAppLiveStateTransport(
     let reconnectStateResyncTimeoutId: ReturnType<
       typeof window.setTimeout
     > | null = null;
-    let sawReconnectOpenSinceLastError = false;
-    let reconnectRecoveryConfirmedSinceLastError = false;
-    // Some browsers/proxies can resume delivering authoritative `state` frames
-    // after an error without an observable `onopen` in our handler order. Delta
-    // frames can be buffered from before the error, so only state events or
-    // cause-specific recovery contracts may use this as no-open live proof.
-    let reconnectErrorPendingLiveProof = false;
     let observedEventSourceOpen = false;
-    // True only between a bad reopened SSE payload and the next confirmed live
-    // event or outage reset. This separates "bad SSE needs proof" from
-    // ordinary reconnect wake-gap polling after `/api/state` progress.
-    // Invariant: producers set this only when sawReconnectOpenSinceLastError
-    // is true, and onerror clears both flags together for the next outage.
-    let pendingBadLiveEventRecovery = false;
-    let allowReconnectRecoveryWithoutExplicitOpen = false;
-    let delegationRepairAdoptedSinceLastReconnectError = false;
-    let lastDelegationRepairRequestedRevision: number | null = null;
+    const reconnectState = new ReconnectStateMachine();
     let nextReconnectStateResyncDelayMs = RECONNECT_STATE_RESYNC_DELAY_MS;
     let liveSessionResumeWatchdogIntervalId: ReturnType<
       typeof window.setInterval
@@ -309,24 +299,22 @@ export function useAppLiveStateTransport(
     }: { allowWithoutConfirmedOpen?: boolean } = {}) {
       // Call only from data-bearing SSE handlers. A bare EventSource `onopen`
       // means the socket handshook, not that fresh state is flowing again.
-      if (!sawReconnectOpenSinceLastError && !allowWithoutConfirmedOpen) {
+      if (
+        !reconnectState.markRecoveryConfirmedAfterReopen({
+          allowWithoutConfirmedOpen,
+        })
+      ) {
         return;
       }
 
-      reconnectRecoveryConfirmedSinceLastError = true;
       clearReconnectStateResyncTimeout();
       resetReconnectStateResyncBackoff();
-    }
-
-    function clearDelegationRepairReconnectProof() {
-      delegationRepairAdoptedSinceLastReconnectError = false;
-      lastDelegationRepairRequestedRevision = null;
     }
 
     function markEventSourceOpen() {
       observedEventSourceOpen = true;
       resetWorkspaceFilesChangedEventGate();
-      sawReconnectOpenSinceLastError = true;
+      reconnectState.onSseOpen();
       // Reset the post-CLOSED recovery counter and clear any pending
       // recovery timer — the live stream is healthy again, so the next
       // failure cycle should start fresh at the lowest backoff.
@@ -345,66 +333,73 @@ export function useAppLiveStateTransport(
       clearRecoveredBackendRequestError();
     }
 
-    function eventSourceReadyStateIsOpen() {
+    function readEventSourceReadyState() {
       const readyState = (eventSource as { readyState?: unknown }).readyState;
-      return typeof readyState === "number" && readyState === 1;
+      return typeof readyState === "number" ? readyState : null;
+    }
+
+    function eventSourceReadyStateIsOpen(
+      readyState = readEventSourceReadyState(),
+    ) {
+      return readyState === 1;
     }
 
     function confirmReconnectRecoveryFromLiveEvent({
       allowWithoutConfirmedOpen = false,
     }: { allowWithoutConfirmedOpen?: boolean } = {}): boolean {
-      const canConfirmWithoutOpen =
-        allowWithoutConfirmedOpen &&
-        (allowReconnectRecoveryWithoutExplicitOpen ||
-          reconnectErrorPendingLiveProof);
-      if (!sawReconnectOpenSinceLastError && !canConfirmWithoutOpen) {
+      if (
+        !reconnectState.confirmLiveEvent({
+          allowWithoutConfirmedOpen,
+        })
+      ) {
         return false;
       }
 
-      clearReconnectStateResyncTimeoutAfterConfirmedReopen({
-        allowWithoutConfirmedOpen: canConfirmWithoutOpen,
-      });
-      pendingBadLiveEventRecovery = false;
-      allowReconnectRecoveryWithoutExplicitOpen = false;
-      reconnectErrorPendingLiveProof = false;
-      clearDelegationRepairReconnectProof();
+      clearReconnectStateResyncTimeout();
+      resetReconnectStateResyncBackoff();
       setBackendConnectionState("connected");
       return true;
     }
 
     function confirmReconnectRecoveryFromDeltaEvent() {
-      return confirmReconnectRecoveryFromLiveEvent({
-        allowWithoutConfirmedOpen:
-          allowReconnectRecoveryWithoutExplicitOpen ||
-          eventSourceReadyStateIsOpen(),
-      });
+      if (
+        !reconnectState.confirmDeltaEvent({
+          eventSourceReadyStateIsOpen: eventSourceReadyStateIsOpen(),
+        })
+      ) {
+        return false;
+      }
+
+      clearReconnectStateResyncTimeout();
+      resetReconnectStateResyncBackoff();
+      setBackendConnectionState("connected");
+      return true;
     }
 
     function confirmReconnectRecoveryFromStateEvent() {
-      const allowWithoutConfirmedOpen =
-        allowReconnectRecoveryWithoutExplicitOpen ||
-        reconnectErrorPendingLiveProof;
-      return confirmReconnectRecoveryFromLiveEvent({
-        allowWithoutConfirmedOpen,
-      });
+      if (
+        !reconnectState.confirmStateEvent({
+          eventSourceReadyStateIsOpen: eventSourceReadyStateIsOpen(),
+        })
+      ) {
+        return false;
+      }
+
+      clearReconnectStateResyncTimeout();
+      resetReconnectStateResyncBackoff();
+      setBackendConnectionState("connected");
+      return true;
     }
 
     function confirmReconnectRecoveryFromAuthoritativeSnapshot() {
-      reconnectRecoveryConfirmedSinceLastError = true;
-      pendingBadLiveEventRecovery = false;
-      allowReconnectRecoveryWithoutExplicitOpen = false;
-      reconnectErrorPendingLiveProof = false;
+      reconnectState.confirmAuthoritativeSnapshot();
       clearReconnectStateResyncTimeout();
       resetReconnectStateResyncBackoff();
-      clearDelegationRepairReconnectProof();
       setBackendConnectionState("connected");
     }
 
     function beginBadLiveEventRecovery() {
-      pendingBadLiveEventRecovery = true;
-      reconnectRecoveryConfirmedSinceLastError = false;
-      allowReconnectRecoveryWithoutExplicitOpen = false;
-      clearDelegationRepairReconnectProof();
+      reconnectState.onBadLiveEvent();
       setBackendConnectionState("reconnecting");
       if (reconnectStateResyncTimeoutId === null) {
         scheduleReconnectStateResync();
@@ -537,9 +532,7 @@ export function useAppLiveStateTransport(
               rearmOnFailure,
               openSessionId,
               paneId,
-            } = consumePendingStateResyncOptions(
-              pendingStateResyncOptionsRef,
-            );
+            } = consumePendingStateResyncOptions(pendingStateResyncOptionsRef);
             const requestedRevision = latestStateRevisionRef.current;
             const requestedServerInstanceId =
               lastSeenServerInstanceIdRef.current;
@@ -688,7 +681,7 @@ export function useAppLiveStateTransport(
                 clearInitialStateResyncRetryTimeout();
                 if (
                   reconnectStateResyncTimeoutId !== null &&
-                  reconnectRecoveryConfirmedSinceLastError
+                  reconnectState.recoveryConfirmedSinceLastError
                 ) {
                   // Once live SSE data has confirmed recovery, an adopted
                   // snapshot can disarm any leftover reconnect fallback timer
@@ -711,12 +704,12 @@ export function useAppLiveStateTransport(
                 );
                 if (
                   !confirmReconnectRecoveryOnAdoption &&
-                  !reconnectRecoveryConfirmedSinceLastError &&
-                  lastDelegationRepairRequestedRevision !== null &&
-                  forceAdoptEqualOrNewerRevision !== null &&
-                  state.revision >= lastDelegationRepairRequestedRevision
+                  !reconnectState.recoveryConfirmedSinceLastError
                 ) {
-                  delegationRepairAdoptedSinceLastReconnectError = true;
+                  reconnectState.markDelegationRepairAdoptedIfCoversRevision(
+                    state.revision,
+                    forceAdoptEqualOrNewerRevision,
+                  );
                 }
                 if (confirmReconnectRecoveryOnAdoption) {
                   confirmReconnectRecoveryFromDeltaEvent();
@@ -747,7 +740,7 @@ export function useAppLiveStateTransport(
               clearRecoveredBackendRequestError();
               if (
                 rearmOnSuccess &&
-                !reconnectRecoveryConfirmedSinceLastError &&
+                !reconnectState.recoveryConfirmedSinceLastError &&
                 reconnectStateResyncTimeoutId === null
               ) {
                 const adoptedReplacementInstance =
@@ -769,7 +762,7 @@ export function useAppLiveStateTransport(
                   // In real EventSource delivery, a data event implies an open
                   // socket; tests may omit `onopen`, so a later data frame can
                   // satisfy this specific manual-retry contract.
-                  allowReconnectRecoveryWithoutExplicitOpen = true;
+                  reconnectState.onManualRetrySameInstanceProgress();
                 }
                 // Timer-driven reconnect fallbacks keep probing until a live
                 // EventSource data frame proves the SSE stream is healthy
@@ -778,7 +771,7 @@ export function useAppLiveStateTransport(
                 // assistant deltas will arrive.
                 const shouldRearmUntilLiveEvent =
                   rearmUntilLiveEventOnSuccess &&
-                  !reconnectRecoveryConfirmedSinceLastError;
+                  !reconnectState.recoveryConfirmedSinceLastError;
                 const carryManualRetryContractForward =
                   rearmAfterSameInstanceProgressUntilLiveEvent &&
                   shouldRearmUntilLiveEvent;
@@ -788,8 +781,8 @@ export function useAppLiveStateTransport(
                 // a replacement instance was adopted and should be confirmed.
                 const shouldRearmAfterSuccess =
                   shouldRearmUntilLiveEvent ||
-                  (pendingBadLiveEventRecovery &&
-                    !reconnectRecoveryConfirmedSinceLastError) ||
+                  (reconnectState.pendingBadLiveEventRecovery &&
+                    !reconnectState.recoveryConfirmedSinceLastError) ||
                   (requestedRevision !== null &&
                     latestStateRevisionRef.current === requestedRevision) ||
                   adoptedReplacementInstance;
@@ -867,7 +860,7 @@ export function useAppLiveStateTransport(
       }
 
       if (
-        reconnectRecoveryConfirmedSinceLastError &&
+        reconnectState.recoveryConfirmedSinceLastError &&
         !options?.preserveReconnectFallback
       ) {
         clearReconnectStateResyncTimeout();
@@ -876,11 +869,10 @@ export function useAppLiveStateTransport(
       // will only disarm it once a /api/state snapshot is actually adopted.
       // Coalesced resync requests retain the strongest semantics until the next
       // loop iteration consumes them.
-      pendingStateResyncOptionsRef.current =
-        coalescePendingStateResyncOptions(
-          pendingStateResyncOptionsRef.current,
-          options,
-        );
+      pendingStateResyncOptionsRef.current = coalescePendingStateResyncOptions(
+        pendingStateResyncOptionsRef.current,
+        options,
+      );
       stateResyncPendingRef.current = true;
       startStateResyncLoop();
     }
@@ -909,11 +901,7 @@ export function useAppLiveStateTransport(
         return;
       }
 
-      sawReconnectOpenSinceLastError = false;
-      reconnectRecoveryConfirmedSinceLastError = false;
-      pendingBadLiveEventRecovery = false;
-      allowReconnectRecoveryWithoutExplicitOpen = false;
-      reconnectErrorPendingLiveProof = false;
+      reconnectState.onManualRetry();
       clearInitialStateResyncRetryTimeout();
       clearReconnectStateResyncTimeout();
       resetReconnectStateResyncBackoff();
@@ -1132,20 +1120,10 @@ export function useAppLiveStateTransport(
       setIsLoading,
       setOrchestrators,
       setLastDelegationRepairRequestedRevision: (revision: number) => {
-        lastDelegationRepairRequestedRevision = revision;
+        reconnectState.setLastDelegationRepairRequestedRevision(revision);
       },
       startSessionHydration,
-      transportState: {
-        get delegationRepairAdoptedSinceLastReconnectError() {
-          return delegationRepairAdoptedSinceLastReconnectError;
-        },
-        get pendingBadLiveEventRecovery() {
-          return pendingBadLiveEventRecovery;
-        },
-        get sawReconnectOpenSinceLastError() {
-          return sawReconnectOpenSinceLastError;
-        },
-      },
+      transportState: reconnectState,
       clearInitialStateResyncRetryTimeout,
       shouldForceAdoptNextStateEvent,
       syncLiveSessionResumeWatchdogBaselines,
@@ -1170,19 +1148,11 @@ export function useAppLiveStateTransport(
         return;
       }
 
-      const hadReconnectOpenSinceLastError = sawReconnectOpenSinceLastError;
+      const { hadReconnectOpenSinceLastError } = reconnectState.onSseError();
       observedEventSourceOpen = false;
-      sawReconnectOpenSinceLastError = false;
-      reconnectRecoveryConfirmedSinceLastError = false;
-      pendingBadLiveEventRecovery = false;
-      allowReconnectRecoveryWithoutExplicitOpen = false;
-      reconnectErrorPendingLiveProof = true;
-      clearDelegationRepairReconnectProof();
       clearForceAdoptNextStateEvent();
-      const readyState = (eventSource as { readyState?: unknown }).readyState;
-      const eventSourceOpen =
-        typeof readyState === "number" && readyState === 1;
-      if (eventSourceOpen) {
+      const readyState = readEventSourceReadyState();
+      if (eventSourceReadyStateIsOpen(readyState)) {
         markEventSourceOpen();
         return;
       }
@@ -1205,9 +1175,7 @@ export function useAppLiveStateTransport(
       // backoff to avoid hammering the proxy. Numeric `2` instead of
       // `EventSource.CLOSED`: tests stub the global `EventSource` with
       // `EventSourceMock`, so `EventSource.CLOSED` is `undefined`.
-      const eventSourceClosed =
-        typeof readyState === "number" && readyState === 2;
-      if (eventSourceClosed && isOnline) {
+      if (readyState === 2 && isOnline) {
         scheduleSseEventSourceRecovery();
       }
 
@@ -1265,17 +1233,19 @@ export function useAppLiveStateTransport(
         return;
       }
 
-      const readyState = (eventSource as { readyState?: unknown }).readyState;
-      const isOpen = typeof readyState === "number" && readyState === 1;
-      if (isOpen) {
+      const readyState = readEventSourceReadyState();
+      if (eventSourceReadyStateIsOpen(readyState)) {
         sseStaleSinceMs = null;
-        if (!observedEventSourceOpen && !pendingBadLiveEventRecovery) {
+        if (
+          !observedEventSourceOpen &&
+          !reconnectState.pendingBadLiveEventRecovery
+        ) {
           markEventSourceOpen();
         }
         return;
       }
       observedEventSourceOpen = false;
-      if (typeof readyState !== "number") {
+      if (readyState === null) {
         // The mock used in tests leaves `readyState` undefined unless a
         // test explicitly opts in. Treat that as "watchdog inert" so
         // existing test scenarios are not perturbed.
@@ -1378,5 +1348,4 @@ export function useAppLiveStateTransport(
     // on mount and resets them on cleanup.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sseEpoch]);
-
 }

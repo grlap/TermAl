@@ -181,9 +181,12 @@ impl StateInner {
 
     /// Backfills the child-session parent pointer from persisted delegation
     /// records. This keeps older SQLite rows hidden in session lists even if
-    /// the `Session` row predates `parent_delegation_id`.
+    /// the `Session` row predates `parent_delegation_id`. As a fallback, also
+    /// recover the link from the delegated-child marker persisted in the child
+    /// prompt; this handles historical rows where the child session survived
+    /// but the dedicated delegation table row did not.
     fn repair_delegation_child_session_links(&mut self) {
-        let links = self
+        let mut links = self
             .delegations
             .iter()
             .map(|delegation| {
@@ -192,22 +195,45 @@ impl StateInner {
                     delegation.id.clone(),
                 )
             })
-            .collect::<Vec<_>>();
+            .collect::<BTreeMap<_, _>>();
 
-        for (child_session_id, delegation_id) in links {
-            let Some(child_index) = self.find_session_index(&child_session_id) else {
+        for record in &self.sessions {
+            if links.contains_key(&record.session.id) {
                 continue;
-            };
-            if self.sessions[child_index]
+            }
+            if let Some(delegation_id) = delegation_id_from_child_session_marker(record) {
+                links.insert(record.session.id.clone(), delegation_id);
+            }
+        }
+
+        for child_index in 0..self.sessions.len() {
+            let child_session_id = self.sessions[child_index].session.id.clone();
+            let expected_delegation_id = links.get(&child_session_id);
+            if let Some(delegation_id) = expected_delegation_id {
+                if self.sessions[child_index]
+                    .session
+                    .parent_delegation_id
+                    .as_deref()
+                    == Some(delegation_id.as_str())
+                {
+                    continue;
+                }
+                if let Some(record) = self.session_mut_by_index(child_index) {
+                    record.session.parent_delegation_id = Some(delegation_id.clone());
+                }
+                continue;
+            }
+
+            let has_invalid_parent_id = self.sessions[child_index]
                 .session
                 .parent_delegation_id
                 .as_deref()
-                == Some(delegation_id.as_str())
-            {
+                .is_some_and(|delegation_id| !is_valid_delegation_marker_id(delegation_id));
+            if !has_invalid_parent_id {
                 continue;
             }
             if let Some(record) = self.session_mut_by_index(child_index) {
-                record.session.parent_delegation_id = Some(delegation_id);
+                record.session.parent_delegation_id = None;
             }
         }
     }
@@ -656,4 +682,61 @@ impl StateInner {
             })
             .max_by_key(|project| project.root_path.len())
     }
+}
+
+fn delegation_id_from_child_session_marker(record: &SessionRecord) -> Option<String> {
+    record
+        .session
+        .messages
+        .first()
+        .and_then(|message| delegation_id_from_message_marker(message, &record.session.id))
+}
+
+fn delegation_id_from_message_marker(message: &Message, expected_child_session_id: &str) -> Option<String> {
+    match message {
+        Message::Text {
+            author: Author::You,
+            text,
+            ..
+        } => delegation_id_from_delegated_child_marker(text, expected_child_session_id),
+        _ => None,
+    }
+}
+
+fn delegation_id_from_delegated_child_marker(
+    text: &str,
+    expected_child_session_id: &str,
+) -> Option<String> {
+    let after_marker = text.trim_start().strip_prefix(DELEGATED_CHILD_SESSION_MARKER)?;
+    let after_opening_tick = after_marker.strip_prefix(" `")?;
+    let closing_tick = after_opening_tick.find('`')?;
+    let after_closing_tick = &after_opening_tick[closing_tick + 1..];
+    if !after_closing_tick.starts_with(".\n") && !after_closing_tick.starts_with(".\r\n") {
+        return None;
+    }
+    let delegation_id = normalize_optional_identifier(Some(&after_opening_tick[..closing_tick]))?;
+    if !is_valid_delegation_marker_id(delegation_id) {
+        return None;
+    }
+    let child_session_id = child_session_id_from_delegated_child_marker(text)?;
+    (child_session_id == expected_child_session_id).then(|| delegation_id.to_owned())
+}
+
+fn child_session_id_from_delegated_child_marker(text: &str) -> Option<&str> {
+    text.lines().find_map(|line| {
+        let after_label = line.strip_prefix("Child session:")?;
+        let after_opening_tick = after_label.strip_prefix(" `")?;
+        let closing_tick = after_opening_tick.find('`')?;
+        let after_closing_tick = &after_opening_tick[closing_tick + 1..];
+        after_closing_tick
+            .is_empty()
+            .then_some(&after_opening_tick[..closing_tick])
+    })
+}
+
+fn is_valid_delegation_marker_id(delegation_id: &str) -> bool {
+    delegation_id.starts_with("delegation-")
+        && delegation_id
+            .chars()
+            .all(|candidate| candidate.is_ascii_alphanumeric() || candidate == '-')
 }

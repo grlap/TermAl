@@ -2463,6 +2463,25 @@ fn normalize_git_repo_relative_path_rejects_windows_prefix_paths() {
     }
 }
 
+// Tests that macOS private firmlink targets are normalized for UI-facing paths.
+#[cfg(target_os = "macos")]
+#[test]
+fn normalize_user_facing_path_rewrites_macos_private_firmlinks() {
+    for (private_path, public_path) in [
+        ("/private/etc", "/etc"),
+        ("/private/etc/hosts", "/etc/hosts"),
+        ("/private/tmp", "/tmp"),
+        ("/private/tmp/termal", "/tmp/termal"),
+        ("/private/var", "/var"),
+        ("/private/var/folders", "/var/folders"),
+    ] {
+        assert_eq!(
+            normalize_user_facing_path(FsPath::new(private_path)),
+            PathBuf::from(public_path)
+        );
+    }
+}
+
 // Tests that read directory accepts project ID without session.
 #[tokio::test]
 async fn read_directory_accepts_project_id_without_session() {

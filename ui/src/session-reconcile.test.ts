@@ -313,6 +313,53 @@ describe("reconcileSessions", () => {
     expect(merged[0].pendingPrompts).toEqual([pendingPrompt]);
   });
 
+  it("adopts partial messages from unloaded summary sessions without marking them complete", () => {
+    const retainedMessage = {
+      id: "message-1",
+      type: "text" as const,
+      timestamp: "10:00",
+      author: "you" as const,
+      text: "Prompt",
+    };
+    const partialAssistantMessage = {
+      id: "message-2",
+      type: "text" as const,
+      timestamp: "10:01",
+      author: "assistant" as const,
+      text: "Partial answer",
+    };
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 3,
+        sessionMutationStamp: 10,
+        messages: [retainedMessage],
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 3,
+        sessionMutationStamp: 11,
+        messages: [
+          {
+            ...retainedMessage,
+          },
+          partialAssistantMessage,
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged).not.toBe(previous);
+    expect(merged[0].messagesLoaded).toBe(false);
+    expect(merged[0].messages).not.toBe(previous[0].messages);
+    expect(merged[0].messages[0]).toBe(previous[0].messages[0]);
+    expect(merged[0].messages[1]).toBe(partialAssistantMessage);
+    expect(merged[0].messageCount).toBe(3);
+  });
+
   it("reuses marker state when only valid color casing changed", () => {
     const marker = {
       id: "marker-1",
@@ -1235,7 +1282,9 @@ describe("reconcileSessions", () => {
   });
 
   it("replaces a session when the external session id changes", () => {
-    const previous = [makeSession("session-a", { externalSessionId: null, preview: "ready" })];
+    const previous = [
+      makeSession("session-a", { externalSessionId: null, preview: "ready" }),
+    ];
 
     const next = [
       makeSession("session-a", {
@@ -1248,7 +1297,9 @@ describe("reconcileSessions", () => {
 
     expect(merged).not.toBe(previous);
     expect(merged[0]).not.toBe(previous[0]);
-    expect(merged[0].externalSessionId).toBe("019cd7b9-551b-7200-9af4-afa006a74db7");
+    expect(merged[0].externalSessionId).toBe(
+      "019cd7b9-551b-7200-9af4-afa006a74db7",
+    );
   });
 
   it("replaces a session when the Codex thread state changes", () => {
@@ -1275,7 +1326,9 @@ describe("reconcileSessions", () => {
     expect(merged[0].codexThreadState).toBe("archived");
   });
   it("replaces a session when the project id changes", () => {
-    const previous = [makeSession("session-a", { projectId: "project-a", preview: "ready" })];
+    const previous = [
+      makeSession("session-a", { projectId: "project-a", preview: "ready" }),
+    ];
 
     const next = [
       makeSession("session-a", {
@@ -1414,5 +1467,4 @@ describe("reconcileSessions", () => {
     expect(merged[0].remoteId).toBe("ssh-lab");
     expect(merged[0].messages).toBe(previous[0].messages);
   });
-
 });
