@@ -253,6 +253,35 @@ mod state_broadcast_mailbox_tests {
             _ => panic!("expected snapshot to enqueue immediately"),
         }
     }
+
+    #[test]
+    fn state_broadcast_mailbox_drops_oldest_snapshot_when_delta_arrives_full() {
+        let mailbox = StateBroadcastMailbox::default();
+        mailbox.publish_snapshot(snapshot(7));
+        for index in 0..STATE_BROADCAST_MAILBOX_CAPACITY - 1 {
+            mailbox.publish_delta_payload(format!("delta-{index}"));
+        }
+        mailbox.publish_delta_payload("delta-over-capacity".to_owned());
+
+        let pending = mailbox.take_pending_for_test();
+        assert_eq!(pending.len(), STATE_BROADCAST_MAILBOX_CAPACITY);
+        match pending.first() {
+            Some(StateBroadcastWork::DeltaPayload(value)) => assert_eq!(value, "delta-0"),
+            _ => panic!("expected first retained item to be the first delta after dropped snapshot"),
+        }
+        match pending.last() {
+            Some(StateBroadcastWork::DeltaPayload(value)) => {
+                assert_eq!(value, "delta-over-capacity")
+            }
+            _ => panic!("expected over-capacity delta to enqueue immediately"),
+        }
+        assert!(
+            pending
+                .iter()
+                .all(|work| matches!(work, StateBroadcastWork::DeltaPayload(_))),
+            "snapshot head should be dropped as the oldest pending work"
+        );
+    }
 }
 
 const REMOTE_DELTA_REPLAY_CACHE_LIMIT: usize = 2048;

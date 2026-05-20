@@ -39,6 +39,37 @@ impl Drop for HttpRouteTestFiles {
     }
 }
 
+fn test_app_state_with_ordered_state_broadcaster() -> AppState {
+    let state = test_app_state();
+    let mailbox = Arc::new(StateBroadcastMailbox::default());
+    let state_events_for_broadcast = state.state_events.clone();
+    let delta_events_for_broadcast = state.delta_events.clone();
+    let mailbox_for_thread = mailbox.clone();
+
+    std::thread::Builder::new()
+        .name("termal-test-state-broadcast".to_owned())
+        .spawn(move || {
+            loop {
+                match mailbox_for_thread.recv_next() {
+                    StateBroadcastWork::Snapshot(snapshot) => {
+                        let payload = serde_json::to_string(&snapshot)
+                            .expect("test snapshot should serialize");
+                        let _ = state_events_for_broadcast.send(payload);
+                    }
+                    StateBroadcastWork::DeltaPayload(payload) => {
+                        let _ = delta_events_for_broadcast.send(payload);
+                    }
+                }
+            }
+        })
+        .expect("test state broadcaster thread should spawn");
+
+    AppState {
+        state_broadcast_mailbox: Some(mailbox),
+        ..state
+    }
+}
+
 // Pins `POST /api/sessions` — asserts 201 Created with a
 // `CreateSessionResponse` whose `session` field carries the normalized
 // workdir and default `Agent::Codex`. Guards against handler regressions
@@ -914,6 +945,83 @@ async fn state_events_route_streams_initial_state_and_live_deltas() {
     assert_eq!(delta["message"]["type"], "text");
     assert_eq!(delta["message"]["text"], "Live delta");
     let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins the production ordered state broadcaster, not only the raw SSE mux: a
+// full snapshot queued before a delta must reach `/api/events` before that
+// delta even when both are pending before the route is polled again.
+#[tokio::test]
+async fn state_events_route_preserves_queued_snapshot_before_following_delta() {
+    let state = test_app_state_with_ordered_state_broadcaster();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    let app = app_router(state.clone());
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+
+    let initial_event = next_sse_event(&mut body).await;
+    let (initial_name, initial_data) = parse_sse_event(&initial_event);
+    assert_eq!(initial_name, "state");
+    let initial_state: StateResponse =
+        serde_json::from_str(&initial_data).expect("initial SSE payload should parse");
+
+    let project_root =
+        std::env::temp_dir().join(format!("termal-ordered-sse-project-{}", Uuid::new_v4()));
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    state
+        .create_project(CreateProjectRequest {
+            name: Some("Ordered SSE Project".to_owned()),
+            root_path: project_root.to_string_lossy().into_owned(),
+            remote_id: default_local_remote_id(),
+        })
+        .expect("project creation should queue a state snapshot");
+    let message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Ordered delta".to_owned(),
+                expanded_text: None,
+            },
+        )
+        .expect("message creation should queue a following delta");
+
+    let snapshot_event = next_sse_event(&mut body).await;
+    let (snapshot_name, snapshot_data) = parse_sse_event(&snapshot_event);
+    assert_eq!(snapshot_name, "state");
+    let snapshot_state: StateResponse =
+        serde_json::from_str(&snapshot_data).expect("queued state payload should parse");
+    assert!(snapshot_state.revision > initial_state.revision);
+    assert!(
+        snapshot_state
+            .projects
+            .iter()
+            .any(|project| project.name == "Ordered SSE Project")
+    );
+
+    let delta_event = next_sse_event(&mut body).await;
+    let (delta_name, delta_data) = parse_sse_event(&delta_event);
+    assert_eq!(delta_name, "delta");
+    let delta: Value = serde_json::from_str(&delta_data).expect("delta SSE payload should parse");
+    assert_eq!(delta["type"], "messageCreated");
+    assert_eq!(delta["sessionId"], session_id);
+    assert_eq!(delta["messageId"], message_id);
+    assert!(delta["revision"].as_u64().unwrap() > snapshot_state.revision);
+
+    let _ = fs::remove_dir_all(project_root);
 }
 
 #[tokio::test]

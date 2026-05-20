@@ -7,6 +7,22 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Ordered SSE route coverage test is not deterministic enough
+
+**Severity:** Medium - the new `/api/events` ordered-broadcaster regression can pass without proving every overflow/drop-repair path it is meant to guard, and the helper thread has no deterministic handoff.
+
+`src/tests/http_routes.rs:947-1025` verifies snapshot-before-delta ordering through a test `StateBroadcastMailbox`, but the spawned broadcaster thread races independently of the test body. The test also asserts only monotonic revision advancement rather than the exact expected ordering/revision contract after the queued work is drained.
+
+**Current behavior:**
+- The route-level test covers normal snapshot-before-delta ordering.
+- The mailbox overflow/drop-repair route contract remains unpinned.
+- The test-owned broadcaster thread has no explicit synchronization or shutdown path.
+
+**Proposal:**
+- Add a deterministic test broadcaster harness or handoff point so queued snapshot/delta work is known to be pending before assertions.
+- Extend route-level coverage to the mailbox capacity/drop-repair path and assert exact revision/order expectations.
+- Give the test broadcaster helper a clean shutdown path, or scope it so leaked helper threads cannot accumulate across repeated test runs.
+
 ## `forward_new_assistant_message_outcome` is still ~450 lines with interleaved early-returns
 
 **Severity:** Note - `src/telegram_forwarding.rs:452-899`. The forwarding path now mixes active-baseline transitions, footer retry, chunk retry/skip state, and visible-content suppression. Future contributors will struggle to trace which baseline shape is preserved across the merge.
@@ -198,10 +214,8 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
 - [ ] P2: Add equal-revision gap repair snapshot adoption coverage:
   skip a non-session revision, optimistically apply a later session delta, then return `/api/state` at the same revision and assert the skipped global state is adopted instead of rejected as stale.
-- [ ] P2: Add end-to-end ordered SSE broadcaster coverage:
-  exercise `/api/events` with a queued state snapshot followed by deltas and assert the emitted stream preserves the required recovery/order contract, including mailbox capacity/drop-repair behavior.
-- [ ] P2: Cover state-broadcast mailbox snapshot-head overflow:
-  publish a snapshot followed by enough deltas to fill the queue, then publish one more delta and assert the dropped-head Snapshot case matches the documented drop-oldest repair contract.
+- [ ] P2: Add ordered SSE broadcaster overflow/drop-repair route coverage:
+  exercise `/api/events` through an `AppState` with the ordered state-broadcast mailbox, drive mailbox or downstream broadcast overflow, and assert the stream emits the expected lagged/recovery state behavior while preserving exact revision ordering after repair.
 - [ ] P2: Add remaining production SQLite persistence coverage:
   with the SQLite runtime path now compiled under `cargo test`, cover targeted delta upsert, metadata-only update, hidden/deleted row removal, malformed SQLite row/load errors, and startup load assertions that exercise the split `app_state` / `sessions` / `delegations` tables directly.
 - [ ] P2: Restore Windows AppState bootstrap path-normalization coverage:
