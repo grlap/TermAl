@@ -32,6 +32,14 @@ Read each file to get:
 
 ## Step 3: Run reviewers
 
+If this session prompt contains `You are a delegated child session for TermAl delegation`,
+run reviewer lenses inline only. In that delegated-child mode, do not use Task tool calls or TermAl delegation MCP tools. Do not spawn reviewers through Claude
+Task agents, Codex subagents, shell-launched agents, TermAl nested delegations
+via `termal_spawn_session`, raw HTTP reviewers, or nested review commands. The
+disallowed nested paths are Claude Task agents, Codex subagents, shell-launched agents, TermAl nested delegations via `termal_spawn_session`,
+raw HTTP reviewers, and nested review commands. In the final summary, state
+that nested reviewer spawning was intentionally skipped.
+
 Run each reviewer lens in this same session using the prompt below as the lens checklist. Do not launch TermAl delegations, Claude Task agents, Codex subagents, shell-launched agents, raw HTTP reviewers, or nested review commands from `/review-local`; use `/review-with-delegate` for cross-agent delegated review.
 
 For each reviewer found in Step 3, use this prompt:

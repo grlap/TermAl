@@ -244,7 +244,8 @@ export function useComposerAutoResize(activeSessionId: string | null) {
 
   useEffect(() => {
     const textarea = composerInputRef.current;
-    if (!textarea || typeof ResizeObserver === "undefined") {
+    const ResizeObserverCtor = globalThis.ResizeObserver;
+    if (!textarea || typeof ResizeObserverCtor !== "function") {
       return;
     }
 
@@ -257,7 +258,7 @@ export function useComposerAutoResize(activeSessionId: string | null) {
     let previousAvailablePanelHeight =
       panelSlotElement?.clientHeight ??
       (panelElement instanceof HTMLElement ? panelElement.clientHeight : 0);
-    const resizeObserver = new ResizeObserver((entries) => {
+    const resizeObserver = new ResizeObserverCtor((entries) => {
       const nextWidth =
         entries.find((entry) => entry.target === textarea)?.contentRect.width ??
         textarea.getBoundingClientRect().width;

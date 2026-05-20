@@ -208,6 +208,16 @@ fn canonicalize_path_with_existing_ancestor(path: &FsPath) -> Result<PathBuf, Ap
             .map_err(|err| ApiError::internal(format!("failed to resolve cwd: {err}")))?
             .join(path)
     };
+    if absolute.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::CurDir | std::path::Component::ParentDir
+        )
+    }) {
+        return Err(ApiError::bad_request(
+            "new file paths cannot contain unresolved `.` or `..` components",
+        ));
+    }
 
     let mut suffix = Vec::<std::ffi::OsString>::new();
     let mut probe = absolute.as_path();
@@ -303,6 +313,21 @@ fn verify_scoped_write_path_after_parent_creation(
 
 /// Normalizes user facing path.
 fn normalize_user_facing_path(path: &FsPath) -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        for (private_prefix, public_prefix) in [
+            (FsPath::new("/private/var"), FsPath::new("/var")),
+            (FsPath::new("/private/tmp"), FsPath::new("/tmp")),
+        ] {
+            if path == private_prefix {
+                return public_prefix.to_path_buf();
+            }
+            if let Ok(rest) = path.strip_prefix(private_prefix) {
+                return public_prefix.join(rest);
+            }
+        }
+    }
+
     #[cfg(windows)]
     {
         let raw = path.to_string_lossy();

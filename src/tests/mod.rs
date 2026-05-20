@@ -1102,7 +1102,12 @@ fn test_sleep_child() -> Child {
     }
 }
 
-struct TestKillChildProcessFailureGuard;
+static TEST_KILL_CHILD_PROCESS_FAILURE_MUTEX: std::sync::LazyLock<std::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
+struct TestKillChildProcessFailureGuard {
+    _scope: std::sync::MutexGuard<'static, ()>,
+}
 
 impl Drop for TestKillChildProcessFailureGuard {
     fn drop(&mut self) {
@@ -1114,8 +1119,11 @@ fn force_test_kill_child_process_failure(
     process: &Arc<SharedChild>,
     label: &str,
 ) -> TestKillChildProcessFailureGuard {
+    let scope = TEST_KILL_CHILD_PROCESS_FAILURE_MUTEX
+        .lock()
+        .expect("test kill-child-process failure mutex poisoned");
     set_test_kill_child_process_failure(Some(label), Some(process));
-    TestKillChildProcessFailureGuard
+    TestKillChildProcessFailureGuard { _scope: scope }
 }
 
 fn test_codex_runtime_handle(

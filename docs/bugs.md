@@ -98,12 +98,12 @@ the Implementation Tasks section.
 **Current behavior:**
 - `ui/src/app-live-state.ts`, `ui/src/app-live-state-transport.ts`, `ui/src/app-live-state-transport-events.ts`, and `ui/src/app-live-state-render-schedulers.ts` are now under the TypeScript utility review threshold.
 - Reconnect transition state is focused in the transport module, but the flag set and transition rules are still implicit in nested effect helpers.
-- The missed-`onopen` reconnecting badge path now has a regression test, but the direct `onerror`-with-`readyState === OPEN` branch still lacks focused coverage.
+- The missed-`onopen` reconnecting badge path and the delta-event direct `onerror`-with-`readyState === OPEN` branch now have regression coverage, but state-event recovery still does not consult the shared ready-state proof and some inline `readyState` peeks remain outside the helper.
 - The shared open-transition helper also resets the workspace-files-changed event gate from the health-watchdog path; that behavior should be documented or pinned in the transition helper when extracted.
 
 **Proposal:**
 - Extract a `ReconnectStateMachine` (or similar) module that owns the flag set + transitions and exposes named events (`onSseError`, `onSseReopen`, `onBadLiveEvent`, `onSnapshotAdopted`, `onLiveEventConfirmed`).
-- Add focused tests for the extracted transition helper before changing behavior, including direct `onerror` with `readyState === OPEN` and the workspace-file event gate reset contract.
+- Add focused tests for the extracted transition helper before changing behavior, including state/delta direct `onerror` with `readyState === OPEN`, shared ready-state helper use, and the workspace-file event gate reset contract.
 
 ## Session store publication can race ahead of React session state
 
@@ -196,6 +196,12 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
+- [ ] P2: Add direct partial summary-message adoption coverage:
+  exercise `reconcileSummarySession` with an unloaded previous session, a shorter local message list, and a summary payload carrying partial messages; assert the partial messages are adopted without marking the session fully loaded.
+- [ ] P2: Align reconnect ready-state recovery paths:
+  make `confirmReconnectRecoveryFromStateEvent` use the same `eventSourceReadyStateIsOpen()` proof as delta recovery, replace remaining inline ready-state peeks with the helper where practical, and cover state-event plus delta-event direct `onerror`/OPEN recovery symmetry.
+- [ ] P2: Clarify macOS path-normalization review follow-ups:
+  document that `normalize_user_facing_path` must be applied to both sides of containment checks, annotate the macOS `EILSEQ`/errno-92 non-UTF8 symlink skip, and decide whether `/private/etc` needs the same user-facing firmlink rewrite coverage as `/private/var` and `/private/tmp`.
 - [ ] P2: Add remaining production SQLite persistence coverage:
   with the SQLite runtime path now compiled under `cargo test`, cover targeted delta upsert, metadata-only update, hidden/deleted row removal, malformed SQLite row/load errors, and startup load assertions that exercise the split `app_state` / `sessions` / `delegations` tables directly.
 - [ ] P2: Restore Windows AppState bootstrap path-normalization coverage:

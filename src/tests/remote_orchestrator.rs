@@ -1619,27 +1619,23 @@ fn focused_remote_state_sync_rolls_back_proxy_sessions_when_orchestrator_localiz
     );
     drop(inner);
 
-    let persisted: Value = serde_json::from_slice(
-        &fs::read(state.persistence_path.as_path()).expect("persisted state file should exist"),
-    )
-    .expect("persisted state should deserialize");
-    let persisted_sessions = persisted["sessions"]
-        .as_array()
-        .expect("persisted sessions should be present");
+    let persisted_connection =
+        rusqlite::Connection::open(state.persistence_path.as_path()).unwrap();
+    let persisted_sessions =
+        load_session_records_from_sqlite(&persisted_connection, state.persistence_path.as_path())
+            .expect("persisted sessions should load");
     assert_eq!(persisted_sessions.len(), initial_session_count);
-    assert!(!persisted_sessions.iter().any(|candidate| {
-        candidate["remoteSessionId"] == Value::String("remote-session-2".to_owned())
-    }));
+    assert!(
+        !persisted_sessions.iter().any(|candidate| {
+            candidate.remote_session_id.as_deref() == Some("remote-session-2")
+        })
+    );
     let persisted_focused = persisted_sessions
         .iter()
-        .find(|candidate| {
-            candidate["remoteSessionId"] == Value::String("remote-session-1".to_owned())
-        })
+        .find(|candidate| candidate.remote_session_id.as_deref() == Some("remote-session-1"))
         .expect("focused mirrored session should persist");
-    assert_eq!(
-        persisted_focused["session"]["preview"],
-        Value::String("Focused sync updated.".to_owned())
-    );
+    assert_eq!(persisted_focused.session.preview, "Focused sync updated.");
+    let persisted = sqlite_metadata_state_value(state.persistence_path.as_path());
     let persisted_orchestrator_instances = persisted["orchestratorInstances"].as_array();
     assert!(persisted_orchestrator_instances.map_or(true, |instances| {
         !instances

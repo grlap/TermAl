@@ -213,12 +213,13 @@ export function ThemePicker({
     listElement.addEventListener("scroll", updateScrollState);
     window.addEventListener("resize", updateScrollState);
 
+    const ResizeObserverCtor = globalThis.ResizeObserver;
     const resizeObserver =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(() => {
+      typeof ResizeObserverCtor === "function"
+        ? new ResizeObserverCtor(() => {
             updateScrollState();
-          });
+          })
+        : null;
 
     resizeObserver?.observe(listElement);
 

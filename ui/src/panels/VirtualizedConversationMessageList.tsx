@@ -3061,10 +3061,14 @@ export function VirtualizedConversationMessageList({
     node.addEventListener("touchcancel", recordTouchEnd, { passive: true });
     node.addEventListener("keydown", markUserScroll);
     node.addEventListener("mousedown", cancelBottomFollowOnMouseDown);
-    const resizeObserver = new ResizeObserver(() => {
-      syncViewport();
-    });
-    resizeObserver.observe(node);
+    const ResizeObserverCtor = globalThis.ResizeObserver;
+    const resizeObserver =
+      typeof ResizeObserverCtor === "function"
+        ? new ResizeObserverCtor(() => {
+            syncViewport();
+          })
+        : null;
+    resizeObserver?.observe(node);
 
     return () => {
       node.removeEventListener("scroll", onNativeScroll);
@@ -3076,7 +3080,7 @@ export function VirtualizedConversationMessageList({
       node.removeEventListener("touchcancel", recordTouchEnd);
       node.removeEventListener("keydown", markUserScroll);
       node.removeEventListener("mousedown", cancelBottomFollowOnMouseDown);
-      resizeObserver.disconnect();
+      resizeObserver?.disconnect();
     };
   }, [
     applyMountedPageRange,
@@ -3330,19 +3334,23 @@ const MeasuredPageBand = memo(function MeasuredPageBand({
     };
 
     measure();
-    const resizeObserver = new ResizeObserver(() => {
-      if (frameId !== 0) {
-        return;
-      }
-      frameId = window.requestAnimationFrame(measure);
-    });
-    resizeObserver.observe(node);
+    const ResizeObserverCtor = globalThis.ResizeObserver;
+    const resizeObserver =
+      typeof ResizeObserverCtor === "function"
+        ? new ResizeObserverCtor(() => {
+            if (frameId !== 0) {
+              return;
+            }
+            frameId = window.requestAnimationFrame(measure);
+          })
+        : null;
+    resizeObserver?.observe(node);
     Array.from(node.querySelectorAll(".virtualized-message-slot")).forEach((slotNode) => {
-      resizeObserver.observe(slotNode);
+      resizeObserver?.observe(slotNode);
     });
 
     return () => {
-      resizeObserver.disconnect();
+      resizeObserver?.disconnect();
       if (frameId !== 0) {
         window.cancelAnimationFrame(frameId);
       }

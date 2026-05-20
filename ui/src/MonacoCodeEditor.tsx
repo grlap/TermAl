@@ -252,12 +252,15 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
       emitStatus();
     });
 
-    resizeObserverRef.current = new ResizeObserver(() => {
-      window.requestAnimationFrame(layoutEditor);
-    });
-    resizeObserverRef.current.observe(container);
-    if (container.parentElement) {
-      resizeObserverRef.current.observe(container.parentElement);
+    const ResizeObserverCtor = globalThis.ResizeObserver;
+    if (typeof ResizeObserverCtor === "function") {
+      resizeObserverRef.current = new ResizeObserverCtor(() => {
+        window.requestAnimationFrame(layoutEditor);
+      });
+      resizeObserverRef.current.observe(container);
+      if (container.parentElement) {
+        resizeObserverRef.current.observe(container.parentElement);
+      }
     }
 
     window.requestAnimationFrame(() => {
@@ -490,7 +493,14 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
       return;
     }
 
-    const observer = new ResizeObserver((entries) => {
+    const ResizeObserverCtor = globalThis.ResizeObserver;
+    if (typeof ResizeObserverCtor !== "function") {
+      inlineZoneResizeObserverRef.current?.disconnect();
+      inlineZoneResizeObserverRef.current = null;
+      return;
+    }
+
+    const observer = new ResizeObserverCtor((entries) => {
       const editorAlive = editorRef.current;
       if (!editorAlive) {
         return;

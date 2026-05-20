@@ -345,6 +345,11 @@ export function useAppLiveStateTransport(
       clearRecoveredBackendRequestError();
     }
 
+    function eventSourceReadyStateIsOpen() {
+      const readyState = (eventSource as { readyState?: unknown }).readyState;
+      return typeof readyState === "number" && readyState === 1;
+    }
+
     function confirmReconnectRecoveryFromLiveEvent({
       allowWithoutConfirmedOpen = false,
     }: { allowWithoutConfirmedOpen?: boolean } = {}): boolean {
@@ -370,7 +375,8 @@ export function useAppLiveStateTransport(
     function confirmReconnectRecoveryFromDeltaEvent() {
       return confirmReconnectRecoveryFromLiveEvent({
         allowWithoutConfirmedOpen:
-          allowReconnectRecoveryWithoutExplicitOpen,
+          allowReconnectRecoveryWithoutExplicitOpen ||
+          eventSourceReadyStateIsOpen(),
       });
     }
 

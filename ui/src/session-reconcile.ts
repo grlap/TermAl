@@ -202,8 +202,15 @@ function reconcileSummarySession(
   const pendingPrompts = previous.pendingPrompts;
   const nextMessageCount =
     typeof next.messageCount === "number" ? next.messageCount : null;
+  const shouldAdoptPartialMessages =
+    next.messages.length > 0 &&
+    previous.messagesLoaded !== true &&
+    previous.messages.length < next.messages.length;
+  const messages = shouldAdoptPartialMessages
+    ? reconcileMessages(previous.messages, next.messages)
+    : previous.messages;
   const hasCompleteMessages =
-    nextMessageCount === null || previous.messages.length >= nextMessageCount;
+    nextMessageCount === null || messages.length >= nextMessageCount;
   const previousMutationStamp = previous.sessionMutationStamp ?? null;
   const nextMutationStamp = next.sessionMutationStamp ?? null;
   const hasDifferentKnownSummaryMutation =
@@ -223,6 +230,7 @@ function reconcileSummarySession(
   if (
     sameSessionSummary(previous, next) &&
     pendingPrompts === previous.pendingPrompts &&
+    messages === previous.messages &&
     previous.messagesLoaded === messagesLoaded
   ) {
     return previous;
@@ -230,7 +238,7 @@ function reconcileSummarySession(
 
   const base = {
     ...next,
-    messages: previous.messages,
+    messages,
     messagesLoaded,
   };
   if (pendingPrompts) {

@@ -456,6 +456,70 @@ describe("deferred session-store sync", () => {
     );
   });
 
+  it("clears reconnecting when an applied delta arrives on an open stream after a missed open event", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const session = makeSession({
+      messagesLoaded: true,
+      messageCount: 1,
+      preview: "Partial output.",
+      messages: [
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Partial output.",
+        },
+      ],
+    });
+    const params = makeLiveStateParams(session);
+    const setBackendConnectionState = vi.fn();
+    params.stateSetters.setBackendConnectionState = setBackendConnectionState;
+    params.adoptionRefs.latestStateRevisionRef.current = 2;
+    params.adoptionRefs.sessionsRef.current = [session];
+
+    renderLiveStateHarness(params, () => {});
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      eventSource?.dispatchError();
+    });
+    expect(setBackendConnectionState).toHaveBeenCalledWith("reconnecting");
+
+    act(() => {
+      if (eventSource) {
+        eventSource.readyState = 1;
+      }
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "textReplace",
+        revision: 3,
+        sessionId: session.id,
+        messageId: "message-assistant-1",
+        messageIndex: 0,
+        messageCount: 1,
+        text: "Recovered live output.",
+        preview: "Recovered live output.",
+        sessionMutationStamp: 3,
+      });
+    });
+
+    expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(3);
+    expect(params.adoptionRefs.sessionsRef.current[0]?.preview).toBe(
+      "Recovered live output.",
+    );
+    expect(setBackendConnectionState).toHaveBeenLastCalledWith("connected");
+  });
+
   it("keeps reconnecting when automatic fallback adopts a newer idle snapshot", async () => {
     vi.useFakeTimers();
     vi.stubGlobal(

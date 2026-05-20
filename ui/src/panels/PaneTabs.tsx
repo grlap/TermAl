@@ -549,12 +549,16 @@ export const PaneTabs = memo(function PaneTabs({
     scheduleUpdate();
     node.addEventListener("scroll", scheduleUpdate, { passive: true });
 
-    const resizeObserver = new ResizeObserver(scheduleUpdate);
-    resizeObserver.observe(node);
+    const ResizeObserverCtor = globalThis.ResizeObserver;
+    const resizeObserver =
+      typeof ResizeObserverCtor === "function"
+        ? new ResizeObserverCtor(scheduleUpdate)
+        : null;
+    resizeObserver?.observe(node);
 
     return () => {
       node.removeEventListener("scroll", scheduleUpdate);
-      resizeObserver.disconnect();
+      resizeObserver?.disconnect();
     };
   }, [paneId, tabs.length]);
 

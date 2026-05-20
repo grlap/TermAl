@@ -558,6 +558,7 @@ export function MarkdownContent({
 
     const ResizeObserverConstructor = window.ResizeObserver;
     const resizeObserver = ResizeObserverConstructor
+      && typeof ResizeObserverConstructor === "function"
       ? new ResizeObserverConstructor(scheduleLineMarkerUpdate)
       : null;
     resizeObserver?.observe(root);

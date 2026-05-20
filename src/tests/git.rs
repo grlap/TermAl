@@ -1267,7 +1267,13 @@ fn git_diff_worktree_reader_allows_non_utf8_symlink_targets() {
     let symlink_path = repo_root.join("link.md");
 
     fs::create_dir_all(&repo_root).unwrap();
-    fs::write(&target_path, "# Target\n").unwrap();
+    if let Err(err) = fs::write(&target_path, "# Target\n") {
+        fs::remove_dir_all(&repo_root).unwrap();
+        if cfg!(target_os = "macos") && err.raw_os_error() == Some(92) {
+            return;
+        }
+        panic!("failed to create non-UTF-8 target path: {err}");
+    }
     std::os::unix::fs::symlink(&target_path, &symlink_path).unwrap();
 
     let content = read_git_worktree_text(&repo_root, "link.md").unwrap();

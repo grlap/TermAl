@@ -214,12 +214,15 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
       modifiedEditor.revealPosition({ lineNumber: lastLine + 1, column: 1 });
     });
 
-    resizeObserverRef.current = new ResizeObserver(() => {
-      window.requestAnimationFrame(layoutEditor);
-    });
-    resizeObserverRef.current.observe(container);
-    if (container.parentElement) {
-      resizeObserverRef.current.observe(container.parentElement);
+    const ResizeObserverCtor = globalThis.ResizeObserver;
+    if (typeof ResizeObserverCtor === "function") {
+      resizeObserverRef.current = new ResizeObserverCtor(() => {
+        window.requestAnimationFrame(layoutEditor);
+      });
+      resizeObserverRef.current.observe(container);
+      if (container.parentElement) {
+        resizeObserverRef.current.observe(container.parentElement);
+      }
     }
 
     window.requestAnimationFrame(() => {
