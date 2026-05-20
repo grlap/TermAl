@@ -208,8 +208,6 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   race a late background commit against `shutdown_persist_blocking()` and prove the final persisted state reflects the latest `StateInner`, not an older worker-drained delta.
 - [ ] P2: Add concurrent shutdown idempotency race coverage:
   call `shutdown_persist_blocking()` concurrently from two `AppState` clones and assert `persist_worker_alive` cannot flip false until the join owner has returned.
-- [ ] P2: Add graceful-shutdown open-SSE coverage:
-  cover both shutdown-before-connect and shutdown-after-initial-state through `/api/events`, and assert the stream exits within a timeout so the persist drain is reached.
 - [ ] P2: Add shutdown persist failure retry coverage:
   force the final shutdown persist attempt to fail once and then succeed, and assert the worker does not exit before the successful write.
 - [ ] P2: Add non-send action restart live-stream delta-on-recreated-stream coverage:
