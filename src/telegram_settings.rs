@@ -2,21 +2,23 @@
 Telegram settings HTTP surface.
 
 This owns the UI-facing config/status/test endpoints for the Telegram relay.
+The UI config source of truth is `StateInner.preferences.telegram`, committed
+through `commit_locked()` so revisions, snapshots, and SSE all observe changes.
 The relay loop still reads flat runtime fields from `telegram-bot.json`; the
-settings file format below keeps those fields flat and adds a `config` object
-for UI-owned fields. The bot token is stored in the OS
-credential store; any legacy plaintext `config.botToken` value is migrated out
-of this JSON file on read.
+settings file keeps those fields flat and mirrors a `config` object for adapter
+interop and legacy migration. The bot token is stored in the OS credential
+store; any legacy plaintext `config.botToken` value is migrated out of this JSON
+file on read.
 
 Locking invariant: file I/O uses `telegram_settings_file_guard()`, and callers
 must not hold the main app state mutex while acquiring that guard. This module
-may briefly read app state while holding the file guard for validation, but it
-must release app state before writing to disk.
+may briefly read or commit app state while holding the file guard, but it must
+release app state before writing `telegram-bot.json` to disk.
 
-File ownership invariant: the UI settings endpoints own the nested `config`
-object, while the Telegram relay owns the legacy flat runtime fields
-(`chatId`, update cursor, assistant-forwarding cursors, selected project/session).
-Any writer must preserve the other half.
+File ownership invariant: app state owns the UI config. The nested file
+`config` object is only a mirror, while the Telegram relay owns the flat runtime
+fields (`chatId`, update cursor, assistant-forwarding cursors, selected
+project/session). Any writer must preserve the other half.
 
 Recovery invariant: status reads tolerate stale project/session references by
 sanitizing and persisting the repaired config. User updates first scrub stale
@@ -96,12 +98,17 @@ impl AppState {
 
     fn telegram_status(&self) -> Result<TelegramStatusResponse, ApiError> {
         let _guard = telegram_settings_file_guard();
-        let (mut file, mut changed) = self.load_telegram_bot_file_migrating_plaintext_token()?;
-        changed |= self.sanitize_telegram_config_for_current_state_in_place(&mut file.config);
-        if changed {
+        let (mut file, mut file_changed) =
+            self.load_telegram_bot_file_migrating_plaintext_token()?;
+        let mut config = self.telegram_config_for_loaded_file(&file);
+        self.sanitize_telegram_config_for_current_state_in_place(&mut config);
+        config.bot_token = None;
+        self.commit_telegram_config_if_changed(config.clone())?;
+        file_changed |= mirror_telegram_config_to_file(&mut file, &config);
+        if file_changed {
             self.persist_telegram_bot_file(&file)?;
         }
-        self.telegram_status_from_file(file)
+        self.telegram_status_from_parts(config, file.state)
     }
 
     fn update_telegram_config(
@@ -109,22 +116,24 @@ impl AppState {
         request: UpdateTelegramConfigRequest,
     ) -> Result<TelegramStatusResponse, ApiError> {
         let _guard = telegram_settings_file_guard();
-        let (mut file, migrated_plaintext_token) =
+        let (mut file, mut file_changed) =
             self.load_telegram_bot_file_migrating_plaintext_token()?;
-        if migrated_plaintext_token {
+        if file_changed {
             self.persist_telegram_bot_file(&file)?;
+            file_changed = false;
         }
         // Layering is intentional: first tolerate/scrub stale persisted
         // project/session references, then validate the user's patch strictly.
-        file.config = self.sanitize_telegram_config_for_current_state(file.config);
+        let mut config = self
+            .sanitize_telegram_config_for_current_state(self.telegram_config_for_loaded_file(&file));
         let saved_bot_token = self.saved_telegram_bot_token()?;
         let mut requested_bot_token = None;
 
         if let Some(enabled) = request.enabled {
-            file.config.enabled = enabled;
+            config.enabled = enabled;
         }
         if let Some(forward_assistant_replies) = request.forward_assistant_replies {
-            file.config.forward_assistant_replies = forward_assistant_replies;
+            config.forward_assistant_replies = forward_assistant_replies;
         }
         if let Some(bot_token) = request.bot_token {
             let bot_token = normalize_optional_secret(bot_token);
@@ -134,14 +143,14 @@ impl AppState {
             requested_bot_token = Some(bot_token);
         }
         if let Some(project_ids) = request.subscribed_project_ids {
-            file.config.subscribed_project_ids = normalize_project_id_list(project_ids)?;
+            config.subscribed_project_ids = normalize_project_id_list(project_ids)?;
         }
         if let Some(project_id) = request.default_project_id {
-            file.config.default_project_id =
+            config.default_project_id =
                 normalize_optional_id(project_id, "default Telegram project id")?;
         }
         if let Some(session_id) = request.default_session_id {
-            file.config.default_session_id =
+            config.default_session_id =
                 normalize_optional_id(session_id, "default Telegram session id")?;
         }
 
@@ -150,22 +159,26 @@ impl AppState {
             .map(|value| value.is_some())
             .unwrap_or_else(|| telegram_bot_token_is_configured(saved_bot_token.as_deref()));
         self.validate_and_normalize_telegram_config_with_token_status(
-            &mut file.config,
+            &mut config,
             bot_token_configured,
         )?;
         // Re-sanitize after validation so a concurrent project/session delete
         // cannot leave references that the next status read would hide.
-        file.config = self.sanitize_telegram_config_for_current_state(file.config);
+        config = self.sanitize_telegram_config_for_current_state(config);
         match requested_bot_token {
             Some(Some(token)) => self.save_telegram_bot_token(&token)?,
             Some(None) => self.delete_saved_telegram_bot_token()?,
             None => {}
         }
-        file.config.bot_token = None;
-        self.persist_telegram_bot_file(&file)?;
-        self.reconcile_telegram_relay_for_loaded_file(&file);
+        config.bot_token = None;
+        self.commit_telegram_config_if_changed(config.clone())?;
+        file_changed |= mirror_telegram_config_to_file(&mut file, &config);
+        if file_changed {
+            self.persist_telegram_bot_file(&file)?;
+        }
+        self.reconcile_telegram_relay_for_config_and_state(config.clone(), file.state.clone());
 
-        self.telegram_status_from_file(file)
+        self.telegram_status_from_parts(config, file.state)
     }
 
     fn test_telegram_connection(
@@ -200,19 +213,55 @@ impl AppState {
         })
     }
 
-    fn telegram_status_from_file(
+    fn telegram_status_from_parts(
         &self,
-        file: TelegramBotFile,
+        config: TelegramUiConfig,
+        telegram_state: TelegramBotState,
     ) -> Result<TelegramStatusResponse, ApiError> {
-        let config = self.sanitize_telegram_config_for_current_state(file.config);
         let relay = self.telegram_relay_status_snapshot();
         let bot_token = self.saved_telegram_bot_token()?;
         Ok(TelegramStatusResponse::from_telegram_settings(
             config,
-            file.state,
+            telegram_state,
             relay,
             bot_token.as_deref(),
         ))
+    }
+
+    fn telegram_config_from_state(&self) -> TelegramUiConfig {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        inner.preferences.telegram.clone()
+    }
+
+    fn telegram_config_for_loaded_file(&self, file: &TelegramBotFile) -> TelegramUiConfig {
+        let committed = self.telegram_config_from_state();
+        let default = TelegramUiConfig::default();
+        if telegram_configs_equal(&committed, &default)
+            && !telegram_configs_equal(&file.config, &default)
+        {
+            let mut legacy = file.config.clone();
+            legacy.bot_token = None;
+            return legacy;
+        }
+        committed
+    }
+
+    fn commit_telegram_config_if_changed(
+        &self,
+        mut config: TelegramUiConfig,
+    ) -> Result<bool, ApiError> {
+        config.bot_token = None;
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if telegram_configs_equal(&inner.preferences.telegram, &config)
+            && inner.preferences.telegram.bot_token.is_none()
+        {
+            return Ok(false);
+        }
+        inner.preferences.telegram = config;
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist Telegram settings: {err:#}"))
+        })?;
+        Ok(true)
     }
 
     fn load_telegram_bot_file(&self) -> Result<TelegramBotFile, ApiError> {
@@ -361,57 +410,79 @@ impl AppState {
 
     fn prune_telegram_config_for_deleted_project(&self, project_id: &str) -> Result<(), ApiError> {
         let _guard = telegram_settings_file_guard();
-        let (mut file, migrated_plaintext_token) =
+        let (mut file, mut file_changed) =
             self.load_telegram_bot_file_migrating_plaintext_token()?;
-        let before = file.config.clone();
+        let mut config = self.telegram_config_for_loaded_file(&file);
+        let before = config.clone();
 
-        file.config
+        config
             .subscribed_project_ids
             .retain(|candidate| candidate != project_id);
-        if file.config.default_project_id.as_deref() == Some(project_id) {
-            file.config.default_project_id = None;
-            file.config.default_session_id = None;
+        if config.default_project_id.as_deref() == Some(project_id) {
+            config.default_project_id = None;
+            config.default_session_id = None;
         }
-        if telegram_config_is_enabled_without_project_target(&file.config) {
-            file.config.enabled = false;
+        if telegram_config_is_enabled_without_project_target(&config) {
+            config.enabled = false;
         }
+        config.bot_token = None;
 
-        let config_changed = !telegram_configs_equal(&before, &file.config);
-        if !migrated_plaintext_token && !config_changed {
+        let config_changed = !telegram_configs_equal(&before, &config);
+        if config_changed {
+            self.commit_telegram_config_if_changed(config.clone())?;
+        }
+        file_changed |= mirror_telegram_config_to_file(&mut file, &config);
+        if !file_changed {
+            if config_changed {
+                self.reconcile_telegram_relay_for_config_and_state(config, file.state);
+            }
             return Ok(());
         }
 
         self.persist_telegram_bot_file(&file)?;
         if config_changed {
-            self.reconcile_telegram_relay_for_loaded_file(&file);
+            self.reconcile_telegram_relay_for_config_and_state(config, file.state);
         }
         Ok(())
     }
 
     fn prune_telegram_state_for_deleted_session(&self, session_id: &str) -> Result<(), ApiError> {
         let _guard = telegram_settings_file_guard();
-        let (mut file, mut changed) = self.load_telegram_bot_file_migrating_plaintext_token()?;
+        let (mut file, mut file_changed) =
+            self.load_telegram_bot_file_migrating_plaintext_token()?;
+        let mut config = self.telegram_config_for_loaded_file(&file);
+        let before_config = config.clone();
 
-        changed |= file
+        file_changed |= file
             .state
             .assistant_forwarding_cursors
             .remove(session_id)
             .is_some();
-        changed |= clear_forward_next_assistant_message_session_id(&mut file.state, session_id);
+        file_changed |=
+            clear_forward_next_assistant_message_session_id(&mut file.state, session_id);
         if file.state.selected_session_id.as_deref() == Some(session_id) {
-            changed |= clear_telegram_project_scoped_state(&mut file.state);
+            file_changed |= clear_telegram_project_scoped_state(&mut file.state);
         }
-        if file.config.default_session_id.as_deref() == Some(session_id) {
-            file.config.default_session_id = None;
-            changed = true;
+        if config.default_session_id.as_deref() == Some(session_id) {
+            config.default_session_id = None;
         }
+        config.bot_token = None;
 
-        if !changed {
+        let config_changed = !telegram_configs_equal(&before_config, &config);
+        if config_changed {
+            self.commit_telegram_config_if_changed(config.clone())?;
+        }
+        file_changed |= mirror_telegram_config_to_file(&mut file, &config);
+
+        if !file_changed {
+            if config_changed {
+                self.reconcile_telegram_relay_for_config_and_state(config, file.state);
+            }
             return Ok(());
         }
 
         self.persist_telegram_bot_file(&file)?;
-        self.reconcile_telegram_relay_for_loaded_file(&file);
+        self.reconcile_telegram_relay_for_config_and_state(config, file.state);
         Ok(())
     }
 
@@ -475,8 +546,20 @@ impl AppState {
     fn reconcile_telegram_relay_from_saved_settings(&self) {
         let _guard = telegram_settings_file_guard();
         match self.load_telegram_bot_file_migrating_plaintext_token() {
-            Ok((file, migrated_plaintext_token)) => {
-                if migrated_plaintext_token {
+            Ok((mut file, mut file_changed)) => {
+                let mut config = self.telegram_config_for_loaded_file(&file);
+                self.sanitize_telegram_config_for_current_state_in_place(&mut config);
+                config.bot_token = None;
+                if let Err(err) = self.commit_telegram_config_if_changed(config.clone()) {
+                    eprintln!(
+                        "telegram settings> failed to commit relay config for startup: {}",
+                        sanitize_telegram_log_detail(&err.message)
+                    );
+                    self.stop_telegram_relay_runtime();
+                    return;
+                }
+                file_changed |= mirror_telegram_config_to_file(&mut file, &config);
+                if file_changed {
                     if let Err(err) = self.persist_telegram_bot_file(&file) {
                         eprintln!(
                             "telegram settings> failed to persist migrated relay config for startup: {}",
@@ -486,7 +569,7 @@ impl AppState {
                         return;
                     }
                 }
-                self.reconcile_telegram_relay_for_loaded_file(&file);
+                self.reconcile_telegram_relay_for_config_and_state(config, file.state);
             }
             Err(err) => {
                 eprintln!(
@@ -498,9 +581,11 @@ impl AppState {
         }
     }
 
-    fn reconcile_telegram_relay_for_loaded_file(&self, file: &TelegramBotFile) {
-        let mut file = file.clone();
-        file.config = self.sanitize_telegram_config_for_current_state(file.config);
+    fn reconcile_telegram_relay_for_config_and_state(
+        &self,
+        config: TelegramUiConfig,
+        state: TelegramBotState,
+    ) {
         let bot_token = match self.saved_telegram_bot_token() {
             Ok(bot_token) => bot_token,
             Err(err) => {
@@ -512,6 +597,7 @@ impl AppState {
                 return;
             }
         };
+        let file = TelegramBotFile { config, state };
         match TelegramBotConfig::from_ui_file(&self.default_workdir, &file, bot_token) {
             Ok(config) => self.start_telegram_relay_runtime(config),
             Err(_reason) => self.stop_telegram_relay_runtime(),
@@ -905,6 +991,17 @@ fn telegram_configs_equal(left: &TelegramUiConfig, right: &TelegramUiConfig) -> 
         && left.subscribed_project_ids == right.subscribed_project_ids
         && left.default_project_id == right.default_project_id
         && left.default_session_id == right.default_session_id
+}
+
+fn mirror_telegram_config_to_file(file: &mut TelegramBotFile, config: &TelegramUiConfig) -> bool {
+    let mut mirrored = config.clone();
+    mirrored.bot_token = None;
+    let changed =
+        !telegram_configs_equal(&file.config, &mirrored) || file.config.bot_token.is_some();
+    if changed {
+        file.config = mirrored;
+    }
+    changed
 }
 
 fn telegram_config_is_enabled_without_project_target(config: &TelegramUiConfig) -> bool {

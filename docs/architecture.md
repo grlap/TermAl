@@ -409,7 +409,7 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 ~/.termal/
 |-- termal.sqlite          # primary store: app_state + sessions + delegations tables (+ WAL/-shm sidecars)
 |-- orchestrators.json     # reusable orchestrator templates
-`-- telegram-bot.json      # optional Telegram relay metadata/state; bot token lives in OS credential store
+`-- telegram-bot.json      # optional Telegram relay runtime metadata/state; UI config is mirrored from app_state
 ```
 
 Background persistence favors UI responsiveness over hard-kill durability. A

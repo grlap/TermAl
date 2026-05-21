@@ -187,6 +187,15 @@ export type AppPreferences = {
   defaultClaudeApprovalMode: ClaudeApprovalMode;
   defaultClaudeEffort: ClaudeEffortLevel;
   remotes?: RemoteConfig[] | null;
+  telegram?: TelegramUiConfig | null;
+};
+
+export type TelegramUiConfig = {
+  enabled?: boolean;
+  forwardAssistantReplies?: boolean;
+  subscribedProjectIds?: string[];
+  defaultProjectId?: string | null;
+  defaultSessionId?: string | null;
 };
 
 export type Project = {

@@ -362,6 +362,8 @@ struct AppPreferences {
     default_claude_effort: ClaudeEffortLevel,
     #[serde(default = "default_remote_configs")]
     remotes: Vec<RemoteConfig>,
+    #[serde(default, skip_serializing_if = "telegram_ui_config_is_default")]
+    telegram: TelegramUiConfig,
 }
 
 impl Default for AppPreferences {
@@ -376,6 +378,7 @@ impl Default for AppPreferences {
             default_claude_approval_mode: default_claude_approval_mode(),
             default_claude_effort: default_claude_effort(),
             remotes: default_remote_configs(),
+            telegram: TelegramUiConfig::default(),
         }
     }
 }

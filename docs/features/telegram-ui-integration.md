@@ -94,14 +94,16 @@ requires a stronger per-turn boundary from the session or agent layer.
 
 ## Storage
 
-Runtime and UI configuration metadata are stored together in
-`~/.termal/telegram-bot.json`. The bot token itself is stored in the OS
-credential store under a TermAl service entry scoped to the TermAl data
-directory. Existing plaintext `config.botToken` values from older releases are
-migrated into the credential store and removed from the JSON file the next time
-the Telegram settings are read or updated.
+UI configuration is stored in the revisioned app state under
+`preferences.telegram`, so settings saves publish ordinary state snapshots and
+SSE updates. `~/.termal/telegram-bot.json` remains the runtime metadata file and
+contains a mirrored `config` block for relay interop and legacy migration. The
+bot token itself is stored in the OS credential store under a TermAl service
+entry scoped to the TermAl data directory. Existing plaintext `config.botToken`
+values from older releases are migrated into the credential store and removed
+from the JSON file the next time the Telegram settings are read or updated.
 
-The UI-owned config block contains:
+The UI config contains:
 
 - `enabled`
 - `subscribedProjectIds`

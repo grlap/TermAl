@@ -6999,6 +6999,7 @@ fn telegram_config_update_allows_enabled_without_token_or_project_target() {
     fs::create_dir_all(&home).expect("test home should exist");
     let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
     let state = test_app_state();
+    let initial_revision = state.snapshot().revision;
 
     let response = state
         .update_telegram_config(UpdateTelegramConfigRequest {
@@ -7015,6 +7016,16 @@ fn telegram_config_update_allows_enabled_without_token_or_project_target() {
     assert!(!response.configured);
     assert_eq!(response.subscribed_project_ids, Vec::<String>::new());
     assert_eq!(response.default_project_id, None);
+    let snapshot = state.snapshot();
+    assert!(snapshot.revision > initial_revision);
+    assert!(snapshot.preferences.telegram.enabled);
+    assert!(
+        snapshot
+            .preferences
+            .telegram
+            .subscribed_project_ids
+            .is_empty()
+    );
 
     let path = state.telegram_bot_file_path();
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
@@ -7036,6 +7047,7 @@ fn telegram_config_update_reflects_in_process_relay_runtime_status() {
     let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
+    let initial_revision = state.snapshot().revision;
 
     state.reset_telegram_relay_runtime_actions_for_tests();
     let response = state
@@ -7053,6 +7065,13 @@ fn telegram_config_update_reflects_in_process_relay_runtime_status() {
     assert!(response.configured);
     assert!(response.running);
     assert_eq!(response.lifecycle, TelegramLifecycle::InProcess);
+    let snapshot = state.snapshot();
+    assert!(snapshot.revision > initial_revision);
+    assert!(snapshot.preferences.telegram.enabled);
+    assert_eq!(
+        snapshot.preferences.telegram.subscribed_project_ids,
+        vec![project_id.clone()]
+    );
     let path = state.telegram_bot_file_path();
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
@@ -7382,6 +7401,7 @@ fn telegram_status_persists_sanitized_stale_project_and_session_references() {
         .expect("fixture should encode"),
     )
     .expect("fixture should write");
+    let initial_revision = state.snapshot().revision;
 
     let response = state
         .telegram_status()
@@ -7396,6 +7416,17 @@ fn telegram_status_persists_sanitized_stale_project_and_session_references() {
     );
     assert_eq!(response.default_session_id, None);
     assert_eq!(response.linked_chat_id, Some(123));
+    let snapshot = state.snapshot();
+    assert!(snapshot.revision > initial_revision);
+    assert_eq!(
+        snapshot.preferences.telegram.subscribed_project_ids,
+        vec![project_id.clone()]
+    );
+    assert_eq!(
+        snapshot.preferences.telegram.default_project_id.as_deref(),
+        Some(project_id.as_str())
+    );
+    assert_eq!(snapshot.preferences.telegram.default_session_id, None);
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
@@ -7528,9 +7559,19 @@ fn delete_project_prunes_telegram_config_and_disables_relay_without_project_targ
     .expect("fixture should write");
 
     state.reset_telegram_relay_runtime_actions_for_tests();
-    state
+    let response = state
         .delete_project(&project_id)
         .expect("project should delete");
+    assert!(!response.preferences.telegram.enabled);
+    assert!(
+        response
+            .preferences
+            .telegram
+            .subscribed_project_ids
+            .is_empty()
+    );
+    assert_eq!(response.preferences.telegram.default_project_id, None);
+    assert_eq!(response.preferences.telegram.default_session_id, None);
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
@@ -7608,9 +7649,22 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
     .expect("fixture should write");
 
     state.reset_telegram_relay_runtime_actions_for_tests();
-    state
+    let response = state
         .delete_project(&deleted_project_id)
         .expect("project should delete");
+    assert!(response.preferences.telegram.enabled);
+    assert_eq!(
+        response.preferences.telegram.subscribed_project_ids,
+        vec![remaining_project_id.clone()]
+    );
+    assert_eq!(
+        response.preferences.telegram.default_project_id.as_deref(),
+        Some(remaining_project_id.as_str())
+    );
+    assert_eq!(
+        response.preferences.telegram.default_session_id.as_deref(),
+        Some(remaining_session_id.as_str())
+    );
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
@@ -7742,9 +7796,10 @@ fn kill_session_prunes_telegram_state_and_config_references() {
     )
     .expect("fixture should write");
 
-    state
+    let response = state
         .kill_session(&session_id)
         .expect("session should kill");
+    assert_eq!(response.preferences.telegram.default_session_id, None);
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");

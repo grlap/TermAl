@@ -1081,8 +1081,11 @@ struct UpdateAppSettingsRequest {
     remotes: Option<Vec<RemoteConfig>>,
 }
 
-/// UI-owned Telegram relay configuration persisted outside `/api/state`.
-#[derive(Clone, Default, Deserialize, Serialize)]
+/// UI-owned Telegram relay configuration committed through app preferences.
+///
+/// `telegram-bot.json` still carries a mirrored `config` object for relay
+/// interop and legacy migration, but app state is the source of truth.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TelegramUiConfig {
     #[serde(default)]
@@ -1097,6 +1100,10 @@ struct TelegramUiConfig {
     default_project_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     default_session_id: Option<String>,
+}
+
+fn telegram_ui_config_is_default(config: &TelegramUiConfig) -> bool {
+    config == &TelegramUiConfig::default()
 }
 
 /// UI-visible Telegram relay lifecycle.

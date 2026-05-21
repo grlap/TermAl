@@ -122,12 +122,12 @@ impl PersistedState {
 
     /// Converts the value into inner.
     fn into_inner(self) -> Result<StateInner> {
+        let mut preferences = self.preferences;
+        preferences.remotes = validate_persisted_remote_configs(preferences.remotes)?;
+        preferences.telegram.bot_token = None;
         let mut inner = StateInner {
             codex: self.codex,
-            preferences: AppPreferences {
-                remotes: validate_persisted_remote_configs(self.preferences.remotes)?,
-                ..self.preferences
-            },
+            preferences,
             revision: self.revision,
             next_project_number: self.next_project_number,
             next_session_number: self.next_session_number,

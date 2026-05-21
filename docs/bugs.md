@@ -7,20 +7,35 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Telegram settings updates live outside the app state/revision model
+## Telegram app-state settings are published but not adopted by open preferences panels
 
-**Severity:** Medium - Telegram settings are user-visible configuration, but saves bypass `StateInner`, `commit_locked()`, snapshots, revisions, and SSE.
+**Severity:** Medium - Telegram config now enters the revisioned app state, but already-open settings panels can still show stale values because the frontend does not consume `preferences.telegram`.
 
-`src/telegram_settings.rs:30` updates `~/.termal/telegram-bot.json` directly through the Telegram settings endpoint. That means one browser tab can save config while other tabs keep stale settings until they manually refetch, and future relay lifecycle work will need to reconcile app state with a separate settings file.
+The backend now commits Telegram UI config through `StateInner.preferences.telegram`, and `ui/src/types.ts` models the new field, but `TelegramPreferencesPanel` still initializes from a one-time `/api/telegram/status` fetch. `AppDialogs` passes only `projects` and `sessions` into the panel, and the app-state adoption path does not feed `preferences.telegram` into the open panel. That means another tab or panel can save Telegram config and publish a new state snapshot while an already-open panel keeps its old draft/status until remount or manual refetch.
 
 **Current behavior:**
-- Telegram settings updates do not bump the app revision.
-- `/api/state` and SSE do not carry the changed config.
-- Other open clients cannot observe settings changes through the normal state model.
+- Telegram config saves bump the app revision and publish app state.
+- The Telegram settings panel initializes from `/api/telegram/status` on mount.
+- Open panels ignore later `preferences.telegram` changes from SSE/state adoption.
 
 **Proposal:**
-- Store Telegram UI config in durable app state and mutate it through `commit_locked()`.
-- If `telegram-bot.json` remains necessary for adapter interop, mirror committed state to that file behind a documented boundary.
+- Feed `preferences.telegram` into the Telegram preferences panel, or refetch status when the app-state Telegram config changes.
+- Keep runtime-only fields such as `configured`, `botTokenMasked`, `linkedChatId`, and relay lifecycle separate from app-state config.
+- Add a frontend regression proving an already-open panel reflects a changed `preferences.telegram` value without remounting.
+
+## Telegram legacy config import can revive stale mirrored defaults
+
+**Severity:** Low - the legacy import heuristic treats "committed Telegram config is default" as "not migrated yet," so a stale mirrored file config can be re-imported after an intentional reset to defaults.
+
+`src/telegram_settings.rs` preserves legacy migration by importing `telegram-bot.json` `config` when the committed app-state Telegram config is default and the file config is non-default. That works for first migration, but it has no durable marker distinguishing an unmigrated state from an explicit user reset to defaults. If app state legitimately resets Telegram config while the mirrored file still has old non-default values, a later status or update can re-import the stale file shape.
+
+**Current behavior:**
+- Default app-state Telegram config plus non-default file config is treated as an unmigrated legacy file.
+- The file mirror can become the source again after an intentional app-state reset to defaults.
+
+**Proposal:**
+- Distinguish missing/unmigrated app-state config from explicitly default config, or restrict file-to-state import to a one-time migration path.
+- Add regression coverage for default-reset state with stale non-default mirrored file config.
 
 ## Session store publication can race ahead of React session state
 
@@ -105,10 +120,16 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   pin the current conservative behavior and, if a future turn-boundary signal lands, add the positive forwarding case for same-message reply text already present on first settled poll.
 - [ ] P2: Add Telegram settings API/security regressions:
   cover plaintext token-at-rest exposure, corrupt-backup permission hardening, and credential-store failure/fallback behavior beyond the native-store smoke test.
+- [ ] P2: Add Telegram app-state adoption coverage:
+  cover an already-open Telegram preferences panel receiving a changed `preferences.telegram` value from `/api/state`/SSE and assert the draft/status reflects the new config without remounting.
+- [ ] P2: Add Telegram legacy config import regression coverage:
+  cover an explicit app-state Telegram config reset to defaults while `telegram-bot.json` still has stale non-default mirrored config, and assert status/update does not re-import the stale file config.
 - [ ] P2: Cover post-validation Telegram settings sanitization:
   delete a project/session after validation but before the second sanitize path, or extract a deterministic helper seam, and assert the persisted response cannot retain stale references. The current stale-reference test at `src/tests/telegram.rs:1573` seeds invalid state before validation, so removing the post-validation sanitize in `src/telegram_settings.rs:73` would still pass.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
   cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
+- [ ] P2: Split Telegram settings persistence tests out of the monolithic Telegram test module:
+  move the state-backed Telegram config persistence/status/delete-session/delete-project coverage into a focused test module so new coverage does not keep growing `src/tests/telegram.rs`.
 - [ ] P2: Add assistant-reply forwarding disabled-path regressions:
   cover `sync_telegram_digest` and `select_telegram_project_session` with `forward_assistant_replies=false` so digest and selection paths cannot accidentally forward assistant replies.
 - [ ] P2: Clarify pending queued-prompt cancel tooltip behavior:

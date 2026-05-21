@@ -612,11 +612,10 @@ impl AppState {
 
         self.commit_locked(&mut inner)
             .map_err(|err| ApiError::internal(format!("failed to remove project: {err:#}")))?;
-        let response = self.snapshot_from_inner(&inner);
         drop(inner);
 
         self.prune_telegram_config_for_deleted_project(&project_id)?;
 
-        Ok(response)
+        Ok(self.snapshot())
     }
 }
