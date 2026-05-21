@@ -589,6 +589,10 @@ struct AppState {
     /// still hold the state mutex. Dropped deltas surface as ordinary revision
     /// gaps to clients, which then repair from `/api/state`.
     state_broadcast_mailbox: Option<Arc<StateBroadcastMailbox>>,
+    /// Owns the optional in-process Telegram relay runtime for this app
+    /// instance. Kept outside `StateInner` because it is live process state
+    /// (thread handle, shutdown flag, status), not durable app data.
+    telegram_relay_runtime: Arc<Mutex<TelegramRelayRuntime>>,
     /// Lazily created shared Codex app-server reused across Codex sessions.
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
     #[cfg(test)]

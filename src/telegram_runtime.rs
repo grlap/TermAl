@@ -317,156 +317,22 @@ impl TelegramRelayRuntimeState {
     }
 }
 
-#[cfg(not(test))]
 #[derive(Default)]
 struct TelegramRelayRuntime {
+    #[cfg(test)]
+    actions: Vec<TelegramRelayRuntimeActionForTest>,
+    #[cfg(not(test))]
     config_fingerprint: Option<String>,
+    #[cfg(not(test))]
     generation: u64,
+    #[cfg(not(test))]
     handle: Option<std::thread::JoinHandle<()>>,
+    #[cfg(test)]
+    running: bool,
+    #[cfg(not(test))]
     shutdown: Option<Arc<AtomicBool>>,
+    #[cfg(not(test))]
     state: TelegramRelayRuntimeState,
-}
-
-#[cfg(not(test))]
-static TELEGRAM_RELAY_RUNTIME: LazyLock<Mutex<TelegramRelayRuntime>> =
-    LazyLock::new(|| Mutex::new(TelegramRelayRuntime::default()));
-
-#[cfg(not(test))]
-fn start_telegram_relay_runtime(config: TelegramBotConfig) {
-    let fingerprint = telegram_relay_config_fingerprint(&config);
-    let mut runtime = TELEGRAM_RELAY_RUNTIME
-        .lock()
-        .expect("telegram relay runtime mutex poisoned");
-    if runtime.config_fingerprint.as_deref() == Some(fingerprint.as_str())
-        && runtime.state.is_active()
-    {
-        return;
-    }
-
-    let previous_shutdown = runtime.shutdown.take();
-    let previous_handle = runtime.handle.take();
-
-    let shutdown = Arc::new(AtomicBool::new(false));
-    runtime.shutdown = Some(shutdown.clone());
-    runtime.config_fingerprint = Some(fingerprint);
-    runtime.generation = runtime.generation.saturating_add(1);
-    let generation = runtime.generation;
-    runtime.state = TelegramRelayRuntimeState::Spawning;
-    drop(runtime);
-
-    if let Some(previous_shutdown) = previous_shutdown {
-        previous_shutdown.store(true, Ordering::Relaxed);
-    }
-
-    match std::thread::Builder::new()
-        .name("termal-telegram-relay".to_owned())
-        .spawn(move || {
-            if let Some(previous_handle) = previous_handle {
-                if let Err(err) = previous_handle.join() {
-                    eprintln!(
-                        "telegram> previous in-process relay thread panicked: {:?}",
-                        err
-                    );
-                }
-            }
-
-            let should_start = {
-                let runtime = TELEGRAM_RELAY_RUNTIME
-                    .lock()
-                    .expect("telegram relay runtime mutex poisoned");
-                if runtime.generation == generation && !shutdown.load(Ordering::Relaxed) {
-                    true
-                } else {
-                    false
-                }
-            };
-            if !should_start {
-                return;
-            }
-
-            let ready_shutdown = shutdown.clone();
-            let result = run_telegram_bot_with_config(
-                config,
-                Some(shutdown),
-                Some(Box::new(move || {
-                    let mut runtime = TELEGRAM_RELAY_RUNTIME
-                        .lock()
-                        .expect("telegram relay runtime mutex poisoned");
-                    if runtime.generation == generation && !ready_shutdown.load(Ordering::Relaxed)
-                    {
-                        runtime.state = TelegramRelayRuntimeState::Running;
-                    }
-                })),
-            );
-            if let Err(err) = result {
-                eprintln!(
-                    "telegram> in-process relay stopped: {}",
-                    sanitize_telegram_log_detail(&err.to_string())
-                );
-            }
-            let mut runtime = TELEGRAM_RELAY_RUNTIME
-                .lock()
-                .expect("telegram relay runtime mutex poisoned");
-            if runtime.generation == generation {
-                runtime.state = TelegramRelayRuntimeState::Idle;
-                runtime.shutdown = None;
-            }
-        }) {
-        Ok(handle) => {
-            let mut runtime = TELEGRAM_RELAY_RUNTIME
-                .lock()
-                .expect("telegram relay runtime mutex poisoned");
-            if runtime.generation == generation {
-                runtime.handle = Some(handle);
-            }
-        }
-        Err(err) => {
-            let mut runtime = TELEGRAM_RELAY_RUNTIME
-                .lock()
-                .expect("telegram relay runtime mutex poisoned");
-            if runtime.generation == generation {
-                runtime.state = TelegramRelayRuntimeState::Idle;
-                runtime.shutdown = None;
-                runtime.config_fingerprint = None;
-            }
-            eprintln!(
-                "telegram> failed to start in-process relay: {}",
-                sanitize_telegram_log_detail(&err.to_string())
-            );
-        }
-    }
-}
-
-#[cfg(not(test))]
-fn stop_telegram_relay_runtime() {
-    let mut runtime = TELEGRAM_RELAY_RUNTIME
-        .lock()
-        .expect("telegram relay runtime mutex poisoned");
-    if let Some(shutdown) = runtime.shutdown.take() {
-        shutdown.store(true, Ordering::Relaxed);
-    }
-    let previous_handle = runtime.handle.take();
-    runtime.config_fingerprint = None;
-    runtime.generation = runtime.generation.saturating_add(1);
-    let generation = runtime.generation;
-    runtime.state = if previous_handle.is_some() {
-        TelegramRelayRuntimeState::Stopping
-    } else {
-        TelegramRelayRuntimeState::Idle
-    };
-    drop(runtime);
-
-    if let Some(previous_handle) = previous_handle {
-        if let Err(err) = previous_handle.join() {
-            eprintln!("telegram> in-process relay thread panicked while stopping: {err:?}");
-        }
-        let mut runtime = TELEGRAM_RELAY_RUNTIME
-            .lock()
-            .expect("telegram relay runtime mutex poisoned");
-        if runtime.generation == generation {
-            runtime.state = TelegramRelayRuntimeState::Idle;
-        }
-    }
 }
 
 #[cfg(test)]
@@ -479,72 +345,211 @@ enum TelegramRelayRuntimeActionForTest {
     Stop,
 }
 
-#[cfg(test)]
-thread_local! {
-    static TELEGRAM_RELAY_RUNTIME_ACTIONS_FOR_TESTS: std::cell::RefCell<Vec<TelegramRelayRuntimeActionForTest>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-    static TELEGRAM_RELAY_RUNTIME_RUNNING_FOR_TESTS: std::cell::RefCell<bool> =
-        const { std::cell::RefCell::new(false) };
-}
-
-#[cfg(test)]
-fn start_telegram_relay_runtime(config: TelegramBotConfig) {
-    TELEGRAM_RELAY_RUNTIME_RUNNING_FOR_TESTS.with(|running| {
-        *running.borrow_mut() = true;
-    });
-    TELEGRAM_RELAY_RUNTIME_ACTIONS_FOR_TESTS.with(|actions| {
-        actions
-            .borrow_mut()
-            .push(TelegramRelayRuntimeActionForTest::Start {
-                project_id: config.project_id,
-                subscribed_project_ids: config.subscribed_project_ids,
-            });
-    });
-}
-
-#[cfg(test)]
-fn stop_telegram_relay_runtime() {
-    TELEGRAM_RELAY_RUNTIME_RUNNING_FOR_TESTS.with(|running| {
-        *running.borrow_mut() = false;
-    });
-    TELEGRAM_RELAY_RUNTIME_ACTIONS_FOR_TESTS.with(|actions| {
-        actions
-            .borrow_mut()
-            .push(TelegramRelayRuntimeActionForTest::Stop);
-    });
-}
-
-#[cfg(test)]
-fn reset_telegram_relay_runtime_actions_for_tests() {
-    TELEGRAM_RELAY_RUNTIME_ACTIONS_FOR_TESTS.with(|actions| actions.borrow_mut().clear());
-    TELEGRAM_RELAY_RUNTIME_RUNNING_FOR_TESTS.with(|running| {
-        *running.borrow_mut() = false;
-    });
-}
-
-#[cfg(test)]
-fn take_telegram_relay_runtime_actions_for_tests() -> Vec<TelegramRelayRuntimeActionForTest> {
-    TELEGRAM_RELAY_RUNTIME_ACTIONS_FOR_TESTS
-        .with(|actions| std::mem::take(&mut *actions.borrow_mut()))
-}
-
 #[cfg(not(test))]
-fn telegram_relay_status_snapshot() -> TelegramRelayStatusSnapshot {
-    let runtime = TELEGRAM_RELAY_RUNTIME
-        .lock()
-        .expect("telegram relay runtime mutex poisoned");
-    TelegramRelayStatusSnapshot {
-        running: runtime.state.is_running(),
-        lifecycle: TelegramLifecycle::InProcess,
+impl AppState {
+    fn start_telegram_relay_runtime(&self, config: TelegramBotConfig) {
+        let runtime_handle = Arc::clone(&self.telegram_relay_runtime);
+        let fingerprint = telegram_relay_config_fingerprint(&config);
+        let mut runtime = runtime_handle
+            .lock()
+            .expect("telegram relay runtime mutex poisoned");
+        if runtime.config_fingerprint.as_deref() == Some(fingerprint.as_str())
+            && runtime.state.is_active()
+        {
+            return;
+        }
+
+        let previous_shutdown = runtime.shutdown.take();
+        let previous_handle = runtime.handle.take();
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        runtime.shutdown = Some(shutdown.clone());
+        runtime.config_fingerprint = Some(fingerprint);
+        runtime.generation = runtime.generation.saturating_add(1);
+        let generation = runtime.generation;
+        runtime.state = TelegramRelayRuntimeState::Spawning;
+        drop(runtime);
+
+        if let Some(previous_shutdown) = previous_shutdown {
+            previous_shutdown.store(true, Ordering::Relaxed);
+        }
+
+        let thread_runtime_handle = Arc::clone(&runtime_handle);
+        match std::thread::Builder::new()
+            .name("termal-telegram-relay".to_owned())
+            .spawn(move || {
+                if let Some(previous_handle) = previous_handle {
+                    if let Err(err) = previous_handle.join() {
+                        eprintln!(
+                            "telegram> previous in-process relay thread panicked: {:?}",
+                            err
+                        );
+                    }
+                }
+
+                let should_start = {
+                    let runtime = thread_runtime_handle
+                        .lock()
+                        .expect("telegram relay runtime mutex poisoned");
+                    runtime.generation == generation && !shutdown.load(Ordering::Relaxed)
+                };
+                if !should_start {
+                    return;
+                }
+
+                let ready_shutdown = shutdown.clone();
+                let ready_runtime_handle = Arc::clone(&thread_runtime_handle);
+                let result = run_telegram_bot_with_config(
+                    config,
+                    Some(shutdown),
+                    Some(Box::new(move || {
+                        let mut runtime = ready_runtime_handle
+                            .lock()
+                            .expect("telegram relay runtime mutex poisoned");
+                        if runtime.generation == generation
+                            && !ready_shutdown.load(Ordering::Relaxed)
+                        {
+                            runtime.state = TelegramRelayRuntimeState::Running;
+                        }
+                    })),
+                );
+                if let Err(err) = result {
+                    eprintln!(
+                        "telegram> in-process relay stopped: {}",
+                        sanitize_telegram_log_detail(&err.to_string())
+                    );
+                }
+                let mut runtime = thread_runtime_handle
+                    .lock()
+                    .expect("telegram relay runtime mutex poisoned");
+                if runtime.generation == generation {
+                    runtime.state = TelegramRelayRuntimeState::Idle;
+                    runtime.shutdown = None;
+                }
+            }) {
+            Ok(handle) => {
+                let mut runtime = runtime_handle
+                    .lock()
+                    .expect("telegram relay runtime mutex poisoned");
+                if runtime.generation == generation {
+                    runtime.handle = Some(handle);
+                }
+            }
+            Err(err) => {
+                let mut runtime = runtime_handle
+                    .lock()
+                    .expect("telegram relay runtime mutex poisoned");
+                if runtime.generation == generation {
+                    runtime.state = TelegramRelayRuntimeState::Idle;
+                    runtime.shutdown = None;
+                    runtime.config_fingerprint = None;
+                }
+                eprintln!(
+                    "telegram> failed to start in-process relay: {}",
+                    sanitize_telegram_log_detail(&err.to_string())
+                );
+            }
+        }
+    }
+
+    fn stop_telegram_relay_runtime(&self) {
+        let mut runtime = self
+            .telegram_relay_runtime
+            .lock()
+            .expect("telegram relay runtime mutex poisoned");
+        if let Some(shutdown) = runtime.shutdown.take() {
+            shutdown.store(true, Ordering::Relaxed);
+        }
+        let previous_handle = runtime.handle.take();
+        runtime.config_fingerprint = None;
+        runtime.generation = runtime.generation.saturating_add(1);
+        let generation = runtime.generation;
+        runtime.state = if previous_handle.is_some() {
+            TelegramRelayRuntimeState::Stopping
+        } else {
+            TelegramRelayRuntimeState::Idle
+        };
+        drop(runtime);
+
+        if let Some(previous_handle) = previous_handle {
+            if let Err(err) = previous_handle.join() {
+                eprintln!("telegram> in-process relay thread panicked while stopping: {err:?}");
+            }
+            let mut runtime = self
+                .telegram_relay_runtime
+                .lock()
+                .expect("telegram relay runtime mutex poisoned");
+            if runtime.generation == generation {
+                runtime.state = TelegramRelayRuntimeState::Idle;
+            }
+        }
+    }
+
+    fn telegram_relay_status_snapshot(&self) -> TelegramRelayStatusSnapshot {
+        let runtime = self
+            .telegram_relay_runtime
+            .lock()
+            .expect("telegram relay runtime mutex poisoned");
+        TelegramRelayStatusSnapshot {
+            running: runtime.state.is_running(),
+            lifecycle: TelegramLifecycle::InProcess,
+        }
     }
 }
 
 #[cfg(test)]
-fn telegram_relay_status_snapshot() -> TelegramRelayStatusSnapshot {
-    let running = TELEGRAM_RELAY_RUNTIME_RUNNING_FOR_TESTS.with(|running| *running.borrow());
-    TelegramRelayStatusSnapshot {
-        running,
-        lifecycle: TelegramLifecycle::InProcess,
+impl AppState {
+    fn start_telegram_relay_runtime(&self, config: TelegramBotConfig) {
+        let mut runtime = self
+            .telegram_relay_runtime
+            .lock()
+            .expect("telegram relay runtime mutex poisoned");
+        runtime.running = true;
+        runtime
+            .actions
+            .push(TelegramRelayRuntimeActionForTest::Start {
+                project_id: config.project_id,
+                subscribed_project_ids: config.subscribed_project_ids,
+            });
+    }
+
+    fn stop_telegram_relay_runtime(&self) {
+        let mut runtime = self
+            .telegram_relay_runtime
+            .lock()
+            .expect("telegram relay runtime mutex poisoned");
+        runtime.running = false;
+        runtime.actions.push(TelegramRelayRuntimeActionForTest::Stop);
+    }
+
+    fn reset_telegram_relay_runtime_actions_for_tests(&self) {
+        let mut runtime = self
+            .telegram_relay_runtime
+            .lock()
+            .expect("telegram relay runtime mutex poisoned");
+        runtime.actions.clear();
+        runtime.running = false;
+    }
+
+    fn take_telegram_relay_runtime_actions_for_tests(
+        &self,
+    ) -> Vec<TelegramRelayRuntimeActionForTest> {
+        let mut runtime = self
+            .telegram_relay_runtime
+            .lock()
+            .expect("telegram relay runtime mutex poisoned");
+        std::mem::take(&mut runtime.actions)
+    }
+
+    fn telegram_relay_status_snapshot(&self) -> TelegramRelayStatusSnapshot {
+        let runtime = self
+            .telegram_relay_runtime
+            .lock()
+            .expect("telegram relay runtime mutex poisoned");
+        TelegramRelayStatusSnapshot {
+            running: runtime.running,
+            lifecycle: TelegramLifecycle::InProcess,
+        }
     }
 }
 

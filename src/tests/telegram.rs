@@ -5801,6 +5801,7 @@ fn telegram_status_response_serializes_in_process_lifecycle() {
     .expect("response should serialize");
 
     assert_eq!(value["lifecycle"], json!("inProcess"));
+    assert_eq!(value["running"], json!(true));
 }
 
 #[test]
@@ -7036,7 +7037,7 @@ fn telegram_config_update_reflects_in_process_relay_runtime_status() {
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
 
-    reset_telegram_relay_runtime_actions_for_tests();
+    state.reset_telegram_relay_runtime_actions_for_tests();
     let response = state
         .update_telegram_config(UpdateTelegramConfigRequest {
             enabled: Some(true),
@@ -7080,7 +7081,7 @@ fn telegram_config_update_reflects_in_process_relay_runtime_status() {
     assert!(!stopped.running);
     assert_eq!(stopped.lifecycle, TelegramLifecycle::InProcess);
     assert_eq!(
-        take_telegram_relay_runtime_actions_for_tests(),
+        state.take_telegram_relay_runtime_actions_for_tests(),
         vec![
             TelegramRelayRuntimeActionForTest::Start {
                 project_id: project_id.clone(),
@@ -7526,7 +7527,7 @@ fn delete_project_prunes_telegram_config_and_disables_relay_without_project_targ
     )
     .expect("fixture should write");
 
-    reset_telegram_relay_runtime_actions_for_tests();
+    state.reset_telegram_relay_runtime_actions_for_tests();
     state
         .delete_project(&project_id)
         .expect("project should delete");
@@ -7543,7 +7544,7 @@ fn delete_project_prunes_telegram_config_and_disables_relay_without_project_targ
     assert!(value["config"].get("defaultSessionId").is_none());
     assert_eq!(value["chatId"], json!(123));
     assert_eq!(
-        take_telegram_relay_runtime_actions_for_tests(),
+        state.take_telegram_relay_runtime_actions_for_tests(),
         vec![TelegramRelayRuntimeActionForTest::Stop]
     );
 }
@@ -7606,7 +7607,7 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
     )
     .expect("fixture should write");
 
-    reset_telegram_relay_runtime_actions_for_tests();
+    state.reset_telegram_relay_runtime_actions_for_tests();
     state
         .delete_project(&deleted_project_id)
         .expect("project should delete");
@@ -7629,7 +7630,7 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
     );
     assert_eq!(value["chatId"], json!(123));
     assert_eq!(
-        take_telegram_relay_runtime_actions_for_tests(),
+        state.take_telegram_relay_runtime_actions_for_tests(),
         vec![TelegramRelayRuntimeActionForTest::Start {
             project_id: remaining_project_id.clone(),
             subscribed_project_ids: vec![remaining_project_id],
@@ -7667,7 +7668,7 @@ fn delete_project_migrates_unrelated_telegram_token_without_restarting_relay() {
     .expect("fixture should encode");
     fs::write(&path, fixture.as_bytes()).expect("fixture should write");
 
-    reset_telegram_relay_runtime_actions_for_tests();
+    state.reset_telegram_relay_runtime_actions_for_tests();
     state
         .delete_project(&deleted_project_id)
         .expect("project should delete");
@@ -7685,7 +7686,11 @@ fn delete_project_migrates_unrelated_telegram_token_without_restarting_relay() {
         value["config"]["defaultSessionId"],
         json!(remaining_session_id)
     );
-    assert!(take_telegram_relay_runtime_actions_for_tests().is_empty());
+    assert!(
+        state
+            .take_telegram_relay_runtime_actions_for_tests()
+            .is_empty()
+    );
     assert_ne!(
         fs::read(&path).expect("settings file should read"),
         fixture.as_bytes()

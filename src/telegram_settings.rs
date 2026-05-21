@@ -205,7 +205,7 @@ impl AppState {
         file: TelegramBotFile,
     ) -> Result<TelegramStatusResponse, ApiError> {
         let config = self.sanitize_telegram_config_for_current_state(file.config);
-        let relay = telegram_relay_status_snapshot();
+        let relay = self.telegram_relay_status_snapshot();
         let bot_token = self.saved_telegram_bot_token()?;
         Ok(TelegramStatusResponse::from_telegram_settings(
             config,
@@ -482,7 +482,7 @@ impl AppState {
                             "telegram settings> failed to persist migrated relay config for startup: {}",
                             sanitize_telegram_log_detail(&err.message)
                         );
-                        stop_telegram_relay_runtime();
+                        self.stop_telegram_relay_runtime();
                         return;
                     }
                 }
@@ -493,7 +493,7 @@ impl AppState {
                     "telegram settings> failed to load relay config for startup: {}",
                     sanitize_telegram_log_detail(&err.message)
                 );
-                stop_telegram_relay_runtime();
+                self.stop_telegram_relay_runtime();
             }
         }
     }
@@ -508,13 +508,13 @@ impl AppState {
                     "telegram settings> failed to load relay bot token: {}",
                     sanitize_telegram_log_detail(&err.message)
                 );
-                stop_telegram_relay_runtime();
+                self.stop_telegram_relay_runtime();
                 return;
             }
         };
         match TelegramBotConfig::from_ui_file(&self.default_workdir, &file, bot_token) {
-            Ok(config) => start_telegram_relay_runtime(config),
-            Err(_reason) => stop_telegram_relay_runtime(),
+            Ok(config) => self.start_telegram_relay_runtime(config),
+            Err(_reason) => self.stop_telegram_relay_runtime(),
         }
     }
 }

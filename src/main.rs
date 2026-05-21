@@ -177,7 +177,7 @@ async fn run_server() -> Result<()> {
         .await
         .context("backend server failed");
     #[cfg(not(test))]
-    stop_telegram_relay_runtime();
+    shutdown_state.stop_telegram_relay_runtime();
 
     // Graceful-shutdown drain: block until the background persist thread
     // has written every queued mutation to SQLite. Without this the

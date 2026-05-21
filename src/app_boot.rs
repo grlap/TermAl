@@ -327,6 +327,7 @@ impl AppState {
             persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
             state_broadcast_mailbox: Some(state_broadcast_mailbox),
+            telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
             shared_codex_runtime: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),

@@ -7,17 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## `TelegramRelayRuntime` is a file-level global rather than `AppState`-owned state
-
-**Severity:** Note - `src/telegram_runtime.rs:309-319`. `TelegramRelayRuntime` and `TELEGRAM_RELAY_RUNTIME` are file-level globals (`LazyLock<Mutex<...>>`). `AppState` has no visibility into the relay's running state, so any future health-monitor, restart-on-error, or readiness-signaling logic ends up reading globals instead of methods on `AppState`.
-
-**Current behavior:**
-- Runtime state lives in module-level statics.
-- Test injection is harder; production-vs-test parity is structural.
-
-**Proposal:**
-- Move the runtime into `AppState` and own its lifecycle on the state object.
-
 ## Telegram settings updates live outside the app state/revision model
 
 **Severity:** Medium - Telegram settings are user-visible configuration, but saves bypass `StateInner`, `commit_locked()`, snapshots, revisions, and SSE.
@@ -120,8 +109,6 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   delete a project/session after validation but before the second sanitize path, or extract a deterministic helper seam, and assert the persisted response cannot retain stale references. The current stale-reference test at `src/tests/telegram.rs:1573` seeds invalid state before validation, so removing the post-validation sanitize in `src/telegram_settings.rs:73` would still pass.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
   cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
-- [ ] P2: Restore explicit Telegram status running wire assertion:
-  keep `telegram_status_response_serializes_in_process_lifecycle` focused on `lifecycle == "inProcess"`, but add or adjust a nearby wire-shape assertion so `running: true` remains explicitly pinned.
 - [ ] P2: Add assistant-reply forwarding disabled-path regressions:
   cover `sync_telegram_digest` and `select_telegram_project_session` with `forward_assistant_replies=false` so digest and selection paths cannot accidentally forward assistant replies.
 - [ ] P2: Clarify pending queued-prompt cancel tooltip behavior:
@@ -148,5 +135,5 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
 - [ ] P2: Cover Telegram relay active-project reconciliation:
   start an in-process relay with subscribed projects but no default and assert startup fails or status exposes the effective `activeProjectId`; delete a project used by a running relay and assert the relay is stopped or restarted without the deleted id.
-- [ ] P2: Cover Telegram relay runtime lifecycle seam:
-  add an injectable or testable relay runtime so startup from saved settings, implicit first subscribed-project fallback, invalid/missing config stop, config-save start/stop/restart, deleted-project reconciliation, runtime status `running: true` + `inProcess`, and graceful-shutdown stop are covered despite the production path's `#[cfg(not(test))]` guards.
+- [ ] P2: Cover remaining Telegram relay runtime lifecycle paths:
+  use the AppState-owned test relay runtime to cover startup from saved settings, implicit first subscribed-project fallback, invalid/missing config stop, config-save restart, and graceful-shutdown stop.
