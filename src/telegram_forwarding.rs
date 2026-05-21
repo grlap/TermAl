@@ -352,6 +352,21 @@ impl TelegramAssistantForwardingOutcome {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OutcomeShortCircuit {
+    outcome: TelegramAssistantForwardingOutcome,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ActiveBaselineTransition {
+    Continue {
+        cursor: TelegramAssistantForwardingCursor,
+        position_of_last: Option<usize>,
+        dirty: bool,
+    },
+    ShortCircuit(OutcomeShortCircuit),
+}
+
 fn prepare_assistant_forwarding_for_telegram_prompt(
     termal: &impl TelegramSessionReader,
     session_id: &str,
@@ -400,6 +415,66 @@ fn arm_assistant_forwarding_for_telegram_prompt(
 ) -> Result<bool> {
     let plan = prepare_assistant_forwarding_for_telegram_prompt(termal, session_id)?;
     Ok(apply_assistant_forwarding_plan(state, plan))
+}
+
+fn transition_active_baseline_to_settled(
+    state: &mut TelegramBotState,
+    session_id: &str,
+    messages: &[TelegramSessionFetchMessage],
+    cursor: TelegramAssistantForwardingCursor,
+    position_of_last: Option<usize>,
+) -> ActiveBaselineTransition {
+    if let Some(pos) = position_of_last {
+        // First settled poll after queuing behind a local turn has no stronger
+        // turn-boundary signal. If the tracked same message grew before this
+        // poll, record its current length as the baseline and wait for later
+        // growth or a later assistant message. Forwarding the already-present
+        // suffix here could leak the previous turn.
+        let text_chars = match &messages[pos] {
+            TelegramSessionFetchMessage::Text { text, .. } => Some(text.chars().count()),
+            _ => None,
+        };
+        let settled_cursor = TelegramAssistantForwardingCursor {
+            baseline_while_active: false,
+            resend_if_grown: true,
+            sent_chunks: None,
+            failed_chunk_send_attempts: None,
+            footer_pending: false,
+            text_chars,
+            text_hash: None,
+            text_start_chars: None,
+            ..cursor
+        };
+        let dirty =
+            remember_assistant_forwarding_cursor(state, session_id, settled_cursor.clone());
+        if dirty && pos + 1 == messages.len() {
+            return ActiveBaselineTransition::ShortCircuit(OutcomeShortCircuit {
+                outcome: TelegramAssistantForwardingOutcome {
+                    dirty,
+                    sent_visible_content: false,
+                    delivery_failed: false,
+                },
+            });
+        }
+        ActiveBaselineTransition::Continue {
+            cursor: settled_cursor,
+            position_of_last: Some(pos),
+            dirty,
+        }
+    } else {
+        let latest = latest_assistant_text_cursor(messages);
+        ActiveBaselineTransition::ShortCircuit(OutcomeShortCircuit {
+            outcome: TelegramAssistantForwardingOutcome {
+                dirty: remember_assistant_forwarding_cursor(
+                    state,
+                    session_id,
+                    TelegramAssistantForwardingCursor::from_latest(latest, false),
+                ),
+                sent_visible_content: false,
+                delivery_failed: false,
+            },
+        })
+    }
 }
 
 /// Forwards every assistant `Text` message that has appeared since
@@ -535,50 +610,25 @@ fn forward_new_assistant_message_outcome(
     });
 
     if forward_without_existing_baseline && cursor.baseline_while_active {
-        if let Some(pos) = position_of_last {
-            // First settled poll after queuing behind a local turn has no
-            // stronger turn-boundary signal. If the tracked same message grew
-            // before this poll, record its current length as the baseline and
-            // wait for later growth or a later assistant message. Forwarding
-            // the already-present suffix here could leak the previous turn.
-            let text_chars = match &messages[pos] {
-                TelegramSessionFetchMessage::Text { text, .. } => Some(text.chars().count()),
-                _ => None,
-            };
-            let settled_cursor = TelegramAssistantForwardingCursor {
-                baseline_while_active: false,
-                resend_if_grown: true,
-                sent_chunks: None,
-                failed_chunk_send_attempts: None,
-                footer_pending: false,
-                text_chars,
-                text_hash: None,
-                text_start_chars: None,
-                ..cursor.clone()
-            };
-            let dirty =
-                remember_assistant_forwarding_cursor(state, session_id, settled_cursor.clone());
-            pre_forward_dirty |= dirty;
-            cursor = settled_cursor;
-            position_of_last = Some(pos);
-            if dirty && pos + 1 == messages.len() {
-                return Ok(TelegramAssistantForwardingOutcome {
-                    dirty,
-                    sent_visible_content: false,
-                    delivery_failed: false,
-                });
+        match transition_active_baseline_to_settled(
+            state,
+            session_id,
+            messages,
+            cursor,
+            position_of_last,
+        ) {
+            ActiveBaselineTransition::Continue {
+                cursor: settled_cursor,
+                position_of_last: settled_position,
+                dirty,
+            } => {
+                pre_forward_dirty |= dirty;
+                cursor = settled_cursor;
+                position_of_last = settled_position;
             }
-        } else {
-            let latest = latest_assistant_text_cursor(messages);
-            return Ok(TelegramAssistantForwardingOutcome {
-                dirty: remember_assistant_forwarding_cursor(
-                    state,
-                    session_id,
-                    TelegramAssistantForwardingCursor::from_latest(latest, false),
-                ),
-                sent_visible_content: false,
-                delivery_failed: false,
-            });
+            ActiveBaselineTransition::ShortCircuit(short_circuit) => {
+                return Ok(short_circuit.outcome);
+            }
         }
     }
 

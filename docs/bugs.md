@@ -7,17 +7,6 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## `forward_new_assistant_message_outcome` is still ~450 lines with interleaved early-returns
-
-**Severity:** Note - `src/telegram_forwarding.rs:452-899`. The forwarding path now mixes active-baseline transitions, footer retry, chunk retry/skip state, and visible-content suppression. Future contributors will struggle to trace which baseline shape is preserved across the merge.
-
-**Current behavior:**
-- Single function ~450 lines.
-- Multiple interleaved early-return branches.
-
-**Proposal:**
-- Extract the active-baseline transition into a helper `transition_active_baseline_to_settled` that returns either the new cursor + position or an `OutcomeShortCircuit`.
-
 ## `TelegramRelayRuntime` is a file-level global rather than `AppState`-owned state
 
 **Severity:** Note - `src/telegram_runtime.rs:309-319`. `TelegramRelayRuntime` and `TELEGRAM_RELAY_RUNTIME` are file-level globals (`LazyLock<Mutex<...>>`). `AppState` has no visibility into the relay's running state, so any future health-monitor, restart-on-error, or readiness-signaling logic ends up reading globals instead of methods on `AppState`.
