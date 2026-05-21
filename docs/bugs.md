@@ -20,7 +20,7 @@ the Implementation Tasks section.
 
 ## `TelegramRelayRuntime` is a file-level global rather than `AppState`-owned state
 
-**Severity:** Note - `src/telegram_runtime.rs:379-389`. `TelegramRelayRuntime` and `TELEGRAM_RELAY_RUNTIME` are file-level globals (`LazyLock<Mutex<...>>`). `AppState` has no visibility into the relay's running state, so any future health-monitor, restart-on-error, or readiness-signaling logic ends up reading globals instead of methods on `AppState`.
+**Severity:** Note - `src/telegram_runtime.rs:309-319`. `TelegramRelayRuntime` and `TELEGRAM_RELAY_RUNTIME` are file-level globals (`LazyLock<Mutex<...>>`). `AppState` has no visibility into the relay's running state, so any future health-monitor, restart-on-error, or readiness-signaling logic ends up reading globals instead of methods on `AppState`.
 
 **Current behavior:**
 - Runtime state lives in module-level statics.
@@ -44,108 +44,41 @@ the Implementation Tasks section.
 - Store Telegram UI config in durable app state and mutate it through `commit_locked()`.
 - If `telegram-bot.json` remains necessary for adapter interop, mirror committed state to that file behind a documented boundary.
 
-## Telegram settings and relay state can overwrite each other in `telegram-bot.json`
+## Telegram relay still has CLI-era runtime leftovers after standalone-mode removal
 
-**Severity:** Medium - the UI settings endpoint and Telegram relay both read-modify-write the same JSON file, and the settings mutex only protects one process.
+**Severity:** Low - the standalone Telegram relay entrypoint is gone, but a few runtime/test seams still read as if a separate CLI lifecycle exists.
 
-`src/telegram_settings.rs:20` defines a process-local mutex, while the standalone `cargo run -- telegram` relay still persists cursor state through `src/telegram_state.rs`. Concurrent `/api/telegram/config` saves and relay cursor persistence can lose either UI-owned token/config fields or runtime-owned `chatId` / `nextUpdateId` fields. Atomic file replacement prevents partial files, but it does not serialize read-modify-write cycles across processes.
-
-**Current behavior:**
-- Settings saves and relay state persistence share one file.
-- Writes are read-modify-write operations without cross-process serialization.
-- The process-local mutex does not coordinate server and standalone relay modes.
-- Last writer wins if the two processes read old state and then save different halves.
-
-**Proposal:**
-- Split UI config and runtime cursor/chat state into separate files, or guard all writers with an OS-level file lock.
-- Add cross-process interleaving coverage proving config and runtime state both survive competing writes.
-
-## Telegram assistant-reply opt-in lacks a third-party content warning
-
-**Severity:** Low - the settings UI now requires an explicit opt-in before full assistant replies are forwarded, but the toggle does not explain that full assistant output may be sent to Telegram.
-
-`ui/src/preferences/telegram-preferences-panel.tsx:386` labels the setting only as "Forward assistant replies". Enabling it can still send arbitrary assistant output to a third-party service, including code, local file paths, file contents, or secrets that appeared in the conversation.
+`TelegramLifecycle::Manual` is no longer produced by the current server-managed relay path, and the in-process relay still prints the CLI-era `TermAl Telegram adapter` startup banner. The `Mode::parse` rejection for `telegram` / `telegram-bot` is intentional guidance, but that branch is easy to mistake for a supported process mode without a local comment. The Telegram message test helper also hardcodes its message id, which makes future multi-message rate-limit scenarios less explicit.
 
 **Current behavior:**
-- Full assistant forwarding is disabled by default.
-- The opt-in control has no nearby warning about third-party content exposure.
-- Users can enable the setting without seeing what class of content leaves the machine.
+- `TelegramLifecycle::Manual` remains in the wire/runtime model after CLI-mode removal.
+- The in-process relay startup banner still uses adapter-era wording.
+- The rejected Telegram CLI aliases are covered by tests, but the parser branch is not documented at the call site.
+- `telegram_text_message(...)` always uses one fixed message id.
 
 **Proposal:**
-- Add a concise settings hint near the toggle explaining that full assistant replies are sent to Telegram when enabled.
-- Cover the warning text and saved toggle state in the Telegram preferences tests.
+- Remove or explicitly justify the `Manual` lifecycle value.
+- Update the in-process relay banner wording.
+- Add a short comment near the Telegram CLI alias rejection in `Mode::parse`.
+- Make test message ids explicit where rate-limit scenarios depend on distinct messages.
 
-## Telegram status frontend type treats required `forwardAssistantReplies` as optional
+## Telegram chat work rate-limit edge cases are underspecified
 
-**Severity:** Low - the backend always serializes `forwardAssistantReplies`, but the frontend response type and fixtures allow it to be missing.
+**Severity:** Note - recent rate-limit coverage improved the main command paths, but the boundary behavior around oversized prompts and pruning remains implicit.
 
-`src/wire.rs:1113-1117` defines `TelegramStatusResponse.forward_assistant_replies` as a required response field. `ui/src/api.ts:709` marks the matching `forwardAssistantReplies` property optional, and existing API/preferences fixtures omit it. This weakens the current API contract and can hide regressions where the UI falls back to `false` because the response field was dropped.
+`src/telegram.rs:214-228` checks free-text byte limits before consuming the chat work limiter, while slash-command paths consume the limiter before command-specific handling in `src/telegram.rs:143-159`. `src/telegram.rs:62-75` also changed pruning to scan the full map, but the mixed expired/fresh bucket case is not pinned by tests or described at the helper boundary.
 
 **Current behavior:**
-- Backend status responses always include `forwardAssistantReplies`.
-- Frontend typing accepts responses without the field.
-- API and preferences tests do not pin the field in status fixtures or config-save payloads.
+- Oversized free-text prompts can return before consuming the work limiter.
+- Slash-command work paths consume the limiter first.
+- Rate-limit pruning covers fully expired buckets, but not a mixed map with some fresh buckets retained.
+- The pruning helper has no comment describing the full-map scan and retain/drop contract.
 
 **Proposal:**
-- Make `TelegramStatusResponse.forwardAssistantReplies` required in `ui/src/api.ts`.
-- Update Telegram API/preference fixtures and save assertions to include the field.
-- Add API helper coverage proving `forwardAssistantReplies` round-trips in config updates.
-
-## Telegram assistant-reply forwarding environment toggle is missing from the feature docs
-
-**Severity:** Low - the runtime now supports `TERMAL_TELEGRAM_FORWARD_ASSISTANT_REPLIES`, but the Telegram feature documentation does not list it with the other relay environment settings.
-
-`docs/features/telegram-ui-integration.md:353-358` documents Telegram environment variables, but omits the assistant-reply forwarding override. Operators reading the feature docs can miss that full assistant replies can be enabled or disabled through environment configuration.
-
-**Current behavior:**
-- The code recognizes `TERMAL_TELEGRAM_FORWARD_ASSISTANT_REPLIES`.
-- The Telegram feature docs do not describe the variable or its content-forwarding implications.
-
-**Proposal:**
-- Add the environment variable to the Telegram feature docs.
-- Note that enabling it allows full assistant output to be sent through Telegram.
-
-## Telegram chat work rate limiting misses some command paths
-
-**Severity:** Low - the per-chat work limiter only guards action dispatches and free-text prompt sends, leaving other commands able to trigger repeated backend work.
-
-`src/telegram.rs:143-197` applies `telegram_chat_work_is_rate_limited(...)` to `Action` commands, and the prompt path checks it later, but `/status`, `/projects`, `/sessions`, `/project`, `/session`, and help fallback paths can still be repeated without hitting the same limiter. Those paths are local-only but can still create avoidable digest/list work for one chat.
-
-**Current behavior:**
-- Action dispatches and free-text prompts are rate-limited.
-- Status, project/session listing and selection, and help fallback commands are not covered by the same work limiter.
-
-**Proposal:**
-- Apply a shared work-command limiter before Telegram commands that perform backend fetch/list/select work.
-- Keep cheap ignore paths for commands addressed to other bots outside the limiter.
-
-## Telegram chat work rate-limit buckets are never pruned
-
-**Severity:** Note - idle chat entries remain in `chat_work_rate_limit` after their timestamp deque has been drained.
-
-`src/telegram.rs:53-64` removes expired timestamps from each chat's `VecDeque`, but it leaves the per-chat map entry in place even when the deque becomes empty. A long-running relay that sees many one-off chat ids can retain empty buckets indefinitely.
-
-**Current behavior:**
-- Expired timestamps are popped from the per-chat deque.
-- Empty chat entries remain in `chat_work_rate_limit`.
-
-**Proposal:**
-- Remove a chat id from the map when its rate-limit deque becomes empty and the current update is not recorded.
-- Add focused coverage for the pruning behavior.
-
-## Authoritative reconnect confirmation discards its success signal
-
-**Severity:** Note - the authoritative snapshot reconnect path ignores the boolean returned by the shared reconnect-finish helper.
-
-`ui/src/app-live-state-transport.ts:392-395` calls `finishReconnectRecoveryConfirmation()` but does not return its result, unlike the live-event, delta-event, and state-event confirmation paths. The current helper always returns `true`, so this is not a runtime regression today, but it makes the authoritative path diverge from the others and can hide a future failure signal if the helper grows one.
-
-**Current behavior:**
-- Live, delta, and state confirmation helpers return the shared finish result.
-- Authoritative snapshot confirmation drops the shared finish result.
-
-**Proposal:**
-- Return the shared finish result from `confirmReconnectRecoveryFromAuthoritativeSnapshot()`.
-- Add a narrow reconnect transport test that pins the authoritative confirmation return behavior.
+- Document the intended byte-limit-versus-rate-limit ordering.
+- Add coverage for oversized prompts when the chat is already rate-limited.
+- Add mixed-bucket pruning coverage that keeps fresh buckets while removing expired ones.
+- Add a short comment on the pruning helper's scan-and-drop behavior.
 
 ## Session store publication can race ahead of React session state
 
@@ -232,24 +165,18 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   cover plaintext token-at-rest exposure, corrupt-backup permission hardening, and credential-store failure/fallback behavior beyond the native-store smoke test.
 - [ ] P2: Cover post-validation Telegram settings sanitization:
   delete a project/session after validation but before the second sanitize path, or extract a deterministic helper seam, and assert the persisted response cannot retain stale references. The current stale-reference test at `src/tests/telegram.rs:1573` seeds invalid state before validation, so removing the post-validation sanitize in `src/telegram_settings.rs:73` would still pass.
-- [ ] P2: Add Telegram settings file concurrency regressions:
-  simulate UI config save racing relay state persistence across separate processes or an OS-lock harness, assert atomic writes prevent partial JSON reads, and assert token/config plus `chatId`/`nextUpdateId` are not lost.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
-  cover API error display, stale default-session clearing, default-project auto-subscription, assistant-reply forwarding opt-in warning/save behavior, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
-- [ ] P2: Add Telegram API helper coverage for assistant-reply forwarding:
-  pin `forwardAssistantReplies` in status fixtures, frontend response typing, and `/api/telegram/config` request-body assertions so the UI cannot silently drop the opt-in field.
-- [ ] P2: Document Telegram assistant-reply forwarding environment configuration:
-  add `TERMAL_TELEGRAM_FORWARD_ASSISTANT_REPLIES` to the Telegram feature docs and describe the third-party content-forwarding impact.
-- [ ] P2: Add Telegram chat work rate-limit coverage:
-  cover action command limiting, free-text prompt limiting, the `telegram_chat_work_is_rate_limited` wrapper, read/select command limiter coverage, and empty bucket pruning.
+  cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
+- [ ] P2: Add Telegram chat work rate-limit edge-case coverage:
+  cover mixed expired/fresh bucket pruning, oversized-prompt-while-rate-limited ordering, and the intended byte-limit-before-rate-limiter contract.
 - [ ] P2: Add assistant-reply forwarding disabled-path regressions:
   cover `sync_telegram_digest` and `select_telegram_project_session` with `forward_assistant_replies=false` so digest and selection paths cannot accidentally forward assistant replies.
 - [ ] P2: Clarify pending queued-prompt cancel tooltip behavior:
   either restore/replace the removed `PendingPromptCard` `title` affordance or document the intentional aria-label-only behavior in the component/test coverage.
-- [ ] P2: Add authoritative reconnect confirmation return coverage:
-  assert `confirmReconnectRecoveryFromAuthoritativeSnapshot()` propagates the shared reconnect-finish result like the live, delta, and state confirmation paths.
 - [ ] P2: Add reconnect-specific gapped session-delta recovery coverage:
   arm reconnect fallback polling, reopen SSE, dispatch an advancing stamped `textDelta`/`textReplace` across a revision gap, and assert live text renders before snapshot repair while recovery remains pending until authoritative repair succeeds.
+- [ ] P2: Add reconnect transport branch coverage for non-rearming adoption:
+  cover the `adopted`-without-rearm path in the live-state transport and make intentionally discarded reconnect-confirmation boolean returns explicit at call sites.
 - [ ] P2: Add remaining production SQLite persistence coverage:
   with the SQLite runtime path now compiled under `cargo test`, cover targeted delta upsert, metadata-only update, hidden/deleted row removal, malformed SQLite row/load errors, and startup load assertions that exercise the split `app_state` / `sessions` / `delegations` tables directly.
 - [ ] P2: Restore Windows AppState bootstrap path-normalization coverage:

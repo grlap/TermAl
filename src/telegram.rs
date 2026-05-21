@@ -6,8 +6,9 @@ Poll updates
   -> GET project digest or POST project action
   -> render digest + inline keyboard after updates have been drained
   -> persist chat binding and digest cursor
-This adapter runs as a separate CLI mode. It reuses the same backend project
-action contract instead of exposing a second transport-specific control path.
+The relay runs inside the main backend process from Settings -> Telegram. It
+reuses the same backend project action contract instead of exposing a second
+transport-specific control path.
 */
 
 /// Handles Telegram update.
@@ -50,18 +51,28 @@ fn telegram_chat_work_is_rate_limited_at(
     chat_id: i64,
     now: std::time::Instant,
 ) -> bool {
+    prune_expired_telegram_chat_work_rate_limits(state, now);
     let entries = state.chat_work_rate_limit.entry(chat_id).or_default();
-    while entries
-        .front()
-        .is_some_and(|entry| now.duration_since(*entry) >= TELEGRAM_CHAT_WORK_RATE_LIMIT_WINDOW)
-    {
-        entries.pop_front();
-    }
     if entries.len() >= TELEGRAM_CHAT_WORK_RATE_LIMIT_MAX {
         return true;
     }
     entries.push_back(now);
     false
+}
+
+fn prune_expired_telegram_chat_work_rate_limits(
+    state: &mut TelegramBotState,
+    now: std::time::Instant,
+) {
+    state.chat_work_rate_limit.retain(|_, entries| {
+        while entries
+            .front()
+            .is_some_and(|entry| now.duration_since(*entry) >= TELEGRAM_CHAT_WORK_RATE_LIMIT_WINDOW)
+        {
+            entries.pop_front();
+        }
+        !entries.is_empty()
+    });
 }
 
 fn handle_telegram_update(
@@ -136,9 +147,17 @@ fn handle_telegram_message_for_relay(
         }
         let Some(command) = parse_telegram_command_for_bot(text, config.bot_username.as_deref())
         else {
+            if telegram_chat_work_is_rate_limited(state, chat_id) {
+                telegram.send_message(chat_id, TELEGRAM_CHAT_WORK_RATE_LIMIT_TEXT, None)?;
+                return Ok(TelegramUpdateHandlingOutcome::default());
+            }
             telegram.send_message(chat_id, &telegram_help_text(config, state), None)?;
             return Ok(TelegramUpdateHandlingOutcome::default());
         };
+        if telegram_chat_work_is_rate_limited(state, chat_id) {
+            telegram.send_message(chat_id, TELEGRAM_CHAT_WORK_RATE_LIMIT_TEXT, None)?;
+            return Ok(TelegramUpdateHandlingOutcome::default());
+        }
 
         return match command.command {
             TelegramIncomingCommand::Start | TelegramIncomingCommand::Help => {
@@ -171,10 +190,6 @@ fn handle_telegram_message_for_relay(
             )
             .map(TelegramUpdateHandlingOutcome::unsynced),
             TelegramIncomingCommand::Action(action_id) => {
-                if telegram_chat_work_is_rate_limited(state, chat_id) {
-                    telegram.send_message(chat_id, TELEGRAM_CHAT_WORK_RATE_LIMIT_TEXT, None)?;
-                    return Ok(TelegramUpdateHandlingOutcome::default());
-                }
                 let (project_id, mut dirty) = resolve_telegram_active_project_id(config, state);
                 match termal.dispatch_project_action(&project_id, action_id.as_str()) {
                     Ok(digest) => {

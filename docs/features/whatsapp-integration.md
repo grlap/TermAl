@@ -13,12 +13,11 @@ Related briefs:
 
 ## Status
 
-Phase 1 (Telegram bot adapter) ships as a separate `cargo run -- telegram`
-process configured by env vars; UI-driven configuration and in-process
-lifecycle are designed in [`telegram-ui-integration.md`](./telegram-ui-integration.md)
-and not yet implemented. Phase 0 (PWA push), Phase 2 (deterministic digest
-builder beyond the current hand-rolled rules), and Phase 3 (WhatsApp) are not
-implemented.
+Phase 1 (Telegram bot adapter) runs in-process inside the TermAl backend and is
+configured from Settings -> Telegram. The multi-bot target model is tracked in
+[`telegram-ui-integration.md`](./telegram-ui-integration.md). Phase 0 (PWA
+push), Phase 2 (deterministic digest builder beyond the current hand-rolled
+rules), and Phase 3 (WhatsApp) are not implemented.
 
 ## Problem
 

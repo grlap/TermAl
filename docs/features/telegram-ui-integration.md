@@ -4,8 +4,7 @@ TermAl supports an experimental Telegram bot relay. The current implementation
 has one UI-configured bot with one linked Telegram chat; the target design is a
 small set of named bot profiles, each with its own token, chat binding, project
 subscriptions, defaults, and relay runtime. The normal path is UI-configured and
-runs inside the main backend process; the older `cargo run -- telegram` mode
-remains as a debugging escape hatch.
+runs inside the main backend process.
 
 Parent feature: [`whatsapp-integration.md`](./whatsapp-integration.md).
 
@@ -24,8 +23,9 @@ Implemented:
 - Telegram session switching with `/sessions` and `/session <name>`.
 - Free-text forwarding into the selected session, or the active project's
   digest target when no session is selected.
-- Assistant text forwarding back to Telegram for Telegram-originated prompts and
-  for locally-entered TermAl prompts in the selected Telegram session.
+- Optional assistant text forwarding back to Telegram for Telegram-originated
+  prompts and for locally-entered TermAl prompts in the selected Telegram
+  session when `forwardAssistantReplies` is enabled.
 - Digest actions through `/approve`, `/reject`, `/continue`, `/fix`,
   `/commit`, `/iterate`, `/stop`, and `/review`.
 - Digest messages use Telegram HTML parse mode with escaped content and a
@@ -54,10 +54,10 @@ Not implemented yet:
 5. Enable the relay and save.
 6. Open the bot in Telegram and send `/start`.
 
-The relay is part of the main TermAl backend. Do not start a second
-`cargo run -- telegram` process for the same bot token while the in-process
-relay is enabled; Telegram permits only one `getUpdates` poller per bot and
-will return API 409 conflicts.
+The relay is part of the main TermAl backend. Saving enabled settings starts,
+stops, or restarts the in-process relay from the saved configuration. Telegram
+permits only one `getUpdates` poller per bot token, so run one TermAl backend
+per configured bot token.
 
 ## Telegram Commands
 
@@ -107,6 +107,7 @@ The UI-owned config block contains:
 - `subscribedProjectIds`
 - `defaultProjectId`
 - `defaultSessionId`
+- `forwardAssistantReplies`
 
 The runtime state contains fields such as:
 
@@ -346,20 +347,6 @@ references can still be scrubbed from the response when they no longer exist.
 Clients should replace local Telegram settings state with the response instead
 of diffing request fields against response fields.
 
-## Legacy CLI Mode
-
-`cargo run -- telegram` still works for debugging and reads:
-
-- `TERMAL_TELEGRAM_BOT_TOKEN`
-- `TERMAL_TELEGRAM_PROJECT_ID`
-- `TERMAL_TELEGRAM_CHAT_ID`
-- `TERMAL_TELEGRAM_API_BASE_URL`
-- `TERMAL_TELEGRAM_PUBLIC_BASE_URL`
-- `TERMAL_TELEGRAM_POLL_TIMEOUT_SECS`
-
-This mode should not be used at the same time as the in-process relay for the
-same bot token.
-
 ## Remaining Work
 
 - Replace manual chat binding with a one-time link-code wizard.
@@ -369,7 +356,5 @@ same bot token.
   Bot API HTML does not support real `<table>` markup, so future options
   include generated PNG/SVG snapshots or attached HTML files for wider tables
   and richer report layouts.
-- Add per-chat prompt/action rate limiting.
-- Decide whether to deprecate or remove the legacy CLI relay.
 - Implement the multi-bot target spec above, keeping one linked chat per bot
   until the profile/runtime migration is stable.

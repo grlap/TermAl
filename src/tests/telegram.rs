@@ -13,6 +13,8 @@ use super::*;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 
+mod rate_limit;
+
 static TELEGRAM_TEST_RATE_LIMIT_TEST_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 
@@ -355,6 +357,17 @@ fn telegram_test_config() -> TelegramTestConfig {
                 .join(format!("termal-telegram-{}.json", Uuid::new_v4())),
             subscribed_project_ids: vec!["project-1".to_owned()],
         },
+    }
+}
+
+fn telegram_text_message(chat_id: i64, text: &str) -> TelegramChatMessage {
+    TelegramChatMessage {
+        message_id: 1,
+        chat: TelegramChat {
+            id: chat_id,
+            _kind: "private".to_owned(),
+        },
+        text: Some(text.to_owned()),
     }
 }
 
@@ -887,68 +900,6 @@ fn telegram_linked_foreign_bot_command_is_ignored() {
 
     assert!(!changed);
     assert!(telegram.sent_texts.borrow().is_empty());
-}
-
-#[test]
-fn telegram_chat_work_rate_limit_is_per_chat_and_windowed() {
-    let mut state = TelegramBotState::default();
-    let now = std::time::Instant::now();
-    for _ in 0..TELEGRAM_CHAT_WORK_RATE_LIMIT_MAX {
-        assert!(!telegram_chat_work_is_rate_limited_at(&mut state, 42, now));
-    }
-    assert!(telegram_chat_work_is_rate_limited_at(&mut state, 42, now));
-    assert!(!telegram_chat_work_is_rate_limited_at(&mut state, 43, now));
-    assert!(!telegram_chat_work_is_rate_limited_at(
-        &mut state,
-        42,
-        now + TELEGRAM_CHAT_WORK_RATE_LIMIT_WINDOW + Duration::from_millis(1),
-    ));
-}
-
-#[test]
-fn telegram_callback_rate_limit_blocks_dispatch() {
-    let mut state = TelegramBotState::default();
-    let now = std::time::Instant::now();
-    for _ in 0..TELEGRAM_CHAT_WORK_RATE_LIMIT_MAX {
-        assert!(!telegram_chat_work_is_rate_limited_at(&mut state, 42, now));
-    }
-
-    let telegram = FakeTelegramSender::new(None);
-    let termal = FakeTelegramActionClient::succeeded(telegram_project_digest(Some("session-1")));
-    let config = telegram_test_config();
-
-    let changed = handle_telegram_callback_query(
-        &telegram,
-        &termal,
-        &config,
-        &mut state,
-        TelegramCallbackQuery {
-            id: "callback-1".to_owned(),
-            data: Some(
-                telegram_digest_callback_data("project-1", "review-in-termal")
-                    .expect("callback data should fit"),
-            ),
-            message: Some(TelegramChatMessage {
-                message_id: 7,
-                chat: TelegramChat {
-                    id: 42,
-                    _kind: "private".to_owned(),
-                },
-                text: Some("digest".to_owned()),
-            }),
-        },
-    )
-    .expect("rate-limited callback should be handled");
-
-    assert!(!changed);
-    assert!(termal.dispatches.borrow().is_empty());
-    assert_eq!(
-        telegram.answered_callbacks.borrow().as_slice(),
-        [(
-            "callback-1".to_owned(),
-            TELEGRAM_CHAT_WORK_RATE_LIMIT_TEXT.to_owned()
-        )]
-    );
 }
 
 #[test]

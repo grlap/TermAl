@@ -32,3 +32,23 @@ fn cli_still_accepts_codex_repl_shortcuts() {
         ));
     }
 }
+
+#[test]
+fn cli_rejects_telegram_relay_aliases_with_settings_guidance() {
+    for args in [vec!["telegram"], vec!["telegram-bot"]] {
+        match Mode::parse(args.into_iter().map(str::to_owned).collect()) {
+            Ok(_) => panic!("Telegram relay aliases should not select a process mode"),
+            Err(err) => {
+                let message = err.to_string();
+                assert!(
+                    message.contains("Telegram relay runs inside server mode"),
+                    "unexpected error: {err:#}"
+                );
+                assert!(
+                    message.contains("Settings -> Telegram"),
+                    "unexpected error: {err:#}"
+                );
+            }
+        }
+    }
+}

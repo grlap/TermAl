@@ -28,6 +28,7 @@ const updateTelegramConfigMock = vi.mocked(updateTelegramConfig);
 const emptyTelegramStatus: TelegramStatusResponse = {
   configured: false,
   enabled: false,
+  forwardAssistantReplies: false,
   running: false,
   lifecycle: "manual",
   linkedChatId: null,
@@ -110,11 +111,32 @@ describe("TelegramPreferencesPanel", () => {
     await waitFor(() => {
       expect(updateTelegramConfigMock).toHaveBeenCalledWith({
         enabled: false,
+        forwardAssistantReplies: false,
         botToken: "123456:token",
         subscribedProjectIds: ["project-1"],
         defaultProjectId: null,
         defaultSessionId: null,
       });
+    });
+  });
+
+  it("warns before saving assistant-reply forwarding to Telegram", async () => {
+    render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
+
+    await screen.findByText(/Sends full assistant output to Telegram/);
+    const forwardingToggle = screen.getByLabelText("Forward assistant replies");
+    expect(forwardingToggle).toHaveAccessibleDescription(
+      /including any code, file paths, file contents, or secrets/,
+    );
+    fireEvent.click(forwardingToggle);
+    fireEvent.click(screen.getByRole("button", { name: "Save Telegram" }));
+
+    await waitFor(() => {
+      expect(updateTelegramConfigMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          forwardAssistantReplies: true,
+        }),
+      );
     });
   });
 

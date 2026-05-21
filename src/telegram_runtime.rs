@@ -1,8 +1,8 @@
 /*
 Telegram relay runtime and configuration.
 
-This include! fragment keeps process lifecycle, environment-derived config,
-and in-process relay supervision out of the update handling module.
+This include! fragment keeps process lifecycle, UI-derived config, and
+in-process relay supervision out of the update handling module.
 */
 
 const TELEGRAM_API_BASE_URL: &str = "https://api.telegram.org";
@@ -16,41 +16,6 @@ const TELEGRAM_CALLBACK_ERROR_MAX_CHARS: usize = 180;
 const TELEGRAM_SAFE_USER_ERROR_DETAIL: &str = "Check TermAl for details, then try again.";
 const TELEGRAM_CALLBACK_DATA_MAX_BYTES: usize = 64;
 
-fn required_env_var(key: &str) -> Result<String> {
-    std::env::var(key)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("{key} is required"))
-}
-
-/// Parses optional i64 environment.
-fn parse_optional_i64_env(key: &str) -> Result<Option<i64>> {
-    std::env::var(key)
-        .ok()
-        .map(|value| {
-            value
-                .parse::<i64>()
-                .with_context(|| format!("{key} is not a valid integer: {value}"))
-        })
-        .transpose()
-}
-
-fn parse_optional_bool_env(key: &str) -> Result<Option<bool>> {
-    let Some(value) = std::env::var(key)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(None);
-    };
-    match value.to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Ok(Some(true)),
-        "0" | "false" | "no" | "off" => Ok(Some(false)),
-        _ => bail!("{key} must be one of true/false, yes/no, on/off, or 1/0"),
-    }
-}
-
 /// Returns the default TermAl API base URL.
 fn default_termal_api_base_url() -> String {
     let port = std::env::var("TERMAL_PORT")
@@ -58,17 +23,6 @@ fn default_termal_api_base_url() -> String {
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(8787);
     format!("http://127.0.0.1:{port}")
-}
-
-/// Runs Telegram bot.
-fn run_telegram_bot() -> Result<()> {
-    let cwd_path = std::env::current_dir().context("failed to resolve current directory")?;
-    let cwd = cwd_path
-        .to_str()
-        .context("current directory is not valid UTF-8")?
-        .to_owned();
-    let config = TelegramBotConfig::from_env(&cwd)?;
-    run_telegram_bot_with_config(config, None, None)
 }
 
 fn run_telegram_bot_with_config(
@@ -114,9 +68,7 @@ fn run_telegram_bot_with_config(
     );
     match effective_telegram_chat_id(&config, &state) {
         Some(chat_id) => println!("chat: {chat_id}"),
-        None => println!(
-            "chat: not linked; set TERMAL_TELEGRAM_CHAT_ID or use the Settings link flow when it is enabled"
-        ),
+        None => println!("chat: not linked; open the bot chat in Telegram and send /start"),
     }
 
     if let Some(on_ready) = on_ready {
@@ -230,48 +182,6 @@ struct TelegramBotConfig {
 }
 
 impl TelegramBotConfig {
-    /// Builds the value from environment.
-    fn from_env(default_workdir: &str) -> Result<Self> {
-        let bot_token = required_env_var("TERMAL_TELEGRAM_BOT_TOKEN")?;
-        let project_id = required_env_var("TERMAL_TELEGRAM_PROJECT_ID")?;
-        let api_base_url = std::env::var("TERMAL_TELEGRAM_API_BASE_URL")
-            .ok()
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(default_termal_api_base_url);
-        let public_base_url = std::env::var("TERMAL_TELEGRAM_PUBLIC_BASE_URL")
-            .ok()
-            .map(|value| value.trim().trim_end_matches('/').to_owned())
-            .filter(|value| !value.is_empty());
-        let chat_id = parse_optional_i64_env("TERMAL_TELEGRAM_CHAT_ID")?;
-        let forward_assistant_replies =
-            parse_optional_bool_env("TERMAL_TELEGRAM_FORWARD_ASSISTANT_REPLIES")?.unwrap_or(false);
-        let poll_timeout_secs = std::env::var("TERMAL_TELEGRAM_POLL_TIMEOUT_SECS")
-            .ok()
-            .map(|value| {
-                value.parse::<u64>().with_context(|| {
-                    format!("TERMAL_TELEGRAM_POLL_TIMEOUT_SECS is not a valid integer: {value}")
-                })
-            })
-            .transpose()?
-            .unwrap_or(TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS)
-            .max(1);
-        let state_path = resolve_termal_data_dir(default_workdir).join("telegram-bot.json");
-
-        Ok(Self {
-            api_base_url,
-            bot_username: None,
-            bot_token,
-            chat_id,
-            forward_assistant_replies,
-            poll_timeout_secs,
-            project_id: project_id.clone(),
-            public_base_url,
-            state_path,
-            subscribed_project_ids: vec![project_id],
-        })
-    }
-
     fn from_ui_file(
         default_workdir: &str,
         file: &TelegramBotFile,

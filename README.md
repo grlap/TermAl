@@ -254,10 +254,15 @@ Configure Telegram from Settings -> Telegram:
 
 1. Create a bot with Telegram's `@BotFather` and copy the bot token.
 2. Paste the token, test the connection, choose the subscribed projects, and save.
-3. Enable the relay and restart the backend if it was already running before the save.
+3. Enable the relay and save. TermAl starts, stops, or restarts the in-process relay from the saved settings.
 4. Open the bot chat in Telegram and send `/start`.
 
-The backend runs the relay in-process; no second `cargo run -- telegram` process is required for the normal setup. Today the relay is bound to one Telegram bot/chat and can control multiple subscribed TermAl projects from that chat. The planned multi-bot model is documented in `docs/features/telegram-ui-integration.md`: each bot becomes a named profile with its own token, linked chat, project subscriptions, defaults, and relay runtime.
+The backend runs the relay in-process from saved Settings -> Telegram
+configuration. Today the relay is bound to one Telegram bot/chat and can control
+multiple subscribed TermAl projects from that chat. The planned multi-bot model
+is documented in `docs/features/telegram-ui-integration.md`: each bot becomes a
+named profile with its own token, linked chat, project subscriptions, defaults,
+and relay runtime.
 
 Telegram commands:
 
@@ -269,18 +274,7 @@ Telegram commands:
 - `/session clear` — return free text to the active project's current/default session
 - `/approve`, `/reject`, `/continue`, `/fix`, `/commit`, `/iterate`, `/stop`, `/review` — dispatch project digest actions
 
-Free text is forwarded into the selected session, or into the active project's current digest target when no session is selected. Assistant replies from the selected session are tailed back to Telegram after they settle.
-
-Legacy CLI mode still exists for debugging:
-
-```bash
-TERMAL_TELEGRAM_BOT_TOKEN=... \
-TERMAL_TELEGRAM_PROJECT_ID=project-1 \
-TERMAL_TELEGRAM_CHAT_ID=123456789 \
-cargo run -- telegram
-```
-
-Do not run the legacy CLI relay at the same time as the in-process relay for the same bot token; Telegram allows only one `getUpdates` poller per bot and will return API 409 conflicts.
+Free text is forwarded into the selected session, or into the active project's current digest target when no session is selected. Assistant replies from the selected session are tailed back to Telegram after they settle only when `Forward assistant replies` is enabled; that setting can send full assistant output, including code, file paths, file contents, or secrets, to Telegram.
 
 ## Project structure
 

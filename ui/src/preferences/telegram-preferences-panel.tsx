@@ -379,12 +379,20 @@ export function TelegramPreferencesPanel({
               type="checkbox"
               checked={draft.forwardAssistantReplies}
               disabled={isLoading || isSaving}
+              aria-describedby="telegram-forward-assistant-replies-warning"
               onChange={(event) =>
                 updateDraft({ forwardAssistantReplies: event.target.checked })
               }
             />
             <span>Forward assistant replies</span>
           </label>
+          <p
+            id="telegram-forward-assistant-replies-warning"
+            className="session-control-hint"
+          >
+            Sends full assistant output to Telegram, including any code, file paths,
+            file contents, or secrets in the reply.
+          </p>
 
           <div className="session-control-group">
             <label

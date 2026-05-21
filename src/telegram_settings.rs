@@ -2,10 +2,9 @@
 Telegram settings HTTP surface.
 
 This owns the UI-facing config/status/test endpoints for the Telegram relay.
-The relay loop still reads the legacy flat runtime fields from
-`telegram-bot.json`; the settings file format below keeps those fields flat and
-adds a `config` object so the existing `cargo run -- telegram` path can ignore
-UI-only fields during the transition. The bot token is stored in the OS
+The relay loop still reads flat runtime fields from `telegram-bot.json`; the
+settings file format below keeps those fields flat and adds a `config` object
+for UI-owned fields. The bot token is stored in the OS
 credential store; any legacy plaintext `config.botToken` value is migrated out
 of this JSON file on read.
 
@@ -26,9 +25,9 @@ re-sanitize immediately before writing so a concurrent project/session delete
 cannot leave references that the next status read would hide.
 
 Coordination invariant: `telegram_settings_file_guard()` coordinates writers in
-this backend process only. The standalone `cargo run -- telegram` relay and
-separate TermAl processes can still race through the filesystem, so read/merge
-paths must treat parse failures and unrelated-file fields carefully.
+this backend process only. Separate TermAl server processes can still race
+through the filesystem, so read/merge paths must treat parse failures and
+unrelated-file fields carefully.
 */
 
 const TELEGRAM_BOT_TOKEN_MAX_CHARS: usize = 256;

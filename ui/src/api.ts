@@ -706,7 +706,7 @@ export function updateAppSettings(payload: {
 export type TelegramStatusResponse = {
   configured: boolean;
   enabled: boolean;
-  forwardAssistantReplies?: boolean;
+  forwardAssistantReplies: boolean;
   running: boolean;
   // lifecycle describes who owns relay startup; running is the current poll-loop state.
   // UI labels derive "Stopped" only when lifecycle is inProcess and

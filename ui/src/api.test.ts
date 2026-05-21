@@ -238,6 +238,7 @@ describe("telegram API helpers", () => {
         JSON.stringify({
           configured: false,
           enabled: false,
+          forwardAssistantReplies: false,
           running: false,
           lifecycle: "manual",
           subscribedProjectIds: [],
@@ -274,6 +275,7 @@ describe("telegram API helpers", () => {
 
     await updateTelegramConfig({
       enabled: true,
+      forwardAssistantReplies: true,
       botToken: null,
       subscribedProjectIds: ["project-1"],
       defaultProjectId: "project-1",
@@ -292,6 +294,7 @@ describe("telegram API helpers", () => {
     const [, init] = fetchMock.mock.calls[0] ?? [];
     expect(JSON.parse(String(init?.body))).toEqual({
       enabled: true,
+      forwardAssistantReplies: true,
       botToken: null,
       subscribedProjectIds: ["project-1"],
       defaultProjectId: "project-1",
@@ -319,6 +322,7 @@ describe("telegram API helpers", () => {
 
     await updateTelegramConfig({
       enabled: true,
+      forwardAssistantReplies: true,
       botToken: "123:abc",
       subscribedProjectIds: ["project-1"],
       defaultProjectId: "project-1",
@@ -328,6 +332,7 @@ describe("telegram API helpers", () => {
     const [, init] = fetchMock.mock.calls[0] ?? [];
     expect(JSON.parse(String(init?.body))).toEqual({
       enabled: true,
+      forwardAssistantReplies: true,
       botToken: "123:abc",
       subscribedProjectIds: ["project-1"],
       defaultProjectId: "project-1",

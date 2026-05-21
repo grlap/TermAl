@@ -133,6 +133,19 @@ type UseAppLiveStateTransportParams = {
   workspaceFilesChangedEventGateRefs: WorkspaceFilesChangedEventGateRefs;
 };
 
+type AuthoritativeSnapshotReconnectRecoveryDeps = {
+  reconnectState: Pick<ReconnectStateMachine, "confirmAuthoritativeSnapshot">;
+  finishReconnectRecoveryConfirmation: () => boolean;
+};
+
+export function confirmAuthoritativeSnapshotReconnectRecovery({
+  reconnectState,
+  finishReconnectRecoveryConfirmation,
+}: AuthoritativeSnapshotReconnectRecoveryDeps): boolean {
+  reconnectState.confirmAuthoritativeSnapshot();
+  return finishReconnectRecoveryConfirmation();
+}
+
 export function useAppLiveStateTransport(
   params: UseAppLiveStateTransportParams,
 ) {
@@ -390,8 +403,10 @@ export function useAppLiveStateTransport(
     }
 
     function confirmReconnectRecoveryFromAuthoritativeSnapshot() {
-      reconnectState.confirmAuthoritativeSnapshot();
-      finishReconnectRecoveryConfirmation();
+      return confirmAuthoritativeSnapshotReconnectRecovery({
+        reconnectState,
+        finishReconnectRecoveryConfirmation,
+      });
     }
 
     function beginBadLiveEventRecovery() {
@@ -794,6 +809,9 @@ export function useAppLiveStateTransport(
                   // proof can clear the reconnect badge after adopting their
                   // authoritative snapshot. Timer-driven reconnect fallback
                   // requests keep polling through `shouldRearmUntilLiveEvent`.
+                  // The helper's boolean mirrors other reconnect confirmation
+                  // paths for future callers; this branch only needs its side
+                  // effects because adoption has already succeeded.
                   confirmReconnectRecoveryFromAuthoritativeSnapshot();
                 }
               }

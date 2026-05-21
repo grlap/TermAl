@@ -381,6 +381,7 @@ describe("AppDialogs settings agent defaults", () => {
       const status = {
         configured: true,
         enabled: true,
+        forwardAssistantReplies: false,
         running: false,
         lifecycle: "inProcess",
         linkedChatId: null,

@@ -15,9 +15,9 @@ Browser UI
        -> per-session Claude runtime
        -> per-session ACP runtimes (Cursor / Gemini)
        -> RemoteRegistry (SSH tunnels + remote event bridges)
+       -> in-process Telegram relay (optional)
 
 Optional sidecar:
-  telegram mode -> project digest/actions -> same local TermAl server
   TermAl MCP bridge -> parent-scoped delegation tools -> same local TermAl server
 ```
 
@@ -58,12 +58,14 @@ receives it through `config.mcp_servers` on `thread/start` and `thread/resume`.
 
 ### Entry Points
 
-The binary has four modes:
+The binary has three modes:
 
 1. **Server mode** (default) - starts an axum HTTP server on `127.0.0.1:8787` by default, serves the API, and manages long-lived agent processes. `TERMAL_PORT` can override the port.
 2. **REPL mode** (`repl`, `cli`, or a REPL-capable agent shortcut such as `codex`) - interactive terminal loop. Reads prompts from stdin and runs one turn at a time via `run_turn_blocking()`. Claude is intentionally excluded because Claude Code runs through the long-lived server-side stdio runtime.
-3. **Telegram mode** (`telegram` or `telegram-bot`) - long-polling relay that turns project digests and project actions into a Telegram bot workflow.
-4. **Delegation MCP mode** (`delegation-mcp --parent-session-id <id> [--base-url <origin>]`) - stdio JSON-RPC bridge exposing parent-scoped delegation tools to agent runtimes.
+3. **Delegation MCP mode** (`delegation-mcp --parent-session-id <id> [--base-url <origin>]`) - stdio JSON-RPC bridge exposing parent-scoped delegation tools to agent runtimes.
+
+The Telegram relay is not a CLI mode. It is configured from Settings ->
+Telegram and supervised inside server mode.
 
 ### Core State
 

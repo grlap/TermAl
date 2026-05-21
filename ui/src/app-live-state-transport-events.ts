@@ -69,7 +69,7 @@ type AppLiveStateTransportEventHandlersContext = {
   clearRecoveredBackendRequestError: () => void;
   clearReconnectStateResyncTimeoutAfterConfirmedReopen: () => void;
   codexStateRef: MutableRefObject<CodexState>;
-  confirmReconnectRecoveryFromAuthoritativeSnapshot: () => void;
+  confirmReconnectRecoveryFromAuthoritativeSnapshot: () => boolean;
   confirmReconnectRecoveryFromDeltaEvent: () => boolean;
   confirmReconnectRecoveryFromLiveEvent: () => boolean;
   confirmReconnectRecoveryFromStateEvent: () => boolean;

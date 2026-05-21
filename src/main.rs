@@ -9,7 +9,7 @@ CLI args
   -> run()
      -> server    -> run_server() -> app_router() -> AppState + HTTP/SSE handlers
      -> repl      -> run_turn_blocking() -> recorder callbacks -> stdout
-     -> telegram  -> run_telegram_bot() -> project digest/action bridge
+     -> delegation-mcp -> run_delegation_mcp_bridge() -> parent-scoped MCP tools
 The crate still compiles as one module so shared backend types stay crate-visible
 without a dense web of pub mod exports, but the behavior is split across
 src/api.rs, src/state.rs, src/runtime.rs, src/turns.rs, src/remote.rs,
@@ -93,9 +93,6 @@ async fn run() -> Result<()> {
     match Mode::parse(args)? {
         Mode::Server => run_server().await,
         Mode::Repl { agent } => run_repl(agent),
-        Mode::Telegram => tokio::task::spawn_blocking(run_telegram_bot)
-            .await
-            .map_err(|err| anyhow!("telegram adapter task failed: {err}"))?,
         Mode::DelegationMcp {
             parent_session_id,
             base_url,
@@ -497,7 +494,6 @@ enum Mode {
     Repl {
         agent: Agent,
     },
-    Telegram,
     DelegationMcp {
         parent_session_id: String,
         base_url: Option<String>,
@@ -507,13 +503,15 @@ enum Mode {
 impl Mode {
     /// Parses CLI arguments into an entry-point `Mode`. First arg
     /// selects between the HTTP server (`server`, default), the
-    /// Telegram bot (`telegram` / `telegram-bot`), or a REPL
-    /// session (`repl` / `cli` + agent name, or a bare REPL-capable
-    /// agent name like `codex`).
+    /// delegation MCP bridge (`delegation-mcp`), or a REPL session
+    /// (`repl` / `cli` + agent name, or a bare REPL-capable agent
+    /// name like `codex`).
     fn parse(args: Vec<String>) -> Result<Self> {
         match args.first().map(String::as_str) {
             None | Some("server") => Ok(Self::Server),
-            Some("telegram") | Some("telegram-bot") => Ok(Self::Telegram),
+            Some("telegram") | Some("telegram-bot") => bail!(
+                "Telegram relay runs inside server mode; configure it from Settings -> Telegram"
+            ),
             Some("delegation-mcp") => {
                 let (parent_session_id, base_url) =
                     parse_delegation_mcp_mode_args(args.into_iter().skip(1))?;
