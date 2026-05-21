@@ -9,6 +9,7 @@ import type {
   RemoteConfig,
   Session,
   SessionModelOption,
+  TelegramUiConfig,
 } from "./types";
 import { matchingSessionModelOption } from "./session-model-options";
 import {
@@ -160,6 +161,7 @@ export function resolveAppPreferences(preferences?: AppPreferences | null) {
       preferences?.defaultClaudeApprovalMode ?? DEFAULT_CLAUDE_APPROVAL_MODE,
     defaultClaudeEffort: preferences?.defaultClaudeEffort ?? DEFAULT_CLAUDE_EFFORT,
     remotes: normalizeRemoteConfigs(preferences?.remotes),
+    telegram: normalizeTelegramUiConfig(preferences?.telegram),
   };
 }
 
@@ -179,6 +181,43 @@ export function areRemoteConfigsEqual(left: readonly RemoteConfig[], right: read
         remote.user === candidate.user
       );
     })
+  );
+}
+
+export function normalizeTelegramUiConfig(
+  config?: TelegramUiConfig | null,
+): TelegramUiConfig {
+  // App-state snapshots may omit fields during migrations; the UI works with
+  // this normalized shape before comparing or applying Telegram config.
+  return {
+    enabled: config?.enabled ?? false,
+    forwardAssistantReplies: config?.forwardAssistantReplies ?? false,
+    subscribedProjectIds: Array.isArray(config?.subscribedProjectIds)
+      ? [...config.subscribedProjectIds]
+      : [],
+    defaultProjectId: config?.defaultProjectId ?? null,
+    defaultSessionId: config?.defaultSessionId ?? null,
+  };
+}
+
+export function areTelegramUiConfigsEqual(
+  left?: TelegramUiConfig | null,
+  right?: TelegramUiConfig | null,
+) {
+  const normalizedLeft = normalizeTelegramUiConfig(left);
+  const normalizedRight = normalizeTelegramUiConfig(right);
+  const leftProjectIds = normalizedLeft.subscribedProjectIds ?? [];
+  const rightProjectIds = normalizedRight.subscribedProjectIds ?? [];
+  return (
+    normalizedLeft.enabled === normalizedRight.enabled &&
+    normalizedLeft.forwardAssistantReplies ===
+      normalizedRight.forwardAssistantReplies &&
+    normalizedLeft.defaultProjectId === normalizedRight.defaultProjectId &&
+    normalizedLeft.defaultSessionId === normalizedRight.defaultSessionId &&
+    leftProjectIds.length === rightProjectIds.length &&
+    leftProjectIds.every(
+      (projectId, index) => projectId === rightProjectIds[index],
+    )
   );
 }
 

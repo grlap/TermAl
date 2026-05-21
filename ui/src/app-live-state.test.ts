@@ -342,6 +342,7 @@ function makeLiveStateParams(
       setDefaultClaudeApprovalMode: noopSetter,
       setDefaultClaudeEffort: noopSetter,
       setRemoteConfigs: noopSetter,
+      setTelegramConfig: noopSetter,
     },
     applyControlPanelLayout: (workspace) => workspace,
     clearRecoveredBackendRequestError: vi.fn(),
@@ -392,6 +393,56 @@ afterEach(() => {
 });
 
 describe("deferred session-store sync", () => {
+  it("syncs Telegram preferences from adopted app state", () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const session = makeSession();
+    const params = makeLiveStateParams(session);
+    const setTelegramConfig = vi.fn();
+    params.preferenceSetters.setTelegramConfig = setTelegramConfig;
+    let hook: UseAppLiveStateReturn | null = null;
+
+    renderLiveStateHarness(params, (nextHook) => {
+      hook = nextHook;
+    });
+
+    const state = makeStateResponse(session);
+    act(() => {
+      hook?.syncPreferencesFromState({
+        ...state,
+        preferences: {
+          ...state.preferences,
+          telegram: {
+            enabled: true,
+            forwardAssistantReplies: true,
+            subscribedProjectIds: ["project-1"],
+            defaultProjectId: "project-1",
+            defaultSessionId: "session-1",
+          },
+        },
+      });
+    });
+
+    expect(setTelegramConfig).toHaveBeenCalledTimes(1);
+    const updater = setTelegramConfig.mock.calls[0]?.[0];
+    expect(typeof updater).toBe("function");
+    expect(updater?.(undefined)).toEqual({
+      enabled: true,
+      forwardAssistantReplies: true,
+      subscribedProjectIds: ["project-1"],
+      defaultProjectId: "project-1",
+      defaultSessionId: "session-1",
+    });
+  });
+
   it("keeps reconnecting when valid delta data arrives after an error without an open event", async () => {
     vi.stubGlobal(
       "EventSource",

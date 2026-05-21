@@ -71,6 +71,7 @@ import {
 } from "./api";
 import {
   areRemoteConfigsEqual,
+  areTelegramUiConfigsEqual,
   resolveAppPreferences,
 } from "./session-model-utils";
 import { resolveAdoptedStateSlices } from "./state-adoption";
@@ -256,6 +257,7 @@ export function useAppLiveState(
     setDefaultClaudeApprovalMode,
     setDefaultClaudeEffort,
     setRemoteConfigs,
+    setTelegramConfig,
   } = preferenceSetters;
 
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
@@ -1173,6 +1175,11 @@ export function useAppLiveState(
       areRemoteConfigsEqual(current, preferences.remotes)
         ? current
         : preferences.remotes,
+    );
+    setTelegramConfig((current) =>
+      areTelegramUiConfigsEqual(current, preferences.telegram)
+        ? current
+        : preferences.telegram,
     );
   }
 

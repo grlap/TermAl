@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRef, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -133,6 +133,7 @@ function createBaseProps(
     setFontSizePx: vi.fn(),
     remoteConfigs: [],
     onSaveRemotes: vi.fn(),
+    telegramConfig: undefined,
     projects: [],
     sessions: [],
     handleOrchestratorStateUpdated: vi.fn(),
@@ -408,5 +409,52 @@ describe("AppDialogs settings agent defaults", () => {
       "placeholder",
       "saved-token",
     );
+  });
+
+  it("passes app-state Telegram config into the settings tab", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      const status = {
+        configured: false,
+        enabled: false,
+        forwardAssistantReplies: false,
+        running: false,
+        lifecycle: "inProcess",
+        linkedChatId: null,
+        botTokenMasked: null,
+        subscribedProjectIds: [],
+        defaultProjectId: null,
+        defaultSessionId: null,
+      };
+      return new Response(JSON.stringify(status), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsDialog("telegram", {
+      telegramConfig: {
+        enabled: true,
+        forwardAssistantReplies: true,
+        subscribedProjectIds: ["project-1"],
+        defaultProjectId: "project-1",
+        defaultSessionId: null,
+      },
+      projects: [
+        {
+          id: "project-1",
+          name: "TermAl",
+          rootPath: "/Users/greg/GitHub/Personal/termal",
+        },
+      ],
+    });
+
+    expect(await screen.findByLabelText("Enable relay")).toBeChecked();
+    expect(screen.getByLabelText("Forward assistant replies")).toBeChecked();
+    expect(
+      within(screen.getByLabelText("Telegram subscribed projects")).getByLabelText(
+        /TermAl/,
+      ),
+    ).toBeChecked();
   });
 });

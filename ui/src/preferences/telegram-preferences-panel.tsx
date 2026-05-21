@@ -17,8 +17,12 @@ import {
   updateTelegramConfig,
   type TelegramStatusResponse,
 } from "../api";
-import type { Project, Session } from "../types";
-import type { ComboboxOption } from "../session-model-utils";
+import type { Project, Session, TelegramUiConfig } from "../types";
+import {
+  areTelegramUiConfigsEqual,
+  normalizeTelegramUiConfig,
+  type ComboboxOption,
+} from "../session-model-utils";
 import { ThemedCombobox } from "./themed-combobox";
 
 type TelegramSettingsDraft = {
@@ -43,6 +47,39 @@ function createTelegramDraft(
   };
 }
 
+function createTelegramDraftFromConfig(
+  config?: TelegramUiConfig | null,
+): TelegramSettingsDraft {
+  const normalizedConfig = normalizeTelegramUiConfig(config);
+  return {
+    enabled: normalizedConfig.enabled ?? false,
+    forwardAssistantReplies: normalizedConfig.forwardAssistantReplies ?? false,
+    botToken: "",
+    subscribedProjectIds: normalizedConfig.subscribedProjectIds ?? [],
+    defaultProjectId: normalizedConfig.defaultProjectId ?? "",
+    defaultSessionId: normalizedConfig.defaultSessionId ?? "",
+  };
+}
+
+function applyTelegramConfigToStatus(
+  status: TelegramStatusResponse,
+  config?: TelegramUiConfig | null,
+): TelegramStatusResponse {
+  if (config === undefined) {
+    return status;
+  }
+
+  const normalizedConfig = normalizeTelegramUiConfig(config);
+  return {
+    ...status,
+    enabled: normalizedConfig.enabled ?? false,
+    forwardAssistantReplies: normalizedConfig.forwardAssistantReplies ?? false,
+    subscribedProjectIds: normalizedConfig.subscribedProjectIds ?? [],
+    defaultProjectId: normalizedConfig.defaultProjectId ?? null,
+    defaultSessionId: normalizedConfig.defaultSessionId ?? null,
+  };
+}
+
 function telegramStatusLabel(status: TelegramStatusResponse | null): string {
   if (!status) {
     return "Loading";
@@ -63,9 +100,11 @@ function telegramStatusLabel(status: TelegramStatusResponse | null): string {
 }
 
 export function TelegramPreferencesPanel({
+  telegramConfig,
   projects,
   sessions,
 }: {
+  telegramConfig?: TelegramUiConfig | null;
   projects: Project[];
   sessions: Session[];
 }) {
@@ -81,6 +120,12 @@ export function TelegramPreferencesPanel({
   const [error, setError] = useState<string | null>(null);
   const isMountedRef = useRef(true);
   const statusFetchVersionRef = useRef(0);
+  const latestTelegramConfigRef = useRef<TelegramUiConfig | null | undefined>(
+    telegramConfig,
+  );
+  const hasAppliedTelegramConfigRef = useRef(false);
+  const lastAppStateTelegramConfigRef = useRef<TelegramUiConfig | null>(null);
+  const isDraftDirtyRef = useRef(false);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -101,8 +146,12 @@ export function TelegramPreferencesPanel({
         if (!isCurrentStatusFetch()) {
           return;
         }
-        setStatus(nextStatus);
-        setDraft(createTelegramDraft(nextStatus));
+        const mergedStatus = applyTelegramConfigToStatus(
+          nextStatus,
+          latestTelegramConfigRef.current,
+        );
+        setStatus(mergedStatus);
+        setDraft(createTelegramDraft(mergedStatus));
         setError(null);
       })
       .catch((loadError: unknown) => {
@@ -126,6 +175,78 @@ export function TelegramPreferencesPanel({
       }
     };
   }, []);
+
+  useEffect(() => {
+    latestTelegramConfigRef.current = telegramConfig;
+
+    if (telegramConfig === undefined) {
+      return;
+    }
+
+    const normalizedConfig = normalizeTelegramUiConfig(telegramConfig);
+    const hasAppliedTelegramConfig = hasAppliedTelegramConfigRef.current;
+    if (
+      hasAppliedTelegramConfig &&
+      areTelegramUiConfigsEqual(
+        lastAppStateTelegramConfigRef.current,
+        normalizedConfig,
+      )
+    ) {
+      return;
+    }
+
+    hasAppliedTelegramConfigRef.current = true;
+    lastAppStateTelegramConfigRef.current = normalizedConfig;
+    setStatus((current) =>
+      current ? applyTelegramConfigToStatus(current, normalizedConfig) : current,
+    );
+
+    if (isDraftDirtyRef.current) {
+      setNotice("Telegram settings changed elsewhere; unsaved edits were kept.");
+    } else {
+      setDraft(createTelegramDraftFromConfig(normalizedConfig));
+    }
+
+    if (!hasAppliedTelegramConfig) {
+      return;
+    }
+
+    const fetchVersion = statusFetchVersionRef.current + 1;
+    statusFetchVersionRef.current = fetchVersion;
+    const isCurrentStatusFetch = () =>
+      isMountedRef.current && statusFetchVersionRef.current === fetchVersion;
+
+    fetchTelegramStatus()
+      .then((nextStatus) => {
+        if (!isCurrentStatusFetch()) {
+          return;
+        }
+        const mergedStatus = applyTelegramConfigToStatus(
+          nextStatus,
+          latestTelegramConfigRef.current,
+        );
+        setStatus(mergedStatus);
+        if (!isDraftDirtyRef.current) {
+          setDraft(createTelegramDraft(mergedStatus));
+        }
+        setError(null);
+      })
+      .catch((refreshError: unknown) => {
+        if (!isCurrentStatusFetch()) {
+          return;
+        }
+        setError(
+          refreshError instanceof Error
+            ? refreshError.message
+            : "Failed to refresh Telegram runtime status.",
+        );
+      })
+      .finally(() => {
+        if (isCurrentStatusFetch()) {
+          setIsLoading(false);
+        }
+      });
+  }, [telegramConfig]);
 
   const projectOptions = useMemo<ComboboxOption[]>(
     () => [
@@ -172,12 +293,18 @@ export function TelegramPreferencesPanel({
   const hasSavedToken = Boolean(status?.botTokenMasked);
 
   const updateDraft = useCallback((patch: Partial<TelegramSettingsDraft>) => {
+    isDraftDirtyRef.current = true;
     setDraft((current) => ({ ...current, ...patch }));
     setNotice(null);
     setError(null);
   }, []);
 
+  const invalidateStatusFetches = useCallback(() => {
+    statusFetchVersionRef.current += 1;
+  }, []);
+
   const toggleProject = useCallback((projectId: string, checked: boolean) => {
+    isDraftDirtyRef.current = true;
     setDraft((current) => {
       const nextIds = checked
         ? [...current.subscribedProjectIds, projectId]
@@ -231,6 +358,7 @@ export function TelegramPreferencesPanel({
       return;
     }
 
+    invalidateStatusFetches();
     setIsSaving(true);
     setNotice(null);
     setError(null);
@@ -251,6 +379,7 @@ export function TelegramPreferencesPanel({
       }
       setStatus(nextStatus);
       setDraft(createTelegramDraft(nextStatus));
+      isDraftDirtyRef.current = false;
       setNotice("Telegram settings saved.");
     } catch (saveError: unknown) {
       if (isMountedRef.current) {
@@ -265,7 +394,7 @@ export function TelegramPreferencesPanel({
         setIsSaving(false);
       }
     }
-  }, [canTestToken, draft, selectedDefaultSessionExists]);
+  }, [canTestToken, draft, invalidateStatusFetches, selectedDefaultSessionExists]);
 
   const handleTestConnection = useCallback(async () => {
     setIsTesting(true);
@@ -300,6 +429,7 @@ export function TelegramPreferencesPanel({
   }, [draft.botToken]);
 
   const handleRemoveToken = useCallback(async () => {
+    invalidateStatusFetches();
     setIsSaving(true);
     setNotice(null);
     setError(null);
@@ -313,6 +443,7 @@ export function TelegramPreferencesPanel({
       }
       setStatus(nextStatus);
       setDraft(createTelegramDraft(nextStatus));
+      isDraftDirtyRef.current = false;
       setNotice("Telegram bot token removed.");
     } catch (removeError: unknown) {
       if (isMountedRef.current) {
@@ -327,7 +458,7 @@ export function TelegramPreferencesPanel({
         setIsSaving(false);
       }
     }
-  }, []);
+  }, [invalidateStatusFetches]);
 
   return (
     <section className="settings-panel-stack">

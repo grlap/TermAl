@@ -8,7 +8,7 @@ import {
   updateTelegramConfig,
   type TelegramStatusResponse,
 } from "../api";
-import type { Project, Session } from "../types";
+import type { Project, Session, TelegramUiConfig } from "../types";
 import { TelegramPreferencesPanel } from "./telegram-preferences-panel";
 
 vi.mock("../api", async () => {
@@ -235,6 +235,322 @@ describe("TelegramPreferencesPanel", () => {
       await screen.findByText("Choose at least one Telegram project before enabling the relay."),
     ).toBeInTheDocument();
     expect(updateTelegramConfigMock).not.toHaveBeenCalled();
+  });
+
+  it("trusts the status response before app-state Telegram config hydrates", async () => {
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      enabled: true,
+      botTokenMasked: "****oken",
+      subscribedProjectIds: ["project-1"],
+    });
+
+    render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
+
+    expect(await screen.findByText("Stopped")).toBeInTheDocument();
+    expect(screen.getByLabelText("Enable relay")).toBeChecked();
+    expect(
+      within(screen.getByLabelText("Telegram subscribed projects")).getByLabelText(
+        /TermAl/,
+      ),
+    ).toBeChecked();
+  });
+
+  it("adopts app-state Telegram config updates while already open", async () => {
+    const { rerender } = render(
+      <TelegramPreferencesPanel projects={projects} sessions={sessions} />,
+    );
+
+    expect(await screen.findByText("Not configured")).toBeInTheDocument();
+    expect(screen.getByLabelText("Enable relay")).not.toBeChecked();
+
+    const nextTelegramConfig: TelegramUiConfig = {
+      enabled: true,
+      forwardAssistantReplies: true,
+      subscribedProjectIds: ["project-1"],
+      defaultProjectId: "project-1",
+      defaultSessionId: "session-1",
+    };
+    rerender(
+      <TelegramPreferencesPanel
+        telegramConfig={nextTelegramConfig}
+        projects={projects}
+        sessions={sessions}
+      />,
+    );
+
+    expect(screen.getByLabelText("Enable relay")).toBeChecked();
+    expect(screen.getByLabelText("Forward assistant replies")).toBeChecked();
+    expect(
+      within(screen.getByLabelText("Telegram subscribed projects")).getByLabelText(
+        /TermAl/,
+      ),
+    ).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Telegram" }));
+
+    await waitFor(() => {
+      expect(updateTelegramConfigMock).toHaveBeenCalledWith({
+        enabled: true,
+        forwardAssistantReplies: true,
+        botToken: undefined,
+        subscribedProjectIds: ["project-1"],
+        defaultProjectId: "project-1",
+        defaultSessionId: "session-1",
+      });
+    });
+  });
+
+  it("refreshes runtime status after an app-state Telegram config change", async () => {
+    const initialTelegramConfig: TelegramUiConfig = {
+      enabled: false,
+      forwardAssistantReplies: false,
+      subscribedProjectIds: [],
+      defaultProjectId: null,
+      defaultSessionId: null,
+    };
+    fetchTelegramStatusMock
+      .mockResolvedValueOnce({
+        ...emptyTelegramStatus,
+        configured: true,
+        botTokenMasked: "****oken",
+      })
+      .mockResolvedValueOnce({
+        ...emptyTelegramStatus,
+        configured: true,
+        running: true,
+        botTokenMasked: "****oken",
+      });
+
+    const { rerender } = render(
+      <TelegramPreferencesPanel
+        telegramConfig={initialTelegramConfig}
+        projects={projects}
+        sessions={sessions}
+      />,
+    );
+
+    expect(await screen.findByText("Configured")).toBeInTheDocument();
+    rerender(
+      <TelegramPreferencesPanel
+        telegramConfig={{
+          ...initialTelegramConfig,
+          enabled: true,
+          subscribedProjectIds: ["project-1"],
+        }}
+        projects={projects}
+        sessions={sessions}
+      />,
+    );
+
+    await waitFor(() => expect(fetchTelegramStatusMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Polling")).toBeInTheDocument();
+  });
+
+  it("clears loading when app-state runtime refresh supersedes the initial status fetch", async () => {
+    const initialStatus = createDeferred<TelegramStatusResponse>();
+    const refreshStatus = createDeferred<TelegramStatusResponse>();
+    const initialTelegramConfig: TelegramUiConfig = {
+      enabled: false,
+      forwardAssistantReplies: false,
+      subscribedProjectIds: [],
+      defaultProjectId: null,
+      defaultSessionId: null,
+    };
+    fetchTelegramStatusMock
+      .mockReturnValueOnce(initialStatus.promise)
+      .mockReturnValueOnce(refreshStatus.promise);
+
+    const { rerender } = render(
+      <TelegramPreferencesPanel
+        telegramConfig={initialTelegramConfig}
+        projects={projects}
+        sessions={sessions}
+      />,
+    );
+
+    rerender(
+      <TelegramPreferencesPanel
+        telegramConfig={{
+          ...initialTelegramConfig,
+          enabled: true,
+          subscribedProjectIds: ["project-1"],
+        }}
+        projects={projects}
+        sessions={sessions}
+      />,
+    );
+
+    await waitFor(() => expect(fetchTelegramStatusMock).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      refreshStatus.resolve({
+        ...emptyTelegramStatus,
+        configured: true,
+        botTokenMasked: "****oken",
+      });
+      await refreshStatus.promise;
+    });
+
+    expect(screen.getByRole("button", { name: "Save Telegram" })).toBeEnabled();
+    await act(async () => {
+      initialStatus.resolve({
+        ...emptyTelegramStatus,
+        configured: true,
+        enabled: false,
+        botTokenMasked: "****stale",
+      });
+      await initialStatus.promise;
+    });
+    expect(screen.getByRole("button", { name: "Save Telegram" })).toBeEnabled();
+  });
+
+  it("ignores stale app-state runtime refreshes after saving newer local edits", async () => {
+    const refreshStatus = createDeferred<TelegramStatusResponse>();
+    const initialTelegramConfig: TelegramUiConfig = {
+      enabled: false,
+      forwardAssistantReplies: false,
+      subscribedProjectIds: [],
+      defaultProjectId: null,
+      defaultSessionId: null,
+    };
+    fetchTelegramStatusMock
+      .mockResolvedValueOnce(emptyTelegramStatus)
+      .mockReturnValueOnce(refreshStatus.promise);
+    updateTelegramConfigMock.mockResolvedValueOnce({
+      ...emptyTelegramStatus,
+      configured: true,
+      enabled: false,
+      botTokenMasked: "****oken",
+    });
+
+    const { rerender } = render(
+      <TelegramPreferencesPanel
+        telegramConfig={initialTelegramConfig}
+        projects={projects}
+        sessions={sessions}
+      />,
+    );
+
+    expect(await screen.findByText("Not configured")).toBeInTheDocument();
+    rerender(
+      <TelegramPreferencesPanel
+        telegramConfig={{
+          ...initialTelegramConfig,
+          enabled: true,
+          subscribedProjectIds: ["project-1"],
+        }}
+        projects={projects}
+        sessions={sessions}
+      />,
+    );
+
+    await waitFor(() => expect(fetchTelegramStatusMock).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByLabelText("Enable relay"));
+    fireEvent.click(screen.getByRole("button", { name: "Save Telegram" }));
+    await waitFor(() => {
+      expect(updateTelegramConfigMock).toHaveBeenCalledWith({
+        enabled: false,
+        forwardAssistantReplies: false,
+        botToken: undefined,
+        subscribedProjectIds: ["project-1"],
+        defaultProjectId: null,
+        defaultSessionId: null,
+      });
+    });
+    expect(await screen.findByText("Telegram settings saved.")).toBeInTheDocument();
+
+    await act(async () => {
+      refreshStatus.resolve({
+        ...emptyTelegramStatus,
+        configured: true,
+        enabled: true,
+        running: true,
+        botTokenMasked: "****stale",
+        subscribedProjectIds: ["project-1"],
+      });
+      await refreshStatus.promise;
+    });
+
+    expect(screen.getByLabelText("Enable relay")).not.toBeChecked();
+    expect(screen.queryByText("Polling")).not.toBeInTheDocument();
+  });
+
+  it("surfaces app-state runtime refresh failures without reverting adopted config", async () => {
+    const initialTelegramConfig: TelegramUiConfig = {
+      enabled: false,
+      forwardAssistantReplies: false,
+      subscribedProjectIds: [],
+      defaultProjectId: null,
+      defaultSessionId: null,
+    };
+    fetchTelegramStatusMock
+      .mockResolvedValueOnce(emptyTelegramStatus)
+      .mockRejectedValueOnce(new Error("Runtime status unavailable."));
+
+    const { rerender } = render(
+      <TelegramPreferencesPanel
+        telegramConfig={initialTelegramConfig}
+        projects={projects}
+        sessions={sessions}
+      />,
+    );
+
+    expect(await screen.findByText("Not configured")).toBeInTheDocument();
+    rerender(
+      <TelegramPreferencesPanel
+        telegramConfig={{
+          ...initialTelegramConfig,
+          enabled: true,
+          subscribedProjectIds: ["project-1"],
+        }}
+        projects={projects}
+        sessions={sessions}
+      />,
+    );
+
+    expect(await screen.findByText("Runtime status unavailable.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Enable relay")).toBeChecked();
+  });
+
+  it("keeps unsaved local edits when app-state Telegram config changes", async () => {
+    const initialTelegramConfig: TelegramUiConfig = {
+      enabled: false,
+      forwardAssistantReplies: false,
+      subscribedProjectIds: [],
+      defaultProjectId: null,
+      defaultSessionId: null,
+    };
+    const { rerender } = render(
+      <TelegramPreferencesPanel
+        telegramConfig={initialTelegramConfig}
+        projects={projects}
+        sessions={sessions}
+      />,
+    );
+
+    const tokenInput = await screen.findByLabelText("Bot token");
+    fireEvent.change(tokenInput, { target: { value: "local-unsaved-token" } });
+    rerender(
+      <TelegramPreferencesPanel
+        telegramConfig={{
+          ...initialTelegramConfig,
+          enabled: true,
+          forwardAssistantReplies: true,
+          subscribedProjectIds: ["project-1"],
+        }}
+        projects={projects}
+        sessions={sessions}
+      />,
+    );
+
+    expect(screen.getByLabelText("Bot token")).toHaveValue("local-unsaved-token");
+    expect(screen.getByLabelText("Enable relay")).not.toBeChecked();
+    expect(
+      await screen.findByText(
+        "Telegram settings changed elsewhere; unsaved edits were kept.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("keeps handler state updates enabled after React StrictMode remount checks", async () => {

@@ -52,6 +52,7 @@ import type {
   RemoteConfig,
   SandboxMode,
   Session,
+  TelegramUiConfig,
 } from "./types";
 import {
   clampDensityPreference,
@@ -169,6 +170,7 @@ type AppDialogsProps = {
   setFontSizePx: (nextValue: number) => void;
   remoteConfigs: RemotePanelProps["remotes"];
   onSaveRemotes: RemotePanelProps["onSaveRemotes"];
+  telegramConfig?: TelegramUiConfig | null;
   projects: TelegramPanelProps["projects"];
   sessions: TelegramPanelProps["sessions"];
   handleOrchestratorStateUpdated: (state: StateResponse) => void;
@@ -447,6 +449,7 @@ export function AppDialogs({
   setFontSizePx,
   remoteConfigs,
   onSaveRemotes,
+  telegramConfig,
   projects,
   sessions,
   handleOrchestratorStateUpdated,
@@ -1113,7 +1116,11 @@ export function AppDialogs({
                   onSaveRemotes={onSaveRemotes}
                 />
               ) : settingsTab === "telegram" ? (
-                <TelegramPreferencesPanel projects={projects} sessions={sessions} />
+                <TelegramPreferencesPanel
+                  telegramConfig={telegramConfig}
+                  projects={projects}
+                  sessions={sessions}
+                />
               ) : settingsTab === "orchestrators" ? (
                 <OrchestratorTemplatesPanel
                   projects={projects}

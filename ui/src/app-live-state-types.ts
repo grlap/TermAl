@@ -19,6 +19,7 @@ import type {
   Project,
   RemoteConfig,
   Session,
+  TelegramUiConfig,
   WorkspaceFilesChangedEvent,
 } from "./types";
 import type {
@@ -148,6 +149,7 @@ export type UseAppLiveStatePreferenceSetters = {
   setDefaultClaudeApprovalMode: Dispatch<SetStateAction<ClaudeApprovalMode>>;
   setDefaultClaudeEffort: Dispatch<SetStateAction<ClaudeEffortLevel>>;
   setRemoteConfigs: Dispatch<SetStateAction<RemoteConfig[]>>;
+  setTelegramConfig: Dispatch<SetStateAction<TelegramUiConfig | undefined>>;
 };
 
 export type UseAppLiveStateParams = {

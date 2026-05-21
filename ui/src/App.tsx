@@ -412,6 +412,8 @@ export default function App() {
     setDefaultGeminiApprovalMode,
     remoteConfigs,
     setRemoteConfigs,
+    telegramConfig,
+    setTelegramConfig,
   } = useAppPreferencesState(initialWorkspaceBootstrap);
   const [isCreateSessionOpen, setIsCreateSessionOpen] = useState(false);
   const [createSessionPaneId, setCreateSessionPaneId] = useState<string | null>(
@@ -852,6 +854,7 @@ export default function App() {
       setDefaultClaudeApprovalMode,
       setDefaultClaudeEffort,
       setRemoteConfigs,
+      setTelegramConfig,
     },
     applyControlPanelLayout,
     clearRecoveredBackendRequestError,
@@ -2247,6 +2250,7 @@ export default function App() {
         onSaveRemotes={(nextRemotes) => {
           void persistAppPreferences({ remotes: nextRemotes });
         }}
+        telegramConfig={telegramConfig}
         projects={projects}
         sessions={sessions}
         handleOrchestratorStateUpdated={handleOrchestratorStateUpdated}

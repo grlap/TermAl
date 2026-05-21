@@ -63,6 +63,7 @@ import type {
   GeminiApprovalMode,
   RemoteConfig,
   SandboxMode,
+  TelegramUiConfig,
 } from "./types";
 import type { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
 
@@ -121,6 +122,9 @@ export function useAppPreferencesState(
   const [remoteConfigs, setRemoteConfigs] = useState<RemoteConfig[]>(
     () => resolveAppPreferences(null).remotes,
   );
+  const [telegramConfig, setTelegramConfig] = useState<
+    TelegramUiConfig | undefined
+  >(undefined);
   const [defaultCursorMode, setDefaultCursorMode] =
     useState<CursorMode>("agent");
   const [defaultGeminiApprovalMode, setDefaultGeminiApprovalMode] =
@@ -221,5 +225,7 @@ export function useAppPreferencesState(
     setDefaultGeminiApprovalMode,
     remoteConfigs,
     setRemoteConfigs,
+    telegramConfig,
+    setTelegramConfig,
   } as const;
 }
