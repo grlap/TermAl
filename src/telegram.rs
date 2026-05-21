@@ -64,6 +64,8 @@ fn prune_expired_telegram_chat_work_rate_limits(
     state: &mut TelegramBotState,
     now: std::time::Instant,
 ) {
+    // Scan every chat bucket on each limiter touch so idle chats do not keep
+    // expired timestamps forever. Buckets with no fresh entries are dropped.
     state.chat_work_rate_limit.retain(|_, entries| {
         while entries
             .front()
@@ -212,6 +214,9 @@ fn handle_telegram_message_for_relay(
         };
     }
 
+    // Oversized free-text prompts are rejected before consuming chat work quota:
+    // they never reach backend work, and the user may need quota to send a
+    // smaller correction immediately after the warning.
     if telegram_prompt_exceeds_byte_limit(text) {
         telegram.send_message(
             chat_id,

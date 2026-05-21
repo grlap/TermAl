@@ -1100,10 +1100,12 @@ struct TelegramUiConfig {
 }
 
 /// UI-visible Telegram relay lifecycle.
+///
+/// Currently always `InProcess`; retained as a discriminator for the planned
+/// multi-bot status surface in `docs/features/telegram-ui-integration.md`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum TelegramLifecycle {
-    Manual,
     InProcess,
 }
 

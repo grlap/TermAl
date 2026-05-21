@@ -30,7 +30,7 @@ const emptyTelegramStatus: TelegramStatusResponse = {
   enabled: false,
   forwardAssistantReplies: false,
   running: false,
-  lifecycle: "manual",
+  lifecycle: "inProcess",
   linkedChatId: null,
   botTokenMasked: null,
   subscribedProjectIds: [],
@@ -174,16 +174,6 @@ describe("TelegramPreferencesPanel", () => {
   });
 
   it.each([
-    [
-      "manual lifecycle",
-      {
-        configured: true,
-        enabled: true,
-        lifecycle: "manual" as const,
-        botTokenMasked: "****oken",
-      },
-      "Configured",
-    ],
     [
       "disabled in-process relay",
       {

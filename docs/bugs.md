@@ -44,42 +44,6 @@ the Implementation Tasks section.
 - Store Telegram UI config in durable app state and mutate it through `commit_locked()`.
 - If `telegram-bot.json` remains necessary for adapter interop, mirror committed state to that file behind a documented boundary.
 
-## Telegram relay still has CLI-era runtime leftovers after standalone-mode removal
-
-**Severity:** Low - the standalone Telegram relay entrypoint is gone, but a few runtime/test seams still read as if a separate CLI lifecycle exists.
-
-`TelegramLifecycle::Manual` is no longer produced by the current server-managed relay path, and the in-process relay still prints the CLI-era `TermAl Telegram adapter` startup banner. The `Mode::parse` rejection for `telegram` / `telegram-bot` is intentional guidance, but that branch is easy to mistake for a supported process mode without a local comment. The Telegram message test helper also hardcodes its message id, which makes future multi-message rate-limit scenarios less explicit.
-
-**Current behavior:**
-- `TelegramLifecycle::Manual` remains in the wire/runtime model after CLI-mode removal.
-- The in-process relay startup banner still uses adapter-era wording.
-- The rejected Telegram CLI aliases are covered by tests, but the parser branch is not documented at the call site.
-- `telegram_text_message(...)` always uses one fixed message id.
-
-**Proposal:**
-- Remove or explicitly justify the `Manual` lifecycle value.
-- Update the in-process relay banner wording.
-- Add a short comment near the Telegram CLI alias rejection in `Mode::parse`.
-- Make test message ids explicit where rate-limit scenarios depend on distinct messages.
-
-## Telegram chat work rate-limit edge cases are underspecified
-
-**Severity:** Note - recent rate-limit coverage improved the main command paths, but the boundary behavior around oversized prompts and pruning remains implicit.
-
-`src/telegram.rs:214-228` checks free-text byte limits before consuming the chat work limiter, while slash-command paths consume the limiter before command-specific handling in `src/telegram.rs:143-159`. `src/telegram.rs:62-75` also changed pruning to scan the full map, but the mixed expired/fresh bucket case is not pinned by tests or described at the helper boundary.
-
-**Current behavior:**
-- Oversized free-text prompts can return before consuming the work limiter.
-- Slash-command work paths consume the limiter first.
-- Rate-limit pruning covers fully expired buckets, but not a mixed map with some fresh buckets retained.
-- The pruning helper has no comment describing the full-map scan and retain/drop contract.
-
-**Proposal:**
-- Document the intended byte-limit-versus-rate-limit ordering.
-- Add coverage for oversized prompts when the chat is already rate-limited.
-- Add mixed-bucket pruning coverage that keeps fresh buckets while removing expired ones.
-- Add a short comment on the pruning helper's scan-and-drop behavior.
-
 ## Session store publication can race ahead of React session state
 
 **Severity:** Medium - the new `session-store` publishes some session slices before the corresponding React `sessions` state commits, so the UI can mix newer store-backed session data with older prop-derived session state in one render.
@@ -167,8 +131,8 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   delete a project/session after validation but before the second sanitize path, or extract a deterministic helper seam, and assert the persisted response cannot retain stale references. The current stale-reference test at `src/tests/telegram.rs:1573` seeds invalid state before validation, so removing the post-validation sanitize in `src/telegram_settings.rs:73` would still pass.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
   cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
-- [ ] P2: Add Telegram chat work rate-limit edge-case coverage:
-  cover mixed expired/fresh bucket pruning, oversized-prompt-while-rate-limited ordering, and the intended byte-limit-before-rate-limiter contract.
+- [ ] P2: Restore explicit Telegram status running wire assertion:
+  keep `telegram_status_response_serializes_in_process_lifecycle` focused on `lifecycle == "inProcess"`, but add or adjust a nearby wire-shape assertion so `running: true` remains explicitly pinned.
 - [ ] P2: Add assistant-reply forwarding disabled-path regressions:
   cover `sync_telegram_digest` and `select_telegram_project_session` with `forward_assistant_replies=false` so digest and selection paths cannot accidentally forward assistant replies.
 - [ ] P2: Clarify pending queued-prompt cancel tooltip behavior:

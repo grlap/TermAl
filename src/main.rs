@@ -509,6 +509,8 @@ impl Mode {
     fn parse(args: Vec<String>) -> Result<Self> {
         match args.first().map(String::as_str) {
             None | Some("server") => Ok(Self::Server),
+            // Legacy standalone Telegram aliases are intentionally rejected:
+            // the relay is owned by server mode and configured from Settings.
             Some("telegram") | Some("telegram-bot") => bail!(
                 "Telegram relay runs inside server mode; configure it from Settings -> Telegram"
             ),

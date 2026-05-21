@@ -708,10 +708,9 @@ export type TelegramStatusResponse = {
   enabled: boolean;
   forwardAssistantReplies: boolean;
   running: boolean;
-  // lifecycle describes who owns relay startup; running is the current poll-loop state.
-  // UI labels derive "Stopped" only when lifecycle is inProcess and
-  // enabled/configured are true while running is false.
-  lifecycle: "manual" | "inProcess";
+  // Always "inProcess" today; retained as the multi-bot status discriminator
+  // described in docs/features/telegram-ui-integration.md.
+  lifecycle: "inProcess";
   linkedChatId?: number | null;
   botTokenMasked?: string | null;
   subscribedProjectIds: string[];

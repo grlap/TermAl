@@ -233,7 +233,7 @@ type TelegramBotStatus = {
   configured: boolean;
   enabled: boolean;
   running: boolean;
-  lifecycle: "manual" | "inProcess";
+  lifecycle: "inProcess";
   linkedChatId?: number | null;
   botTokenMasked?: string | null;
   subscribedProjectIds: string[];

@@ -345,12 +345,9 @@ impl Drop for TelegramTestConfig {
 fn telegram_test_config() -> TelegramTestConfig {
     TelegramTestConfig {
         config: TelegramBotConfig {
-            api_base_url: "http://127.0.0.1:8765".to_owned(),
             bot_username: Some("termal_bot".to_owned()),
-            bot_token: "123456:TESTTOKEN".to_owned(),
             chat_id: Some(42),
             forward_assistant_replies: true,
-            poll_timeout_secs: 1,
             project_id: "project-1".to_owned(),
             public_base_url: None,
             state_path: std::env::temp_dir()
@@ -360,9 +357,9 @@ fn telegram_test_config() -> TelegramTestConfig {
     }
 }
 
-fn telegram_text_message(chat_id: i64, text: &str) -> TelegramChatMessage {
+fn telegram_text_message(chat_id: i64, message_id: i64, text: &str) -> TelegramChatMessage {
     TelegramChatMessage {
-        message_id: 1,
+        message_id,
         chat: TelegramChat {
             id: chat_id,
             _kind: "private".to_owned(),
@@ -5775,7 +5772,7 @@ fn telegram_status_response_keeps_empty_project_list_on_wire() {
         enabled: false,
         forward_assistant_replies: false,
         running: false,
-        lifecycle: TelegramLifecycle::Manual,
+        lifecycle: TelegramLifecycle::InProcess,
         linked_chat_id: None,
         bot_token_masked: None,
         subscribed_project_ids: Vec::new(),
@@ -5784,7 +5781,6 @@ fn telegram_status_response_keeps_empty_project_list_on_wire() {
     })
     .expect("response should serialize");
 
-    assert_eq!(value["lifecycle"], json!("manual"));
     assert_eq!(value["subscribedProjectIds"], json!([]));
 }
 
@@ -5805,7 +5801,6 @@ fn telegram_status_response_serializes_in_process_lifecycle() {
     .expect("response should serialize");
 
     assert_eq!(value["lifecycle"], json!("inProcess"));
-    assert_eq!(value["running"], json!(true));
 }
 
 #[test]

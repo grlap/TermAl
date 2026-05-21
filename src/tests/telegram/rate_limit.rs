@@ -46,6 +46,31 @@ fn telegram_chat_work_rate_limit_prunes_idle_chat_buckets() {
 }
 
 #[test]
+fn telegram_chat_work_rate_limit_prunes_mixed_buckets() {
+    let mut state = TelegramBotState::default();
+    let now = std::time::Instant::now();
+    let expired = now - TELEGRAM_CHAT_WORK_RATE_LIMIT_WINDOW - Duration::from_millis(1);
+    let fresh = now - Duration::from_millis(1);
+    state
+        .chat_work_rate_limit
+        .insert(7, VecDeque::from(vec![expired]));
+    state
+        .chat_work_rate_limit
+        .insert(8, VecDeque::from(vec![expired, fresh]));
+
+    assert!(!telegram_chat_work_is_rate_limited_at(&mut state, 42, now));
+
+    assert!(!state.chat_work_rate_limit.contains_key(&7));
+    let retained_entries = state
+        .chat_work_rate_limit
+        .get(&8)
+        .expect("fresh bucket should remain");
+    assert_eq!(retained_entries.len(), 1);
+    assert_eq!(retained_entries.front().copied(), Some(fresh));
+    assert!(state.chat_work_rate_limit.contains_key(&42));
+}
+
+#[test]
 fn telegram_slash_action_rate_limit_blocks_dispatch() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramPromptClient::new(
@@ -69,7 +94,7 @@ fn telegram_slash_action_rate_limit_blocks_dispatch() {
         &termal,
         &config,
         &mut state,
-        telegram_text_message(42, "/commit"),
+        telegram_text_message(42, 1, "/commit"),
     )
     .expect("rate-limited action command should be handled");
 
@@ -78,6 +103,55 @@ fn telegram_slash_action_rate_limit_blocks_dispatch() {
     assert_eq!(
         telegram.sent_texts.borrow().as_slice(),
         [TELEGRAM_CHAT_WORK_RATE_LIMIT_TEXT.to_owned()]
+    );
+}
+
+#[test]
+fn telegram_oversized_free_text_does_not_consume_rate_limit_quota() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    );
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+    let now = std::time::Instant::now();
+    let existing_quota = VecDeque::from(vec![now; TELEGRAM_CHAT_WORK_RATE_LIMIT_MAX]);
+    state
+        .chat_work_rate_limit
+        .insert(42, existing_quota.clone());
+    let oversized_prompt = "x".repeat(MAX_DELEGATION_PROMPT_BYTES + 1);
+
+    let changed = handle_telegram_message(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        telegram_text_message(42, 1, &oversized_prompt),
+    )
+    .expect("oversized prompt should be handled");
+
+    assert!(!changed);
+    assert!(termal.sent_prompts.borrow().is_empty());
+    assert!(termal.events.borrow().is_empty());
+    assert_eq!(
+        telegram.sent_texts.borrow().as_slice(),
+        [format!(
+            "That prompt is too large for TermAl. Keep Telegram prompts at or below {} bytes.",
+            MAX_DELEGATION_PROMPT_BYTES
+        )]
+    );
+    assert_eq!(
+        state
+            .chat_work_rate_limit
+            .get(&42)
+            .expect("existing quota should remain unchanged"),
+        &existing_quota
     );
 }
 
@@ -105,7 +179,7 @@ fn telegram_free_text_rate_limit_blocks_prompt_forwarding() {
         &termal,
         &config,
         &mut state,
-        telegram_text_message(42, "run the next task"),
+        telegram_text_message(42, 1, "run the next task"),
     )
     .expect("rate-limited prompt should be handled");
 
@@ -120,13 +194,16 @@ fn telegram_free_text_rate_limit_blocks_prompt_forwarding() {
 
 #[test]
 fn telegram_read_and_select_commands_are_rate_limited_before_backend_work() {
-    for command in [
+    for (command_index, command) in [
         "/status",
         "/projects",
         "/sessions",
         "/project project-1",
         "/session session-1",
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let telegram = FakeTelegramSender::new(None);
         let termal = FakeTelegramPromptClient::new(
             Vec::new(),
@@ -149,7 +226,7 @@ fn telegram_read_and_select_commands_are_rate_limited_before_backend_work() {
             &termal,
             &config,
             &mut state,
-            telegram_text_message(42, command),
+            telegram_text_message(42, (command_index + 1) as i64, command),
         )
         .expect("rate-limited command should be handled");
 
@@ -190,7 +267,7 @@ fn telegram_help_fallback_is_rate_limited() {
         &termal,
         &config,
         &mut state,
-        telegram_text_message(42, "/not-a-command"),
+        telegram_text_message(42, 1, "/not-a-command"),
     )
     .expect("rate-limited unknown command should be handled");
 

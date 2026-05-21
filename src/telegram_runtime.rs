@@ -7,9 +7,11 @@ in-process relay supervision out of the update handling module.
 
 const TELEGRAM_API_BASE_URL: &str = "https://api.telegram.org";
 const TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS: u64 = 5;
+#[cfg(not(test))]
 const TELEGRAM_ERROR_RETRY_DELAY: Duration = Duration::from_secs(2);
 const TELEGRAM_GET_UPDATES_LIMIT: i64 = 25;
 const TELEGRAM_MAX_UPDATES_PER_ITERATION: usize = TELEGRAM_GET_UPDATES_LIMIT as usize;
+#[cfg(not(test))]
 const TELEGRAM_RELAY_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const TELEGRAM_USER_ERROR_MAX_CHARS: usize = 240;
 const TELEGRAM_CALLBACK_ERROR_MAX_CHARS: usize = 180;
@@ -17,6 +19,7 @@ const TELEGRAM_SAFE_USER_ERROR_DETAIL: &str = "Check TermAl for details, then tr
 const TELEGRAM_CALLBACK_DATA_MAX_BYTES: usize = 64;
 
 /// Returns the default TermAl API base URL.
+#[cfg(not(test))]
 fn default_termal_api_base_url() -> String {
     let port = std::env::var("TERMAL_PORT")
         .ok()
@@ -25,6 +28,7 @@ fn default_termal_api_base_url() -> String {
     format!("http://127.0.0.1:{port}")
 }
 
+#[cfg(not(test))]
 fn run_telegram_bot_with_config(
     mut config: TelegramBotConfig,
     shutdown: Option<Arc<AtomicBool>>,
@@ -59,7 +63,7 @@ fn run_telegram_bot_with_config(
         persist_telegram_bot_state(&config.state_path, &state)?;
     }
 
-    println!("TermAl Telegram adapter");
+    println!("TermAl in-process Telegram relay");
     println!("api: {}", config.api_base_url);
     println!("project: {}", config.project_id);
     println!(
@@ -103,6 +107,7 @@ fn telegram_relay_shutdown_requested(shutdown: &Option<Arc<AtomicBool>>) -> bool
         .is_some_and(|value| value.load(Ordering::Relaxed))
 }
 
+#[cfg(not(test))]
 fn telegram_relay_sleep(duration: Duration, shutdown: &Option<Arc<AtomicBool>>) {
     let mut remaining = duration;
     while !remaining.is_zero() && !telegram_relay_shutdown_requested(shutdown) {
@@ -169,11 +174,14 @@ fn drain_telegram_updates_then_sync_digest(
 /// Holds Telegram bot configuration.
 #[derive(Clone, Debug)]
 struct TelegramBotConfig {
+    #[cfg(not(test))]
     api_base_url: String,
     bot_username: Option<String>,
+    #[cfg(not(test))]
     bot_token: String,
     chat_id: Option<i64>,
     forward_assistant_replies: bool,
+    #[cfg(not(test))]
     poll_timeout_secs: u64,
     project_id: String,
     public_base_url: Option<String>,
@@ -198,6 +206,8 @@ impl TelegramBotConfig {
             Some(token) => token.to_owned(),
             None => return Err(TelegramRelayConfigUnavailableReason::MissingBotToken),
         };
+        #[cfg(test)]
+        let _ = &bot_token;
         let project_id = telegram_effective_default_project_id(&file.config)
             .ok_or(TelegramRelayConfigUnavailableReason::MissingProjectTarget)?;
         if project_id.is_empty() {
@@ -208,11 +218,14 @@ impl TelegramBotConfig {
         let state_path = resolve_termal_data_dir(default_workdir).join("telegram-bot.json");
 
         Ok(Self {
+            #[cfg(not(test))]
             api_base_url: default_termal_api_base_url(),
             bot_username: None,
+            #[cfg(not(test))]
             bot_token,
             chat_id: file.state.chat_id,
             forward_assistant_replies: file.config.forward_assistant_replies,
+            #[cfg(not(test))]
             poll_timeout_secs: TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS,
             project_id,
             public_base_url: None,

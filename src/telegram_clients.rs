@@ -79,6 +79,7 @@ impl TelegramApiClient {
     }
 
     /// Gets updates.
+    #[cfg(not(test))]
     fn get_updates(&self, offset: Option<i64>, timeout_secs: u64) -> Result<Vec<TelegramUpdate>> {
         let mut body = serde_json::Map::new();
         body.insert("timeout".to_owned(), json!(timeout_secs));
@@ -307,11 +308,13 @@ impl TelegramCallbackResponder for TelegramApiClient {
 }
 
 /// Represents TermAl API client.
+#[cfg(not(test))]
 struct TermalApiClient {
     api_base_url: String,
     client: BlockingHttpClient,
 }
 
+#[cfg(not(test))]
 impl TermalApiClient {
     /// Creates a new instance.
     fn new(api_base_url: &str) -> Result<Self> {
@@ -426,6 +429,7 @@ trait TelegramSessionReader {
     fn get_session(&self, session_id: &str) -> Result<TelegramSessionFetchResponse>;
 }
 
+#[cfg(not(test))]
 impl TelegramSessionReader for TermalApiClient {
     fn get_session(&self, session_id: &str) -> Result<TelegramSessionFetchResponse> {
         TermalApiClient::get_session(self, session_id)
@@ -445,6 +449,7 @@ trait TelegramPromptClient: TelegramSessionReader {
     fn send_session_message(&self, session_id: &str, text: &str) -> Result<()>;
 }
 
+#[cfg(not(test))]
 impl TelegramPromptClient for TermalApiClient {
     fn get_project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse> {
         TermalApiClient::get_project_digest(self, project_id)
@@ -468,6 +473,7 @@ trait TelegramActionClient {
     ) -> Result<ProjectDigestResponse>;
 }
 
+#[cfg(not(test))]
 impl TelegramActionClient for TermalApiClient {
     fn dispatch_project_action(
         &self,

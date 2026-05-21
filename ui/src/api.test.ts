@@ -240,7 +240,7 @@ describe("telegram API helpers", () => {
           enabled: false,
           forwardAssistantReplies: false,
           running: false,
-          lifecycle: "manual",
+          lifecycle: "inProcess",
           subscribedProjectIds: [],
         }),
         {
