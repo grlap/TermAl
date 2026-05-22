@@ -52,10 +52,10 @@ function createTelegramDraftFromConfig(
 ): TelegramSettingsDraft {
   const normalizedConfig = normalizeTelegramUiConfig(config);
   return {
-    enabled: normalizedConfig.enabled ?? false,
-    forwardAssistantReplies: normalizedConfig.forwardAssistantReplies ?? false,
+    enabled: normalizedConfig.enabled,
+    forwardAssistantReplies: normalizedConfig.forwardAssistantReplies,
     botToken: "",
-    subscribedProjectIds: normalizedConfig.subscribedProjectIds ?? [],
+    subscribedProjectIds: normalizedConfig.subscribedProjectIds,
     defaultProjectId: normalizedConfig.defaultProjectId ?? "",
     defaultSessionId: normalizedConfig.defaultSessionId ?? "",
   };
@@ -72,11 +72,11 @@ function applyTelegramConfigToStatus(
   const normalizedConfig = normalizeTelegramUiConfig(config);
   return {
     ...status,
-    enabled: normalizedConfig.enabled ?? false,
-    forwardAssistantReplies: normalizedConfig.forwardAssistantReplies ?? false,
-    subscribedProjectIds: normalizedConfig.subscribedProjectIds ?? [],
-    defaultProjectId: normalizedConfig.defaultProjectId ?? null,
-    defaultSessionId: normalizedConfig.defaultSessionId ?? null,
+    enabled: normalizedConfig.enabled,
+    forwardAssistantReplies: normalizedConfig.forwardAssistantReplies,
+    subscribedProjectIds: normalizedConfig.subscribedProjectIds,
+    defaultProjectId: normalizedConfig.defaultProjectId,
+    defaultSessionId: normalizedConfig.defaultSessionId,
   };
 }
 
@@ -211,6 +211,10 @@ export function TelegramPreferencesPanel({
       return;
     }
 
+    // One version token protects all async status fetches: initial load,
+    // app-state runtime refresh, and save/remove invalidation. Dirty drafts are
+    // never overwritten by app-state adoption, and local mutations bump this
+    // token before awaiting so older refreshes cannot replay stale status.
     const fetchVersion = statusFetchVersionRef.current + 1;
     statusFetchVersionRef.current = fetchVersion;
     const isCurrentStatusFetch = () =>

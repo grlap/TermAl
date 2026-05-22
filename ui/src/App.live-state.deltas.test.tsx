@@ -498,6 +498,123 @@ describe("App live state - delta-gap core", () => {
     });
   });
 
+  it("keeps command-view props aligned with eager session-store slices before broad render flush", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const commandSession = makeSession("session-1", {
+        name: "Codex Session",
+        status: "active",
+        preview: "old command output",
+        messages: [
+          {
+            id: "message-user-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "you",
+            text: "run command",
+          },
+          {
+            id: "message-command-1",
+            type: "command",
+            timestamp: "10:01",
+            author: "assistant",
+            command: "npm test",
+            output: "old command output",
+            status: "running",
+          },
+        ],
+      });
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [],
+            sessions: [commandSession],
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(eventSource, {
+          revision: 1,
+          projects: [],
+          sessions: [commandSession],
+        });
+        await settleAsyncUi();
+
+        await openSessionByName("Codex Session");
+        await clickAndSettle(screen.getByRole("button", { name: "Commands" }));
+        expect(screen.getAllByText("old command output").length).toBeGreaterThan(
+          0,
+        );
+
+        let nextFrameId = 1;
+        const pendingFrames = new Map<number, FrameRequestCallback>();
+        const requestAnimationFrameMock = vi.fn(
+          (callback: FrameRequestCallback) => {
+            const frameId = nextFrameId;
+            nextFrameId += 1;
+            pendingFrames.set(frameId, callback);
+            return frameId;
+          },
+        );
+        const cancelAnimationFrameMock = vi.fn((frameId: number) => {
+          pendingFrames.delete(frameId);
+        });
+        vi.stubGlobal(
+          "requestAnimationFrame",
+          requestAnimationFrameMock as unknown as typeof requestAnimationFrame,
+        );
+        vi.stubGlobal(
+          "cancelAnimationFrame",
+          cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame,
+        );
+
+        act(() => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "commandUpdate",
+            revision: 2,
+            sessionId: "session-1",
+            messageId: "message-command-1",
+            messageIndex: 1,
+            messageCount: 2,
+            command: "npm test",
+            output: "new command output",
+            status: "success",
+            preview: "new command output",
+          });
+        });
+
+        expect(requestAnimationFrameMock).toHaveBeenCalledTimes(1);
+        expect(pendingFrames.size).toBe(1);
+        expect(screen.getAllByText("new command output").length).toBeGreaterThan(
+          0,
+        );
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("coalesces Codex global-state delta renders through one animation frame", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;

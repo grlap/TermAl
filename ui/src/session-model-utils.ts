@@ -186,7 +186,7 @@ export function areRemoteConfigsEqual(left: readonly RemoteConfig[], right: read
 
 export function normalizeTelegramUiConfig(
   config?: TelegramUiConfig | null,
-): TelegramUiConfig {
+): NormalizedTelegramUiConfig {
   // App-state snapshots may omit fields during migrations; the UI works with
   // this normalized shape before comparing or applying Telegram config.
   return {
@@ -200,14 +200,22 @@ export function normalizeTelegramUiConfig(
   };
 }
 
+export type NormalizedTelegramUiConfig = {
+  enabled: boolean;
+  forwardAssistantReplies: boolean;
+  subscribedProjectIds: string[];
+  defaultProjectId: string | null;
+  defaultSessionId: string | null;
+};
+
 export function areTelegramUiConfigsEqual(
   left?: TelegramUiConfig | null,
   right?: TelegramUiConfig | null,
 ) {
   const normalizedLeft = normalizeTelegramUiConfig(left);
   const normalizedRight = normalizeTelegramUiConfig(right);
-  const leftProjectIds = normalizedLeft.subscribedProjectIds ?? [];
-  const rightProjectIds = normalizedRight.subscribedProjectIds ?? [];
+  const leftProjectIds = normalizedLeft.subscribedProjectIds;
+  const rightProjectIds = normalizedRight.subscribedProjectIds;
   return (
     normalizedLeft.enabled === normalizedRight.enabled &&
     normalizedLeft.forwardAssistantReplies ===

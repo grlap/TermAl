@@ -52,6 +52,10 @@ import {
   renderHighlightedText,
   type SearchHighlightTone,
 } from "../search-highlight";
+import {
+  commandMessagesForPaneViewMode,
+  diffMessagesForPaneViewMode,
+} from "../SessionPaneView.messages";
 import { resolveLiveWaitingIndicatorPrompt } from "../app-utils";
 import {
   shouldShowAgentSessionWaitingIndicator,
@@ -99,8 +103,8 @@ export function AgentSessionPanel({
   showWaitingIndicator,
   waitingIndicatorKind = "liveTurn",
   waitingIndicatorPrompt,
-  commandMessages,
-  diffMessages,
+  commandMessages: fallbackCommandMessages,
+  diffMessages: fallbackDiffMessages,
   scrollContainerRef,
   onApprovalDecision,
   onUserInputSubmit,
@@ -146,8 +150,8 @@ export function AgentSessionPanel({
       showWaitingIndicator={showWaitingIndicator}
       waitingIndicatorKind={waitingIndicatorKind}
       waitingIndicatorPrompt={waitingIndicatorPrompt}
-      commandMessages={commandMessages}
-      diffMessages={diffMessages}
+      commandMessages={fallbackCommandMessages}
+      diffMessages={fallbackDiffMessages}
       onApprovalDecision={stableOnApprovalDecision}
       onUserInputSubmit={stableOnUserInputSubmit}
       onMcpElicitationSubmit={stableOnMcpElicitationSubmit}
@@ -253,8 +257,8 @@ const SessionBody = memo(function SessionBody({
   showWaitingIndicator,
   waitingIndicatorKind,
   waitingIndicatorPrompt,
-  commandMessages,
-  diffMessages,
+  commandMessages: fallbackCommandMessages,
+  diffMessages: fallbackDiffMessages,
   onApprovalDecision,
   onUserInputSubmit,
   onMcpElicitationSubmit,
@@ -275,6 +279,20 @@ const SessionBody = memo(function SessionBody({
   const activeSession = useSessionRecordSnapshot(activeSessionId);
   const activeSessionMessages = activeSession?.messages;
   const activeSessionStatus = activeSession?.status;
+  const commandMessages = useMemo(
+    () =>
+      activeSession
+        ? commandMessagesForPaneViewMode(viewMode, activeSession)
+        : fallbackCommandMessages,
+    [activeSession, fallbackCommandMessages, viewMode],
+  );
+  const diffMessages = useMemo(
+    () =>
+      activeSession
+        ? diffMessagesForPaneViewMode(viewMode, activeSession)
+        : fallbackDiffMessages,
+    [activeSession, fallbackDiffMessages, viewMode],
+  );
   const shouldResolveLiveWaitingPrompt =
     showWaitingIndicator &&
     waitingIndicatorKind === "liveTurn" &&

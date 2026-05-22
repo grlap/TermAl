@@ -443,6 +443,51 @@ describe("deferred session-store sync", () => {
     });
   });
 
+  it("keeps the current Telegram config object when adopted app state is equal", () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const session = makeSession();
+    const params = makeLiveStateParams(session);
+    const setTelegramConfig = vi.fn();
+    params.preferenceSetters.setTelegramConfig = setTelegramConfig;
+    let hook: UseAppLiveStateReturn | null = null;
+
+    renderLiveStateHarness(params, (nextHook) => {
+      hook = nextHook;
+    });
+
+    const currentTelegramConfig = {
+      enabled: true,
+      forwardAssistantReplies: true,
+      subscribedProjectIds: ["project-1"],
+      defaultProjectId: "project-1",
+      defaultSessionId: "session-1",
+    };
+    const state = makeStateResponse(session);
+    act(() => {
+      hook?.syncPreferencesFromState({
+        ...state,
+        preferences: {
+          ...state.preferences,
+          telegram: { ...currentTelegramConfig },
+        },
+      });
+    });
+
+    expect(setTelegramConfig).toHaveBeenCalledTimes(1);
+    const updater = setTelegramConfig.mock.calls[0]?.[0];
+    expect(typeof updater).toBe("function");
+    expect(updater?.(currentTelegramConfig)).toBe(currentTelegramConfig);
+  });
+
   it("keeps reconnecting when valid delta data arrives after an error without an open event", async () => {
     vi.stubGlobal(
       "EventSource",

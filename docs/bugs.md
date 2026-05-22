@@ -21,37 +21,6 @@ the Implementation Tasks section.
 - Distinguish missing/unmigrated app-state config from explicitly default config, or restrict file-to-state import to a one-time migration path.
 - Add regression coverage for default-reset state with stale non-default mirrored file config.
 
-## Session store publication can race ahead of React session state
-
-**Severity:** Medium - the new `session-store` publishes some session slices before the corresponding React `sessions` state commits, so the UI can mix newer store-backed session data with older prop-derived session state in one render.
-
-The staged refactor publishes `session-store` updates directly from
-`ui/src/app-live-state.ts` and `ui/src/app-session-actions.ts`, while other
-parts of the active pane still derive session data from React state in
-`ui/src/SessionPaneView.tsx`. That leaves two live sources of truth on slightly
-different timelines: `AgentSessionPanel` / `PaneTabs` can read the new store
-snapshot immediately, while sibling props such as `commandMessages`,
-`diffMessages`, waiting-indicator state, and other session-derived metadata are
-still coming from the previous React `sessions` commit.
-
-**Current behavior:**
-- `session-store` is synced directly from live-state/action paths before some
-  `setSessions(...)` commits land.
-- `AgentSessionPanel` and `PaneTabs` read session data from the store.
-- `SessionPaneView` still derives other active-session slices from React state,
-  so the same active pane can render mixed-version session data within one
-  update.
-
-**Proposal:**
-- Keep store publication aligned with committed React state, or finish moving
-  the remaining active-session derivations in `SessionPaneView` onto the same
-  store boundary.
-- Document which layer is authoritative during the transition so later changes
-  do not deepen the split-brain state model.
-- Add an integration test that forces a store-backed session update plus a
-  lagging React-state-derived sibling prop and asserts the active pane never
-  renders a torn combination.
-
 ## Focused live sessions monopolize the main thread during state adoption
 
 **Severity:** Medium - a visible, focused TermAl tab with an active Codex session can spend multiple seconds of an 8 s sample on main-thread work even when no requests fail and no exceptions fire.
@@ -110,12 +79,12 @@ An initial attempt to fix this by raising estimates to a single 40k px cap (and 
   delete a project/session after validation but before the second sanitize path, or extract a deterministic helper seam, and assert the persisted response cannot retain stale references. The current stale-reference test at `src/tests/telegram.rs:1573` seeds invalid state before validation, so removing the post-validation sanitize in `src/telegram_settings.rs:73` would still pass.
 - [ ] P2: Add Telegram preferences panel RTL coverage:
   cover API error display, stale default-session clearing, default-project auto-subscription, `inProcess` running/stopped lifecycle labels including stopped-over-linked precedence, AppDialogs Telegram tab path, and StrictMode-mounted save/test/remove flows proving post-await UI updates still land.
-- [ ] P2: Document Telegram app-state refresh invariants:
-  add a short comment to the `TelegramPreferencesPanel` config-adoption effect explaining the version/ref invariant that protects initial status loading, background runtime refresh, dirty drafts, and save/remove invalidation.
-- [ ] P2: Tighten normalized Telegram config typing:
-  make `normalizeTelegramUiConfig` return a fully normalized shape so call sites do not need redundant `??` fallbacks for fields that are guaranteed after normalization.
-- [ ] P2: Add Telegram app-state equality fast-path coverage:
-  cover the `syncPreferencesFromState` branch where an incoming normalized `preferences.telegram` value equals the current config and must not call the Telegram config setter.
+- [ ] P2: Add Diffs-view session-store alignment coverage:
+  mirror the command-update eager session-store regression for a diff-bearing update path, proving Diffs view props stay aligned with store-backed session slices before the broad React session render flush.
+- [ ] P2: Tighten session-store eager-render RAF coverage:
+  extend the new eager session-store delta regression to flush the pending animation frame and assert the command/diff view remains consistent after the broad React session render catches up.
+- [ ] P2: Audit SessionPaneView scroll/signature derivations during store-backed updates:
+  `AgentSessionPanel` now derives visible command/diff lists from the store-backed session snapshot, but `SessionPaneView` still computes scroll/signature bookkeeping from React-state `activeSession`; prove this cannot drift during eager store publication, or move the bookkeeping to the same store boundary.
 - [ ] P2: Split Telegram settings persistence tests out of the monolithic Telegram test module:
   move the state-backed Telegram config persistence/status/delete-session/delete-project coverage into a focused test module so new coverage does not keep growing `src/tests/telegram.rs`.
 - [ ] P2: Add assistant-reply forwarding disabled-path regressions:
