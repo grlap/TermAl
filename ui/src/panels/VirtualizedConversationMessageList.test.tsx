@@ -116,6 +116,7 @@ function renderVirtualizedHarness({
   const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
   const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
   let nextFrameId = 1;
+  let resizeObserveCount = 0;
   let scrollTop = initialScrollTop;
   const scrollWrites: number[] = [];
   const buildEstimatedLayout = (nextMessages: Message[]) =>
@@ -135,10 +136,33 @@ function renderVirtualizedHarness({
     currentMessages = nextMessages;
     estimatedLayout = buildEstimatedLayout(currentMessages);
   };
+  const resolveMessageHeight = (message: Message | undefined) =>
+    message ? slotHeight(message) : 80;
+  const resolveMessageTop = (messageIndex: number) => {
+    let top = 0;
+    for (let index = 0; index < messageIndex; index += 1) {
+      top += resolveMessageHeight(currentMessages[index]);
+      if (index < currentMessages.length - 1) {
+        top += VIRTUALIZED_MESSAGE_GAP_PX;
+      }
+    }
+    return top - scrollTop;
+  };
+  const resolveMessageRangeHeight = (startIndex: number, endIndex: number) => {
+    let height = 0;
+    for (let index = startIndex; index < endIndex; index += 1) {
+      height += resolveMessageHeight(currentMessages[index]);
+      if (index < currentMessages.length - 1) {
+        height += VIRTUALIZED_MESSAGE_GAP_PX;
+      }
+    }
+    return height;
+  };
 
   class ResizeObserverMock {
     constructor(private readonly callback: ResizeObserverCallback) {}
     observe(target: Element) {
+      resizeObserveCount += 1;
       resizeCallbacks.set(target, this.callback);
     }
     disconnect() {}
@@ -182,6 +206,23 @@ function renderVirtualizedHarness({
       if (element === scrollNode) {
         return makeDomRect({ height: clientHeight, width: clientWidth });
       }
+      if (element.classList.contains("virtualized-message-page")) {
+        const [startRaw, endRaw] = (element.dataset.pageKey ?? "").split(":");
+        const startIndex = Number.parseInt(startRaw ?? "", 10);
+        const endIndex = Number.parseInt(endRaw ?? "", 10);
+        if (
+          Number.isFinite(startIndex) &&
+          Number.isFinite(endIndex) &&
+          startIndex >= 0 &&
+          endIndex >= startIndex
+        ) {
+          return makeDomRect({
+            height: resolveMessageRangeHeight(startIndex, endIndex),
+            top: resolveMessageTop(startIndex),
+            width: clientWidth,
+          });
+        }
+      }
       if (element.classList.contains("virtualized-message-slot")) {
         const messageIndex = currentMessages.findIndex(
           (candidate) => candidate.id === element.dataset.messageId,
@@ -193,11 +234,11 @@ function renderVirtualizedHarness({
             return makeDomRect(customRect);
           }
         }
-        const height = message ? slotHeight(message) : 80;
+        const height = resolveMessageHeight(message);
         return makeDomRect({
           top:
             messageIndex >= 0
-              ? messageIndex * (height + VIRTUALIZED_MESSAGE_GAP_PX) - scrollTop
+              ? resolveMessageTop(messageIndex)
               : 0,
           height,
         });
@@ -251,6 +292,9 @@ function renderVirtualizedHarness({
     },
     get scrollTop() {
       return scrollTop;
+    },
+    get resizeObserveCount() {
+      return resizeObserveCount;
     },
     resizeCallbacks,
     restore,
@@ -637,9 +681,18 @@ describe("VirtualizedConversationMessageList foundation", () => {
     const messageNumber = (message: Message) =>
       Number(message.id.replace("message-", ""));
     const estimatedHeightForMessageNumber = (number: number) =>
-      estimateConversationMessageHeight(messages[number - 1]!, {
-        availableWidthPx: clientWidth,
-      });
+      estimateConversationMessageHeight(
+        messages[number - 1] ?? {
+          author: "assistant",
+          id: `message-${number}`,
+          text: `Message ${number}`,
+          timestamp: `10:${number}`,
+          type: "text",
+        },
+        {
+          availableWidthPx: clientWidth,
+        },
+      );
     const estimatedOffsetBeforeMessage = (firstNumber: number, number: number) => {
       let offset = 0;
       for (let current = firstNumber; current < number; current += 1) {
@@ -777,6 +830,126 @@ describe("VirtualizedConversationMessageList foundation", () => {
         estimatedTotalHeightPx: 1_200,
         viewportTopPx: 450,
       });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("adopts visible page measurements before the deferred layout timer", async () => {
+    vi.useFakeTimers();
+    const messages = makeTextMessages(8);
+    const measuredSlotHeight = 720;
+    const measuredPageHeight =
+      messages.length * measuredSlotHeight +
+      (messages.length - 1) * VIRTUALIZED_MESSAGE_GAP_PX;
+    const estimatedPageHeight = messages.reduce(
+      (total, message, index) =>
+        total +
+        estimateConversationMessageHeight(message, { availableWidthPx: 1000 }) +
+        (index < messages.length - 1 ? VIRTUALIZED_MESSAGE_GAP_PX : 0),
+      0,
+    );
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      messages,
+      slotHeight: () => measuredSlotHeight,
+      virtualizerHandleRef,
+    });
+
+    try {
+      expect(measuredPageHeight).toBeGreaterThan(estimatedPageHeight * 3);
+      expect(virtualizerHandleRef.current).not.toBeNull();
+      expect(
+        virtualizerHandleRef.current!.getLayoutSnapshot().estimatedTotalHeightPx,
+      ).toBe(measuredPageHeight);
+    } finally {
+      vi.useRealTimers();
+      harness.restore();
+    }
+  });
+
+  it("adopts physically visible adjacent page measurements before the deferred layout timer", async () => {
+    vi.useFakeTimers();
+    const messages = makeTextMessages(16);
+    const firstPageMessages = messages.slice(0, 8);
+    const measuredFirstPageSlotHeight = 720;
+    const measuredSecondPageSlotHeight = 80;
+    const measuredFirstPageHeight =
+      firstPageMessages.length * measuredFirstPageSlotHeight +
+      firstPageMessages.length * VIRTUALIZED_MESSAGE_GAP_PX;
+    const measuredSecondPageHeight =
+      (messages.length - firstPageMessages.length) * measuredSecondPageSlotHeight +
+      (messages.length - firstPageMessages.length - 1) *
+        VIRTUALIZED_MESSAGE_GAP_PX;
+    const estimatedFirstPageHeight = firstPageMessages.reduce(
+      (total, message) =>
+        total +
+        estimateConversationMessageHeight(message, { availableWidthPx: 1000 }) +
+        VIRTUALIZED_MESSAGE_GAP_PX,
+      0,
+    );
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      clientHeight: 360,
+      initialScrollTop: estimatedFirstPageHeight,
+      messages,
+      slotHeight: (message) => {
+        const messageNumber = Number.parseInt(message.id.replace("message-", ""), 10);
+        return messageNumber <= 8
+          ? measuredFirstPageSlotHeight
+          : measuredSecondPageSlotHeight;
+      },
+      virtualizerHandleRef,
+    });
+
+    try {
+      expect(measuredFirstPageHeight).toBeGreaterThan(estimatedFirstPageHeight * 3);
+      expect(virtualizerHandleRef.current).not.toBeNull();
+      const snapshot = virtualizerHandleRef.current!.getLayoutSnapshot();
+      expect(snapshot.visiblePageRange.startIndex).toBe(0);
+      expect(snapshot.estimatedTotalHeightPx).toBe(
+        measuredFirstPageHeight + measuredSecondPageHeight,
+      );
+    } finally {
+      vi.useRealTimers();
+      harness.restore();
+    }
+  });
+
+  it("keeps page measurement observers stable across visible-range-only scroll changes", async () => {
+    const messages = makeTextMessages(16);
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      clientHeight: 360,
+      messages,
+      virtualizerHandleRef,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(virtualizerHandleRef.current).not.toBeNull();
+      });
+      const initialSnapshot = virtualizerHandleRef.current!.getLayoutSnapshot();
+      const initialVisibleStart = initialSnapshot.visiblePageRange.startIndex;
+      const observeCountAfterInitialMeasure = harness.resizeObserveCount;
+
+      act(() => {
+        harness.setScrollTop(0);
+        fireEvent.scroll(harness.scrollNode);
+      });
+
+      await waitFor(() => {
+        const snapshot = virtualizerHandleRef.current!.getLayoutSnapshot();
+        expect(snapshot.visiblePageRange.startIndex).not.toBe(initialVisibleStart);
+        expect(snapshot.mountedPageRange).toEqual(initialSnapshot.mountedPageRange);
+      });
+      expect(harness.resizeObserveCount).toBe(observeCountAfterInitialMeasure);
     } finally {
       harness.restore();
     }

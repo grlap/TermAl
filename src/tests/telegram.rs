@@ -5922,6 +5922,7 @@ fn telegram_ui_relay_config() -> TelegramUiConfig {
 fn telegram_ui_relay_file(config: TelegramUiConfig) -> TelegramBotFile {
     TelegramBotFile {
         config,
+        config_migrated_to_app_state: true,
         state: TelegramBotState::default(),
     }
 }
@@ -6002,6 +6003,7 @@ fn telegram_ui_file_uses_trimmed_default_project_for_relay_config() {
             subscribed_project_ids: vec![" project-2 ".to_owned(), "project-1".to_owned()],
             ..telegram_ui_relay_config()
         },
+        config_migrated_to_app_state: true,
         state: TelegramBotState {
             chat_id: Some(42),
             ..TelegramBotState::default()
@@ -7437,6 +7439,62 @@ fn telegram_status_persists_sanitized_stale_project_and_session_references() {
     assert_eq!(value["config"]["defaultProjectId"], json!(project_id));
     assert!(value["config"].get("defaultSessionId").is_none());
     assert!(value["config"].get("botToken").is_none());
+    assert_eq!(value["chatId"], json!(123));
+}
+
+#[test]
+fn telegram_status_does_not_reimport_migrated_file_config_after_default_reset() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-default-reset-stale-mirror-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
+        .expect("settings dir should create");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "configMigratedToAppState": true,
+            "config": {
+                "enabled": true,
+                "forwardAssistantReplies": true,
+                "subscribedProjectIds": ["stale-project"],
+                "defaultProjectId": "stale-project",
+                "defaultSessionId": "stale-session"
+            },
+            "chatId": 123
+        }))
+        .expect("fixture should encode"),
+    )
+    .expect("fixture should write");
+
+    let response = state
+        .telegram_status()
+        .expect("status read should ignore migrated stale file config");
+
+    assert!(!response.enabled);
+    assert!(!response.forward_assistant_replies);
+    assert!(response.subscribed_project_ids.is_empty());
+    assert_eq!(response.default_project_id, None);
+    assert_eq!(response.default_session_id, None);
+    assert_eq!(response.linked_chat_id, Some(123));
+    assert_eq!(
+        state.snapshot().preferences.telegram,
+        TelegramUiConfig::default()
+    );
+
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert_eq!(value["configMigratedToAppState"], json!(true));
+    assert_eq!(value["config"]["enabled"], json!(false));
+    assert_eq!(value["config"]["forwardAssistantReplies"], json!(false));
+    assert!(value["config"].get("subscribedProjectIds").is_none());
+    assert!(value["config"].get("defaultProjectId").is_none());
+    assert!(value["config"].get("defaultSessionId").is_none());
     assert_eq!(value["chatId"], json!(123));
 }
 

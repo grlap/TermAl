@@ -1673,7 +1673,7 @@ describe("fetchState", () => {
     }
   });
 
-  it("parses successful application/json responses from a single text body read", async () => {
+  it("parses successful application/json state responses without a text body read", async () => {
     const payload = {
       revision: 1,
       serverInstanceId: "server-1",
@@ -1711,17 +1711,20 @@ describe("fetchState", () => {
     );
 
     await expect(fetchState()).resolves.toEqual(payload);
-    expect(text).toHaveBeenCalledTimes(1);
-    expect(json).not.toHaveBeenCalled();
+    expect(json).toHaveBeenCalledTimes(1);
+    expect(text).not.toHaveBeenCalled();
     expect(clone).not.toHaveBeenCalled();
   });
 
   it("classifies mislabelled HTML JSON success responses as restart-required backend errors", async () => {
     expect.assertions(5);
     const html = "<!DOCTYPE html><html><body>Old backend</body></html>";
-    const text = vi.fn(async () => html);
-    const json = vi.fn();
-    const clone = vi.fn();
+    const originalText = vi.fn();
+    const fallbackText = vi.fn(async () => html);
+    const json = vi.fn(async () => {
+      throw new SyntaxError("Unexpected token < in JSON");
+    });
+    const clone = vi.fn(() => ({ text: fallbackText }));
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -1729,9 +1732,10 @@ describe("fetchState", () => {
         status: 200,
         headers: new Headers({
           "Content-Type": "application/json",
+          "Content-Length": String(html.length),
         }),
         json,
-        text,
+        text: originalText,
         clone,
       } as unknown as Response),
     );
@@ -1740,18 +1744,21 @@ describe("fetchState", () => {
       await fetchState();
       throw new Error("Expected fetchState to reject");
     } catch (error) {
-      expect(text).toHaveBeenCalledTimes(1);
-      expect(clone).not.toHaveBeenCalled();
+      expect(json).toHaveBeenCalledTimes(1);
+      expect(clone).toHaveBeenCalledTimes(1);
+      expect(fallbackText).toHaveBeenCalledTimes(1);
       expect(isBackendUnavailableError(error)).toBe(true);
       expect((error as ApiRequestError).restartRequired).toBe(true);
-      expect((error as Error).message).toContain("Restart TermAl");
     }
   });
 
   it("propagates SyntaxError for invalid non-HTML JSON success responses", async () => {
     expect.assertions(5);
-    const text = vi.fn(async () => '{"revision":');
-    const json = vi.fn();
+    const text = vi.fn();
+    const parseError = new SyntaxError("Unexpected end of JSON input");
+    const json = vi.fn(async () => {
+      throw parseError;
+    });
     const clone = vi.fn();
     vi.stubGlobal(
       "fetch",
@@ -1771,10 +1778,47 @@ describe("fetchState", () => {
       await fetchState();
       throw new Error("Expected fetchState to reject");
     } catch (error) {
-      expect(text).toHaveBeenCalledTimes(1);
-      expect(json).not.toHaveBeenCalled();
+      expect(json).toHaveBeenCalledTimes(1);
+      expect(text).not.toHaveBeenCalled();
       expect(clone).not.toHaveBeenCalled();
-      expect(error).toBeInstanceOf(SyntaxError);
+      expect(error).toBe(parseError);
+      expect(isBackendUnavailableError(error)).toBe(false);
+    }
+  });
+
+  it("preserves the original JSON parse error when fallback text cannot be read", async () => {
+    expect.assertions(5);
+    const parseError = new SyntaxError("Unexpected end of JSON input");
+    const fallbackReadError = new Error("body stream failed");
+    const json = vi.fn(async () => {
+      throw parseError;
+    });
+    const fallbackText = vi.fn(async () => {
+      throw fallbackReadError;
+    });
+    const clone = vi.fn(() => ({ text: fallbackText }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({
+          "Content-Type": "application/json",
+          "Content-Length": "128",
+        }),
+        json,
+        clone,
+      } as unknown as Response),
+    );
+
+    try {
+      await fetchState();
+      throw new Error("Expected fetchState to reject");
+    } catch (error) {
+      expect(json).toHaveBeenCalledTimes(1);
+      expect(clone).toHaveBeenCalledTimes(1);
+      expect(fallbackText).toHaveBeenCalledTimes(1);
+      expect(error).toBe(parseError);
       expect(isBackendUnavailableError(error)).toBe(false);
     }
   });

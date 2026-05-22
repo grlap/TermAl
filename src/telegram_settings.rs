@@ -53,6 +53,14 @@ static TELEGRAM_SECRET_STORE_INITIALIZED: LazyLock<Mutex<bool>> =
 struct TelegramBotFile {
     #[serde(default)]
     config: TelegramUiConfig,
+    /// Marks `config` as an app-state mirror rather than a legacy source.
+    ///
+    /// Older files do not have this field, so the first status/update read can
+    /// still import their non-default config into app state. Once this marker is
+    /// written, later default app-state configs remain authoritative even if the
+    /// mirrored file config is stale.
+    #[serde(default, skip_serializing_if = "is_false")]
+    config_migrated_to_app_state: bool,
     #[serde(default, flatten)]
     state: TelegramBotState,
 }
@@ -236,7 +244,8 @@ impl AppState {
     fn telegram_config_for_loaded_file(&self, file: &TelegramBotFile) -> TelegramUiConfig {
         let committed = self.telegram_config_from_state();
         let default = TelegramUiConfig::default();
-        if telegram_configs_equal(&committed, &default)
+        if !file.config_migrated_to_app_state
+            && telegram_configs_equal(&committed, &default)
             && !telegram_configs_equal(&file.config, &default)
         {
             let mut legacy = file.config.clone();
@@ -597,7 +606,11 @@ impl AppState {
                 return;
             }
         };
-        let file = TelegramBotFile { config, state };
+        let file = TelegramBotFile {
+            config,
+            config_migrated_to_app_state: true,
+            state,
+        };
         match TelegramBotConfig::from_ui_file(&self.default_workdir, &file, bot_token) {
             Ok(config) => self.start_telegram_relay_runtime(config),
             Err(_reason) => self.stop_telegram_relay_runtime(),
@@ -996,10 +1009,12 @@ fn telegram_configs_equal(left: &TelegramUiConfig, right: &TelegramUiConfig) -> 
 fn mirror_telegram_config_to_file(file: &mut TelegramBotFile, config: &TelegramUiConfig) -> bool {
     let mut mirrored = config.clone();
     mirrored.bot_token = None;
-    let changed =
-        !telegram_configs_equal(&file.config, &mirrored) || file.config.bot_token.is_some();
+    let changed = !telegram_configs_equal(&file.config, &mirrored)
+        || file.config.bot_token.is_some()
+        || !file.config_migrated_to_app_state;
     if changed {
         file.config = mirrored;
+        file.config_migrated_to_app_state = true;
     }
     changed
 }

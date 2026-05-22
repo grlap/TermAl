@@ -215,6 +215,11 @@ type EstimatedPageHeightEntry = {
   cacheKey: string;
   height: number;
 };
+type EstimatedMessageHeightEntry = {
+  expandedPromptOpen: boolean;
+  height: number;
+  widthBucket: number;
+};
 export type MessageWindowSnapshot = {
   ids: string[];
   sessionId: string;
@@ -361,17 +366,41 @@ function captureFirstVisibleMountedMessageAnchor(
   scrollContainerNode: HTMLElement,
 ): VisibleMessageAnchor | null {
   const containerRect = scrollContainerNode.getBoundingClientRect();
-  const visibleSlot = getMountedMessageSlots(virtualizedListRoot).find((slot) => {
+  for (const slot of getMountedMessageSlots(virtualizedListRoot)) {
     const rect = slot.getBoundingClientRect();
-    return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
-  });
-  if (!visibleSlot?.dataset.messageId) {
-    return null;
+    if (rect.bottom <= containerRect.top || rect.top >= containerRect.bottom) {
+      continue;
+    }
+    if (!slot.dataset.messageId) {
+      return null;
+    }
+    return {
+      messageId: slot.dataset.messageId,
+      viewportOffsetPx: rect.top - containerRect.top,
+    };
   }
-  return {
-    messageId: visibleSlot.dataset.messageId,
-    viewportOffsetPx: visibleSlot.getBoundingClientRect().top - containerRect.top,
-  };
+  return null;
+}
+
+function getMountedSlotViewportOffsetPx(
+  scrollContainerNode: HTMLElement,
+  slotNode: HTMLElement,
+) {
+  const containerRect = scrollContainerNode.getBoundingClientRect();
+  const slotRect = slotNode.getBoundingClientRect();
+  return slotRect.top - containerRect.top;
+}
+
+function doesMountedPageIntersectViewport(
+  scrollContainerNode: HTMLElement,
+  pageNode: HTMLElement | null | undefined,
+) {
+  if (!pageNode) {
+    return false;
+  }
+  const containerRect = scrollContainerNode.getBoundingClientRect();
+  const pageRect = pageNode.getBoundingClientRect();
+  return pageRect.bottom > containerRect.top && pageRect.top < containerRect.bottom;
 }
 
 function estimatePageHeight(
@@ -399,10 +428,7 @@ function buildPageEstimateCacheKey(
   page: MessagePage,
   availableWidthPx: number,
 ) {
-  const widthBucket =
-    Number.isFinite(availableWidthPx) && availableWidthPx > 0
-      ? Math.round(availableWidthPx)
-      : 0;
+  const widthBucket = resolveEstimateWidthBucket(availableWidthPx);
   const expandedPromptKey = page.messages
     .flatMap((message) =>
       message.type === "text" &&
@@ -414,6 +440,12 @@ function buildPageEstimateCacheKey(
     )
     .join(",");
   return `${page.key}:${widthBucket}:${expandedPromptKey}`;
+}
+
+function resolveEstimateWidthBucket(availableWidthPx: number) {
+  return Number.isFinite(availableWidthPx) && availableWidthPx > 0
+    ? Math.round(availableWidthPx)
+    : 0;
 }
 
 function estimateMessageOffsetWithinPage(
@@ -516,6 +548,9 @@ export function VirtualizedConversationMessageList({
   const estimatedPageHeightsRef = useRef<Record<string, EstimatedPageHeightEntry>>(
     {},
   );
+  const estimatedMessageHeightsRef = useRef<WeakMap<Message, EstimatedMessageHeightEntry>>(
+    new WeakMap(),
+  );
   const shouldKeepBottomAfterLayoutRef = useRef(false);
   const isDetachedFromBottomRef = useRef(false);
   const skipNextMountedPrependRestoreRef = useRef(false);
@@ -586,6 +621,10 @@ export function VirtualizedConversationMessageList({
   ] = useState(false);
   const [bottomBoundaryRevealToken, setBottomBoundaryRevealToken] = useState(0);
   const previousIsActiveRef = useRef(isActive);
+  const visiblePageRangeRef = useRef<VirtualizedRange>({
+    startIndex: 0,
+    endIndex: 0,
+  });
 
   const setHasUserScrollInteraction = useCallback((nextValue: boolean) => {
     hasUserScrollInteractionRef.current = nextValue;
@@ -860,15 +899,33 @@ export function VirtualizedConversationMessageList({
       : viewport.width;
 
   const estimateMessageHeight = useCallback(
-    (message: Message) =>
-      estimateConversationMessageHeight(message, {
-        availableWidthPx: viewportWidth,
-        expandedPromptOpen:
-          message.type === "text" &&
-          message.author === "you" &&
-          Boolean(message.expandedText) &&
-          isExpandedPromptOpen(message.id),
-      }),
+    (message: Message) => {
+      const widthBucket = resolveEstimateWidthBucket(viewportWidth);
+      const expandedPromptOpen =
+        message.type === "text" &&
+        message.author === "you" &&
+        Boolean(message.expandedText) &&
+        isExpandedPromptOpen(message.id);
+      const cached = estimatedMessageHeightsRef.current.get(message);
+      if (
+        cached &&
+        cached.widthBucket === widthBucket &&
+        cached.expandedPromptOpen === expandedPromptOpen
+      ) {
+        return cached.height;
+      }
+
+      const height = estimateConversationMessageHeight(message, {
+        availableWidthPx: widthBucket > 0 ? widthBucket : viewportWidth,
+        expandedPromptOpen,
+      });
+      estimatedMessageHeightsRef.current.set(message, {
+        expandedPromptOpen,
+        height,
+        widthBucket,
+      });
+      return height;
+    },
     [viewportWidth],
   );
 
@@ -977,6 +1034,7 @@ export function VirtualizedConversationMessageList({
       0,
     );
   }, [pageHeights, pageLayout.tops, pages.length, viewportHeight, viewportScrollTop]);
+  visiblePageRangeRef.current = visiblePageRange;
 
   const activeConversationSearchLocation =
     activeConversationSearchMessageId !== null
@@ -1525,8 +1583,7 @@ export function VirtualizedConversationMessageList({
       : preservedAnchor && preservedAnchorSlot
         ? Math.max(
             node.scrollTop +
-              (preservedAnchorSlot.getBoundingClientRect().top -
-                node.getBoundingClientRect().top) -
+              getMountedSlotViewportOffsetPx(node, preservedAnchorSlot) -
               preservedAnchor.viewportOffsetPx,
             0,
           )
@@ -2401,7 +2458,7 @@ export function VirtualizedConversationMessageList({
     const targetScrollTop = anchorSlot
       ? Math.max(
           node.scrollTop +
-            (anchorSlot.getBoundingClientRect().top - node.getBoundingClientRect().top) -
+            getMountedSlotViewportOffsetPx(node, anchorSlot) -
             pendingRestore.anchor!.viewportOffsetPx,
           0,
         )
@@ -2437,7 +2494,7 @@ export function VirtualizedConversationMessageList({
 
     const targetScrollTop = Math.max(
       node.scrollTop +
-        (anchorSlot.getBoundingClientRect().top - node.getBoundingClientRect().top) -
+        getMountedSlotViewportOffsetPx(node, anchorSlot) -
         pendingAnchor.viewportOffsetPx,
       0,
     );
@@ -3142,66 +3199,96 @@ export function VirtualizedConversationMessageList({
     };
   }, [isActive, scrollContainerRef, sessionId, syncViewportFromScrollNode]);
 
+  const handlePageHeightChangeRef = useRef<
+    ((
+      pageKey: string,
+      pageIndex: number,
+      nextHeight: number,
+      pageNode?: HTMLElement | null,
+    ) => void) | null
+  >(null);
+  handlePageHeightChangeRef.current = (pageKey, pageIndex, nextHeight, pageNode) => {
+    if (!Number.isFinite(nextHeight) || nextHeight <= 0) {
+      return;
+    }
+
+    const roundedHeight = Math.round(nextHeight);
+    const previousHeight = pageHeightsRef.current[pageKey];
+    if (previousHeight !== undefined && Math.abs(previousHeight - roundedHeight) < 1) {
+      return;
+    }
+
+    pageHeightsRef.current[pageKey] = roundedHeight;
+
+    const node = scrollContainerRef.current;
+    if (node && hasUserScrollInteractionRef.current && !isScrollContainerNearBottom(node)) {
+      shouldKeepBottomAfterLayoutRef.current = false;
+    }
+    const shouldKeepBottom =
+      isActive && node
+        ? !isDetachedFromBottomRef.current &&
+          (shouldKeepBottomAfterLayoutRef.current || isScrollContainerNearBottom(node))
+        : false;
+    if (shouldKeepBottom) {
+      shouldKeepBottomAfterLayoutRef.current = true;
+    }
+
+    const restoreBottomAfterLayout = () => {
+      if (!node || !shouldKeepBottom || hasUserScrollInteractionRef.current) {
+        return;
+      }
+      window.requestAnimationFrame(() => {
+        if (scrollContainerRef.current !== node) {
+          return;
+        }
+        if (
+          hasUserScrollInteractionRef.current ||
+          isDetachedFromBottomRef.current ||
+          !shouldKeepBottomAfterLayoutRef.current
+        ) {
+          return;
+        }
+        const target = Math.max(node.scrollHeight - node.clientHeight, 0);
+        writeScrollTopAndSyncViewport(node, target);
+      });
+    };
+
+    const latestVisiblePageRange = visiblePageRangeRef.current;
+    const isVisiblePage =
+      pageIndex >= latestVisiblePageRange.startIndex &&
+      pageIndex < latestVisiblePageRange.endIndex;
+    const intersectsViewport =
+      node !== null && doesMountedPageIntersectViewport(node, pageNode);
+    if (isVisiblePage || intersectsViewport) {
+      clearPendingDeferredLayoutTimer();
+      bumpLayoutVersion();
+      restoreBottomAfterLayout();
+      return;
+    }
+
+    const timeSinceUserScroll = performance.now() - lastUserScrollInputTimeRef.current;
+    const inUserScrollCooldown =
+      timeSinceUserScroll < VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
+    if (inUserScrollCooldown) {
+      scheduleDeferredLayoutVersion(
+        VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS - timeSinceUserScroll,
+      );
+      return;
+    }
+
+    scheduleDeferredLayoutVersion(0);
+    restoreBottomAfterLayout();
+  };
   const handlePageHeightChange = useCallback(
-    (pageKey: string, nextHeight: number) => {
-      if (!Number.isFinite(nextHeight) || nextHeight <= 0) {
-        return;
-      }
-
-      const roundedHeight = Math.round(nextHeight);
-      const previousHeight = pageHeightsRef.current[pageKey];
-      if (previousHeight !== undefined && Math.abs(previousHeight - roundedHeight) < 1) {
-        return;
-      }
-
-      pageHeightsRef.current[pageKey] = roundedHeight;
-
-      const node = scrollContainerRef.current;
-      if (node && hasUserScrollInteractionRef.current && !isScrollContainerNearBottom(node)) {
-        shouldKeepBottomAfterLayoutRef.current = false;
-      }
-      const shouldKeepBottom =
-        isActive && node
-          ? !isDetachedFromBottomRef.current &&
-            (shouldKeepBottomAfterLayoutRef.current || isScrollContainerNearBottom(node))
-          : false;
-      if (shouldKeepBottom) {
-        shouldKeepBottomAfterLayoutRef.current = true;
-      }
-
-      const timeSinceUserScroll = performance.now() - lastUserScrollInputTimeRef.current;
-      const inUserScrollCooldown = timeSinceUserScroll < VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS;
-      if (inUserScrollCooldown) {
-        scheduleDeferredLayoutVersion(
-          VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS - timeSinceUserScroll,
-        );
-        return;
-      }
-
-      scheduleDeferredLayoutVersion(0);
-      if (node && shouldKeepBottom && !hasUserScrollInteractionRef.current) {
-        window.requestAnimationFrame(() => {
-          if (scrollContainerRef.current !== node) {
-            return;
-          }
-          if (
-            hasUserScrollInteractionRef.current ||
-            isDetachedFromBottomRef.current ||
-            !shouldKeepBottomAfterLayoutRef.current
-          ) {
-            return;
-          }
-          const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-          writeScrollTopAndSyncViewport(node, target);
-        });
-      }
+    (
+      pageKey: string,
+      pageIndex: number,
+      nextHeight: number,
+      pageNode?: HTMLElement | null,
+    ) => {
+      handlePageHeightChangeRef.current?.(pageKey, pageIndex, nextHeight, pageNode);
     },
-    [
-      isActive,
-      scheduleDeferredLayoutVersion,
-      scrollContainerRef,
-      writeScrollTopAndSyncViewport,
-    ],
+    [],
   );
 
   const boundApprovalDecision = useCallback(
@@ -3288,7 +3375,12 @@ const MeasuredPageBand = memo(function MeasuredPageBand({
   onUserInputSubmit: BoundUserInputSubmitHandler;
   onMcpElicitationSubmit: BoundMcpElicitationSubmitHandler;
   onCodexAppRequestSubmit: BoundCodexAppRequestSubmitHandler;
-  onHeightChange: (pageKey: string, nextHeight: number) => void;
+  onHeightChange: (
+    pageKey: string,
+    pageIndex: number,
+    nextHeight: number,
+    pageNode?: HTMLElement | null,
+  ) => void;
 }) {
   const pageRef = useRef<HTMLDivElement | null>(null);
 
@@ -3330,7 +3422,7 @@ const MeasuredPageBand = memo(function MeasuredPageBand({
       if (measuredSlotCount === 0) {
         return;
       }
-      onHeightChange(page.key, totalHeight);
+      onHeightChange(page.key, page.pageIndex, totalHeight, node);
     };
 
     measure();

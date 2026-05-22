@@ -46,6 +46,7 @@ import { sanitizeUserFacingErrorMessage } from "./error-messages";
 // `TERMINAL_OUTPUT_MAX_BYTES * 16` in `src/api.rs`; if either side drifts
 // the other's regression test fails.
 export const TERMINAL_SSE_BUFFER_MAX_CHARS = 16 * 512 * 1024;
+const JSON_HTML_FALLBACK_TEXT_LIMIT_BYTES = 64 * 1024;
 
 export type StateResponse = {
   revision: number;
@@ -590,7 +591,99 @@ async function request<T>(
 }
 
 export function fetchState() {
-  return request<StateResponse>("/api/state");
+  return requestJsonFirst<StateResponse>("/api/state");
+}
+
+async function requestJsonFirst<T>(
+  path: string,
+  init?: RequestInit,
+  options?: RequestOptions,
+): Promise<T> {
+  const response = await performRequest(path, init);
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (looksLikeHtmlResponse("", contentType)) {
+    await response.text().catch(() => "");
+    throw createBackendUnavailableError(
+      formatUnavailableApiMessage(path, response.status),
+      response.status,
+      { restartRequired: true },
+    );
+  }
+
+  if (!response.ok) {
+    const raw = await response.text();
+    if (looksLikeHtmlResponse(raw, contentType)) {
+      throw createBackendUnavailableError(
+        formatUnavailableApiMessage(path, response.status),
+        response.status,
+        { restartRequired: true },
+      );
+    }
+    throw createResponseError(raw, response.status, options);
+  }
+
+  if (contentType.toLowerCase().includes("application/json")) {
+    const textFallback = cloneSmallJsonResponseForFallback(response);
+    try {
+      return (await response.json()) as T;
+    } catch (error) {
+      let raw = "";
+      if (textFallback) {
+        try {
+          raw = await textFallback.text();
+        } catch {
+          throw error;
+        }
+      }
+      if (looksLikeHtmlResponse(raw, contentType)) {
+        throw createBackendUnavailableError(
+          formatUnavailableApiMessage(path, response.status),
+          response.status,
+          { restartRequired: true },
+        );
+      }
+      if (!raw) {
+        if (looksLikeHtmlJsonParseError(error)) {
+          throw createBackendUnavailableError(
+            formatUnavailableApiMessage(path, response.status),
+            response.status,
+            { restartRequired: true },
+          );
+        }
+        if (!textFallback) {
+          throw error;
+        }
+        return {} as T;
+      }
+      throw error;
+    }
+  }
+
+  const raw = await response.text();
+  if (looksLikeHtmlResponse(raw, contentType)) {
+    throw createBackendUnavailableError(
+      formatUnavailableApiMessage(path, response.status),
+      response.status,
+      { restartRequired: true },
+    );
+  }
+  return raw ? (JSON.parse(raw) as T) : ({} as T);
+}
+
+function cloneSmallJsonResponseForFallback(response: Response) {
+  const contentLength = Number.parseInt(
+    response.headers.get("content-length") ?? "",
+    10,
+  );
+  if (
+    !Number.isFinite(contentLength) ||
+    contentLength < 0 ||
+    contentLength > JSON_HTML_FALLBACK_TEXT_LIMIT_BYTES
+  ) {
+    return null;
+  }
+  return response.clone();
 }
 
 export function fetchSession(sessionId: string) {
@@ -1847,6 +1940,19 @@ function looksLikeHtmlResponse(raw: string, contentType: string) {
   return (
     startsWithIgnoreCase(raw, start, "<!doctype html") ||
     startsWithIgnoreCase(raw, start, "<html")
+  );
+}
+
+function looksLikeHtmlJsonParseError(error: unknown) {
+  if (!(error instanceof SyntaxError)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("unexpected token '<") ||
+    message.includes("unexpected token <") ||
+    message.includes("<!doctype") ||
+    message.includes("<html")
   );
 }
 

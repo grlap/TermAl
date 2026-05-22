@@ -1,5 +1,9 @@
 import type { Session } from "./types";
-import { reconcileSessions, reconcileSingleSession } from "./session-reconcile";
+import {
+  applyDelegationParentIdsFromSummaries,
+  reconcileSessions,
+  reconcileSingleSession,
+} from "./session-reconcile";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
@@ -209,6 +213,26 @@ describe("reconcileSessions", () => {
     expect(merged[0].messages).toBe(previous[0].messages);
     expect(merged[0].messagesLoaded).toBe(true);
     expect(merged[0].preview).toBe("Completed");
+  });
+
+  it("restores delegated child ownership from state delegation summaries", () => {
+    const parent = makeSession("parent-session");
+    const child = makeSession("child-session");
+    const originalSessions = [parent, child];
+
+    const sessions = applyDelegationParentIdsFromSummaries(originalSessions, [
+      {
+        id: "delegation-1",
+        childSessionId: child.id,
+      },
+    ]);
+
+    expect(sessions).not.toBe(originalSessions);
+    expect(sessions[0]).toBe(parent);
+    expect(sessions[1]).toEqual({
+      ...child,
+      parentDelegationId: "delegation-1",
+    });
   });
 
   it("preserves delegated child ownership when a full hydration response omits it", () => {

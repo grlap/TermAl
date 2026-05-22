@@ -488,6 +488,50 @@ describe("deferred session-store sync", () => {
     expect(updater?.(currentTelegramConfig)).toBe(currentTelegramConfig);
   });
 
+  it("uses delegation summaries to keep child sessions hidden from ordinary lists", () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const parentSession = makeSession({ id: "parent-session" });
+    const childSession = makeSession({ id: "child-session" });
+    const params = makeLiveStateParams(parentSession);
+    params.adoptionRefs.sessionsRef.current = [parentSession];
+    params.stateSetters.setSessions = vi.fn((nextSessions: Session[]) => {
+      params.adoptionRefs.sessionsRef.current = nextSessions;
+    }) as typeof params.stateSetters.setSessions;
+    let hook: UseAppLiveStateReturn | null = null;
+
+    renderLiveStateHarness(params, (nextHook) => {
+      hook = nextHook;
+    });
+
+    act(() => {
+      hook?.adoptState({
+        ...makeStateResponse(parentSession, 2),
+        sessions: [parentSession, childSession],
+        delegations: [
+          makeDelegationSummary({
+            parentSessionId: parentSession.id,
+            childSessionId: childSession.id,
+          }),
+        ],
+      });
+    });
+
+    expect(
+      params.adoptionRefs.sessionsRef.current.find(
+        (session) => session.id === childSession.id,
+      )?.parentDelegationId,
+    ).toBe("delegation-1");
+  });
+
   it("keeps reconnecting when valid delta data arrives after an error without an open event", async () => {
     vi.stubGlobal(
       "EventSource",

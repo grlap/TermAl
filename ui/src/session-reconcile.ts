@@ -1,4 +1,5 @@
 import type {
+  DelegationSummary,
   ApprovalMessage,
   CodexAppRequestMessage,
   CommandMessage,
@@ -38,6 +39,45 @@ type ReconcileSessionsOptions = {
    */
   forceMessagesUnloaded?: boolean;
 };
+
+export function applyDelegationParentIdsFromSummaries(
+  sessions: Session[],
+  delegations: readonly Pick<DelegationSummary, "id" | "childSessionId">[],
+): Session[] {
+  if (!delegations.length) {
+    return sessions;
+  }
+
+  const parentDelegationIdsByChildSessionId = new Map<string, string>();
+  for (const delegation of delegations) {
+    if (delegation.childSessionId && delegation.id) {
+      parentDelegationIdsByChildSessionId.set(
+        delegation.childSessionId,
+        delegation.id,
+      );
+    }
+  }
+  if (!parentDelegationIdsByChildSessionId.size) {
+    return sessions;
+  }
+
+  let changed = false;
+  const nextSessions = sessions.map((session) => {
+    const parentDelegationId = parentDelegationIdsByChildSessionId.get(
+      session.id,
+    );
+    if (!parentDelegationId || session.parentDelegationId === parentDelegationId) {
+      return session;
+    }
+    changed = true;
+    return {
+      ...session,
+      parentDelegationId,
+    };
+  });
+
+  return changed ? nextSessions : sessions;
+}
 
 export function reconcileSessions(
   previous: Session[],

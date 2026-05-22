@@ -7,74 +7,40 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Telegram legacy config import can revive stale mirrored defaults
+## Focused live-session responsiveness remains pending re-profile after state-adoption cuts
 
-**Severity:** Low - the legacy import heuristic treats "committed Telegram config is default" as "not migrated yet," so a stale mirrored file config can be re-imported after an intentional reset to defaults.
+**Severity:** Medium - previous focused-session profiles showed user-visible main-thread churn, and the current mitigation batch has not yet been re-profiled against the same live active-session path.
 
-`src/telegram_settings.rs` preserves legacy migration by importing `telegram-bot.json` `config` when the committed app-state Telegram config is default and the file config is non-default. That works for first migration, but it has no durable marker distinguishing an unmigrated state from an explicit user reset to defaults. If app state legitimately resets Telegram config while the mirrored file still has old non-default values, a later status or update can re-import the stale file shape.
-
-**Current behavior:**
-- Default app-state Telegram config plus non-default file config is treated as an unmigrated legacy file.
-- The file mirror can become the source again after an intentional app-state reset to defaults.
-
-**Proposal:**
-- Distinguish missing/unmigrated app-state config from explicitly default config, or restrict file-to-state import to a one-time migration path.
-- Add regression coverage for default-reset state with stale non-default mirrored file config.
-
-## Focused live sessions monopolize the main thread during state adoption
-
-**Severity:** Medium - a visible, focused TermAl tab with an active Codex session can spend multiple seconds of an 8 s sample on main-thread work even when no requests fail and no exceptions fire.
-
-A live Chrome profile against the current dev tab showed no runtime exceptions, no failed network requests, and no framework error overlay, but the page still burned about `6.6 s` of `TaskDuration`, `0.97 s` of `ScriptDuration`, `372` style recalculations, and several long tasks above `2 s` while Codex was active. The hottest app frames were `handleStateEvent(...)` in `ui/src/app-live-state.ts`, `request(...)` / `looksLikeHtmlResponse(...)` in `ui/src/api.ts`, `reconcileSessions(...)` / `reconcileMessages(...)` in `ui/src/session-reconcile.ts`, `estimateConversationMessageHeight(...)` in `ui/src/panels/conversation-virtualization.ts`, and repeated `getBoundingClientRect()` reads in `ui/src/panels/VirtualizedConversationMessageList.tsx`. A second targeted typing profile pointed the same way: 16 simulated keystrokes averaged only about `1.0 ms` of synchronous input work and about `11 ms` to the next frame, while `handleStateEvent(...)` alone still consumed about `199 ms` of self time. Narrower composer-rerender and adoption-fan-out regressions have been fixed separately, but the remaining profile still points at broader whole-tab churn.
+Recent changes cut several suspected hot paths: unchanged session adoption can early-return, `/api/state` now uses a JSON-first response path, and transcript virtualization caches more estimate work. Those changes are useful, but they do not prove the original profile is resolved. The active acceptance gate is still a fresh profile of a visible active Codex session.
 
 **Current behavior:**
-- A visible, focused active session still produces repeated long main-thread tasks while Codex is working or waiting for output.
-- Per-chunk session deltas now coalesce their full-session store publication and broad `sessions` render update to one animation frame, but full state snapshots and transcript measurement still need separate cuts.
-- `codexUpdated` deltas and same-value backend connection-state updates are now coalesced or ignored, but snapshot adoption remains the dominant unresolved path.
-- Slow `state` events now log per-phase timings in development, so the next profiling round should use the `[TermAl perf] slow state event ...` line to pick the next cut.
-- Stale same-instance snapshots now avoid full JSON parse, so the remaining problematic lines should be adopted snapshots or server-restart/fallback snapshots.
-- `handleStateEvent(...)` still drives broad adoption work through `adoptState(...)` / `adoptSessions(...)`, transcript reconciliation, and follow-on measurement/render work even after the narrower cleanup fan-out cut.
-- `/api/state` resync still reads full response bodies as text before JSON parsing; `looksLikeHtmlResponse(...)` now does only a narrow prefix check, so the remaining avoidable CPU is the text-body path itself on large successful snapshots.
-- Transcript virtualization still spends measurable time on regex-heavy height estimation and synchronous layout reads, so live session churn compounds with scroll/measure work instead of staying isolated to the active status surface.
+- The last reproduced focused active-session profile showed long main-thread tasks while Codex was active.
+- The current diff reduces state-adoption, JSON parsing, and transcript-estimation work, but no new profile has verified `TaskDuration`, next-frame latency, or `[TermAl perf] slow state event ...` output.
+- Closing this bug before the re-profile would make the new P2 task the only record of a still-unverified user-visible performance issue.
 
 **Proposal:**
-- Make the live state path more metadata-first so transcript arrays, workspace layout, and per-session maps are not reconciled or pruned when the incoming snapshot did not materially change those slices.
-- Split the `/api/state` response handling into a cheap JSON-first path while preserving the narrow HTML fallback check for old-backend responses.
-- Cache height-estimation inputs by message identity/revision and reduce repeated `getBoundingClientRect()` passes in the virtualized transcript.
-- Re-profile the focused active-session path after each cut and keep this issue open until long-task bursts drop back below user-visible jank thresholds.
-
-**Plan:**
-- Start at the root of the profile: cut `handleStateEvent(...)` / `adoptState(...)` work first, because that is where both the passive and targeted rounds spend the most app CPU.
-- Break the work into independently measurable slices: state adoption fan-out, `/api/state` parsing path, and transcript virtualization measurement/estimation.
-- After each slice lands, rerun the live active-session profile and the focused typing round so reductions in `handleStateEvent(...)` self time, `TaskDuration`, and next-frame latency are verified instead of assumed.
-
-## Conversation cards overlap for one frame during scroll through long messages
-
-**Severity:** Medium - `estimateConversationMessageHeight` in `ui/src/panels/conversation-virtualization.ts` produces an initial height for unmeasured cards using a per-line pixel heuristic with line-count caps (`Math.min(outputLineCount, 14)` for `command`, `Math.min(diffLineCount, 20)` for `diff`) and overall ceilings of 1400/1500/1600/1800/900 px. For heavy messages — review-tool output, build logs, large patches — the estimate is 20–40% under the rendered height, so `layout.tops[index]` for cards below an under-priced neighbour places them inside the neighbour's rendered area. The user sees the cards painted on top of each other for one frame, until the `ResizeObserver` measurement lands and `setLayoutVersion` rebuilds the layout.
-
-An initial attempt to fix this by raising estimates to a single 40k px cap (and adding `visibility: hidden` per-card until measured) was reverted after it introduced two worse regressions: (1) per-card `visibility: hidden` combined with the wrapper's `is-measuring-post-activation` hide left the whole transcript empty for a frame whenever the virtualization window shifted before measurements landed; (2) raising the cap made the `getAdjustedVirtualizedScrollTopForHeightChange` shrink-adjustment huge (40k estimate − 8k actual = −32k scrollTop jump), so slow wheel-scrolling through heavy transcripts caused visible scroll jumps of tens of thousands of pixels. The revert restores the one-frame overlap as the known limitation.
-
-**Current behavior:**
-- Initial layout uses estimates that badly under-price long commands / diffs.
-- First paint places subsequent cards overlapping the under-priced one for one frame.
-- Next frame, `ResizeObserver` fires, `setLayoutVersion` rebuilds, positions correct.
-- Visible to the user as a brief "jumble" during scroll.
-
-**Proposal:**
-- Proper fix likely needs off-screen pre-measurement (render the card in a hidden measure-only tree, read `getBoundingClientRect` height, then place in the layout) rather than a formula-based estimate. This is a bigger change than a single pure-function tweak.
-- Alternative: batch-measurement pass when the virtualization window shifts — hide the wrapper briefly, mount the newly-entering cards, wait for all their measurements, then reveal.
-- Not: raise the estimator cap. Large overshoots trade one visible artifact for a worse one.
+- Keep this issue active until `scripts/perf/prompt-responsiveness-smoke.js` is rerun against a visible active Codex session.
+- Close it only if the focused profile shows long-task bursts have dropped below user-visible jank thresholds.
+- If the profile still fails, use the slow-state-event phase timings to split the next concrete cut.
 
 ## Implementation Tasks
 
+- [ ] P2: Re-profile focused live-session responsiveness after state-adoption cuts:
+  rerun `scripts/perf/prompt-responsiveness-smoke.js` against a visible active Codex session; close this bug if it passes, or refine the active bug if `TaskDuration`, next-frame latency, or `[TermAl perf] slow state event ...` output still points at state adoption or transcript measurement.
+- [ ] P2: Extract oversized frontend hot-path helpers:
+  move JSON-first `/api/state` parsing into a focused API helper and virtualized transcript measurement/cache logic into focused helper or hook modules so the reviewed hot paths stop growing oversized frontend files.
+- [ ] P2: Add Telegram migration-marker write-path coverage:
+  assert the `configMigratedToAppState` marker is persisted after legacy import, and cover `update_telegram_config()` plus prune/helper paths so stale mirrored file config cannot become the source of truth again.
+- [ ] P2: Add app-state adoption no-op coverage:
+  cover the `adoptSessions` early-return path when reconciled sessions are unchanged and no pending-open recovery exists, proving broad workspace/session updates are skipped.
+- [ ] P2: Add virtualized transcript estimate-cache coverage:
+  cover `estimatedMessageHeightsRef` WeakMap cache hits plus width-bucket or expanded-prompt invalidation so the cache cannot return stale estimates for a changed rendering context.
 - [ ] P2: Cover first-chunk Telegram forward failure:
   force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
 - [ ] P2: Cover first-settled active-baseline same-message growth policy:
   pin the current conservative behavior and, if a future turn-boundary signal lands, add the positive forwarding case for same-message reply text already present on first settled poll.
 - [ ] P2: Add Telegram settings API/security regressions:
   cover plaintext token-at-rest exposure, corrupt-backup permission hardening, and credential-store failure/fallback behavior beyond the native-store smoke test.
-- [ ] P2: Add Telegram legacy config import regression coverage:
-  cover an explicit app-state Telegram config reset to defaults while `telegram-bot.json` still has stale non-default mirrored config, and assert status/update does not re-import the stale file config.
 - [ ] P2: Cover post-validation Telegram settings sanitization:
   delete a project/session after validation but before the second sanitize path, or extract a deterministic helper seam, and assert the persisted response cannot retain stale references. The current stale-reference test at `src/tests/telegram.rs:1573` seeds invalid state before validation, so removing the post-validation sanitize in `src/telegram_settings.rs:73` would still pass.
 - [ ] P2: Add Telegram preferences panel RTL coverage:

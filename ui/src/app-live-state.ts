@@ -99,7 +99,11 @@ import {
   type AdoptFetchedSessionOutcome,
   type SessionHydrationRequestContext,
 } from "./session-hydration-adoption";
-import { reconcileSessions, reconcileSingleSession } from "./session-reconcile";
+import {
+  applyDelegationParentIdsFromSummaries,
+  reconcileSessions,
+  reconcileSingleSession,
+} from "./session-reconcile";
 import {
   openSessionInWorkspaceState,
   reconcileWorkspaceState,
@@ -508,48 +512,67 @@ export function useAppLiveState(
     options?: AdoptSessionsOptions,
   ) {
     const previousSessions = sessionsRef.current;
-    const previousSessionsById = new Map(
-      previousSessions.map((session) => [session.id, session]),
-    );
     const mergedSessions = reconcileSessions(previousSessions, nextSessions, {
       disableMutationStampFastPath: options?.disableMutationStampFastPath,
       forceMessagesUnloaded: options?.forceMessagesUnloaded,
     });
-    const changedSessions = mergedSessions.filter(
-      (session) => previousSessionsById.get(session.id) !== session,
-    );
-    const availableSessionIds = new Set(
-      mergedSessions.map((session) => session.id),
-    );
-    const removedSessionIds = new Set(
-      previousSessions.flatMap((session) =>
-        availableSessionIds.has(session.id) ? [] : [session.id],
-      ),
-    );
-    const unhydratedSessionIds = new Set(
-      mergedSessions.flatMap((session) =>
-        session.messagesLoaded === false ? [session.id] : [],
-      ),
-    );
-    const sessionsWithChangedWorkdir = new Set(
-      mergedSessions.flatMap((session) => {
-        const previousSession = previousSessionsById.get(session.id);
-        return previousSession && previousSession.workdir !== session.workdir
-          ? [session.id]
-          : [];
-      }),
-    );
-    const hasRemovedSessions = removedSessionIds.size > 0;
-    const hasWorkdirInvalidations = sessionsWithChangedWorkdir.size > 0;
     const pendingOpenSessionId =
       options?.openSessionId ?? pendingRecoveryOpenSessionIdRef.current;
     const pendingPaneId =
       options?.openSessionId !== undefined
         ? (options.paneId ?? null)
         : (pendingRecoveryPaneIdRef.current ?? null);
+
+    if (mergedSessions === previousSessions && pendingOpenSessionId === undefined) {
+      return;
+    }
+
+    const availableSessionIds = new Set(
+      mergedSessions.map((session) => session.id),
+    );
     const canOpenPendingSession =
       pendingOpenSessionId !== undefined &&
       availableSessionIds.has(pendingOpenSessionId);
+
+    if (mergedSessions === previousSessions && !canOpenPendingSession) {
+      return;
+    }
+
+    const previousSessionsById = new Map(
+      previousSessions.map((session) => [session.id, session]),
+    );
+    const changedSessions =
+      mergedSessions === previousSessions
+        ? []
+        : mergedSessions.filter(
+            (session) => previousSessionsById.get(session.id) !== session,
+          );
+    const removedSessionIds = new Set(
+      mergedSessions === previousSessions
+        ? []
+        : previousSessions.flatMap((session) =>
+            availableSessionIds.has(session.id) ? [] : [session.id],
+          ),
+    );
+    const unhydratedSessionIds = new Set(
+      mergedSessions === previousSessions
+        ? []
+        : mergedSessions.flatMap((session) =>
+            session.messagesLoaded === false ? [session.id] : [],
+          ),
+    );
+    const sessionsWithChangedWorkdir = new Set(
+      mergedSessions === previousSessions
+        ? []
+        : mergedSessions.flatMap((session) => {
+            const previousSession = previousSessionsById.get(session.id);
+            return previousSession && previousSession.workdir !== session.workdir
+              ? [session.id]
+              : [];
+          }),
+    );
+    const hasRemovedSessions = removedSessionIds.size > 0;
+    const hasWorkdirInvalidations = sessionsWithChangedWorkdir.size > 0;
     // Avoid rewriting workspace state when an adopted snapshot preserves the
     // same reconciled sessions. Workspace autosave is keyed off `workspace`
     // identity, so an identity-only rewrite here can create a loop:
@@ -1302,7 +1325,10 @@ export function useAppLiveState(
     const requestedOpenSessionId =
       options?.openSessionId ?? pendingRecoveryOpenSessionIdRef.current;
     adoptSessions(
-      nextState.sessions,
+      applyDelegationParentIdsFromSummaries(
+        nextState.sessions,
+        nextState.delegations ?? [],
+      ),
       resolveAdoptStateSessionOptions(options, fullStateServerInstanceChanged),
     );
     // Local state adoptions can resume or create active sessions before any SSE arrives.
