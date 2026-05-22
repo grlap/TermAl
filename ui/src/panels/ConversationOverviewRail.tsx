@@ -1,5 +1,4 @@
 import {
-  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -35,7 +34,6 @@ import type { Message } from "../types";
 export const CONVERSATION_OVERVIEW_MIN_MESSAGES = 80;
 const CONVERSATION_OVERVIEW_COMPACT_SEGMENT_THRESHOLD = 160;
 const CONVERSATION_OVERVIEW_COMPACT_VISUAL_SEGMENT_COUNT = 96;
-const CONVERSATION_OVERVIEW_FOCUSED_PROMPT_FALLBACK_DELAY_MS = 240;
 const CONVERSATION_OVERVIEW_COMPACT_NAVIGATION_STALE_DELAY_MS = 2_000;
 const EMPTY_CONVERSATION_OVERVIEW_MARKERS: readonly ConversationOverviewMarkerInput[] =
   [];
@@ -44,6 +42,17 @@ const EMPTY_CONVERSATION_OVERVIEW_TAIL_ITEMS: readonly ConversationOverviewTailI
 const EMPTY_COMPACT_OVERVIEW_VISUAL_SEGMENTS: readonly CompactOverviewVisualSegment[] =
   [];
 const EMPTY_CONVERSATION_OVERVIEW_SEGMENT_LABELS: readonly string[] = [];
+const EMPTY_CONVERSATION_OVERVIEW_PROJECTION: ConversationOverviewProjection = {
+  items: [],
+  markers: [],
+  sourceHeightPx: 0,
+  estimatedScrollHeightPx: 1,
+  totalHeightPx: 0,
+  scale: 1,
+  viewportTopPx: 0,
+  viewportHeightPx: 0,
+  viewportSnapshotTranslation: null,
+};
 
 type CompactOverviewVisualSegment = {
   id: string;
@@ -57,6 +66,7 @@ type ConversationOverviewProjectionInput = {
   layoutSnapshot: VirtualizedConversationLayoutSnapshot | null;
   markers: readonly ConversationOverviewMarkerInput[];
   tailItems: readonly ConversationOverviewTailItemInput[];
+  enabled: boolean;
   maxHeightPx?: number;
 };
 
@@ -87,6 +97,7 @@ export function ConversationOverviewRail({
   const [compactNavigationSegmentIndex, setCompactNavigationSegmentIndex] =
     useState<number | null>(null);
   const projection = useConversationOverviewProjection({
+    enabled: messages.length >= minMessages,
     layoutSnapshot,
     markers,
     maxHeightPx,
@@ -174,10 +185,6 @@ export function ConversationOverviewRail({
       window.clearTimeout(timeoutId);
     };
   }, [compactNavigationSegmentIndex, currentSegmentIndex]);
-
-  if (messages.length < minMessages || projection.items.length === 0) {
-    return null;
-  }
 
   const navigateFromClientY = (clientY: number) => {
     const rail = railRef.current;
@@ -340,6 +347,10 @@ export function ConversationOverviewRail({
     navigateToSegmentIndex(nextIndex);
   };
 
+  if (messages.length < minMessages || projection.items.length === 0) {
+    return null;
+  }
+
   return (
     <div
       aria-label="Conversation overview"
@@ -432,6 +443,7 @@ export function ConversationOverviewRail({
 
 function useConversationOverviewProjection({
   messages,
+  enabled,
   layoutSnapshot,
   markers,
   tailItems,
@@ -440,26 +452,14 @@ function useConversationOverviewProjection({
   const metadataCacheRef = useRef<ConversationOverviewMessageMetadataCache>(
     new WeakMap(),
   );
-  const latestInputRef = useRef<ConversationOverviewProjectionInput>({
-    layoutSnapshot,
-    markers,
-    maxHeightPx,
-    messages,
-    tailItems,
-  });
   const latestProjectionRef = useRef<ConversationOverviewProjection | null>(null);
-  const [, setDeferredProjectionVersion] = useState(0);
   const isPromptFocused = useComposerPromptFocused();
 
-  latestInputRef.current = {
-    layoutSnapshot,
-    markers,
-    maxHeightPx,
-    messages,
-    tailItems,
-  };
+  const projection = useMemo(() => {
+    if (!enabled) {
+      return null;
+    }
 
-  const immediateProjection = useMemo(() => {
     if (isPromptFocused && latestProjectionRef.current !== null) {
       return null;
     }
@@ -472,49 +472,8 @@ function useConversationOverviewProjection({
       messages,
       tailItems,
     });
-  }, [isPromptFocused, layoutSnapshot, markers, maxHeightPx, messages, tailItems]);
-
-  if (immediateProjection) {
-    latestProjectionRef.current = immediateProjection;
-  }
-
-  useEffect(() => {
-    if (!isPromptFocused || immediateProjection) {
-      return undefined;
-    }
-
-    let cancelled = false;
-    const cancelProjectionBuild = scheduleConversationOverviewProjectionBuild(() => {
-      if (cancelled) {
-        return;
-      }
-      const latestInput = latestInputRef.current;
-      const nextProjection = buildConversationOverviewProjection({
-        layoutSnapshot: latestInput.layoutSnapshot,
-        markers: latestInput.markers,
-        maxHeightPx: latestInput.maxHeightPx,
-        messageMetadataCache: metadataCacheRef.current,
-        messages: latestInput.messages,
-        tailItems: latestInput.tailItems,
-      });
-
-      if (cancelled) {
-        return;
-      }
-      latestProjectionRef.current = nextProjection;
-      startTransition(() => {
-        if (cancelled) {
-          return;
-        }
-        setDeferredProjectionVersion((version) => version + 1);
-      });
-    });
-    return () => {
-      cancelled = true;
-      cancelProjectionBuild();
-    };
   }, [
-    immediateProjection,
+    enabled,
     isPromptFocused,
     layoutSnapshot,
     markers,
@@ -523,20 +482,17 @@ function useConversationOverviewProjection({
     tailItems,
   ]);
 
-  if (latestProjectionRef.current) {
-    return latestProjectionRef.current;
+  if (!enabled) {
+    latestProjectionRef.current = null;
+    return EMPTY_CONVERSATION_OVERVIEW_PROJECTION;
   }
 
-  const fallbackProjection = buildConversationOverviewProjection({
-    layoutSnapshot,
-    markers,
-    maxHeightPx,
-    messageMetadataCache: metadataCacheRef.current,
-    messages,
-    tailItems,
-  });
-  latestProjectionRef.current = fallbackProjection;
-  return fallbackProjection;
+  if (projection) {
+    latestProjectionRef.current = projection;
+    return projection;
+  }
+
+  return latestProjectionRef.current ?? EMPTY_CONVERSATION_OVERVIEW_PROJECTION;
 }
 
 function useComposerPromptFocused() {
@@ -566,80 +522,6 @@ function isComposerPromptFocused() {
     activeElement instanceof HTMLTextAreaElement &&
     activeElement.dataset[CONVERSATION_COMPOSER_INPUT_DATASET_KEY] === "true"
   );
-}
-
-function scheduleConversationOverviewProjectionBuild(run: () => void) {
-  const idleWindow = window as Window &
-    typeof globalThis & {
-      requestIdleCallback?: (
-        callback: IdleRequestCallback,
-        options?: IdleRequestOptions,
-      ) => number;
-      cancelIdleCallback?: (handle: number) => void;
-    };
-
-  if (
-    typeof idleWindow.requestIdleCallback === "function" &&
-    typeof idleWindow.cancelIdleCallback === "function"
-  ) {
-    let idleHandle: number | null = null;
-    let timeoutId: number | null = null;
-    let didRun = false;
-    const clearScheduled = () => {
-      if (idleHandle !== null) {
-        idleWindow.cancelIdleCallback?.(idleHandle);
-        idleHandle = null;
-      }
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-    };
-    const runOnce = () => {
-      if (didRun) {
-        return;
-      }
-      didRun = true;
-      clearScheduled();
-      run();
-    };
-    function scheduleIdle() {
-      idleHandle =
-        idleWindow.requestIdleCallback?.(runWhenIdle, {
-          timeout: CONVERSATION_OVERVIEW_FOCUSED_PROMPT_FALLBACK_DELAY_MS,
-        }) ?? null;
-    }
-    const runWhenIdle: IdleRequestCallback = (deadline) => {
-      idleHandle = null;
-      if (
-        isComposerPromptFocused() &&
-        deadline.timeRemaining() < 8 &&
-        !deadline.didTimeout
-      ) {
-        scheduleIdle();
-        return;
-      }
-      runOnce();
-    };
-
-    timeoutId = window.setTimeout(
-      runOnce,
-      CONVERSATION_OVERVIEW_FOCUSED_PROMPT_FALLBACK_DELAY_MS,
-    );
-    scheduleIdle();
-    return () => {
-      didRun = true;
-      clearScheduled();
-    };
-  }
-
-  const timeoutId = window.setTimeout(
-    run,
-    CONVERSATION_OVERVIEW_FOCUSED_PROMPT_FALLBACK_DELAY_MS,
-  );
-  return () => {
-    window.clearTimeout(timeoutId);
-  };
 }
 
 function resolveOverviewSegmentKeyboardIndex(

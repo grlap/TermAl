@@ -7,26 +7,8 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
-## Focused live-session responsiveness remains pending re-profile after state-adoption cuts
-
-**Severity:** Medium - previous focused-session profiles showed user-visible main-thread churn, and the current mitigation batch has not yet been re-profiled against the same live active-session path.
-
-Recent changes cut several suspected hot paths: unchanged session adoption can early-return, `/api/state` now uses a JSON-first response path, and transcript virtualization caches more estimate work. Those changes are useful, but they do not prove the original profile is resolved. The active acceptance gate is still a fresh profile of a visible active Codex session.
-
-**Current behavior:**
-- The last reproduced focused active-session profile showed long main-thread tasks while Codex was active.
-- The current diff reduces state-adoption, JSON parsing, and transcript-estimation work, but no new profile has verified `TaskDuration`, next-frame latency, or `[TermAl perf] slow state event ...` output.
-- Closing this bug before the re-profile would make the new P2 task the only record of a still-unverified user-visible performance issue.
-
-**Proposal:**
-- Keep this issue active until `scripts/perf/prompt-responsiveness-smoke.js` is rerun against a visible active Codex session.
-- Close it only if the focused profile shows long-task bursts have dropped below user-visible jank thresholds.
-- If the profile still fails, use the slow-state-event phase timings to split the next concrete cut.
-
 ## Implementation Tasks
 
-- [ ] P2: Re-profile focused live-session responsiveness after state-adoption cuts:
-  rerun `scripts/perf/prompt-responsiveness-smoke.js` against a visible active Codex session; close this bug if it passes, or refine the active bug if `TaskDuration`, next-frame latency, or `[TermAl perf] slow state event ...` output still points at state adoption or transcript measurement.
 - [ ] P2: Extract oversized frontend hot-path helpers:
   move JSON-first `/api/state` parsing into a focused API helper and virtualized transcript measurement/cache logic into focused helper or hook modules so the reviewed hot paths stop growing oversized frontend files.
 - [ ] P2: Add Telegram migration-marker write-path coverage:

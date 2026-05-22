@@ -121,7 +121,6 @@ describe("ConversationOverviewRail", () => {
   });
 
   it("keeps the previous projection while the composer prompt is focused", () => {
-    vi.useFakeTimers();
     const composer = document.createElement("textarea");
     composer.dataset[CONVERSATION_COMPOSER_INPUT_DATASET_KEY] = "true";
     document.body.appendChild(composer);
@@ -133,10 +132,6 @@ describe("ConversationOverviewRail", () => {
           ? { ...message, text: "Updated prompt sample" }
           : message,
       );
-      act(() => {
-        composer.focus();
-        fireEvent.focusIn(composer);
-      });
 
       const { rerender } = render(
         <ConversationOverviewRail
@@ -148,6 +143,93 @@ describe("ConversationOverviewRail", () => {
         />,
       );
 
+      expect(screen.getByLabelText(/User prompt 1: Message 1/)).toBeInTheDocument();
+
+      act(() => {
+        composer.focus();
+        fireEvent.focusIn(composer);
+      });
+      rerender(
+        <ConversationOverviewRail
+          messages={updatedMessages}
+          layoutSnapshot={layoutSnapshot(updatedMessages)}
+          minMessages={4}
+          maxHeightPx={250}
+          onNavigate={() => {}}
+        />,
+      );
+
+      expect(screen.getByLabelText(/User prompt 1: Message 1/)).toBeInTheDocument();
+      expect(
+        screen.queryByLabelText(/User prompt 1: Updated prompt sample/),
+      ).not.toBeInTheDocument();
+
+      act(() => {
+        composer.blur();
+        fireEvent.focusOut(composer);
+      });
+      rerender(
+        <ConversationOverviewRail
+          messages={updatedMessages}
+          layoutSnapshot={layoutSnapshot(updatedMessages)}
+          minMessages={4}
+          maxHeightPx={250}
+          onNavigate={() => {}}
+        />,
+      );
+
+      expect(
+        screen.getByLabelText(/User prompt 1: Updated prompt sample/),
+      ).toBeInTheDocument();
+    } finally {
+      document.body.removeChild(composer);
+    }
+  });
+
+  it("builds the first eligible projection when the composer prompt is already focused", () => {
+    const composer = document.createElement("textarea");
+    composer.dataset[CONVERSATION_COMPOSER_INPUT_DATASET_KEY] = "true";
+    document.body.appendChild(composer);
+
+    try {
+      const belowThresholdMessages = textMessages(3);
+      const messages = textMessages(5);
+      const updatedMessages = messages.map((message, index) =>
+        index === 0 && message.type === "text"
+          ? { ...message, text: "Updated prompt sample" }
+          : message,
+      );
+
+      act(() => {
+        composer.focus();
+        fireEvent.focusIn(composer);
+      });
+
+      const { rerender } = render(
+        <ConversationOverviewRail
+          messages={belowThresholdMessages}
+          layoutSnapshot={layoutSnapshot(belowThresholdMessages)}
+          minMessages={4}
+          maxHeightPx={250}
+          onNavigate={() => {}}
+        />,
+      );
+
+      expect(
+        screen.queryByLabelText("Conversation overview"),
+      ).not.toBeInTheDocument();
+
+      rerender(
+        <ConversationOverviewRail
+          messages={messages}
+          layoutSnapshot={layoutSnapshot(messages)}
+          minMessages={4}
+          maxHeightPx={250}
+          onNavigate={() => {}}
+        />,
+      );
+
+      expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
       expect(screen.getByLabelText(/User prompt 1: Message 1/)).toBeInTheDocument();
 
       rerender(
@@ -184,39 +266,22 @@ describe("ConversationOverviewRail", () => {
       ).toBeInTheDocument();
     } finally {
       document.body.removeChild(composer);
-      vi.useRealTimers();
     }
   });
 
-  it("bounds focused projection deferral when idle callbacks keep reporting low time", () => {
+  it("does not rebuild a focused projection from idle callbacks", () => {
     const composer = document.createElement("textarea");
     composer.dataset[CONVERSATION_COMPOSER_INPUT_DATASET_KEY] = "true";
     document.body.appendChild(composer);
     const originalRequestIdleCallback = window.requestIdleCallback;
     const originalCancelIdleCallback = window.cancelIdleCallback;
-    const idleCallbacks = new Map<number, IdleRequestCallback>();
-    const idleOptions: Array<IdleRequestOptions | undefined> = [];
-    let nextIdleHandle = 1;
     Object.defineProperty(window, "requestIdleCallback", {
       configurable: true,
-      value: vi.fn(
-        (
-          callback: IdleRequestCallback,
-          options?: IdleRequestOptions,
-        ) => {
-          const handle = nextIdleHandle;
-          nextIdleHandle += 1;
-          idleCallbacks.set(handle, callback);
-          idleOptions.push(options);
-          return handle;
-        },
-      ),
+      value: vi.fn(),
     });
     Object.defineProperty(window, "cancelIdleCallback", {
       configurable: true,
-      value: vi.fn((handle: number) => {
-        idleCallbacks.delete(handle);
-      }),
+      value: vi.fn(),
     });
 
     try {
@@ -226,11 +291,6 @@ describe("ConversationOverviewRail", () => {
           ? { ...message, text: "Updated prompt sample" }
           : message,
       );
-      act(() => {
-        composer.focus();
-        fireEvent.focusIn(composer);
-      });
-
       const { rerender } = render(
         <ConversationOverviewRail
           messages={messages}
@@ -241,6 +301,10 @@ describe("ConversationOverviewRail", () => {
         />,
       );
 
+      act(() => {
+        composer.focus();
+        fireEvent.focusIn(composer);
+      });
       rerender(
         <ConversationOverviewRail
           messages={updatedMessages}
@@ -252,27 +316,24 @@ describe("ConversationOverviewRail", () => {
       );
 
       expect(screen.getByLabelText(/User prompt 1: Message 1/)).toBeInTheDocument();
-      expect(idleOptions[0]).toEqual({ timeout: 240 });
-
-      act(() => {
-        idleCallbacks.get(1)?.({
-          didTimeout: false,
-          timeRemaining: () => 0,
-        } as IdleDeadline);
-      });
-
-      expect(screen.getByLabelText(/User prompt 1: Message 1/)).toBeInTheDocument();
       expect(
         screen.queryByLabelText(/User prompt 1: Updated prompt sample/),
       ).not.toBeInTheDocument();
-      expect(idleOptions[1]).toEqual({ timeout: 240 });
+      expect(window.requestIdleCallback).not.toHaveBeenCalled();
 
       act(() => {
-        idleCallbacks.get(2)?.({
-          didTimeout: true,
-          timeRemaining: () => 0,
-        } as IdleDeadline);
+        composer.blur();
+        fireEvent.focusOut(composer);
       });
+      rerender(
+        <ConversationOverviewRail
+          messages={updatedMessages}
+          layoutSnapshot={layoutSnapshot(updatedMessages)}
+          minMessages={4}
+          maxHeightPx={250}
+          onNavigate={() => {}}
+        />,
+      );
 
       expect(
         screen.getByLabelText(/User prompt 1: Updated prompt sample/),
@@ -298,7 +359,7 @@ describe("ConversationOverviewRail", () => {
     }
   });
 
-  it("rebuilds a focused projection through the hard timeout when idle never fires", () => {
+  it("does not rebuild a focused projection through timer fallback work", () => {
     vi.useFakeTimers();
     const composer = document.createElement("textarea");
     composer.dataset[CONVERSATION_COMPOSER_INPUT_DATASET_KEY] = "true";
@@ -321,11 +382,6 @@ describe("ConversationOverviewRail", () => {
           ? { ...message, text: "Updated prompt sample" }
           : message,
       );
-      act(() => {
-        composer.focus();
-        fireEvent.focusIn(composer);
-      });
-
       const { rerender } = render(
         <ConversationOverviewRail
           messages={messages}
@@ -336,6 +392,10 @@ describe("ConversationOverviewRail", () => {
         />,
       );
 
+      act(() => {
+        composer.focus();
+        fireEvent.focusIn(composer);
+      });
       rerender(
         <ConversationOverviewRail
           messages={updatedMessages}
@@ -351,6 +411,25 @@ describe("ConversationOverviewRail", () => {
       act(() => {
         vi.advanceTimersByTime(240);
       });
+
+      expect(screen.getByLabelText(/User prompt 1: Message 1/)).toBeInTheDocument();
+      expect(
+        screen.queryByLabelText(/User prompt 1: Updated prompt sample/),
+      ).not.toBeInTheDocument();
+
+      act(() => {
+        composer.blur();
+        fireEvent.focusOut(composer);
+      });
+      rerender(
+        <ConversationOverviewRail
+          messages={updatedMessages}
+          layoutSnapshot={layoutSnapshot(updatedMessages)}
+          minMessages={4}
+          maxHeightPx={250}
+          onNavigate={() => {}}
+        />,
+      );
 
       expect(
         screen.getByLabelText(/User prompt 1: Updated prompt sample/),

@@ -55,20 +55,23 @@ export function hydrationRetainedMessagesMatch(
   // divergent and drop retained messages. The current client may retain a
   // gapped transcript tail from live deltas while waiting for hydration; every
   // retained message must appear in the fetched transcript, in order.
-  const responseMessageKeys = responseSession.messages.map((message) =>
-    JSON.stringify(message),
-  );
   let responseIndex = 0;
   for (const currentMessage of currentSession.messages) {
-    const currentSerialized = JSON.stringify(currentMessage);
+    const currentMessageId = currentMessage.id;
+    let currentSerialized: string | null = null;
     let matched = false;
-    while (responseIndex < responseMessageKeys.length) {
-      const responseSerialized = responseMessageKeys[responseIndex];
+    while (responseIndex < responseSession.messages.length) {
+      const responseMessage = responseSession.messages[responseIndex];
       responseIndex += 1;
-      if (responseSerialized === currentSerialized) {
-        matched = true;
-        break;
+      if (responseMessage.id !== currentMessageId) {
+        continue;
       }
+      currentSerialized ??= JSON.stringify(currentMessage);
+      if (JSON.stringify(responseMessage) !== currentSerialized) {
+        continue;
+      }
+      matched = true;
+      break;
     }
     if (!matched) {
       return false;
