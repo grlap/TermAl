@@ -532,6 +532,131 @@ describe("deferred session-store sync", () => {
     ).toBe("delegation-1");
   });
 
+  it("skips broad session and workspace updates when adopted sessions are unchanged", () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const session = makeSession({
+      messages: [],
+      messagesLoaded: false,
+      messageCount: 0,
+      sessionMutationStamp: 7,
+    });
+    const params = makeLiveStateParams(session);
+    const previousSessions = [session];
+    params.adoptionRefs.sessionsRef.current = previousSessions;
+    const setSessions = vi.fn() as typeof params.stateSetters.setSessions;
+    const setWorkspace = vi.fn() as typeof params.stateSetters.setWorkspace;
+    params.stateSetters.setSessions = setSessions;
+    params.stateSetters.setWorkspace = setWorkspace;
+    let hook: UseAppLiveStateReturn | null = null;
+
+    renderLiveStateHarness(params, (nextHook) => {
+      hook = nextHook;
+    });
+
+    const unchangedSummary = {
+      ...session,
+      messages: [],
+      messagesLoaded: false,
+      messageCount: 0,
+      sessionMutationStamp: 7,
+    };
+    act(() => {
+      hook?.adoptState({
+        ...makeStateResponse(unchangedSummary, 2),
+        sessions: [unchangedSummary],
+      });
+    });
+
+    expect(params.adoptionRefs.sessionsRef.current).toBe(previousSessions);
+    expect(setSessions).not.toHaveBeenCalled();
+    expect(setWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("keeps missing pending-open recovery armed across unchanged session adoption", () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const session = makeSession({
+      messages: [],
+      messagesLoaded: false,
+      messageCount: 0,
+      sessionMutationStamp: 7,
+    });
+    const pendingSession = makeSession({
+      id: "missing-pending-session",
+      projectId: "pending-project",
+    });
+    const params = makeLiveStateParams(session);
+    const previousSessions = [session];
+    params.adoptionRefs.sessionsRef.current = previousSessions;
+    const setSessions = vi.fn((nextSessions: Session[]) => {
+      params.adoptionRefs.sessionsRef.current = nextSessions;
+    }) as typeof params.stateSetters.setSessions;
+    const setWorkspace = vi.fn() as typeof params.stateSetters.setWorkspace;
+    const setSelectedProjectId =
+      vi.fn() as typeof params.stateSetters.setSelectedProjectId;
+    params.stateSetters.setSessions = setSessions;
+    params.stateSetters.setWorkspace = setWorkspace;
+    params.stateSetters.setSelectedProjectId = setSelectedProjectId;
+    let hook: UseAppLiveStateReturn | null = null;
+
+    renderLiveStateHarness(params, (nextHook) => {
+      hook = nextHook;
+    });
+
+    act(() => {
+      params.requestActionRecoveryResyncRef.current({
+        openSessionId: pendingSession.id,
+        paneId: "pane-1",
+      });
+    });
+
+    const unchangedSummary = {
+      ...session,
+      messages: [],
+      messagesLoaded: false,
+      messageCount: 0,
+      sessionMutationStamp: 7,
+    };
+    act(() => {
+      hook?.adoptState({
+        ...makeStateResponse(unchangedSummary, 2),
+        sessions: [unchangedSummary],
+      });
+    });
+
+    expect(params.adoptionRefs.sessionsRef.current).toBe(previousSessions);
+    expect(setSessions).not.toHaveBeenCalled();
+    expect(setWorkspace).not.toHaveBeenCalled();
+    expect(setSelectedProjectId).not.toHaveBeenCalled();
+
+    act(() => {
+      hook?.adoptState({
+        ...makeStateResponse(unchangedSummary, 3),
+        sessions: [unchangedSummary, pendingSession],
+      });
+    });
+
+    expect(setSessions).toHaveBeenCalledTimes(1);
+    expect(setSelectedProjectId).toHaveBeenCalledWith("pending-project");
+  });
+
   it("keeps reconnecting when valid delta data arrives after an error without an open event", async () => {
     vi.stubGlobal(
       "EventSource",

@@ -11,10 +11,10 @@ the Implementation Tasks section.
 
 - [ ] P2: Extract oversized frontend hot-path helpers:
   move JSON-first `/api/state` parsing into a focused API helper and virtualized transcript measurement/cache logic into focused helper or hook modules so the reviewed hot paths stop growing oversized frontend files.
-- [ ] P2: Add Telegram migration-marker write-path coverage:
-  assert the `configMigratedToAppState` marker is persisted after legacy import, and cover `update_telegram_config()` plus prune/helper paths so stale mirrored file config cannot become the source of truth again.
-- [ ] P2: Add app-state adoption no-op coverage:
-  cover the `adoptSessions` early-return path when reconciled sessions are unchanged and no pending-open recovery exists, proving broad workspace/session updates are skipped.
+- [ ] P2: Add Code Navigation MCP reverse feature links:
+  link `code-navigation-mcp.md` back from the referenced feature briefs (`agent-delegation-sessions`, `instruction-debugger`, `file-change-awareness`, and `source-renderers`) if the new brief remains in the tree.
+- [ ] P2: Add Code Navigation MCP filesystem safety constraints:
+  update `docs/features/code-navigation-mcp.md` to define canonical workspace-root confinement, symlink escape handling, ignored secret/build paths, and hard file/snippet size limits before implementing read-backed MCP tools.
 - [ ] P2: Add virtualized transcript estimate-cache coverage:
   cover `estimatedMessageHeightsRef` WeakMap cache hits plus width-bucket or expanded-prompt invalidation so the cache cannot return stale estimates for a changed rendering context.
 - [ ] P2: Cover first-chunk Telegram forward failure:

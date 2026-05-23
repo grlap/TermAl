@@ -7499,6 +7499,70 @@ fn telegram_status_does_not_reimport_migrated_file_config_after_default_reset() 
 }
 
 #[test]
+fn telegram_config_update_does_not_reimport_migrated_file_config_after_default_reset() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-update-default-reset-stale-mirror-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
+        .expect("settings dir should create");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "configMigratedToAppState": true,
+            "config": {
+                "enabled": true,
+                "forwardAssistantReplies": true,
+                "subscribedProjectIds": [project_id.clone()],
+                "defaultProjectId": project_id,
+                "defaultSessionId": session_id
+            },
+            "chatId": 123
+        }))
+        .expect("fixture should encode"),
+    )
+    .expect("fixture should write");
+
+    let response = state
+        .update_telegram_config(UpdateTelegramConfigRequest {
+            enabled: None,
+            forward_assistant_replies: None,
+            bot_token: None,
+            subscribed_project_ids: None,
+            default_project_id: None,
+            default_session_id: None,
+        })
+        .expect("update should ignore migrated stale file config");
+
+    assert!(!response.enabled);
+    assert!(!response.forward_assistant_replies);
+    assert!(response.subscribed_project_ids.is_empty());
+    assert_eq!(response.default_project_id, None);
+    assert_eq!(response.default_session_id, None);
+    assert_eq!(response.linked_chat_id, Some(123));
+    assert_eq!(
+        state.snapshot().preferences.telegram,
+        TelegramUiConfig::default()
+    );
+
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert_eq!(value["configMigratedToAppState"], json!(true));
+    assert_eq!(value["config"]["enabled"], json!(false));
+    assert_eq!(value["config"]["forwardAssistantReplies"], json!(false));
+    assert!(value["config"].get("subscribedProjectIds").is_none());
+    assert!(value["config"].get("defaultProjectId").is_none());
+    assert!(value["config"].get("defaultSessionId").is_none());
+    assert_eq!(value["chatId"], json!(123));
+}
+
+#[test]
 fn telegram_settings_load_defaults_only_for_missing_file() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let home = std::env::temp_dir().join(format!(
@@ -7579,6 +7643,7 @@ fn telegram_config_update_sanitizes_stale_persisted_references_before_validation
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
     assert_eq!(value["config"]["enabled"], json!(true));
+    assert_eq!(value["configMigratedToAppState"], json!(true));
     assert!(value["config"].get("botToken").is_none());
     assert_eq!(
         value["config"]["subscribedProjectIds"],
@@ -7634,6 +7699,7 @@ fn delete_project_prunes_telegram_config_and_disables_relay_without_project_targ
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
     assert_eq!(value["config"]["enabled"], json!(false));
+    assert_eq!(value["configMigratedToAppState"], json!(true));
     assert!(value["config"].get("botToken").is_none());
     assert!(
         value["config"].get("subscribedProjectIds").is_none()
@@ -7645,6 +7711,67 @@ fn delete_project_prunes_telegram_config_and_disables_relay_without_project_targ
     assert_eq!(
         state.take_telegram_relay_runtime_actions_for_tests(),
         vec![TelegramRelayRuntimeActionForTest::Stop]
+    );
+}
+
+#[test]
+fn delete_project_does_not_reimport_migrated_file_config_after_default_reset() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-delete-default-reset-stale-mirror-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (deleted_project_id, _deleted_session_id) =
+        create_telegram_settings_project_and_session(&state);
+    let (stale_project_id, stale_session_id) =
+        create_telegram_settings_project_and_session(&state);
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
+        .expect("settings dir should create");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "configMigratedToAppState": true,
+            "config": {
+                "enabled": true,
+                "forwardAssistantReplies": true,
+                "subscribedProjectIds": [stale_project_id.clone()],
+                "defaultProjectId": stale_project_id.clone(),
+                "defaultSessionId": stale_session_id.clone()
+            },
+            "chatId": 123
+        }))
+        .expect("fixture should encode"),
+    )
+    .expect("fixture should write");
+
+    state.reset_telegram_relay_runtime_actions_for_tests();
+    let response = state
+        .delete_project(&deleted_project_id)
+        .expect("project should delete without importing migrated mirror");
+
+    assert_eq!(response.preferences.telegram, TelegramUiConfig::default());
+    assert_eq!(
+        state.snapshot().preferences.telegram,
+        TelegramUiConfig::default()
+    );
+
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert_eq!(value["configMigratedToAppState"], json!(true));
+    assert_eq!(value["config"]["enabled"], json!(false));
+    assert_eq!(value["config"]["forwardAssistantReplies"], json!(false));
+    assert!(value["config"].get("subscribedProjectIds").is_none());
+    assert!(value["config"].get("defaultProjectId").is_none());
+    assert!(value["config"].get("defaultSessionId").is_none());
+    assert_eq!(value["chatId"], json!(123));
+    assert!(
+        state
+            .take_telegram_relay_runtime_actions_for_tests()
+            .is_empty()
     );
 }
 
@@ -7726,6 +7853,7 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
+    assert_eq!(value["configMigratedToAppState"], json!(true));
     assert_eq!(value["config"]["enabled"], json!(true));
     assert!(value["config"].get("botToken").is_none());
     assert_eq!(
@@ -7787,6 +7915,7 @@ fn delete_project_migrates_unrelated_telegram_token_without_restarting_relay() {
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
+    assert_eq!(value["configMigratedToAppState"], json!(true));
     assert_eq!(value["chatId"], json!(123));
     assert!(value["config"].get("botToken").is_none());
     assert_eq!(value["config"]["enabled"], json!(true));
@@ -7861,6 +7990,7 @@ fn kill_session_prunes_telegram_state_and_config_references() {
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
+    assert_eq!(value["configMigratedToAppState"], json!(true));
     assert!(value["config"].get("botToken").is_none());
     assert!(value["config"].get("defaultSessionId").is_none());
     assert!(value.get("selectedSessionId").is_none());
@@ -7883,5 +8013,66 @@ fn kill_session_prunes_telegram_state_and_config_references() {
         value["assistantForwardingCursors"]["other-session"]["messageId"],
         json!("message-2")
     );
+    assert_eq!(value["chatId"], json!(123));
+}
+
+#[test]
+fn kill_session_does_not_reimport_migrated_file_config_after_default_reset() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-kill-default-reset-stale-mirror-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
+        .expect("settings dir should create");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "configMigratedToAppState": true,
+            "config": {
+                "enabled": true,
+                "forwardAssistantReplies": true,
+                "subscribedProjectIds": [project_id.clone()],
+                "defaultProjectId": project_id,
+                "defaultSessionId": session_id.clone()
+            },
+            "selectedSessionId": session_id.clone(),
+            "assistantForwardingCursors": {
+                (session_id.clone()): {
+                    "messageId": "message-1",
+                    "textChars": 10
+                }
+            },
+            "chatId": 123
+        }))
+        .expect("fixture should encode"),
+    )
+    .expect("fixture should write");
+
+    let response = state
+        .kill_session(&session_id)
+        .expect("session should kill without importing migrated mirror");
+
+    assert_eq!(response.preferences.telegram, TelegramUiConfig::default());
+    assert_eq!(
+        state.snapshot().preferences.telegram,
+        TelegramUiConfig::default()
+    );
+
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert_eq!(value["configMigratedToAppState"], json!(true));
+    assert_eq!(value["config"]["enabled"], json!(false));
+    assert_eq!(value["config"]["forwardAssistantReplies"], json!(false));
+    assert!(value["config"].get("subscribedProjectIds").is_none());
+    assert!(value["config"].get("defaultProjectId").is_none());
+    assert!(value["config"].get("defaultSessionId").is_none());
+    assert!(value.get("selectedSessionId").is_none());
+    assert!(value.get("assistantForwardingCursors").is_none());
     assert_eq!(value["chatId"], json!(123));
 }

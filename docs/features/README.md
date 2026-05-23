@@ -34,6 +34,7 @@ design decisions, and future plans.
 - [Agent Delegation Sessions](./agent-delegation-sessions.md)
 - [Conversation Overview Map](./conversation-overview-map.md)
 - [Conversation Markers](./conversation-markers.md)
+- [Code Navigation MCP](./code-navigation-mcp.md)
 - [Editor Buffer Persistence](./editor-buffer-persistence.md)
 - [Kimi CLI Integration](./kimi-cli-integration.md)
 - [Territory Visualization](./territory-visualization.md)
