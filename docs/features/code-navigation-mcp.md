@@ -15,6 +15,9 @@ Related:
 - [File Change Awareness](./file-change-awareness.md)
 - [Source Renderers](./source-renderers.md)
 
+Follow-up: add reciprocal links from those referenced feature briefs if this
+brief remains in the tree.
+
 ## Problem
 
 Agents can already read files, run shell commands, and use text search. That is
@@ -427,6 +430,10 @@ Recommended agent integration:
 
 The server should be optimized for fast, bounded answers:
 
+- constrain all file reads and indexes to canonical workspace roots
+- reject or explicitly handle symlink and reparse-point escapes
+- ignore secret, dependency, and build-output paths by default
+- enforce hard file-read and snippet byte-size limits
 - all list-style tools must support `limit` and `cursor`
 - snippets should have a default line budget
 - huge result sets should return summaries and paging metadata

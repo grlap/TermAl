@@ -24,7 +24,9 @@ Recovery invariant: status reads tolerate stale project/session references by
 sanitizing and persisting the repaired config. User updates first scrub stale
 persisted references, then validate the submitted patch strictly, then
 re-sanitize immediately before writing so a concurrent project/session delete
-cannot leave references that the next status read would hide.
+cannot leave references that the next status read would hide. If that final
+sanitize removes every project target from a configured relay, updates disable
+the relay before committing so persisted state remains runnable-or-disabled.
 
 Coordination invariant: `telegram_settings_file_guard()` coordinates writers in
 this backend process only. Separate TermAl server processes can still race
@@ -76,6 +78,12 @@ struct TelegramConfigNormalization {
     default_session_id: Option<String>,
 }
 
+enum TelegramPostValidationHook {
+    None,
+    #[cfg(test)]
+    Callback(Box<dyn FnOnce(&AppState) -> Result<(), ApiError>>),
+}
+
 impl TelegramStatusResponse {
     fn from_telegram_settings(
         config: TelegramUiConfig,
@@ -123,6 +131,30 @@ impl AppState {
         &self,
         request: UpdateTelegramConfigRequest,
     ) -> Result<TelegramStatusResponse, ApiError> {
+        self.update_telegram_config_inner(request, TelegramPostValidationHook::None)
+    }
+
+    #[cfg(test)]
+    fn update_telegram_config_with_post_validation_hook<F>(
+        &self,
+        request: UpdateTelegramConfigRequest,
+        post_validation_hook: F,
+    ) -> Result<TelegramStatusResponse, ApiError>
+    where
+        F: FnOnce(&AppState) -> Result<(), ApiError> + 'static,
+    {
+        self.update_telegram_config_inner(
+            request,
+            TelegramPostValidationHook::Callback(Box::new(post_validation_hook)),
+        )
+    }
+
+    fn update_telegram_config_inner(
+        &self,
+        request: UpdateTelegramConfigRequest,
+        post_validation_hook: TelegramPostValidationHook,
+    ) -> Result<TelegramStatusResponse, ApiError>
+    {
         let _guard = telegram_settings_file_guard();
         let (mut file, mut file_changed) =
             self.load_telegram_bot_file_migrating_plaintext_token()?;
@@ -170,9 +202,21 @@ impl AppState {
             &mut config,
             bot_token_configured,
         )?;
+        match post_validation_hook {
+            TelegramPostValidationHook::None => {}
+            #[cfg(test)]
+            TelegramPostValidationHook::Callback(hook) => hook(self)?,
+        }
         // Re-sanitize after validation so a concurrent project/session delete
         // cannot leave references that the next status read would hide.
         config = self.sanitize_telegram_config_for_current_state(config);
+        // Preserve enabled-but-unconfigured setup drafts, but disable a
+        // configured relay that lost its target after validation. Project
+        // deletion pruning is stricter because it repairs already-persisted
+        // state after a target is explicitly removed.
+        if bot_token_configured && telegram_config_is_enabled_without_project_target(&config) {
+            config.enabled = false;
+        }
         match requested_bot_token {
             Some(Some(token)) => self.save_telegram_bot_token(&token)?,
             Some(None) => self.delete_saved_telegram_bot_token()?,

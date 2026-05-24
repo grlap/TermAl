@@ -69,6 +69,30 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
+async function selectComboboxOption(name: string, optionName: string | RegExp) {
+  fireEvent.click(await screen.findByRole("combobox", { name }));
+
+  const listbox = await screen.findByRole("listbox");
+  const option = within(listbox)
+    .getAllByRole("option")
+    .find((candidate) => {
+      const label =
+        candidate.querySelector(".combo-option-label")?.textContent?.trim() ??
+        candidate.textContent?.trim() ??
+        "";
+
+      return typeof optionName === "string"
+        ? label === optionName
+        : optionName.test(label);
+    });
+
+  if (!option) {
+    throw new Error(`Combobox option not found for ${String(optionName)}`);
+  }
+
+  fireEvent.click(option);
+}
+
 describe("TelegramPreferencesPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -173,6 +197,23 @@ describe("TelegramPreferencesPanel", () => {
     expect(await screen.findByText("Stopped")).toBeInTheDocument();
   });
 
+  it("labels stopped in-process relays before linked chat state", async () => {
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      enabled: true,
+      lifecycle: "inProcess",
+      linkedChatId: 123,
+      botTokenMasked: "****oken",
+    });
+
+    render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
+
+    expect(await screen.findByText("Stopped")).toBeInTheDocument();
+    expect(screen.queryByText("Linked")).not.toBeInTheDocument();
+    expect(screen.getByText("Linked chat id: 123")).toBeInTheDocument();
+  });
+
   it.each([
     [
       "disabled in-process relay",
@@ -235,6 +276,129 @@ describe("TelegramPreferencesPanel", () => {
       await screen.findByText("Choose at least one Telegram project before enabling the relay."),
     ).toBeInTheDocument();
     expect(updateTelegramConfigMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces Telegram save API errors", async () => {
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      botTokenMasked: "****oken",
+    });
+    updateTelegramConfigMock.mockRejectedValueOnce(new Error("Telegram save failed."));
+
+    render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
+
+    await screen.findByText("Stored in the OS credential store as ****oken.");
+    fireEvent.click(screen.getByRole("button", { name: "Save Telegram" }));
+
+    expect(await screen.findByText("Telegram save failed.")).toBeInTheDocument();
+  });
+
+  it("adopts a backend-normalized disabled response after an enabled save", async () => {
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      enabled: false,
+      lifecycle: "inProcess",
+      botTokenMasked: "****oken",
+      subscribedProjectIds: ["project-1"],
+    });
+    updateTelegramConfigMock.mockResolvedValueOnce({
+      ...emptyTelegramStatus,
+      configured: true,
+      enabled: false,
+      lifecycle: "inProcess",
+      botTokenMasked: "****oken",
+      subscribedProjectIds: [],
+    });
+
+    render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
+
+    await screen.findByText("Stored in the OS credential store as ****oken.");
+    fireEvent.click(screen.getByLabelText("Enable relay"));
+    expect(screen.getByLabelText("Enable relay")).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Save Telegram" }));
+
+    await waitFor(() => {
+      expect(updateTelegramConfigMock).toHaveBeenCalledWith({
+        enabled: true,
+        forwardAssistantReplies: false,
+        botToken: undefined,
+        subscribedProjectIds: ["project-1"],
+        defaultProjectId: null,
+        defaultSessionId: null,
+      });
+    });
+    expect(await screen.findByText("Telegram settings saved.")).toBeInTheDocument();
+    expect(screen.getByText("Configured")).toBeInTheDocument();
+    expect(screen.getByLabelText("Enable relay")).not.toBeChecked();
+    expect(
+      within(screen.getByLabelText("Telegram subscribed projects")).getByLabelText(
+        /TermAl/,
+      ),
+    ).not.toBeChecked();
+  });
+
+  it("auto-subscribes the selected default project when saving", async () => {
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      botTokenMasked: "****oken",
+    });
+
+    render(<TelegramPreferencesPanel projects={projects} sessions={sessions} />);
+
+    await screen.findByText("Stored in the OS credential store as ****oken.");
+    await selectComboboxOption("Default project", "TermAl");
+    fireEvent.click(screen.getByRole("button", { name: "Save Telegram" }));
+
+    await waitFor(() => {
+      expect(updateTelegramConfigMock).toHaveBeenCalledWith({
+        enabled: false,
+        forwardAssistantReplies: false,
+        botToken: undefined,
+        subscribedProjectIds: ["project-1"],
+        defaultProjectId: "project-1",
+        defaultSessionId: null,
+      });
+    });
+  });
+
+  it("clears a stale default session when saving", async () => {
+    const staleTelegramConfig: TelegramUiConfig = {
+      enabled: true,
+      forwardAssistantReplies: false,
+      subscribedProjectIds: ["project-1"],
+      defaultProjectId: "project-1",
+      defaultSessionId: "missing-session",
+    };
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      botTokenMasked: "****oken",
+    });
+
+    render(
+      <TelegramPreferencesPanel
+        telegramConfig={staleTelegramConfig}
+        projects={projects}
+        sessions={sessions}
+      />,
+    );
+
+    await screen.findByText("Stored in the OS credential store as ****oken.");
+    fireEvent.click(screen.getByRole("button", { name: "Save Telegram" }));
+
+    await waitFor(() => {
+      expect(updateTelegramConfigMock).toHaveBeenCalledWith({
+        enabled: true,
+        forwardAssistantReplies: false,
+        botToken: undefined,
+        subscribedProjectIds: ["project-1"],
+        defaultProjectId: "project-1",
+        defaultSessionId: null,
+      });
+    });
   });
 
   it("trusts the status response before app-state Telegram config hydrates", async () => {
@@ -570,6 +734,39 @@ describe("TelegramPreferencesPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
 
     expect(await screen.findByText("Connected to @termal_bot.")).toBeInTheDocument();
+  });
+
+  it("keeps save and remove updates enabled after React StrictMode remount checks", async () => {
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      enabled: false,
+      botTokenMasked: "****oken",
+    });
+    updateTelegramConfigMock
+      .mockResolvedValueOnce({
+        ...emptyTelegramStatus,
+        configured: true,
+        enabled: false,
+        botTokenMasked: "****oken",
+        subscribedProjectIds: ["project-1"],
+      })
+      .mockResolvedValueOnce(emptyTelegramStatus);
+
+    render(
+      <StrictMode>
+        <TelegramPreferencesPanel projects={projects} sessions={sessions} />
+      </StrictMode>,
+    );
+
+    await screen.findByText("Stored in the OS credential store as ****oken.");
+    const projectList = screen.getByLabelText("Telegram subscribed projects");
+    fireEvent.click(within(projectList).getByLabelText(/TermAl/));
+    fireEvent.click(screen.getByRole("button", { name: "Save Telegram" }));
+    expect(await screen.findByText("Telegram settings saved.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove token" }));
+    expect(await screen.findByText("Telegram bot token removed.")).toBeInTheDocument();
   });
 
   it("ignores stale initial Telegram status fetches after React StrictMode remount checks", async () => {
