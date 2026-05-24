@@ -54,6 +54,13 @@ export const VIRTUALIZED_MESSAGE_GAP_PX = 12;
 export const DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT = 720;
 export const DEFAULT_ESTIMATED_MESSAGE_HEIGHT = 180;
 export const VIEWPORT_TOP_HEIGHT_CHANGE_HYSTERESIS_PX = 24;
+// Cache entries are keyed by Message object identity. Context fields stay in
+// the entry so callers only reuse an estimate for the same layout inputs.
+export type EstimatedMessageHeightEntry = {
+  expandedPromptOpen: boolean;
+  height: number;
+  widthBucket: number;
+};
 const DEFAULT_ESTIMATED_MESSAGE_WIDTH_PX = 1120;
 const MIN_ESTIMATED_TEXT_CONTENT_WIDTH_PX = 320;
 const ESTIMATED_USER_TEXT_HORIZONTAL_CHROME_PX = 96;
@@ -74,6 +81,12 @@ function resolveEstimatedTextContentWidthPx(
     safeAvailableWidthPx - horizontalChromePx,
     MIN_ESTIMATED_TEXT_CONTENT_WIDTH_PX,
   );
+}
+
+function resolveEstimateWidthBucket(availableWidthPx: number) {
+  return Number.isFinite(availableWidthPx) && availableWidthPx > 0
+    ? Math.round(availableWidthPx)
+    : 0;
 }
 
 function estimateCharactersPerLineForWidth(contentWidthPx: number, characterWidthPx: number) {
@@ -388,4 +401,39 @@ export function estimateConversationMessageHeight(
       return Math.min(900, Math.max(220, 188 + detailLineCount * 20));
     }
   }
+}
+
+export function resolveEstimatedConversationMessageHeight(
+  cache: WeakMap<Message, EstimatedMessageHeightEntry>,
+  message: Message,
+  {
+    expandedPromptOpen,
+    estimateHeight = estimateConversationMessageHeight,
+    viewportWidth,
+  }: {
+    expandedPromptOpen: boolean;
+    estimateHeight?: typeof estimateConversationMessageHeight;
+    viewportWidth: number;
+  },
+) {
+  const widthBucket = resolveEstimateWidthBucket(viewportWidth);
+  const cached = cache.get(message);
+  if (
+    cached &&
+    cached.widthBucket === widthBucket &&
+    cached.expandedPromptOpen === expandedPromptOpen
+  ) {
+    return cached.height;
+  }
+
+  const height = estimateHeight(message, {
+    availableWidthPx: widthBucket > 0 ? widthBucket : viewportWidth,
+    expandedPromptOpen,
+  });
+  cache.set(message, {
+    expandedPromptOpen,
+    height,
+    widthBucket,
+  });
+  return height;
 }

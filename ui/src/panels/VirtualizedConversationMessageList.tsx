@@ -37,10 +37,11 @@ import {
   DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
   VIRTUALIZED_MESSAGE_GAP_PX,
   clampVirtualizedViewportScrollTop,
-  estimateConversationMessageHeight,
   findVirtualizedMessageRange,
   getScrollContainerBottomGap,
   isScrollContainerNearBottom,
+  resolveEstimatedConversationMessageHeight,
+  type EstimatedMessageHeightEntry,
 } from "./conversation-virtualization";
 import type {
   ApprovalDecision,
@@ -214,11 +215,6 @@ type MessagePage = {
 type EstimatedPageHeightEntry = {
   cacheKey: string;
   height: number;
-};
-type EstimatedMessageHeightEntry = {
-  expandedPromptOpen: boolean;
-  height: number;
-  widthBucket: number;
 };
 export type MessageWindowSnapshot = {
   ids: string[];
@@ -900,31 +896,19 @@ export function VirtualizedConversationMessageList({
 
   const estimateMessageHeight = useCallback(
     (message: Message) => {
-      const widthBucket = resolveEstimateWidthBucket(viewportWidth);
       const expandedPromptOpen =
         message.type === "text" &&
         message.author === "you" &&
         Boolean(message.expandedText) &&
         isExpandedPromptOpen(message.id);
-      const cached = estimatedMessageHeightsRef.current.get(message);
-      if (
-        cached &&
-        cached.widthBucket === widthBucket &&
-        cached.expandedPromptOpen === expandedPromptOpen
-      ) {
-        return cached.height;
-      }
-
-      const height = estimateConversationMessageHeight(message, {
-        availableWidthPx: widthBucket > 0 ? widthBucket : viewportWidth,
-        expandedPromptOpen,
-      });
-      estimatedMessageHeightsRef.current.set(message, {
-        expandedPromptOpen,
-        height,
-        widthBucket,
-      });
-      return height;
+      return resolveEstimatedConversationMessageHeight(
+        estimatedMessageHeightsRef.current,
+        message,
+        {
+          expandedPromptOpen,
+          viewportWidth,
+        },
+      );
     },
     [viewportWidth],
   );

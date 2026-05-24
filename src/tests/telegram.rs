@@ -1811,6 +1811,60 @@ fn telegram_session_command_selects_project_session_target() {
 }
 
 #[test]
+fn telegram_session_command_does_not_baseline_when_assistant_forwarding_disabled() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "baseline".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Existing selected-session reply".to_owned(),
+                }],
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![TelegramStateSession {
+            id: "session-2".to_owned(),
+            name: "Target Session".to_owned(),
+            project_id: Some("project-1".to_owned()),
+            status: TelegramSessionStatus::Idle,
+            message_count: 1,
+            session_mutation_stamp: None,
+            parent_delegation_id: None,
+        }],
+    });
+    let mut config = telegram_test_config();
+    config.forward_assistant_replies = false;
+    let mut state = TelegramBotState::default();
+
+    let changed =
+        select_telegram_project_session(&telegram, &termal, &config, &mut state, 42, "session-2")
+            .expect("session selection should succeed");
+
+    assert!(changed);
+    assert_eq!(state.selected_session_id.as_deref(), Some("session-2"));
+    assert!(state.assistant_forwarding_cursors.is_empty());
+    assert!(state.forward_next_assistant_message_session_ids.is_empty());
+    assert_eq!(state.forward_next_assistant_message_session_id, None);
+    let sent_texts = telegram.sent_texts.borrow();
+    assert_eq!(sent_texts.len(), 1);
+    assert!(sent_texts[0].contains("Telegram session target set to Target Session"));
+    assert_eq!(
+        termal.events.borrow().as_slice(),
+        ["state-sessions".to_owned()],
+        "session selection should not fetch a baseline when forwarding is disabled"
+    );
+}
+
+#[test]
 fn telegram_session_command_no_args_persists_stale_project_cleanup() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramPromptClient::new(
@@ -2214,6 +2268,70 @@ fn telegram_digest_edit_uses_html_parse_mode() {
     assert_eq!(edited_messages[0].3, TelegramTextFormat::Html);
     assert!(edited_messages[0].2.contains("<pre>"));
     assert!(edited_messages[0].2.contains("termal &lt;dev&gt;"));
+}
+
+#[test]
+fn telegram_digest_sync_does_not_forward_assistant_reply_when_disabled() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![Ok(telegram_project_digest(Some("session-1")))],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![
+                    TelegramSessionFetchMessage::Text {
+                        id: "baseline".to_owned(),
+                        author: "assistant".to_owned(),
+                        text: "Baseline".to_owned(),
+                    },
+                    TelegramSessionFetchMessage::Text {
+                        id: "reply".to_owned(),
+                        author: "assistant".to_owned(),
+                        text: "Reply that must stay in TermAl".to_owned(),
+                    },
+                ],
+            },
+        },
+    );
+    let mut config = telegram_test_config();
+    config.forward_assistant_replies = false;
+    let mut state = TelegramBotState {
+        assistant_forwarding_cursors: HashMap::from([(
+            "session-1".to_owned(),
+            TelegramAssistantForwardingCursor {
+                message_id: Some("baseline".to_owned()),
+                text_chars: Some("Baseline".chars().count()),
+                text_hash: None,
+                text_start_chars: None,
+                resend_if_grown: false,
+                sent_chunks: None,
+                failed_chunk_send_attempts: None,
+                footer_pending: false,
+                baseline_while_active: false,
+            },
+        )]),
+        ..TelegramBotState::default()
+    };
+
+    let changed = sync_telegram_digest(&telegram, &termal, &config, &mut state, 42)
+        .expect("digest sync should succeed");
+
+    assert!(changed);
+    assert_eq!(
+        termal.events.borrow().as_slice(),
+        ["digest:project-1".to_owned()],
+        "digest sync should not fetch assistant messages when forwarding is disabled"
+    );
+    let sent_texts = telegram.sent_texts.borrow();
+    assert_eq!(sent_texts.len(), 1);
+    assert!(sent_texts[0].contains("Project digest"));
+    assert!(!sent_texts[0].contains("Reply that must stay in TermAl"));
+    let cursor = state
+        .assistant_forwarding_cursors
+        .get("session-1")
+        .expect("disabled forwarding should leave the existing cursor untouched");
+    assert_eq!(cursor.message_id.as_deref(), Some("baseline"));
+    assert_eq!(cursor.text_chars, Some("Baseline".chars().count()));
 }
 
 #[test]
@@ -3374,6 +3492,75 @@ fn telegram_active_baseline_reforwards_same_message_growth_after_settle() {
     assert!(changed);
     assert_eq!(telegram.sent_texts.borrow()[0], "Telegram reply");
     assert_eq!(state.forward_next_assistant_message_session_id, None);
+}
+
+#[test]
+fn telegram_active_baseline_same_message_growth_on_first_settled_poll_stays_baseline() {
+    let termal = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Active,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "message-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Old turn partial".to_owned(),
+                }],
+            },
+        },
+    };
+    let mut state = TelegramBotState::default();
+
+    let plan = prepare_assistant_forwarding_for_telegram_prompt(&termal, "session-1")
+        .expect("prepare should succeed");
+    assert!(apply_assistant_forwarding_plan(&mut state, plan));
+
+    let telegram = FakeTelegramSender::new(None);
+    let settled_with_same_message_growth = FakeTelegramSessionReader {
+        response: TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "message-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Old turn partial\nTelegram reply already present".to_owned(),
+                }],
+            },
+        },
+    };
+
+    let changed = forward_new_assistant_message_if_any(
+        &telegram,
+        &settled_with_same_message_growth,
+        &mut state,
+        42,
+        "session-1",
+    )
+    .expect("first settled poll should baseline same-message growth");
+
+    assert!(changed);
+    assert!(
+        telegram.sent_texts.borrow().is_empty(),
+        "same-message growth already present on the first settled poll is treated as baseline"
+    );
+    let cursor = state
+        .assistant_forwarding_cursors
+        .get("session-1")
+        .expect("cursor should stay persisted");
+    assert_eq!(cursor.message_id.as_deref(), Some("message-1"));
+    assert_eq!(
+        cursor.text_chars,
+        Some(
+            "Old turn partial\nTelegram reply already present"
+                .chars()
+                .count()
+        )
+    );
+    assert!(cursor.resend_if_grown);
+    assert!(!cursor.baseline_while_active);
+    assert_eq!(
+        state.forward_next_assistant_message_session_id.as_deref(),
+        Some("session-1")
+    );
 }
 
 #[test]

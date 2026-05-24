@@ -23,6 +23,8 @@ import {
   VIRTUALIZED_MESSAGE_GAP_PX,
   buildVirtualizedMessageLayout,
   estimateConversationMessageHeight,
+  resolveEstimatedConversationMessageHeight,
+  type EstimatedMessageHeightEntry,
 } from "./conversation-virtualization";
 import {
   DEFERRED_RENDER_RESUME_EVENT,
@@ -412,6 +414,65 @@ describe("VirtualizedConversationMessageList foundation", () => {
         500,
       ),
     ).toBe("seek");
+  });
+
+  it("caches estimated message heights until width bucket or expanded prompt state changes", () => {
+    const message: Message = {
+      id: "message-expanded",
+      type: "text",
+      timestamp: "10:01",
+      author: "you",
+      text: "Review the implementation.",
+      expandedText: "Review the implementation.\n\nInclude edge cases.",
+    };
+    const cache = new WeakMap<Message, EstimatedMessageHeightEntry>();
+    const estimateHeight = vi
+      .fn<typeof estimateConversationMessageHeight>()
+      .mockReturnValueOnce(120)
+      .mockReturnValueOnce(160)
+      .mockReturnValueOnce(220);
+
+    expect(
+      resolveEstimatedConversationMessageHeight(cache, message, {
+        expandedPromptOpen: false,
+        estimateHeight,
+        viewportWidth: 640.2,
+      }),
+    ).toBe(120);
+    expect(
+      resolveEstimatedConversationMessageHeight(cache, message, {
+        expandedPromptOpen: false,
+        estimateHeight,
+        viewportWidth: 640.4,
+      }),
+    ).toBe(120);
+    expect(estimateHeight).toHaveBeenCalledTimes(1);
+
+    expect(
+      resolveEstimatedConversationMessageHeight(cache, message, {
+        expandedPromptOpen: false,
+        estimateHeight,
+        viewportWidth: 641,
+      }),
+    ).toBe(160);
+    expect(estimateHeight).toHaveBeenCalledTimes(2);
+    expect(estimateHeight.mock.calls[1]?.[1]).toMatchObject({
+      availableWidthPx: 641,
+      expandedPromptOpen: false,
+    });
+
+    expect(
+      resolveEstimatedConversationMessageHeight(cache, message, {
+        expandedPromptOpen: true,
+        estimateHeight,
+        viewportWidth: 641,
+      }),
+    ).toBe(220);
+    expect(estimateHeight).toHaveBeenCalledTimes(3);
+    expect(estimateHeight.mock.calls[2]?.[1]).toMatchObject({
+      availableWidthPx: 641,
+      expandedPromptOpen: true,
+    });
   });
 
   it("exposes a layout snapshot and explicit jump helpers", async () => {

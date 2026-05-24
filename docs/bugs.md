@@ -15,12 +15,6 @@ the Implementation Tasks section.
   link `code-navigation-mcp.md` back from the referenced feature briefs (`agent-delegation-sessions`, `instruction-debugger`, `file-change-awareness`, and `source-renderers`) if the new brief remains in the tree.
 - [ ] P2: Add Code Navigation MCP filesystem safety constraints:
   update `docs/features/code-navigation-mcp.md` to define canonical workspace-root confinement, symlink escape handling, ignored secret/build paths, and hard file/snippet size limits before implementing read-backed MCP tools.
-- [ ] P2: Add virtualized transcript estimate-cache coverage:
-  cover `estimatedMessageHeightsRef` WeakMap cache hits plus width-bucket or expanded-prompt invalidation so the cache cannot return stale estimates for a changed rendering context.
-- [ ] P2: Cover first-chunk Telegram forward failure:
-  force the first chunk of a long assistant message to fail and assert bounded retry/escalation behavior instead of an endless replay loop.
-- [ ] P2: Cover first-settled active-baseline same-message growth policy:
-  pin the current conservative behavior and, if a future turn-boundary signal lands, add the positive forwarding case for same-message reply text already present on first settled poll.
 - [ ] P2: Add Telegram settings API/security regressions:
   cover plaintext token-at-rest exposure, corrupt-backup permission hardening, and credential-store failure/fallback behavior beyond the native-store smoke test.
 - [ ] P2: Cover post-validation Telegram settings sanitization:
@@ -31,10 +25,8 @@ the Implementation Tasks section.
   `AgentSessionPanel` now derives visible command/diff lists from the store-backed session snapshot, but `SessionPaneView` still computes scroll/signature bookkeeping from React-state `activeSession`; prove this cannot drift during eager store publication, or move the bookkeeping to the same store boundary.
 - [ ] P2: Split Telegram settings persistence tests out of the monolithic Telegram test module:
   move the state-backed Telegram config persistence/status/delete-session/delete-project coverage into a focused test module so new coverage does not keep growing `src/tests/telegram.rs`.
-- [ ] P2: Add assistant-reply forwarding disabled-path regressions:
-  cover `sync_telegram_digest` and `select_telegram_project_session` with `forward_assistant_replies=false` so digest and selection paths cannot accidentally forward assistant replies.
-- [ ] P2: Clarify pending queued-prompt cancel tooltip behavior:
-  either restore/replace the removed `PendingPromptCard` `title` affordance or document the intentional aria-label-only behavior in the component/test coverage.
+- [ ] P2: Split Telegram assistant-forwarding and digest regression tests out of the monolithic Telegram test module:
+  move disabled-forwarding, active-baseline, chunk retry, and digest-forwarding coverage into focused test modules or helper-level tests so new relay coverage does not keep growing `src/tests/telegram.rs`.
 - [ ] P1: Add `forward_new_assistant_message_if_any` logic-level coverage:
   refactor the message-walking branch into a pure helper that takes a `Vec<TelegramSessionFetchMessage>` + state and returns a forwarding plan (or use a fake `TelegramApiClient` / `TermalApiClient`). Cover the active-status gate, the cold-start baseline policy, a Telegram-originated first reply that must be forwarded, the streaming-then-settled re-forward via char-count growth, and per-message progress recording on mid-batch send failure.
 - [ ] P2: Cover Telegram relay active-project reconciliation:

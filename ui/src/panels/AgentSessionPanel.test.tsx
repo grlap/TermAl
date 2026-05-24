@@ -3639,8 +3639,10 @@ describe("AgentSessionPanel conversation caching", () => {
   });
 
   it("refreshes command cards when only the command renderer changes", async () => {
-    const activeSession = makeSession("session-a");
     const commandMessages = makeCommandMessages(1);
+    const activeSession = makeSession("session-a", {
+      messages: commandMessages,
+    });
 
     const renderPanelWithDefaults = createAgentSessionPanelHarness({
       activeSession,
@@ -3667,8 +3669,10 @@ describe("AgentSessionPanel conversation caching", () => {
   });
 
   it("refreshes diff cards when only the diff renderer changes", async () => {
-    const activeSession = makeSession("session-a");
     const diffMessages = makeDiffMessages(1);
+    const activeSession = makeSession("session-a", {
+      messages: diffMessages,
+    });
 
     const renderPanelWithDefaults = createAgentSessionPanelHarness({
       activeSession,
