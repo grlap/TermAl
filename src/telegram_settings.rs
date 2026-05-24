@@ -431,6 +431,7 @@ impl AppState {
             config.default_project_id = None;
             config.default_session_id = None;
         }
+        self.sanitize_telegram_config_for_current_state_in_place(&mut config);
         if telegram_config_is_enabled_without_project_target(&config) {
             config.enabled = false;
         }

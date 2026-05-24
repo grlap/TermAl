@@ -27,7 +27,5 @@ the Implementation Tasks section.
   move the state-backed Telegram config persistence/status/delete-session/delete-project coverage into a focused test module so new coverage does not keep growing `src/tests/telegram.rs`.
 - [ ] P2: Split Telegram assistant-forwarding and digest regression tests out of the monolithic Telegram test module:
   move disabled-forwarding, active-baseline, chunk retry, and digest-forwarding coverage into focused test modules or helper-level tests so new relay coverage does not keep growing `src/tests/telegram.rs`.
-- [ ] P2: Cover Telegram relay active-project reconciliation:
-  start an in-process relay with subscribed projects but no default and assert startup fails or status exposes the effective `activeProjectId`; delete a project used by a running relay and assert the relay is stopped or restarted without the deleted id.
 - [ ] P2: Cover remaining Telegram relay runtime lifecycle paths:
   use the AppState-owned test relay runtime to cover startup from saved settings, implicit first subscribed-project fallback, invalid/missing config stop, config-save restart, and graceful-shutdown stop.

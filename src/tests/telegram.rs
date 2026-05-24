@@ -7302,6 +7302,65 @@ fn telegram_config_update_reflects_in_process_relay_runtime_status() {
 }
 
 #[test]
+fn telegram_startup_with_multiple_subscribed_projects_and_no_default_stops_relay() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-startup-no-default-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (project_1, _session_1) = create_telegram_settings_project_and_session(&state);
+    let (project_2, _session_2) = create_telegram_settings_project_and_session(&state);
+    let path = state.telegram_bot_file_path();
+    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
+        .expect("settings dir should create");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "config": {
+                "enabled": true,
+                "botToken": "123456:secret",
+                "subscribedProjectIds": [project_1.clone(), project_2.clone()]
+            },
+            "chatId": 123
+        }))
+        .expect("fixture should encode"),
+    )
+    .expect("fixture should write");
+
+    state.reset_telegram_relay_runtime_actions_for_tests();
+    state.reconcile_telegram_relay_from_saved_settings();
+
+    let status = state.telegram_status().expect("status should load");
+    assert!(status.enabled);
+    assert!(status.configured);
+    assert!(!status.running);
+    assert_eq!(
+        status.subscribed_project_ids,
+        vec![project_1.clone(), project_2.clone()]
+    );
+    assert_eq!(status.default_project_id, None);
+    assert_eq!(
+        state.take_telegram_relay_runtime_actions_for_tests(),
+        vec![TelegramRelayRuntimeActionForTest::Stop]
+    );
+
+    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
+        .expect("settings file should parse");
+    assert_eq!(value["configMigratedToAppState"], json!(true));
+    assert!(value["config"].get("botToken").is_none());
+    assert_eq!(
+        value["config"]["subscribedProjectIds"],
+        json!([project_1, project_2])
+    );
+    assert!(value["config"].get("defaultProjectId").is_none());
+    assert_eq!(value["chatId"], json!(123));
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
 fn telegram_config_update_blank_token_clears_saved_token_before_project_target_check() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let home = std::env::temp_dir().join(format!(
@@ -8062,6 +8121,80 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
             subscribed_project_ids: vec![remaining_project_id],
         }]
     );
+}
+
+#[test]
+fn delete_project_restarts_running_telegram_relay_with_remaining_effective_project() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-delete-active-project-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (deleted_project_id, _deleted_session_id) =
+        create_telegram_settings_project_and_session(&state);
+    let (remaining_project_id, _remaining_session_id) =
+        create_telegram_settings_project_and_session(&state);
+
+    state.reset_telegram_relay_runtime_actions_for_tests();
+    let started = state
+        .update_telegram_config(UpdateTelegramConfigRequest {
+            enabled: Some(true),
+            forward_assistant_replies: None,
+            bot_token: Some(Some("123456:secret".to_owned())),
+            subscribed_project_ids: Some(vec![
+                deleted_project_id.clone(),
+                remaining_project_id.clone(),
+            ]),
+            default_project_id: Some(Some(deleted_project_id.clone())),
+            default_session_id: None,
+        })
+        .expect("relay config should save and start");
+    assert!(started.running);
+    assert_eq!(
+        started.default_project_id.as_deref(),
+        Some(deleted_project_id.as_str())
+    );
+
+    let response = state
+        .delete_project(&deleted_project_id)
+        .expect("project should delete");
+    assert!(response.preferences.telegram.enabled);
+    assert_eq!(
+        response.preferences.telegram.subscribed_project_ids,
+        vec![remaining_project_id.clone()]
+    );
+    assert_eq!(
+        response.preferences.telegram.default_project_id.as_deref(),
+        Some(remaining_project_id.as_str())
+    );
+
+    let status = state.telegram_status().expect("status should load");
+    assert!(status.running);
+    assert_eq!(
+        status.subscribed_project_ids,
+        vec![remaining_project_id.clone()]
+    );
+    assert_eq!(
+        status.default_project_id.as_deref(),
+        Some(remaining_project_id.as_str())
+    );
+    assert_eq!(
+        state.take_telegram_relay_runtime_actions_for_tests(),
+        vec![
+            TelegramRelayRuntimeActionForTest::Start {
+                project_id: deleted_project_id.clone(),
+                subscribed_project_ids: vec![deleted_project_id, remaining_project_id.clone()],
+            },
+            TelegramRelayRuntimeActionForTest::Start {
+                project_id: remaining_project_id.clone(),
+                subscribed_project_ids: vec![remaining_project_id],
+            },
+        ]
+    );
+    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
