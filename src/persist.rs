@@ -141,12 +141,12 @@ fn reject_existing_state_directory_redirection(path: &FsPath) -> Result<()> {
     reject_existing_state_directory_redirection_unix(path)
 }
 
-#[cfg(all(not(test), windows))]
+#[cfg(windows)]
 fn harden_local_state_directory_permissions(path: &FsPath) -> Result<()> {
     reject_existing_windows_state_path_redirection(path)
 }
 
-#[cfg(all(not(test), windows))]
+#[cfg(windows)]
 fn reject_existing_state_directory_redirection(path: &FsPath) -> Result<()> {
     reject_existing_windows_state_path_redirection(path)
 }
@@ -156,7 +156,7 @@ fn harden_local_state_directory_permissions(_path: &FsPath) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(test, not(unix)))]
+#[cfg(all(test, not(unix), not(windows)))]
 fn harden_local_state_directory_permissions(_path: &FsPath) -> Result<()> {
     Ok(())
 }
@@ -245,7 +245,7 @@ fn reject_existing_sqlite_state_file_symlinks(path: &FsPath) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(not(test), windows))]
+#[cfg(windows)]
 fn reject_existing_sqlite_state_file_symlinks(path: &FsPath) -> Result<()> {
     reject_existing_windows_state_path_redirection(path)?;
     reject_existing_windows_state_path_redirection(&sqlite_sidecar_path(path, "-wal"))?;
@@ -259,7 +259,7 @@ fn reject_existing_sqlite_state_file_symlinks(_path: &FsPath) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(test, not(unix)))]
+#[cfg(all(test, not(unix), not(windows)))]
 fn reject_existing_sqlite_state_file_symlinks(_path: &FsPath) -> Result<()> {
     Ok(())
 }
@@ -271,7 +271,7 @@ fn reject_existing_sqlite_state_file_symlinks(_path: &FsPath) -> Result<()> {
 /// escape hatch intentionally does not apply. `0x400` is the stable
 /// `FILE_ATTRIBUTE_REPARSE_POINT` value; spelling it locally avoids adding a
 /// Windows API crate only for this metadata bit.
-#[cfg(all(not(test), windows))]
+#[cfg(windows)]
 fn reject_existing_windows_state_path_redirection(path: &FsPath) -> Result<()> {
     use std::os::windows::fs::MetadataExt;
 
@@ -306,7 +306,7 @@ fn create_local_state_directory(path: &FsPath) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(test, not(unix)))]
+#[cfg(all(test, not(unix), not(windows)))]
 fn reject_existing_state_directory_redirection(_path: &FsPath) -> Result<()> {
     Ok(())
 }
@@ -350,7 +350,7 @@ fn harden_existing_state_file_permissions(path: &FsPath) -> Result<()> {
     }
 }
 
-#[cfg(any(unix, all(not(test), windows)))]
+#[cfg(any(unix, windows))]
 fn sqlite_sidecar_path(path: &FsPath, suffix: &str) -> PathBuf {
     let mut sidecar = path.as_os_str().to_os_string();
     sidecar.push(suffix);

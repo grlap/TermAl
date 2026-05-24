@@ -221,9 +221,9 @@ export function createAppLiveStateTransportEventHandlers(
             latestStateRevisionRef.current === null ||
             rawRevision >= latestStateRevisionRef.current;
           if (isEqualOrNewerRejectedState) {
-            confirmReconnectRecoveryFromStateEvent();
+            void confirmReconnectRecoveryFromStateEvent();
           } else {
-            confirmReconnectRecoveryFromLiveEvent();
+            void confirmReconnectRecoveryFromLiveEvent();
           }
         }
         profiler?.mark("stalePeekReject");
@@ -267,7 +267,7 @@ export function createAppLiveStateTransportEventHandlers(
       // must not clear pending bad-event recovery because it did not repair
       // the malformed event.
       if (adopted || !transportState.pendingBadLiveEventRecovery) {
-        confirmReconnectRecoveryFromStateEvent();
+        void confirmReconnectRecoveryFromStateEvent();
       }
       if (adopted) {
         cancelStaleSendResponseRecoveryPollForSessions(
@@ -327,7 +327,7 @@ export function createAppLiveStateTransportEventHandlers(
         applyDelegationWaitDeltaLocally(delta);
         if (currentRevision === null || delta.revision >= currentRevision) {
           if (transportState.delegationRepairAdoptedSinceLastReconnectError) {
-            confirmReconnectRecoveryFromDeltaEvent();
+            void confirmReconnectRecoveryFromDeltaEvent();
           }
           setLastDelegationRepairRequestedRevision(delta.revision);
           requestStateResync({
@@ -341,7 +341,7 @@ export function createAppLiveStateTransportEventHandlers(
             rearmOnFailure: true,
           });
         } else if (!transportState.pendingBadLiveEventRecovery) {
-          confirmReconnectRecoveryFromDeltaEvent();
+          void confirmReconnectRecoveryFromDeltaEvent();
         }
         setBackendConnectionIssueDetail(null);
         clearRecoveredBackendRequestError();
@@ -362,7 +362,7 @@ export function createAppLiveStateTransportEventHandlers(
             result.kind === "applied" ||
             result.kind === "appliedNeedsResync";
           if (replayableMaterialApply) {
-            confirmReconnectRecoveryFromDeltaEvent();
+            void confirmReconnectRecoveryFromDeltaEvent();
             const appliedAt = Date.now();
             cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
             markLiveTransportActivity([delta.sessionId], appliedAt);
@@ -437,7 +437,7 @@ export function createAppLiveStateTransportEventHandlers(
           !transportState.pendingBadLiveEventRecovery ||
           ignoredDeltaConfirmsBadLiveEventRecovery
         ) {
-          confirmReconnectRecoveryFromDeltaEvent();
+          void confirmReconnectRecoveryFromDeltaEvent();
         }
         setBackendConnectionIssueDetail(null);
         clearRecoveredBackendRequestError();
@@ -513,7 +513,7 @@ export function createAppLiveStateTransportEventHandlers(
       }
 
       if (delta.type === "codexUpdated") {
-        confirmReconnectRecoveryFromDeltaEvent();
+        void confirmReconnectRecoveryFromDeltaEvent();
         latestStateRevisionRef.current = delta.revision;
         codexStateRef.current = delta.codex;
         scheduleCodexStateRender();
@@ -526,7 +526,7 @@ export function createAppLiveStateTransportEventHandlers(
         // Global orchestrator updates prove the SSE stream is healthy enough to
         // clear reconnect fallback state. When the delta also carries session
         // snapshots, treat those specific ids as live data for watchdog baselines.
-        confirmReconnectRecoveryFromDeltaEvent();
+        void confirmReconnectRecoveryFromDeltaEvent();
         const appliedAt = Date.now();
         if (delta.sessions?.length) {
           const deltaSessionIds = delta.sessions.map((session) => session.id);
@@ -561,7 +561,7 @@ export function createAppLiveStateTransportEventHandlers(
       // session reducer only accepts deltas that carry a concrete sessionId.
       const result = applyDeltaToSessions(sessionsRef.current, delta);
       if (result.kind === "appliedNoOp") {
-        confirmReconnectRecoveryFromDeltaEvent();
+        void confirmReconnectRecoveryFromDeltaEvent();
         cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
         latestStateRevisionRef.current = delta.revision;
         sessionsRef.current = result.sessions;
@@ -573,7 +573,7 @@ export function createAppLiveStateTransportEventHandlers(
         result.kind === "applied" ||
         result.kind === "appliedNeedsResync"
       ) {
-        confirmReconnectRecoveryFromDeltaEvent();
+        void confirmReconnectRecoveryFromDeltaEvent();
         const appliedAt = Date.now();
         // Every session-scoped delta proves liveness for that session, including
         // any future delta shape that revives it back to "active".
@@ -646,7 +646,7 @@ export function createAppLiveStateTransportEventHandlers(
         event.data,
       ) as WorkspaceFilesChangedEvent;
       if (!transportState.pendingBadLiveEventRecovery) {
-        confirmReconnectRecoveryFromLiveEvent();
+        void confirmReconnectRecoveryFromLiveEvent();
         clearReconnectStateResyncTimeoutAfterConfirmedReopen();
       }
       setBackendConnectionIssueDetail(null);

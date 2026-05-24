@@ -606,6 +606,161 @@ describe("App live state - delta-gap core", () => {
         expect(screen.getAllByText("new command output").length).toBeGreaterThan(
           0,
         );
+
+        await act(async () => {
+          const callbacks = [...pendingFrames.values()];
+          pendingFrames.clear();
+          callbacks.forEach((callback) => {
+            callback(Date.now());
+          });
+          await flushUiWork();
+        });
+
+        expect(screen.getAllByText("new command output").length).toBeGreaterThan(
+          0,
+        );
+        expect(screen.queryByText("old command output")).not.toBeInTheDocument();
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("keeps diff-view props aligned with eager session-store slices before and after broad render flush", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const diffSession = makeSession("session-1", {
+        name: "Codex Session",
+        status: "active",
+        preview: "old diff summary",
+        messages: [
+          {
+            id: "message-user-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "you",
+            text: "edit file",
+          },
+          {
+            id: "message-diff-1",
+            type: "diff",
+            timestamp: "10:01",
+            author: "assistant",
+            filePath: "/repo/src/app.ts",
+            summary: "old diff summary",
+            diff: "-old\n+old",
+            changeType: "edit",
+          },
+        ],
+      });
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [],
+            sessions: [diffSession],
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(eventSource, {
+          revision: 1,
+          projects: [],
+          sessions: [diffSession],
+        });
+        await settleAsyncUi();
+
+        await openSessionByName("Codex Session");
+        await clickAndSettle(screen.getByRole("button", { name: "Diffs" }));
+        expect(screen.getAllByText("old diff summary").length).toBeGreaterThan(
+          0,
+        );
+
+        let nextFrameId = 1;
+        const pendingFrames = new Map<number, FrameRequestCallback>();
+        const requestAnimationFrameMock = vi.fn(
+          (callback: FrameRequestCallback) => {
+            const frameId = nextFrameId;
+            nextFrameId += 1;
+            pendingFrames.set(frameId, callback);
+            return frameId;
+          },
+        );
+        const cancelAnimationFrameMock = vi.fn((frameId: number) => {
+          pendingFrames.delete(frameId);
+        });
+        vi.stubGlobal(
+          "requestAnimationFrame",
+          requestAnimationFrameMock as unknown as typeof requestAnimationFrame,
+        );
+        vi.stubGlobal(
+          "cancelAnimationFrame",
+          cancelAnimationFrameMock as unknown as typeof cancelAnimationFrame,
+        );
+
+        act(() => {
+          eventSource.dispatchNamedEvent("delta", {
+            type: "messageUpdated",
+            revision: 2,
+            sessionId: "session-1",
+            messageId: "message-diff-1",
+            messageIndex: 1,
+            messageCount: 2,
+            message: {
+              id: "message-diff-1",
+              type: "diff",
+              timestamp: "10:01",
+              author: "assistant",
+              filePath: "/repo/src/app.ts",
+              summary: "new diff summary",
+              diff: "-old\n+new",
+              changeType: "edit",
+            },
+            preview: "new diff summary",
+            status: "idle",
+            sessionMutationStamp: 2,
+          });
+        });
+
+        expect(requestAnimationFrameMock).toHaveBeenCalledTimes(1);
+        expect(pendingFrames.size).toBe(1);
+        expect(screen.getAllByText("new diff summary").length).toBeGreaterThan(
+          0,
+        );
+
+        await act(async () => {
+          const callbacks = [...pendingFrames.values()];
+          pendingFrames.clear();
+          callbacks.forEach((callback) => {
+            callback(Date.now());
+          });
+          await flushUiWork();
+        });
+
+        expect(screen.getAllByText("new diff summary").length).toBeGreaterThan(
+          0,
+        );
+        expect(screen.queryByText("old diff summary")).not.toBeInTheDocument();
       } finally {
         scrollIntoViewSpy.mockRestore();
         restoreGlobal("fetch", originalFetch);

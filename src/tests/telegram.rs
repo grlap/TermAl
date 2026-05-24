@@ -7726,8 +7726,7 @@ fn delete_project_does_not_reimport_migrated_file_config_after_default_reset() {
     let state = test_app_state();
     let (deleted_project_id, _deleted_session_id) =
         create_telegram_settings_project_and_session(&state);
-    let (stale_project_id, stale_session_id) =
-        create_telegram_settings_project_and_session(&state);
+    let (stale_project_id, stale_session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("settings path should have a parent"))
         .expect("settings dir should create");

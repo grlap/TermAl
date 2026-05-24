@@ -723,7 +723,7 @@ export function useAppLiveStateTransport(
                   );
                 }
                 if (confirmReconnectRecoveryOnAdoption) {
-                  confirmReconnectRecoveryFromDeltaEvent();
+                  void confirmReconnectRecoveryFromDeltaEvent();
                 }
               } else if (shouldRetryTargetedEqualRevisionRepair) {
                 scheduleReconnectStateResync({
@@ -812,7 +812,7 @@ export function useAppLiveStateTransport(
                   // The helper's boolean mirrors other reconnect confirmation
                   // paths for future callers; this branch only needs its side
                   // effects because adoption has already succeeded.
-                  confirmReconnectRecoveryFromAuthoritativeSnapshot();
+                  void confirmReconnectRecoveryFromAuthoritativeSnapshot();
                 }
               }
             } catch (error) {

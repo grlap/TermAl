@@ -713,6 +713,222 @@ describe("App session lifecycle", () => {
     });
   });
 
+  it("streams assistant deltas on a recreated EventSource after approval recovery crosses a backend restart", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalFetch = globalThis.fetch;
+      const project = {
+        id: "project-termal",
+        name: "TermAl",
+        rootPath: "/projects/termal",
+      };
+      const pendingApprovalMessage = {
+        id: "message-approval-1",
+        timestamp: "2026-04-19T10:00:01Z",
+        author: "assistant" as const,
+        type: "approval" as const,
+        title: "Approve shell command",
+        command: "npm test",
+        detail: "Codex wants to run the test suite.",
+        decision: "pending" as const,
+      };
+      const acceptedApprovalMessage = {
+        ...pendingApprovalMessage,
+        decision: "accepted" as const,
+      };
+      const initialState = makeStateResponse({
+        revision: 5,
+        serverInstanceId: "current-instance",
+        projects: [project],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Session 1",
+            projectId: project.id,
+            workdir: project.rootPath,
+            status: "approval",
+            preview: "Approval required",
+            messageCount: 2,
+            sessionMutationStamp: 5,
+            messages: [
+              {
+                id: "message-1",
+                timestamp: "2026-04-19T10:00:00Z",
+                author: "you",
+                type: "text",
+                text: "Run the checks",
+              },
+              pendingApprovalMessage,
+            ],
+          }),
+        ],
+      });
+      const recoveredState = makeStateResponse({
+        revision: 1,
+        serverInstanceId: "replacement-instance",
+        projects: [project],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Session 1",
+            projectId: project.id,
+            workdir: project.rootPath,
+            status: "active",
+            preview: "Approval accepted",
+            messageCount: 2,
+            messages: [
+              {
+                id: "message-1",
+                timestamp: "2026-04-19T10:00:00Z",
+                author: "you",
+                type: "text",
+                text: "Run the checks",
+              },
+              acceptedApprovalMessage,
+            ],
+          }),
+        ],
+      });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse(recoveredState);
+          }
+          if (
+            requestUrl.pathname ===
+              "/api/sessions/session-1/approvals/message-approval-1" &&
+            (init?.method ?? "GET").toUpperCase() === "POST"
+          ) {
+            return jsonResponse(recoveredState);
+          }
+
+          throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+        },
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const eventSource = latestEventSource();
+        await dispatchOpenedStateEvent(eventSource, initialState);
+        const sessionList = document.querySelector(".session-list");
+        if (!(sessionList instanceof HTMLDivElement)) {
+          throw new Error("Session list not found");
+        }
+        const sessionRowLabel =
+          await within(sessionList).findByText("Session 1");
+        const sessionRowButton = sessionRowLabel.closest("button");
+        if (!sessionRowButton) {
+          throw new Error("Session row button not found");
+        }
+
+        await clickAndSettle(sessionRowButton);
+        await screen.findByText("Approve shell command");
+
+        fetchMock.mockClear();
+        await clickAndSettle(screen.getByRole("button", { name: "Approve" }));
+        await settleAsyncUi();
+
+        const stateProbeCalls = fetchMock.mock.calls.filter(
+          ([input]) =>
+            new URL(String(input), "http://localhost").pathname ===
+            "/api/state",
+        );
+        expect(stateProbeCalls.length).toBeGreaterThanOrEqual(1);
+        await waitFor(() => {
+          expect(screen.getByText("Decision: approved")).toBeInTheDocument();
+        });
+
+        expect(EventSourceMock.instances.length).toBeGreaterThanOrEqual(2);
+        const newestEventSource =
+          EventSourceMock.instances[EventSourceMock.instances.length - 1];
+        expect(newestEventSource).not.toBe(eventSource);
+
+        await act(async () => {
+          newestEventSource.dispatchOpen();
+          newestEventSource.dispatchNamedEvent("state", {
+            revision: 2,
+            serverInstanceId: "replacement-instance",
+            projects: [project],
+            sessions: [
+              makeSession("session-1", {
+                name: "Session 1",
+                projectId: project.id,
+                workdir: project.rootPath,
+                status: "active",
+                preview: "Approval accepted",
+                messageCount: 2,
+                sessionMutationStamp: 1,
+                messages: [
+                  {
+                    id: "message-1",
+                    timestamp: "2026-04-19T10:00:00Z",
+                    author: "you",
+                    type: "text",
+                    text: "Run the checks",
+                  },
+                  acceptedApprovalMessage,
+                ],
+              }),
+            ],
+          });
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        await act(async () => {
+          newestEventSource.dispatchNamedEvent("delta", {
+            type: "messageCreated",
+            revision: 3,
+            sessionId: "session-1",
+            messageId: "message-assistant-1",
+            messageIndex: 2,
+            messageCount: 3,
+            message: {
+              id: "message-assistant-1",
+              timestamp: "2026-04-19T10:00:02Z",
+              author: "assistant",
+              type: "text",
+              text: "Approval recovery streamed on the recreated EventSource.",
+            },
+            preview: "Approval recovery streamed on the recreated EventSource.",
+            status: "active",
+            sessionMutationStamp: 2,
+          });
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          expect(
+            document.querySelector(".message-card.bubble-assistant")
+              ?.textContent,
+          ).toContain(
+            "Approval recovery streamed on the recreated EventSource.",
+          );
+        });
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("cancels the active-prompt poll once live updates resume for that session", async () => {
     await withSuppressedActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;

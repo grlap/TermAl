@@ -216,6 +216,152 @@ fn persisted_state_normalizes_legacy_workspace_layout_paths() {
     let _ = fs::remove_dir_all(project_root);
 }
 
+#[cfg(windows)]
+#[test]
+fn app_state_new_with_paths_normalizes_verbatim_bootstrap_workdirs() {
+    let _env_lock = TEST_HOME_ENV_MUTEX
+        .lock()
+        .expect("test home env mutex poisoned");
+    let project_root =
+        std::env::temp_dir().join(format!("termal-bootstrap-verbatim-{}", Uuid::new_v4()));
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
+        .to_string_lossy()
+        .into_owned();
+    let verbatim_root = format!(r"\\?\{normalized_root}");
+    let state_root = std::env::temp_dir().join(format!(
+        "termal-bootstrap-verbatim-state-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &state_root);
+    let persistence_path = state_root.join("termal.sqlite");
+    let orchestrator_templates_path = state_root.join("orchestrators.json");
+
+    let state =
+        AppState::new_with_paths(verbatim_root, persistence_path, orchestrator_templates_path)
+            .expect("app state should bootstrap from verbatim default workdir");
+
+    assert_eq!(state.default_workdir, normalized_root);
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(inner.projects.len(), 1);
+    assert_eq!(inner.projects[0].root_path, normalized_root);
+    for agent in [Agent::Codex, Agent::Claude] {
+        let session = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.agent == agent)
+            .expect("bootstrapped live session should exist");
+        assert_eq!(session.session.workdir, normalized_root);
+        assert_eq!(
+            session.session.project_id.as_deref(),
+            Some(inner.projects[0].id.as_str())
+        );
+    }
+    drop(inner);
+    state.shutdown_persist_blocking();
+
+    let _ = fs::remove_dir_all(project_root);
+    let _ = fs::remove_dir_all(state_root);
+}
+
+#[cfg(windows)]
+fn create_windows_file_symlink_or_skip(target: &FsPath, link: &FsPath) -> bool {
+    match std::os::windows::fs::symlink_file(target, link) {
+        Ok(()) => true,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!("skipping Windows symlink assertion without symlink privilege: {err}");
+            false
+        }
+        Err(err) => panic!("Windows file symlink should be created: {err}"),
+    }
+}
+
+#[cfg(windows)]
+fn create_windows_dir_reparse_point_or_skip(target: &FsPath, link: &FsPath) -> bool {
+    match std::os::windows::fs::symlink_dir(target, link) {
+        Ok(()) => true,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!(
+                "skipping Windows directory reparse-point assertion without symlink privilege: {err}"
+            );
+            false
+        }
+        Err(err) => panic!("Windows directory reparse point should be created: {err}"),
+    }
+}
+
+#[cfg(windows)]
+fn assert_windows_state_redirection_rejected(error: anyhow::Error) {
+    assert!(
+        format!("{error:#}").contains("refusing to follow redirected state path"),
+        "{error:#}"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_sqlite_state_redirection_rejects_main_database_link() {
+    let state_root = std::env::temp_dir().join(format!(
+        "termal-windows-main-redirection-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let db = state_root.join("termal.sqlite");
+    let main_target = state_root.join("main-target.sqlite");
+
+    fs::write(&main_target, b"target").expect("main target should write");
+    if create_windows_file_symlink_or_skip(&main_target, &db) {
+        let main_error = reject_existing_sqlite_state_path_redirection(&db)
+            .expect_err("main sqlite symlink should be rejected");
+        assert_windows_state_redirection_rejected(main_error);
+    }
+
+    let _ = fs::remove_dir_all(state_root);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_sqlite_state_redirection_rejects_sidecar_link_independently() {
+    let state_root = std::env::temp_dir().join(format!(
+        "termal-windows-sidecar-redirection-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let db = state_root.join("termal.sqlite");
+    let wal_target = state_root.join("wal-target");
+
+    fs::write(&wal_target, b"wal").expect("wal target should write");
+    let wal_link = sqlite_sidecar_path(&db, "-wal");
+    if create_windows_file_symlink_or_skip(&wal_target, &wal_link) {
+        let wal_error = reject_existing_sqlite_state_path_redirection(&db)
+            .expect_err("sqlite sidecar symlink should be rejected");
+        assert_windows_state_redirection_rejected(wal_error);
+    }
+
+    let _ = fs::remove_dir_all(state_root);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_sqlite_state_redirection_rejects_termal_directory_reparse_point_independently() {
+    let state_root =
+        std::env::temp_dir().join(format!("termal-windows-dir-redirection-{}", Uuid::new_v4()));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let redirected_target = state_root.join("redirected-termal-target");
+    let termal_dir = state_root.join(".termal");
+
+    fs::create_dir_all(&redirected_target).expect("redirected target should exist");
+    if create_windows_dir_reparse_point_or_skip(&redirected_target, &termal_dir) {
+        let directory_error =
+            reject_existing_sqlite_state_path_redirection(&termal_dir.join("termal.sqlite"))
+                .expect_err(".termal directory reparse point should be rejected");
+        assert_windows_state_redirection_rejected(directory_error);
+    }
+
+    let _ = fs::remove_dir_all(state_root);
+}
+
 // Tests that persisted state preserves significant local path spaces.
 #[cfg(not(windows))]
 #[test]
@@ -1596,6 +1742,606 @@ fn persist_delta_restore_requeues_only_drained_explicit_tombstones() {
         1,
         "hidden-session deletes should be regenerated, not restored as explicit tombstones"
     );
+}
+
+fn sqlite_row_json(path: &FsPath, table: &str, id: &str) -> Option<String> {
+    let connection = rusqlite::Connection::open(path).expect("sqlite state should open");
+    let sql = format!("SELECT value_json FROM {table} WHERE id = ?1");
+    match connection.query_row(&sql, rusqlite::params![id], |row| row.get(0)) {
+        Ok(value) => Some(value),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(err) => panic!("sqlite row query should succeed: {err}"),
+    }
+}
+
+fn sqlite_table_ids(path: &FsPath, table: &str) -> Vec<String> {
+    let connection = rusqlite::Connection::open(path).expect("sqlite state should open");
+    let sql = format!("SELECT id FROM {table} ORDER BY id");
+    let mut statement = connection
+        .prepare(&sql)
+        .expect("sqlite id query should prepare");
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("sqlite id query should run");
+    rows.map(|row| row.expect("sqlite id row should read"))
+        .collect()
+}
+
+fn make_persist_test_delegation(
+    id: &str,
+    parent_session_id: &str,
+    child_session_id: &str,
+) -> DelegationRecord {
+    DelegationRecord {
+        id: id.to_owned(),
+        parent_session_id: parent_session_id.to_owned(),
+        child_session_id: child_session_id.to_owned(),
+        mode: DelegationMode::Reviewer,
+        status: DelegationStatus::Running,
+        title: "Persisted Delegation".to_owned(),
+        prompt: "/review-local".to_owned(),
+        cwd: "/tmp".to_owned(),
+        agent: Agent::Codex,
+        model: None,
+        write_policy: DelegationWritePolicy::ReadOnly,
+        created_at: stamp_now(),
+        started_at: Some(stamp_now()),
+        completed_at: None,
+        result: None,
+    }
+}
+
+#[test]
+fn sqlite_persist_connection_cache_reuses_matching_connection_until_invalidated() {
+    let state_root =
+        std::env::temp_dir().join(format!("termal-sqlite-cache-reuse-{}", Uuid::new_v4()));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let path = state_root.join("termal.sqlite");
+    let mut cache = SqlitePersistConnectionCache::new();
+
+    {
+        let connection = cache
+            .connection_for(&path)
+            .expect("cached sqlite connection should open");
+        connection
+            .execute("CREATE TEMP TABLE cache_probe(value TEXT)", [])
+            .expect("connection-local temp table should be created");
+        connection
+            .execute("INSERT INTO cache_probe(value) VALUES('reused')", [])
+            .expect("connection-local temp row should be inserted");
+    }
+    {
+        let connection = cache
+            .connection_for(&path)
+            .expect("matching path should reuse cached sqlite connection");
+        let value: String = connection
+            .query_row("SELECT value FROM cache_probe", [], |row| row.get(0))
+            .expect("connection-local temp table should survive cache reuse");
+        assert_eq!(value, "reused");
+    }
+
+    cache.invalidate();
+
+    {
+        let connection = cache
+            .connection_for(&path)
+            .expect("invalidated cache should reopen sqlite connection");
+        let error = connection
+            .query_row("SELECT value FROM cache_probe", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .expect_err("fresh connection should not see the prior temp table");
+        assert!(
+            error.to_string().contains("no such table"),
+            "unexpected cache invalidation error: {error}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(state_root);
+}
+
+#[test]
+fn sqlite_delta_upserts_only_changed_session_rows_and_removes_hidden_or_deleted_rows() {
+    let state_root = std::env::temp_dir().join(format!("termal-sqlite-delta-{}", Uuid::new_v4()));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let path = state_root.join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let changed_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Changed".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let unchanged_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Unchanged".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let hidden_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Hidden".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let deleted_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Deleted".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    persist_state(&path, &inner).expect("initial sqlite state should persist");
+    let unchanged_before =
+        sqlite_row_json(&path, "sessions", &unchanged_id).expect("unchanged row should exist");
+    let watermark = inner.last_mutation_stamp;
+
+    let changed_index = inner
+        .find_session_index(&changed_id)
+        .expect("changed session should exist");
+    inner
+        .session_mut_by_index(changed_index)
+        .expect("changed session should be mutable")
+        .session
+        .preview = "Targeted changed preview".to_owned();
+    let hidden_index = inner
+        .find_session_index(&hidden_id)
+        .expect("hidden session should exist");
+    inner
+        .session_mut_by_index(hidden_index)
+        .expect("hidden session should be mutable")
+        .hidden = true;
+    let deleted_index = inner
+        .find_session_index(&deleted_id)
+        .expect("deleted session should exist");
+    inner.remove_session_at(deleted_index);
+
+    let delta = inner.collect_persist_delta(watermark);
+    assert_eq!(delta.changed_sessions.len(), 1);
+    assert_eq!(delta.removed_session_ids.len(), 2);
+    let mut cache = SqlitePersistConnectionCache::new();
+    persist_delta_via_cache(&mut cache, &path, &delta).expect("delta should persist");
+
+    assert_eq!(
+        sqlite_table_ids(&path, "sessions"),
+        vec![changed_id.clone(), unchanged_id.clone()]
+    );
+    let changed_row =
+        sqlite_row_json(&path, "sessions", &changed_id).expect("changed row should remain");
+    let changed_value: Value =
+        serde_json::from_str(&changed_row).expect("changed row should decode as json");
+    assert_eq!(
+        changed_value["session"]["preview"],
+        Value::String("Targeted changed preview".to_owned())
+    );
+    assert_eq!(
+        sqlite_row_json(&path, "sessions", &unchanged_id),
+        Some(unchanged_before),
+        "unchanged session row should not be rewritten by a targeted delta"
+    );
+    assert!(sqlite_row_json(&path, "sessions", &hidden_id).is_none());
+    assert!(sqlite_row_json(&path, "sessions", &deleted_id).is_none());
+
+    let loaded = load_state(&path)
+        .expect("sqlite state should load")
+        .expect("sqlite state should exist");
+    assert!(loaded.find_session_index(&changed_id).is_some());
+    assert!(loaded.find_session_index(&unchanged_id).is_some());
+    assert!(loaded.find_session_index(&hidden_id).is_none());
+    assert!(loaded.find_session_index(&deleted_id).is_none());
+
+    let _ = fs::remove_dir_all(state_root);
+}
+
+#[test]
+fn sqlite_delta_upserts_changed_delegation_rows_and_removes_deleted_rows() {
+    let state_root =
+        std::env::temp_dir().join(format!("termal-sqlite-delegation-delta-{}", Uuid::new_v4()));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let path = state_root.join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let parent_id = inner
+        .create_session(
+            Agent::Codex,
+            Some("Parent".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let child_id = inner
+        .create_session(
+            Agent::Codex,
+            Some("Child".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let changed_id = "delegation-delta-changed";
+    let unchanged_id = "delegation-delta-unchanged";
+    let deleted_id = "delegation-delta-deleted";
+    inner.delegations.push(make_persist_test_delegation(
+        changed_id, &parent_id, &child_id,
+    ));
+    inner.delegations.push(make_persist_test_delegation(
+        unchanged_id,
+        &parent_id,
+        &child_id,
+    ));
+    inner.delegations.push(make_persist_test_delegation(
+        deleted_id, &parent_id, &child_id,
+    ));
+    persist_state(&path, &inner).expect("initial sqlite state should persist");
+    let unchanged_before =
+        sqlite_row_json(&path, "delegations", unchanged_id).expect("unchanged row should exist");
+    let watermark = inner.last_mutation_stamp;
+
+    let changed_index = inner
+        .find_delegation_index(changed_id)
+        .expect("changed delegation should exist");
+    inner.delegations[changed_index].title = "Changed Delegation Row".to_owned();
+    inner.mark_delegation_mutated(changed_index);
+    let deleted_index = inner
+        .find_delegation_index(deleted_id)
+        .expect("deleted delegation should exist");
+    inner.remove_delegation_at(deleted_index);
+
+    let delta = inner.collect_persist_delta(watermark);
+    assert_eq!(
+        delta
+            .changed_delegations
+            .as_ref()
+            .expect("changed delegation should be persisted")
+            .iter()
+            .map(|delegation| delegation.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![changed_id]
+    );
+    assert_eq!(delta.removed_delegation_ids, vec![deleted_id.to_owned()]);
+    let mut cache = SqlitePersistConnectionCache::new();
+    persist_delta_via_cache(&mut cache, &path, &delta).expect("delegation delta should persist");
+
+    assert_eq!(
+        sqlite_table_ids(&path, "delegations"),
+        vec![changed_id.to_owned(), unchanged_id.to_owned()]
+    );
+    let changed_row =
+        sqlite_row_json(&path, "delegations", changed_id).expect("changed row should remain");
+    let changed_value: Value =
+        serde_json::from_str(&changed_row).expect("changed row should decode as json");
+    assert_eq!(
+        changed_value["title"],
+        Value::String("Changed Delegation Row".to_owned())
+    );
+    assert_eq!(
+        sqlite_row_json(&path, "delegations", unchanged_id),
+        Some(unchanged_before),
+        "unchanged delegation row should not be rewritten by a targeted delta"
+    );
+    assert!(sqlite_row_json(&path, "delegations", deleted_id).is_none());
+
+    let _ = fs::remove_dir_all(state_root);
+}
+
+#[test]
+fn sqlite_delta_metadata_only_update_does_not_rewrite_session_rows() {
+    let state_root =
+        std::env::temp_dir().join(format!("termal-sqlite-metadata-only-{}", Uuid::new_v4()));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let path = state_root.join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Session".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    persist_state(&path, &inner).expect("initial sqlite state should persist");
+    let session_before =
+        sqlite_row_json(&path, "sessions", &session_id).expect("session row should exist");
+    let watermark = inner.last_mutation_stamp;
+
+    let project = inner.create_project(
+        Some("Metadata Project".to_owned()),
+        "/tmp/metadata-project".to_owned(),
+        default_local_remote_id(),
+    );
+    let delta = inner.collect_persist_delta(watermark);
+    assert!(delta.changed_sessions.is_empty());
+    assert!(delta.removed_session_ids.is_empty());
+
+    let mut cache = SqlitePersistConnectionCache::new();
+    persist_delta_via_cache(&mut cache, &path, &delta).expect("metadata-only delta should persist");
+
+    assert_eq!(
+        sqlite_row_json(&path, "sessions", &session_id),
+        Some(session_before),
+        "metadata-only persist should leave session rows untouched"
+    );
+    let metadata = sqlite_metadata_state_value(&path);
+    assert!(
+        metadata["projects"]
+            .as_array()
+            .expect("projects should be encoded")
+            .iter()
+            .any(|value| value["id"] == Value::String(project.id.clone())),
+        "metadata row should contain the newly-created project"
+    );
+
+    let _ = fs::remove_dir_all(state_root);
+}
+
+#[test]
+fn sqlite_startup_loads_sessions_and_delegations_from_split_tables() {
+    let state_root =
+        std::env::temp_dir().join(format!("termal-sqlite-split-load-{}", Uuid::new_v4()));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let path = state_root.join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let parent_id = inner
+        .create_session(
+            Agent::Codex,
+            Some("Parent".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let child_id = inner
+        .create_session(
+            Agent::Codex,
+            Some("Child".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let delegation = make_persist_test_delegation("delegation-split", &parent_id, &child_id);
+    inner.delegations.push(delegation.clone());
+    persist_state(&path, &inner).expect("split sqlite state should persist");
+
+    let metadata = sqlite_metadata_state_value(&path);
+    assert_eq!(metadata["sessions"], Value::Array(Vec::new()));
+    assert!(
+        metadata.get("delegations").is_none(),
+        "delegations should be stored in the dedicated table, not embedded metadata"
+    );
+
+    let loaded = load_state(&path)
+        .expect("sqlite state should load")
+        .expect("sqlite state should exist");
+    assert!(loaded.find_session_index(&parent_id).is_some());
+    assert!(loaded.find_session_index(&child_id).is_some());
+    assert_eq!(loaded.delegations.len(), 1);
+    let loaded_delegation = &loaded.delegations[0];
+    assert_eq!(loaded_delegation.id, delegation.id);
+    assert_eq!(
+        loaded_delegation.parent_session_id,
+        delegation.parent_session_id
+    );
+    assert_eq!(
+        loaded_delegation.child_session_id,
+        delegation.child_session_id
+    );
+    assert_eq!(loaded_delegation.mode, delegation.mode);
+    assert_eq!(loaded_delegation.title, delegation.title);
+    assert_eq!(loaded_delegation.prompt, delegation.prompt);
+    assert_eq!(loaded_delegation.cwd, delegation.cwd);
+    assert_eq!(loaded_delegation.agent, delegation.agent);
+    assert_eq!(loaded_delegation.write_policy, delegation.write_policy);
+    assert_eq!(loaded_delegation.created_at, delegation.created_at);
+    assert_eq!(loaded_delegation.started_at, delegation.started_at);
+    assert_eq!(
+        loaded_delegation.status,
+        DelegationStatus::Failed,
+        "startup load should finalize in-flight delegations without result packets"
+    );
+    assert_eq!(
+        loaded_delegation
+            .result
+            .as_ref()
+            .map(|result| result.summary.as_str()),
+        Some("child finished without a result packet")
+    );
+
+    let _ = fs::remove_dir_all(state_root);
+}
+
+#[test]
+fn sqlite_legacy_embedded_delegations_are_requeued_for_table_migration() {
+    let state_root = std::env::temp_dir().join(format!(
+        "termal-sqlite-legacy-delegations-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let path = state_root.join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let parent_id = inner
+        .create_session(
+            Agent::Codex,
+            Some("Parent".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let child_id = inner
+        .create_session(
+            Agent::Codex,
+            Some("Child".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let delegation = make_persist_test_delegation("delegation-legacy", &parent_id, &child_id);
+    inner.delegations.push(delegation.clone());
+    let legacy_embedded_state = PersistedState::from_inner(&inner);
+    persist_state_parts_to_sqlite(&path, &legacy_embedded_state, &[], true, &[], true)
+        .expect("legacy sqlite metadata should persist with an empty delegation table");
+
+    let mut loaded = load_state(&path)
+        .expect("legacy sqlite state should load")
+        .expect("legacy sqlite state should exist");
+    assert!(
+        loaded
+            .delegations
+            .iter()
+            .any(|record| record.id == delegation.id),
+        "embedded legacy delegations should survive when the dedicated table is empty"
+    );
+
+    let delta = loaded.collect_persist_delta(0);
+    let changed_delegations = delta
+        .changed_delegations
+        .as_ref()
+        .expect("legacy embedded delegations should be requeued for table migration");
+    assert!(
+        changed_delegations
+            .iter()
+            .any(|record| record.id == delegation.id)
+    );
+    let mut cache = SqlitePersistConnectionCache::new();
+    persist_delta_via_cache(&mut cache, &path, &delta)
+        .expect("legacy delegation migration delta should persist");
+    assert_eq!(
+        sqlite_table_ids(&path, "delegations"),
+        vec![delegation.id.clone()]
+    );
+
+    let _ = fs::remove_dir_all(state_root);
+}
+
+#[test]
+fn sqlite_load_reports_malformed_metadata_session_and_delegation_rows() {
+    let state_root =
+        std::env::temp_dir().join(format!("termal-sqlite-malformed-{}", Uuid::new_v4()));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let session_row_path = state_root.join("session-row.sqlite");
+    let delegation_row_path = state_root.join("delegation-row.sqlite");
+    let metadata_path = state_root.join("metadata.sqlite");
+
+    let mut inner = StateInner::new();
+    let parent_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Parent".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let child_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Child".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Session".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let delegation = make_persist_test_delegation("delegation-malformed", &parent_id, &child_id);
+    inner.delegations.push(delegation.clone());
+    persist_state(&session_row_path, &inner).expect("session-row state should persist");
+    persist_state(&delegation_row_path, &inner).expect("delegation-row state should persist");
+    persist_state(&metadata_path, &inner).expect("metadata state should persist");
+
+    {
+        let connection =
+            rusqlite::Connection::open(&session_row_path).expect("sqlite state should open");
+        connection
+            .execute(
+                "UPDATE sessions SET value_json = '{ not json' WHERE id = ?1",
+                rusqlite::params![session_id],
+            )
+            .expect("session row should be corrupted");
+    }
+    let session_error = match load_state(&session_row_path) {
+        Ok(_) => panic!("malformed session row should fail startup load"),
+        Err(error) => error,
+    };
+    assert!(
+        format!("{session_error:#}").contains("failed to parse persisted session row"),
+        "{session_error:#}"
+    );
+
+    {
+        let connection =
+            rusqlite::Connection::open(&delegation_row_path).expect("sqlite state should open");
+        connection
+            .execute(
+                "UPDATE delegations SET value_json = '{ not json' WHERE id = ?1",
+                rusqlite::params![delegation.id],
+            )
+            .expect("delegation row should be corrupted");
+    }
+    let delegation_error = match load_state(&delegation_row_path) {
+        Ok(_) => panic!("malformed delegation row should fail startup load"),
+        Err(error) => error,
+    };
+    assert!(
+        format!("{delegation_error:#}").contains("failed to parse persisted delegation row"),
+        "{delegation_error:#}"
+    );
+
+    {
+        let connection =
+            rusqlite::Connection::open(&metadata_path).expect("sqlite state should open");
+        connection
+            .execute(
+                "UPDATE app_state SET value_json = '{ not json' WHERE key = 'metadataState'",
+                [],
+            )
+            .expect("metadata row should be corrupted");
+    }
+    let metadata_error = match load_state(&metadata_path) {
+        Ok(_) => panic!("malformed app_state row should fail startup load"),
+        Err(error) => error,
+    };
+    assert!(
+        format!("{metadata_error:#}").contains("failed to parse persisted state"),
+        "{metadata_error:#}"
+    );
+
+    let _ = fs::remove_dir_all(state_root);
 }
 
 // Regression guard: `commit_session_created_locked` must route

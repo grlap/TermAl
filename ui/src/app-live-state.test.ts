@@ -990,6 +990,86 @@ describe("deferred session-store sync", () => {
     expect(setBackendConnectionState).toHaveBeenLastCalledWith("reconnecting");
   });
 
+  it("keeps reconnect fallback armed after non-rearming action recovery until live proof", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    const activeSession = makeSession({
+      status: "active",
+      messagesLoaded: true,
+      messageCount: 1,
+      preview: "Still working.",
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "test",
+        },
+      ],
+    });
+    const recoveredSession = makeSession({
+      status: "idle",
+      messagesLoaded: true,
+      messageCount: 2,
+      preview: "Recovered by action recovery.",
+      messages: [
+        ...activeSession.messages,
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Recovered by action recovery.",
+        },
+      ],
+      sessionMutationStamp: 2,
+    });
+    const fetchState = vi
+      .spyOn(api, "fetchState")
+      .mockResolvedValue(makeStateResponse(recoveredSession, 3));
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const params = makeLiveStateParams(activeSession);
+    const setBackendConnectionState = vi.fn();
+    params.stateSetters.setBackendConnectionState = setBackendConnectionState;
+    params.adoptionRefs.latestStateRevisionRef.current = 2;
+    params.adoptionRefs.sessionsRef.current = [activeSession];
+
+    renderLiveStateHarness(params, () => {});
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      eventSource?.dispatchError();
+    });
+    expect(setBackendConnectionState).toHaveBeenCalledWith("reconnecting");
+
+    await act(async () => {
+      params.requestActionRecoveryResyncRef.current();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchState).toHaveBeenCalledTimes(1);
+    expect(params.adoptionRefs.sessionsRef.current[0]?.preview).toBe(
+      "Recovered by action recovery.",
+    );
+    expect(setBackendConnectionState).toHaveBeenLastCalledWith("reconnecting");
+
+    fetchState.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
+      await Promise.resolve();
+    });
+
+    expect(fetchState).toHaveBeenCalledTimes(1);
+  });
+
   it("recreates SSE when an older in-flight resync adopts an armed replacement instance", async () => {
     vi.stubGlobal(
       "EventSource",

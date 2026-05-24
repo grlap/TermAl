@@ -586,6 +586,165 @@ describe("App live state — reconnect", () => {
     }
   });
 
+  it("renders reconnect gap text deltas before authoritative repair while keeping recovery armed", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const stateResync = createDeferred<Response>();
+    vi.useFakeTimers();
+    let stateRequestCount = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/state") {
+        stateRequestCount += 1;
+        if (stateRequestCount === 1) {
+          return stateResync.promise;
+        }
+        throw new Error(`Unexpected /api/state call #${stateRequestCount}`);
+      }
+      if (url === "/api/sessions/session-1") {
+        return new Promise<Response>(() => {});
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const scrollIntoViewSpy = stubScrollIntoView();
+
+    try {
+      await renderApp();
+
+      const eventSource = latestEventSource();
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("state", {
+          revision: 2,
+          projects: [],
+          sessions: [
+            makeSession("session-1", {
+              name: "Codex Session",
+              status: "active",
+              preview: "Partial ",
+              sessionMutationStamp: 1,
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "test",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Partial ",
+                },
+              ],
+            }),
+          ],
+        });
+      });
+      await settleAsyncUi();
+
+      await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
+      const sessionList = document.querySelector(".session-list");
+      if (!(sessionList instanceof HTMLDivElement)) {
+        throw new Error("Session list not found");
+      }
+      const sessionRowLabel = within(sessionList).getByText("Codex Session");
+      const sessionRowButton = sessionRowLabel.closest("button");
+      if (!sessionRowButton) {
+        throw new Error("Session row button not found");
+      }
+      await clickAndSettle(sessionRowButton);
+
+      act(() => {
+        eventSource.dispatchError();
+      });
+      await advanceTimers(100);
+      await settleAsyncUi();
+
+      act(() => {
+        eventSource.dispatchOpen();
+        eventSource.dispatchNamedEvent("delta", {
+          type: "textDelta",
+          revision: 4,
+          sessionId: "session-1",
+          messageId: "message-assistant-1",
+          messageIndex: 1,
+          messageCount: 2,
+          delta: "live chunk",
+          preview: "Partial live chunk",
+          sessionMutationStamp: 2,
+        });
+      });
+      await settleAsyncUi();
+
+      expect(stateRequestCount).toBe(1);
+      expect(screen.getAllByText("Partial live chunk").length).toBeGreaterThan(
+        0,
+      );
+      expect(
+        screen.queryByText("Authoritative repaired text."),
+      ).not.toBeInTheDocument();
+
+      await act(async () => {
+        stateResync.resolve(
+          jsonResponse({
+            revision: 4,
+            projects: [],
+            sessions: [
+              makeSession("session-1", {
+                name: "Codex Session",
+                status: "idle",
+                preview: "Authoritative repaired text.",
+                sessionMutationStamp: 3,
+                messages: [
+                  {
+                    id: "message-user-1",
+                    type: "text",
+                    timestamp: "10:00",
+                    author: "you",
+                    text: "test",
+                  },
+                  {
+                    id: "message-assistant-1",
+                    type: "text",
+                    timestamp: "10:01",
+                    author: "assistant",
+                    text: "Authoritative repaired text.",
+                  },
+                ],
+              }),
+            ],
+          }),
+        );
+        await flushUiWork();
+      });
+      await settleAsyncUi();
+
+      expect(screen.getAllByText("Authoritative repaired text.").length).toBeGreaterThan(
+        0,
+      );
+    } finally {
+      vi.useRealTimers();
+      scrollIntoViewSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
   it("restarts the resync loop from finally when a reconnect fallback queues behind a failing pre-reopen resync", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
