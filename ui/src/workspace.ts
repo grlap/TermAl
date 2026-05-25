@@ -105,6 +105,11 @@ export {
 } from "./workspace-types";
 const DEFAULT_ADJACENT_PANE_SPLIT_RATIO = 0.5;
 
+export type ReconcileWorkspaceStateOptions = {
+  pruneDelegatedChildSessionTabs?: boolean;
+  preserveSessionIds?: readonly string[];
+};
+
 export function normalizeWorkspaceStatePaths(workspace: WorkspaceState): WorkspaceState {
   return {
     ...workspace,
@@ -162,8 +167,25 @@ export function normalizeWorkspaceStatePaths(workspace: WorkspaceState): Workspa
   };
 }
 
-export function reconcileWorkspaceState(current: WorkspaceState, sessions: Session[]): WorkspaceState {
-  const availableSessionIds = new Set(sessions.map((session) => session.id));
+export function reconcileWorkspaceState(
+  current: WorkspaceState,
+  sessions: Session[],
+  options: ReconcileWorkspaceStateOptions = {},
+): WorkspaceState {
+  const preservedSessionIds = new Set(options.preserveSessionIds ?? []);
+  const availableSessions = sessions.filter((session) => {
+    if (
+      options.pruneDelegatedChildSessionTabs === true &&
+      session.parentDelegationId &&
+      !preservedSessionIds.has(session.id)
+    ) {
+      return false;
+    }
+    return true;
+  });
+  const availableSessionIds = new Set(
+    availableSessions.map((session) => session.id),
+  );
   let panes = current.panes.map((pane) => {
     const tabs = pane.tabs
       .flatMap((tab): WorkspaceTab[] => {
@@ -330,8 +352,8 @@ export function reconcileWorkspaceState(current: WorkspaceState, sessions: Sessi
     };
   }
 
-  if (!root && sessions.length > 0) {
-    const initialPane = createPane(createSessionTab(sessions[0].id));
+  if (!root && availableSessions.length > 0) {
+    const initialPane = createPane(createSessionTab(availableSessions[0].id));
     panes = [initialPane];
     root = {
       type: "pane",

@@ -501,6 +501,98 @@ fn already_terminal_delegation_wait_reports_queued_prompt_without_dispatch_for_b
 }
 
 #[test]
+fn stale_busy_delegation_child_without_runtime_fails_and_releases_wait() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review until the runtime disappears.".to_owned(),
+                title: Some("Stale Runtime Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    let wait = state
+        .create_delegation_wait(
+            &parent_session_id,
+            CreateDelegationWaitRequest {
+                delegation_ids: vec![created.delegation.id.clone()],
+                mode: DelegationWaitMode::All,
+                title: Some("Stale runtime fan-in".to_owned()),
+            },
+        )
+        .expect("wait should be scheduled");
+    assert!(!wait.resume_prompt_queued);
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let child_index = inner
+            .find_session_index(&created.delegation.child_session_id)
+            .expect("child session should exist");
+        let child = inner
+            .session_mut_by_index(child_index)
+            .expect("child session index should be valid");
+        child.runtime = SessionRuntime::None;
+        child.session.status = SessionStatus::Approval;
+        child.session.preview = "Waiting for approval".to_owned();
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    state
+        .refresh_delegation_for_child_session(&created.delegation.child_session_id)
+        .expect("refresh should terminalize the stale child");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let delegation = inner
+        .delegations
+        .iter()
+        .find(|record| record.id == created.delegation.id)
+        .expect("delegation should exist");
+    assert_eq!(delegation.status, DelegationStatus::Failed);
+    assert_eq!(
+        delegation
+            .result
+            .as_ref()
+            .map(|result| result.summary.as_str()),
+        Some("Codex session exited before the active turn completed")
+    );
+    assert!(
+        inner.delegation_waits.is_empty(),
+        "terminal refresh should consume the fan-in wait"
+    );
+    assert!(
+        inner.running_read_only_delegations.is_empty(),
+        "stale child must not remain in the running delegation index"
+    );
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_session_id)
+        .expect("parent should exist");
+    assert!(
+        parent.session.messages.iter().any(|message| matches!(
+            message,
+            Message::Text {
+                author: Author::You,
+                text,
+                ..
+            } if text.contains("Stale runtime fan-in")
+                && text.contains("Codex session exited before the active turn completed")
+        )),
+        "parent should receive the failed fan-in prompt"
+    );
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn already_terminal_delegation_wait_reports_dispatch_for_idle_parent() {
     let (state, input_rx) =
         test_app_state_with_delegation_codex_runtime("already-terminal-idle-parent-dispatch");

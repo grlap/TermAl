@@ -77,6 +77,7 @@ export type AdoptSessionsOptions = {
   paneId?: string | null;
   disableMutationStampFastPath?: boolean;
   forceMessagesUnloaded?: boolean;
+  pruneDelegatedChildWorkspaceTabs?: boolean;
 };
 
 export type SessionHydrationTarget = {

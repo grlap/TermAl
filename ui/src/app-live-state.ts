@@ -522,8 +522,14 @@ export function useAppLiveState(
       options?.openSessionId !== undefined
         ? (options.paneId ?? null)
         : (pendingRecoveryPaneIdRef.current ?? null);
+    const shouldPruneDelegatedChildWorkspaceTabs =
+      options?.pruneDelegatedChildWorkspaceTabs === true;
 
-    if (mergedSessions === previousSessions && pendingOpenSessionId === undefined) {
+    if (
+      mergedSessions === previousSessions &&
+      pendingOpenSessionId === undefined &&
+      !shouldPruneDelegatedChildWorkspaceTabs
+    ) {
       return;
     }
 
@@ -534,7 +540,11 @@ export function useAppLiveState(
       pendingOpenSessionId !== undefined &&
       availableSessionIds.has(pendingOpenSessionId);
 
-    if (mergedSessions === previousSessions && !canOpenPendingSession) {
+    if (
+      mergedSessions === previousSessions &&
+      !canOpenPendingSession &&
+      !shouldPruneDelegatedChildWorkspaceTabs
+    ) {
       return;
     }
 
@@ -578,7 +588,9 @@ export function useAppLiveState(
     // identity, so an identity-only rewrite here can create a loop:
     // workspace PUT -> SSE state snapshot -> adoptSessions -> workspace save.
     const shouldReconcileWorkspace =
-      mergedSessions !== previousSessions || canOpenPendingSession;
+      mergedSessions !== previousSessions ||
+      canOpenPendingSession ||
+      shouldPruneDelegatedChildWorkspaceTabs;
 
     sessionsRef.current = mergedSessions;
     if (changedSessions.length > 0 || hasRemovedSessions) {
@@ -599,9 +611,16 @@ export function useAppLiveState(
       if (shouldReconcileWorkspace) {
         setWorkspace((current) => {
           const reconciled =
-            mergedSessions !== previousSessions
+            mergedSessions !== previousSessions ||
+            shouldPruneDelegatedChildWorkspaceTabs
               ? applyControlPanelLayout(
-                  reconcileWorkspaceState(current, mergedSessions),
+                  reconcileWorkspaceState(current, mergedSessions, {
+                    preserveSessionIds: pendingOpenSessionId
+                      ? [pendingOpenSessionId]
+                      : [],
+                    pruneDelegatedChildSessionTabs:
+                      shouldPruneDelegatedChildWorkspaceTabs,
+                  }),
                 )
               : current;
           if (!canOpenPendingSession || !pendingOpenSessionId) {

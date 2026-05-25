@@ -3018,30 +3018,47 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
     };
     let child = &inner.sessions[child_index];
     match child.session.status {
-        SessionStatus::Active | SessionStatus::Approval => DelegationChildOutcome::Running,
+        SessionStatus::Active | SessionStatus::Approval => {
+            if !matches!(child.runtime, SessionRuntime::None) {
+                return DelegationChildOutcome::Running;
+            }
+            delegation_child_result_outcome(child).unwrap_or_else(|| DelegationChildOutcome::Failed {
+                summary: delegation_child_missing_runtime_summary(child),
+            })
+        }
         SessionStatus::Error => DelegationChildOutcome::Failed {
             summary: child.session.preview.clone(),
         },
         SessionStatus::Idle => {
-            if let Some(result) = latest_assistant_delegation_result(&child.session) {
-                if result.status == DelegationStatus::Failed {
-                    DelegationChildOutcome::Failed {
-                        summary: result.summary,
-                    }
-                } else {
-                    DelegationChildOutcome::Completed {
-                        summary: result.summary,
-                        findings: result.findings,
-                        changed_files: child_changed_files(&child.session),
-                        commands_run: child_commands_run(&child.session),
-                        notes: result.notes,
-                    }
-                }
-            } else {
-                DelegationChildOutcome::IdleWithoutResult
-            }
+            delegation_child_result_outcome(child).unwrap_or(DelegationChildOutcome::IdleWithoutResult)
         }
     }
+}
+
+fn delegation_child_result_outcome(child: &SessionRecord) -> Option<DelegationChildOutcome> {
+    let result = latest_assistant_delegation_result(&child.session)?;
+    if result.status == DelegationStatus::Failed {
+        return Some(DelegationChildOutcome::Failed {
+            summary: result.summary,
+        });
+    }
+
+    Some(DelegationChildOutcome::Completed {
+        summary: result.summary,
+        findings: result.findings,
+        changed_files: child_changed_files(&child.session),
+        commands_run: child_commands_run(&child.session),
+        notes: result.notes,
+    })
+}
+
+fn delegation_child_missing_runtime_summary(child: &SessionRecord) -> String {
+    match child.session.agent {
+        Agent::Claude => "Claude session exited before the active turn completed",
+        Agent::Codex => "Codex session exited before the active turn completed",
+        _ => "Agent session exited before the active turn completed",
+    }
+    .to_owned()
 }
 
 struct DelegationWriteScope {

@@ -581,6 +581,112 @@ describe("deferred session-store sync", () => {
     expect(setWorkspace).not.toHaveBeenCalled();
   });
 
+  it("prunes delegated child workspace tabs on server instance changes even when sessions are unchanged", () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    vi.spyOn(api, "fetchSession").mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.fetchSession>>>(() => {}),
+    );
+    const parentSession = makeSession({
+      id: "parent-session",
+      messages: [],
+      messagesLoaded: false,
+      messageCount: 0,
+      sessionMutationStamp: 7,
+    });
+    const childSession = makeSession({
+      id: "child-session",
+      parentDelegationId: "delegation-1",
+      messages: [],
+      messagesLoaded: false,
+      messageCount: 0,
+      sessionMutationStamp: 7,
+    });
+    const params = makeLiveStateParams(parentSession);
+    const previousSessions = [parentSession, childSession];
+    params.adoptionRefs.sessionsRef.current = previousSessions;
+    const setSessions = vi.fn() as typeof params.stateSetters.setSessions;
+    const currentWorkspace: WorkspaceState = {
+      root: {
+        type: "pane",
+        paneId: "pane-1",
+      },
+      panes: [
+        {
+          id: "pane-1",
+          tabs: [
+            {
+              id: "tab-child",
+              kind: "session",
+              sessionId: "child-session",
+            },
+            {
+              id: "tab-parent",
+              kind: "session",
+              sessionId: "parent-session",
+            },
+          ],
+          activeTabId: "tab-child",
+          activeSessionId: "child-session",
+          viewMode: "session",
+          lastSessionViewMode: "session",
+          sourcePath: null,
+        },
+      ],
+      activePaneId: "pane-1",
+    };
+    let updatedWorkspace: WorkspaceState | null = null;
+    const setWorkspace = vi.fn(
+      (update: Parameters<typeof params.stateSetters.setWorkspace>[0]) => {
+        updatedWorkspace =
+          typeof update === "function" ? update(currentWorkspace) : update;
+      },
+    ) as typeof params.stateSetters.setWorkspace;
+    params.stateSetters.setSessions = setSessions;
+    params.stateSetters.setWorkspace = setWorkspace;
+    let hook: UseAppLiveStateReturn | null = null;
+
+    renderLiveStateHarness(params, (nextHook) => {
+      hook = nextHook;
+    });
+
+    act(() => {
+      hook?.adoptState(
+        {
+          ...makeStateResponse(parentSession, 2),
+          serverInstanceId: "server-b",
+          sessions: previousSessions,
+          delegations: [
+            makeDelegationSummary({
+              id: "delegation-1",
+              childSessionId: "child-session",
+            }),
+          ],
+        },
+        { allowUnknownServerInstance: true },
+      );
+    });
+
+    expect(params.adoptionRefs.sessionsRef.current).toBe(previousSessions);
+    expect(setSessions).not.toHaveBeenCalled();
+    expect(setWorkspace).toHaveBeenCalledTimes(1);
+    expect(updatedWorkspace).not.toBeNull();
+    const prunedWorkspace = updatedWorkspace as unknown as WorkspaceState;
+    expect(prunedWorkspace.panes[0].tabs).toEqual([
+      {
+        id: "tab-parent",
+        kind: "session",
+        sessionId: "parent-session",
+      },
+    ]);
+    expect(prunedWorkspace.panes[0].activeSessionId).toBe("parent-session");
+  });
+
   it("keeps missing pending-open recovery armed across unchanged session adoption", () => {
     vi.stubGlobal(
       "EventSource",
@@ -3441,9 +3547,23 @@ describe("resolveAdoptStateSessionOptions", () => {
     ).toBe(true);
   });
 
+  it("prunes delegated child workspace tabs on a server instance change", () => {
+    expect(
+      resolveAdoptStateSessionOptions(undefined, true)
+        .pruneDelegatedChildWorkspaceTabs,
+    ).toBe(true);
+  });
+
   it("does not force messages unloaded without a server instance change", () => {
     expect(
       resolveAdoptStateSessionOptions(undefined, false).forceMessagesUnloaded,
+    ).toBe(false);
+  });
+
+  it("keeps delegated child workspace tabs during ordinary live updates", () => {
+    expect(
+      resolveAdoptStateSessionOptions(undefined, false)
+        .pruneDelegatedChildWorkspaceTabs,
     ).toBe(false);
   });
 });

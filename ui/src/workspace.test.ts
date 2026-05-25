@@ -3920,6 +3920,125 @@ describe("workspace helpers", () => {
     });
   });
 
+  it("reconcileWorkspaceState prunes delegated child workspace entries when restart recovery requests it", () => {
+    const childSession = {
+      ...makeSession("session-child"),
+      parentDelegationId: "delegation-1",
+    };
+    const next = reconcileWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane(
+          "pane-a",
+          [
+            makeSessionTab("tab-child", "session-child"),
+            makeSessionTab("tab-parent", "session-parent"),
+            makeSourceTab("source-child", "/tmp/review.md", "session-child"),
+            makeCanvasTab(
+              "canvas-a",
+              [
+                { sessionId: "session-child", x: 10, y: 20 },
+                { sessionId: "session-parent", x: 30, y: 40 },
+              ],
+              "session-child",
+            ),
+          ],
+          {
+            activeTabId: "tab-child",
+            activeSessionId: "session-child",
+            viewMode: "session",
+          },
+        ),
+      ),
+      [makeSession("session-parent"), childSession],
+      { pruneDelegatedChildSessionTabs: true },
+    );
+
+    expect(next.panes[0].tabs).toEqual([
+      makeSessionTab("tab-parent", "session-parent"),
+      makeSourceTab("source-child", "/tmp/review.md", null),
+      makeCanvasTab(
+        "canvas-a",
+        [{ sessionId: "session-parent", x: 30, y: 40 }],
+        null,
+      ),
+    ]);
+    expect(next.panes[0].activeSessionId).toBe("session-parent");
+  });
+
+  it("reconcileWorkspaceState keeps delegated child workspace entries during ordinary updates", () => {
+    const childSession = {
+      ...makeSession("session-child"),
+      parentDelegationId: "delegation-1",
+    };
+    const next = reconcileWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane(
+          "pane-a",
+          [makeSessionTab("tab-child", "session-child")],
+          {
+            activeTabId: "tab-child",
+            activeSessionId: "session-child",
+            viewMode: "session",
+          },
+        ),
+      ),
+      [childSession],
+    );
+
+    expect(next.panes[0].tabs).toEqual([
+      makeSessionTab("tab-child", "session-child"),
+    ]);
+    expect(next.panes[0].activeSessionId).toBe("session-child");
+  });
+
+  it("reconcileWorkspaceState creates fallback tabs from nondelegated sessions during restart pruning", () => {
+    const childSession = {
+      ...makeSession("session-child"),
+      parentDelegationId: "delegation-1",
+    };
+    const next = reconcileWorkspaceState(
+      {
+        root: null,
+        panes: [],
+        activePaneId: null,
+      },
+      [childSession, makeSession("session-parent")],
+      { pruneDelegatedChildSessionTabs: true },
+    );
+
+    expect(next.panes).toHaveLength(1);
+    expect(next.panes[0].tabs).toEqual([
+      expect.objectContaining({
+        kind: "session",
+        sessionId: "session-parent",
+      }),
+    ]);
+    expect(next.panes[0].activeSessionId).toBe("session-parent");
+  });
+
+  it("reconcileWorkspaceState keeps an empty workspace when every session is pruned", () => {
+    const next = reconcileWorkspaceState(
+      {
+        root: null,
+        panes: [],
+        activePaneId: null,
+      },
+      [
+        {
+          ...makeSession("session-child"),
+          parentDelegationId: "delegation-1",
+        },
+      ],
+      { pruneDelegatedChildSessionTabs: true },
+    );
+
+    expect(next).toEqual({
+      root: null,
+      panes: [],
+      activePaneId: null,
+    });
+  });
+
   it("reconcileWorkspaceState updates origin fields for session and project list tabs", () => {
     const next = reconcileWorkspaceState(
       makeSinglePaneWorkspace(
@@ -4005,4 +4124,3 @@ describe("workspace helpers", () => {
     });
   });
 });
-

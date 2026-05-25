@@ -42,6 +42,11 @@ export function resolveAdoptStateSessionOptions(
     // the active pane instead of leaving stale streaming content
     // visible until the user hard-refreshes.
     forceMessagesUnloaded: serverInstanceChanged,
+    // Delegated child sessions are durable for result inspection, but restored
+    // workspace layouts should not reopen historical reviewer panes after a
+    // browser or backend restart. They remain openable explicitly from the
+    // delegation card in the current UI session.
+    pruneDelegatedChildWorkspaceTabs: serverInstanceChanged,
   };
 }
 
