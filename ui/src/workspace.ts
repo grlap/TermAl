@@ -173,9 +173,11 @@ export function reconcileWorkspaceState(
   options: ReconcileWorkspaceStateOptions = {},
 ): WorkspaceState {
   const preservedSessionIds = new Set(options.preserveSessionIds ?? []);
+  const shouldPruneDelegatedChildSessionTabs =
+    options.pruneDelegatedChildSessionTabs === true;
   const availableSessions = sessions.filter((session) => {
     if (
-      options.pruneDelegatedChildSessionTabs === true &&
+      shouldPruneDelegatedChildSessionTabs &&
       session.parentDelegationId &&
       !preservedSessionIds.has(session.id)
     ) {
@@ -342,6 +344,16 @@ export function reconcileWorkspaceState(
       activeSessionId,
     });
   });
+  if (shouldPruneDelegatedChildSessionTabs) {
+    const originallyEmptyPaneIds = new Set(
+      current.panes
+        .filter((pane) => pane.tabs.length === 0)
+        .map((pane) => pane.id),
+    );
+    panes = panes.filter(
+      (pane) => pane.tabs.length > 0 || originallyEmptyPaneIds.has(pane.id),
+    );
+  }
 
   let root = pruneWorkspaceNode(current.root, new Set(panes.map((pane) => pane.id)));
 

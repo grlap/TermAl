@@ -3991,6 +3991,82 @@ describe("workspace helpers", () => {
     expect(next.panes[0].activeSessionId).toBe("session-child");
   });
 
+  it("reconcileWorkspaceState rebuilds fallback tabs when pruning empties the restored pane", () => {
+    const childSession = {
+      ...makeSession("session-child"),
+      parentDelegationId: "delegation-1",
+    };
+    const next = reconcileWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane(
+          "pane-a",
+          [makeSessionTab("tab-child", "session-child")],
+          {
+            activeTabId: "tab-child",
+            activeSessionId: "session-child",
+            viewMode: "session",
+          },
+        ),
+      ),
+      [childSession, makeSession("session-parent")],
+      { pruneDelegatedChildSessionTabs: true },
+    );
+
+    expect(next.panes).toHaveLength(1);
+    expect(next.panes[0].tabs).toEqual([
+      expect.objectContaining({
+        kind: "session",
+        sessionId: "session-parent",
+      }),
+    ]);
+    expect(next.panes[0].activeSessionId).toBe("session-parent");
+    expect(next.root).toEqual({
+      type: "pane",
+      paneId: next.panes[0].id,
+    });
+  });
+
+  it("reconcileWorkspaceState preserves pre-existing empty panes during restart pruning", () => {
+    const childSession = {
+      ...makeSession("session-child"),
+      parentDelegationId: "delegation-1",
+    };
+    const next = reconcileWorkspaceState(
+      makeSplitWorkspace(
+        makePane(
+          "pane-child",
+          [makeSessionTab("tab-child", "session-child")],
+          {
+            activeTabId: "tab-child",
+            activeSessionId: "session-child",
+            viewMode: "session",
+          },
+        ),
+        makePane("pane-empty", [], {
+          activeTabId: null,
+          activeSessionId: null,
+          viewMode: "session",
+        }),
+        "pane-empty",
+      ),
+      [childSession, makeSession("session-parent")],
+      { pruneDelegatedChildSessionTabs: true },
+    );
+
+    expect(next.panes).toEqual([
+      makePane("pane-empty", [], {
+        activeTabId: null,
+        activeSessionId: null,
+        viewMode: "session",
+      }),
+    ]);
+    expect(next.root).toEqual({
+      type: "pane",
+      paneId: "pane-empty",
+    });
+    expect(next.activePaneId).toBe("pane-empty");
+  });
+
   it("reconcileWorkspaceState creates fallback tabs from nondelegated sessions during restart pruning", () => {
     const childSession = {
       ...makeSession("session-child"),

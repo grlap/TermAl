@@ -625,11 +625,6 @@ describe("deferred session-store sync", () => {
               kind: "session",
               sessionId: "child-session",
             },
-            {
-              id: "tab-parent",
-              kind: "session",
-              sessionId: "parent-session",
-            },
           ],
           activeTabId: "tab-child",
           activeSessionId: "child-session",
@@ -672,17 +667,19 @@ describe("deferred session-store sync", () => {
       );
     });
 
+    // This is the path under test: `reconcileSessions` must preserve array
+    // identity, not just equal contents, while restart pruning still reconciles
+    // workspace tabs.
     expect(params.adoptionRefs.sessionsRef.current).toBe(previousSessions);
     expect(setSessions).not.toHaveBeenCalled();
     expect(setWorkspace).toHaveBeenCalledTimes(1);
     expect(updatedWorkspace).not.toBeNull();
     const prunedWorkspace = updatedWorkspace as unknown as WorkspaceState;
     expect(prunedWorkspace.panes[0].tabs).toEqual([
-      {
-        id: "tab-parent",
+      expect.objectContaining({
         kind: "session",
         sessionId: "parent-session",
-      },
+      }),
     ]);
     expect(prunedWorkspace.panes[0].activeSessionId).toBe("parent-session");
   });

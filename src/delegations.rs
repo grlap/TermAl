@@ -2232,18 +2232,26 @@ fn refresh_delegation_from_child_locked(
                 commands_run,
                 notes,
             };
-            let record = inner.delegations.get_mut(delegation_index)?;
-            record.status = DelegationStatus::Completed;
-            record.completed_at = Some(completed_at.clone());
-            record.result = Some(result.clone());
+            let public_summary = compact_delegation_public_summary(&result.summary);
+            {
+                let record = inner.delegations.get_mut(delegation_index)?;
+                record.status = DelegationStatus::Completed;
+                record.completed_at = Some(completed_at.clone());
+                record.result = Some(result.clone());
+            }
             inner.sync_running_read_only_delegation_index(delegation_index);
             inner.mark_delegation_mutated(delegation_index);
-            clear_delegation_child_queue_locked(inner, &delegation.child_session_id);
+            settle_terminal_delegation_child_locked(
+                inner,
+                &delegation.child_session_id,
+                SessionStatus::Idle,
+                &public_summary,
+            );
             let parent_card_delta = update_parent_delegation_card_locked(
                 inner,
                 &delegation,
                 ParallelAgentStatus::Completed,
-                compact_delegation_public_summary(&result.summary),
+                public_summary,
             );
             Some(DelegationLifecycleDelta::Completed {
                 delegation_id: delegation.id,
@@ -2385,14 +2393,12 @@ fn mark_delegation_failed_locked(
     record.result = Some(result.clone());
     inner.sync_running_read_only_delegation_index(delegation_index);
     inner.mark_delegation_mutated(delegation_index);
-    clear_delegation_child_queue_locked(inner, &delegation.child_session_id);
-    if let Some(child_index) = inner.find_session_index(&delegation.child_session_id) {
-        let child = inner
-            .session_mut_by_index(child_index)
-            .expect("child session index should be valid");
-        child.session.status = SessionStatus::Error;
-        child.session.preview = public_summary.clone();
-    }
+    settle_terminal_delegation_child_locked(
+        inner,
+        &delegation.child_session_id,
+        SessionStatus::Error,
+        &public_summary,
+    );
     let parent_card_delta = update_parent_delegation_card_locked(
         inner,
         &delegation,
@@ -2435,14 +2441,12 @@ fn mark_delegation_canceled_locked(
     record.result = Some(result);
     inner.sync_running_read_only_delegation_index(delegation_index);
     inner.mark_delegation_mutated(delegation_index);
-    clear_delegation_child_queue_locked(inner, &delegation.child_session_id);
-    if let Some(child_index) = inner.find_session_index(&delegation.child_session_id) {
-        let child = inner
-            .session_mut_by_index(child_index)
-            .expect("child session index should be valid");
-        child.session.status = SessionStatus::Idle;
-        child.session.preview = public_summary.clone();
-    }
+    settle_terminal_delegation_child_locked(
+        inner,
+        &delegation.child_session_id,
+        SessionStatus::Idle,
+        &public_summary,
+    );
     let parent_card_delta = update_parent_delegation_card_locked(
         inner,
         &delegation,
@@ -2455,6 +2459,23 @@ fn mark_delegation_canceled_locked(
         reason,
         parent_card_delta,
     })
+}
+
+fn settle_terminal_delegation_child_locked(
+    inner: &mut StateInner,
+    child_session_id: &str,
+    status: SessionStatus,
+    preview: &str,
+) {
+    clear_delegation_child_queue_locked(inner, child_session_id);
+    let Some(child_index) = inner.find_session_index(child_session_id) else {
+        return;
+    };
+    let child = inner
+        .session_mut_by_index(child_index)
+        .expect("child session index should be valid");
+    child.session.status = status;
+    child.session.preview = preview.to_owned();
 }
 
 fn clear_delegation_child_queue_locked(inner: &mut StateInner, child_session_id: &str) {
@@ -3053,12 +3074,10 @@ fn delegation_child_result_outcome(child: &SessionRecord) -> Option<DelegationCh
 }
 
 fn delegation_child_missing_runtime_summary(child: &SessionRecord) -> String {
-    match child.session.agent {
-        Agent::Claude => "Claude session exited before the active turn completed",
-        Agent::Codex => "Codex session exited before the active turn completed",
-        _ => "Agent session exited before the active turn completed",
-    }
-    .to_owned()
+    format!(
+        "{} session exited before the active turn completed",
+        child.session.agent.name()
+    )
 }
 
 struct DelegationWriteScope {
