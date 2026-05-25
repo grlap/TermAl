@@ -55,6 +55,10 @@ mod session_stop;
 mod session_stop_runtime;
 mod shared_codex;
 mod telegram;
+mod telegram_forwarding;
+mod telegram_relay_lifecycle;
+mod telegram_settings;
+mod telegram_support;
 mod terminal;
 mod workspace;
 
