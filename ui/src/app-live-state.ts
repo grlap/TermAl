@@ -107,7 +107,6 @@ import {
 import {
   openSessionInWorkspaceState,
   reconcileWorkspaceState,
-  type WorkspaceState,
 } from "./workspace";
 import type { ControlPanelSide } from "./workspace-storage";
 import type {
@@ -159,6 +158,7 @@ import {
 } from "./app-live-state-workspace-events";
 import { useAppLiveStateRenderSchedulers } from "./app-live-state-render-schedulers";
 import { useAppLiveStateTransport } from "./app-live-state-transport";
+import { reconcileAdoptedSessionsWorkspace } from "./app-live-state-workspace-reconciliation";
 
 export type {
   AdoptCreatedSessionOutcome,
@@ -189,49 +189,6 @@ function rememberServerInstanceId(
   if (serverInstanceId) {
     seenServerInstanceIdsRef.current.add(serverInstanceId);
   }
-}
-
-function workspaceHasDelegatedChildSessionReferences(
-  workspace: WorkspaceState,
-  sessions: readonly Session[],
-  preserveSessionIds: readonly string[] = [],
-) {
-  const preservedSessionIds = new Set(preserveSessionIds);
-  const delegatedChildSessionIds = new Set(
-    sessions.flatMap((session) =>
-      session.parentDelegationId && !preservedSessionIds.has(session.id)
-        ? [session.id]
-        : [],
-    ),
-  );
-  if (delegatedChildSessionIds.size === 0) {
-    return false;
-  }
-
-  return workspace.panes.some((pane) => {
-    if (
-      pane.activeSessionId &&
-      delegatedChildSessionIds.has(pane.activeSessionId)
-    ) {
-      return true;
-    }
-
-    return pane.tabs.some((tab) => {
-      if (tab.kind === "session") {
-        return delegatedChildSessionIds.has(tab.sessionId);
-      }
-      if (tab.kind === "canvas") {
-        return tab.cards.some((card) =>
-          delegatedChildSessionIds.has(card.sessionId),
-        );
-      }
-      return (
-        "originSessionId" in tab &&
-        !!tab.originSessionId &&
-        delegatedChildSessionIds.has(tab.originSessionId)
-      );
-    });
-  });
 }
 
 export function useAppLiveState(
@@ -654,46 +611,17 @@ export function useAppLiveState(
       }
       if (shouldReconcileWorkspace) {
         setWorkspace((current) => {
-          const preservedSessionIds = pendingOpenSessionId
-            ? [pendingOpenSessionId]
-            : [];
-          const shouldPruneCurrentWorkspace =
-            shouldPruneDelegatedChildWorkspaceTabs &&
-            workspaceHasDelegatedChildSessionReferences(
-              current,
-              mergedSessions,
-              preservedSessionIds,
-            );
-          const shouldReconcileCurrentWorkspace =
-            mergedSessions !== previousSessions ||
-            canOpenPendingSession ||
-            shouldPruneCurrentWorkspace;
-          if (!shouldReconcileCurrentWorkspace) {
-            return current;
-          }
-
-          const reconciled =
-            mergedSessions !== previousSessions ||
-            shouldPruneCurrentWorkspace
-              ? applyControlPanelLayout(
-                  reconcileWorkspaceState(current, mergedSessions, {
-                    preserveSessionIds: preservedSessionIds,
-                    pruneDelegatedChildSessionTabs:
-                      shouldPruneCurrentWorkspace,
-                  }),
-                )
-              : current;
-          if (!canOpenPendingSession || !pendingOpenSessionId) {
-            return reconciled;
-          }
-
-          return applyControlPanelLayout(
-            openSessionInWorkspaceState(
-              reconciled,
-              pendingOpenSessionId,
-              pendingPaneId,
-            ),
-          );
+          return reconcileAdoptedSessionsWorkspace({
+            applyControlPanelLayout,
+            canOpenPendingSession,
+            current,
+            mergedSessions,
+            pendingOpenSessionId,
+            pendingPaneId,
+            pruneDelegatedChildWorkspaceTabs:
+              shouldPruneDelegatedChildWorkspaceTabs,
+            sessionsChanged: mergedSessions !== previousSessions,
+          });
         });
       }
       if (hasRemovedSessions) {

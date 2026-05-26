@@ -1,33 +1,7 @@
+use super::delegation_support::{
+    finish_delegation_child_with_assistant_text, test_app_state_with_delegation_codex_runtime,
+};
 use super::*;
-
-fn finish_delegation_child_with_assistant_text(
-    state: &AppState,
-    child_session_id: &str,
-    text: &str,
-) {
-    let mut inner = state.inner.lock().expect("state mutex poisoned");
-    let child_index = inner
-        .find_session_index(child_session_id)
-        .expect("child session should exist");
-    let message_id = inner.next_message_id();
-    let child = inner
-        .session_mut_by_index(child_index)
-        .expect("child session index should be valid");
-    push_message_on_record(
-        child,
-        Message::Text {
-            attachments: Vec::new(),
-            id: message_id,
-            timestamp: stamp_now(),
-            author: Author::Assistant,
-            text: text.to_owned(),
-            expanded_text: None,
-        },
-    );
-    child.session.status = SessionStatus::Idle;
-    child.session.preview = text.lines().last().unwrap_or_default().to_owned();
-    state.commit_locked(&mut inner).unwrap();
-}
 
 fn mark_delegation_child_stale_with_result_packet(
     state: &AppState,
@@ -96,18 +70,6 @@ fn assert_delegation_wait_response_serializes_queue_flags(
     assert_eq!(value["resumeDispatchRequested"], resume_dispatch_requested);
     assert!(value.get("resume_prompt_queued").is_none());
     assert!(value.get("resume_dispatch_requested").is_none());
-}
-
-fn test_app_state_with_delegation_codex_runtime(
-    runtime_id: &str,
-) -> (AppState, mpsc::Receiver<CodexRuntimeCommand>) {
-    let state = super::test_app_state();
-    let (runtime, input_rx, _process) = test_shared_codex_runtime(runtime_id);
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
-    (state, input_rx)
 }
 
 #[test]

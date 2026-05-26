@@ -6,17 +6,14 @@ Proposed.
 
 This brief defines an MCP server that gives agent sessions a fast, semantic way
 to navigate large source trees. The first target is very large C# workspaces
-with hundreds or thousands of projects, but the design should leave room for
-language adapters beyond C#.
+with a few thousand projects, but the design should leave room for language
+adapters beyond C#.
 
 Related:
 - [Agent Delegation Sessions](./agent-delegation-sessions.md)
 - [Instruction Debugger](./instruction-debugger.md)
 - [File Change Awareness](./file-change-awareness.md)
 - [Source Renderers](./source-renderers.md)
-
-Follow-up: add reciprocal links from those referenced feature briefs if this
-brief remains in the tree.
 
 ## Problem
 
@@ -33,13 +30,15 @@ codebase:
   edit surface
 - repeated sessions rebuild the same mental map from scratch
 
-For a C# workspace with 1000+ projects, the missing capability is a compact,
-structured code intelligence layer that can answer source-navigation questions
-without dumping large files into the transcript.
+For a C# workspace with a few thousand projects, the missing capability is a
+compact, structured code intelligence layer that can answer source-navigation
+questions without dumping large files into the transcript.
 
 ## Goals
 
 - Provide exact symbol navigation through MCP tools.
+- Replace broad `rg`/`grep` as the default source-navigation reflex for Claude,
+  Codex, and delegated explorer/reviewer agents in indexed workspaces.
 - Return small, ranked, line-addressable results instead of whole-file dumps.
 - Provide file outlines so agents can inspect large files without reading full
   bodies.
@@ -55,6 +54,10 @@ without dumping large files into the transcript.
 - Expose stable symbol handles and clear invalidation when indexes refresh.
 - Make large-repo exploration faster for both direct agent work and delegated
   explorer/reviewer sessions.
+- Share one warm workspace index across parent sessions and delegated child
+  sessions so each agent does not pay a cold-start penalty.
+- Keep common warm navigation calls fast enough that agents do not fall back to
+  shell search.
 
 ## Non-goals for v1
 
@@ -68,12 +71,13 @@ without dumping large files into the transcript.
 
 ## Core Idea
 
-Add a **Code Navigation MCP** server for each active workspace:
+Add a **Code Navigation MCP** server for each active local workspace:
 
 ```text
 workspace files
-  -> project graph index
-  -> language-specific symbol index
+  -> lightweight workspace discovery
+  -> persisted path/text/project/symbol index
+  -> bounded language-service cache
   -> search and ranking layer
   -> MCP tools consumed by agents
 ```
@@ -82,6 +86,12 @@ The MCP server should be read-only by default. Agents still use their normal
 file-editing and terminal tools to make changes, while the navigation MCP gives
 them the shortest reliable path to the right files, symbols, tests, and
 dependency edges.
+
+TermAl should supervise one shared navigation server per workspace root, not one
+per agent process. Parent sessions and delegated Claude/Codex/Cursor/Gemini
+sessions should attach to that shared server and reuse its persisted index and
+warm caches. Remote workspace support is separate because index placement and
+path mapping are different problems.
 
 The primary design rule is:
 
@@ -102,7 +112,7 @@ repo_overview()
   -> outline(path) for large files before any whole-file read
   -> references(target, group_by = "project")
   -> related_tests(target) before behavior changes
-  -> read only the returned snippets or spans
+  -> source_context(path, spans, contextLines, maxBytes)
 ```
 
 When the task is exploratory, the agent should first find the project cluster:
@@ -120,12 +130,38 @@ The rule to encode in agent instructions is:
 **Never read a large file before `outline` or `definition` identifies the
 relevant span.**
 
+For agent instructions, a "large file" should mean any source file above roughly
+400 lines or 24 KB, unless the server reports a lower language-specific
+threshold. Agents may still use shell `rg` for unindexed generated output,
+binary-adjacent logs, or when the MCP server is unavailable, but the default
+path for source, project, and symbol navigation should be the MCP.
+
 ## Tool Surface
+
+The surface should be divided into phase-gated capability levels so agents know
+which workflows are safe. The server should expose its effective capabilities
+through normal MCP tool discovery and, optionally, a small
+`server_capabilities()` tool that reports supported languages, index status,
+available tools, response budgets, and disabled features.
+
+For implementation planning, core tools are required for the grep-replacement
+MVP, higher-level tools should follow once the core signals are reliable, and
+expanded tools are optional or later-phase capabilities.
 
 ### Core tools
 
 These tools should ship together because they cover the minimum useful
-large-repository navigation loop.
+large-repository navigation loop and are the minimum agent-usable grep
+replacement.
+
+```text
+server_capabilities()
+```
+
+Returns supported languages, enabled tools, index status, response budgets,
+latency/deadline defaults, and feature flags for partial phase availability.
+Agents can use normal MCP tool discovery too, but a compact capability summary
+helps them branch without probing broad queries.
 
 ```text
 repo_overview()
@@ -154,16 +190,29 @@ search_text(query, filters, limit, cursor)
 ```
 
 Fast text search with ranking and filters. This should behave like `rg`, but
-with structured output and workspace-aware ranking.
+with structured output, stable line/byte offsets, result budgets, and
+workspace-aware ranking. It is still text search, not a substitute for
+`search_symbol` or `references`.
 
 Useful filters:
 
+- fixed string vs regex
+- case-sensitive vs case-insensitive
+- whole-word matching
+- multiline matching, when the underlying index supports it
 - path globs
 - project name
 - language
 - production vs test
 - generated vs handwritten
 - file extension
+- hidden files
+- maximum line length and snippet bytes
+
+Ranking should prefer exact-token matches, handwritten source, project-local
+matches, recently changed files when relevant, and production/test scope
+matching the query. It should demote build output, vendored dependencies,
+generated files, designer files, and broad package/cache directories by default.
 
 ```text
 outline(path, depth)
@@ -172,6 +221,13 @@ outline(path, depth)
 Returns a file-level symbol map without method bodies. This is the primary
 token-saver for large C# files and should be cheap enough to call before any
 whole-file read.
+
+`depth` should be bounded and explicit:
+
+- `1`: namespaces and top-level types
+- `2`: type members, excluding method bodies
+- `3`: local functions, top-level statements, and lambda anchors where the
+  language adapter can report them cheaply
 
 Useful outline fields:
 
@@ -186,6 +242,16 @@ Useful outline fields:
 - generated/test classification
 
 ```text
+source_context(path, spans, contextLines, maxBytes)
+```
+
+Reads bounded live source around one or more returned spans. This is the bridge
+between navigation and editing: `outline`, `definition`, `references`, and
+`symbol_at` identify spans; `source_context` returns only the selected live
+source with line numbers, byte limits, truncation metadata, and freshness
+metadata. Batch span reads should be supported for common fan-out workflows.
+
+```text
 search_symbol(query, kinds, filters, limit, cursor)
 ```
 
@@ -198,17 +264,26 @@ Useful symbol kinds:
 - class
 - interface
 - struct
+- record
+- record struct
 - enum
+- delegate
 - method
 - constructor
 - property
 - field
 - event
-- attribute
 - extension method
+- local function
+- lambda anchor
+- top-level statement
+- attribute usage
 - controller
 - handler
 - test
+
+`attribute usage` is not a Roslyn symbol kind; it should be treated as an
+adapter-level search category over attributes attached to symbols.
 
 ```text
 symbol_at(path, line, column)
@@ -233,6 +308,14 @@ references(target, filters, group_by, limit, cursor)
 Returns exact references for a symbol or source location. For C#, this should be
 Roslyn-backed rather than raw text search.
 
+Because this is the most explosive query in a workspace with a few thousand
+projects, it should default to grouped summaries and bounded locations rather
+than a global flat dump. Filters should include project glob, production/test,
+generated/handwritten, reference kind, caller type, target framework, and
+whether to include interface or override expansion. Reflection, string-based
+lookup, DI container wiring, and expression-tree-only edges should be reported
+as `heuristic` or excluded by default.
+
 Useful grouping:
 
 - project
@@ -254,6 +337,14 @@ Useful options:
 - format: `edges` or a compact tree summary
 - include packages
 - include test projects
+
+```text
+projects_containing(path)
+```
+
+Returns all projects that compile or link a file. This matters for shared files
+and linked `<Compile Include="...">` entries and is needed before interpreting
+diagnostics or symbol identity for files included by multiple projects.
 
 ### Higher-level tools
 
@@ -279,11 +370,13 @@ types, and overridden methods.
 
 ```text
 callers(target, depth, filters, limit, cursor)
-callee(target, depth, filters, limit, cursor)
+callees(target, depth, filters, limit, cursor)
 ```
 
 Walks the call graph around a method, constructor, property accessor, or
-delegate invocation.
+delegate invocation. These tools should be on-demand, scope-limited, and
+confidence-labeled; precomputing whole-repo call graphs is not required for the
+core grep-replacement workflow.
 
 ```text
 type_hierarchy(target, direction, depth)
@@ -313,13 +406,6 @@ dependency_path(from_project, to_project, limit)
 
 Returns the shortest project-reference or package-reference paths explaining
 why one project depends on another.
-
-```text
-projects_containing(path)
-```
-
-Returns all projects that compile or link a file. This matters for shared files
-and linked `<Compile Include="...">` entries.
 
 ```text
 config_lookup(key, filters, limit, cursor)
@@ -376,6 +462,7 @@ Batch forms should exist for common fan-out calls:
 batch_definition(targets)
 batch_references(targets, filters, group_by, limit)
 batch_outline(paths, depth)
+batch_source_context(requests)
 ```
 
 ## Result Shape
@@ -385,17 +472,39 @@ responses should include a short summary, cursor metadata, and index freshness
 metadata so the agent can decide whether to tighten filters, page, or trust the
 answer.
 
+All tool responses should enforce both item and byte/token budgets. Defaults
+should be tuned for agent turns rather than human IDE panes:
+
+- default response target: roughly 8 KB of JSON/snippet payload
+- hard response cap: roughly 32 KB unless the caller explicitly opts into a
+  larger budget
+- snippets should include line numbers and a small surrounding context by
+  default
+- `truncated: true` means the result set was larger than the response budget
+- `partial: true` means the server hit a deadline, stale dependency, failed
+  project load, or partial index and is returning an incomplete answer
+- list tools should return `nextCursor` when more exact results are available
+- all results should include enough path, line, column, and byte-offset metadata
+  for a follow-up `source_context` call
+
 Targets should be accepted in any of these forms:
 
 ```json
-{ "symbolId": "roslyn:Billing.Application:..." }
+{ "symbolId": "roslyn:Billing.Application:net8.0:M:Billing.Application.InvoiceService.CreateInvoiceAsync(...)" }
 { "path": "src/Billing/Application/InvoiceService.cs", "line": 42, "column": 17 }
 { "qualifiedName": "Billing.Application.InvoiceService.CreateInvoiceAsync" }
+{
+  "projectPath": "src/Billing/Application/Billing.Application.csproj",
+  "targetFramework": "net8.0",
+  "documentationCommentId": "M:Billing.Application.InvoiceService.CreateInvoiceAsync(...)"
+}
 ```
 
 Symbol ids are stable within an `indexVersion`. If an index refresh invalidates
 an id, tools should return a clear stale-id error and, where possible, a
-replacement candidate.
+replacement candidate. For C#, the stable identity should be based on Roslyn's
+documentation comment id or metadata name plus project identity and target
+framework, not a display name alone.
 
 ```json
 {
@@ -404,8 +513,12 @@ replacement candidate.
   "endLine": 88,
   "snippetLines": [38, 54],
   "project": "Billing.Application",
+  "projectPath": "src/Billing/Application/Billing.Application.csproj",
+  "assemblyName": "Billing.Application",
   "targetFramework": "net8.0",
-  "symbolId": "roslyn:Billing.Application:...",
+  "configuration": "Debug",
+  "symbolId": "roslyn:Billing.Application:net8.0:M:Billing.Application.InvoiceService.CreateInvoiceAsync(...)",
+  "documentationCommentId": "M:Billing.Application.InvoiceService.CreateInvoiceAsync(...)",
   "kind": "method",
   "accessibility": "public",
   "containingNamespace": "Billing.Application",
@@ -415,6 +528,8 @@ replacement candidate.
   "isTest": false,
   "score": 0.93,
   "confidence": "exact",
+  "partial": false,
+  "truncated": false,
   "snippet": "public async Task<Invoice> CreateInvoiceAsync(...)",
   "indexVersion": "workspace-sha-or-index-id",
   "indexStatus": "fresh"
@@ -437,12 +552,13 @@ References should default to grouped output, not a flat global dump:
     }
   ],
   "truncated": true,
+  "partial": false,
   "nextCursor": "...",
   "indexVersion": "workspace-sha-or-index-id",
   "indexStatus": "fresh",
   "coverage": {
     "indexedProjects": 1510,
-    "totalProjects": 1600
+    "totalProjects": 2400
   }
 }
 ```
@@ -489,6 +605,8 @@ answer:
 - `indexStatus`: `fresh`, `building`, `partial`, or `stale`
 - `coverage`: indexed projects/files compared with discovered total
 - missing or stale project summaries for partial indexes
+- `partialReason`, when `partial: true`
+- `deadlineMs` and `elapsedMs` for calls that may be slow
 
 ## C# First Index
 
@@ -496,7 +614,7 @@ The C# adapter should use Roslyn and MSBuild semantics instead of regex parsing.
 
 Recommended index inputs:
 
-- `.sln`, `.slnx`, and discovered `.csproj` files
+- `.sln`, `.slnx`, `.slnf`, and discovered `.csproj` files
 - `Directory.Build.props`
 - `Directory.Build.targets`
 - `global.json`
@@ -507,20 +625,106 @@ Recommended index inputs:
 - generated-code markers
 - test framework packages and attributes
 
+Workspace discovery must not assume one canonical solution. Large enterprise
+repos often contain many overlapping solutions, generated solution filters, or
+no useful solution file at all. The indexer should support:
+
+- solution-less project discovery from canonical workspace roots
+- `.slnf` solution filters and generated solution files
+- overlapping solution membership without duplicating project identities
+- lazy project loading when the current task only needs a subset
+- explicit user/workspace preference for primary solutions or project clusters
+- project load failures recorded as first-class index status, not hidden logs
+
 Recommended symbol data:
 
 - fully qualified metadata name
 - display signature
 - source span
 - declaring project
+- project path and stable project id
 - assembly name
+- target framework, configuration, and platform
 - accessibility
+- arity and parameter signature for overload identity
 - attributes
 - XML documentation summary, if available
 - partial declaration spans
 - generated vs handwritten flag
 - test vs production classification
-- target framework and conditional-compilation context
+- nullable, preprocessor, and conditional-compilation context where relevant
+- source-generator origin metadata where detectable
+
+### Symbol Identity
+
+C# symbol identity must handle overloads, partials, linked files, generated
+source, and multi-targeted projects. A symbol id should include:
+
+- adapter prefix and index version compatibility
+- canonical project path or project id
+- assembly name
+- target framework and configuration/platform
+- Roslyn documentation comment id or metadata name
+- member arity and parameter signature for overloads
+- generated-origin marker when the symbol has no handwritten source span
+
+For multi-targeted projects, the default policy should choose a canonical target
+framework for broad search results while preserving the exact TFM in symbol ids.
+The canonical TFM should be configurable per workspace. When behavior differs
+by TFM, tools should return separate results rather than collapsing them.
+
+Partial types and members should share one logical symbol id with multiple
+declaration spans. Extension methods should be anchored to their declaring
+static type and method symbol, while search/ranking may expose the extended type
+as a convenience field.
+
+### Storage Model
+
+The first implementation should use a persisted local index rather than
+rebuilding navigation state inside each agent session. SQLite with FTS5 is the
+default pragmatic storage choice unless benchmarks show it is insufficient.
+The schema should include at least:
+
+- files with path, language, hash, generated/test flags, and freshness state
+- projects with path, name, assembly, target frameworks, solution membership,
+  load status, and package/project references
+- symbols with stable ids, kind, name facets, declaration spans, project ids,
+  target frameworks, and generated/test flags
+- references with symbol id, source location, reference kind, caller symbol,
+  project id, and confidence
+- text-search FTS rows with path, line/byte offsets, language, generated/test
+  flags, and ranking features
+- dependency graph edges
+- index metadata, coverage, stale scopes, and failure summaries
+
+The index should support single-writer/multi-reader access so multiple agents
+can query while a background refresh updates stale scopes. The spec should track
+a rough size budget per million lines of code once benchmark data exists.
+
+### Memory And Process Model
+
+A few-thousand-project C# repo cannot assume a retained whole-repo Roslyn
+compilation. The indexer should separate:
+
+- a lightweight persisted index for path/text/project/symbol metadata
+- an ephemeral Roslyn workspace/project cache for semantic rebinding
+- bounded compilation objects with LRU eviction
+- background indexing workers with CPU and memory caps
+- cancellation for indexing and for individual expensive tool calls
+
+`MSBuildWorkspace.OpenSolutionAsync` over the entire repo should not be the
+required startup path. The server should be useful during partial readiness,
+load project clusters lazily, and never block ordinary TermAl session startup on
+full semantic indexing.
+
+### Source Generators
+
+Generated source must be explicit in both coverage and confidence. The indexer
+should record whether generated outputs are indexed, which generator or MSBuild
+target produced them when detectable, and whether a symbol came from generated
+or handwritten syntax. Generator execution should be cached per project snapshot
+and should not run per query. When generated output is unavailable, tools should
+return `partial` or `heuristic` instead of silently missing generated symbols.
 
 Recommended semantic edges:
 
@@ -529,10 +733,10 @@ Recommended semantic edges:
 - type inheritance
 - interface implementation
 - method override
-- method calls
+- method calls, when resolved on demand or from a bounded cached graph
 - property/event references
 - attribute usage
-- dependency injection registrations, where detectable
+- dependency injection registrations, where detectable and confidence-labeled
 - test-to-production references
 - source-generator inputs and generated outputs, where detectable
 
@@ -598,6 +802,20 @@ Ranking should prefer:
 - tests that reference the exact symbol over tests that only match by name
 - recently changed files when the question concerns current work
 
+The budget algorithm should be deterministic. A hard `maxTokens` or `maxBytes`
+must never be exceeded. If the full pack does not fit, include content in this
+order and report omitted categories:
+
+- primary target definitions and requested `must_include_paths`
+- direct tests with exact references
+- direct callers or entrypoints closest to the target project
+- relevant project graph edges
+- nearby sibling declarations from outlines
+- heuristic matches and recent-change hints
+
+The response should distinguish `omittedBecauseBudget` from `partial` so agents
+know whether the pack is complete within its requested scope.
+
 ## Freshness And Dirty Workspaces
 
 Large indexes cannot be rebuilt on every keystroke. The MCP server needs clear
@@ -611,6 +829,9 @@ freshness semantics:
 - re-bind symbols in modified files before returning cross-file references that
   could be affected by working-tree edits
 - allow explicit `refresh(scope)` in later phases
+- support delta refresh for changed files and affected project clusters
+- keep stale project summaries queryable so agents can see what coverage is
+  missing
 
 TermAl's file-change awareness can feed the same invalidation model, but the
 navigation server should still work as a standalone MCP process.
@@ -628,24 +849,44 @@ Workspace setup should include compact instructions similar to:
 ## Code Navigation MCP
 
 This repository is too large for broad grep-based C# navigation. Use the
-read-only Code Navigation MCP before reading files.
+read-only Code Navigation MCP before reading files. Prefer MCP search and
+symbol tools over shell `rg`/`grep` for source navigation.
 
 Default flow:
 1. Call `repo_overview()` before code work and check `indexStatus`.
-2. Use `search_symbol` for C# identifiers. Use `search_text` only for config
-   keys, route strings, error messages, and literals.
+2. Use `search_symbol` for C# identifiers. Use `search_text` for config keys,
+   route strings, error messages, and literals.
 3. If starting from a stack trace, build error, diagnostic, grep hit, or diff
    hunk, call `symbol_at(path, line, column?)`.
-4. Before reading a large file, call `outline(path)` and read only the needed
-   spans.
+4. Before reading a large file, call `outline(path)`, then `source_context` for
+   only the needed spans.
 5. Before changing behavior, call `references(target, group_by="project")` and
    `related_tests(target)`.
 6. Trust `confidence: exact`; treat `heuristic`, `partial`, and `stale` as
    leads.
 7. Keep limits small. Tighten filters before paging broad result sets.
+8. Use shell `rg` only when the MCP is unavailable, the scope is unindexed, or
+   the query is outside source navigation.
 ```
 
+Codex and Claude prompts can share the same rules, but TermAl should inject
+agent-specific wording where needed. In particular, delegated explorer and
+reviewer sessions should be told that MCP navigation is mandatory before broad
+file reads, because their value comes from finding the right source slice
+without spending the parent transcript on exploration.
+
 ## TermAl Integration
+
+TermAl should supervise the initial implementation as a workspace-scoped MCP
+server process. A concrete command shape could be:
+
+```text
+termal code-nav-mcp --workspace-root <path> --index-root <path> --workspace-id <id>
+```
+
+The backend should own workspace path mapping, process lifecycle, index root
+selection, and server restart behavior. Agent processes should receive only the
+MCP descriptor and compact instructions.
 
 Recommended user-facing integration points:
 
@@ -659,12 +900,22 @@ Recommended user-facing integration points:
 
 Recommended agent integration:
 
-- attach the MCP server to Codex, Claude, Gemini, and Cursor sessions when the
-  workspace is local and indexable
+- attach the MCP server to Codex through `config.mcp_servers` when the workspace
+  is local and indexable
+- attach the MCP server to Claude through generated `--mcp-config`
 - include a compact instruction in session setup explaining which tools exist
   and when to prefer them
 - expose the same MCP tool names across agents where possible
 - keep the backend authoritative for workspace path mapping and server lifecycle
+- make delegated child sessions inherit the parent workspace navigation server
+  instead of launching their own cold indexer
+- surface a clear unavailable/degraded state when the server is missing, still
+  indexing, or has failed to load relevant projects
+
+The integration should fail soft for ordinary chat but fail visible for
+navigation-heavy code work. If a large C# workspace is detected and the MCP is
+not attached, the session instructions should say that source navigation is
+degraded and shell search may be noisy.
 
 ## Safety And Performance
 
@@ -686,57 +937,124 @@ The server should be optimized for fast, bounded answers:
 - index state should be cancellable and restartable
 - indexing should not block ordinary TermAl session startup
 - every response should include index status when freshness could matter
+- every potentially expensive tool call should have a deadline, defaulting to
+  roughly 5 seconds and configurable up to a bounded maximum
+- broad calls that exceed their deadline should return `partial: true` with
+  exact results found so far rather than blocking other agents
+
+Warm-query latency targets should be explicit so replacing `rg` is measurable:
+
+- `repo_overview`: p95 under 100 ms from the persisted index
+- `find_file`: p95 under 100 ms
+- `search_text`: p95 under 250 ms for scoped queries
+- `outline`: p95 under 100 ms from syntax/index data
+- `search_symbol`: p95 under 250 ms from the symbol index
+- `definition`: p95 under 250 ms when the target project is already loaded or
+  the definition span is in the persisted index
+- `references`: p95 under 1 second for scoped, grouped queries; broader queries
+  should return grouped summaries plus cursors or partial results
+
+Default exclusions should be concrete and overridable:
+
+- `**/.git/**`
+- `**/{bin,obj,packages,node_modules,TestResults}/**`
+- `**/.vs/**`
+- `**/.idea/**`
+- `**/*.{g,designer,generated}.cs`
+- generated source folders discovered through MSBuild or source-generator
+  conventions, unless the caller includes generated output explicitly
 
 The server should avoid hidden writes. Future write-capable tools, if any, must
 be separate from navigation tools and go through TermAl's normal approval and
 file-change protection paths.
 
+## Evaluation And Testing
+
+The feature should be validated as an agent workflow, not only as an indexer.
+Acceptance tests and benchmarks should cover:
+
+- synthetic and real few-thousand-project C# workspaces
+- multiple solutions, `.slnf`, overlapping solutions, and solution-less project
+  discovery
+- linked files compiled by multiple projects
+- multi-targeted projects such as `net48;net8.0`
+- generated source and missing-generator partial coverage
+- stale index behavior after local edits
+- grouped reference queries with large result sets
+- Claude and Codex MCP attachment, including delegated child sessions
+- response byte/token caps, cursors, deadlines, and partial results
+
+Success metrics should include p95 tool latency, index size, memory ceiling,
+percentage of agent file reads preceded by MCP span navigation, percentage of
+shell `rg` calls avoided in large C# sessions, and click/open rates for returned
+source locations in the human UI.
+
 ## Phased Plan
 
-### Phase 1: Raw workspace map plus path/text search
+### Phase 0: Index substrate and workspace discovery
 
-- discover solutions, projects, source roots, and test roots
+- implement the workspace-scoped MCP server process
+- create the persisted index store and text-search tables
+- discover `.sln`, `.slnx`, `.slnf`, loose `.csproj`, source roots, test roots,
+  generated/build-output conventions, and default exclusions
+- expose `server_capabilities`, `repo_overview`, `find_file`, and `search_text`
+  for internal testing
+- do not advertise this as a grep replacement yet
+
+### Phase 1: Agent grep-replacement MVP
+
+This is the first release that should be attached to Claude/Codex as the
+preferred source-navigation path. It should ship as a coherent slice:
+
 - expose `repo_overview`
 - expose `find_file`
-- expose `search_text`
-- return structured file/line snippets
-- ignore semantic symbol indexing until the workspace map is reliable
-
-### Phase 2: C# project graph and syntactic outlines
-
-- parse `.sln` / `.slnx` / `.csproj`
-- resolve project references and package references
-- detect linked compile items
-- detect production/test projects
+- expose `search_text` with grep-parity flags and workspace ranking
 - expose `project_graph`
-- expose `outline` using syntax trees where semantic loading is unavailable
 - expose `projects_containing`
-- add project filters to text search
+- expose `outline`
+- expose `source_context`
+- expose `search_symbol`
+- expose `symbol_at`
+- expose `definition`
+- expose scoped, grouped `references`
+- load Roslyn/MSBuild semantics lazily for the project clusters needed by those
+  symbol and reference calls
+- attach the server to Codex and Claude sessions with agent instructions
+- share the same warm server with delegated child sessions
+- enforce response budgets, deadlines, partial results, and freshness metadata
+- meet the initial warm-query latency targets for scoped queries
 
-### Phase 3: Roslyn symbol index
+### Phase 2: C# scale hardening
 
-- load projects through MSBuild/Roslyn
-- index definitions and symbol metadata
-- expose `search_symbol`, `symbol_at`, and `definition`
-- include stable symbol ids and index versions
-- expose partial-index coverage and stale-id failure modes
+- implement lazy Roslyn/MSBuild project loading by project cluster
+- implement bounded compilation caches with LRU eviction
+- finalize symbol id schema for overloads, partials, linked files,
+  multi-targeting, and generated source
+- implement delta invalidation from file-change awareness and standalone file
+  watching
+- record project load failures, stale scopes, and source-generator coverage
+- benchmark on synthetic and real few-thousand-project repos
 
-### Phase 4: References and implementations
+### Phase 3: Expanded semantic navigation
 
-- expose `references`
 - expose `implementations`
-- group references by project, file, and production/test classification
-- mark generated and stale results clearly
-
-### Phase 5: Context packs and impact summaries
-
-- expose `context_pack`
+- expose `callers` and `callees` as on-demand, scoped graph queries
+- expose `type_hierarchy`
 - expose `related_tests`
-- expose first-pass `impact`
-- expose `dependency_path`, `namespace_layout`, and `config_lookup`
+- expose `dependency_path`, `namespace_layout`, `projects_under`, and
+  `config_lookup`
 - tune ranking with real agent transcripts from large repos
 
-### Phase 6: Human inspection surface
+### Phase 4: Context packs and impact summaries
+
+- expose `context_pack`
+- expose first-pass `impact`
+- add optional `xml_doc`
+- decide whether `diagnostics` reads last build output, live Roslyn analyzers, or
+  both as separate tools
+- keep all higher-level tools explainable as summaries over lower-level results
+
+### Phase 5: Human inspection surface
 
 - add a TermAl Code Navigation tab
 - show project graph, symbol search, references, and context-pack previews
@@ -744,16 +1062,15 @@ file-change protection paths.
 
 ## Open Questions
 
-- Should the MCP server live inside TermAl, or should TermAl supervise an
-  external per-workspace process?
 - How should remote workspaces expose indexes without copying huge repositories
   back to the local machine?
-- How much call graph data should be precomputed versus resolved on demand?
 - Should context-pack ranking remain deterministic in the MCP, with optional
   model-assisted reranking left to the calling agent?
 - What is the right cache invalidation boundary for generated source, source
   generators, and conditional compilation?
-- How should multi-targeted projects report symbol identity when a symbol is
-  compiled under several target frameworks?
 - How should symbol ids resolve across index rebuilds when source has moved but
   the logical symbol still exists?
+- Should SQLite + FTS5 remain the storage backend after large-repo benchmarks, or
+  should symbol/reference search move to Tantivy/LMDB/another store?
+- Which reciprocal links should be added from related feature briefs once this
+  proposal is accepted?

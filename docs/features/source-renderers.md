@@ -17,6 +17,9 @@ recognized diagrams, equations, and other safe visual blocks from the same
 source buffer used by Monaco editing, Git diff edit mode, and rendered Markdown
 views.
 
+Related: [Code Navigation MCP](./code-navigation-mcp.md) can use source-renderer
+metadata when building compact context packs for renderable files.
+
 ### Phase 1 shipped
 
 - `remark-math` + `rehype-katex` + `katex` wired into

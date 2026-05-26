@@ -10,6 +10,10 @@ This brief describes a provenance and debugging surface for agent instruction
 documents such as `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, and related
 Markdown-based prompt files.
 
+Related: [Code Navigation MCP](./code-navigation-mcp.md) follows the same
+principle of returning compact, provenance-rich navigation context instead of
+forcing agents to read broad file sets.
+
 ## Problem
 
 The current instruction-file story is opaque.
