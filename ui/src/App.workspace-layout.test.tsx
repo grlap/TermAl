@@ -1660,4 +1660,201 @@ describe("App workspace layout", () => {
       ),
     ).toBe(unrelatedError);
   });
+
+  it("prunes delegated child tabs from a fetched workspace layout after state loads", async () => {
+    const fetchWorkspaceLayoutDeferred =
+      createDeferred<Awaited<ReturnType<typeof api.fetchWorkspaceLayout>> | null>();
+    vi.mocked(api.fetchWorkspaceLayout).mockImplementation(
+      () => fetchWorkspaceLayoutDeferred.promise,
+    );
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    stubScrollIntoView();
+
+    await renderApp();
+
+    await act(async () => {
+      fetchWorkspaceLayoutDeferred.resolve(
+        makeWorkspaceLayoutResponse({
+          workspace: {
+            root: {
+              type: "pane",
+              paneId: "pane-restored",
+            },
+            panes: [
+              {
+                id: "pane-restored",
+                tabs: [
+                  {
+                    id: "tab-child",
+                    kind: "session",
+                    sessionId: "session-child",
+                  },
+                  {
+                    id: "tab-parent",
+                    kind: "session",
+                    sessionId: "session-parent",
+                  },
+                ],
+                activeTabId: "tab-child",
+                activeSessionId: "session-child",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+            ],
+            activePaneId: "pane-restored",
+          },
+        }),
+      );
+      await flushUiWork();
+    });
+
+    expect(
+      screen.queryByRole("tab", { name: "Parent Session" }),
+    ).not.toBeInTheDocument();
+
+    await dispatchOpenedStateEvent(
+      latestEventSource(),
+      makeStateResponse({
+        revision: 1,
+        projects: [],
+        orchestrators: [],
+        workspaces: [],
+        sessions: [
+          makeSession("session-parent", {
+            name: "Parent Session",
+          }),
+          makeSession("session-child", {
+            name: "Delegated Reviewer",
+            parentDelegationId: "delegation-1",
+          }),
+        ],
+      }),
+    );
+
+    expect(
+      screen.queryByRole("tab", { name: "Delegated Reviewer" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "Parent Session" }),
+    ).toBeInTheDocument();
+
+    const workspaceViewId = new URL(window.location.href).searchParams.get(
+      "workspace",
+    );
+    expect(workspaceViewId).not.toBeNull();
+    const persistedRaw = window.localStorage.getItem(
+      `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+    );
+    expect(persistedRaw).not.toBeNull();
+    const persistedLayout = JSON.parse(persistedRaw!) as {
+      workspace: WorkspaceState;
+    };
+    const persistedSessionIds = persistedLayout.workspace.panes.flatMap((pane) =>
+      pane.tabs.flatMap((tab) =>
+        tab.kind === "session" ? [tab.sessionId] : [],
+      ),
+    );
+    expect(persistedSessionIds).toEqual(["session-parent"]);
+  });
+
+  it("clears a deferred fetched workspace layout after an empty session snapshot", async () => {
+    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const workspaceViewId = "test-empty-session-layout-release";
+    const layoutStorageKey = `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`;
+    const fetchWorkspaceLayoutDeferred =
+      createDeferred<Awaited<ReturnType<typeof api.fetchWorkspaceLayout>> | null>();
+    vi.mocked(api.fetchWorkspaceLayout).mockImplementation(
+      () => fetchWorkspaceLayoutDeferred.promise,
+    );
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    stubScrollIntoView();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `/?workspace=${workspaceViewId}`,
+    );
+
+    try {
+      await renderApp();
+
+      await act(async () => {
+        fetchWorkspaceLayoutDeferred.resolve(
+          makeWorkspaceLayoutResponse({
+            workspace: {
+              root: {
+                type: "pane",
+                paneId: "pane-stale",
+              },
+              panes: [
+                {
+                  id: "pane-stale",
+                  tabs: [
+                    {
+                      id: "tab-stale-session",
+                      kind: "session",
+                      sessionId: "session-stale",
+                    },
+                  ],
+                  activeTabId: "tab-stale-session",
+                  activeSessionId: "session-stale",
+                  viewMode: "session",
+                  lastSessionViewMode: "session",
+                  sourcePath: null,
+                },
+              ],
+              activePaneId: "pane-stale",
+            },
+          }),
+        );
+        await flushUiWork();
+      });
+
+      expect(
+        window.localStorage.getItem(layoutStorageKey),
+      ).toBeNull();
+
+      await dispatchOpenedStateEvent(
+        latestEventSource(),
+        makeStateResponse({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [],
+        }),
+      );
+
+      await waitFor(() => {
+        const persistedRaw = window.localStorage.getItem(layoutStorageKey);
+        expect(persistedRaw).not.toBeNull();
+        const persistedLayout = JSON.parse(persistedRaw!) as {
+          workspace: WorkspaceState;
+        };
+        const persistedSessionIds = persistedLayout.workspace.panes.flatMap(
+          (pane) =>
+            pane.tabs.flatMap((tab) =>
+              tab.kind === "session" ? [tab.sessionId] : [],
+            ),
+        );
+        expect(persistedSessionIds).toEqual([]);
+      });
+    } finally {
+      window.history.replaceState(window.history.state, "", originalUrl);
+    }
+  });
 });

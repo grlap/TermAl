@@ -292,6 +292,7 @@ export default function App() {
     Gemini: defaultNewSessionModel("Gemini"),
   }));
   const [isLoading, setIsLoading] = useState(true);
+  const [hasAdoptedStateSnapshot, setHasAdoptedStateSnapshot] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [sendingSessionIds, setSendingSessionIds] = useState<SessionFlagMap>(
     {},
@@ -750,6 +751,9 @@ export default function App() {
     workspaceViewId,
     workspace,
     setWorkspace,
+    sessions,
+    sessionsRef,
+    isSessionStateReady: hasAdoptedStateSnapshot,
     controlPanelSide,
     setControlPanelSide,
     preferences: {
@@ -842,6 +846,7 @@ export default function App() {
       setSessionSettingNotices,
       setSelectedProjectId,
       setIsLoading,
+      setHasAdoptedStateSnapshot,
       setBackendConnectionIssueDetail,
       setBackendConnectionState,
     },

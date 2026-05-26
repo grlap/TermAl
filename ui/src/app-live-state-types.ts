@@ -135,6 +135,7 @@ export type UseAppLiveStateStateSetters = {
   setSessionSettingNotices: Dispatch<SetStateAction<SessionNoticeMap>>;
   setSelectedProjectId: Dispatch<SetStateAction<string>>;
   setIsLoading: Dispatch<SetStateAction<boolean>>;
+  setHasAdoptedStateSnapshot: Dispatch<SetStateAction<boolean>>;
   setBackendConnectionIssueDetail: Dispatch<SetStateAction<string | null>>;
   setBackendConnectionState: (next: BackendConnectionState) => void;
 };

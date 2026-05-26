@@ -330,6 +330,7 @@ function makeLiveStateParams(
       setSessionSettingNotices: noopSetter,
       setSelectedProjectId: noopSetter,
       setIsLoading: noopSetter,
+      setHasAdoptedStateSnapshot: noopSetter,
       setBackendConnectionIssueDetail: noopSetter,
       setBackendConnectionState: noopSetter,
     },

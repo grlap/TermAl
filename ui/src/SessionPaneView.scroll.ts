@@ -51,6 +51,7 @@ type UseSessionPaneScrollStateParams = {
   activeSession: Session | null;
   activeSessionSearchMatch: SessionSearchMatch | null;
   defaultScrollToBottom: boolean;
+  deferContentScrollEffects: boolean;
   forceSessionScrollToBottomRef: MutableRefObject<
     Record<string, true | undefined>
   >;
@@ -84,6 +85,7 @@ export function useSessionPaneScrollState({
   activeSession,
   activeSessionSearchMatch,
   defaultScrollToBottom,
+  deferContentScrollEffects,
   forceSessionScrollToBottomRef,
   hasSessionFindQuery,
   isActive,
@@ -362,7 +364,10 @@ export function useSessionPaneScrollState({
       scrollStateKey,
       paneScrollPositions,
     );
-    if (shouldStick) {
+    if (isUpwardScroll) {
+      setTailFollowIntent(false);
+      cancelSettledScrollToBottom();
+    } else if (shouldStick) {
       setTailFollowIntent(true);
       setNewResponseIndicator(scrollStateKey, false);
     } else {
@@ -740,6 +745,8 @@ export function useSessionPaneScrollState({
       typeof previousTop === "number" &&
       previousTop < Number.MAX_SAFE_INTEGER / 2 &&
       node.scrollTop < previousTop - 1;
+    const movedUpAfterUserEscape =
+      hasTailFollowUserEscape() && movedUpFromRecordedPosition;
     const { shouldStick } = syncMessageStackScrollPosition(
       node,
       scrollStateKey,
@@ -758,7 +765,10 @@ export function useSessionPaneScrollState({
       }
       return;
     }
-    if (shouldStick) {
+    if (movedUpAfterUserEscape) {
+      setTailFollowIntent(false);
+      cancelSettledScrollToBottom();
+    } else if (shouldStick) {
       setTailFollowIntent(true);
       setNewResponseIndicator(scrollStateKey, false);
     } else if (
@@ -870,6 +880,7 @@ export function useSessionPaneScrollState({
     }
 
     if (
+      deferContentScrollEffects ||
       !activeSession ||
       !isActive ||
       !isSessionTabActive ||
@@ -899,7 +910,8 @@ export function useSessionPaneScrollState({
       scrollKind: "bottom_follow",
     });
   }, [
-    activeSession,
+    activeSession?.id,
+    deferContentScrollEffects,
     isActive,
     isSessionTabActive,
     paneViewMode,
@@ -945,6 +957,7 @@ export function useSessionPaneScrollState({
 
   useLayoutEffect(() => {
     if (
+      deferContentScrollEffects ||
       !activeSession ||
       !isSessionTabActive ||
       paneViewMode !== "session" ||
@@ -961,7 +974,8 @@ export function useSessionPaneScrollState({
       preferVirtualizedBoundary: true,
     });
   }, [
-    activeSession,
+    activeSession?.id,
+    deferContentScrollEffects,
     isSessionTabActive,
     paneViewMode,
     savedScrollShouldStick,
@@ -993,6 +1007,9 @@ export function useSessionPaneScrollState({
 
   useEffect(() => {
     if (!activeSession || !isSessionTabActive) {
+      return;
+    }
+    if (deferContentScrollEffects) {
       return;
     }
 
@@ -1081,7 +1098,8 @@ export function useSessionPaneScrollState({
       scrollKind: "bottom_follow",
     });
   }, [
-    activeSession,
+    activeSession?.id,
+    deferContentScrollEffects,
     hasSessionFindQuery,
     isSessionTabActive,
     paneViewMode,

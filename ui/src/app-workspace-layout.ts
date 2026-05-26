@@ -49,6 +49,7 @@ import { hydrateControlPanelLayout } from "./control-panel-layout";
 import type { BackendConnectionState } from "./backend-connection";
 import { resolveRecoveredWorkspaceLayoutRequestError } from "./state-adoption";
 import {
+  reconcileWorkspaceState,
   stripDiffPreviewDocumentContentFromWorkspaceState,
   stripLoadingGitDiffPreviewTabsFromWorkspaceState,
   type WorkspaceState,
@@ -58,6 +59,7 @@ import {
   deleteStoredWorkspaceLayout,
   parseStoredWorkspaceLayout,
   persistWorkspaceLayout,
+  type StoredWorkspaceLayout,
   type ControlPanelSide,
   WORKSPACE_VIEW_QUERY_PARAM,
 } from "./workspace-storage";
@@ -76,11 +78,15 @@ import {
   type PendingWorkspaceLayoutSave,
   type WorkspaceLayoutPersistencePayload,
 } from "./app-shell-internals";
+import type { Session } from "./types";
 
 export type UseAppWorkspaceLayoutParams = {
   workspaceViewId: string;
   workspace: WorkspaceState;
   setWorkspace: Dispatch<SetStateAction<WorkspaceState>>;
+  sessions: Session[];
+  sessionsRef: MutableRefObject<Session[]>;
+  isSessionStateReady: boolean;
   controlPanelSide: ControlPanelSide;
   setControlPanelSide: Dispatch<SetStateAction<ControlPanelSide>>;
   preferences: {
@@ -148,6 +154,24 @@ export type UseAppWorkspaceLayoutReturn = {
   handleDeleteWorkspace: (workspaceId: string) => Promise<void>;
 };
 
+function workspaceHasSessionReferences(workspace: WorkspaceState) {
+  return workspace.panes.some((pane) => {
+    if (pane.activeSessionId) {
+      return true;
+    }
+
+    return pane.tabs.some((tab) => {
+      if (tab.kind === "session") {
+        return true;
+      }
+      if (tab.kind === "canvas" && tab.cards.length > 0) {
+        return true;
+      }
+      return "originSessionId" in tab && !!tab.originSessionId;
+    });
+  });
+}
+
 export function useAppWorkspaceLayout(
   params: UseAppWorkspaceLayoutParams,
 ): UseAppWorkspaceLayoutReturn {
@@ -155,6 +179,9 @@ export function useAppWorkspaceLayout(
     workspaceViewId,
     workspace,
     setWorkspace,
+    sessions,
+    sessionsRef,
+    isSessionStateReady,
     controlPanelSide,
     setControlPanelSide,
     preferences,
@@ -217,10 +244,37 @@ export function useAppWorkspaceLayout(
     (options?: { keepalive?: boolean }) => void
   >(() => {});
   const workspaceSummariesRef = useRef(workspaceSummaries);
+  const pendingFetchedWorkspaceLayoutRef = useRef<StoredWorkspaceLayout | null>(
+    null,
+  );
+  const isSessionStateReadyRef = useRef(isSessionStateReady);
+  const hasSessions = sessions.length > 0;
+  isSessionStateReadyRef.current = isSessionStateReady;
 
   useEffect(() => {
     workspaceSummariesRef.current = workspaceSummaries;
   }, [workspaceSummaries]);
+
+  const applyFetchedWorkspaceLayout = useCallback(
+    (nextLayout: StoredWorkspaceLayout) => {
+      const restoredWorkspace = reconcileWorkspaceState(
+        nextLayout.workspace,
+        sessionsRef.current,
+        { pruneDelegatedChildSessionTabs: true },
+      );
+      setWorkspace(
+        hydrateControlPanelLayout(
+          restoredWorkspace,
+          nextLayout.controlPanelSide,
+        ),
+      );
+      persistWorkspaceLayout(workspaceViewId, {
+        ...nextLayout,
+        workspace: restoredWorkspace,
+      });
+    },
+    [sessionsRef, setWorkspace, workspaceViewId],
+  );
 
   function beginWorkspaceSummariesRequest() {
     workspaceSummariesRequestTokenRef.current += 1;
@@ -431,6 +485,7 @@ export function useAppWorkspaceLayout(
     let cancelled = false;
     workspaceLayoutLoadPendingRef.current = true;
     ignoreFetchedWorkspaceLayoutRef.current = false;
+    pendingFetchedWorkspaceLayoutRef.current = null;
     setIsWorkspaceLayoutReady(false);
 
     void fetchWorkspaceLayout(workspaceViewId)
@@ -458,6 +513,7 @@ export function useAppWorkspaceLayout(
             )
           : null;
 
+        let isFetchedWorkspaceLayoutWaitingForSessions = false;
         if (nextLayout) {
           const shouldApplyFetchedWorkspaceLayout =
             !ignoreFetchedWorkspaceLayoutRef.current;
@@ -498,13 +554,17 @@ export function useAppWorkspaceLayout(
             setDensityPercent(nextLayout.densityPercent);
           }
           if (shouldApplyFetchedWorkspaceLayout) {
-            setWorkspace(
-              hydrateControlPanelLayout(
-                nextLayout.workspace,
-                nextLayout.controlPanelSide,
-              ),
-            );
-            persistWorkspaceLayout(workspaceViewId, nextLayout);
+            if (
+              !isSessionStateReadyRef.current &&
+              sessionsRef.current.length === 0 &&
+              workspaceHasSessionReferences(nextLayout.workspace)
+            ) {
+              pendingFetchedWorkspaceLayoutRef.current = nextLayout;
+              isFetchedWorkspaceLayoutWaitingForSessions = true;
+            } else {
+              pendingFetchedWorkspaceLayoutRef.current = null;
+              applyFetchedWorkspaceLayout(nextLayout);
+            }
           }
         }
 
@@ -522,8 +582,9 @@ export function useAppWorkspaceLayout(
             ),
           );
         }
-        workspaceLayoutLoadPendingRef.current = false;
-        setIsWorkspaceLayoutReady(true);
+        workspaceLayoutLoadPendingRef.current =
+          isFetchedWorkspaceLayoutWaitingForSessions;
+        setIsWorkspaceLayoutReady(!isFetchedWorkspaceLayoutWaitingForSessions);
       })
       .catch((error) => {
         console.warn(
@@ -546,8 +607,31 @@ export function useAppWorkspaceLayout(
     return () => {
       cancelled = true;
       workspaceLayoutLoadPendingRef.current = false;
+      pendingFetchedWorkspaceLayoutRef.current = null;
     };
-  }, [workspaceViewId]);
+  }, [applyFetchedWorkspaceLayout, sessionsRef, workspaceViewId]);
+
+  useEffect(() => {
+    const pendingFetchedWorkspaceLayout =
+      pendingFetchedWorkspaceLayoutRef.current;
+    if (
+      !pendingFetchedWorkspaceLayout ||
+      (!isSessionStateReady && !hasSessions)
+    ) {
+      return;
+    }
+
+    pendingFetchedWorkspaceLayoutRef.current = null;
+    if (ignoreFetchedWorkspaceLayoutRef.current) {
+      workspaceLayoutLoadPendingRef.current = false;
+      setIsWorkspaceLayoutReady(true);
+      return;
+    }
+
+    applyFetchedWorkspaceLayout(pendingFetchedWorkspaceLayout);
+    workspaceLayoutLoadPendingRef.current = false;
+    setIsWorkspaceLayoutReady(true);
+  }, [applyFetchedWorkspaceLayout, hasSessions, isSessionStateReady]);
 
   useEffect(() => {
     if (!isWorkspaceLayoutReady) {

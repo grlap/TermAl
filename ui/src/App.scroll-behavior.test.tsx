@@ -2297,7 +2297,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("unpinns the live turn tail when the user scrolls away from bottom", async () => {
+  it("unpins the live turn tail on explicit upward scroll near bottom", async () => {
     await withSuppressedActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -2360,10 +2360,29 @@ describe("App scroll behaviour", () => {
         expect(liveTail).not.toBeNull();
         expect(liveTail).toHaveClass("is-pinned");
 
+        messageStack.scrollTop = 800;
         await act(async () => {
-          fireEvent.wheel(messageStack, { deltaY: -160 });
-          messageStack.scrollTop = 600;
           fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+        expect(liveTail).toHaveClass("is-pinned");
+
+        messageStack.scrollTop = 640;
+        await act(async () => {
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+        expect(liveTail).not.toHaveClass("is-pinned");
+
+        messageStack.scrollTop = 800;
+        await act(async () => {
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+        expect(liveTail).toHaveClass("is-pinned");
+
+        await act(async () => {
+          fireEvent.wheel(messageStack, { deltaY: -20 });
           await flushUiWork();
         });
         expect(liveTail).not.toHaveClass("is-pinned");

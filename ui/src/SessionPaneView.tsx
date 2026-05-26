@@ -58,6 +58,7 @@ import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
 } from "./panels/AgentSessionPanel";
+import { useSessionRecordSnapshot } from "./session-store";
 import { DiffPanel } from "./panels/DiffPanel";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
@@ -80,6 +81,7 @@ import {
   type SessionPaneViewMode,
   type TabDropPlacement,
   type WorkspacePane,
+  type WorkspaceSessionTab,
 } from "./workspace";
 import {
   dataTransferHasSessionDragType,
@@ -224,6 +226,49 @@ export function SessionPaneView({
   workspaceFilesChangedEvent,
   backendConnectionState,
 }: SessionPaneViewProps) {
+  const firstAvailableSessionTabId =
+    pane.tabs.find(
+      (tab): tab is WorkspaceSessionTab =>
+        tab.kind === "session" && sessionLookup.has(tab.sessionId),
+    )?.sessionId ?? null;
+  const firstSessionTabId =
+    pane.tabs.find(
+      (tab): tab is WorkspaceSessionTab => tab.kind === "session",
+    )?.sessionId ?? null;
+  const activeSessionSnapshotId =
+    (pane.activeSessionId && sessionLookup.has(pane.activeSessionId)
+      ? pane.activeSessionId
+      : null) ??
+    firstAvailableSessionTabId ??
+    pane.activeSessionId ??
+    firstSessionTabId;
+  // The session store can receive an eager active-session update before the
+  // broader `sessions` prop is reconciled. Use that fresher record for active
+  // pane derivation while keeping the prop-backed lookup for unrelated sessions.
+  const storeActiveSession = useSessionRecordSnapshot(activeSessionSnapshotId);
+  const sessionLookupActiveSession = activeSessionSnapshotId
+    ? (sessionLookup.get(activeSessionSnapshotId) ?? null)
+    : null;
+  // The eager store path is expected to be at least as fresh as the prop-backed
+  // lookup for this active session; without a store record, the prop lookup stays
+  // authoritative.
+  // During this one-render divergence, derive signatures from the store-backed
+  // session but defer layout scroll effects until the parent session list catches up.
+  const deferStoreBackedScrollEffects =
+    !!storeActiveSession && sessionLookupActiveSession !== storeActiveSession;
+  const activeContextSessionLookup = useMemo(() => {
+    if (!storeActiveSession) {
+      return sessionLookup;
+    }
+
+    if (sessionLookup.get(storeActiveSession.id) === storeActiveSession) {
+      return sessionLookup;
+    }
+
+    const nextSessionLookup = new Map(sessionLookup);
+    nextSessionLookup.set(storeActiveSession.id, storeActiveSession);
+    return nextSessionLookup;
+  }, [sessionLookup, storeActiveSession]);
   const {
     activeTab,
     activeControlPanelTab,
@@ -273,7 +318,11 @@ export function SessionPaneView({
     shouldRenderFilesystemProjectScope,
     shouldRenderGitProjectScope,
     shouldRenderTerminalProjectScope,
-  } = useSessionPaneActiveContext({ pane, projectLookup, sessionLookup });
+  } = useSessionPaneActiveContext({
+    pane,
+    projectLookup,
+    sessionLookup: activeContextSessionLookup,
+  });
   const paneRootRef = useRef<HTMLElement | null>(null);
   const paneTopRef = useRef<HTMLDivElement | null>(null);
   const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<
@@ -558,6 +607,7 @@ export function SessionPaneView({
     activeSession,
     activeSessionSearchMatch,
     defaultScrollToBottom,
+    deferContentScrollEffects: deferStoreBackedScrollEffects,
     forceSessionScrollToBottomRef,
     hasSessionFindQuery,
     isActive,
@@ -642,7 +692,7 @@ export function SessionPaneView({
       prompt: string,
       options?: CreateComposerDelegationOptions,
     ) => {
-      const parentSession = sessionLookup.get(sessionId);
+      const parentSession = activeContextSessionLookup.get(sessionId);
       if (!parentSession) {
         onComposerError("Session is no longer available.");
         return false;
@@ -1260,7 +1310,7 @@ export function SessionPaneView({
         ) : activeCanvasTab ? (
           <SessionCanvasPanel
             tab={activeCanvasTab}
-            sessionLookup={sessionLookup}
+            sessionLookup={activeContextSessionLookup}
             draggedTab={draggedTab}
             onOpenSession={(sessionId) =>
               onOpenConversationFromDiff(sessionId, pane.id)
@@ -1310,8 +1360,8 @@ export function SessionPaneView({
                 ? () =>
                     onOpenInstructionDebuggerTab(
                       pane.id,
-                      sessionLookup.get(activeSourceOriginSessionId)?.workdir ??
-                        null,
+                      activeContextSessionLookup.get(activeSourceOriginSessionId)
+                        ?.workdir ?? null,
                       activeSourceOriginSessionId,
                       activeSourceOriginProjectId,
                     )
@@ -1380,7 +1430,7 @@ export function SessionPaneView({
                       null,
                       activeSession,
                       allKnownSessions,
-                      sessionLookup,
+                      activeContextSessionLookup,
                     ),
                     nextProject.id,
                   );
@@ -1459,7 +1509,7 @@ export function SessionPaneView({
                       null,
                       activeSession,
                       allKnownSessions,
-                      sessionLookup,
+                      activeContextSessionLookup,
                     ),
                     nextProject.id,
                   );
@@ -1537,7 +1587,7 @@ export function SessionPaneView({
                         null,
                         activeSession,
                         allKnownSessions,
-                        sessionLookup,
+                        activeContextSessionLookup,
                       ),
                       nextProject.id,
                     );
@@ -1640,8 +1690,8 @@ export function SessionPaneView({
               projectId={activeDiffOriginProjectId}
               originAgentName={
                 activeDiffOriginSessionId
-                  ? (sessionLookup.get(activeDiffOriginSessionId)?.agent ??
-                    null)
+                  ? (activeContextSessionLookup.get(activeDiffOriginSessionId)
+                      ?.agent ?? null)
                   : null
               }
               workspaceRoot={activeDiffWorkspaceRoot}

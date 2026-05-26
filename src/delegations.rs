@@ -3040,16 +3040,24 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
     let child = &inner.sessions[child_index];
     match child.session.status {
         SessionStatus::Active | SessionStatus::Approval => {
-            if !matches!(child.runtime, SessionRuntime::None) {
+            if !matches!(child.runtime, SessionRuntime::None) || child.is_remote_proxy() {
                 return DelegationChildOutcome::Running;
             }
             delegation_child_result_outcome(child).unwrap_or_else(|| DelegationChildOutcome::Failed {
                 summary: delegation_child_missing_runtime_summary(child),
             })
         }
-        SessionStatus::Error => DelegationChildOutcome::Failed {
-            summary: child.session.preview.clone(),
-        },
+        SessionStatus::Error => {
+            // Runtime wrappers can surface a generic child-session error after
+            // the reviewer already wrote a well-formed result packet. For this
+            // error state, trust only the latest assistant candidate so an older
+            // packet followed by newer error text cannot mask the real failure.
+            delegation_child_latest_result_outcome(child).unwrap_or_else(|| {
+                DelegationChildOutcome::Failed {
+                    summary: child.session.preview.clone(),
+                }
+            })
+        }
         SessionStatus::Idle => {
             delegation_child_result_outcome(child).unwrap_or(DelegationChildOutcome::IdleWithoutResult)
         }
@@ -3058,19 +3066,31 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
 
 fn delegation_child_result_outcome(child: &SessionRecord) -> Option<DelegationChildOutcome> {
     let result = latest_assistant_delegation_result(&child.session)?;
+    Some(delegation_child_outcome_from_result(child, result))
+}
+
+fn delegation_child_latest_result_outcome(child: &SessionRecord) -> Option<DelegationChildOutcome> {
+    let result = latest_assistant_message_delegation_result(&child.session)?;
+    Some(delegation_child_outcome_from_result(child, result))
+}
+
+fn delegation_child_outcome_from_result(
+    child: &SessionRecord,
+    result: ParsedDelegationResult,
+) -> DelegationChildOutcome {
     if result.status == DelegationStatus::Failed {
-        return Some(DelegationChildOutcome::Failed {
+        return DelegationChildOutcome::Failed {
             summary: result.summary,
-        });
+        };
     }
 
-    Some(DelegationChildOutcome::Completed {
+    DelegationChildOutcome::Completed {
         summary: result.summary,
         findings: result.findings,
         changed_files: child_changed_files(&child.session),
         commands_run: child_commands_run(&child.session),
         notes: result.notes,
-    })
+    }
 }
 
 fn delegation_child_missing_runtime_summary(child: &SessionRecord) -> String {
@@ -3209,33 +3229,50 @@ fn latest_assistant_delegation_result(session: &Session) -> Option<ParsedDelegat
     // `IdleWithoutResult`; instead, keep scanning until we find a parseable
     // packet.
     session.messages.iter().rev().find_map(|message| {
-        let text = match message {
-            Message::Text {
-                author: Author::Assistant,
-                text,
-                ..
-            } => non_empty_trimmed(text),
-            Message::Markdown {
-                author: Author::Assistant,
-                markdown,
-                title,
-                ..
-            } => non_empty_trimmed(markdown).or_else(|| non_empty_trimmed(title)),
-            Message::SubagentResult {
-                author: Author::Assistant,
-                summary,
-                title,
-                ..
-            } => non_empty_trimmed(summary).or_else(|| non_empty_trimmed(title)),
-            Message::Diff {
-                author: Author::Assistant,
-                summary,
-                ..
-            } => non_empty_trimmed(summary),
-            _ => None,
-        };
-        text.and_then(|t| parse_delegation_result_packet(&t))
+        assistant_delegation_result_candidate_text(message)
+            .and_then(|text| parse_delegation_result_packet(&text))
     })
+}
+
+fn latest_assistant_message_delegation_result(session: &Session) -> Option<ParsedDelegationResult> {
+    // Unlike the idle/completed path, errored children must not scan past the
+    // latest assistant candidate: if that latest candidate is non-result text,
+    // any earlier result packet is stale relative to the terminal error.
+    for message in session.messages.iter().rev() {
+        let Some(text) = assistant_delegation_result_candidate_text(message) else {
+            continue;
+        };
+        return parse_delegation_result_packet(&text);
+    }
+    None
+}
+
+fn assistant_delegation_result_candidate_text(message: &Message) -> Option<String> {
+    match message {
+        Message::Text {
+            author: Author::Assistant,
+            text,
+            ..
+        } => non_empty_trimmed(text),
+        Message::Markdown {
+            author: Author::Assistant,
+            markdown,
+            title,
+            ..
+        } => non_empty_trimmed(markdown).or_else(|| non_empty_trimmed(title)),
+        Message::SubagentResult {
+            author: Author::Assistant,
+            summary,
+            title,
+            ..
+        } => non_empty_trimmed(summary).or_else(|| non_empty_trimmed(title)),
+        Message::Diff {
+            author: Author::Assistant,
+            summary,
+            ..
+        } => non_empty_trimmed(summary),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

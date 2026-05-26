@@ -4747,6 +4747,7 @@ describe("Backend connection state", () => {
       expect(
         await within(activeConversationPage()).findByText(
           "Prompt from mobile Telegram",
+          { selector: ".plain-text-copy" },
         ),
       ).toBeInTheDocument();
       expect(requestAnimationFrameMock).toHaveBeenCalled();

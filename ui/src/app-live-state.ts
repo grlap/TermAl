@@ -191,6 +191,49 @@ function rememberServerInstanceId(
   }
 }
 
+function workspaceHasDelegatedChildSessionReferences(
+  workspace: WorkspaceState,
+  sessions: readonly Session[],
+  preserveSessionIds: readonly string[] = [],
+) {
+  const preservedSessionIds = new Set(preserveSessionIds);
+  const delegatedChildSessionIds = new Set(
+    sessions.flatMap((session) =>
+      session.parentDelegationId && !preservedSessionIds.has(session.id)
+        ? [session.id]
+        : [],
+    ),
+  );
+  if (delegatedChildSessionIds.size === 0) {
+    return false;
+  }
+
+  return workspace.panes.some((pane) => {
+    if (
+      pane.activeSessionId &&
+      delegatedChildSessionIds.has(pane.activeSessionId)
+    ) {
+      return true;
+    }
+
+    return pane.tabs.some((tab) => {
+      if (tab.kind === "session") {
+        return delegatedChildSessionIds.has(tab.sessionId);
+      }
+      if (tab.kind === "canvas") {
+        return tab.cards.some((card) =>
+          delegatedChildSessionIds.has(card.sessionId),
+        );
+      }
+      return (
+        "originSessionId" in tab &&
+        !!tab.originSessionId &&
+        delegatedChildSessionIds.has(tab.originSessionId)
+      );
+    });
+  });
+}
+
 export function useAppLiveState(
   params: UseAppLiveStateParams,
 ): UseAppLiveStateReturn {
@@ -249,6 +292,7 @@ export function useAppLiveState(
     setSessionSettingNotices,
     setSelectedProjectId,
     setIsLoading,
+    setHasAdoptedStateSnapshot,
     setBackendConnectionIssueDetail,
     setBackendConnectionState,
   } = stateSetters;
@@ -610,16 +654,32 @@ export function useAppLiveState(
       }
       if (shouldReconcileWorkspace) {
         setWorkspace((current) => {
+          const preservedSessionIds = pendingOpenSessionId
+            ? [pendingOpenSessionId]
+            : [];
+          const shouldPruneCurrentWorkspace =
+            shouldPruneDelegatedChildWorkspaceTabs &&
+            workspaceHasDelegatedChildSessionReferences(
+              current,
+              mergedSessions,
+              preservedSessionIds,
+            );
+          const shouldReconcileCurrentWorkspace =
+            mergedSessions !== previousSessions ||
+            canOpenPendingSession ||
+            shouldPruneCurrentWorkspace;
+          if (!shouldReconcileCurrentWorkspace) {
+            return current;
+          }
+
           const reconciled =
             mergedSessions !== previousSessions ||
-            shouldPruneDelegatedChildWorkspaceTabs
+            shouldPruneCurrentWorkspace
               ? applyControlPanelLayout(
                   reconcileWorkspaceState(current, mergedSessions, {
-                    preserveSessionIds: pendingOpenSessionId
-                      ? [pendingOpenSessionId]
-                      : [],
+                    preserveSessionIds: preservedSessionIds,
                     pruneDelegatedChildSessionTabs:
-                      shouldPruneDelegatedChildWorkspaceTabs,
+                      shouldPruneCurrentWorkspace,
                   }),
                 )
               : current;
@@ -1258,6 +1318,7 @@ export function useAppLiveState(
     }
 
     latestStateRevisionRef.current = nextState.revision;
+    setHasAdoptedStateSnapshot(true);
     if (nextState.serverInstanceId) {
       rememberServerInstanceId(
         seenServerInstanceIdsRef,
