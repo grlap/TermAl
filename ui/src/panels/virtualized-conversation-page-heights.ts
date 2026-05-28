@@ -77,8 +77,17 @@ export function useVirtualizedConversationPageHeightChange({
       shouldKeepBottomAfterLayoutRef.current = true;
     }
 
+    const isInUserScrollCooldown = () =>
+      performance.now() - lastUserScrollInputTimeRef.current <
+      userScrollAdjustmentCooldownMs;
+
     const restoreBottomAfterLayout = () => {
-      if (!node || !shouldKeepBottom || hasUserScrollInteractionRef.current) {
+      if (
+        !node ||
+        !shouldKeepBottom ||
+        hasUserScrollInteractionRef.current ||
+        isInUserScrollCooldown()
+      ) {
         return;
       }
       window.requestAnimationFrame(() => {
@@ -88,7 +97,8 @@ export function useVirtualizedConversationPageHeightChange({
         if (
           hasUserScrollInteractionRef.current ||
           isDetachedFromBottomRef.current ||
-          !shouldKeepBottomAfterLayoutRef.current
+          !shouldKeepBottomAfterLayoutRef.current ||
+          isInUserScrollCooldown()
         ) {
           return;
         }
@@ -111,8 +121,7 @@ export function useVirtualizedConversationPageHeightChange({
     }
 
     const timeSinceUserScroll = performance.now() - lastUserScrollInputTimeRef.current;
-    const inUserScrollCooldown =
-      timeSinceUserScroll < userScrollAdjustmentCooldownMs;
+    const inUserScrollCooldown = timeSinceUserScroll < userScrollAdjustmentCooldownMs;
     if (inUserScrollCooldown) {
       scheduleDeferredLayoutVersion(
         userScrollAdjustmentCooldownMs - timeSinceUserScroll,

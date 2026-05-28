@@ -894,14 +894,16 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
         await Promise.resolve();
       });
 
-      expect(getFirstMountedMessageIndex(container)).toBeLessThan(
-        firstMountedBeforeMultiTouch,
-      );
-      expect(
-        container
-          .querySelector<HTMLElement>(".virtualized-message-page")
-          ?.getBoundingClientRect().top,
-      ).toBeLessThanOrEqual(0);
+      await waitFor(() => {
+        expect(getFirstMountedMessageIndex(container)).toBeLessThan(
+          firstMountedBeforeMultiTouch,
+        );
+        expect(
+          container
+            .querySelector<HTMLElement>(".virtualized-message-page")
+            ?.getBoundingClientRect().top,
+        ).toBeLessThanOrEqual(0);
+      });
 
       await act(async () => {
         scrollTop = 0;

@@ -387,6 +387,8 @@ describe("App control panel - openers and canvas", () => {
     }
   });
 
+  // This flow drives several panels; full-suite workers can push it past the
+  // default timeout even though it completes quickly in isolation.
   it("opens standalone tabs for sessions, projects, and git from the control panel", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
@@ -568,7 +570,7 @@ describe("App control panel - openers and canvas", () => {
         restoreGlobal("ResizeObserver", originalResizeObserver);
       }
     });
-  });
+  }, 20_000);
 
   it("opens canvas from the control panel using the pane-local session context", async () => {
     await withSuppressedActWarnings(async () => {
@@ -1347,4 +1349,3 @@ describe("App control panel - openers and canvas", () => {
     });
   });
 });
-
