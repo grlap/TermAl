@@ -491,7 +491,7 @@ export function fetchState() {
 }
 
 export function fetchSession(sessionId: string) {
-  return request<SessionResponse>(
+  return requestJsonFirst<SessionResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}`,
   );
 }
@@ -500,7 +500,7 @@ export function fetchSessionTail(sessionId: string, messageLimit: number) {
   const query = new URLSearchParams({
     tail: String(Math.max(1, Math.floor(messageLimit))),
   });
-  return request<SessionResponse>(
+  return requestJsonFirst<SessionResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}?${query.toString()}`,
   );
 }

@@ -224,12 +224,9 @@ export function classifyFetchedSessionAdoption({
     responseSession,
     currentSession,
   );
-  const responseMatches =
-    responseMetadataMatches &&
-    hydrationRetainedMessagesMatch(responseSession, currentSession);
   if (
     requestStillMatches &&
-    !responseMatches &&
+    !responseMetadataMatches &&
     hydrationSessionMetadataIsAhead(responseSession, currentSession)
   ) {
     return "stateResync";
@@ -238,6 +235,17 @@ export function classifyFetchedSessionAdoption({
   const responseIsNotOlderThanRequest =
     requestContext.revision === null ||
     responseRevision >= requestContext.revision;
+  let retainedMessagesMatch: boolean | null = null;
+  const responseMatches = () => {
+    if (!responseMetadataMatches) {
+      return false;
+    }
+    retainedMessagesMatch ??= hydrationRetainedMessagesMatch(
+      responseSession,
+      currentSession,
+    );
+    return retainedMessagesMatch;
+  };
   // See the text-repair sibling below before changing this branch: both
   // downgrade allowances share request/revision guards but intentionally
   // differ on transcript-match and loaded-state requirements.
@@ -245,7 +253,7 @@ export function classifyFetchedSessionAdoption({
     currentSession.messagesLoaded !== true &&
     responseIsNotOlderThanRequest &&
     requestStillMatches &&
-    responseMatches;
+    responseMatches();
   // Text repair is the sibling downgrade path for an already-loaded
   // transcript whose live deltas diverged from the server transcript. It
   // deliberately does not require retained messages to match, but still
@@ -280,16 +288,16 @@ export function classifyFetchedSessionAdoption({
     return "stale";
   }
 
-  if (!requestStillMatches || !responseMatches) {
-    if (
-      requestStillMatches &&
-      (requestRevisionStillCurrent ||
-        requestContext.kind === "textRepair") &&
-      responseMetadataMatches &&
-      responseSession.messagesLoaded === true
-    ) {
-      return "adopted";
-    }
+  const canAdoptLoadedResponseWithoutRetainedMatch =
+    requestStillMatches &&
+    (requestRevisionStillCurrent || requestContext.kind === "textRepair") &&
+    responseMetadataMatches &&
+    responseSession.messagesLoaded === true;
+  if (canAdoptLoadedResponseWithoutRetainedMatch) {
+    return "adopted";
+  }
+
+  if (!requestStillMatches || !responseMatches()) {
     if (
       requestStillMatches &&
       hydrationSessionMetadataIsAhead(responseSession, currentSession)

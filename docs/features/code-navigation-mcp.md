@@ -97,10 +97,56 @@ The primary design rule is:
 
 **Return the smallest precise context that lets an agent take the next step.**
 
+## Navigation Layers
+
+The MCP should expose three distinct layers of source understanding. Agents
+should use the cheapest layer that can answer the question, while preferring
+compiler-backed answers for code facts.
+
+- **Indexed text lookup**: `find_file` and `search_text` answer path and text
+  questions with grep-like matching, stable line/byte offsets, workspace-aware
+  ranking, and response budgets. This is the right layer for config keys, route
+  strings, error messages, log fragments, comments, and literals: questions
+  that are genuinely about where exact text appears.
+- **Syntax / AST structure**: `outline` and syntax-derived spans answer
+  structural questions inside a file without requiring a whole-file read or
+  cross-file symbol resolution. This is the right layer for finding containing
+  types, members, local functions, top-level declarations, and source spans
+  before reading or editing a large file.
+- **Semantic model**: `symbol_at`, `search_symbol`, `definition`,
+  `references`, `project_graph`, `projects_containing`, and later tools such as
+  `implementations`, `callers`, `callees`, `type_hierarchy`, and
+  `related_tests` answer program-meaning questions through Roslyn/MSBuild or
+  the relevant language adapter. This is the right layer for definitions,
+  exact references, overloads, partial declarations, generated code ownership,
+  project membership, dependency direction, and impact analysis.
+
+Text finds bytes. Syntax finds source shape. The semantic model finds program
+meaning. `search_symbol` may use name matching to locate candidates, but its
+results should still carry semantic identity: symbol id, kind, project, target
+framework, and declaration spans.
+
+The default preference should be:
+
+```text
+semantic model for code facts
+syntax / AST for file structure and spans
+indexed text lookup for literal text questions
+shell rg/grep only for unavailable, unindexed, or non-source scopes
+```
+
+Agents should still use shell `rg` or `grep` when the MCP server is
+unavailable, the scope is outside the workspace index, the query targets
+binary-adjacent logs or transient build/generated output, or the question is
+outside source navigation. In an indexed workspace, shell text search should
+not be the first step for code facts unless `server_capabilities()` or index
+metadata shows that the relevant semantic layer is unavailable, partial, or
+stale.
+
 ## Agent Navigation Workflow
 
-The MCP should make semantic navigation the agent's default reflex, not a
-fallback after broad text search.
+The MCP should make the semantic layer the agent's default reflex for code
+facts, not a fallback after broad text search.
 
 When the task already names a symbol, stack frame, build error, route, or file,
 the agent should follow a surgical flow:
@@ -189,10 +235,11 @@ agent only has a filename from a log, build output, or human prompt.
 search_text(query, filters, limit, cursor)
 ```
 
-Fast text search with ranking and filters. This should behave like `rg`, but
-with structured output, stable line/byte offsets, result budgets, and
-workspace-aware ranking. It is still text search, not a substitute for
-`search_symbol` or `references`.
+Fast text search with ranking and filters. This is the indexed text lookup
+layer: it should behave like `rg`, but with structured output, stable line/byte
+offsets, result budgets, and workspace-aware ranking. For code facts, agents
+should use the semantic layer instead: `search_symbol`, `definition`, and
+`references`.
 
 Useful filters:
 
@@ -218,9 +265,9 @@ generated files, designer files, and broad package/cache directories by default.
 outline(path, depth)
 ```
 
-Returns a file-level symbol map without method bodies. This is the primary
-token-saver for large C# files and should be cheap enough to call before any
-whole-file read.
+Returns a syntactic file map with names and spans, but without method bodies or
+cross-file resolution. This is the primary token-saver for large C# files and
+should be cheap enough to call before any whole-file read.
 
 `depth` should be bounded and explicit:
 
@@ -598,6 +645,12 @@ The MCP server should label each result with how it was produced:
 This matters because agents should treat compiler-backed references differently
 from best-effort guesses.
 
+Confidence is separate from the navigation layer. For example, indexed text
+lookup can return fresh or stale results, and semantic tools can return exact,
+partial, or stale results depending on project load and index state. If exposed
+as a field, `navigationLayer` should describe the abstraction used:
+`text`, `syntax`, or `semantic`.
+
 Every tool response should carry index metadata when freshness could affect the
 answer:
 
@@ -854,19 +907,22 @@ symbol tools over shell `rg`/`grep` for source navigation.
 
 Default flow:
 1. Call `repo_overview()` before code work and check `indexStatus`.
-2. Use `search_symbol` for C# identifiers. Use `search_text` for config keys,
-   route strings, error messages, and literals.
-3. If starting from a stack trace, build error, diagnostic, grep hit, or diff
+2. Use the semantic layer for code facts: `search_symbol`, `definition`,
+   `references`, and `symbol_at`.
+3. Use `search_text` for config keys, route strings, error messages, log
+   fragments, comments, and literals.
+4. If starting from a stack trace, build error, diagnostic, grep hit, or diff
    hunk, call `symbol_at(path, line, column?)`.
-4. Before reading a large file, call `outline(path)`, then `source_context` for
+5. Before reading a large file, call `outline(path)`, then `source_context` for
    only the needed spans.
-5. Before changing behavior, call `references(target, group_by="project")` and
+6. Before changing behavior, call `references(target, group_by="project")` and
    `related_tests(target)`.
-6. Trust `confidence: exact`; treat `heuristic`, `partial`, and `stale` as
+7. Trust `confidence: exact`; treat `heuristic`, `partial`, and `stale` as
    leads.
-7. Keep limits small. Tighten filters before paging broad result sets.
-8. Use shell `rg` only when the MCP is unavailable, the scope is unindexed, or
-   the query is outside source navigation.
+8. Keep limits small. Tighten filters before paging broad result sets.
+9. Use shell `rg` only when the MCP is unavailable, the relevant layer is
+   unavailable or stale, the scope is unindexed, or the query is outside source
+   navigation.
 ```
 
 Codex and Claude prompts can share the same rules, but TermAl should inject

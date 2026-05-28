@@ -55,6 +55,43 @@ describe("api-request", () => {
     });
   });
 
+  it("wraps oversized JSON-first parse failures as structured request errors", async () => {
+    expect.assertions(5);
+    const parseError = new SyntaxError("Unexpected end of JSON input");
+    const json = vi.fn(async () => {
+      throw parseError;
+    });
+    const clone = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({
+          "content-length": String(64 * 1024 + 1),
+          "content-type": "application/json",
+        }),
+        json,
+        clone,
+      } as unknown as Response),
+    );
+
+    try {
+      await requestJsonFirst("/api/large-json");
+      throw new Error("Expected requestJsonFirst to reject");
+    } catch (error) {
+      expect(json).toHaveBeenCalledTimes(1);
+      expect(clone).not.toHaveBeenCalled();
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect(error).toMatchObject({
+        kind: "request-failed",
+        status: 200,
+        message: "Failed to parse JSON response from /api/large-json.",
+      });
+      expect((error as ApiRequestError).cause).toBe(parseError);
+    }
+  });
+
   it("preserves intentional gateway JSON errors when requested", async () => {
     vi.stubGlobal(
       "fetch",

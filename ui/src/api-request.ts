@@ -147,6 +147,9 @@ export async function requestJsonFirst<T>(
           );
         }
         if (!textFallback) {
+          if (responseExceedsJsonFallbackTextLimit(response)) {
+            throw createJsonParseResponseError(path, response.status, error);
+          }
           throw error;
         }
         return {} as T;
@@ -167,18 +170,35 @@ export async function requestJsonFirst<T>(
 }
 
 function cloneSmallJsonResponseForFallback(response: Response) {
-  const contentLength = Number.parseInt(
-    response.headers.get("content-length") ?? "",
-    10,
-  );
+  const contentLength = readResponseContentLength(response);
+  if (contentLength === null) {
+    return null;
+  }
   if (
-    !Number.isFinite(contentLength) ||
     contentLength < 0 ||
     contentLength > JSON_HTML_FALLBACK_TEXT_LIMIT_BYTES
   ) {
     return null;
   }
   return response.clone();
+}
+
+function responseExceedsJsonFallbackTextLimit(response: Response) {
+  const contentLength = readResponseContentLength(response);
+  return (
+    contentLength !== null && contentLength > JSON_HTML_FALLBACK_TEXT_LIMIT_BYTES
+  );
+}
+
+function readResponseContentLength(response: Response) {
+  const contentLength = Number.parseInt(
+    response.headers.get("content-length") ?? "",
+    10,
+  );
+  if (!Number.isFinite(contentLength)) {
+    return null;
+  }
+  return contentLength;
 }
 
 export async function performRequest(path: string, init?: RequestInit) {
@@ -235,6 +255,21 @@ export function createResponseError(
   return new ApiRequestError("request-failed", extractError(raw, status), {
     status,
   });
+}
+
+function createJsonParseResponseError(
+  path: string,
+  status: number,
+  cause: unknown,
+) {
+  return new ApiRequestError(
+    "request-failed",
+    `Failed to parse JSON response from ${path}.`,
+    {
+      status,
+      cause,
+    },
+  );
 }
 
 function extractIntentionalGatewayError(raw: string) {

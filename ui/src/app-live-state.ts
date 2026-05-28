@@ -149,7 +149,17 @@ import {
   resolveAdoptStateSessionOptions,
   SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
   SESSION_HYDRATION_RETRY_DELAYS_MS,
+  SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS,
 } from "./app-live-state-hydration";
+import {
+  cancelDeferredFullHydrationTimers,
+  clearDeferredFullHydrationTimer,
+  scheduleDeferredFullHydration as scheduleDeferredFullHydrationTimer,
+  shouldDelayFullHydrationStartForComposer as shouldDelayFullHydrationStartForComposerFromScheduler,
+  shouldPromoteDeferredFullHydration,
+  type DeferredFullHydrationHandle,
+  type SessionHydrationOptions,
+} from "./app-live-state-deferred-hydration";
 import {
   enqueueWorkspaceFilesChangedEvent as enqueueWorkspaceFilesChangedEventInGate,
   flushWorkspaceFilesChangedEventBuffer as flushWorkspaceFilesChangedEventGateBuffer,
@@ -175,12 +185,10 @@ export {
   resolveAdoptStateSessionOptions,
   SESSION_HYDRATION_FIRST_RETRY_DELAY_MS,
   SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
+  SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_HARD_TIMEOUT_MS,
+  SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS,
+  SESSION_TAIL_FULL_HYDRATION_DEFER_MS,
 } from "./app-live-state-hydration";
-
-type SessionHydrationOptions = {
-  allowDivergentTextRepairAfterNewerRevision?: boolean;
-  queueAfterCurrent?: boolean;
-};
 
 function rememberServerInstanceId(
   seenServerInstanceIdsRef: MutableRefObject<Set<string>>,
@@ -277,6 +285,9 @@ export function useAppLiveState(
   );
   const hydrationRestartResyncPendingRef = useRef(false);
   const hydrationRetryTimersRef = useRef<Map<string, number>>(new Map());
+  const deferredFullHydrationTimersRef = useRef<
+    Map<string, DeferredFullHydrationHandle>
+  >(new Map());
   const hydrationRetryAttemptsRef = useRef<Map<string, number>>(new Map());
   const hydrationCappedRetryAttemptsRef = useRef<Map<string, number>>(new Map());
   const forceAdoptNextStateEventRef = useRef(false);
@@ -376,6 +387,7 @@ export function useAppLiveState(
 
   function completeSessionHydration(sessionId: string) {
     clearHydrationRetry(sessionId);
+    clearDeferredFullHydration(sessionId);
     hydratedSessionIdsRef.current.add(sessionId);
   }
 
@@ -386,6 +398,14 @@ export function useAppLiveState(
     hydrationRetryTimersRef.current.clear();
     hydrationRetryAttemptsRef.current.clear();
     hydrationCappedRetryAttemptsRef.current.clear();
+  }
+
+  function clearDeferredFullHydration(sessionId: string) {
+    clearDeferredFullHydrationTimer(deferredFullHydrationTimersRef, sessionId);
+  }
+
+  function cancelDeferredFullHydrations() {
+    cancelDeferredFullHydrationTimers(deferredFullHydrationTimersRef);
   }
 
   function clearHydrationMismatchSessionIds(sessionIds: Iterable<string>) {
@@ -416,6 +436,32 @@ export function useAppLiveState(
         ? session.messageCount
         : session.messages.length;
     return messageCount >= SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES;
+  }
+
+  function shouldDelayFullHydrationStartForComposer(
+    sessionId: string,
+    options?: SessionHydrationOptions,
+  ) {
+    return shouldDelayFullHydrationStartForComposerFromScheduler({
+      sessionId,
+      options,
+      sessionStillNeedsHydration,
+      shouldStartTailFirstHydration,
+    });
+  }
+
+  function scheduleDeferredFullHydration(
+    sessionId: string,
+    options: { delayMs?: number; firstScheduledAtMs?: number } = {},
+  ) {
+    scheduleDeferredFullHydrationTimer({
+      timersRef: deferredFullHydrationTimersRef,
+      isMountedRef,
+      sessionId,
+      sessionStillNeedsHydration,
+      startSessionHydration,
+      options,
+    });
   }
 
   function scheduleHydrationRetry(
@@ -457,6 +503,7 @@ export function useAppLiveState(
   useEffect(() => {
     return () => {
       cancelHydrationRetries();
+      cancelDeferredFullHydrations();
     };
   }, []);
 
@@ -707,6 +754,11 @@ export function useAppLiveState(
           clearHydrationRetry(sessionId);
         }
       }
+      for (const sessionId of deferredFullHydrationTimersRef.current.keys()) {
+        if (!availableSessionIds.has(sessionId)) {
+          clearDeferredFullHydration(sessionId);
+        }
+      }
     }
     if (hasRemovedSessions || unhydratedSessionIds.size > 0) {
       hydratedSessionIdsRef.current = new Set(
@@ -931,6 +983,19 @@ export function useAppLiveState(
     sessionId: string,
     options?: SessionHydrationOptions,
   ) {
+    if (
+      options?.fromDeferredFullHydration !== true &&
+      deferredFullHydrationTimersRef.current.has(sessionId)
+    ) {
+      if (shouldPromoteDeferredFullHydration(options)) {
+        clearDeferredFullHydration(sessionId);
+      } else {
+        return;
+      }
+    }
+    if (options?.fromDeferredFullHydration === true) {
+      clearDeferredFullHydration(sessionId);
+    }
     if (hydratingSessionIdsRef.current.has(sessionId)) {
       if (options?.queueAfterCurrent === true) {
         queuedHydrationSessionIdsRef.current.add(sessionId);
@@ -938,6 +1003,12 @@ export function useAppLiveState(
       if (options?.allowDivergentTextRepairAfterNewerRevision === true) {
         queuedTextRepairHydrationSessionIdsRef.current.add(sessionId);
       }
+      return;
+    }
+    if (shouldDelayFullHydrationStartForComposer(sessionId, options)) {
+      scheduleDeferredFullHydration(sessionId, {
+        delayMs: SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS,
+      });
       return;
     }
 
@@ -980,7 +1051,13 @@ export function useAppLiveState(
           );
           switch (tailAdoptOutcome) {
             case "partial":
-              break;
+              queuedHydrationSessionIdsRef.current.delete(sessionId);
+              if (!sessionStillNeedsHydration(sessionId)) {
+                completeSessionHydration(sessionId);
+                return;
+              }
+              scheduleDeferredFullHydration(sessionId);
+              return;
             case "adopted":
               completeSessionHydration(sessionId);
               return;
@@ -1142,7 +1219,7 @@ export function useAppLiveState(
           queuedHydrationSessionIdsRef.current.delete(sessionId) &&
           isMountedRef.current
         ) {
-          startSessionHydration(sessionId);
+          startSessionHydration(sessionId, { queueAfterCurrent: true });
           return;
         }
         if (shouldRetryHydration) {
@@ -1267,6 +1344,7 @@ export function useAppLiveState(
       hydratedSessionIdsRef.current.clear();
       queuedHydrationSessionIdsRef.current.clear();
       queuedTextRepairHydrationSessionIdsRef.current.clear();
+      cancelDeferredFullHydrations();
       // Caller-requested EventSource recreation on instance change. See
       // `forceSseReconnect` for the full context. The flag is set
       // synchronously by `handleSend` BEFORE the recovery probe is in

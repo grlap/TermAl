@@ -6,6 +6,9 @@ import * as api from "./api";
 import {
   SESSION_HYDRATION_FIRST_RETRY_DELAY_MS,
   SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
+  SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_HARD_TIMEOUT_MS,
+  SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS,
+  SESSION_TAIL_FULL_HYDRATION_DEFER_MS,
   resolveAdoptStateSessionOptions,
   useAppLiveState,
   type SessionHydrationTarget,
@@ -13,13 +16,6 @@ import {
   type UseAppLiveStateReturn,
 } from "./app-live-state";
 import { RECONNECT_STATE_RESYNC_DELAY_MS } from "./app-shell-internals";
-import {
-  classifyFetchedSessionAdoption,
-  hydrationRetainedMessagesMatch,
-  hydrationSessionMetadataIsAhead,
-  hydrationSessionMetadataMatches,
-  type SessionHydrationRequestContext,
-} from "./session-hydration-adoption";
 import {
   getSessionRecordSnapshotForTesting,
   resetSessionStoreForTesting,
@@ -29,6 +25,7 @@ import {
   SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
   SESSION_TAIL_WINDOW_MESSAGE_COUNT,
 } from "./session-tail-policy";
+import { CONVERSATION_COMPOSER_INPUT_DATA_ATTRIBUTES } from "./panels/conversation-composer-focus";
 import type { StateResponse } from "./api";
 import type { DelegationSummary, Message, Session } from "./types";
 import type { WorkspaceState } from "./workspace";
@@ -204,19 +201,6 @@ function makeDelegationDeltaCases(revision: number) {
   ] as const;
 }
 
-function makeHydrationRequestContext(
-  overrides: Partial<SessionHydrationRequestContext> = {},
-): SessionHydrationRequestContext {
-  return {
-    kind: "fullSession",
-    messageCount: 1,
-    revision: 5,
-    serverInstanceId: "server-a",
-    sessionMutationStamp: 1,
-    ...overrides,
-  };
-}
-
 function makeStateResponse(session: Session, revision = 2): StateResponse {
   return {
     revision,
@@ -385,7 +369,31 @@ function renderLiveStateHarness(
   };
 }
 
+const appendedComposerDrafts: HTMLTextAreaElement[] = [];
+
+function appendFocusedComposerDraft(value: string) {
+  const composer = document.createElement("textarea");
+  for (const [attribute, attributeValue] of Object.entries(
+    CONVERSATION_COMPOSER_INPUT_DATA_ATTRIBUTES,
+  )) {
+    composer.setAttribute(attribute, attributeValue);
+  }
+  composer.value = value;
+  document.body.appendChild(composer);
+  appendedComposerDrafts.push(composer);
+  composer.focus();
+  return composer;
+}
+
+async function flushHydrationMicrotasks() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 afterEach(() => {
+  for (const composer of appendedComposerDrafts.splice(0)) {
+    composer.remove();
+  }
   resetSessionStoreForTesting();
   EventSourceMock.instances = [];
   vi.restoreAllMocks();
@@ -1084,8 +1092,7 @@ describe("deferred session-store sync", () => {
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushHydrationMicrotasks();
     });
 
     expect(fetchState).toHaveBeenCalledTimes(1);
@@ -1155,8 +1162,7 @@ describe("deferred session-store sync", () => {
 
     await act(async () => {
       params.requestActionRecoveryResyncRef.current();
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushHydrationMicrotasks();
     });
 
     expect(fetchState).toHaveBeenCalledTimes(1);
@@ -1754,16 +1760,14 @@ describe("delegation delta repair", () => {
     });
 
     await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushHydrationMicrotasks();
     });
     expect(fetchState).toHaveBeenCalledTimes(1);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(500);
     });
     await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushHydrationMicrotasks();
     });
     expect(fetchState).toHaveBeenCalledTimes(2);
     expect(params.adoptionRefs.projectsRef.current[0]?.id).toBe(
@@ -1920,8 +1924,7 @@ describe("delegation delta repair", () => {
     });
 
     await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushHydrationMicrotasks();
     });
     expect(fetchState).toHaveBeenCalledTimes(1);
     expect(params.adoptionRefs.projectsRef.current[0]?.id).toBe(
@@ -1930,8 +1933,7 @@ describe("delegation delta repair", () => {
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushHydrationMicrotasks();
     });
     expect(fetchState).toHaveBeenCalledTimes(2);
 
@@ -1945,15 +1947,13 @@ describe("delegation delta repair", () => {
       });
     });
     await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushHydrationMicrotasks();
     });
     expect(fetchState).toHaveBeenCalledTimes(3);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushHydrationMicrotasks();
     });
 
     expect(fetchState).toHaveBeenCalledTimes(3);
@@ -2017,8 +2017,7 @@ describe("delegation delta repair", () => {
       });
     });
     await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushHydrationMicrotasks();
     });
     expect(fetchState).toHaveBeenCalledTimes(1);
     expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(3);
@@ -2026,8 +2025,7 @@ describe("delegation delta repair", () => {
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushHydrationMicrotasks();
     });
     expect(fetchState).toHaveBeenCalledTimes(2);
     expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(4);
@@ -2043,8 +2041,7 @@ describe("delegation delta repair", () => {
       });
     });
     await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushHydrationMicrotasks();
     });
     expect(fetchState).toHaveBeenCalledTimes(3);
     expect(params.adoptionRefs.latestStateRevisionRef.current).toBe(4);
@@ -2052,8 +2049,7 @@ describe("delegation delta repair", () => {
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS * 4);
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushHydrationMicrotasks();
     });
 
     expect(fetchState).toHaveBeenCalledTimes(3);
@@ -2688,10 +2684,13 @@ describe("hydration adoption side effects", () => {
   });
 
   it("adopts a large-session tail before fetching the full transcript", async () => {
+    vi.useFakeTimers();
     vi.stubGlobal(
       "EventSource",
       EventSourceMock as unknown as typeof EventSource,
     );
+    vi.stubGlobal("requestIdleCallback", undefined);
+    vi.stubGlobal("cancelIdleCallback", undefined);
     vi.spyOn(api, "fetchState").mockImplementation(
       () => new Promise<StateResponse>(() => {}),
     );
@@ -2739,15 +2738,16 @@ describe("hydration adoption side effects", () => {
 
     renderLiveStateHarness(params, () => {});
 
-    await waitFor(() => expect(api.fetchSessionTail).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await flushHydrationMicrotasks();
+    });
+    expect(api.fetchSessionTail).toHaveBeenCalledTimes(1);
     expect(api.fetchSessionTail).toHaveBeenCalledWith(
       "session-1",
       SESSION_TAIL_WINDOW_MESSAGE_COUNT,
     );
-    await waitFor(() =>
-      expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toHaveLength(
-        SESSION_TAIL_WINDOW_MESSAGE_COUNT,
-      ),
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toHaveLength(
+      SESSION_TAIL_WINDOW_MESSAGE_COUNT,
     );
     expect(params.adoptionRefs.sessionsRef.current[0]?.messageCount).toBe(
       messages.length,
@@ -2758,6 +2758,18 @@ describe("hydration adoption side effects", () => {
     expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
       false,
     );
+    expect(fetchSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_DEFER_MS - 1);
+      await Promise.resolve();
+    });
+    expect(fetchSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
     expect(fetchSession).toHaveBeenCalledTimes(1);
 
     await act(async () => {
@@ -2767,16 +2779,654 @@ describe("hydration adoption side effects", () => {
         session: fullSession,
       });
       await fullHydration;
+      await Promise.resolve();
     });
 
-    await waitFor(() =>
-      expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
-        true,
-      ),
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
+      true,
     );
     expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toHaveLength(
       messages.length,
     );
+  });
+
+  it("keeps full hydration deferred while a composer draft is focused", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal("requestIdleCallback", undefined);
+    vi.stubGlobal("cancelIdleCallback", undefined);
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+
+    const messages = makeHydrationMessages(
+      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+    );
+    const initialSession = makeSession({
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: makeSession({
+        messages: messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT),
+        messagesLoaded: false,
+        messageCount: messages.length,
+        sessionMutationStamp: 1,
+      }),
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+    const composer = appendFocusedComposerDraft("still typing");
+
+    renderLiveStateHarness(params, () => {});
+
+    await act(async () => {
+      await flushHydrationMicrotasks();
+    });
+    expect(api.fetchSessionTail).toHaveBeenCalledTimes(1);
+    expect(fetchSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_DEFER_MS);
+      await Promise.resolve();
+    });
+    expect(fetchSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(
+        SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS - 1,
+      );
+      await Promise.resolve();
+    });
+    expect(fetchSession).not.toHaveBeenCalled();
+
+    composer.value = "";
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
+
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("defers direct full hydration while a composer draft is focused", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal("requestIdleCallback", undefined);
+    vi.stubGlobal("cancelIdleCallback", undefined);
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+
+    const retainedMessages = makeHydrationMessages(1);
+    const session = makeSession({
+      messages: retainedMessages,
+      messagesLoaded: false,
+      messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+      sessionMutationStamp: 1,
+    });
+    const fetchSessionTail = vi
+      .spyOn(api, "fetchSessionTail")
+      .mockImplementation(() => new Promise(() => {}));
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    const params = makeLiveStateParams(session);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [session];
+    const composer = appendFocusedComposerDraft("still typing");
+
+    renderLiveStateHarness(params, () => {});
+
+    await act(async () => {
+      await flushHydrationMicrotasks();
+    });
+    expect(fetchSessionTail).not.toHaveBeenCalled();
+    expect(fetchSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(
+        SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS - 1,
+      );
+      await Promise.resolve();
+    });
+    expect(fetchSession).not.toHaveBeenCalled();
+
+    composer.value = "";
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
+
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels deferred full hydration when the hook unmounts", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal("requestIdleCallback", undefined);
+    vi.stubGlobal("cancelIdleCallback", undefined);
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+
+    const session = makeSession({
+      messages: makeHydrationMessages(1),
+      messagesLoaded: false,
+      messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+      sessionMutationStamp: 1,
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    vi.spyOn(api, "fetchSessionTail").mockImplementation(
+      () => new Promise(() => {}),
+    );
+    const params = makeLiveStateParams(session);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [session];
+    const composer = appendFocusedComposerDraft("still typing");
+
+    const harness = renderLiveStateHarness(params, () => {});
+
+    await act(async () => {
+      await flushHydrationMicrotasks();
+    });
+    expect(fetchSession).not.toHaveBeenCalled();
+    const clearCallsBeforeUnmount = clearTimeoutSpy.mock.calls.length;
+
+    harness.unmount();
+    composer.value = "";
+
+    expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(
+      clearCallsBeforeUnmount,
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS);
+      await Promise.resolve();
+    });
+
+    expect(fetchSession).not.toHaveBeenCalled();
+  });
+
+  it("cancels deferred full hydration when the session is removed", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal("requestIdleCallback", undefined);
+    vi.stubGlobal("cancelIdleCallback", undefined);
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+
+    const session = makeSession({
+      messages: makeHydrationMessages(1),
+      messagesLoaded: false,
+      messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+      sessionMutationStamp: 1,
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    const params = makeLiveStateParams(session);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [session];
+    const composer = appendFocusedComposerDraft("still typing");
+    let hook: UseAppLiveStateReturn | null = null;
+
+    renderLiveStateHarness(params, (nextHook) => {
+      hook = nextHook;
+    });
+
+    await act(async () => {
+      await flushHydrationMicrotasks();
+    });
+    expect(fetchSession).not.toHaveBeenCalled();
+    const clearCallsBeforeRemoval = clearTimeoutSpy.mock.calls.length;
+
+    act(() => {
+      hook?.adoptState(makeStateResponse(makeSession({ id: "session-2" }), 6));
+    });
+    composer.value = "";
+
+    expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(
+      clearCallsBeforeRemoval,
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS);
+      await Promise.resolve();
+    });
+
+    expect(fetchSession).not.toHaveBeenCalled();
+  });
+
+  it("cancels deferred full hydration when the server instance changes", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal("requestIdleCallback", undefined);
+    vi.stubGlobal("cancelIdleCallback", undefined);
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+
+    const session = makeSession({
+      messages: makeHydrationMessages(1),
+      messagesLoaded: false,
+      messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+      sessionMutationStamp: 1,
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    vi.spyOn(api, "fetchSessionTail").mockImplementation(
+      () => new Promise(() => {}),
+    );
+    const params = makeLiveStateParams(session);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [session];
+    const composer = appendFocusedComposerDraft("still typing");
+    let hook: UseAppLiveStateReturn | null = null;
+
+    renderLiveStateHarness(params, (nextHook) => {
+      hook = nextHook;
+    });
+
+    await act(async () => {
+      await flushHydrationMicrotasks();
+    });
+    expect(fetchSession).not.toHaveBeenCalled();
+    const clearCallsBeforeInstanceChange = clearTimeoutSpy.mock.calls.length;
+
+    act(() => {
+      hook?.adoptState(
+        {
+          ...makeStateResponse(
+            makeSession({
+              ...session,
+              messages: [],
+              messagesLoaded: false,
+            }),
+            1,
+          ),
+          serverInstanceId: "server-b",
+        },
+        { allowUnknownServerInstance: true },
+      );
+    });
+
+    expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(
+      clearCallsBeforeInstanceChange,
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS);
+      await Promise.resolve();
+    });
+
+    expect(fetchSession).not.toHaveBeenCalled();
+  });
+
+  it("runs queued recovery hydration after the current request despite a composer draft", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal("requestIdleCallback", undefined);
+    vi.stubGlobal("cancelIdleCallback", undefined);
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+
+    const retainedMessages = makeHydrationMessages(1);
+    const missingMessage: Message = {
+      id: "message-2",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:02",
+      text: "Recovered message",
+    };
+    const initialSession = makeSession({
+      messages: retainedMessages,
+      messagesLoaded: false,
+      messageCount: retainedMessages.length,
+      sessionMutationStamp: 1,
+    });
+    const staleFullSession = makeSession({
+      messages: retainedMessages,
+      messagesLoaded: true,
+      messageCount: retainedMessages.length,
+      sessionMutationStamp: 1,
+    });
+    const recoveredFullSession = makeSession({
+      messages: [...retainedMessages, missingMessage],
+      messagesLoaded: true,
+      messageCount: retainedMessages.length + 1,
+      sessionMutationStamp: 2,
+    });
+    let resolveStaleFullHydration!: (
+      response: Awaited<ReturnType<typeof api.fetchSession>>,
+    ) => void;
+    const staleFullHydration = new Promise<
+      Awaited<ReturnType<typeof api.fetchSession>>
+    >((resolve) => {
+      resolveStaleFullHydration = resolve;
+    });
+    let resolveRecoveredFullHydration!: (
+      response: Awaited<ReturnType<typeof api.fetchSession>>,
+    ) => void;
+    const recoveredFullHydration = new Promise<
+      Awaited<ReturnType<typeof api.fetchSession>>
+    >((resolve) => {
+      resolveRecoveredFullHydration = resolve;
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementationOnce(() => staleFullHydration)
+      .mockImplementationOnce(() => recoveredFullHydration);
+    const fetchSessionTail = vi
+      .spyOn(api, "fetchSessionTail")
+      .mockImplementation(() => new Promise(() => {}));
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    renderLiveStateHarness(params, () => {});
+
+    await act(async () => {
+      await flushHydrationMicrotasks();
+    });
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+    expect(fetchSessionTail).not.toHaveBeenCalled();
+
+    const composer = appendFocusedComposerDraft("still typing");
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "messageUpdated",
+        revision: 6,
+        sessionId: initialSession.id,
+        messageId: missingMessage.id,
+        messageIndex: 1,
+        messageCount: 2,
+        message: missingMessage,
+        preview: missingMessage.text,
+        status: "idle",
+        sessionMutationStamp: 2,
+      });
+    });
+
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+    expect(params.adoptionRefs.sessionsRef.current[0]).toMatchObject({
+      messagesLoaded: false,
+      messageCount: 2,
+      sessionMutationStamp: 2,
+    });
+
+    await act(async () => {
+      resolveStaleFullHydration({
+        revision: 5,
+        serverInstanceId: "server-a",
+        session: staleFullSession,
+      });
+      await staleFullHydration;
+      await flushHydrationMicrotasks();
+    });
+
+    expect(fetchSession).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveRecoveredFullHydration({
+        revision: 6,
+        serverInstanceId: "server-a",
+        session: recoveredFullSession,
+      });
+      await recoveredFullHydration;
+      await Promise.resolve();
+    });
+
+    expect(params.adoptionRefs.sessionsRef.current[0]).toMatchObject({
+      messagesLoaded: true,
+      messageCount: 2,
+      sessionMutationStamp: 2,
+    });
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages[1]).toEqual(
+      missingMessage,
+    );
+  });
+
+  it("promotes recovery hydration ahead of deferred full hydration", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal("requestIdleCallback", undefined);
+    vi.stubGlobal("cancelIdleCallback", undefined);
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+
+    const messages = makeHydrationMessages(
+      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+    );
+    const updatedMessages = messages.map((message) =>
+      message.id === "message-30"
+        ? { ...message, text: "Message 30 updated" }
+        : message,
+    );
+    const initialSession = makeSession({
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: makeSession({
+        messages: messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT),
+        messagesLoaded: false,
+        messageCount: messages.length,
+        sessionMutationStamp: 1,
+      }),
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+    const composer = appendFocusedComposerDraft("still typing");
+
+    renderLiveStateHarness(params, () => {});
+
+    await act(async () => {
+      await flushHydrationMicrotasks();
+    });
+    expect(api.fetchSessionTail).toHaveBeenCalledTimes(1);
+    expect(fetchSession).not.toHaveBeenCalled();
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+
+    act(() => {
+      eventSource?.dispatchNamedEvent("delta", {
+        type: "messageUpdated",
+        revision: 6,
+        sessionId: "session-1",
+        messageId: "message-30",
+        messageIndex: 29,
+        messageCount: updatedMessages.length,
+        message: updatedMessages[29],
+        preview: "Message 30 updated",
+        status: "idle",
+        sessionMutationStamp: 2,
+      });
+    });
+
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      vi.advanceTimersByTime(
+        SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS +
+          SESSION_TAIL_FULL_HYDRATION_DEFER_MS,
+      );
+      await Promise.resolve();
+    });
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs deferred full hydration after the composer-busy hard timeout", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal("requestIdleCallback", undefined);
+    vi.stubGlobal("cancelIdleCallback", undefined);
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+
+    const messages = makeHydrationMessages(
+      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+    );
+    const initialSession = makeSession({
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: makeSession({
+        messages: messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT),
+        messagesLoaded: false,
+        messageCount: messages.length,
+        sessionMutationStamp: 1,
+      }),
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+    const composer = appendFocusedComposerDraft("still typing");
+
+    renderLiveStateHarness(params, () => {});
+
+    await act(async () => {
+      await flushHydrationMicrotasks();
+    });
+    expect(api.fetchSessionTail).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_DEFER_MS);
+      await Promise.resolve();
+    });
+    expect(fetchSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(
+        SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_HARD_TIMEOUT_MS,
+      );
+      await Promise.resolve();
+    });
+
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for the idle callback before running deferred full hydration", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    let idleCallback: IdleRequestCallback | null = null;
+    const requestIdleCallback = vi.fn((callback: IdleRequestCallback) => {
+      idleCallback = callback;
+      return 7;
+    });
+    vi.stubGlobal("requestIdleCallback", requestIdleCallback);
+    vi.stubGlobal("cancelIdleCallback", vi.fn());
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+
+    const messages = makeHydrationMessages(
+      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+    );
+    const initialSession = makeSession({
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: makeSession({
+        messages: messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT),
+        messagesLoaded: false,
+        messageCount: messages.length,
+        sessionMutationStamp: 1,
+      }),
+    });
+    const fetchSession = vi
+      .spyOn(api, "fetchSession")
+      .mockImplementation(() => new Promise(() => {}));
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    renderLiveStateHarness(params, () => {});
+
+    await act(async () => {
+      await flushHydrationMicrotasks();
+    });
+    expect(api.fetchSessionTail).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_DEFER_MS);
+      await Promise.resolve();
+    });
+    expect(requestIdleCallback).toHaveBeenCalledTimes(1);
+    expect(fetchSession).not.toHaveBeenCalled();
+
+    act(() => {
+      idleCallback?.({
+        didTimeout: false,
+        timeRemaining: () => 50,
+      } as IdleDeadline);
+    });
+
+    expect(fetchSession).toHaveBeenCalledTimes(1);
   });
 
   it("short-circuits tail-first hydration when the tail response is fully loaded", async () => {
@@ -3012,10 +3662,13 @@ describe("hydration adoption side effects", () => {
   });
 
   it("refetches after a missing-prefix delta races with tail-then-full hydration", async () => {
+    vi.useFakeTimers();
     vi.stubGlobal(
       "EventSource",
       EventSourceMock as unknown as typeof EventSource,
     );
+    vi.stubGlobal("requestIdleCallback", undefined);
+    vi.stubGlobal("cancelIdleCallback", undefined);
     vi.spyOn(api, "fetchState").mockImplementation(
       () => new Promise<StateResponse>(() => {}),
     );
@@ -3083,11 +3736,18 @@ describe("hydration adoption side effects", () => {
 
     renderLiveStateHarness(params, () => {});
 
-    await waitFor(() =>
-      expect(params.adoptionRefs.sessionsRef.current[0]?.messages[0]?.id).toBe(
-        `message-${messages.length - SESSION_TAIL_WINDOW_MESSAGE_COUNT + 1}`,
-      ),
+    await act(async () => {
+      await flushHydrationMicrotasks();
+    });
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages[0]?.id).toBe(
+      `message-${messages.length - SESSION_TAIL_WINDOW_MESSAGE_COUNT + 1}`,
     );
+    expect(fetchSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_DEFER_MS);
+      await Promise.resolve();
+    });
     expect(fetchSession).toHaveBeenCalledTimes(1);
     const eventSource =
       EventSourceMock.instances[EventSourceMock.instances.length - 1];
@@ -3107,10 +3767,11 @@ describe("hydration adoption side effects", () => {
       });
     });
 
-    await waitFor(() =>
-      expect(
-        params.adoptionRefs.sessionsRef.current[0]?.sessionMutationStamp,
-      ).toBe(2),
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(params.adoptionRefs.sessionsRef.current[0]?.sessionMutationStamp).toBe(
+      2,
     );
     expect(fetchSession).toHaveBeenCalledTimes(1);
 
@@ -3123,7 +3784,11 @@ describe("hydration adoption side effects", () => {
       await staleFullHydration;
     });
 
-    await waitFor(() => expect(fetchSession).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      vi.advanceTimersByTime(SESSION_HYDRATION_FIRST_RETRY_DELAY_MS);
+      await Promise.resolve();
+    });
+    expect(fetchSession).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       resolveUpdatedFullHydration({
@@ -3132,12 +3797,11 @@ describe("hydration adoption side effects", () => {
         session: updatedFullSession,
       });
       await updatedFullHydration;
+      await Promise.resolve();
     });
 
-    await waitFor(() =>
-      expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
-        true,
-      ),
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
+      true,
     );
     expect(
       params.adoptionRefs.sessionsRef.current[0]?.messages[29],
@@ -3148,10 +3812,13 @@ describe("hydration adoption side effects", () => {
   });
 
   it("preserves a tail-window delta across tail-then-full hydration retry", async () => {
+    vi.useFakeTimers();
     vi.stubGlobal(
       "EventSource",
       EventSourceMock as unknown as typeof EventSource,
     );
+    vi.stubGlobal("requestIdleCallback", undefined);
+    vi.stubGlobal("cancelIdleCallback", undefined);
     vi.spyOn(api, "fetchState").mockImplementation(
       () => new Promise<StateResponse>(() => {}),
     );
@@ -3216,11 +3883,18 @@ describe("hydration adoption side effects", () => {
 
     renderLiveStateHarness(params, () => {});
 
-    await waitFor(() =>
-      expect(params.adoptionRefs.sessionsRef.current[0]?.messages[0]?.id).toBe(
-        `message-${messages.length - SESSION_TAIL_WINDOW_MESSAGE_COUNT + 1}`,
-      ),
+    await act(async () => {
+      await flushHydrationMicrotasks();
+    });
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages[0]?.id).toBe(
+      `message-${messages.length - SESSION_TAIL_WINDOW_MESSAGE_COUNT + 1}`,
     );
+    expect(fetchSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_DEFER_MS);
+      await Promise.resolve();
+    });
     expect(fetchSession).toHaveBeenCalledTimes(1);
     const eventSource =
       EventSourceMock.instances[EventSourceMock.instances.length - 1];
@@ -3240,16 +3914,17 @@ describe("hydration adoption side effects", () => {
       });
     });
 
-    await waitFor(() =>
-      expect(
-        params.adoptionRefs.sessionsRef.current[0]?.messages.find(
-          (message) => message.id === updatedMessageId,
-        ),
-      ).toMatchObject({
-        id: updatedMessageId,
-        text: updatedMessageText,
-      }),
-    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      params.adoptionRefs.sessionsRef.current[0]?.messages.find(
+        (message) => message.id === updatedMessageId,
+      ),
+    ).toMatchObject({
+      id: updatedMessageId,
+      text: updatedMessageText,
+    });
     expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
       false,
     );
@@ -3263,7 +3938,11 @@ describe("hydration adoption side effects", () => {
       await firstFullHydration;
     });
 
-    await waitFor(() => expect(fetchSession).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      vi.advanceTimersByTime(SESSION_HYDRATION_FIRST_RETRY_DELAY_MS);
+      await Promise.resolve();
+    });
+    expect(fetchSession).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       resolveRetriedFullHydration({
@@ -3272,12 +3951,11 @@ describe("hydration adoption side effects", () => {
         session: updatedFullSession,
       });
       await retriedFullHydration;
+      await Promise.resolve();
     });
 
-    await waitFor(() =>
-      expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
-        true,
-      ),
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(
+      true,
     );
     expect(
       params.adoptionRefs.sessionsRef.current[0]?.messages[updatedMessageIndex],
@@ -3364,8 +4042,7 @@ describe("hydration adoption side effects", () => {
       await waitFor(() => expect(fetchSession).toHaveBeenCalledTimes(1));
     } else {
       await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
+        await flushHydrationMicrotasks();
       });
       expect(fetchSession).not.toHaveBeenCalled();
     }
@@ -3563,465 +4240,5 @@ describe("resolveAdoptStateSessionOptions", () => {
       resolveAdoptStateSessionOptions(undefined, false)
         .pruneDelegatedChildWorkspaceTabs,
     ).toBe(false);
-  });
-});
-
-describe("classifyFetchedSessionAdoption", () => {
-  const message: Message = {
-    id: "message-1",
-    type: "text",
-    author: "assistant",
-    timestamp: "10:00",
-    text: "Hello",
-  };
-
-  it("adopts a matching loaded same-instance response", () => {
-    expect(
-      classifyFetchedSessionAdoption({
-        responseSession: makeSession({
-          messages: [message],
-          messagesLoaded: true,
-          messageCount: 1,
-          sessionMutationStamp: 1,
-        }),
-        responseRevision: 5,
-        responseServerInstanceId: "server-a",
-        requestContext: makeHydrationRequestContext(),
-        currentSession: makeSession({
-          messageCount: 1,
-          sessionMutationStamp: 1,
-        }),
-        currentRevision: 5,
-        currentServerInstanceId: "server-a",
-        seenServerInstanceIds: new Set(["server-a"]),
-      }),
-    ).toBe("adopted");
-  });
-
-  it("classifies replacement-instance hydration as restart resync", () => {
-    expect(
-      classifyFetchedSessionAdoption({
-        responseSession: makeSession({
-          messages: [message],
-          messagesLoaded: true,
-          messageCount: 1,
-          sessionMutationStamp: 1,
-        }),
-        responseRevision: 1,
-        responseServerInstanceId: "server-b",
-        requestContext: makeHydrationRequestContext(),
-        currentSession: makeSession({
-          messageCount: 1,
-          sessionMutationStamp: 1,
-        }),
-        currentRevision: 5,
-        currentServerInstanceId: "server-a",
-        seenServerInstanceIds: new Set(["server-a"]),
-      }),
-    ).toBe("restartResync");
-  });
-
-  it("requests a state resync when fetched metadata is ahead of the summary", () => {
-    expect(
-      classifyFetchedSessionAdoption({
-        responseSession: makeSession({
-          messages: [message, { ...message, id: "message-2", text: "Newer" }],
-          messagesLoaded: true,
-          messageCount: 2,
-          sessionMutationStamp: 2,
-        }),
-        responseRevision: 5,
-        responseServerInstanceId: "server-a",
-        requestContext: makeHydrationRequestContext(),
-        currentSession: makeSession({
-          messageCount: 1,
-          sessionMutationStamp: 1,
-        }),
-        currentRevision: 5,
-        currentServerInstanceId: "server-a",
-        seenServerInstanceIds: new Set(["server-a"]),
-      }),
-    ).toBe("stateResync");
-  });
-
-  it("adopts a loaded response when retained text diverged but metadata still matches", () => {
-    expect(
-      classifyFetchedSessionAdoption({
-        responseSession: makeSession({
-          messages: [message],
-          messagesLoaded: true,
-          messageCount: 1,
-          sessionMutationStamp: 2,
-        }),
-        responseRevision: 6,
-        responseServerInstanceId: "server-a",
-        requestContext: makeHydrationRequestContext({
-          revision: 6,
-          sessionMutationStamp: 2,
-        }),
-        currentSession: makeSession({
-          messages: [{ ...message, text: "Corrupted live stream" }],
-          messagesLoaded: true,
-          messageCount: 1,
-          sessionMutationStamp: 2,
-        }),
-        currentRevision: 6,
-        currentServerInstanceId: "server-a",
-        seenServerInstanceIds: new Set(["server-a"]),
-      }),
-    ).toBe("adopted");
-  });
-
-  it("rejects divergent same-metadata hydration after a newer live revision", () => {
-    expect(
-      classifyFetchedSessionAdoption({
-        responseSession: makeSession({
-          messages: [message],
-          messagesLoaded: true,
-          messageCount: 1,
-          sessionMutationStamp: 2,
-        }),
-        responseRevision: 7,
-        responseServerInstanceId: "server-a",
-        requestContext: makeHydrationRequestContext({
-          revision: 6,
-          sessionMutationStamp: 2,
-        }),
-        currentSession: makeSession({
-          messages: [{ ...message, text: "Newer live stream" }],
-          messagesLoaded: true,
-          messageCount: 1,
-          sessionMutationStamp: 2,
-        }),
-        currentRevision: 7,
-        currentServerInstanceId: "server-a",
-        seenServerInstanceIds: new Set(["server-a"]),
-      }),
-    ).toBe("stale");
-  });
-
-  it("allows explicit text-repair hydration after an unrelated newer live revision", () => {
-    expect(
-      classifyFetchedSessionAdoption({
-        responseSession: makeSession({
-          messages: [message],
-          messagesLoaded: true,
-          messageCount: 1,
-          sessionMutationStamp: 2,
-        }),
-        responseRevision: 7,
-        responseServerInstanceId: "server-a",
-        requestContext: makeHydrationRequestContext({
-          kind: "textRepair",
-          revision: 6,
-          sessionMutationStamp: 2,
-        }),
-        currentSession: makeSession({
-          messages: [{ ...message, text: "Corrupted gapped live stream" }],
-          messagesLoaded: true,
-          messageCount: 1,
-          sessionMutationStamp: 2,
-        }),
-        currentRevision: 7,
-        currentServerInstanceId: "server-a",
-        seenServerInstanceIds: new Set(["server-a"]),
-      }),
-    ).toBe("adopted");
-  });
-
-  it("allows explicit text-repair hydration at the request revision after an unrelated newer live revision", () => {
-    expect(
-      classifyFetchedSessionAdoption({
-        responseSession: makeSession({
-          messages: [message],
-          messagesLoaded: true,
-          messageCount: 1,
-          sessionMutationStamp: 2,
-        }),
-        responseRevision: 6,
-        responseServerInstanceId: "server-a",
-        requestContext: makeHydrationRequestContext({
-          kind: "textRepair",
-          revision: 6,
-          sessionMutationStamp: 2,
-        }),
-        currentSession: makeSession({
-          messages: [{ ...message, text: "Corrupted gapped live stream" }],
-          messagesLoaded: true,
-          messageCount: 1,
-          sessionMutationStamp: 2,
-        }),
-        currentRevision: 7,
-        currentServerInstanceId: "server-a",
-        seenServerInstanceIds: new Set(["server-a"]),
-      }),
-    ).toBe("adopted");
-  });
-
-  it("allows partial transcript adoption only for tail hydration requests", () => {
-    expect(
-      classifyFetchedSessionAdoption({
-        responseSession: makeSession({
-          messages: [message],
-          messagesLoaded: false,
-          messageCount: 1,
-          sessionMutationStamp: 1,
-        }),
-        responseRevision: 5,
-        responseServerInstanceId: "server-a",
-        requestContext: makeHydrationRequestContext({ kind: "partialTail" }),
-        currentSession: makeSession({
-          messageCount: 1,
-          sessionMutationStamp: 1,
-        }),
-        currentRevision: 5,
-        currentServerInstanceId: "server-a",
-        seenServerInstanceIds: new Set(["server-a"]),
-      }),
-    ).toBe("partial");
-  });
-
-  it("rejects stale lower-revision responses once the session is loaded", () => {
-    expect(
-      classifyFetchedSessionAdoption({
-        responseSession: makeSession({
-          messages: [message],
-          messagesLoaded: true,
-          messageCount: 1,
-          sessionMutationStamp: 1,
-        }),
-        responseRevision: 9,
-        responseServerInstanceId: "server-a",
-        requestContext: makeHydrationRequestContext({ revision: 9 }),
-        currentSession: makeSession({
-          messages: [message],
-          messagesLoaded: true,
-          messageCount: 1,
-          sessionMutationStamp: 1,
-        }),
-        currentRevision: 10,
-        currentServerInstanceId: "server-a",
-        seenServerInstanceIds: new Set(["server-a"]),
-      }),
-    ).toBe("stale");
-  });
-});
-
-describe("hydrationRetainedMessagesMatch", () => {
-  const message: Message = {
-    id: "message-1",
-    type: "text",
-    author: "assistant",
-    timestamp: "10:00",
-    text: "Hello",
-  };
-
-  it("matches structurally identical retained messages", () => {
-    expect(
-      hydrationRetainedMessagesMatch(
-        { messages: [{ ...message }] },
-        { messages: [{ ...message }] },
-      ),
-    ).toBe(true);
-  });
-
-  it("matches retained messages that appear as an ordered subsequence of the hydrated transcript", () => {
-    const olderMessage: Message = {
-      ...message,
-      id: "message-older",
-      text: "Older retained message",
-    };
-    const missingMessage: Message = {
-      ...message,
-      id: "message-missing",
-      text: "Message only present after hydration",
-    };
-    const latestMessage: Message = {
-      ...message,
-      id: "message-latest",
-      text: "Latest retained message",
-    };
-
-    expect(
-      hydrationRetainedMessagesMatch(
-        { messages: [olderMessage, missingMessage, latestMessage] },
-        { messages: [olderMessage, latestMessage] },
-      ),
-    ).toBe(true);
-  });
-
-  it("treats either empty side as retainable", () => {
-    expect(
-      hydrationRetainedMessagesMatch({ messages: [] }, { messages: [message] }),
-    ).toBe(true);
-    expect(
-      hydrationRetainedMessagesMatch({ messages: [message] }, { messages: [] }),
-    ).toBe(true);
-  });
-
-  it("rejects non-empty message shape mismatches", () => {
-    expect(
-      hydrationRetainedMessagesMatch(
-        { messages: [{ ...message, text: "Hello" }] },
-        { messages: [{ ...message, text: "Goodbye" }] },
-      ),
-    ).toBe(false);
-  });
-
-  it("rejects retained messages that are missing from the hydrated transcript", () => {
-    expect(
-      hydrationRetainedMessagesMatch(
-        { messages: [{ ...message, id: "message-other" }] },
-        { messages: [message] },
-      ),
-    ).toBe(false);
-  });
-
-  it("rejects retained messages that appear out of order in the hydrated transcript", () => {
-    const firstMessage: Message = {
-      ...message,
-      id: "message-first",
-      text: "First",
-    };
-    const secondMessage: Message = {
-      ...message,
-      id: "message-second",
-      text: "Second",
-    };
-
-    expect(
-      hydrationRetainedMessagesMatch(
-        { messages: [secondMessage, firstMessage] },
-        { messages: [firstMessage, secondMessage] },
-      ),
-    ).toBe(false);
-  });
-
-  it("rejects extra client-side fields on retained messages", () => {
-    expect(
-      hydrationRetainedMessagesMatch(
-        { messages: [message] },
-        { messages: [{ ...message, localRenderCache: true } as Message] },
-      ),
-    ).toBe(false);
-  });
-});
-
-describe("hydrationSessionMetadataMatches", () => {
-  const baseSession: Session = {
-    id: "session-1",
-    name: "Session",
-    emoji: "AI",
-    agent: "Codex",
-    workdir: "C:/workspace",
-    model: "codex",
-    status: "idle",
-    preview: "",
-    messages: [],
-    messagesLoaded: false,
-  };
-
-  it("rejects numeric response metadata when the current session captured null", () => {
-    expect(
-      hydrationSessionMetadataMatches(
-        {
-          ...baseSession,
-          messageCount: 3,
-          sessionMutationStamp: 7,
-        },
-        {
-          ...baseSession,
-          messageCount: null,
-          sessionMutationStamp: null,
-        },
-      ),
-    ).toBe(false);
-  });
-
-  it("treats null metadata as an exact value rather than a wildcard", () => {
-    expect(
-      hydrationSessionMetadataMatches(
-        {
-          ...baseSession,
-          messageCount: null,
-          sessionMutationStamp: null,
-        },
-        {
-          ...baseSession,
-          messageCount: null,
-          sessionMutationStamp: null,
-        },
-      ),
-    ).toBe(true);
-  });
-
-  it("falls back to loaded message length when messageCount is absent", () => {
-    expect(
-      hydrationSessionMetadataMatches(
-        {
-          ...baseSession,
-          messages: [
-            {
-              id: "m1",
-              type: "text",
-              author: "assistant",
-              timestamp: "10:00",
-              text: "One",
-            },
-          ],
-          messagesLoaded: true,
-          sessionMutationStamp: 1,
-        },
-        {
-          ...baseSession,
-          messageCount: 1,
-          messages: [],
-          messagesLoaded: false,
-          sessionMutationStamp: 1,
-        },
-      ),
-    ).toBe(true);
-  });
-});
-
-describe("hydrationSessionMetadataIsAhead", () => {
-  const baseSession: Session = {
-    id: "session-1",
-    name: "Session",
-    emoji: "AI",
-    agent: "Codex",
-    workdir: "C:/workspace",
-    model: "codex",
-    status: "idle",
-    preview: "",
-    messages: [],
-    messagesLoaded: false,
-  };
-
-  it("treats equal counts with a newer mutation stamp as ahead", () => {
-    expect(
-      hydrationSessionMetadataIsAhead(
-        { ...baseSession, messageCount: 3, sessionMutationStamp: 11 },
-        { ...baseSession, messageCount: 3, sessionMutationStamp: 10 },
-      ),
-    ).toBe(true);
-  });
-
-  it("does not treat equal counts with an equal mutation stamp as ahead", () => {
-    expect(
-      hydrationSessionMetadataIsAhead(
-        { ...baseSession, messageCount: 3, sessionMutationStamp: 10 },
-        { ...baseSession, messageCount: 3, sessionMutationStamp: 10 },
-      ),
-    ).toBe(false);
-  });
-
-  it("falls back to mutation stamps when message counts are unavailable", () => {
-    expect(
-      hydrationSessionMetadataIsAhead(
-        { ...baseSession, messageCount: null, sessionMutationStamp: 2 },
-        { ...baseSession, messageCount: null, sessionMutationStamp: 1 },
-      ),
-    ).toBe(true);
   });
 });
