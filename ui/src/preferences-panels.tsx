@@ -1231,7 +1231,6 @@ export function ClaudeApprovalsPreferencesPanel({
           <AgentDefaultModelControl
             agent="Claude"
             id="default-claude-model"
-            hasLiveModelList={defaultModelOptions.hasLiveModelList}
             modelOptions={defaultModelOptions.options}
             value={defaultClaudeModel}
             onChange={onSelectModel}
@@ -1316,7 +1315,6 @@ export function CodexPromptPreferencesPanel({
           <AgentDefaultModelControl
             agent="Codex"
             id="default-codex-model"
-            hasLiveModelList={defaultModelOptions.hasLiveModelList}
             modelOptions={defaultModelOptions.options}
             value={defaultModel}
             onChange={onSelectModel}
@@ -1372,12 +1370,19 @@ export function CursorPreferencesPanel({
   defaultCursorMode,
   onSelectModel,
   onSelectMode,
+  sessions = [],
 }: {
   defaultCursorModel: string;
   defaultCursorMode: CursorMode;
   onSelectModel: (model: string) => void;
   onSelectMode: (mode: CursorMode) => void;
+  sessions?: readonly Session[];
 }) {
+  const defaultModelOptions = useMemo(
+    () => defaultModelOptionsFromSessions("Cursor", sessions, defaultCursorModel),
+    [defaultCursorModel, sessions],
+  );
+
   return (
     <section className="settings-panel-stack">
       <div className="settings-panel-intro">
@@ -1396,6 +1401,7 @@ export function CursorPreferencesPanel({
           <AgentDefaultModelControl
             agent="Cursor"
             id="default-cursor-model"
+            modelOptions={defaultModelOptions.options}
             value={defaultCursorModel}
             onChange={onSelectModel}
           />
@@ -1426,12 +1432,19 @@ export function GeminiPreferencesPanel({
   defaultGeminiModel,
   onSelectApprovalMode,
   onSelectModel,
+  sessions = [],
 }: {
   defaultGeminiApprovalMode: GeminiApprovalMode;
   defaultGeminiModel: string;
   onSelectApprovalMode: (mode: GeminiApprovalMode) => void;
   onSelectModel: (model: string) => void;
+  sessions?: readonly Session[];
 }) {
+  const defaultModelOptions = useMemo(
+    () => defaultModelOptionsFromSessions("Gemini", sessions, defaultGeminiModel),
+    [defaultGeminiModel, sessions],
+  );
+
   return (
     <section className="settings-panel-stack">
       <div className="settings-panel-intro">
@@ -1450,6 +1463,7 @@ export function GeminiPreferencesPanel({
           <AgentDefaultModelControl
             agent="Gemini"
             id="default-gemini-model"
+            modelOptions={defaultModelOptions.options}
             value={defaultGeminiModel}
             onChange={onSelectModel}
           />

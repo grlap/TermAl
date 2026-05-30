@@ -1157,6 +1157,7 @@ export function AppDialogs({
                   defaultCursorMode={defaultCursorMode}
                   onSelectModel={handleDefaultCursorModelChange}
                   onSelectMode={onChangeDefaultCursorMode}
+                  sessions={sessions}
                 />
               ) : settingsTab === "gemini" ? (
                 <GeminiPreferencesPanel
@@ -1164,6 +1165,7 @@ export function AppDialogs({
                   defaultGeminiModel={defaultGeminiModel}
                   onSelectApprovalMode={onChangeDefaultGeminiApprovalMode}
                   onSelectModel={handleDefaultGeminiModelChange}
+                  sessions={sessions}
                 />
               ) : (
                 (() => {

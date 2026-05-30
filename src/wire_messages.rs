@@ -360,6 +360,62 @@ impl Message {
         }
     }
 
+    fn is_interaction_request(&self) -> bool {
+        matches!(
+            self,
+            Self::Approval { .. }
+                | Self::UserInputRequest { .. }
+                | Self::McpElicitationRequest { .. }
+                | Self::CodexAppRequest { .. }
+        )
+    }
+
+    fn pending_interaction_request(&self) -> Option<PendingInteractionRequest<'_>> {
+        match self {
+            Self::Approval {
+                title,
+                detail,
+                decision: ApprovalDecision::Pending,
+                ..
+            } => Some(PendingInteractionRequest {
+                child_waiting_prefix: "Child session is waiting for approval",
+                title,
+                detail,
+            }),
+            Self::UserInputRequest {
+                title,
+                detail,
+                state: InteractionRequestState::Pending,
+                ..
+            } => Some(PendingInteractionRequest {
+                child_waiting_prefix: "Child session is waiting for input",
+                title,
+                detail,
+            }),
+            Self::McpElicitationRequest {
+                title,
+                detail,
+                state: InteractionRequestState::Pending,
+                ..
+            } => Some(PendingInteractionRequest {
+                child_waiting_prefix: "Child session is waiting for MCP input",
+                title,
+                detail,
+            }),
+            Self::CodexAppRequest {
+                title,
+                detail,
+                state: InteractionRequestState::Pending,
+                ..
+            } => Some(PendingInteractionRequest {
+                child_waiting_prefix: "Child session is waiting for a Codex response",
+                title,
+                detail,
+            }),
+            _ => None,
+        }
+    }
+
     /// Returns a short single-line preview of the message for
     /// sidebar/header rendering. Different variants distill down
     /// differently: user/agent text falls back to a truncated
@@ -386,6 +442,12 @@ impl Message {
             Self::Command { .. } => None,
         }
     }
+}
+
+struct PendingInteractionRequest<'a> {
+    child_waiting_prefix: &'static str,
+    title: &'a str,
+    detail: &'a str,
 }
 
 fn parallel_agents_preview_text(agents: &[ParallelAgentProgress]) -> String {

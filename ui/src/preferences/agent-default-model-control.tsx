@@ -1,15 +1,11 @@
 // Split from ../preferences-panels.tsx to keep agent default model settings
 // separate from the broader preferences panel collection.
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useMemo } from "react";
 
 import {
   DEFAULT_MODEL_PREFERENCE,
   isDefaultModelPreference,
-  MAX_DEFAULT_MODEL_PREFERENCE_CHARS,
+  NEW_SESSION_MODEL_OPTIONS,
   sessionModelComboboxOptions,
   type ComboboxOption,
 } from "../session-model-utils";
@@ -38,6 +34,10 @@ function defaultModelComboboxOptions(
 ): ComboboxOption[] {
   const normalizedValue = normalizeDefaultModelPreferenceDraft(value);
   const options = new Map<string, ComboboxOption>();
+  const knownModelOptions = [
+    ...NEW_SESSION_MODEL_OPTIONS[agent],
+    ...modelOptions,
+  ];
 
   options.set(DEFAULT_MODEL_PREFERENCE, {
     label: "Default",
@@ -45,7 +45,7 @@ function defaultModelComboboxOptions(
     description: `Let ${agent} choose its built-in default`,
   });
 
-  for (const option of modelOptions) {
+  for (const option of knownModelOptions) {
     const normalizedOptionValue = normalizeDefaultModelPreferenceDraft(option.value);
     if (options.has(normalizedOptionValue)) {
       continue;
@@ -76,7 +76,6 @@ export function defaultModelOptionsFromSessions(
   sessions: readonly Session[],
   value: string,
 ): {
-  hasLiveModelList: boolean;
   options: ComboboxOption[];
 } {
   const liveModelOptions = sessions
@@ -88,64 +87,29 @@ export function defaultModelOptionsFromSessions(
     );
 
   return {
-    hasLiveModelList: liveModelOptions.length > 0,
     options: defaultModelComboboxOptions(agent, value, liveModelOptions),
   };
 }
 
 export function AgentDefaultModelControl({
   agent,
-  hasLiveModelList = false,
   id,
   modelOptions,
   value,
   onChange,
 }: {
   agent: AgentType;
-  hasLiveModelList?: boolean;
   id: string;
   modelOptions?: readonly ComboboxOption[];
   value: string;
   onChange: (nextValue: string) => void;
 }) {
   const normalizedValue = normalizeDefaultModelPreferenceDraft(value);
-  const [customModel, setCustomModel] = useState(displayDefaultModelPreference(normalizedValue));
   const hintId = `${id}-hint`;
-  const customId = `${id}-custom`;
-  const customLabelId = `${customId}-label`;
   const selectOptions = useMemo(
     () => defaultModelComboboxOptions(agent, value, modelOptions),
     [agent, modelOptions, value],
   );
-  const trimmedCustomModel = customModel.trim();
-  const normalizedCustomModel = normalizeDefaultModelPreferenceDraft(trimmedCustomModel);
-  const canApplyCustomModel =
-    trimmedCustomModel.length > 0 && normalizedCustomModel !== normalizedValue;
-  const customModelKnown = selectOptions.some(
-    (option) => option.value === normalizedCustomModel,
-  );
-  const validationMessage =
-    trimmedCustomModel.length === 0
-      ? null
-      : normalizedCustomModel === normalizedValue
-        ? `${trimmedCustomModel} is already the configured default model.`
-        : !customModelKnown && hasLiveModelList
-          ? `${trimmedCustomModel} is not in the current live model list. TermAl will still try it for new ${agent} sessions.`
-          : null;
-  const validationTone =
-    validationMessage && !customModelKnown && hasLiveModelList ? "warning" : "info";
-
-  useEffect(() => {
-    setCustomModel(displayDefaultModelPreference(normalizedValue));
-  }, [normalizedValue]);
-
-  function applyCustomModel() {
-    if (!canApplyCustomModel) {
-      return;
-    }
-
-    onChange(normalizedCustomModel);
-  }
 
   return (
     <div className="session-control-group">
@@ -162,53 +126,8 @@ export function AgentDefaultModelControl({
           onChange(normalizeDefaultModelPreferenceDraft(nextValue));
         }}
       />
-      <div className="session-model-custom">
-        <label id={customLabelId} className="session-control-label" htmlFor={customId}>
-          {agent} custom default model
-        </label>
-        <div className="session-model-custom-row">
-          <input
-            id={customId}
-            className="themed-input session-model-custom-input"
-            type="text"
-            value={customModel}
-            placeholder={`${agent.toLowerCase()} model id`}
-            maxLength={MAX_DEFAULT_MODEL_PREFERENCE_CHARS}
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-            aria-labelledby={customLabelId}
-            onChange={(event) => setCustomModel(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter") {
-                return;
-              }
-
-              event.preventDefault();
-              applyCustomModel();
-            }}
-          />
-          <button
-            type="button"
-            className="ghost-button session-model-custom-apply"
-            disabled={!canApplyCustomModel}
-            aria-label={`Apply ${agent} default model`}
-            onClick={applyCustomModel}
-          >
-            Apply
-          </button>
-        </div>
-        {validationMessage ? (
-          <p
-            className={`session-model-custom-validation ${validationTone}`}
-            aria-live="polite"
-          >
-            {validationMessage}
-          </p>
-        ) : null}
-      </div>
       <p id={hintId} className="session-control-hint">
-        Select a known model, enter an exact model id, or choose <code>Default</code> to let {agent} use its built-in default.
+        Select a known model or choose <code>Default</code> to let {agent} use its built-in default.
       </p>
     </div>
   );

@@ -63,6 +63,48 @@ fn delegation_prompt_marker_stays_in_sync_with_review_local_command() {
     );
 }
 
+#[test]
+fn delegation_prompt_tells_child_to_fail_fast_on_blocking_tooling() {
+    let record = DelegationRecord {
+        id: "delegation-tooling-test".to_owned(),
+        parent_session_id: "session-parent".to_owned(),
+        child_session_id: "session-child".to_owned(),
+        mode: DelegationMode::Reviewer,
+        status: DelegationStatus::Running,
+        title: "Tooling Test".to_owned(),
+        prompt: "Review the local changes.".to_owned(),
+        cwd: "/tmp/termal-tooling-test".to_owned(),
+        agent: Agent::Codex,
+        model: None,
+        write_policy: DelegationWritePolicy::ReadOnly,
+        created_at: stamp_now(),
+        started_at: Some(stamp_now()),
+        completed_at: None,
+        result: None,
+    };
+    let prompt = build_delegation_prompt(&record);
+
+    assert!(
+        prompt.contains("Do not use browser, Chrome DevTools, or other external MCP tools"),
+        "delegated review prompt should steer children away from interactive browser MCP tools"
+    );
+    assert!(
+        prompt.contains("Return a failed `## Result` packet explaining the missing tool"),
+        "delegated review prompt should make blocked tooling terminal and parseable"
+    );
+}
+
+fn expected_codex_read_only_delegation_sandbox_mode() -> CodexSandboxMode {
+    #[cfg(windows)]
+    {
+        CodexSandboxMode::DangerFullAccess
+    }
+    #[cfg(not(windows))]
+    {
+        CodexSandboxMode::ReadOnly
+    }
+}
+
 fn test_app_state() -> AppState {
     test_app_state_with_drained_delegation_codex_runtime("delegation-test-runtime")
 }
@@ -311,6 +353,28 @@ fn parent_delegation_card_has_status(
         .unwrap_or(false)
 }
 
+fn parent_delegation_card_agent_snapshot(
+    inner: &StateInner,
+    parent_session_id: &str,
+    delegation_id: &str,
+) -> Option<(ParallelAgentStatus, Option<String>)> {
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_session_id)?;
+    parent.session.messages.iter().rev().find_map(|message| {
+        let Message::ParallelAgents { agents, .. } = message else {
+            return None;
+        };
+        agents
+            .iter()
+            .find(|agent| {
+                agent.id == delegation_id && agent.source == ParallelAgentSource::Delegation
+            })
+            .map(|agent| (agent.status, agent.detail.clone()))
+    })
+}
+
 fn assert_single_parent_delegation_agent_status(
     inner: &StateInner,
     parent_session_id: &str,
@@ -521,6 +585,470 @@ fn delegation_parent_card_update_ignores_recorder_tool_source_id_collision() {
             Some("delegation failed")
         );
     }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+fn test_mcp_elicitation_message(message_id: &str) -> Message {
+    Message::McpElicitationRequest {
+        id: message_id.to_owned(),
+        timestamp: stamp_now(),
+        author: Author::Assistant,
+        title: "Codex needs MCP input".to_owned(),
+        detail: "MCP server chrome-devtools requested additional structured input. Allow the chrome-devtools MCP server to run tool \"new_page\"?".to_owned(),
+        request: McpElicitationRequestPayload {
+            thread_id: "thread-mcp".to_owned(),
+            turn_id: Some("turn-mcp".to_owned()),
+            server_name: "chrome-devtools".to_owned(),
+            mode: McpElicitationRequestMode::Form {
+                meta: None,
+                message: "Allow tool new_page?".to_owned(),
+                requested_schema: json!({
+                    "type": "object",
+                    "properties": {}
+                }),
+            },
+        },
+        state: InteractionRequestState::Pending,
+        submitted_action: None,
+        submitted_content: None,
+    }
+}
+
+fn test_approval_message(message_id: &str) -> Message {
+    Message::Approval {
+        id: message_id.to_owned(),
+        timestamp: stamp_now(),
+        author: Author::Assistant,
+        title: "Codex needs approval".to_owned(),
+        command: "Edit src/main.rs".to_owned(),
+        command_language: None,
+        detail: "Allow editing src/main.rs?".to_owned(),
+        decision: ApprovalDecision::Pending,
+    }
+}
+
+fn test_user_input_message(message_id: &str) -> Message {
+    Message::UserInputRequest {
+        id: message_id.to_owned(),
+        timestamp: stamp_now(),
+        author: Author::Assistant,
+        title: "Codex needs input".to_owned(),
+        detail: "Choose the review depth.".to_owned(),
+        questions: vec![UserInputQuestion {
+            header: "Depth".to_owned(),
+            id: "depth".to_owned(),
+            is_other: false,
+            is_secret: false,
+            options: Some(vec![UserInputQuestionOption {
+                description: "Run the focused review path.".to_owned(),
+                label: "Focused".to_owned(),
+            }]),
+            question: "How deep should the review go?".to_owned(),
+        }],
+        state: InteractionRequestState::Pending,
+        submitted_answers: None,
+    }
+}
+
+fn test_codex_app_request_message(message_id: &str) -> Message {
+    Message::CodexAppRequest {
+        id: message_id.to_owned(),
+        timestamp: stamp_now(),
+        author: Author::Assistant,
+        title: "Codex needs app data".to_owned(),
+        detail: "Allow the local app request to continue?".to_owned(),
+        method: "termal/test".to_owned(),
+        params: json!({ "ok": true }),
+        state: InteractionRequestState::Pending,
+        submitted_result: None,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PendingInteractionTestKind {
+    Approval,
+    UserInput,
+    Mcp,
+    CodexApp,
+}
+
+fn test_pending_interaction_message(kind: PendingInteractionTestKind, message_id: &str) -> Message {
+    match kind {
+        PendingInteractionTestKind::Approval => test_approval_message(message_id),
+        PendingInteractionTestKind::UserInput => test_user_input_message(message_id),
+        PendingInteractionTestKind::Mcp => test_mcp_elicitation_message(message_id),
+        PendingInteractionTestKind::CodexApp => test_codex_app_request_message(message_id),
+    }
+}
+
+#[test]
+fn delegation_child_pending_mcp_request_updates_parent_card_detail() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review without browser tooling.".to_owned(),
+                title: Some("MCP Blocked Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+
+    state
+        .push_message(
+            &created.delegation.child_session_id,
+            test_mcp_elicitation_message("delegation-mcp-message"),
+        )
+        .expect("pending MCP message should be recorded");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let (status, detail) =
+        parent_delegation_card_agent_snapshot(&inner, &parent_session_id, &created.delegation.id)
+            .expect("parent delegation card row should exist");
+    let detail = detail.expect("running parent card should have detail");
+    assert_eq!(status, ParallelAgentStatus::Running);
+    assert!(
+        detail.contains("Child session is waiting for MCP input"),
+        "parent card should expose child pending MCP state: {detail}"
+    );
+    assert!(
+        detail.contains("chrome-devtools"),
+        "parent card should preserve the MCP server detail: {detail}"
+    );
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn delegation_child_pending_non_mcp_requests_update_parent_card_detail() {
+    let cases = [
+        (
+            test_approval_message("delegation-approval-message"),
+            "Child session is waiting for approval",
+            "Allow editing src/main.rs",
+        ),
+        (
+            test_user_input_message("delegation-user-input-message"),
+            "Child session is waiting for input",
+            "Choose the review depth",
+        ),
+        (
+            test_codex_app_request_message("delegation-app-request-message"),
+            "Child session is waiting for a Codex response",
+            "Allow the local app request",
+        ),
+    ];
+
+    for (message, expected_prefix, expected_detail) in cases {
+        let state = test_app_state();
+        let parent_session_id = test_session_id(&state, Agent::Codex);
+        let created = state
+            .create_read_only_delegation(
+                &parent_session_id,
+                CreateDelegationRequest {
+                    prompt: "Review pending child interaction.".to_owned(),
+                    title: Some(format!("{expected_prefix} review")),
+                    cwd: None,
+                    agent: Some(Agent::Codex),
+                    model: None,
+                    mode: Some(DelegationMode::Reviewer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                },
+            )
+            .expect("delegation should be created");
+
+        state
+            .push_message(&created.delegation.child_session_id, message)
+            .expect("pending interaction message should be recorded");
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let (status, detail) = parent_delegation_card_agent_snapshot(
+            &inner,
+            &parent_session_id,
+            &created.delegation.id,
+        )
+        .expect("parent delegation card row should exist");
+        let detail = detail.expect("running parent card should have detail");
+        assert_eq!(status, ParallelAgentStatus::Running);
+        assert!(
+            detail.contains(expected_prefix),
+            "parent card should expose child pending interaction state: {detail}"
+        );
+        assert!(
+            detail.contains(expected_detail),
+            "parent card should preserve child interaction detail: {detail}"
+        );
+        drop(inner);
+
+        let _ = fs::remove_file(state.persistence_path.as_path());
+    }
+}
+
+#[test]
+fn delegated_interaction_submission_returns_post_refresh_state_and_restores_running_detail() {
+    let (state, input_rx) =
+        test_app_state_with_delegation_codex_runtime("delegation-interaction-refresh");
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review with MCP interaction.".to_owned(),
+                title: Some("MCP Refresh Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    match input_rx.recv_timeout(Duration::from_secs(1)) {
+        Ok(CodexRuntimeCommand::Prompt { .. }) => {}
+        Ok(_) => panic!("expected initial delegation prompt"),
+        Err(err) => panic!("initial delegation prompt should dispatch: {err}"),
+    }
+
+    let message_id = "delegation-response-mcp-message";
+    let request = match test_mcp_elicitation_message(message_id) {
+        Message::McpElicitationRequest { request, .. } => request,
+        _ => unreachable!("test helper should create an MCP message"),
+    };
+    state
+        .push_message(
+            &created.delegation.child_session_id,
+            test_mcp_elicitation_message(message_id),
+        )
+        .expect("pending MCP message should be recorded");
+    state
+        .register_codex_pending_mcp_elicitation(
+            &created.delegation.child_session_id,
+            message_id.to_owned(),
+            CodexPendingMcpElicitation {
+                request,
+                request_id: json!("delegation-mcp-request"),
+            },
+        )
+        .expect("pending MCP elicitation should be registered");
+
+    let response = state
+        .submit_codex_mcp_elicitation(
+            &created.delegation.child_session_id,
+            message_id,
+            McpElicitationAction::Decline,
+            None,
+        )
+        .expect("MCP elicitation response should submit");
+
+    match input_rx.recv_timeout(Duration::from_millis(50)) {
+        Ok(CodexRuntimeCommand::JsonRpcResponse { response }) => {
+            assert_eq!(response.request_id, json!("delegation-mcp-request"));
+        }
+        Ok(_) => panic!("expected Codex JSON-RPC MCP response"),
+        Err(err) => panic!("Codex MCP response should arrive: {err}"),
+    }
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(
+        response.revision, inner.revision,
+        "interaction submission response should include the post-refresh revision"
+    );
+    let (status, detail) =
+        parent_delegation_card_agent_snapshot(&inner, &parent_session_id, &created.delegation.id)
+            .expect("parent delegation card row should exist");
+    assert_eq!(status, ParallelAgentStatus::Running);
+    assert_eq!(
+        detail.as_deref(),
+        Some("Delegated session is running."),
+        "parent card should return to the generic running detail after the interaction resolves"
+    );
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn interaction_message_update_returns_post_refresh_state_for_each_request_variant() {
+    let cases = [
+        PendingInteractionTestKind::Approval,
+        PendingInteractionTestKind::UserInput,
+        PendingInteractionTestKind::Mcp,
+        PendingInteractionTestKind::CodexApp,
+    ];
+
+    for (index, kind) in cases.into_iter().enumerate() {
+        let state = test_app_state();
+        let parent_session_id = test_session_id(&state, Agent::Codex);
+        let created = state
+            .create_read_only_delegation(
+                &parent_session_id,
+                CreateDelegationRequest {
+                    prompt: "Review with pending interaction.".to_owned(),
+                    title: Some(format!("Interaction Refresh {index}")),
+                    cwd: None,
+                    agent: Some(Agent::Codex),
+                    model: None,
+                    mode: Some(DelegationMode::Reviewer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                },
+            )
+            .expect("delegation should be created");
+        let message_id = format!("delegation-refresh-message-{index}");
+        state
+            .push_message(
+                &created.delegation.child_session_id,
+                test_pending_interaction_message(kind, &message_id),
+            )
+            .expect("pending interaction message should be recorded");
+
+        let response = state
+            .commit_interaction_message_update(
+                &created.delegation.child_session_id,
+                &message_id,
+                |record| {
+                    let message_index = match kind {
+                        PendingInteractionTestKind::Approval => {
+                            let message_index = set_approval_decision_on_record(
+                                record,
+                                &message_id,
+                                ApprovalDecision::Accepted,
+                            )
+                            .expect("approval should update");
+                            let preview = approval_preview_text(
+                                record.session.agent.name(),
+                                ApprovalDecision::Accepted,
+                            );
+                            sync_session_interaction_state(record, preview);
+                            message_index
+                        }
+                        PendingInteractionTestKind::UserInput => {
+                            let message_index = set_user_input_request_state_on_record(
+                                record,
+                                &message_id,
+                                InteractionRequestState::Submitted,
+                                Some(BTreeMap::from([(
+                                    "depth".to_owned(),
+                                    vec!["Focused".to_owned()],
+                                )])),
+                            )
+                            .expect("user input should update");
+                            let preview = user_input_request_preview_text(
+                                record.session.agent.name(),
+                                InteractionRequestState::Submitted,
+                            );
+                            sync_session_interaction_state(record, preview);
+                            message_index
+                        }
+                        PendingInteractionTestKind::Mcp => {
+                            let message_index = set_mcp_elicitation_request_state_on_record(
+                                record,
+                                &message_id,
+                                InteractionRequestState::Submitted,
+                                Some(McpElicitationAction::Decline),
+                                None,
+                            )
+                            .expect("MCP elicitation should update");
+                            let preview = mcp_elicitation_request_preview_text(
+                                record.session.agent.name(),
+                                InteractionRequestState::Submitted,
+                                Some(McpElicitationAction::Decline),
+                            );
+                            sync_session_interaction_state(record, preview);
+                            message_index
+                        }
+                        PendingInteractionTestKind::CodexApp => {
+                            let message_index = set_codex_app_request_state_on_record(
+                                record,
+                                &message_id,
+                                InteractionRequestState::Submitted,
+                                Some(json!({ "ok": true })),
+                            )
+                            .expect("Codex app request should update");
+                            let preview = codex_app_request_preview_text(
+                                record.session.agent.name(),
+                                InteractionRequestState::Submitted,
+                            );
+                            sync_session_interaction_state(record, preview);
+                            message_index
+                        }
+                    };
+                    Ok(message_index)
+                },
+            )
+            .expect("interaction message update should commit");
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(
+            response.revision, inner.revision,
+            "interaction update response should include the post-refresh revision"
+        );
+        let (status, detail) = parent_delegation_card_agent_snapshot(
+            &inner,
+            &parent_session_id,
+            &created.delegation.id,
+        )
+        .expect("parent delegation card row should exist");
+        assert_eq!(status, ParallelAgentStatus::Running);
+        assert_eq!(detail.as_deref(), Some("Delegated session is running."));
+        drop(inner);
+
+        let _ = fs::remove_file(state.persistence_path.as_path());
+    }
+}
+
+#[test]
+fn canceling_delegation_preserves_pending_child_interaction_reason() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review with a blocked MCP request.".to_owned(),
+                title: Some("Canceled MCP Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+
+    state
+        .push_message(
+            &created.delegation.child_session_id,
+            test_mcp_elicitation_message("delegation-cancel-mcp-message"),
+        )
+        .expect("pending MCP message should be recorded");
+
+    let response = state
+        .cancel_delegation(&parent_session_id, &created.delegation.id)
+        .expect("delegation cancel should succeed");
+
+    assert_eq!(response.delegation.status, DelegationStatus::Canceled);
+    let summary = response
+        .delegation
+        .result
+        .as_ref()
+        .map(|result| result.summary.as_str())
+        .expect("canceled delegation should store a result summary");
+    assert!(
+        summary.contains("Last child state: Child session is waiting for MCP input"),
+        "canceled delegation should explain the child blocker: {summary}"
+    );
+    assert!(
+        summary.contains("chrome-devtools"),
+        "canceled delegation should preserve the MCP server detail: {summary}"
+    );
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
@@ -996,7 +1524,10 @@ fn delegation_creation_dispatches_child_prompt_through_runtime_channel() {
         } => {
             assert_eq!(session_id, created.delegation.child_session_id);
             assert_eq!(command.approval_policy, CodexApprovalPolicy::Never);
-            assert_eq!(command.sandbox_mode, CodexSandboxMode::ReadOnly);
+            assert_eq!(
+                command.sandbox_mode,
+                expected_codex_read_only_delegation_sandbox_mode()
+            );
             assert_eq!(command.cwd, created.delegation.cwd);
             assert!(command.prompt.contains("Inspect dispatch wiring."));
         }

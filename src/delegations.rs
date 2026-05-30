@@ -887,7 +887,7 @@ impl AppState {
         parent_session_id: &str,
         delegation_id: &str,
     ) -> Result<DelegationStatusResponse, ApiError> {
-        let child_session_id = {
+        let (child_session_id, cancel_reason) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
@@ -923,6 +923,7 @@ impl AppState {
                 return Ok(response);
             }
             let child_session_id = delegation.child_session_id.clone();
+            let cancel_reason = delegation_child_cancel_reason_locked(&inner, &child_session_id);
             drop(inner);
             self.publish_delegation_refresh_side_effects(
                 revision,
@@ -930,7 +931,7 @@ impl AppState {
                 detached_child,
                 wait_refresh,
             );
-            child_session_id
+            (child_session_id, cancel_reason)
         };
 
         let stop_conflicted = match self.stop_session_with_options(
@@ -956,10 +957,10 @@ impl AppState {
             if delegation_is_terminal(inner.delegations[index].status) {
                 refreshed_delta
             } else {
-                mark_delegation_canceled_locked(&mut inner, index, None)
+                mark_delegation_canceled_locked(&mut inner, index, cancel_reason)
             }
         } else {
-            mark_delegation_canceled_locked(&mut inner, index, None)
+            mark_delegation_canceled_locked(&mut inner, index, cancel_reason)
         };
         let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
         let wait_refresh = refresh_delegation_waits_locked(&mut inner);
@@ -1648,6 +1649,11 @@ Working directory: `{}`\n\
 {}\n\
 Other sessions may be active in the same workspace. Do not revert unrelated changes.\n\
 \n\
+Tooling constraints:\n\
+- Do not use browser, Chrome DevTools, or other external MCP tools unless the task explicitly asks for them.\n\
+- If required local file or terminal access is unavailable, do not wait for interactive approval. Return a failed `## Result` packet explaining the missing tool.\n\
+- If an approval, input, or MCP prompt blocks progress, report it in the `## Result` packet instead of leaving the delegation pending.\n\
+\n\
 Task:\n{}\n\
 \n\
 Final answer requirements:\n\
@@ -2197,8 +2203,30 @@ fn refresh_delegation_from_child_locked(
     let child_outcome = delegation_child_outcome(inner, &delegation.child_session_id);
     match child_outcome {
         DelegationChildOutcome::Running => {
+            let running_detail = delegation_running_detail_locked(inner, &delegation);
             if delegation.status == DelegationStatus::Running {
-                None
+                if parent_delegation_card_matches_locked(
+                    inner,
+                    &delegation,
+                    ParallelAgentStatus::Running,
+                    &running_detail,
+                ) {
+                    None
+                } else {
+                    let updated_at = stamp_now();
+                    let parent_card_delta = update_parent_delegation_card_locked(
+                        inner,
+                        &delegation,
+                        ParallelAgentStatus::Running,
+                        running_detail,
+                    );
+                    parent_card_delta.map(|parent_card_delta| DelegationLifecycleDelta::Updated {
+                        delegation_id: delegation.id,
+                        status: DelegationStatus::Running,
+                        updated_at,
+                        parent_card_delta: Some(parent_card_delta),
+                    })
+                }
             } else {
                 let updated_at = stamp_now();
                 let record = inner.delegations.get_mut(delegation_index)?;
@@ -2210,7 +2238,7 @@ fn refresh_delegation_from_child_locked(
                     inner,
                     &delegation,
                     ParallelAgentStatus::Running,
-                    "Delegated session is running.".to_owned(),
+                    running_detail,
                 );
                 Some(DelegationLifecycleDelta::Updated {
                     delegation_id: delegation.id,
@@ -2280,6 +2308,75 @@ fn refresh_delegation_from_child_locked(
             "delegation child session no longer exists",
         ),
     }
+}
+
+fn delegation_running_detail_locked(inner: &StateInner, delegation: &DelegationRecord) -> String {
+    inner
+        .find_session_index(&delegation.child_session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .and_then(delegation_child_pending_interaction_detail)
+        .unwrap_or_else(|| "Delegated session is running.".to_owned())
+}
+
+fn delegation_child_pending_interaction_detail(record: &SessionRecord) -> Option<String> {
+    for message in record.session.messages.iter().rev() {
+        if let Some(request) = message.pending_interaction_request() {
+            return Some(format!(
+                "{}: {}",
+                request.child_waiting_prefix,
+                compact_interaction_request_detail(request.title, request.detail)
+            ));
+        }
+    }
+    None
+}
+
+fn compact_interaction_request_detail(title: &str, detail: &str) -> String {
+    let title = title.trim();
+    let detail = detail.trim();
+    let combined = match (title.is_empty(), detail.is_empty()) {
+        (true, true) => "interaction request".to_owned(),
+        (false, true) => title.to_owned(),
+        (true, false) => detail.to_owned(),
+        (false, false) => format!("{title}: {detail}"),
+    };
+    compact_delegation_public_summary(&combined)
+}
+
+fn delegation_child_cancel_reason_locked(
+    inner: &StateInner,
+    child_session_id: &str,
+) -> Option<String> {
+    inner
+        .find_session_index(child_session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .and_then(delegation_child_pending_interaction_detail)
+        .map(|detail| format!("Delegation canceled. Last child state: {detail}"))
+}
+
+fn parent_delegation_card_matches_locked(
+    inner: &StateInner,
+    delegation: &DelegationRecord,
+    status: ParallelAgentStatus,
+    detail: &str,
+) -> bool {
+    let Some(parent_index) = inner.find_session_index(&delegation.parent_session_id) else {
+        return false;
+    };
+    let Some(parent) = inner.sessions.get(parent_index) else {
+        return false;
+    };
+    parent.session.messages.iter().rev().any(|message| {
+        let Message::ParallelAgents { agents, .. } = message else {
+            return false;
+        };
+        agents.iter().any(|agent| {
+            agent.id == delegation.id
+                && agent.source == ParallelAgentSource::Delegation
+                && agent.status == status
+                && agent.detail.as_deref() == Some(detail)
+        })
+    })
 }
 
 fn detach_terminal_delegation_child_runtime_locked(
@@ -2717,10 +2814,24 @@ fn validate_delegation_cwd_input(cwd: &str) -> Result<(), ApiError> {
 
 fn delegation_codex_sandbox_mode(write_policy: &DelegationWritePolicy) -> CodexSandboxMode {
     match write_policy {
-        DelegationWritePolicy::ReadOnly => CodexSandboxMode::ReadOnly,
+        DelegationWritePolicy::ReadOnly => delegation_codex_read_only_sandbox_mode(),
         DelegationWritePolicy::IsolatedWorktree { .. } => CodexSandboxMode::WorkspaceWrite,
         DelegationWritePolicy::SharedWorktree { .. } => CodexSandboxMode::WorkspaceWrite,
     }
+}
+
+#[cfg(windows)]
+fn delegation_codex_read_only_sandbox_mode() -> CodexSandboxMode {
+    // Codex's Windows sandbox can fail before read-only review commands run
+    // (`windows sandbox: spawn setup refresh`). Keep the delegation write policy
+    // read-only, but avoid the sandbox path that prevents reviewers from reading
+    // the repository at all.
+    CodexSandboxMode::DangerFullAccess
+}
+
+#[cfg(not(windows))]
+fn delegation_codex_read_only_sandbox_mode() -> CodexSandboxMode {
+    CodexSandboxMode::ReadOnly
 }
 
 fn prepare_isolated_delegation_worktree(

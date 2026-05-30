@@ -48,6 +48,7 @@ impl AppState {
     /// path (see `src/recorders.rs`) for whole-block events (text,
     /// thinking, diff, approval, subagent result, etc.).
     fn push_message(&self, session_id: &str, message: Message) -> Result<()> {
+        let should_refresh_delegation = message.is_interaction_request();
         let (revision, message, message_index, message_count, preview, status, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -60,13 +61,7 @@ impl AppState {
                 if let Some(next_preview) = message.preview_text() {
                     record.session.preview = next_preview;
                 }
-                if matches!(
-                    message,
-                    Message::Approval { .. }
-                        | Message::UserInputRequest { .. }
-                        | Message::McpElicitationRequest { .. }
-                        | Message::CodexAppRequest { .. }
-                ) {
+                if message.is_interaction_request() {
                     record.session.status = SessionStatus::Approval;
                 }
                 let message_index = push_message_on_record(record, message.clone());
@@ -101,6 +96,13 @@ impl AppState {
             status,
             session_mutation_stamp: Some(session_mutation_stamp),
         });
+        if should_refresh_delegation {
+            if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
+                eprintln!(
+                    "state warning> failed to refresh delegation after interaction request: {err:#}"
+                );
+            }
+        }
         Ok(())
     }
 

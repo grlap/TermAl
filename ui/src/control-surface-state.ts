@@ -14,8 +14,8 @@
 //   - `resolveWorkspaceScopedSessionId` — picks a session id for a
 //     control surface scoped to a project: prefers a preferred
 //     session if it belongs to the project, then the active
-//     session, then the first session in the project. Returns
-//     `null` if none match.
+//     session, then the first session-list-visible session in the
+//     project. Returns `null` if none match.
 //   - `ControlSurfaceSessionListEntry` — discriminated union of
 //     plain session rows and orchestrator-group rows, used by the
 //     control surface's session list to render orchestrator
@@ -64,6 +64,7 @@ import {
   countSessionsByFilter,
   filterSessionListVisibleSessions,
   filterSessionsByListFilter,
+  isSessionVisibleInSessionList,
   type SessionListFilter,
 } from "./session-list-filter";
 import type {
@@ -150,7 +151,11 @@ export function resolveWorkspaceScopedSessionId(
   }
 
   return (
-    sessions.find((session) => session.projectId === projectId)?.id ?? null
+    sessions.find(
+      (session) =>
+        isSessionVisibleInSessionList(session) &&
+        session.projectId === projectId,
+    )?.id ?? null
   );
 }
 
@@ -227,12 +232,13 @@ export function buildControlSurfaceSessionListEntries(
   sessions: readonly Session[],
   orchestrators: readonly OrchestratorInstance[],
 ): ControlSurfaceSessionListEntry[] {
-  if (!sessions.length) {
+  const visibleSessions = filterSessionListVisibleSessions(sessions);
+  if (!visibleSessions.length) {
     return [];
   }
 
   if (!orchestrators.length) {
-    return sessions.map((session) => ({ kind: "session", session }));
+    return visibleSessions.map((session) => ({ kind: "session", session }));
   }
 
   const sessionOrchestrators = new Map<string, OrchestratorInstance>();
@@ -251,7 +257,7 @@ export function buildControlSurfaceSessionListEntries(
   const groupedSessionsByOrchestratorId = new Map<string, Session[]>();
   const entries: ControlSurfaceSessionListEntry[] = [];
 
-  for (const session of sessions) {
+  for (const session of visibleSessions) {
     const orchestrator = sessionOrchestrators.get(session.id);
 
     if (!orchestrator) {

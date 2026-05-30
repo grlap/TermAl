@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildControlSurfaceSessionListState } from "./control-surface-state";
+import {
+  buildControlSurfaceSessionListEntries,
+  buildControlSurfaceSessionListState,
+  resolveWorkspaceScopedSessionId,
+} from "./control-surface-state";
 import type { Project, Session } from "./types";
 
 function createSession(overrides: Partial<Session>): Session {
@@ -69,5 +73,78 @@ describe("buildControlSurfaceSessionListState", () => {
       transcriptIncomplete: true,
     });
     expect(state.sessionListSearchResults.has("other")).toBe(false);
+  });
+});
+
+describe("buildControlSurfaceSessionListEntries", () => {
+  it("omits delegated child sessions even when given raw session state", () => {
+    const parent = createSession({
+      id: "parent",
+      name: "Parent",
+    });
+    const delegatedChild = createSession({
+      id: "reviewer-child",
+      name: "Review docs - Codex",
+      parentDelegationId: "delegation-1",
+    });
+
+    const entries = buildControlSurfaceSessionListEntries(
+      [delegatedChild, parent],
+      [],
+    );
+
+    expect(entries).toEqual([{ kind: "session", session: parent }]);
+  });
+});
+
+describe("resolveWorkspaceScopedSessionId", () => {
+  it("does not choose delegated child sessions as project fallback", () => {
+    const projectId = "project-1";
+    const delegatedChild = createSession({
+      id: "reviewer-child",
+      projectId,
+      parentDelegationId: "delegation-1",
+    });
+    const visibleSession = createSession({
+      id: "visible-session",
+      projectId,
+    });
+    const sessions = [delegatedChild, visibleSession];
+    const sessionLookup = new Map(
+      sessions.map((session) => [session.id, session]),
+    );
+
+    expect(
+      resolveWorkspaceScopedSessionId(
+        projectId,
+        null,
+        null,
+        sessions,
+        sessionLookup,
+      ),
+    ).toBe("visible-session");
+  });
+
+  it("returns null when only delegated child sessions match the project fallback", () => {
+    const projectId = "project-1";
+    const delegatedChild = createSession({
+      id: "reviewer-child",
+      projectId,
+      parentDelegationId: "delegation-1",
+    });
+    const sessions = [delegatedChild];
+    const sessionLookup = new Map(
+      sessions.map((session) => [session.id, session]),
+    );
+
+    expect(
+      resolveWorkspaceScopedSessionId(
+        projectId,
+        null,
+        null,
+        sessions,
+        sessionLookup,
+      ),
+    ).toBeNull();
   });
 });

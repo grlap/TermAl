@@ -78,7 +78,7 @@ impl AppState {
     where
         F: FnOnce(&mut SessionRecord) -> std::result::Result<usize, ApiError>,
     {
-        let snapshot = {
+        {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -114,13 +114,13 @@ impl AppState {
                 session_mutation_stamp: Some(session_mutation_stamp),
             };
             self.publish_delta(&event);
-            self.snapshot_from_inner_with_full_session(
-                &inner,
-                self.cached_agent_readiness(),
-                session_id,
-            )
         };
-        Ok(snapshot)
+        if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
+            eprintln!(
+                "state warning> failed to refresh delegation after interaction response: {err:#}"
+            );
+        }
+        Ok(self.summary_snapshot_with_full_session(session_id))
     }
 
     /// Routes an approval decision back to the originating agent.

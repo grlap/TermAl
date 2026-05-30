@@ -67,148 +67,79 @@ function renderClaudePanel({
 function renderCursorPanel({
   defaultModel = "default",
   onSelectModel = vi.fn(),
+  sessions = [],
 }: {
   defaultModel?: string;
   onSelectModel?: (model: string) => void;
+  sessions?: ComponentProps<typeof CursorPreferencesPanel>["sessions"];
 } = {}) {
+  const props = {
+    defaultCursorMode: "agent" as const,
+    defaultCursorModel: defaultModel,
+    onSelectModel,
+    onSelectMode: vi.fn(),
+    sessions,
+  };
+
   return {
     onSelectModel,
-    ...render(
-      <CursorPreferencesPanel
-        defaultCursorMode="agent"
-        defaultCursorModel={defaultModel}
-        onSelectMode={vi.fn()}
-        onSelectModel={onSelectModel}
-      />,
-    ),
+    ...render(<CursorPreferencesPanel {...props} />),
   };
 }
 
 function renderGeminiPanel({
   defaultModel = "default",
   onSelectModel = vi.fn(),
+  sessions = [],
 }: {
   defaultModel?: string;
   onSelectModel?: (model: string) => void;
+  sessions?: ComponentProps<typeof GeminiPreferencesPanel>["sessions"];
 } = {}) {
+  const props = {
+    defaultGeminiApprovalMode: "default" as const,
+    defaultGeminiModel: defaultModel,
+    onSelectApprovalMode: vi.fn(),
+    onSelectModel,
+    sessions,
+  };
+
   return {
     onSelectModel,
-    ...render(
-      <GeminiPreferencesPanel
-        defaultGeminiApprovalMode="default"
-        defaultGeminiModel={defaultModel}
-        onSelectApprovalMode={vi.fn()}
-        onSelectModel={onSelectModel}
-      />,
-    ),
+    ...render(<GeminiPreferencesPanel {...props} />),
   };
 }
 
 describe("AgentDefaultModelControl", () => {
-  it("keeps a custom model entry path beside the known-model combobox", () => {
+  it("keeps configured custom values in the dropdown without a text input", () => {
     renderCodexPanel({ defaultModel: "gpt-5.5" });
 
     expect(
       screen.getByRole("combobox", { name: "Codex default model" }),
     ).toHaveTextContent("gpt-5.5");
-    expect(screen.getByLabelText("Codex custom default model")).toHaveValue("gpt-5.5");
     expect(
-      screen.queryByRole("button", { name: "Reset Codex default model" }),
+      screen.queryByLabelText("Codex custom default model"),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Apply Codex default model" }),
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: "Apply Codex default model" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/Select a known model/u)).toHaveTextContent(
+      "Select a known model or choose Default to let Codex use its built-in default.",
+    );
   });
 
-  it("applies an arbitrary app-level default model id", () => {
-    const onSelectModel = vi.fn();
-    renderCodexPanel({ defaultModel: "default", onSelectModel });
+  it("renders Claude default model selection as dropdown-only", () => {
+    renderClaudePanel();
 
-    fireEvent.change(screen.getByLabelText("Codex custom default model"), {
-      target: { value: "gpt-5.6-preview" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Apply Codex default model" }));
-
-    expect(onSelectModel).toHaveBeenCalledWith("gpt-5.6-preview");
-    expect(screen.queryByText(/not in the current live model list/u)).not.toBeInTheDocument();
-  });
-
-  it("warns for unknown manual model ids only when a live model list exists", () => {
-    renderCodexPanel({
-      sessions: [
-        {
-          id: "codex-1",
-          name: "Codex",
-          emoji: "",
-          agent: "Codex",
-          workdir: "/tmp",
-          model: "default",
-          modelOptions: [
-            {
-              label: "GPT-5.5",
-              value: "gpt-5.5",
-              description: "Latest Codex model",
-            },
-          ],
-          status: "idle",
-          preview: "",
-          messages: [],
-        },
-      ],
-    });
-
-    fireEvent.change(screen.getByLabelText("Codex custom default model"), {
-      target: { value: "gpt-5.6-preview" },
-    });
-
-    expect(screen.getByText(/not in the current live model list/u)).toBeInTheDocument();
-  });
-
-  it("applies manual default model ids with Enter", () => {
-    const onSelectModel = vi.fn();
-    renderCodexPanel({ defaultModel: "default", onSelectModel });
-
-    fireEvent.change(screen.getByLabelText("Codex custom default model"), {
-      target: { value: "gpt-5.7-preview" },
-    });
-    fireEvent.keyDown(screen.getByLabelText("Codex custom default model"), {
-      key: "Enter",
-    });
-
-    expect(onSelectModel).toHaveBeenCalledWith("gpt-5.7-preview");
-  });
-
-  it("applies arbitrary app-level default model ids for Claude, Cursor, and Gemini", () => {
-    const panels = [
-      {
-        agent: "Claude",
-        renderPanel: renderClaudePanel,
-        value: "claude-opus-4-5",
-      },
-      {
-        agent: "Cursor",
-        renderPanel: renderCursorPanel,
-        value: "cursor-custom-model",
-      },
-      {
-        agent: "Gemini",
-        renderPanel: renderGeminiPanel,
-        value: "gemini-custom-model",
-      },
-    ] as const;
-
-    for (const { agent, renderPanel, value } of panels) {
-      const onSelectModel = vi.fn();
-      const { unmount } = renderPanel({ onSelectModel });
-
-      fireEvent.change(screen.getByLabelText(`${agent} custom default model`), {
-        target: { value },
-      });
-      fireEvent.click(screen.getByRole("button", { name: `Apply ${agent} default model` }));
-
-      expect(onSelectModel).toHaveBeenCalledWith(value);
-      unmount();
-    }
+    expect(
+      screen.getByRole("combobox", { name: "Claude default model" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Claude custom default model"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Apply Claude default model" }),
+    ).not.toBeInTheDocument();
   });
 
   it("selects the canonical default sentinel from the combobox", async () => {
@@ -227,6 +158,16 @@ describe("AgentDefaultModelControl", () => {
     expect(
       screen.getByRole("combobox", { name: "Codex default model" }),
     ).toHaveTextContent("Default");
+  });
+
+  it("offers static Codex model choices before a live session model list loads", async () => {
+    const onSelectModel = vi.fn();
+    renderCodexPanel({ onSelectModel });
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Codex default model" }));
+    fireEvent.click(await screen.findByRole("option", { name: /GPT-5\.4/u }));
+
+    expect(onSelectModel).toHaveBeenCalledWith("gpt-5.4");
   });
 
   it("selects a Codex default model from live session options", async () => {
@@ -291,6 +232,68 @@ describe("AgentDefaultModelControl", () => {
     fireEvent.click(await screen.findByRole("option", { name: /Claude Sonnet 4\.5/u }));
 
     expect(onSelectModel).toHaveBeenCalledWith("claude-sonnet-4-5");
+  });
+
+  it("selects Cursor and Gemini defaults from live session options", async () => {
+    const onSelectCursorModel = vi.fn();
+    renderCursorPanel({
+      onSelectModel: onSelectCursorModel,
+      sessions: [
+        {
+          id: "cursor-1",
+          name: "Cursor",
+          emoji: "",
+          agent: "Cursor",
+          workdir: "/tmp",
+          model: "auto",
+          modelOptions: [
+            {
+              label: "Cursor Pro",
+              value: "cursor-pro",
+              description: "Cursor subscription model",
+            },
+          ],
+          status: "idle",
+          preview: "",
+          messages: [],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Cursor default model" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Cursor Pro/u }));
+
+    expect(onSelectCursorModel).toHaveBeenCalledWith("cursor-pro");
+
+    const onSelectGeminiModel = vi.fn();
+    renderGeminiPanel({
+      onSelectModel: onSelectGeminiModel,
+      sessions: [
+        {
+          id: "gemini-1",
+          name: "Gemini",
+          emoji: "",
+          agent: "Gemini",
+          workdir: "/tmp",
+          model: "auto",
+          modelOptions: [
+            {
+              label: "Gemini Pro",
+              value: "gemini-pro",
+              description: "Gemini model",
+            },
+          ],
+          status: "idle",
+          preview: "",
+          messages: [],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Gemini default model" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Gemini Pro/u }));
+
+    expect(onSelectGeminiModel).toHaveBeenCalledWith("gemini-pro");
   });
 
   it("keeps read-only auto-approve internal to delegation flows", () => {
