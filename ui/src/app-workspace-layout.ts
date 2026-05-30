@@ -49,9 +49,11 @@ import { hydrateControlPanelLayout } from "./control-panel-layout";
 import type { BackendConnectionState } from "./backend-connection";
 import { resolveRecoveredWorkspaceLayoutRequestError } from "./state-adoption";
 import {
+  collectWorkspaceSessionReferences,
   reconcileWorkspaceState,
   stripDiffPreviewDocumentContentFromWorkspaceState,
   stripLoadingGitDiffPreviewTabsFromWorkspaceState,
+  workspaceHasDelegatedChildSessionReferences,
   type WorkspaceState,
 } from "./workspace";
 import {
@@ -120,10 +122,7 @@ export type UseAppWorkspaceLayoutParams = {
   isMountedRef: MutableRefObject<boolean>;
   clearRecoveredBackendRequestError: () => void;
   setBackendConnectionState: (state: BackendConnectionState) => void;
-  reportRequestError: (
-    error: unknown,
-    options?: { message?: string },
-  ) => void;
+  reportRequestError: (error: unknown, options?: { message?: string }) => void;
   applyControlPanelLayout: (
     nextWorkspace: WorkspaceState,
     side?: ControlPanelSide,
@@ -247,8 +246,15 @@ export function useAppWorkspaceLayout(
   const pendingFetchedWorkspaceLayoutRef = useRef<StoredWorkspaceLayout | null>(
     null,
   );
+  const hasPrunedInitialDelegatedChildWorkspaceTabsRef = useRef(false);
+  const initialDelegatedChildPruneSessionIdsRef = useRef<Set<string>>(
+    new Set(),
+  );
+  const initialDelegatedChildPruneMetadataSignatureRef = useRef("");
+  const workspaceRef = useRef(workspace);
   const isSessionStateReadyRef = useRef(isSessionStateReady);
   const hasSessions = sessions.length > 0;
+  workspaceRef.current = workspace;
   isSessionStateReadyRef.current = isSessionStateReady;
 
   useEffect(() => {
@@ -274,6 +280,46 @@ export function useAppWorkspaceLayout(
       });
     },
     [sessionsRef, setWorkspace, workspaceViewId],
+  );
+
+  const resetInitialDelegatedChildWorkspacePruneScope = useCallback(
+    (nextWorkspace: WorkspaceState) => {
+      initialDelegatedChildPruneSessionIdsRef.current =
+        collectWorkspaceSessionReferences(nextWorkspace);
+      initialDelegatedChildPruneMetadataSignatureRef.current = "";
+      hasPrunedInitialDelegatedChildWorkspaceTabsRef.current = false;
+    },
+    [],
+  );
+
+  const initialDelegatedChildPruneMetadataSignature = useCallback(
+    (currentSessions: readonly Session[]) => {
+      const initialSessionIds = initialDelegatedChildPruneSessionIdsRef.current;
+      if (initialSessionIds.size === 0) {
+        return "";
+      }
+      return currentSessions
+        .flatMap((session) =>
+          initialSessionIds.has(session.id)
+            ? [`${session.id}:${session.parentDelegationId ?? ""}`]
+            : [],
+        )
+        .sort()
+        .join("|");
+    },
+    [],
+  );
+
+  const delegatedChildSessionIdsOutsideInitialPruneScope = useCallback(
+    (currentSessions: readonly Session[]) => {
+      const initialSessionIds = initialDelegatedChildPruneSessionIdsRef.current;
+      return currentSessions.flatMap((session) =>
+        session.parentDelegationId && !initialSessionIds.has(session.id)
+          ? [session.id]
+          : [],
+      );
+    },
+    [],
   );
 
   function beginWorkspaceSummariesRequest() {
@@ -486,6 +532,7 @@ export function useAppWorkspaceLayout(
     workspaceLayoutLoadPendingRef.current = true;
     ignoreFetchedWorkspaceLayoutRef.current = false;
     pendingFetchedWorkspaceLayoutRef.current = null;
+    resetInitialDelegatedChildWorkspacePruneScope(workspaceRef.current);
     setIsWorkspaceLayoutReady(false);
 
     void fetchWorkspaceLayout(workspaceViewId)
@@ -502,7 +549,8 @@ export function useAppWorkspaceLayout(
                 styleId: response.layout.styleId,
                 markdownThemeId: response.layout.markdownThemeId,
                 markdownStyleId: response.layout.markdownStyleId,
-                diagramThemeOverrideMode: response.layout.diagramThemeOverrideMode,
+                diagramThemeOverrideMode:
+                  response.layout.diagramThemeOverrideMode,
                 diagramLook: response.layout.diagramLook,
                 diagramPalette: response.layout.diagramPalette,
                 fontSizePx: response.layout.fontSizePx,
@@ -517,6 +565,9 @@ export function useAppWorkspaceLayout(
         if (nextLayout) {
           const shouldApplyFetchedWorkspaceLayout =
             !ignoreFetchedWorkspaceLayoutRef.current;
+          if (shouldApplyFetchedWorkspaceLayout) {
+            resetInitialDelegatedChildWorkspacePruneScope(nextLayout.workspace);
+          }
           // A manual layout change during hydration claims the workspace tree
           // and dock side locally, but still allows the server-stored visual
           // preferences to merge in once the fetch resolves.
@@ -609,7 +660,12 @@ export function useAppWorkspaceLayout(
       workspaceLayoutLoadPendingRef.current = false;
       pendingFetchedWorkspaceLayoutRef.current = null;
     };
-  }, [applyFetchedWorkspaceLayout, sessionsRef, workspaceViewId]);
+  }, [
+    applyFetchedWorkspaceLayout,
+    resetInitialDelegatedChildWorkspacePruneScope,
+    sessionsRef,
+    workspaceViewId,
+  ]);
 
   useEffect(() => {
     const pendingFetchedWorkspaceLayout =
@@ -632,6 +688,92 @@ export function useAppWorkspaceLayout(
     workspaceLayoutLoadPendingRef.current = false;
     setIsWorkspaceLayoutReady(true);
   }, [applyFetchedWorkspaceLayout, hasSessions, isSessionStateReady]);
+
+  useEffect(() => {
+    if (!isWorkspaceLayoutReady || !isSessionStateReady) {
+      return;
+    }
+
+    const metadataSignature =
+      initialDelegatedChildPruneMetadataSignature(sessions);
+    if (
+      metadataSignature !==
+      initialDelegatedChildPruneMetadataSignatureRef.current
+    ) {
+      initialDelegatedChildPruneMetadataSignatureRef.current =
+        metadataSignature;
+      hasPrunedInitialDelegatedChildWorkspaceTabsRef.current = false;
+    }
+
+    if (hasPrunedInitialDelegatedChildWorkspaceTabsRef.current) {
+      return;
+    }
+
+    const initialPruneSessionIds =
+      initialDelegatedChildPruneSessionIdsRef.current;
+    if (initialPruneSessionIds.size === 0) {
+      hasPrunedInitialDelegatedChildWorkspaceTabsRef.current = true;
+      return;
+    }
+
+    if (sessions.length === 0 && workspaceHasSessionReferences(workspace)) {
+      return;
+    }
+
+    const preserveSessionIds =
+      delegatedChildSessionIdsOutsideInitialPruneScope(sessions);
+    if (
+      !workspaceHasDelegatedChildSessionReferences(
+        workspace,
+        sessions,
+        preserveSessionIds,
+      )
+    ) {
+      // Session metadata is ready and none of the restored references are
+      // delegated children, so the restore-only prune has no remaining work.
+      hasPrunedInitialDelegatedChildWorkspaceTabsRef.current = true;
+      return;
+    }
+
+    // The updater below may be invoked more than once by React. Mark the
+    // restore-only prune as consumed here so the updater remains pure.
+    hasPrunedInitialDelegatedChildWorkspaceTabsRef.current = true;
+    setWorkspace((current) => {
+      const currentSessions = sessionsRef.current;
+      const currentPreserveSessionIds =
+        delegatedChildSessionIdsOutsideInitialPruneScope(currentSessions);
+      if (
+        !workspaceHasDelegatedChildSessionReferences(
+          current,
+          currentSessions,
+          currentPreserveSessionIds,
+        )
+      ) {
+        return current;
+      }
+
+      // This one-shot prune is only for session references restored from local
+      // or server workspace layouts; current-session child tabs are preserved.
+      return applyControlPanelLayout(
+        reconcileWorkspaceState(current, currentSessions, {
+          pruneDelegatedChildSessionTabs: true,
+          preserveSessionIds: currentPreserveSessionIds,
+        }),
+        controlPanelSide,
+      );
+    });
+  }, [
+    applyControlPanelLayout,
+    controlPanelSide,
+    delegatedChildSessionIdsOutsideInitialPruneScope,
+    initialDelegatedChildPruneMetadataSignature,
+    isSessionStateReady,
+    isWorkspaceLayoutReady,
+    sessions,
+    sessionsRef,
+    setWorkspace,
+    workspace,
+  ]);
 
   useEffect(() => {
     if (!isWorkspaceLayoutReady) {

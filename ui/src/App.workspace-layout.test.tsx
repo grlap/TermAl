@@ -281,6 +281,17 @@ describe("App workspace layout", () => {
     vi.unstubAllGlobals();
   });
 
+  async function openSessionByName(name: string) {
+    await clickAndSettle(
+      await screen.findByRole("button", { name: "Sessions" }),
+    );
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const sessionRowButton = await screen.findByRole("button", {
+      name: new RegExp(`^${escapedName}(?:\\s|$)`),
+    });
+    await clickAndSettle(sessionRowButton);
+  }
+
   it("opens the workspace switcher with one refresh under StrictMode", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
@@ -574,7 +585,6 @@ describe("App workspace layout", () => {
     });
   });
 
-
   it("shows workspace delete errors and restores the delete button", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
@@ -658,7 +668,9 @@ describe("App workspace layout", () => {
         await waitFor(() => {
           expect(deleteWorkspaceLayoutSpy).toHaveBeenCalledWith("monitor-left");
         });
-        expect(await within(switcherDialog).findByText("Delete failed.")).toBeInTheDocument();
+        expect(
+          await within(switcherDialog).findByText("Delete failed."),
+        ).toBeInTheDocument();
         expect(
           within(switcherDialog).getAllByText("monitor-left").length,
         ).toBeGreaterThan(0);
@@ -919,7 +931,9 @@ describe("App workspace layout", () => {
         let switcherDialog = await screen.findByRole("dialog", {
           name: "Workspace switcher",
         });
-        expect(within(switcherDialog).getAllByText("monitor-left").length).toBeGreaterThan(0);
+        expect(
+          within(switcherDialog).getAllByText("monitor-left").length,
+        ).toBeGreaterThan(0);
 
         await clickAndSettle(switcherTrigger);
         await waitFor(() => {
@@ -1265,13 +1279,15 @@ describe("App workspace layout", () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
-        revision: 1,
-        projects: [],
-        orchestrators: [],
-        workspaces: [],
-        sessions: [],
-      }));
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
+        makeStateResponse({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [],
+        }),
+      );
       const fetchWorkspaceLayoutSpy = vi
         .mocked(api.fetchWorkspaceLayout)
         .mockResolvedValue(null);
@@ -1338,20 +1354,22 @@ describe("App workspace layout", () => {
       vi.useFakeTimers();
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
-      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
-        revision: 1,
-        projects: [],
-        orchestrators: [],
-        workspaces: [
-          {
-            id: "workspace-current",
-            revision: 1,
-            updatedAt: "2026-04-10 10:00:00",
-            controlPanelSide: "left",
-          },
-        ],
-        sessions: [],
-      }));
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
+        makeStateResponse({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [
+            {
+              id: "workspace-current",
+              revision: 1,
+              updatedAt: "2026-04-10 10:00:00",
+              controlPanelSide: "left",
+            },
+          ],
+          sessions: [],
+        }),
+      );
       const fetchWorkspaceLayoutSpy = vi
         .mocked(api.fetchWorkspaceLayout)
         .mockResolvedValue(null);
@@ -1415,8 +1433,9 @@ describe("App workspace layout", () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     const layoutStorageKey = `${WORKSPACE_LAYOUT_STORAGE_KEY}:test-control-panel-resize-race`;
-    const fetchWorkspaceLayoutDeferred =
-      createDeferred<Awaited<ReturnType<typeof api.fetchWorkspaceLayout>> | null>();
+    const fetchWorkspaceLayoutDeferred = createDeferred<Awaited<
+      ReturnType<typeof api.fetchWorkspaceLayout>
+    > | null>();
     const fetchWorkspaceLayoutSpy = vi
       .mocked(api.fetchWorkspaceLayout)
       .mockImplementation(() => fetchWorkspaceLayoutDeferred.promise);
@@ -1606,7 +1625,8 @@ describe("App workspace layout", () => {
       });
 
       await waitFor(() => {
-        const persistedLayoutRaw = window.localStorage.getItem(layoutStorageKey);
+        const persistedLayoutRaw =
+          window.localStorage.getItem(layoutStorageKey);
         expect(persistedLayoutRaw).not.toBeNull();
         const persistedLayout = JSON.parse(persistedLayoutRaw ?? "null") as {
           workspace: {
@@ -1654,16 +1674,14 @@ describe("App workspace layout", () => {
       ),
     ).toBe(unrelatedError);
     expect(
-      resolveRecoveredWorkspaceLayoutRequestError(
-        unrelatedError,
-        null,
-      ),
+      resolveRecoveredWorkspaceLayoutRequestError(unrelatedError, null),
     ).toBe(unrelatedError);
   });
 
   it("prunes delegated child tabs from a fetched workspace layout after state loads", async () => {
-    const fetchWorkspaceLayoutDeferred =
-      createDeferred<Awaited<ReturnType<typeof api.fetchWorkspaceLayout>> | null>();
+    const fetchWorkspaceLayoutDeferred = createDeferred<Awaited<
+      ReturnType<typeof api.fetchWorkspaceLayout>
+    > | null>();
     vi.mocked(api.fetchWorkspaceLayout).mockImplementation(
       () => fetchWorkspaceLayoutDeferred.promise,
     );
@@ -1757,20 +1775,300 @@ describe("App workspace layout", () => {
     const persistedLayout = JSON.parse(persistedRaw!) as {
       workspace: WorkspaceState;
     };
-    const persistedSessionIds = persistedLayout.workspace.panes.flatMap((pane) =>
-      pane.tabs.flatMap((tab) =>
-        tab.kind === "session" ? [tab.sessionId] : [],
-      ),
+    const persistedSessionIds = persistedLayout.workspace.panes.flatMap(
+      (pane) =>
+        pane.tabs.flatMap((tab) =>
+          tab.kind === "session" ? [tab.sessionId] : [],
+        ),
     );
     expect(persistedSessionIds).toEqual(["session-parent"]);
+  });
+
+  it("prunes delegated child tabs from a locally restored workspace layout after state loads", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const workspaceViewId = "test-local-delegated-child-prune";
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      stubScrollIntoView();
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `/?workspace=${workspaceViewId}`,
+      );
+      workspaceStorage.persistWorkspaceLayout(workspaceViewId, {
+        controlPanelSide: "left",
+        workspace: {
+          root: {
+            type: "pane",
+            paneId: "pane-restored",
+          },
+          panes: [
+            {
+              id: "pane-restored",
+              tabs: [
+                {
+                  id: "tab-child",
+                  kind: "session",
+                  sessionId: "session-child",
+                },
+                {
+                  id: "tab-parent",
+                  kind: "session",
+                  sessionId: "session-parent",
+                },
+              ],
+              activeTabId: "tab-child",
+              activeSessionId: "session-child",
+              viewMode: "session",
+              lastSessionViewMode: "session",
+              sourcePath: null,
+            },
+          ],
+          activePaneId: "pane-restored",
+        },
+      });
+
+      try {
+        await renderApp();
+
+        await dispatchOpenedStateEvent(
+          latestEventSource(),
+          makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-parent", {
+                name: "Parent Session",
+              }),
+              makeSession("session-child", {
+                name: "Delegated Reviewer",
+                parentDelegationId: "delegation-1",
+              }),
+            ],
+          }),
+        );
+        await settleAsyncUi();
+
+        await waitFor(() => {
+          expect(
+            screen.queryByRole("tab", { name: "Delegated Reviewer" }),
+          ).not.toBeInTheDocument();
+          expect(
+            screen.getByRole("tab", { name: "Parent Session" }),
+          ).toBeInTheDocument();
+        });
+
+        await waitFor(() => {
+          const persistedRaw = window.localStorage.getItem(
+            `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+          );
+          expect(persistedRaw).not.toBeNull();
+          const persistedLayout = JSON.parse(persistedRaw!) as {
+            workspace: WorkspaceState;
+          };
+          const persistedSessionIds = persistedLayout.workspace.panes.flatMap(
+            (pane) =>
+              pane.tabs.flatMap((tab) =>
+                tab.kind === "session" ? [tab.sessionId] : [],
+              ),
+          );
+          expect(persistedSessionIds).toEqual(["session-parent"]);
+        });
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+      }
+    });
+  });
+
+  it("prunes locally restored delegated child tabs after parent metadata arrives later", async () => {
+    await withSuppressedActWarnings(async () => {
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const workspaceViewId = "test-late-delegated-child-prune";
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      stubScrollIntoView();
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `/?workspace=${workspaceViewId}`,
+      );
+      workspaceStorage.persistWorkspaceLayout(workspaceViewId, {
+        controlPanelSide: "left",
+        workspace: {
+          root: {
+            type: "pane",
+            paneId: "pane-restored",
+          },
+          panes: [
+            {
+              id: "pane-restored",
+              tabs: [
+                {
+                  id: "tab-child",
+                  kind: "session",
+                  sessionId: "session-child",
+                },
+                {
+                  id: "tab-parent",
+                  kind: "session",
+                  sessionId: "session-parent",
+                },
+              ],
+              activeTabId: "tab-child",
+              activeSessionId: "session-child",
+              viewMode: "session",
+              lastSessionViewMode: "session",
+              sourcePath: null,
+            },
+          ],
+          activePaneId: "pane-restored",
+        },
+      });
+
+      try {
+        await renderApp();
+
+        await dispatchOpenedStateEvent(
+          latestEventSource(),
+          makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-parent", {
+                name: "Parent Session",
+              }),
+              makeSession("session-child", {
+                name: "Delegated Reviewer",
+              }),
+            ],
+          }),
+        );
+        await waitFor(() => {
+          expect(
+            screen.getByRole("tab", { name: "Delegated Reviewer" }),
+          ).toBeInTheDocument();
+        });
+
+        await dispatchStateEvent(
+          latestEventSource(),
+          makeStateResponse({
+            revision: 2,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-parent", {
+                name: "Parent Session",
+              }),
+              makeSession("session-child", {
+                name: "Delegated Reviewer",
+                parentDelegationId: "delegation-1",
+              }),
+            ],
+          }),
+        );
+
+        await waitFor(() => {
+          expect(
+            screen.queryByRole("tab", { name: "Delegated Reviewer" }),
+          ).not.toBeInTheDocument();
+          expect(
+            screen.getByRole("tab", { name: "Parent Session" }),
+          ).toBeInTheDocument();
+        });
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+      }
+    });
+  });
+
+  it("preserves current-session delegated child tabs opened after workspace readiness", async () => {
+    await withSuppressedActWarnings(async () => {
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      stubScrollIntoView();
+
+      await renderApp();
+
+      await dispatchOpenedStateEvent(
+        latestEventSource(),
+        makeStateResponse({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [
+            makeSession("session-parent", {
+              name: "Parent Session",
+            }),
+            makeSession("session-child", {
+              name: "Delegated Reviewer",
+            }),
+          ],
+        }),
+      );
+      await openSessionByName("Delegated Reviewer");
+      expect(
+        await screen.findByRole("tab", { name: "Delegated Reviewer" }),
+      ).toBeInTheDocument();
+
+      await dispatchStateEvent(
+        latestEventSource(),
+        makeStateResponse({
+          revision: 2,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [
+            makeSession("session-parent", {
+              name: "Parent Session",
+            }),
+            makeSession("session-child", {
+              name: "Delegated Reviewer",
+              parentDelegationId: "delegation-1",
+            }),
+          ],
+        }),
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("tab", { name: "Delegated Reviewer" }),
+        ).toBeInTheDocument();
+      });
+    });
   });
 
   it("clears a deferred fetched workspace layout after an empty session snapshot", async () => {
     const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     const workspaceViewId = "test-empty-session-layout-release";
     const layoutStorageKey = `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`;
-    const fetchWorkspaceLayoutDeferred =
-      createDeferred<Awaited<ReturnType<typeof api.fetchWorkspaceLayout>> | null>();
+    const fetchWorkspaceLayoutDeferred = createDeferred<Awaited<
+      ReturnType<typeof api.fetchWorkspaceLayout>
+    > | null>();
     vi.mocked(api.fetchWorkspaceLayout).mockImplementation(
       () => fetchWorkspaceLayoutDeferred.promise,
     );
@@ -1824,9 +2122,7 @@ describe("App workspace layout", () => {
         await flushUiWork();
       });
 
-      expect(
-        window.localStorage.getItem(layoutStorageKey),
-      ).toBeNull();
+      expect(window.localStorage.getItem(layoutStorageKey)).toBeNull();
 
       await dispatchOpenedStateEvent(
         latestEventSource(),

@@ -203,6 +203,18 @@ fn delegation_write_policy_accepts_legacy_snake_case_discriminators() {
         serde_json::from_value(json!({ "kind": "read_only" })).expect("read_only alias");
     assert_eq!(read_only, DelegationWritePolicy::ReadOnly);
 
+    let read_only_string: DelegationWritePolicy =
+        serde_json::from_value(json!("readOnly")).expect("readOnly string alias");
+    assert_eq!(read_only_string, DelegationWritePolicy::ReadOnly);
+
+    let read_only_wrapper: DelegationWritePolicy =
+        serde_json::from_value(json!({ "readOnly": true })).expect("readOnly wrapper alias");
+    assert_eq!(read_only_wrapper, DelegationWritePolicy::ReadOnly);
+
+    let read_only_empty: DelegationWritePolicy =
+        serde_json::from_value(json!({})).expect("empty object should default read-only");
+    assert_eq!(read_only_empty, DelegationWritePolicy::ReadOnly);
+
     let shared: DelegationWritePolicy = serde_json::from_value(json!({
         "kind": "shared_worktree",
         "ownedPaths": ["src"]
@@ -241,6 +253,70 @@ fn delegation_write_policy_accepts_legacy_snake_case_discriminators() {
             worktree_path: None,
         }
     );
+
+    let isolated_wrapper: DelegationWritePolicy = serde_json::from_value(json!({
+        "isolatedWorktree": {
+            "ownedPaths": ["src"],
+            "worktreePath": "C:/tmp/delegation-worktree"
+        }
+    }))
+    .expect("isolatedWorktree wrapper alias");
+    assert_eq!(
+        isolated_wrapper,
+        DelegationWritePolicy::IsolatedWorktree {
+            owned_paths: vec!["src".to_owned()],
+            worktree_path: Some("C:/tmp/delegation-worktree".to_owned()),
+        }
+    );
+}
+
+#[test]
+fn delegation_write_policy_round_trips_serialized_variants() {
+    let policies = vec![
+        DelegationWritePolicy::ReadOnly,
+        DelegationWritePolicy::SharedWorktree {
+            owned_paths: vec!["src".to_owned(), "ui/src".to_owned()],
+        },
+        DelegationWritePolicy::IsolatedWorktree {
+            owned_paths: vec!["src".to_owned()],
+            worktree_path: Some("/tmp/termal-delegation-worktree".to_owned()),
+        },
+        DelegationWritePolicy::IsolatedWorktree {
+            owned_paths: Vec::new(),
+            worktree_path: None,
+        },
+    ];
+
+    for policy in policies {
+        let value = serde_json::to_value(&policy).expect("write policy should serialize");
+        let decoded: DelegationWritePolicy =
+            serde_json::from_value(value.clone()).expect("serialized policy should deserialize");
+        assert_eq!(decoded, policy, "round-trip failed for {value}");
+    }
+}
+
+#[test]
+fn delegation_write_policy_rejects_invalid_shapes() {
+    fn assert_rejected(value: serde_json::Value, expected_message: &str) {
+        let err = serde_json::from_value::<DelegationWritePolicy>(value)
+            .expect_err("invalid write policy should be rejected");
+        let message = err.to_string();
+        assert!(
+            message.contains(expected_message),
+            "expected `{message}` to contain `{expected_message}`",
+        );
+    }
+
+    assert_rejected(
+        json!({ "readOnly": true, "isolatedWorktree": {} }),
+        "writePolicy object must include kind",
+    );
+    assert_rejected(
+        json!({ "kind": "dangerousWorktree" }),
+        "unsupported writePolicy kind",
+    );
+    assert_rejected(json!({ "kind": true }), "writePolicy.kind must be a string");
+    assert_rejected(json!(true), "writePolicy must be a string or object");
 }
 
 #[test]

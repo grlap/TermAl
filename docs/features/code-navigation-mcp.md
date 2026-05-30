@@ -112,14 +112,19 @@ compiler-backed answers for code facts.
   structural questions inside a file without requiring a whole-file read or
   cross-file symbol resolution. This is the right layer for finding containing
   types, members, local functions, top-level declarations, and source spans
-  before reading or editing a large file.
+  before reading or editing a large file. The agent-facing surface should
+  expose syntax-derived summaries and spans, not raw syntax-tree dumps, unless
+  a later language adapter has a specific, bounded use case for raw nodes.
 - **Semantic model**: `symbol_at`, `search_symbol`, `definition`,
   `references`, `project_graph`, `projects_containing`, and later tools such as
   `implementations`, `callers`, `callees`, `type_hierarchy`, and
   `related_tests` answer program-meaning questions through Roslyn/MSBuild or
   the relevant language adapter. This is the right layer for definitions,
   exact references, overloads, partial declarations, generated code ownership,
-  project membership, dependency direction, and impact analysis.
+  project membership, dependency direction, and impact analysis. Project-graph
+  facts come from MSBuild/project evaluation rather than Roslyn symbols, but
+  they belong in the same layer because they describe program structure and
+  ownership rather than text occurrence.
 
 Text finds bytes. Syntax finds source shape. The semantic model finds program
 meaning. `search_symbol` may use name matching to locate candidates, but its
@@ -142,6 +147,13 @@ outside source navigation. In an indexed workspace, shell text search should
 not be the first step for code facts unless `server_capabilities()` or index
 metadata shows that the relevant semantic layer is unavailable, partial, or
 stale.
+
+Agent instructions should be scoped to the layers and tools reported by
+`server_capabilities()`. During partial rollout, unsupported languages, failed
+project loads, dirty or broken files, missing generated source, linked files,
+multi-targeting differences, reflection, dependency-injection conventions, and
+string-based dispatch should be treated as explicit degraded states rather than
+silently downgraded to exact semantic facts.
 
 ## Agent Navigation Workflow
 
@@ -190,15 +202,15 @@ through normal MCP tool discovery and, optionally, a small
 `server_capabilities()` tool that reports supported languages, index status,
 available tools, response budgets, and disabled features.
 
-For implementation planning, core tools are required for the grep-replacement
+For implementation planning, core tools are required for the source-navigation
 MVP, higher-level tools should follow once the core signals are reliable, and
 expanded tools are optional or later-phase capabilities.
 
 ### Core tools
 
 These tools should ship together because they cover the minimum useful
-large-repository navigation loop and are the minimum agent-usable grep
-replacement.
+large-repository navigation loop and are the minimum agent-usable default path
+for indexed source navigation.
 
 ```text
 server_capabilities()
@@ -239,7 +251,8 @@ Fast text search with ranking and filters. This is the indexed text lookup
 layer: it should behave like `rg`, but with structured output, stable line/byte
 offsets, result budgets, and workspace-aware ranking. For code facts, agents
 should use the semantic layer instead: `search_symbol`, `definition`, and
-`references`.
+`references`. A `search_text` hit is evidence that bytes matched; it is not
+proof of symbol identity, ownership, or reference semantics.
 
 Useful filters:
 
@@ -423,7 +436,7 @@ callees(target, depth, filters, limit, cursor)
 Walks the call graph around a method, constructor, property accessor, or
 delegate invocation. These tools should be on-demand, scope-limited, and
 confidence-labeled; precomputing whole-repo call graphs is not required for the
-core grep-replacement workflow.
+core source-navigation workflow.
 
 ```text
 type_hierarchy(target, direction, depth)
@@ -1055,9 +1068,9 @@ source locations in the human UI.
   generated/build-output conventions, and default exclusions
 - expose `server_capabilities`, `repo_overview`, `find_file`, and `search_text`
   for internal testing
-- do not advertise this as a grep replacement yet
+- do not advertise this as the default source-navigation path yet
 
-### Phase 1: Agent grep-replacement MVP
+### Phase 1: Agent source-navigation MVP
 
 This is the first release that should be attached to Claude/Codex as the
 preferred source-navigation path. It should ship as a coherent slice:

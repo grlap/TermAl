@@ -77,6 +77,47 @@ fn delegation_result_packet_parses_findings_notes_and_inspected_files() {
 }
 
 #[test]
+fn delegation_result_packet_deduplicates_and_caps_findings() {
+    let mut packet = "## Result\n\nStatus: completed\n\nSummary:\nReady.\n\nFindings:\n\
+- High src/delegations.rs:1413 - Resume prompt drops findings.\n\
+- High src/delegations.rs:1413 - Resume prompt drops findings.\n"
+        .to_owned();
+    for index in 0..MAX_DELEGATION_RESULT_FINDINGS {
+        packet.push_str(&format!(
+            "- Low src/generated.rs:{index} - Generated finding {index}.\n"
+        ));
+    }
+
+    let parsed = parse_delegation_result_packet(&packet).expect("packet findings should parse");
+
+    assert_eq!(parsed.findings.len(), MAX_DELEGATION_RESULT_FINDINGS);
+    assert_eq!(
+        parsed.findings[0],
+        DelegationFinding {
+            severity: "High".to_owned(),
+            file: Some("src/delegations.rs".to_owned()),
+            line: Some(1413),
+            message: "Resume prompt drops findings.".to_owned(),
+        }
+    );
+    assert_eq!(
+        parsed
+            .findings
+            .iter()
+            .filter(|finding| finding.message == "Resume prompt drops findings.")
+            .count(),
+        1
+    );
+    assert!(
+        parsed
+            .findings
+            .iter()
+            .all(|finding| finding.message != "Generated finding 99."),
+        "cap should be applied after dedupe keeps the first unique finding"
+    );
+}
+
+#[test]
 fn delegation_result_packet_parses_line_range_on_standard_findings_path() {
     let parsed = parse_delegation_result_packet(
         "## Result\n\nStatus: completed\n\nSummary:\nReady.\n\nFindings:\n- Medium src/state.rs:66-109 - State mutex waits behind the mailbox.",

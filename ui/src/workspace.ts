@@ -1,4 +1,8 @@
-import type { GitDiffDocumentContent, GitDiffRequestPayload, GitDiffSection } from "./api";
+import type {
+  GitDiffDocumentContent,
+  GitDiffRequestPayload,
+  GitDiffSection,
+} from "./api";
 import type { DiffMessage, Session } from "./types";
 import {
   EMPTY_WORKSPACE_SOURCE_FOCUS,
@@ -110,7 +114,83 @@ export type ReconcileWorkspaceStateOptions = {
   preserveSessionIds?: readonly string[];
 };
 
-export function normalizeWorkspaceStatePaths(workspace: WorkspaceState): WorkspaceState {
+// Returns whether the workspace still points at delegated child sessions.
+// `preserveSessionIds` exempts child sessions that were intentionally opened
+// in the current UI session and should not be treated as stale restored tabs.
+export function workspaceHasDelegatedChildSessionReferences(
+  workspace: WorkspaceState,
+  sessions: readonly Session[],
+  preserveSessionIds: readonly string[] = [],
+) {
+  const preservedSessionIds = new Set(preserveSessionIds);
+  const delegatedChildSessionIds = new Set(
+    sessions.flatMap((session) =>
+      session.parentDelegationId && !preservedSessionIds.has(session.id)
+        ? [session.id]
+        : [],
+    ),
+  );
+  if (delegatedChildSessionIds.size === 0) {
+    return false;
+  }
+
+  return workspace.panes.some((pane) => {
+    if (
+      pane.activeSessionId &&
+      delegatedChildSessionIds.has(pane.activeSessionId)
+    ) {
+      return true;
+    }
+
+    return pane.tabs.some((tab) => {
+      if (tab.kind === "session") {
+        return delegatedChildSessionIds.has(tab.sessionId);
+      }
+      if (tab.kind === "canvas") {
+        return (
+          (!!tab.originSessionId &&
+            delegatedChildSessionIds.has(tab.originSessionId)) ||
+          tab.cards.some((card) => delegatedChildSessionIds.has(card.sessionId))
+        );
+      }
+      return (
+        "originSessionId" in tab &&
+        !!tab.originSessionId &&
+        delegatedChildSessionIds.has(tab.originSessionId)
+      );
+    });
+  });
+}
+
+// Collects every session id directly referenced by the workspace tree, including
+// tab origins and canvas cards, so restore-time pruning can stay scoped to ids
+// that came from persisted layout state.
+export function collectWorkspaceSessionReferences(workspace: WorkspaceState) {
+  const sessionIds = new Set<string>();
+  workspace.panes.forEach((pane) => {
+    if (pane.activeSessionId) {
+      sessionIds.add(pane.activeSessionId);
+    }
+    pane.tabs.forEach((tab) => {
+      if (tab.kind === "session") {
+        sessionIds.add(tab.sessionId);
+      }
+      if ("originSessionId" in tab && tab.originSessionId) {
+        sessionIds.add(tab.originSessionId);
+      }
+      if (tab.kind === "canvas") {
+        tab.cards.forEach((card) => {
+          sessionIds.add(card.sessionId);
+        });
+      }
+    });
+  });
+  return sessionIds;
+}
+
+export function normalizeWorkspaceStatePaths(
+  workspace: WorkspaceState,
+): WorkspaceState {
   return {
     ...workspace,
     panes: workspace.panes.map((pane) =>
@@ -189,146 +269,172 @@ export function reconcileWorkspaceState(
     availableSessions.map((session) => session.id),
   );
   let panes = current.panes.map((pane) => {
-    const tabs = pane.tabs
-      .flatMap((tab): WorkspaceTab[] => {
-        if (tab.kind === "session") {
-          return availableSessionIds.has(tab.sessionId) ? [tab] : [];
-        }
+    const tabs = pane.tabs.flatMap((tab): WorkspaceTab[] => {
+      if (tab.kind === "session") {
+        return availableSessionIds.has(tab.sessionId) ? [tab] : [];
+      }
 
-        const originSessionId =
-          tab.originSessionId && availableSessionIds.has(tab.originSessionId)
-            ? tab.originSessionId
-            : null;
-        const originProjectId = normalizeWorkspaceIdentifier(tab.originProjectId);
+      const originSessionId =
+        tab.originSessionId && availableSessionIds.has(tab.originSessionId)
+          ? tab.originSessionId
+          : null;
+      const originProjectId = normalizeWorkspaceIdentifier(tab.originProjectId);
 
-        if (tab.kind === "source") {
-          const {
-            originProjectId: _ignoredOriginProjectId,
-            focusLineNumber: _ignoredFocusLineNumber,
-            focusColumnNumber: _ignoredFocusColumnNumber,
-            focusToken: _ignoredFocusToken,
-            ...tabWithoutOriginProjectId
-          } = tab;
-          return [
-            {
-              ...tabWithoutOriginProjectId,
-              originSessionId,
-              ...projectOriginProps(originProjectId),
-              path: normalizeWorkspacePath(tab.path),
-              ...sourceFocusProps(
-                normalizeWorkspaceSourceFocus({
-                  line: tab.focusLineNumber ?? null,
-                  column: tab.focusColumnNumber ?? null,
-                  token: tab.focusToken ?? null,
-                }),
-              ),
-            },
-          ];
-        }
-
-        if (tab.kind === "filesystem") {
-          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
-          return [
-            {
-              ...tabWithoutOriginProjectId,
-              originSessionId,
-              ...projectOriginProps(originProjectId),
-              rootPath: normalizeWorkspacePath(tab.rootPath),
-            },
-          ];
-        }
-
-        if (tab.kind === "gitStatus") {
-          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
-          return [
-            {
-              ...tabWithoutOriginProjectId,
-              originSessionId,
-              ...projectOriginProps(originProjectId),
-              workdir: normalizeWorkspacePath(tab.workdir),
-            },
-          ];
-        }
-
-        if (tab.kind === "terminal") {
-          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
-          return [
-            {
-              ...tabWithoutOriginProjectId,
-              originSessionId,
-              ...projectOriginProps(originProjectId),
-              workdir: normalizeWorkspacePath(tab.workdir),
-            },
-          ];
-        }
-
-        if (
-          tab.kind === "controlPanel" ||
-          tab.kind === "orchestratorList" ||
-          tab.kind === "sessionList" ||
-          tab.kind === "projectList"
-        ) {
-          return [reconcileOriginOnlyTab(tab, originSessionId, originProjectId)];
-        }
-
-        if (tab.kind === "canvas") {
-          const { originProjectId: _ignoredOriginProjectId, zoom: _ignoredZoom, ...tabWithoutOriginProjectId } = tab;
-          return [
-            {
-              ...tabWithoutOriginProjectId,
-              cards: normalizeWorkspaceCanvasCards(tab.cards).filter((card) =>
-                availableSessionIds.has(card.sessionId)
-              ),
-              ...canvasZoomProps(normalizeWorkspaceCanvasZoom(tab.zoom)),
-              originSessionId,
-              ...projectOriginProps(originProjectId),
-            },
-          ];
-        }
-
-        if (tab.kind === "orchestratorCanvas") {
-          const {
-            originProjectId: _ignoredOriginProjectId,
-            templateId: _ignoredTemplateId,
-            startMode: _ignoredStartMode,
-            ...tabWithoutSpecialFields
-          } = tab;
-          const normalizedTemplateId = normalizeWorkspaceIdentifier(tab.templateId);
-          return [
-            {
-              ...tabWithoutSpecialFields,
-              originSessionId,
-              ...projectOriginProps(originProjectId),
-              ...(normalizedTemplateId ? { templateId: normalizedTemplateId } : {}),
-              ...(tab.startMode === "new" ? { startMode: "new" as const } : {}),
-            },
-          ];
-        }
-
-        if (tab.kind === "instructionDebugger") {
-          const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
-          return [
-            {
-              ...tabWithoutOriginProjectId,
-              originSessionId,
-              ...projectOriginProps(originProjectId),
-              workdir: normalizeWorkspacePath(tab.workdir),
-            },
-          ];
-        }
-
-        const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
-        const normalizedChangeSetId = normalizeWorkspaceIdentifier(tab.changeSetId);
+      if (tab.kind === "source") {
+        const {
+          originProjectId: _ignoredOriginProjectId,
+          focusLineNumber: _ignoredFocusLineNumber,
+          focusColumnNumber: _ignoredFocusColumnNumber,
+          focusToken: _ignoredFocusToken,
+          ...tabWithoutOriginProjectId
+        } = tab;
         return [
           {
             ...tabWithoutOriginProjectId,
             originSessionId,
             ...projectOriginProps(originProjectId),
-            ...(normalizedChangeSetId ? { changeSetId: normalizedChangeSetId } : {}),
-            filePath: normalizeWorkspacePath(tab.filePath),
+            path: normalizeWorkspacePath(tab.path),
+            ...sourceFocusProps(
+              normalizeWorkspaceSourceFocus({
+                line: tab.focusLineNumber ?? null,
+                column: tab.focusColumnNumber ?? null,
+                token: tab.focusToken ?? null,
+              }),
+            ),
           },
         ];
-      });
+      }
+
+      if (tab.kind === "filesystem") {
+        const {
+          originProjectId: _ignoredOriginProjectId,
+          ...tabWithoutOriginProjectId
+        } = tab;
+        return [
+          {
+            ...tabWithoutOriginProjectId,
+            originSessionId,
+            ...projectOriginProps(originProjectId),
+            rootPath: normalizeWorkspacePath(tab.rootPath),
+          },
+        ];
+      }
+
+      if (tab.kind === "gitStatus") {
+        const {
+          originProjectId: _ignoredOriginProjectId,
+          ...tabWithoutOriginProjectId
+        } = tab;
+        return [
+          {
+            ...tabWithoutOriginProjectId,
+            originSessionId,
+            ...projectOriginProps(originProjectId),
+            workdir: normalizeWorkspacePath(tab.workdir),
+          },
+        ];
+      }
+
+      if (tab.kind === "terminal") {
+        const {
+          originProjectId: _ignoredOriginProjectId,
+          ...tabWithoutOriginProjectId
+        } = tab;
+        return [
+          {
+            ...tabWithoutOriginProjectId,
+            originSessionId,
+            ...projectOriginProps(originProjectId),
+            workdir: normalizeWorkspacePath(tab.workdir),
+          },
+        ];
+      }
+
+      if (
+        tab.kind === "controlPanel" ||
+        tab.kind === "orchestratorList" ||
+        tab.kind === "sessionList" ||
+        tab.kind === "projectList"
+      ) {
+        return [reconcileOriginOnlyTab(tab, originSessionId, originProjectId)];
+      }
+
+      if (tab.kind === "canvas") {
+        const {
+          originProjectId: _ignoredOriginProjectId,
+          zoom: _ignoredZoom,
+          ...tabWithoutOriginProjectId
+        } = tab;
+        return [
+          {
+            ...tabWithoutOriginProjectId,
+            cards: normalizeWorkspaceCanvasCards(tab.cards).filter((card) =>
+              availableSessionIds.has(card.sessionId),
+            ),
+            ...canvasZoomProps(normalizeWorkspaceCanvasZoom(tab.zoom)),
+            originSessionId,
+            ...projectOriginProps(originProjectId),
+          },
+        ];
+      }
+
+      if (tab.kind === "orchestratorCanvas") {
+        const {
+          originProjectId: _ignoredOriginProjectId,
+          templateId: _ignoredTemplateId,
+          startMode: _ignoredStartMode,
+          ...tabWithoutSpecialFields
+        } = tab;
+        const normalizedTemplateId = normalizeWorkspaceIdentifier(
+          tab.templateId,
+        );
+        return [
+          {
+            ...tabWithoutSpecialFields,
+            originSessionId,
+            ...projectOriginProps(originProjectId),
+            ...(normalizedTemplateId
+              ? { templateId: normalizedTemplateId }
+              : {}),
+            ...(tab.startMode === "new" ? { startMode: "new" as const } : {}),
+          },
+        ];
+      }
+
+      if (tab.kind === "instructionDebugger") {
+        const {
+          originProjectId: _ignoredOriginProjectId,
+          ...tabWithoutOriginProjectId
+        } = tab;
+        return [
+          {
+            ...tabWithoutOriginProjectId,
+            originSessionId,
+            ...projectOriginProps(originProjectId),
+            workdir: normalizeWorkspacePath(tab.workdir),
+          },
+        ];
+      }
+
+      const {
+        originProjectId: _ignoredOriginProjectId,
+        ...tabWithoutOriginProjectId
+      } = tab;
+      const normalizedChangeSetId = normalizeWorkspaceIdentifier(
+        tab.changeSetId,
+      );
+      return [
+        {
+          ...tabWithoutOriginProjectId,
+          originSessionId,
+          ...projectOriginProps(originProjectId),
+          ...(normalizedChangeSetId
+            ? { changeSetId: normalizedChangeSetId }
+            : {}),
+          filePath: normalizeWorkspacePath(tab.filePath),
+        },
+      ];
+    });
     const activeTabId = tabs.some((tab) => tab.id === pane.activeTabId)
       ? pane.activeTabId
       : (tabs[0]?.id ?? null);
@@ -355,7 +461,10 @@ export function reconcileWorkspaceState(
     );
   }
 
-  let root = pruneWorkspaceNode(current.root, new Set(panes.map((pane) => pane.id)));
+  let root = pruneWorkspaceNode(
+    current.root,
+    new Set(panes.map((pane) => pane.id)),
+  );
 
   if (!root && panes.length > 0) {
     root = {
@@ -392,7 +501,10 @@ export function reconcileWorkspaceState(
   };
 }
 
-export function findWorkspacePaneIdForSession(workspace: WorkspaceState, sessionId: string) {
+export function findWorkspacePaneIdForSession(
+  workspace: WorkspaceState,
+  sessionId: string,
+) {
   return findSessionTab(workspace, sessionId)?.paneId ?? null;
 }
 
@@ -408,9 +520,18 @@ export function openSessionInWorkspaceState(
   );
   const existing = findSessionTab(workspace, sessionId);
   if (existing) {
-    if (targetPaneId && (existing.paneId !== targetPaneId || tabIndex !== undefined)) {
+    if (
+      targetPaneId &&
+      (existing.paneId !== targetPaneId || tabIndex !== undefined)
+    ) {
       return activatePane(
-        moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId, tabIndex),
+        moveWorkspaceTabToPane(
+          workspace,
+          existing.paneId,
+          existing.tab.id,
+          targetPaneId,
+          tabIndex,
+        ),
         targetPaneId,
         existing.tab.id,
       );
@@ -448,7 +569,13 @@ export function placeSessionDropInWorkspaceState(
     const existing = findSessionTab(workspace, sessionId);
     if (existing) {
       return activatePane(
-        moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId, tabIndex),
+        moveWorkspaceTabToPane(
+          workspace,
+          existing.paneId,
+          existing.tab.id,
+          targetPaneId,
+          tabIndex,
+        ),
         targetPaneId,
         existing.tab.id,
       );
@@ -484,11 +611,13 @@ export function openSourceInWorkspaceState(
   options?: OpenSourceTabOptions,
 ): WorkspaceState {
   const originProjectId =
-    typeof originProjectIdOrOptions === "string" || originProjectIdOrOptions === null
+    typeof originProjectIdOrOptions === "string" ||
+    originProjectIdOrOptions === null
       ? originProjectIdOrOptions
       : null;
   const resolvedOptions =
-    typeof originProjectIdOrOptions === "string" || originProjectIdOrOptions === null
+    typeof originProjectIdOrOptions === "string" ||
+    originProjectIdOrOptions === null
       ? options
       : originProjectIdOrOptions;
   const normalizedPath = normalizeWorkspacePath(path);
@@ -499,16 +628,41 @@ export function openSourceInWorkspaceState(
     "source",
   );
   const focus = createOpenSourceFocus(resolvedOptions);
-  const nextTab = createSourceTab(normalizedPath, originSessionId, originProjectId, focus);
-  const controlSurfaceTarget = resolveControlSurfaceViewerOpenTarget(workspace, preferredPaneId, "source");
+  const nextTab = createSourceTab(
+    normalizedPath,
+    originSessionId,
+    originProjectId,
+    focus,
+  );
+  const controlSurfaceTarget = resolveControlSurfaceViewerOpenTarget(
+    workspace,
+    preferredPaneId,
+    "source",
+  );
   if (resolvedOptions?.openInNewTab) {
     if (controlSurfaceTarget.splitAnchorPaneId) {
-      return openTabInAdjacentPane(workspace, controlSurfaceTarget.splitAnchorPaneId, nextTab, "row", false);
+      return openTabInAdjacentPane(
+        workspace,
+        controlSurfaceTarget.splitAnchorPaneId,
+        nextTab,
+        "row",
+        false,
+      );
     }
     if (controlSurfaceTarget.targetPaneId) {
-      return openTabInWorkspaceState(workspace, nextTab, controlSurfaceTarget.targetPaneId);
+      return openTabInWorkspaceState(
+        workspace,
+        nextTab,
+        controlSurfaceTarget.targetPaneId,
+      );
     }
-    return openContextualTabInWorkspaceState(workspace, nextTab, null, preferredPaneId, originSessionId);
+    return openContextualTabInWorkspaceState(
+      workspace,
+      nextTab,
+      null,
+      preferredPaneId,
+      originSessionId,
+    );
   }
 
   if (normalizedPath) {
@@ -517,7 +671,12 @@ export function openSourceInWorkspaceState(
       const activatedWorkspace =
         targetPaneId && existing.paneId !== targetPaneId
           ? activatePane(
-              moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId),
+              moveWorkspaceTabToPane(
+                workspace,
+                existing.paneId,
+                existing.tab.id,
+                targetPaneId,
+              ),
               targetPaneId,
               existing.tab.id,
             )
@@ -531,13 +690,29 @@ export function openSourceInWorkspaceState(
   }
 
   if (controlSurfaceTarget.splitAnchorPaneId) {
-    return openTabInAdjacentPane(workspace, controlSurfaceTarget.splitAnchorPaneId, nextTab, "row", false);
+    return openTabInAdjacentPane(
+      workspace,
+      controlSurfaceTarget.splitAnchorPaneId,
+      nextTab,
+      "row",
+      false,
+    );
   }
   if (controlSurfaceTarget.targetPaneId) {
-    return openTabInWorkspaceState(workspace, nextTab, controlSurfaceTarget.targetPaneId);
+    return openTabInWorkspaceState(
+      workspace,
+      nextTab,
+      controlSurfaceTarget.targetPaneId,
+    );
   }
 
-  return openContextualTabInWorkspaceState(workspace, nextTab, null, preferredPaneId, originSessionId);
+  return openContextualTabInWorkspaceState(
+    workspace,
+    nextTab,
+    null,
+    preferredPaneId,
+    originSessionId,
+  );
 }
 
 export function openFilesystemInWorkspaceState(
@@ -592,8 +767,10 @@ export function openTerminalInWorkspaceState(
   originProjectId: string | null = null,
 ): WorkspaceState {
   const normalizedWorkdir = normalizeWorkspacePath(workdir);
-  const normalizedOriginSessionId = normalizeWorkspaceIdentifier(originSessionId);
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+  const normalizedOriginSessionId =
+    normalizeWorkspaceIdentifier(originSessionId);
+  const normalizedOriginProjectId =
+    normalizeWorkspaceIdentifier(originProjectId);
   if (normalizedWorkdir) {
     const existing = findTerminalTab(
       workspace,
@@ -608,7 +785,11 @@ export function openTerminalInWorkspaceState(
 
   return openTabInWorkspaceState(
     workspace,
-    createTerminalTab(normalizedWorkdir, normalizedOriginSessionId, normalizedOriginProjectId),
+    createTerminalTab(
+      normalizedWorkdir,
+      normalizedOriginSessionId,
+      normalizedOriginProjectId,
+    ),
     preferredPaneId,
   );
 }
@@ -649,21 +830,34 @@ export function openCanvasInWorkspaceState(
         ? ({
             ...existing.tab,
             originSessionId,
-            ...projectOriginProps(normalizeWorkspaceIdentifier(originProjectId)),
+            ...projectOriginProps(
+              normalizeWorkspaceIdentifier(originProjectId),
+            ),
           } satisfies WorkspaceCanvasTab)
         : existing.tab;
     const movedWorkspace =
       targetPaneId && existing.paneId !== targetPaneId
-        ? moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId)
+        ? moveWorkspaceTabToPane(
+            workspace,
+            existing.paneId,
+            existing.tab.id,
+            targetPaneId,
+          )
         : workspace;
     const nextPaneId =
-      targetPaneId && movedWorkspace.panes.some((pane) => pane.id === targetPaneId)
+      targetPaneId &&
+      movedWorkspace.panes.some((pane) => pane.id === targetPaneId)
         ? targetPaneId
         : existing.paneId;
     const updatedWorkspace =
       nextTab === existing.tab
         ? movedWorkspace
-        : replaceWorkspaceTabInPane(movedWorkspace, nextPaneId, existing.tab.id, nextTab);
+        : replaceWorkspaceTabInPane(
+            movedWorkspace,
+            nextPaneId,
+            existing.tab.id,
+            nextTab,
+          );
 
     return activatePane(updatedWorkspace, nextPaneId, existing.tab.id);
   }
@@ -694,21 +888,34 @@ export function openOrchestratorListInWorkspaceState(
         ? ({
             ...existing.tab,
             originSessionId,
-            ...projectOriginProps(normalizeWorkspaceIdentifier(originProjectId)),
+            ...projectOriginProps(
+              normalizeWorkspaceIdentifier(originProjectId),
+            ),
           } satisfies WorkspaceOrchestratorListTab)
         : existing.tab;
     const movedWorkspace =
       targetPaneId && existing.paneId !== targetPaneId
-        ? moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId)
+        ? moveWorkspaceTabToPane(
+            workspace,
+            existing.paneId,
+            existing.tab.id,
+            targetPaneId,
+          )
         : workspace;
     const nextPaneId =
-      targetPaneId && movedWorkspace.panes.some((pane) => pane.id === targetPaneId)
+      targetPaneId &&
+      movedWorkspace.panes.some((pane) => pane.id === targetPaneId)
         ? targetPaneId
         : existing.paneId;
     const updatedWorkspace =
       nextTab === existing.tab
         ? movedWorkspace
-        : replaceWorkspaceTabInPane(movedWorkspace, nextPaneId, existing.tab.id, nextTab);
+        : replaceWorkspaceTabInPane(
+            movedWorkspace,
+            nextPaneId,
+            existing.tab.id,
+            nextTab,
+          );
 
     return activatePane(updatedWorkspace, nextPaneId, existing.tab.id);
   }
@@ -723,9 +930,14 @@ export function openOrchestratorListInWorkspaceState(
       return preferredPaneId;
     }
 
-    const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId);
+    const preferredPane = workspace.panes.find(
+      (pane) => pane.id === preferredPaneId,
+    );
     if (preferredPane && paneContainsControlPanel(preferredPane)) {
-      return findNonControlPanelPaneId(workspace, preferredPane.id) ?? preferredPaneId;
+      return (
+        findNonControlPanelPaneId(workspace, preferredPane.id) ??
+        preferredPaneId
+      );
     }
 
     return preferredPaneId;
@@ -786,21 +998,34 @@ export function openSessionListInWorkspaceState(
         ? ({
             ...existing.tab,
             originSessionId,
-            ...projectOriginProps(normalizeWorkspaceIdentifier(originProjectId)),
+            ...projectOriginProps(
+              normalizeWorkspaceIdentifier(originProjectId),
+            ),
           } satisfies WorkspaceSessionListTab)
         : existing.tab;
     const movedWorkspace =
       targetPaneId && existing.paneId !== targetPaneId
-        ? moveWorkspaceTabToPane(workspace, existing.paneId, existing.tab.id, targetPaneId)
+        ? moveWorkspaceTabToPane(
+            workspace,
+            existing.paneId,
+            existing.tab.id,
+            targetPaneId,
+          )
         : workspace;
     const nextPaneId =
-      targetPaneId && movedWorkspace.panes.some((pane) => pane.id === targetPaneId)
+      targetPaneId &&
+      movedWorkspace.panes.some((pane) => pane.id === targetPaneId)
         ? targetPaneId
         : existing.paneId;
     const updatedWorkspace =
       nextTab === existing.tab
         ? movedWorkspace
-        : replaceWorkspaceTabInPane(movedWorkspace, nextPaneId, existing.tab.id, nextTab);
+        : replaceWorkspaceTabInPane(
+            movedWorkspace,
+            nextPaneId,
+            existing.tab.id,
+            nextTab,
+          );
 
     return activatePane(updatedWorkspace, nextPaneId, existing.tab.id);
   }
@@ -817,9 +1042,14 @@ export function openSessionListInWorkspaceState(
       return preferredPaneId;
     }
 
-    const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId);
+    const preferredPane = workspace.panes.find(
+      (pane) => pane.id === preferredPaneId,
+    );
     if (preferredPane && paneContainsControlPanel(preferredPane)) {
-      return findNonControlPanelPaneId(workspace, preferredPane.id) ?? preferredPaneId;
+      return (
+        findNonControlPanelPaneId(workspace, preferredPane.id) ??
+        preferredPaneId
+      );
     }
 
     return preferredPaneId;
@@ -860,19 +1090,29 @@ export function openInstructionDebuggerInWorkspaceState(
   originProjectId: string | null = null,
 ): WorkspaceState {
   const normalizedWorkdir = normalizeWorkspacePath(workdir);
-  const existing = findInstructionDebuggerTab(workspace, normalizedWorkdir, originSessionId);
+  const existing = findInstructionDebuggerTab(
+    workspace,
+    normalizedWorkdir,
+    originSessionId,
+  );
   if (existing) {
     return activatePane(workspace, existing.paneId, existing.tab.id);
   }
 
   return openTabInWorkspaceState(
     workspace,
-    createInstructionDebuggerTab(normalizedWorkdir, originSessionId, originProjectId),
+    createInstructionDebuggerTab(
+      normalizedWorkdir,
+      originSessionId,
+      originProjectId,
+    ),
     preferredPaneId,
   );
 }
 
-export function ensureControlPanelInWorkspaceState(workspace: WorkspaceState): WorkspaceState {
+export function ensureControlPanelInWorkspaceState(
+  workspace: WorkspaceState,
+): WorkspaceState {
   if (findControlPanelTab(workspace)) {
     return workspace;
   }
@@ -914,9 +1154,8 @@ export function dockControlPanelAtWorkspaceEdge(
     preferredControlPanelWidthRatio ??
     getDockedControlPanelWidthRatio(workspace.root, controlPanel.paneId) ??
     DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO;
-  const nextRatio = side === "left"
-    ? controlPanelWidthRatio
-    : 1 - controlPanelWidthRatio;
+  const nextRatio =
+    side === "left" ? controlPanelWidthRatio : 1 - controlPanelWidthRatio;
 
   return {
     ...workspace,
@@ -965,13 +1204,27 @@ export function openDiffPreviewInWorkspaceState(
   },
 ): WorkspaceState {
   const nextTab = createDiffPreviewTab(tab);
-  const controlSurfaceTarget = resolveControlSurfaceViewerOpenTarget(workspace, preferredPaneId, "diffPreview");
+  const controlSurfaceTarget = resolveControlSurfaceViewerOpenTarget(
+    workspace,
+    preferredPaneId,
+    "diffPreview",
+  );
   if (options?.openInNewTab) {
     if (controlSurfaceTarget.splitAnchorPaneId) {
-      return openTabInAdjacentPane(workspace, controlSurfaceTarget.splitAnchorPaneId, nextTab, "row", false);
+      return openTabInAdjacentPane(
+        workspace,
+        controlSurfaceTarget.splitAnchorPaneId,
+        nextTab,
+        "row",
+        false,
+      );
     }
     if (controlSurfaceTarget.targetPaneId) {
-      return openTabInWorkspaceState(workspace, nextTab, controlSurfaceTarget.targetPaneId);
+      return openTabInWorkspaceState(
+        workspace,
+        nextTab,
+        controlSurfaceTarget.targetPaneId,
+      );
     }
     return openContextualTabInWorkspaceState(
       workspace,
@@ -995,19 +1248,34 @@ export function openDiffPreviewInWorkspaceState(
 
   if (options?.reuseActiveViewerTab) {
     if (controlSurfaceTarget.splitAnchorPaneId) {
-      return openTabInAdjacentPane(workspace, controlSurfaceTarget.splitAnchorPaneId, nextTab, "row", false);
+      return openTabInAdjacentPane(
+        workspace,
+        controlSurfaceTarget.splitAnchorPaneId,
+        nextTab,
+        "row",
+        false,
+      );
     }
     if (controlSurfaceTarget.targetPaneId) {
-      return replaceActiveViewerTabInPane(workspace, controlSurfaceTarget.targetPaneId, nextTab);
+      return replaceActiveViewerTabInPane(
+        workspace,
+        controlSurfaceTarget.targetPaneId,
+        nextTab,
+      );
     }
 
     const contextSessionId =
       tab.originSessionId ??
       (preferredPaneId
-        ? (workspace.panes.find((pane) => pane.id === preferredPaneId)?.activeSessionId ?? null)
+        ? (workspace.panes.find((pane) => pane.id === preferredPaneId)
+            ?.activeSessionId ?? null)
         : null);
     const targetPaneId =
-      findRelatedDiffPreviewPaneId(workspace, preferredPaneId, contextSessionId) ??
+      findRelatedDiffPreviewPaneId(
+        workspace,
+        preferredPaneId,
+        contextSessionId,
+      ) ??
       findRelatedViewerPaneId(workspace, preferredPaneId, contextSessionId);
     if (targetPaneId) {
       return replaceActiveViewerTabInPane(workspace, targetPaneId, nextTab);
@@ -1015,10 +1283,20 @@ export function openDiffPreviewInWorkspaceState(
   }
 
   if (controlSurfaceTarget.splitAnchorPaneId) {
-    return openTabInAdjacentPane(workspace, controlSurfaceTarget.splitAnchorPaneId, nextTab, "row", false);
+    return openTabInAdjacentPane(
+      workspace,
+      controlSurfaceTarget.splitAnchorPaneId,
+      nextTab,
+      "row",
+      false,
+    );
   }
   if (controlSurfaceTarget.targetPaneId) {
-    return replaceActiveViewerTabInPane(workspace, controlSurfaceTarget.targetPaneId, nextTab);
+    return replaceActiveViewerTabInPane(
+      workspace,
+      controlSurfaceTarget.targetPaneId,
+      nextTab,
+    );
   }
 
   return openContextualTabInWorkspaceState(
@@ -1081,19 +1359,24 @@ export function closeWorkspaceTab(
     return workspace;
   }
 
-  const closedTabIndex = pane.tabs.findIndex((candidate) => candidate.id === tabId);
+  const closedTabIndex = pane.tabs.findIndex(
+    (candidate) => candidate.id === tabId,
+  );
   const nextTabs = pane.tabs.filter((candidate) => candidate.id !== tabId);
   if (nextTabs.length === 0) {
-    const panes = workspace.panes.filter((candidate) => candidate.id !== paneId);
+    const panes = workspace.panes.filter(
+      (candidate) => candidate.id !== paneId,
+    );
     const root = removePaneFromTree(workspace.root, paneId);
 
     return {
       root,
       panes,
-      activePaneId:
-        panes.some((candidate) => candidate.id === workspace.activePaneId)
-          ? workspace.activePaneId
-          : (panes[0]?.id ?? null),
+      activePaneId: panes.some(
+        (candidate) => candidate.id === workspace.activePaneId,
+      )
+        ? workspace.activePaneId
+        : (panes[0]?.id ?? null),
     };
   }
 
@@ -1109,7 +1392,9 @@ export function closeWorkspaceTab(
         tabs: nextTabs,
         activeTabId:
           candidate.activeTabId === tabId
-            ? (nextTabs[Math.min(Math.max(closedTabIndex, 0), nextTabs.length - 1)]?.id ?? null)
+            ? (nextTabs[
+                Math.min(Math.max(closedTabIndex, 0), nextTabs.length - 1)
+              ]?.id ?? null)
             : candidate.activeTabId,
       });
     }),
@@ -1127,7 +1412,8 @@ export function splitPane(
     return workspace;
   }
 
-  const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? null;
+  const activeTab =
+    pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? null;
   const tabToMove = pane.tabs.length > 1 ? activeTab : null;
   const newPane = createPane(tabToMove, pane.lastSessionViewMode);
   const panes = workspace.panes.map((candidate) => {
@@ -1146,7 +1432,13 @@ export function splitPane(
   });
 
   return {
-    root: insertPaneAdjacent(workspace.root, paneId, direction, newPane.id, false),
+    root: insertPaneAdjacent(
+      workspace.root,
+      paneId,
+      direction,
+      newPane.id,
+      false,
+    ),
     panes: [...panes, newPane],
     activePaneId: newPane.id,
   };
@@ -1174,17 +1466,29 @@ export function placeDraggedTab(
   if (placement === "tabs") {
     const requestedTabIndex = tabIndex ?? targetPane.tabs.length;
     if (sourcePaneId === targetPaneId) {
-      const sourceTabIndex = sourcePane.tabs.findIndex((tab) => tab.id === tabId);
+      const sourceTabIndex = sourcePane.tabs.findIndex(
+        (tab) => tab.id === tabId,
+      );
       const adjustedTabIndex =
         sourceTabIndex >= 0 && requestedTabIndex > sourceTabIndex
           ? requestedTabIndex - 1
           : requestedTabIndex;
 
-      return addWorkspaceTabToPane(workspace, targetPaneId, draggedTab, adjustedTabIndex);
+      return addWorkspaceTabToPane(
+        workspace,
+        targetPaneId,
+        draggedTab,
+        adjustedTabIndex,
+      );
     }
 
     const withoutSource = closeWorkspaceTab(workspace, sourcePaneId, tabId);
-    return addWorkspaceTabToPane(withoutSource, targetPaneId, draggedTab, requestedTabIndex);
+    return addWorkspaceTabToPane(
+      withoutSource,
+      targetPaneId,
+      draggedTab,
+      requestedTabIndex,
+    );
   }
 
   if (sourcePaneId === targetPaneId && sourcePane.tabs.length <= 1) {
@@ -1192,16 +1496,26 @@ export function placeDraggedTab(
   }
 
   const withoutSource = closeWorkspaceTab(workspace, sourcePaneId, tabId);
-  if (!withoutSource.root || !withoutSource.panes.some((pane) => pane.id === targetPaneId)) {
+  if (
+    !withoutSource.root ||
+    !withoutSource.panes.some((pane) => pane.id === targetPaneId)
+  ) {
     return workspace;
   }
 
   const newPane = createPane(draggedTab, targetPane.lastSessionViewMode);
-  const direction = placement === "left" || placement === "right" ? "row" : "column";
+  const direction =
+    placement === "left" || placement === "right" ? "row" : "column";
   const placeBefore = placement === "left" || placement === "top";
 
   return {
-    root: insertPaneAdjacent(withoutSource.root, targetPaneId, direction, newPane.id, placeBefore),
+    root: insertPaneAdjacent(
+      withoutSource.root,
+      targetPaneId,
+      direction,
+      newPane.id,
+      placeBefore,
+    ),
     panes: [...withoutSource.panes, newPane],
     activePaneId: newPane.id,
   };
@@ -1217,12 +1531,22 @@ export function placeExternalTab(
   const transferredTab = cloneWorkspaceTab(tab);
 
   if (placement === "tabs") {
-    return openTabInWorkspaceState(workspace, transferredTab, targetPaneId, tabIndex);
+    return openTabInWorkspaceState(
+      workspace,
+      transferredTab,
+      targetPaneId,
+      tabIndex,
+    );
   }
 
   const targetPane = workspace.panes.find((pane) => pane.id === targetPaneId);
   if (!targetPane || !workspace.root) {
-    return openTabInWorkspaceState(workspace, transferredTab, targetPaneId, tabIndex);
+    return openTabInWorkspaceState(
+      workspace,
+      transferredTab,
+      targetPaneId,
+      tabIndex,
+    );
   }
 
   if (!isAllowedControlPanelPlacement(targetPane, transferredTab, placement)) {
@@ -1230,11 +1554,18 @@ export function placeExternalTab(
   }
 
   const newPane = createPane(transferredTab, targetPane.lastSessionViewMode);
-  const direction = placement === "left" || placement === "right" ? "row" : "column";
+  const direction =
+    placement === "left" || placement === "right" ? "row" : "column";
   const placeBefore = placement === "left" || placement === "top";
 
   return {
-    root: insertPaneAdjacent(workspace.root, targetPaneId, direction, newPane.id, placeBefore),
+    root: insertPaneAdjacent(
+      workspace.root,
+      targetPaneId,
+      direction,
+      newPane.id,
+      placeBefore,
+    ),
     panes: [...workspace.panes, newPane],
     activePaneId: newPane.id,
   };
@@ -1319,7 +1650,9 @@ export function removeCanvasSessionCard(
   }
 
   return updateCanvasTab(workspace, canvasTabId, (tab) => {
-    const cards = tab.cards.filter((card) => card.sessionId !== normalizedSessionId);
+    const cards = tab.cards.filter(
+      (card) => card.sessionId !== normalizedSessionId,
+    );
     return cards.length === tab.cards.length
       ? tab
       : {
@@ -1379,12 +1712,17 @@ export function setPaneSourcePath(
   const currentPane = workspace.panes.find((pane) => pane.id === paneId);
   const activeSourceTabId =
     currentPane?.tabs.find(
-      (tab): tab is WorkspaceSourceTab => tab.id === currentPane.activeTabId && tab.kind === "source",
+      (tab): tab is WorkspaceSourceTab =>
+        tab.id === currentPane.activeTabId && tab.kind === "source",
     )?.id ?? null;
   const existing = nextPath ? findSourceTab(workspace, nextPath) : null;
   if (existing && existing.tab.id !== activeSourceTabId) {
     return activatePane(
-      setSourceTabFocus(workspace, existing.tab.id, EMPTY_WORKSPACE_SOURCE_FOCUS),
+      setSourceTabFocus(
+        workspace,
+        existing.tab.id,
+        EMPTY_WORKSPACE_SOURCE_FOCUS,
+      ),
       existing.paneId,
       existing.tab.id,
     );
@@ -1419,7 +1757,8 @@ export function setPaneSourcePath(
           return {
             ...tabWithoutOriginProjectId,
             path: nextPath,
-            originSessionId: activeTab.originSessionId ?? pane.activeSessionId ?? null,
+            originSessionId:
+              activeTab.originSessionId ?? pane.activeSessionId ?? null,
             ...projectOriginProps(activeTab.originProjectId ?? null),
           };
         }),
@@ -1456,9 +1795,14 @@ function replaceActiveViewerTabInPane(
   paneId: string,
   tab: WorkspaceTab,
 ): WorkspaceState {
-  const pane = workspace.panes.find((candidate) => candidate.id === paneId) ?? null;
+  const pane =
+    workspace.panes.find((candidate) => candidate.id === paneId) ?? null;
   const activeTab = pane ? getActiveTab(pane) : null;
-  if (!pane || !activeTab || (activeTab.kind !== "source" && activeTab.kind !== "diffPreview")) {
+  if (
+    !pane ||
+    !activeTab ||
+    (activeTab.kind !== "source" && activeTab.kind !== "diffPreview")
+  ) {
     return addWorkspaceTabToPane(workspace, paneId, tab);
   }
 
@@ -1471,7 +1815,9 @@ function replaceActiveViewerTabInPane(
 
       return syncPaneState({
         ...candidate,
-        tabs: candidate.tabs.map((entry) => (entry.id === activeTab.id ? tab : entry)),
+        tabs: candidate.tabs.map((entry) =>
+          entry.id === activeTab.id ? tab : entry,
+        ),
         activeTabId: tab.id,
       });
     }),
@@ -1498,10 +1844,19 @@ function moveWorkspaceTabToPane(
       return activatePane(workspace, sourcePaneId, tabId);
     }
 
-    const sourceTabIndex = sourcePane.tabs.findIndex((candidate) => candidate.id === tabId);
+    const sourceTabIndex = sourcePane.tabs.findIndex(
+      (candidate) => candidate.id === tabId,
+    );
     const adjustedTabIndex =
-      sourceTabIndex >= 0 && tabIndex > sourceTabIndex ? tabIndex - 1 : tabIndex;
-    return addWorkspaceTabToPane(workspace, sourcePaneId, tab, adjustedTabIndex);
+      sourceTabIndex >= 0 && tabIndex > sourceTabIndex
+        ? tabIndex - 1
+        : tabIndex;
+    return addWorkspaceTabToPane(
+      workspace,
+      sourcePaneId,
+      tab,
+      adjustedTabIndex,
+    );
   }
 
   const withoutSource = closeWorkspaceTab(workspace, sourcePaneId, tabId);
@@ -1538,7 +1893,9 @@ export function updateGitDiffPreviewTabInWorkspaceState(
   return changed ? { ...workspace, panes } : workspace;
 }
 
-export function stripLoadingGitDiffPreviewTabsFromWorkspaceState(workspace: WorkspaceState): WorkspaceState {
+export function stripLoadingGitDiffPreviewTabsFromWorkspaceState(
+  workspace: WorkspaceState,
+): WorkspaceState {
   let nextWorkspace = workspace;
   // Git-status preview tabs start as empty loading placeholders. Restored
   // diff tabs can also be loading while documentContent is re-fetched, but
@@ -1560,13 +1917,19 @@ export function stripLoadingGitDiffPreviewTabsFromWorkspaceState(workspace: Work
     if (!nextWorkspace.panes.some((pane) => pane.id === loadingTab.paneId)) {
       continue;
     }
-    nextWorkspace = closeWorkspaceTab(nextWorkspace, loadingTab.paneId, loadingTab.tabId);
+    nextWorkspace = closeWorkspaceTab(
+      nextWorkspace,
+      loadingTab.paneId,
+      loadingTab.tabId,
+    );
   }
 
   return nextWorkspace;
 }
 
-export function stripDiffPreviewDocumentContentFromWorkspaceState(workspace: WorkspaceState): WorkspaceState {
+export function stripDiffPreviewDocumentContentFromWorkspaceState(
+  workspace: WorkspaceState,
+): WorkspaceState {
   let changed = false;
   const panes = workspace.panes.map((pane) => {
     let paneChanged = false;
@@ -1575,7 +1938,10 @@ export function stripDiffPreviewDocumentContentFromWorkspaceState(workspace: Wor
         return tab;
       }
 
-      const { documentContent: _documentContent, ...tabWithoutDocumentContent } = tab;
+      const {
+        documentContent: _documentContent,
+        ...tabWithoutDocumentContent
+      } = tab;
       changed = true;
       paneChanged = true;
       return tabWithoutDocumentContent;
@@ -1613,7 +1979,10 @@ function replaceWorkspaceTabInPane<T extends WorkspaceTab>(
   return changed ? { ...workspace, panes: nextPanes } : workspace;
 }
 
-export function getSplitRatio(node: WorkspaceNode | null, splitId: string): number | null {
+export function getSplitRatio(
+  node: WorkspaceNode | null,
+  splitId: string,
+): number | null {
   if (!node || node.type === "pane") {
     return null;
   }
@@ -1622,7 +1991,9 @@ export function getSplitRatio(node: WorkspaceNode | null, splitId: string): numb
     return node.ratio;
   }
 
-  return getSplitRatio(node.first, splitId) ?? getSplitRatio(node.second, splitId);
+  return (
+    getSplitRatio(node.first, splitId) ?? getSplitRatio(node.second, splitId)
+  );
 }
 
 function openTabInWorkspaceState(
@@ -1631,7 +2002,9 @@ function openTabInWorkspaceState(
   preferredPaneId: string | null,
   tabIndex?: number,
 ): WorkspaceState {
-  const targetPaneId = workspace.panes.some((pane) => pane.id === preferredPaneId)
+  const targetPaneId = workspace.panes.some(
+    (pane) => pane.id === preferredPaneId,
+  )
     ? preferredPaneId
     : (workspace.activePaneId ?? workspace.panes[0]?.id ?? null);
 
@@ -1647,8 +2020,13 @@ function openTabInWorkspaceState(
     };
   }
 
-  const targetPane = workspace.panes.find((pane) => pane.id === targetPaneId) ?? null;
-  if (targetPane && tab.kind !== "controlPanel" && paneContainsControlPanel(targetPane)) {
+  const targetPane =
+    workspace.panes.find((pane) => pane.id === targetPaneId) ?? null;
+  if (
+    targetPane &&
+    tab.kind !== "controlPanel" &&
+    paneContainsControlPanel(targetPane)
+  ) {
     const alternatePaneId = findNonControlPanelPaneId(workspace, targetPane.id);
     if (alternatePaneId) {
       return addWorkspaceTabToPane(workspace, alternatePaneId, tab, tabIndex);
@@ -1657,7 +2035,11 @@ function openTabInWorkspaceState(
     return openTabInAdjacentPane(workspace, targetPane.id, tab, "row", false);
   }
 
-  if (targetPane && tab.kind === "controlPanel" && !paneContainsControlPanel(targetPane)) {
+  if (
+    targetPane &&
+    tab.kind === "controlPanel" &&
+    !paneContainsControlPanel(targetPane)
+  ) {
     return openTabInAdjacentPane(workspace, targetPane.id, tab, "row", true);
   }
 
@@ -1678,7 +2060,13 @@ function openTabInAdjacentPane(
 
   const newPane = createPane(tab, referencePane.lastSessionViewMode);
   return {
-    root: insertPaneAdjacent(workspace.root, paneId, direction, newPane.id, placeBefore),
+    root: insertPaneAdjacent(
+      workspace.root,
+      paneId,
+      direction,
+      newPane.id,
+      placeBefore,
+    ),
     panes: [...workspace.panes, newPane],
     activePaneId: newPane.id,
   };
@@ -1706,7 +2094,13 @@ function openContextualTabInWorkspaceState<T extends WorkspaceTab>(
   }
 
   if (shouldOpenTabInAdjacentPane(workspace, preferredPaneId, tab.kind)) {
-    return openTabInAdjacentPane(workspace, preferredPaneId!, tab, "row", false);
+    return openTabInAdjacentPane(
+      workspace,
+      preferredPaneId!,
+      tab,
+      "row",
+      false,
+    );
   }
 
   // Too many panes to split - try to find an adjacent content pane to reuse
@@ -1722,7 +2116,10 @@ function openContextualTabInWorkspaceState<T extends WorkspaceTab>(
 }
 
 function syncPaneState(pane: WorkspacePane): WorkspacePane {
-  const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
+  const activeTab =
+    pane.tabs.find((tab) => tab.id === pane.activeTabId) ??
+    pane.tabs[0] ??
+    null;
   if (!activeTab) {
     return {
       ...pane,
@@ -1734,8 +2131,12 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
   }
 
   if (activeTab.kind === "session") {
-    const viewMode = pane.viewMode === "source" ? pane.lastSessionViewMode : pane.viewMode;
-    const nextSessionViewMode = normalizeSessionViewMode(viewMode, pane.lastSessionViewMode);
+    const viewMode =
+      pane.viewMode === "source" ? pane.lastSessionViewMode : pane.viewMode;
+    const nextSessionViewMode = normalizeSessionViewMode(
+      viewMode,
+      pane.lastSessionViewMode,
+    );
     return {
       ...pane,
       activeTabId: activeTab.id,
@@ -1750,7 +2151,11 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     return {
       ...pane,
       activeTabId: activeTab.id,
-      activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+      activeSessionId: resolveOriginSessionId(
+        activeTab.originSessionId,
+        pane.activeSessionId,
+        pane.tabs,
+      ),
       viewMode: "source",
       sourcePath: activeTab.path,
     };
@@ -1760,7 +2165,11 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     return {
       ...pane,
       activeTabId: activeTab.id,
-      activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+      activeSessionId: resolveOriginSessionId(
+        activeTab.originSessionId,
+        pane.activeSessionId,
+        pane.tabs,
+      ),
       viewMode: "canvas",
       sourcePath: null,
     };
@@ -1770,7 +2179,11 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     return {
       ...pane,
       activeTabId: activeTab.id,
-      activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+      activeSessionId: resolveOriginSessionId(
+        activeTab.originSessionId,
+        pane.activeSessionId,
+        pane.tabs,
+      ),
       viewMode: "orchestratorCanvas",
       sourcePath: null,
     };
@@ -1780,7 +2193,11 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     return {
       ...pane,
       activeTabId: activeTab.id,
-      activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+      activeSessionId: resolveOriginSessionId(
+        activeTab.originSessionId,
+        pane.activeSessionId,
+        pane.tabs,
+      ),
       viewMode: "filesystem",
       sourcePath: null,
     };
@@ -1799,7 +2216,11 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     return {
       ...pane,
       activeTabId: activeTab.id,
-      activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+      activeSessionId: resolveOriginSessionId(
+        activeTab.originSessionId,
+        pane.activeSessionId,
+        pane.tabs,
+      ),
       viewMode: "instructionDebugger",
       sourcePath: null,
     };
@@ -1809,7 +2230,11 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     return {
       ...pane,
       activeTabId: activeTab.id,
-      activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+      activeSessionId: resolveOriginSessionId(
+        activeTab.originSessionId,
+        pane.activeSessionId,
+        pane.tabs,
+      ),
       viewMode: "terminal",
       sourcePath: null,
     };
@@ -1818,7 +2243,11 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
   return {
     ...pane,
     activeTabId: activeTab.id,
-    activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+    activeSessionId: resolveOriginSessionId(
+      activeTab.originSessionId,
+      pane.activeSessionId,
+      pane.tabs,
+    ),
     viewMode: activeTab.kind === "gitStatus" ? "gitStatus" : "diffPreview",
     sourcePath: null,
   };
@@ -1832,11 +2261,16 @@ function normalizeSessionViewMode(
 }
 
 function firstSessionTabId(tabs: WorkspaceTab[]): string | null {
-  return tabs.find((tab): tab is WorkspaceSessionTab => tab.kind === "session")?.sessionId ?? null;
+  return (
+    tabs.find((tab): tab is WorkspaceSessionTab => tab.kind === "session")
+      ?.sessionId ?? null
+  );
 }
 
 function isSessionTabActive(pane: WorkspacePane) {
-  return pane.tabs.some((tab) => tab.id === pane.activeTabId && tab.kind === "session");
+  return pane.tabs.some(
+    (tab) => tab.id === pane.activeTabId && tab.kind === "session",
+  );
 }
 
 function findSessionTab(workspace: WorkspaceState, sessionId: string) {
@@ -1908,15 +2342,19 @@ function findTerminalTab(
   originProjectId: string | null,
 ) {
   const normalizedWorkdir = normalizeWorkspacePath(workdir);
-  const normalizedOriginSessionId = normalizeWorkspaceIdentifier(originSessionId);
-  const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
+  const normalizedOriginSessionId =
+    normalizeWorkspaceIdentifier(originSessionId);
+  const normalizedOriginProjectId =
+    normalizeWorkspaceIdentifier(originProjectId);
   for (const pane of workspace.panes) {
     const tab = pane.tabs.find(
       (candidate): candidate is WorkspaceTerminalTab =>
         candidate.kind === "terminal" &&
         normalizeWorkspacePath(candidate.workdir) === normalizedWorkdir &&
-        normalizeWorkspaceIdentifier(candidate.originSessionId) === normalizedOriginSessionId &&
-        normalizeWorkspaceIdentifier(candidate.originProjectId ?? null) === normalizedOriginProjectId,
+        normalizeWorkspaceIdentifier(candidate.originSessionId) ===
+          normalizedOriginSessionId &&
+        normalizeWorkspaceIdentifier(candidate.originProjectId ?? null) ===
+          normalizedOriginProjectId,
     );
     if (tab) {
       return { paneId: pane.id, tab };
@@ -1929,7 +2367,8 @@ function findTerminalTab(
 function findControlPanelTab(workspace: WorkspaceState) {
   for (const pane of workspace.panes) {
     const tab = pane.tabs.find(
-      (candidate): candidate is WorkspaceControlPanelTab => candidate.kind === "controlPanel",
+      (candidate): candidate is WorkspaceControlPanelTab =>
+        candidate.kind === "controlPanel",
     );
     if (tab) {
       return { paneId: pane.id, tab };
@@ -1956,7 +2395,8 @@ function findOrchestratorListTab(workspace: WorkspaceState) {
 function findCanvasTab(workspace: WorkspaceState) {
   for (const pane of workspace.panes) {
     const tab = pane.tabs.find(
-      (candidate): candidate is WorkspaceCanvasTab => candidate.kind === "canvas",
+      (candidate): candidate is WorkspaceCanvasTab =>
+        candidate.kind === "canvas",
     );
     if (tab) {
       return { paneId: pane.id, tab };
@@ -1969,7 +2409,8 @@ function findCanvasTab(workspace: WorkspaceState) {
 function findSessionListTab(workspace: WorkspaceState) {
   for (const pane of workspace.panes) {
     const tab = pane.tabs.find(
-      (candidate): candidate is WorkspaceSessionListTab => candidate.kind === "sessionList",
+      (candidate): candidate is WorkspaceSessionListTab =>
+        candidate.kind === "sessionList",
     );
     if (tab) {
       return { paneId: pane.id, tab };
@@ -1982,7 +2423,8 @@ function findSessionListTab(workspace: WorkspaceState) {
 function findProjectListTab(workspace: WorkspaceState) {
   for (const pane of workspace.panes) {
     const tab = pane.tabs.find(
-      (candidate): candidate is WorkspaceProjectListTab => candidate.kind === "projectList",
+      (candidate): candidate is WorkspaceProjectListTab =>
+        candidate.kind === "projectList",
     );
     if (tab) {
       return { paneId: pane.id, tab };
@@ -1997,7 +2439,10 @@ function reconcileOriginOnlyTab(
   originSessionId: string | null,
   originProjectId: string | null,
 ): WorkspaceOriginOnlyTab {
-  const { originProjectId: _ignoredOriginProjectId, ...tabWithoutOriginProjectId } = tab;
+  const {
+    originProjectId: _ignoredOriginProjectId,
+    ...tabWithoutOriginProjectId
+  } = tab;
   return {
     ...tabWithoutOriginProjectId,
     originSessionId,
@@ -2012,7 +2457,11 @@ function syncOriginOnlyPaneState(
   return {
     ...pane,
     activeTabId: activeTab.id,
-    activeSessionId: resolveOriginSessionId(activeTab.originSessionId, pane.activeSessionId, pane.tabs),
+    activeSessionId: resolveOriginSessionId(
+      activeTab.originSessionId,
+      pane.activeSessionId,
+      pane.tabs,
+    ),
     viewMode: activeTab.kind,
     sourcePath: null,
   };
@@ -2071,7 +2520,10 @@ function findDefaultControlPanelAnchorPaneId(workspace: WorkspaceState) {
   );
 }
 
-function findSiblingContentPaneId(workspace: WorkspaceState, excludePaneId: string) {
+function findSiblingContentPaneId(
+  workspace: WorkspaceState,
+  excludePaneId: string,
+) {
   // Find another pane that holds user content (session, source, diff, etc.) and prefer the active pane.
   // Skip all control-surface panes, including standalone Files/Git/Sessions/Projects views.
   const candidates = workspace.panes.filter((pane) => {
@@ -2088,14 +2540,20 @@ function findSiblingContentPaneId(workspace: WorkspaceState, excludePaneId: stri
     return null;
   }
   // Prefer the workspace's active pane if it's in the candidate list.
-  const activePaneCandidate = candidates.find((pane) => pane.id === workspace.activePaneId);
+  const activePaneCandidate = candidates.find(
+    (pane) => pane.id === workspace.activePaneId,
+  );
   return activePaneCandidate?.id ?? candidates[0]?.id ?? null;
 }
 
-function findNonControlPanelPaneId(workspace: WorkspaceState, excludePaneId: string | null) {
+function findNonControlPanelPaneId(
+  workspace: WorkspaceState,
+  excludePaneId: string | null,
+) {
   const activePane =
     workspace.activePaneId && workspace.activePaneId !== excludePaneId
-      ? workspace.panes.find((pane) => pane.id === workspace.activePaneId) ?? null
+      ? (workspace.panes.find((pane) => pane.id === workspace.activePaneId) ??
+        null)
       : null;
   if (activePane && !paneContainsControlPanel(activePane)) {
     return activePane.id;
@@ -2119,10 +2577,14 @@ function findNonControlPanelPaneId(workspace: WorkspaceState, excludePaneId: str
   );
 }
 
-function findContentPaneId(workspace: WorkspaceState, excludePaneId: string | null) {
+function findContentPaneId(
+  workspace: WorkspaceState,
+  excludePaneId: string | null,
+) {
   const activePane =
     workspace.activePaneId && workspace.activePaneId !== excludePaneId
-      ? workspace.panes.find((pane) => pane.id === workspace.activePaneId) ?? null
+      ? (workspace.panes.find((pane) => pane.id === workspace.activePaneId) ??
+        null)
       : null;
   if (activePane && !paneIsControlSurface(activePane)) {
     return activePane.id;
@@ -2139,7 +2601,11 @@ function findContentPaneId(workspace: WorkspaceState, excludePaneId: string | nu
     return sessionPane.id;
   }
 
-  return workspace.panes.find((pane) => pane.id !== excludePaneId && !paneIsControlSurface(pane))?.id ?? null;
+  return (
+    workspace.panes.find(
+      (pane) => pane.id !== excludePaneId && !paneIsControlSurface(pane),
+    )?.id ?? null
+  );
 }
 
 function resolveSessionOpenTargetPaneId(
@@ -2150,7 +2616,8 @@ function resolveSessionOpenTargetPaneId(
     return { targetPaneId: null, splitAnchorPaneId: null };
   }
 
-  const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null;
+  const preferredPane =
+    workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null;
   if (!preferredPane) {
     return { targetPaneId: null, splitAnchorPaneId: null };
   }
@@ -2159,9 +2626,14 @@ function resolveSessionOpenTargetPaneId(
     return { targetPaneId: null, splitAnchorPaneId: null };
   }
 
-  const directionalContentPaneId = findDirectionalContentPaneId(workspace, preferredPane.id);
-  const hasSingleControlSurfacePane = workspace.panes.filter(paneIsControlSurface).length === 1;
-  const hasSingleContentPane = workspace.panes.filter((pane) => !paneIsControlSurface(pane)).length === 1;
+  const directionalContentPaneId = findDirectionalContentPaneId(
+    workspace,
+    preferredPane.id,
+  );
+  const hasSingleControlSurfacePane =
+    workspace.panes.filter(paneIsControlSurface).length === 1;
+  const hasSingleContentPane =
+    workspace.panes.filter((pane) => !paneIsControlSurface(pane)).length === 1;
   if (
     directionalContentPaneId &&
     workspace.panes.length === 2 &&
@@ -2189,7 +2661,8 @@ function resolveControlSurfaceViewerOpenTarget(
     return { targetPaneId: null, splitAnchorPaneId: null };
   }
 
-  const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null;
+  const preferredPane =
+    workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null;
   if (!preferredPane || !paneIsControlSurface(preferredPane)) {
     return { targetPaneId: null, splitAnchorPaneId: null };
   }
@@ -2202,9 +2675,15 @@ function resolveControlSurfaceViewerOpenTarget(
     return { targetPaneId: null, splitAnchorPaneId: null };
   }
 
-  const contentPane = workspace.panes.find((pane) => pane.id === contentPaneId) ?? null;
-  const contentActiveTabKind = contentPane ? getActiveTab(contentPane)?.kind : null;
-  if (contentActiveTabKind === "source" || contentActiveTabKind === "diffPreview") {
+  const contentPane =
+    workspace.panes.find((pane) => pane.id === contentPaneId) ?? null;
+  const contentActiveTabKind = contentPane
+    ? getActiveTab(contentPane)?.kind
+    : null;
+  if (
+    contentActiveTabKind === "source" ||
+    contentActiveTabKind === "diffPreview"
+  ) {
     return { targetPaneId: contentPaneId, splitAnchorPaneId: null };
   }
 
@@ -2224,7 +2703,8 @@ function resolveCanvasOpenTargetPaneId(
     return null;
   }
 
-  const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null;
+  const preferredPane =
+    workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null;
   if (!preferredPane) {
     return null;
   }
@@ -2235,7 +2715,7 @@ function resolveCanvasOpenTargetPaneId(
   }
 
   const originSessionPaneId = originSessionId
-    ? findSessionTab(workspace, originSessionId)?.paneId ?? null
+    ? (findSessionTab(workspace, originSessionId)?.paneId ?? null)
     : null;
   if (originSessionPaneId) {
     return originSessionPaneId;
@@ -2281,7 +2761,9 @@ export function rescopeControlSurfacePane(
   projectId: string | null,
   workdir: string | null,
 ): WorkspaceState {
-  const paneIndex = workspace.panes.findIndex((pane) => pane.id === controlSurfacePaneId);
+  const paneIndex = workspace.panes.findIndex(
+    (pane) => pane.id === controlSurfacePaneId,
+  );
   if (paneIndex === -1) {
     return workspace;
   }
@@ -2294,11 +2776,30 @@ export function rescopeControlSurfacePane(
   let updatedTab: WorkspaceTab | null = null;
 
   if (activeTab.kind === "gitStatus" && workdir) {
-    updatedTab = { ...activeTab, workdir, originSessionId: sessionId ?? activeTab.originSessionId, originProjectId: projectId };
+    updatedTab = {
+      ...activeTab,
+      workdir,
+      originSessionId: sessionId ?? activeTab.originSessionId,
+      originProjectId: projectId,
+    };
   } else if (activeTab.kind === "filesystem" && workdir) {
-    updatedTab = { ...activeTab, rootPath: workdir, originSessionId: sessionId ?? activeTab.originSessionId, originProjectId: projectId };
-  } else if (activeTab.kind === "controlPanel" || activeTab.kind === "sessionList" || activeTab.kind === "projectList" || activeTab.kind === "orchestratorList") {
-    updatedTab = { ...activeTab, originSessionId: sessionId ?? activeTab.originSessionId, originProjectId: projectId };
+    updatedTab = {
+      ...activeTab,
+      rootPath: workdir,
+      originSessionId: sessionId ?? activeTab.originSessionId,
+      originProjectId: projectId,
+    };
+  } else if (
+    activeTab.kind === "controlPanel" ||
+    activeTab.kind === "sessionList" ||
+    activeTab.kind === "projectList" ||
+    activeTab.kind === "orchestratorList"
+  ) {
+    updatedTab = {
+      ...activeTab,
+      originSessionId: sessionId ?? activeTab.originSessionId,
+      originProjectId: projectId,
+    };
   }
   // Terminal tabs intentionally have no branch here — see the doc comment
   // above. Do NOT add one without also taking `TerminalPanel`'s history
@@ -2308,7 +2809,9 @@ export function rescopeControlSurfacePane(
     return workspace;
   }
 
-  const updatedTabs = pane.tabs.map((tab) => (tab.id === activeTab.id ? updatedTab! : tab));
+  const updatedTabs = pane.tabs.map((tab) =>
+    tab.id === activeTab.id ? updatedTab! : tab,
+  );
   const updatedPane = syncPaneState({ ...pane, tabs: updatedTabs });
   const updatedPanes = workspace.panes.slice();
   updatedPanes[paneIndex] = updatedPane;
@@ -2371,8 +2874,12 @@ function paneContainsControlPanel(pane: WorkspacePane) {
  * `rescopeControlSurfacePane` above for the full rationale.
  */
 export const CONTROL_SURFACE_KINDS: ReadonlySet<string> = new Set([
-  "controlPanel", "sessionList", "projectList", "orchestratorList",
-  "gitStatus", "filesystem",
+  "controlPanel",
+  "sessionList",
+  "projectList",
+  "orchestratorList",
+  "gitStatus",
+  "filesystem",
 ]);
 
 function paneIsControlSurface(pane: WorkspacePane) {
@@ -2413,7 +2920,10 @@ function findNearestPaneIdMatching(
   return null;
 }
 
-function findDirectionalContentPaneId(workspace: WorkspaceState, paneId: string) {
+function findDirectionalContentPaneId(
+  workspace: WorkspaceState,
+  paneId: string,
+) {
   const paneLookup = new Map(workspace.panes.map((pane) => [pane.id, pane]));
   const order = flattenPaneOrder(workspace.root, paneLookup);
   const myIndex = order.indexOf(paneId);
@@ -2438,7 +2948,10 @@ function findDirectionalContentPaneId(workspace: WorkspaceState, paneId: string)
   return null;
 }
 
-function flattenPaneOrder(root: WorkspaceNode | null, paneLookup: Map<string, WorkspacePane>): string[] {
+function flattenPaneOrder(
+  root: WorkspaceNode | null,
+  paneLookup: Map<string, WorkspacePane>,
+): string[] {
   if (!root) {
     return [];
   }
@@ -2532,8 +3045,10 @@ function findRelatedDiffPreviewPaneId(
 ) {
   const findMatchingPaneId = (predicate: (pane: WorkspacePane) => boolean) => {
     if (preferredPaneId) {
-      return findNearestPaneIdMatching(workspace, preferredPaneId, (pane) =>
-        pane.id !== preferredPaneId && predicate(pane),
+      return findNearestPaneIdMatching(
+        workspace,
+        preferredPaneId,
+        (pane) => pane.id !== preferredPaneId && predicate(pane),
       );
     }
 
@@ -2545,7 +3060,9 @@ function findRelatedDiffPreviewPaneId(
       return false;
     }
 
-    return contextSessionId === null || pane.activeSessionId === contextSessionId;
+    return (
+      contextSessionId === null || pane.activeSessionId === contextSessionId
+    );
   });
   if (activeDiffPaneId) {
     return activeDiffPaneId;
@@ -2562,7 +3079,9 @@ function findRelatedDiffPreviewPaneId(
     }
   }
 
-  return findMatchingPaneId((pane) => getActiveTab(pane)?.kind === "diffPreview");
+  return findMatchingPaneId(
+    (pane) => getActiveTab(pane)?.kind === "diffPreview",
+  );
 }
 
 function findRelatedViewerPaneId(
@@ -2572,8 +3091,10 @@ function findRelatedViewerPaneId(
 ) {
   const findMatchingPaneId = (predicate: (pane: WorkspacePane) => boolean) => {
     if (preferredPaneId) {
-      return findNearestPaneIdMatching(workspace, preferredPaneId, (pane) =>
-        pane.id !== preferredPaneId && predicate(pane),
+      return findNearestPaneIdMatching(
+        workspace,
+        preferredPaneId,
+        (pane) => pane.id !== preferredPaneId && predicate(pane),
       );
     }
 
@@ -2586,7 +3107,9 @@ function findRelatedViewerPaneId(
       return false;
     }
 
-    return contextSessionId === null || pane.activeSessionId === contextSessionId;
+    return (
+      contextSessionId === null || pane.activeSessionId === contextSessionId
+    );
   });
   if (activeViewerPaneId) {
     return activeViewerPaneId;
@@ -2596,7 +3119,9 @@ function findRelatedViewerPaneId(
     const relatedViewerPaneId = findMatchingPaneId(
       (pane) =>
         pane.activeSessionId === contextSessionId &&
-        pane.tabs.some((tab) => tab.kind === "source" || tab.kind === "diffPreview"),
+        pane.tabs.some(
+          (tab) => tab.kind === "source" || tab.kind === "diffPreview",
+        ),
     );
     if (relatedViewerPaneId) {
       return relatedViewerPaneId;
@@ -2652,7 +3177,11 @@ function updateCanvasTab(
   return hasChanged ? { ...workspace, panes } : workspace;
 }
 
-function insertTabAtIndex(tabs: WorkspaceTab[], tab: WorkspaceTab, tabIndex: number): WorkspaceTab[] {
+function insertTabAtIndex(
+  tabs: WorkspaceTab[],
+  tab: WorkspaceTab,
+  tabIndex: number,
+): WorkspaceTab[] {
   const nextTabs = tabs.filter((candidate) => candidate.id !== tab.id);
   const nextTabIndex = clampIndex(tabIndex, 0, nextTabs.length);
   nextTabs.splice(nextTabIndex, 0, tab);
@@ -2670,7 +3199,9 @@ function shouldOpenTabInAdjacentPane(
     return false;
   }
 
-  const preferredPane = workspace.panes.find((pane) => pane.id === preferredPaneId);
+  const preferredPane = workspace.panes.find(
+    (pane) => pane.id === preferredPaneId,
+  );
   if (!preferredPane) {
     return false;
   }
@@ -2689,10 +3220,12 @@ function shouldOpenTabInAdjacentPane(
     if (!paneActiveTab) {
       return true;
     }
-    return paneActiveTab.kind !== "controlPanel"
-      && paneActiveTab.kind !== "sessionList"
-      && paneActiveTab.kind !== "projectList"
-      && paneActiveTab.kind !== "orchestratorList";
+    return (
+      paneActiveTab.kind !== "controlPanel" &&
+      paneActiveTab.kind !== "sessionList" &&
+      paneActiveTab.kind !== "projectList" &&
+      paneActiveTab.kind !== "orchestratorList"
+    );
   });
   if (contentPanes.length >= MAX_AUTO_SPLIT_PANES) {
     return false;
@@ -2708,7 +3241,7 @@ function findContextualTargetPaneId(
   tabKind: WorkspaceTab["kind"],
 ) {
   const preferredPane = preferredPaneId
-    ? workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null
+    ? (workspace.panes.find((pane) => pane.id === preferredPaneId) ?? null)
     : null;
   const preferredActiveTab = preferredPane ? getActiveTab(preferredPane) : null;
 
@@ -2721,14 +3254,22 @@ function findContextualTargetPaneId(
       return preferredPane!.id;
     }
 
-    const originSessionPaneId = originSessionId ? findSessionTab(workspace, originSessionId)?.paneId ?? null : null;
+    const originSessionPaneId = originSessionId
+      ? (findSessionTab(workspace, originSessionId)?.paneId ?? null)
+      : null;
     if (originSessionPaneId) {
       return originSessionPaneId;
     }
 
     if (preferredPane && paneContainsControlPanel(preferredPane)) {
-      const nonControlPanelPaneId = findNonControlPanelPaneId(workspace, preferredPane.id);
-      if (nonControlPanelPaneId && shouldOpenTabInAdjacentPane(workspace, nonControlPanelPaneId, tabKind)) {
+      const nonControlPanelPaneId = findNonControlPanelPaneId(
+        workspace,
+        preferredPane.id,
+      );
+      if (
+        nonControlPanelPaneId &&
+        shouldOpenTabInAdjacentPane(workspace, nonControlPanelPaneId, tabKind)
+      ) {
         // Room to split - return null so the caller splits off the content pane.
         // The caller will use the content pane (not the control panel) as the split anchor.
         return null;
@@ -2744,13 +3285,18 @@ function findContextualTargetPaneId(
       return preferredPane!.id;
     }
 
-    const originSessionPaneId = originSessionId ? findSessionTab(workspace, originSessionId)?.paneId ?? null : null;
+    const originSessionPaneId = originSessionId
+      ? (findSessionTab(workspace, originSessionId)?.paneId ?? null)
+      : null;
     if (originSessionPaneId) {
       return originSessionPaneId;
     }
 
     if (preferredPane && paneContainsControlPanel(preferredPane)) {
-      const nonControlPanelPaneId = findNonControlPanelPaneId(workspace, preferredPane.id);
+      const nonControlPanelPaneId = findNonControlPanelPaneId(
+        workspace,
+        preferredPane.id,
+      );
       if (
         nonControlPanelPaneId &&
         shouldOpenTabInAdjacentPane(workspace, nonControlPanelPaneId, tabKind)
@@ -2764,20 +3310,35 @@ function findContextualTargetPaneId(
   }
 
   if (tabKind === "diffPreview") {
-    const contextSessionId = originSessionId ?? preferredPane?.activeSessionId ?? null;
-    const diffPaneId = findRelatedDiffPreviewPaneId(workspace, preferredPaneId, contextSessionId);
+    const contextSessionId =
+      originSessionId ?? preferredPane?.activeSessionId ?? null;
+    const diffPaneId = findRelatedDiffPreviewPaneId(
+      workspace,
+      preferredPaneId,
+      contextSessionId,
+    );
     if (diffPaneId) {
       return diffPaneId;
     }
 
-    const viewerPaneId = findRelatedViewerPaneId(workspace, preferredPaneId, contextSessionId);
+    const viewerPaneId = findRelatedViewerPaneId(
+      workspace,
+      preferredPaneId,
+      contextSessionId,
+    );
     if (viewerPaneId) {
       return viewerPaneId;
     }
 
     if (preferredPane && paneContainsControlPanel(preferredPane)) {
-      const nonControlPanelPaneId = findNonControlPanelPaneId(workspace, preferredPane.id);
-      if (nonControlPanelPaneId && shouldOpenTabInAdjacentPane(workspace, nonControlPanelPaneId, tabKind)) {
+      const nonControlPanelPaneId = findNonControlPanelPaneId(
+        workspace,
+        preferredPane.id,
+      );
+      if (
+        nonControlPanelPaneId &&
+        shouldOpenTabInAdjacentPane(workspace, nonControlPanelPaneId, tabKind)
+      ) {
         return null;
       }
       if (nonControlPanelPaneId) {
@@ -2801,7 +3362,9 @@ function findContextualTargetPaneId(
   return null;
 }
 function getActiveTab(pane: WorkspacePane) {
-  return pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
+  return (
+    pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0] ?? null
+  );
 }
 
 function setSourceTabFocus(
@@ -2847,7 +3410,9 @@ function resolveOriginSessionId(
   return originSessionId ?? activeSessionId ?? firstSessionTabId(tabs);
 }
 
-function isSessionPaneViewMode(viewMode: PaneViewMode): viewMode is SessionPaneViewMode {
+function isSessionPaneViewMode(
+  viewMode: PaneViewMode,
+): viewMode is SessionPaneViewMode {
   return (
     viewMode === "session" ||
     viewMode === "prompt" ||
@@ -2860,7 +3425,10 @@ function clampIndex(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-function pruneWorkspaceNode(node: WorkspaceNode | null, availablePaneIds: Set<string>): WorkspaceNode | null {
+function pruneWorkspaceNode(
+  node: WorkspaceNode | null,
+  availablePaneIds: Set<string>,
+): WorkspaceNode | null {
   if (!node) {
     return null;
   }
@@ -2888,7 +3456,10 @@ function pruneWorkspaceNode(node: WorkspaceNode | null, availablePaneIds: Set<st
   };
 }
 
-function removePaneFromTree(node: WorkspaceNode | null, paneId: string): WorkspaceNode | null {
+function removePaneFromTree(
+  node: WorkspaceNode | null,
+  paneId: string,
+): WorkspaceNode | null {
   if (!node) {
     return null;
   }
@@ -2945,12 +3516,28 @@ function insertPaneAdjacent(
 
   return {
     ...node,
-    first: insertPaneAdjacent(node.first, paneId, direction, newPaneId, placeBefore),
-    second: insertPaneAdjacent(node.second, paneId, direction, newPaneId, placeBefore),
+    first: insertPaneAdjacent(
+      node.first,
+      paneId,
+      direction,
+      newPaneId,
+      placeBefore,
+    ),
+    second: insertPaneAdjacent(
+      node.second,
+      paneId,
+      direction,
+      newPaneId,
+      placeBefore,
+    ),
   };
 }
 
-function updateSplitRatioInNode(node: WorkspaceNode, splitId: string, ratio: number): WorkspaceNode {
+function updateSplitRatioInNode(
+  node: WorkspaceNode,
+  splitId: string,
+  ratio: number,
+): WorkspaceNode {
   if (node.type === "pane") {
     return node;
   }

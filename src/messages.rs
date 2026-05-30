@@ -19,6 +19,11 @@
 // Extracted from state.rs so state.rs can stay focused on `StateInner`
 // + commit_locked() + SSE broadcasting.
 
+// Stop writes this exact assistant transcript message; delegation result
+// synthesis treats the same text as a terminal sentinel rather than review
+// output. Keep both call sites tied to this neutral message contract.
+const SESSION_STOPPED_BY_USER_MESSAGE: &str = "Turn stopped by user.";
+
 /// Returns the transcript count carried by session-scoped SSE deltas.
 fn session_message_count(record: &SessionRecord) -> u32 {
     debug_assert!(

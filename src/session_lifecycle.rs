@@ -37,7 +37,6 @@
 // `src/remote.rs`) and never touches a local runtime.
 
 impl AppState {
-
     /// Destructively removes a session: tears down its runtime (kill
     /// child process for Claude/ACP, `turn/interrupt` + detach for shared
     /// Codex), removes the `SessionRecord` from `StateInner`, garbage-collects
@@ -67,8 +66,8 @@ impl AppState {
             let agent = inner.sessions[index].session.agent;
             let external_session_id = inner.sessions[index].external_session_id.clone();
             let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
 
             let runtime = match &record.runtime {
                 SessionRuntime::Claude(handle) => Some(KillableRuntime::Claude(handle.clone())),
@@ -155,8 +154,7 @@ impl AppState {
                         return true;
                     }
 
-                    let keep = visible_profiles
-                        .contains(&profile);
+                    let keep = visible_profiles.contains(&profile);
                     if !keep {
                         if let SessionRuntime::Claude(handle) = &session_record.runtime {
                             hidden_runtimes.push(KillableRuntime::Claude(handle.clone()));
@@ -193,8 +191,7 @@ impl AppState {
         }
 
         if let Some(runtime) = runtime_to_kill {
-            if let Err(err) =
-                shutdown_removed_runtime(runtime, &format!("session `{session_id}`"))
+            if let Err(err) = shutdown_removed_runtime(runtime, &format!("session `{session_id}`"))
             {
                 eprintln!("session cleanup warning> {err:#}");
             }
@@ -205,8 +202,7 @@ impl AppState {
             }
         }
         for runtime in delegation_runtimes_to_kill {
-            if let Err(err) =
-                shutdown_removed_runtime(runtime, "a removed parent delegation child")
+            if let Err(err) = shutdown_removed_runtime(runtime, "a removed parent delegation child")
             {
                 eprintln!("session cleanup warning> {err:#}");
             }
@@ -316,8 +312,8 @@ impl AppState {
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
 
             if record.runtime_stop_in_progress {
                 return Err(ApiError::conflict("session is already stopping"));
@@ -366,8 +362,8 @@ impl AppState {
                         .find_visible_session_index(session_id)
                         .ok_or_else(|| ApiError::not_found("session not found"))?;
                     let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid");
                     record.runtime_stop_in_progress = false;
                     let deferred_callbacks = std::mem::take(&mut record.deferred_stop_callbacks);
                     let token = record.runtime.runtime_token();
@@ -415,8 +411,9 @@ impl AppState {
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let message_id = inner.next_message_id();
-            let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
-                .then(|| inner.next_message_id());
+            let file_change_message_id =
+                (!inner.sessions[index].active_turn_file_changes.is_empty())
+                    .then(|| inner.next_message_id());
             let mut thread_id_to_suppress = None;
             let (pending_interaction_updates, created_messages) = {
                 let record = inner
@@ -441,14 +438,14 @@ impl AppState {
                     set_record_external_session_id(record, None);
                 }
                 record.session.status = SessionStatus::Idle;
-                record.session.preview = "Turn stopped by user.".to_owned();
+                record.session.preview = SESSION_STOPPED_BY_USER_MESSAGE.to_owned();
                 let stopped_message_index = record.session.messages.len();
                 record.session.messages.push(Message::Text {
                     attachments: Vec::new(),
                     id: message_id,
                     timestamp: stamp_now(),
                     author: Author::Assistant,
-                    text: "Turn stopped by user.".to_owned(),
+                    text: SESSION_STOPPED_BY_USER_MESSAGE.to_owned(),
                     expanded_text: None,
                 });
                 created_message_indices.push(stopped_message_index);

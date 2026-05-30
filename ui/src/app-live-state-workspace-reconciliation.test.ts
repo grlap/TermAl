@@ -4,7 +4,10 @@ import { reconcileAdoptedSessionsWorkspace } from "./app-live-state-workspace-re
 import type { Session } from "./types";
 import type { WorkspaceState, WorkspaceTab } from "./workspace";
 
-function makeSession(id: string, parentDelegationId: string | null = null): Session {
+function makeSession(
+  id: string,
+  parentDelegationId: string | null = null,
+): Session {
   return {
     id,
     name: id,
@@ -63,7 +66,9 @@ describe("reconcileAdoptedSessionsWorkspace", () => {
     const parentSession = makeSession("parent-session");
     const childSession = makeSession("child-session", "delegation-1");
     const workspace = makeSingleSessionWorkspace(childSession.id);
-    const applyControlPanelLayout = vi.fn((nextWorkspace: WorkspaceState) => nextWorkspace);
+    const applyControlPanelLayout = vi.fn(
+      (nextWorkspace: WorkspaceState) => nextWorkspace,
+    );
 
     const result = reconcileAdoptedSessionsWorkspace({
       applyControlPanelLayout,
@@ -106,7 +111,9 @@ describe("reconcileAdoptedSessionsWorkspace", () => {
         originSessionId: childSession.id,
       },
     ]);
-    const applyControlPanelLayout = vi.fn((nextWorkspace: WorkspaceState) => nextWorkspace);
+    const applyControlPanelLayout = vi.fn(
+      (nextWorkspace: WorkspaceState) => nextWorkspace,
+    );
 
     const result = reconcileAdoptedSessionsWorkspace({
       applyControlPanelLayout,
@@ -134,11 +141,49 @@ describe("reconcileAdoptedSessionsWorkspace", () => {
     );
   });
 
+  it("prunes delegated child references from canvas origin session fields", () => {
+    const parentSession = makeSession("parent-session");
+    const childSession = makeSession("child-session", "delegation-1");
+    const workspace = makeWorkspaceWithTabs([
+      {
+        id: "canvas-tab",
+        kind: "canvas",
+        cards: [{ sessionId: parentSession.id, x: 10, y: 20 }],
+        originSessionId: childSession.id,
+      },
+    ]);
+    const applyControlPanelLayout = vi.fn(
+      (nextWorkspace: WorkspaceState) => nextWorkspace,
+    );
+
+    const result = reconcileAdoptedSessionsWorkspace({
+      applyControlPanelLayout,
+      canOpenPendingSession: false,
+      current: workspace,
+      mergedSessions: [parentSession, childSession],
+      pendingPaneId: null,
+      pruneDelegatedChildWorkspaceTabs: true,
+      sessionsChanged: false,
+    });
+
+    const [canvasTab] = result.panes[0].tabs;
+    expect(applyControlPanelLayout).toHaveBeenCalledTimes(1);
+    expect(canvasTab).toEqual(
+      expect.objectContaining({
+        kind: "canvas",
+        cards: [{ sessionId: parentSession.id, x: 10, y: 20 }],
+        originSessionId: null,
+      }),
+    );
+  });
+
   it("preserves a pending delegated child session before the open can run", () => {
     const parentSession = makeSession("parent-session");
     const childSession = makeSession("child-session", "delegation-1");
     const workspace = makeSingleSessionWorkspace(childSession.id);
-    const applyControlPanelLayout = vi.fn((nextWorkspace: WorkspaceState) => nextWorkspace);
+    const applyControlPanelLayout = vi.fn(
+      (nextWorkspace: WorkspaceState) => nextWorkspace,
+    );
 
     const result = reconcileAdoptedSessionsWorkspace({
       applyControlPanelLayout,
@@ -159,7 +204,9 @@ describe("reconcileAdoptedSessionsWorkspace", () => {
     const parentSession = makeSession("parent-session");
     const childSession = makeSession("child-session", "delegation-1");
     const workspace = makeSingleSessionWorkspace(parentSession.id);
-    const applyControlPanelLayout = vi.fn((nextWorkspace: WorkspaceState) => nextWorkspace);
+    const applyControlPanelLayout = vi.fn(
+      (nextWorkspace: WorkspaceState) => nextWorkspace,
+    );
 
     const result = reconcileAdoptedSessionsWorkspace({
       applyControlPanelLayout,
@@ -178,7 +225,9 @@ describe("reconcileAdoptedSessionsWorkspace", () => {
   it("does not open a session when pending opening is enabled without a target", () => {
     const parentSession = makeSession("parent-session");
     const workspace = makeSingleSessionWorkspace(parentSession.id);
-    const applyControlPanelLayout = vi.fn((nextWorkspace: WorkspaceState) => nextWorkspace);
+    const applyControlPanelLayout = vi.fn(
+      (nextWorkspace: WorkspaceState) => nextWorkspace,
+    );
 
     const result = reconcileAdoptedSessionsWorkspace({
       applyControlPanelLayout,
@@ -198,7 +247,9 @@ describe("reconcileAdoptedSessionsWorkspace", () => {
     const parentSession = makeSession("parent-session");
     const openedSession = makeSession("opened-session");
     const workspace = makeSingleSessionWorkspace(parentSession.id);
-    const applyControlPanelLayout = vi.fn((nextWorkspace: WorkspaceState) => nextWorkspace);
+    const applyControlPanelLayout = vi.fn(
+      (nextWorkspace: WorkspaceState) => nextWorkspace,
+    );
 
     const result = reconcileAdoptedSessionsWorkspace({
       applyControlPanelLayout,
@@ -243,7 +294,9 @@ describe("reconcileAdoptedSessionsWorkspace", () => {
       `tab-${childSession.id}`,
       childSession.id,
     );
-    const applyControlPanelLayout = vi.fn((nextWorkspace: WorkspaceState) => nextWorkspace);
+    const applyControlPanelLayout = vi.fn(
+      (nextWorkspace: WorkspaceState) => nextWorkspace,
+    );
 
     const result = reconcileAdoptedSessionsWorkspace({
       applyControlPanelLayout,

@@ -3,6 +3,7 @@ import {
   addWorkspaceTabToPane,
   activatePane,
   closeWorkspaceTab,
+  collectWorkspaceSessionReferences,
   createPane,
   dockControlPanelAtWorkspaceEdge,
   openCanvasInWorkspaceState,
@@ -35,6 +36,7 @@ import {
   updateGitDiffPreviewTabInWorkspaceState,
   updateSplitRatio,
   upsertCanvasSessionCard,
+  workspaceHasDelegatedChildSessionReferences,
   type WorkspacePane,
   type WorkspaceState,
   type WorkspaceTab,
@@ -385,7 +387,6 @@ describe("workspace helpers", () => {
     expect(reused.panes[0]?.tabs).toHaveLength(2);
   });
 
-
   it("openCanvasInWorkspaceState refreshes origin metadata when reusing an existing canvas tab", () => {
     const next = openCanvasInWorkspaceState(
       makeSinglePaneWorkspace(
@@ -509,7 +510,8 @@ describe("workspace helpers", () => {
       next.panes.find((pane) => pane.id === targetSessionPane.id)?.activeTabId,
     ).toBe("canvas-a");
     expect(
-      next.panes.find((pane) => pane.id === targetSessionPane.id)?.activeSessionId,
+      next.panes.find((pane) => pane.id === targetSessionPane.id)
+        ?.activeSessionId,
     ).toBe("session-target");
     expect(
       next.panes.find((pane) => pane.id === targetSessionPane.id)?.viewMode,
@@ -2308,7 +2310,6 @@ describe("workspace helpers", () => {
     expect(next.panes[0].activeSessionId).toBe("session-a");
   });
 
-
   it("openSessionListInWorkspaceState refreshes origin metadata when reusing an existing sessions tab", () => {
     const next = openSessionListInWorkspaceState(
       makeSinglePaneWorkspace(
@@ -2872,15 +2873,18 @@ describe("workspace helpers", () => {
     });
   });
 
-
   it("openDiffPreviewInWorkspaceState opens a standalone git diff beside the related session pane", () => {
     const next = openDiffPreviewInWorkspaceState(
       makeSplitWorkspace(
-        makePane("pane-git", [makeGitStatusTab("git-a", "/repo", "session-a")], {
-          activeTabId: "git-a",
-          activeSessionId: "session-a",
-          viewMode: "gitStatus",
-        }),
+        makePane(
+          "pane-git",
+          [makeGitStatusTab("git-a", "/repo", "session-a")],
+          {
+            activeTabId: "git-a",
+            activeSessionId: "session-a",
+            viewMode: "gitStatus",
+          },
+        ),
         makePane("pane-session", [makeSessionTab("tab-a", "session-a")], {
           activeTabId: "tab-a",
           activeSessionId: "session-a",
@@ -3965,6 +3969,57 @@ describe("workspace helpers", () => {
     expect(next.panes[0].activeSessionId).toBe("session-parent");
   });
 
+  it("detects delegated child references from canvas origin sessions without cards", () => {
+    const childSession = {
+      ...makeSession("session-child"),
+      parentDelegationId: "delegation-1",
+    };
+    const workspace = makeSinglePaneWorkspace(
+      makePane("pane-a", [makeCanvasTab("canvas-a", [], "session-child")], {
+        activeTabId: "canvas-a",
+        activeSessionId: null,
+        viewMode: "canvas",
+      }),
+    );
+
+    expect(
+      workspaceHasDelegatedChildSessionReferences(workspace, [
+        makeSession("session-parent"),
+        childSession,
+      ]),
+    ).toBe(true);
+  });
+
+  it("collects workspace session references from tabs, origins, active panes, and canvas cards", () => {
+    const workspace = makeSinglePaneWorkspace(
+      makePane(
+        "pane-a",
+        [
+          makeSessionTab("tab-session", "session-tab"),
+          makeSourceTab("tab-source", "/tmp/review.md", "session-origin"),
+          makeCanvasTab(
+            "tab-canvas",
+            [{ sessionId: "session-card", x: 10, y: 20 }],
+            "session-canvas-origin",
+          ),
+        ],
+        {
+          activeTabId: "tab-session",
+          activeSessionId: "session-active",
+          viewMode: "session",
+        },
+      ),
+    );
+
+    expect([...collectWorkspaceSessionReferences(workspace)].sort()).toEqual([
+      "session-active",
+      "session-canvas-origin",
+      "session-card",
+      "session-origin",
+      "session-tab",
+    ]);
+  });
+
   it("reconcileWorkspaceState keeps delegated child workspace entries during ordinary updates", () => {
     const childSession = {
       ...makeSession("session-child"),
@@ -3972,15 +4027,11 @@ describe("workspace helpers", () => {
     };
     const next = reconcileWorkspaceState(
       makeSinglePaneWorkspace(
-        makePane(
-          "pane-a",
-          [makeSessionTab("tab-child", "session-child")],
-          {
-            activeTabId: "tab-child",
-            activeSessionId: "session-child",
-            viewMode: "session",
-          },
-        ),
+        makePane("pane-a", [makeSessionTab("tab-child", "session-child")], {
+          activeTabId: "tab-child",
+          activeSessionId: "session-child",
+          viewMode: "session",
+        }),
       ),
       [childSession],
     );
@@ -3991,6 +4042,49 @@ describe("workspace helpers", () => {
     expect(next.panes[0].activeSessionId).toBe("session-child");
   });
 
+  it("reconcileWorkspaceState preserves selected delegated children during restart pruning", () => {
+    const restoredChildSession = {
+      ...makeSession("session-restored-child"),
+      parentDelegationId: "delegation-1",
+    };
+    const currentChildSession = {
+      ...makeSession("session-current-child"),
+      parentDelegationId: "delegation-2",
+    };
+    const next = reconcileWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane(
+          "pane-a",
+          [
+            makeSessionTab("tab-restored", restoredChildSession.id),
+            makeSessionTab("tab-current", currentChildSession.id),
+            makeSessionTab("tab-parent", "session-parent"),
+          ],
+          {
+            activeTabId: "tab-restored",
+            activeSessionId: restoredChildSession.id,
+            viewMode: "session",
+          },
+        ),
+      ),
+      [
+        restoredChildSession,
+        currentChildSession,
+        makeSession("session-parent"),
+      ],
+      {
+        pruneDelegatedChildSessionTabs: true,
+        preserveSessionIds: [currentChildSession.id],
+      },
+    );
+
+    const sessionIds = next.panes[0].tabs.flatMap((tab) =>
+      tab.kind === "session" ? [tab.sessionId] : [],
+    );
+    expect(sessionIds).toEqual([currentChildSession.id, "session-parent"]);
+    expect(next.panes[0].activeSessionId).toBe(currentChildSession.id);
+  });
+
   it("reconcileWorkspaceState rebuilds fallback tabs when pruning empties the restored pane", () => {
     const childSession = {
       ...makeSession("session-child"),
@@ -3998,15 +4092,11 @@ describe("workspace helpers", () => {
     };
     const next = reconcileWorkspaceState(
       makeSinglePaneWorkspace(
-        makePane(
-          "pane-a",
-          [makeSessionTab("tab-child", "session-child")],
-          {
-            activeTabId: "tab-child",
-            activeSessionId: "session-child",
-            viewMode: "session",
-          },
-        ),
+        makePane("pane-a", [makeSessionTab("tab-child", "session-child")], {
+          activeTabId: "tab-child",
+          activeSessionId: "session-child",
+          viewMode: "session",
+        }),
       ),
       [childSession, makeSession("session-parent")],
       { pruneDelegatedChildSessionTabs: true },
@@ -4033,15 +4123,11 @@ describe("workspace helpers", () => {
     };
     const next = reconcileWorkspaceState(
       makeSplitWorkspace(
-        makePane(
-          "pane-child",
-          [makeSessionTab("tab-child", "session-child")],
-          {
-            activeTabId: "tab-child",
-            activeSessionId: "session-child",
-            viewMode: "session",
-          },
-        ),
+        makePane("pane-child", [makeSessionTab("tab-child", "session-child")], {
+          activeTabId: "tab-child",
+          activeSessionId: "session-child",
+          viewMode: "session",
+        }),
         makePane("pane-empty", [], {
           activeTabId: null,
           activeSessionId: null,

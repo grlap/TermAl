@@ -22,6 +22,11 @@ const MAX_DELEGATION_MODEL_CHARS: usize = 200;
 const MAX_DELEGATION_CWD_CHARS: usize = 4096;
 // Public summaries ride in `/api/state`; full summaries stay behind result reads.
 const MAX_DELEGATION_PUBLIC_SUMMARY_CHARS: usize = 1000;
+// Synthesized no-packet results can contain a full review transcript; keep the
+// stored result summary bounded before persisting and rebroadcasting it.
+const MAX_DELEGATION_RESULT_SUMMARY_CHARS: usize = 8000;
+// Keep parsed reviewer output bounded alongside the summary cap.
+const MAX_DELEGATION_RESULT_FINDINGS: usize = 100;
 // Result packets are expected near the end of long assistant output.
 const DELEGATION_RESULT_PACKET_SEARCH_BYTES: usize = 32 * 1024;
 // Phase 1 starts children immediately but still enforces simple fan-out limits.
@@ -34,8 +39,7 @@ const MAX_DELEGATION_WAIT_IDS: usize = 10;
 const MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES: usize = 64 * 1024;
 // Isolated worktrees materialize dirty tracked state through binary patches.
 const MAX_ISOLATED_WORKTREE_PATCH_BYTES: usize = 16 * 1024 * 1024;
-const DELEGATION_WAIT_RESUME_TRUNCATED_MARKER: &str =
-    "\n\n[TermAl truncated this delegation fan-in prompt. Open the child sessions for full results.]";
+const DELEGATION_WAIT_RESUME_TRUNCATED_MARKER: &str = "\n\n[TermAl truncated this delegation fan-in prompt. Open the child sessions for full results.]";
 const DELEGATED_CHILD_SESSION_MARKER: &str =
     "You are a delegated child session for TermAl delegation";
 // Shared conflict text for create/cancel races before child dispatch starts.
@@ -183,14 +187,10 @@ impl DelegationWaitRefresh {
             .unwrap_or_default()
     }
 
-    fn consume_wait(
-        &mut self,
-        wait: DelegationWaitRecord,
-        reason: DelegationWaitConsumedReason,
-    ) {
-        self.consumed_waits.push(ConsumedDelegationWait { wait, reason });
+    fn consume_wait(&mut self, wait: DelegationWaitRecord, reason: DelegationWaitConsumedReason) {
+        self.consumed_waits
+            .push(ConsumedDelegationWait { wait, reason });
     }
-
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -785,7 +785,13 @@ impl AppState {
                 inner.revision
             };
             let result = inner.delegations[index].result.clone();
-            (revision, result, lifecycle_delta, detached_child, wait_refresh)
+            (
+                revision,
+                result,
+                lifecycle_delta,
+                detached_child,
+                wait_refresh,
+            )
         };
         self.publish_delegation_refresh_side_effects(
             revision,
@@ -811,10 +817,7 @@ impl AppState {
             .ok_or_else(|| ApiError::bad_request("parent session id is required"))?
             .to_owned();
         let delegation_ids = normalize_delegation_wait_ids(request.delegation_ids)?;
-        let title = request
-            .title
-            .as_deref()
-            .and_then(non_empty_trimmed);
+        let title = request.title.as_deref().and_then(non_empty_trimmed);
         if title
             .as_ref()
             .is_some_and(|value| value.chars().count() > MAX_DELEGATION_TITLE_CHARS)
@@ -960,9 +963,10 @@ impl AppState {
         };
         let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
         let wait_refresh = refresh_delegation_waits_locked(&mut inner);
-        let revision =
-            if lifecycle_delta.is_some() || detached_child.did_mutate() || wait_refresh.did_mutate()
-            {
+        let revision = if lifecycle_delta.is_some()
+            || detached_child.did_mutate()
+            || wait_refresh.did_mutate()
+        {
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist delegation cancelation: {err:#}"))
             })?
@@ -1689,9 +1693,7 @@ fn normalize_delegation_wait_ids(ids: Vec<String>) -> Result<Vec<String>, ApiErr
     let mut seen = BTreeSet::new();
     for id in ids {
         let Some(id) = non_empty_trimmed(&id) else {
-            return Err(ApiError::bad_request(
-                "delegation wait ids cannot be empty",
-            ));
+            return Err(ApiError::bad_request("delegation wait ids cannot be empty"));
         };
         if seen.insert(id.clone()) {
             normalized.push(id);
@@ -1820,7 +1822,9 @@ fn refresh_delegation_waits_matching_locked(
         let queue_result =
             queue_delegation_wait_resume_locked(inner, &wait.parent_session_id, resume_prompt);
         if queue_result.dispatch_requested {
-            refresh.dispatch_parents.push(wait.parent_session_id.clone());
+            refresh
+                .dispatch_parents
+                .push(wait.parent_session_id.clone());
         }
         refresh
             .queue_results_by_wait_id
@@ -1838,7 +1842,12 @@ fn delegation_wait_resume_prompt_locked(
     let records = wait
         .delegation_ids
         .iter()
-        .filter_map(|id| inner.delegations.iter().find(|delegation| delegation.id == *id))
+        .filter_map(|id| {
+            inner
+                .delegations
+                .iter()
+                .find(|delegation| delegation.id == *id)
+        })
         .collect::<Vec<_>>();
     if records.len() != wait.delegation_ids.len() {
         return Some(limit_delegation_wait_resume_prompt(format!(
@@ -2035,10 +2044,7 @@ fn format_delegation_finding(finding: &DelegationFinding) -> String {
         (None, Some(line)) => format!(" line {line}"),
         (None, None) => String::new(),
     };
-    format!(
-        "- {}{} - {}",
-        finding.severity, location, finding.message
-    )
+    format!("- {}{} - {}", finding.severity, location, finding.message)
 }
 
 fn delegation_status_label(status: DelegationStatus) -> &'static str {
@@ -3043,8 +3049,10 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
             if !matches!(child.runtime, SessionRuntime::None) || child.is_remote_proxy() {
                 return DelegationChildOutcome::Running;
             }
-            delegation_child_result_outcome(child).unwrap_or_else(|| DelegationChildOutcome::Failed {
-                summary: delegation_child_missing_runtime_summary(child),
+            delegation_child_result_outcome(child, false).unwrap_or_else(|| {
+                DelegationChildOutcome::Failed {
+                    summary: delegation_child_missing_runtime_summary(child),
+                }
             })
         }
         SessionStatus::Error => {
@@ -3058,14 +3066,16 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
                 }
             })
         }
-        SessionStatus::Idle => {
-            delegation_child_result_outcome(child).unwrap_or(DelegationChildOutcome::IdleWithoutResult)
-        }
+        SessionStatus::Idle => delegation_child_result_outcome(child, true)
+            .unwrap_or(DelegationChildOutcome::IdleWithoutResult),
     }
 }
 
-fn delegation_child_result_outcome(child: &SessionRecord) -> Option<DelegationChildOutcome> {
-    let result = latest_assistant_delegation_result(&child.session)?;
+fn delegation_child_result_outcome(
+    child: &SessionRecord,
+    synthesize_plain_output: bool,
+) -> Option<DelegationChildOutcome> {
+    let result = latest_assistant_delegation_result(&child.session, synthesize_plain_output)?;
     Some(delegation_child_outcome_from_result(child, result))
 }
 
@@ -3221,17 +3231,35 @@ fn delegated_child_dispatch_is_blocked_locked(inner: &StateInner, session_index:
         .is_some_and(|delegation| delegation_is_terminal(delegation.status))
 }
 
-fn latest_assistant_delegation_result(session: &Session) -> Option<ParsedDelegationResult> {
+fn latest_assistant_delegation_result(
+    session: &Session,
+    synthesize_plain_output: bool,
+) -> Option<ParsedDelegationResult> {
     // Walk back through assistant messages and parse each candidate. The agent
     // is asked to put `## Result` last, but realistic runtimes can append a
     // trailing chunk after the result packet (status text, diff summary, etc.).
     // Stopping at the latest assistant message would misclassify those runs as
     // `IdleWithoutResult`; instead, keep scanning until we find a parseable
     // packet.
-    session.messages.iter().rev().find_map(|message| {
-        assistant_delegation_result_candidate_text(message)
-            .and_then(|text| parse_delegation_result_packet(&text))
-    })
+    let mut latest_assistant_output = None;
+    for message in session.messages.iter().rev() {
+        let Some(text) = assistant_delegation_result_candidate_text(message) else {
+            continue;
+        };
+        if let Some(result) = parse_delegation_result_packet(&text) {
+            return Some(result);
+        }
+        latest_assistant_output.get_or_insert(text);
+    }
+    if !synthesize_plain_output {
+        return None;
+    }
+    // Plain-output synthesis is only for idle children whose turn reached a
+    // normal stop without emitting a result packet. Active/approval children
+    // with no runtime still need the missing-runtime failure path.
+    latest_assistant_output
+        .as_deref()
+        .and_then(synthesize_delegation_result_from_assistant_output)
 }
 
 fn latest_assistant_message_delegation_result(session: &Session) -> Option<ParsedDelegationResult> {
@@ -3348,7 +3376,7 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
     let findings_explicitly_empty = delegation_result_findings_explicitly_empty(&finding_lines);
     let findings_refer_to_prior_sections = delegation_findings_refer_to_prior_sections(&findings);
     if !findings_explicitly_empty && (findings.is_empty() || findings_refer_to_prior_sections) {
-        let preamble_findings = parse_delegation_review_actionable_findings(preamble);
+        let preamble_findings = parse_delegation_review_findings(preamble);
         if !preamble_findings.is_empty() {
             findings = preamble_findings;
         } else if findings_refer_to_prior_sections {
@@ -3358,13 +3386,35 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
 
     Some(ParsedDelegationResult {
         status,
-        summary,
-        findings,
+        summary: compact_delegation_result_summary(&summary),
+        findings: dedupe_delegation_findings(findings),
         notes: note_lines
             .iter()
             .filter_map(|line| parse_delegation_note_line(line))
             .collect(),
     })
+}
+
+fn synthesize_delegation_result_from_assistant_output(
+    text: &str,
+) -> Option<ParsedDelegationResult> {
+    let summary = non_empty_trimmed(text)?;
+    if is_delegation_stop_marker(&summary) {
+        return None;
+    }
+    // In the plain-output fallback, an idle child that produced any non-stop
+    // assistant text completed its turn. Preserve that output as a completed
+    // degraded result even when the text describes a soft failure.
+    Some(ParsedDelegationResult {
+        status: DelegationStatus::Completed,
+        findings: parse_delegation_review_findings(&summary),
+        summary: compact_delegation_result_summary(&summary),
+        notes: Vec::new(),
+    })
+}
+
+fn is_delegation_stop_marker(text: &str) -> bool {
+    text.trim() == SESSION_STOPPED_BY_USER_MESSAGE
 }
 
 fn delegation_result_section_heading(cleaned: &str) -> Option<DelegationResultSection> {
@@ -3431,39 +3481,81 @@ fn delegation_result_findings_explicitly_empty(lines: &[&str]) -> bool {
 fn delegation_findings_refer_to_prior_sections(findings: &[DelegationFinding]) -> bool {
     !findings.is_empty()
         && findings.iter().all(|finding| {
-        let message = finding.message.to_ascii_lowercase();
-        message.contains("see the actionable")
-            || message.contains("actionable and informational")
-            || message.contains("actionable section")
-            || message.contains("sections above")
-    })
+            let message = finding.message.to_ascii_lowercase();
+            message.contains("see the actionable")
+                || message.contains("actionable and informational")
+                || message.contains("actionable section")
+                || message.contains("sections above")
+        })
 }
 
-fn parse_delegation_review_actionable_findings(preamble: &str) -> Vec<DelegationFinding> {
+fn parse_delegation_review_findings(text: &str) -> Vec<DelegationFinding> {
     let mut findings = Vec::new();
-    let mut in_actionable = false;
-    for line in preamble.lines() {
+    let mut in_findings = false;
+    for line in text.lines() {
         let cleaned = line.trim();
-        if cleaned.starts_with("## ") {
-            in_actionable = cleaned
-                .trim_start_matches('#')
-                .trim()
-                .eq_ignore_ascii_case("Actionable");
+        if let Some(is_findings_section) = delegation_review_findings_section_heading(cleaned) {
+            in_findings = is_findings_section;
             continue;
         }
-        if !in_actionable
-            || line
-                .chars()
-                .next()
-                .is_some_and(char::is_whitespace)
-        {
+        if !in_findings || line.chars().next().is_some_and(char::is_whitespace) {
             continue;
         }
         if let Some(finding) = parse_delegation_review_actionable_finding_line(line) {
             findings.push(finding);
         }
     }
+    dedupe_delegation_findings(findings)
+}
+
+fn dedupe_delegation_findings(findings: Vec<DelegationFinding>) -> Vec<DelegationFinding> {
+    let mut seen = std::collections::HashSet::new();
     findings
+        .into_iter()
+        .filter(|finding| {
+            seen.insert((
+                finding.severity.clone(),
+                finding.file.clone(),
+                finding.line,
+                finding.message.clone(),
+            ))
+        })
+        .take(MAX_DELEGATION_RESULT_FINDINGS)
+        .collect()
+}
+
+fn delegation_review_findings_section_heading(cleaned: &str) -> Option<bool> {
+    // Reviewer prose has several section styles. Only Actionable/Findings
+    // sections should emit structured findings; known non-finding labels and
+    // any new markdown heading reset capture so summaries/notes do not leak in.
+    let label = delegation_review_section_label(cleaned)?;
+    match label.as_str() {
+        "actionable" | "findings" => Some(true),
+        "changed files" | "changes reviewed" | "commands run" | "files inspected"
+        | "informational" | "notes" | "reviewer summaries" | "summary" | "verification" => {
+            Some(false)
+        }
+        _ if cleaned.starts_with('#') => Some(false),
+        _ => None,
+    }
+}
+
+fn delegation_review_section_label(cleaned: &str) -> Option<String> {
+    let mut label = cleaned.trim();
+    if label.starts_with('#') {
+        label = label.trim_start_matches('#').trim();
+    }
+    if let Some(inner) = label
+        .strip_prefix("**")
+        .and_then(|value| value.strip_suffix("**"))
+    {
+        label = inner.trim();
+    }
+    label = label.strip_suffix(':').unwrap_or(label).trim();
+    if label.is_empty() {
+        return None;
+    }
+    Some(label.to_ascii_lowercase())
 }
 
 fn parse_delegation_review_actionable_finding_line(line: &str) -> Option<DelegationFinding> {
@@ -3538,9 +3630,7 @@ fn parse_markdown_link_location(location: &str) -> Option<(&str, &str)> {
 fn parse_delegation_finding_head(head: &str) -> (&str, &str) {
     let head = head.trim();
     if let Some((severity, location)) = head.rsplit_once(char::is_whitespace) {
-        if !severity.trim().is_empty()
-            && looks_like_delegation_finding_location(location)
-        {
+        if !severity.trim().is_empty() && looks_like_delegation_finding_location(location) {
             return (severity.trim(), location.trim());
         }
     }
@@ -3639,6 +3729,10 @@ fn compact_delegation_public_summary(summary: &str) -> String {
     truncate_chars(&compact, MAX_DELEGATION_PUBLIC_SUMMARY_CHARS)
 }
 
+fn compact_delegation_result_summary(summary: &str) -> String {
+    truncate_chars(summary, MAX_DELEGATION_RESULT_SUMMARY_CHARS)
+}
+
 fn truncate_chars(value: &str, max_chars: usize) -> String {
     let mut end = 0;
     for (count, (index, ch)) in value.char_indices().enumerate() {
@@ -3650,11 +3744,7 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
     value.to_owned()
 }
 
-fn truncate_to_byte_limit_with_marker(
-    mut value: String,
-    max_bytes: usize,
-    marker: &str,
-) -> String {
+fn truncate_to_byte_limit_with_marker(mut value: String, max_bytes: usize, marker: &str) -> String {
     if value.len() <= max_bytes {
         return value;
     }

@@ -10,6 +10,7 @@ import type { Session } from "./types";
 import {
   openSessionInWorkspaceState,
   reconcileWorkspaceState,
+  workspaceHasDelegatedChildSessionReferences,
   type WorkspaceState,
 } from "./workspace";
 
@@ -23,49 +24,6 @@ type ReconcileAdoptedSessionsWorkspaceOptions = {
   pruneDelegatedChildWorkspaceTabs: boolean;
   sessionsChanged: boolean;
 };
-
-function workspaceHasDelegatedChildSessionReferences(
-  workspace: WorkspaceState,
-  sessions: readonly Session[],
-  preserveSessionIds: readonly string[] = [],
-) {
-  const preservedSessionIds = new Set(preserveSessionIds);
-  const delegatedChildSessionIds = new Set(
-    sessions.flatMap((session) =>
-      session.parentDelegationId && !preservedSessionIds.has(session.id)
-        ? [session.id]
-        : [],
-    ),
-  );
-  if (delegatedChildSessionIds.size === 0) {
-    return false;
-  }
-
-  return workspace.panes.some((pane) => {
-    if (
-      pane.activeSessionId &&
-      delegatedChildSessionIds.has(pane.activeSessionId)
-    ) {
-      return true;
-    }
-
-    return pane.tabs.some((tab) => {
-      if (tab.kind === "session") {
-        return delegatedChildSessionIds.has(tab.sessionId);
-      }
-      if (tab.kind === "canvas") {
-        return tab.cards.some((card) =>
-          delegatedChildSessionIds.has(card.sessionId),
-        );
-      }
-      return (
-        "originSessionId" in tab &&
-        !!tab.originSessionId &&
-        delegatedChildSessionIds.has(tab.originSessionId)
-      );
-    });
-  });
-}
 
 export function reconcileAdoptedSessionsWorkspace({
   applyControlPanelLayout,

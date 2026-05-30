@@ -838,23 +838,112 @@ enum DelegationStatus {
 /// Delegated child write policy. Backend support currently accepts
 /// `ReadOnly` and reviewer-safe `IsolatedWorktree`; `SharedWorktree`
 /// remains a future worker policy.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
 enum DelegationWritePolicy {
-    #[serde(alias = "read_only")]
     ReadOnly,
-    #[serde(alias = "shared_worktree")]
-    SharedWorktree { owned_paths: Vec<String> },
-    #[serde(alias = "isolated_worktree")]
+    SharedWorktree {
+        owned_paths: Vec<String>,
+    },
     IsolatedWorktree {
         owned_paths: Vec<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none")]
         worktree_path: Option<String>,
     },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationWritePolicyFields {
+    #[serde(default, alias = "owned_paths")]
+    owned_paths: Vec<String>,
+    #[serde(default, alias = "worktree_path")]
+    worktree_path: Option<String>,
+}
+
+impl<'de> serde::Deserialize<'de> for DelegationWritePolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        parse_delegation_write_policy_value(value).map_err(<D::Error as serde::de::Error>::custom)
+    }
+}
+
+fn parse_delegation_write_policy_value(value: Value) -> Result<DelegationWritePolicy, String> {
+    // The JSON request body is fed by CLI prompts and MCP clients, so accept
+    // legacy loose read-only shapes while keeping explicit write-capable kinds.
+    // The derived Serialize shape above remains canonical; metadata tests cover
+    // serialize-to-deserialize round trips for each variant.
+    match value {
+        Value::String(kind) => {
+            delegation_write_policy_from_kind(&kind, Value::Object(Default::default()))
+        }
+        Value::Object(mut object) => {
+            if let Some(kind) = object.remove("kind") {
+                let kind = kind
+                    .as_str()
+                    .ok_or_else(|| "writePolicy.kind must be a string".to_owned())?;
+                return delegation_write_policy_from_kind(kind, Value::Object(object));
+            }
+
+            if object.is_empty() {
+                return Ok(DelegationWritePolicy::ReadOnly);
+            }
+
+            let mut entries = object.into_iter();
+            let Some((legacy_kind, fields)) = entries.next() else {
+                return Ok(DelegationWritePolicy::ReadOnly);
+            };
+            if entries.next().is_some() {
+                return Err("writePolicy object must include kind".to_owned());
+            }
+            delegation_write_policy_from_kind(&legacy_kind, fields)
+        }
+        _ => Err("writePolicy must be a string or object".to_owned()),
+    }
+}
+
+fn delegation_write_policy_from_kind(
+    kind: &str,
+    fields: Value,
+) -> Result<DelegationWritePolicy, String> {
+    match kind {
+        "readOnly" | "read_only" | "read-only" | "readonly" => Ok(DelegationWritePolicy::ReadOnly),
+        "sharedWorktree" | "shared_worktree" | "shared-worktree" => {
+            let fields = parse_delegation_write_policy_fields(fields)?;
+            Ok(DelegationWritePolicy::SharedWorktree {
+                owned_paths: fields.owned_paths,
+            })
+        }
+        "isolatedWorktree" | "isolated_worktree" | "isolated-worktree" => {
+            let fields = parse_delegation_write_policy_fields(fields)?;
+            Ok(DelegationWritePolicy::IsolatedWorktree {
+                owned_paths: fields.owned_paths,
+                worktree_path: fields.worktree_path,
+            })
+        }
+        _ => Err(format!("unsupported writePolicy kind `{kind}`")),
+    }
+}
+
+fn parse_delegation_write_policy_fields(
+    fields: Value,
+) -> Result<DelegationWritePolicyFields, String> {
+    match fields {
+        Value::Bool(_) | Value::Null => Ok(DelegationWritePolicyFields {
+            owned_paths: Vec::new(),
+            worktree_path: None,
+        }),
+        Value::Object(_) => serde_json::from_value(fields)
+            .map_err(|err| format!("invalid writePolicy fields: {err}")),
+        _ => Err("writePolicy fields must be an object".to_owned()),
+    }
 }
 
 /// Compact result packet for a completed delegation.
@@ -1969,10 +2058,7 @@ enum DeltaEvent {
     /// merging partial patches. Split this into narrower delta variants before
     /// adding independently-changing fields or payloads larger than runtime
     /// chrome.
-    CodexUpdated {
-        revision: u64,
-        codex: CodexState,
-    },
+    CodexUpdated { revision: u64, codex: CodexState },
     OrchestratorsUpdated {
         revision: u64,
         orchestrators: Vec<OrchestratorInstance>,
