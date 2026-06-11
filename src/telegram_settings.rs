@@ -70,6 +70,7 @@ struct TelegramBotFile {
 struct TelegramConfigValidationSnapshot {
     known_projects: HashSet<String>,
     session_project_ids: HashMap<String, Option<String>>,
+    delegated_session_ids: HashSet<String>,
 }
 
 struct TelegramConfigNormalization {
@@ -451,12 +452,19 @@ impl AppState {
             session_project_ids: inner
                 .sessions
                 .iter()
+                .filter(|record| record.session.parent_delegation_id.is_none())
                 .map(|record| {
                     (
                         record.session.id.clone(),
                         record.session.project_id.clone(),
                     )
                 })
+                .collect(),
+            delegated_session_ids: inner
+                .sessions
+                .iter()
+                .filter(|record| record.session.parent_delegation_id.is_some())
+                .map(|record| record.session.id.clone())
                 .collect(),
         }
     }
@@ -586,6 +594,7 @@ impl AppState {
             let session_matches = inner.sessions.iter().any(|record| {
                 record.session.id == session_id
                     && record.session.project_id.as_deref() == default_project_id
+                    && record.session.parent_delegation_id.is_none()
             });
             if !session_matches {
                 config.default_session_id = None;
@@ -709,6 +718,12 @@ fn validate_telegram_config_against_snapshot(
     }
 
     if let Some(session_id) = default_session_id.as_deref() {
+        if snapshot.delegated_session_ids.contains(session_id) {
+            return Err(ApiError::bad_request(
+                "default Telegram session cannot be a delegated child session",
+            ));
+        }
+
         let session_project_id = snapshot
             .session_project_ids
             .get(session_id)

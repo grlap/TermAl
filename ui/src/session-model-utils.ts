@@ -54,6 +54,7 @@ export const CLAUDE_EFFORT_OPTIONS = [
   { label: "low", value: "low", description: "Keep reasoning light" },
   { label: "medium", value: "medium", description: "Use the standard effort level" },
   { label: "high", value: "high", description: "Use deeper reasoning for harder prompts" },
+  { label: "xhigh", value: "xhigh", description: "Use extra-high effort for the hardest prompts" },
   { label: "max", value: "max", description: "Use the highest available effort" },
 ] as const;
 
@@ -67,7 +68,7 @@ export const DEFAULT_CLAUDE_APPROVAL_MODE: ClaudeApprovalMode = "ask";
 export const DEFAULT_CLAUDE_EFFORT: ClaudeEffortLevel = "default";
 export const DEFAULT_MODEL_PREFERENCE = "default";
 export const MAX_DEFAULT_MODEL_PREFERENCE_CHARS = 200;
-export const FALLBACK_CLAUDE_EFFORTS = ["low", "medium", "high"] as ClaudeEffortLevel[];
+export const FALLBACK_CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh"] as ClaudeEffortLevel[];
 
 export function defaultNewSessionModel(agent: AgentType): string {
   return NEW_SESSION_MODEL_OPTIONS[agent][0]?.value ?? "";
@@ -322,7 +323,7 @@ export function supportedClaudeEffortLevelsForModelOption(
       : [...FALLBACK_CLAUDE_EFFORTS];
   }
 
-  return currentEffort === "max" ? ["max"] : [];
+  return currentEffort === "xhigh" || currentEffort === "max" ? [currentEffort] : [];
 }
 
 export function claudeEffortComboboxOptions(session: Session) {

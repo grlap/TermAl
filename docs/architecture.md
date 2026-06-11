@@ -181,6 +181,8 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | PUT | `/api/workspaces/{id}` | Save a persisted workspace layout |
 | DELETE | `/api/workspaces/{id}` (200) -> `WorkspaceLayoutsResponse` | Delete a persisted workspace layout and return the remaining layout summaries |
 | POST | `/api/settings` | Update app-wide preferences and remote config |
+| POST | `/api/remotes/{id}/register` | Register an existing checkout on an SSH remote for TermAl lifecycle actions. Verifies the remote checkout/tooling and writes `~/.termal/remote-install.json`; returns capped stdout/stderr. |
+| POST | `/api/remotes/{id}/upgrade` | Build and install TermAl on a registered SSH remote by running `git pull --ff-only` and `cargo build --release --bin termal`, then copying the release binary to `~/.termal/bin/termal`; returns capped stdout/stderr. |
 | GET | `/api/orchestrators/templates` | List orchestrator templates |
 | POST | `/api/orchestrators/templates` | Create orchestrator template |
 | GET | `/api/orchestrators/templates/{id}` | Read orchestrator template |
@@ -527,9 +529,14 @@ This is intentionally similar to the Remote-SSH shape used by editor tooling:
 SSH is used to reach the machine, start the remote server, and carry the
 transport. The browser still only talks to the local control plane.
 The current remote config stores only connection settings (`id`, `name`,
-`transport`, `enabled`, `host`, `port`, and `user`). Source checkout management,
-binary installation, and remote upgrade orchestration are intentionally outside
-the current shipped config surface.
+`transport`, `enabled`, `host`, `port`, and `user`). Remote lifecycle actions are
+explicit one-shot SSH operations, not background services: registration verifies
+an existing checkout and writes `~/.termal/remote-install.json`, and upgrade
+pulls/builds that checkout and installs `termal` or `termal.exe` under the
+remote `.termal/bin` directory. POSIX checkout paths use `sh -lc`; Windows-style
+checkout paths use encoded PowerShell. Managed startup still runs
+`termal server` from the remote command environment so Windows SSH hosts are not
+forced through a POSIX shell just to start the server.
 
 ### Control Plane Responsibilities
 

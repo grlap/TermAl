@@ -55,7 +55,11 @@ type ScheduleDeferredFullHydrationParams = {
     sessionId: string,
     options?: SessionHydrationOptions,
   ) => void;
-  options?: { delayMs?: number; firstScheduledAtMs?: number };
+  options?: {
+    autoStart?: boolean;
+    delayMs?: number;
+    firstScheduledAtMs?: number;
+  };
 };
 
 type ShouldDelayFullHydrationStartParams = {
@@ -188,6 +192,10 @@ export function scheduleDeferredFullHydration({
     idleId: null,
     timeoutId: null,
   };
+  timersRef.current.set(sessionId, handle);
+  if (options.autoStart === false) {
+    return;
+  }
   handle.timeoutId = window.setTimeout(() => {
     handle.timeoutId = null;
     if (!isMountedRef.current || !sessionStillNeedsHydration(sessionId)) {
@@ -210,5 +218,4 @@ export function scheduleDeferredFullHydration({
     }
     runHydration();
   }, options.delayMs ?? SESSION_TAIL_FULL_HYDRATION_DEFER_MS);
-  timersRef.current.set(sessionId, handle);
 }

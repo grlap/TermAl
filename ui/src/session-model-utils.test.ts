@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CLAUDE_EFFORT_OPTIONS,
+  FALLBACK_CLAUDE_EFFORTS,
   areTelegramUiConfigsEqual,
   isDefaultModelPreference,
   normalizeTelegramUiConfig,
+  supportedClaudeEffortLevelsForModelOption,
 } from "./session-model-utils";
 
 describe("isDefaultModelPreference", () => {
@@ -18,6 +21,29 @@ describe("isDefaultModelPreference", () => {
     ["custom model", "my-model", false],
   ])("classifies %s", (_label, value, expected) => {
     expect(isDefaultModelPreference(value)).toBe(expected);
+  });
+});
+
+describe("Claude effort options", () => {
+  it("includes xhigh in default-capability effort choices", () => {
+    expect(CLAUDE_EFFORT_OPTIONS.map((option) => option.value)).toEqual([
+      "default",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    expect(FALLBACK_CLAUDE_EFFORTS).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(supportedClaudeEffortLevelsForModelOption(null, "default")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    expect(
+      supportedClaudeEffortLevelsForModelOption({ label: "No effort", value: "no-effort" }, "xhigh"),
+    ).toEqual(["xhigh"]);
   });
 });
 

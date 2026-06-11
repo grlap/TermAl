@@ -1553,7 +1553,32 @@ textarea {
 
 .remote-settings-row-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
   justify-content: flex-end;
+}
+
+.remote-action-result {
+  flex-basis: 100%;
+  margin: 0;
+  text-align: left;
+}
+
+.remote-action-error {
+  color: var(--danger-text, var(--danger));
+}
+
+.remote-action-output {
+  margin: 0.45rem 0 0;
+  overflow-x: auto;
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  background: var(--command-output-bg);
+  color: var(--command-output-fg);
+  font-family: var(--code-font);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .remote-settings-actions {

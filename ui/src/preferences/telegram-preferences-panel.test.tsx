@@ -364,6 +364,39 @@ describe("TelegramPreferencesPanel", () => {
     });
   });
 
+  it("excludes delegated child sessions from the default-session picker", async () => {
+    const sessionsWithDelegatedChild: Session[] = [
+      ...sessions,
+      {
+        ...sessions[0],
+        id: "session-child",
+        name: "Delegated Reviewer",
+        status: "active",
+        parentDelegationId: "delegation-1",
+      },
+    ];
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      botTokenMasked: "****oken",
+    });
+
+    render(
+      <TelegramPreferencesPanel
+        projects={projects}
+        sessions={sessionsWithDelegatedChild}
+      />,
+    );
+
+    await screen.findByText("Stored in the OS credential store as ****oken.");
+    await selectComboboxOption("Default project", "TermAl");
+    fireEvent.click(screen.getByRole("combobox", { name: "Default session" }));
+
+    const listbox = await screen.findByRole("listbox");
+    expect(within(listbox).getByText("Codex Live")).toBeInTheDocument();
+    expect(within(listbox).queryByText("Delegated Reviewer")).not.toBeInTheDocument();
+  });
+
   it("clears a stale default session when saving", async () => {
     const staleTelegramConfig: TelegramUiConfig = {
       enabled: true,
@@ -383,6 +416,52 @@ describe("TelegramPreferencesPanel", () => {
         telegramConfig={staleTelegramConfig}
         projects={projects}
         sessions={sessions}
+      />,
+    );
+
+    await screen.findByText("Stored in the OS credential store as ****oken.");
+    fireEvent.click(screen.getByRole("button", { name: "Save Telegram" }));
+
+    await waitFor(() => {
+      expect(updateTelegramConfigMock).toHaveBeenCalledWith({
+        enabled: true,
+        forwardAssistantReplies: false,
+        botToken: undefined,
+        subscribedProjectIds: ["project-1"],
+        defaultProjectId: "project-1",
+        defaultSessionId: null,
+      });
+    });
+  });
+
+  it("clears a delegated default session when saving", async () => {
+    const delegatedTelegramConfig: TelegramUiConfig = {
+      enabled: true,
+      forwardAssistantReplies: false,
+      subscribedProjectIds: ["project-1"],
+      defaultProjectId: "project-1",
+      defaultSessionId: "session-child",
+    };
+    const sessionsWithDelegatedChild: Session[] = [
+      ...sessions,
+      {
+        ...sessions[0],
+        id: "session-child",
+        name: "Delegated Reviewer",
+        parentDelegationId: "delegation-1",
+      },
+    ];
+    fetchTelegramStatusMock.mockResolvedValue({
+      ...emptyTelegramStatus,
+      configured: true,
+      botTokenMasked: "****oken",
+    });
+
+    render(
+      <TelegramPreferencesPanel
+        telegramConfig={delegatedTelegramConfig}
+        projects={projects}
+        sessions={sessionsWithDelegatedChild}
       />,
     );
 

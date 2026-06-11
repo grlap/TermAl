@@ -13,7 +13,8 @@
 use super::telegram_support::{
     FakeTelegramActionClient, FakeTelegramPromptClient, FakeTelegramSender,
     TELEGRAM_TEST_RATE_LIMIT_TEST_LOCK, create_telegram_settings_project_and_session,
-    telegram_project_digest, telegram_test_config, telegram_text_message,
+    telegram_project_digest, telegram_state_sessions_with_project_session, telegram_test_config,
+    telegram_text_message,
 };
 use super::*;
 
@@ -930,6 +931,10 @@ fn telegram_relay_iteration_skips_post_update_sync_after_prompt_refresh() {
             },
         },
     );
+    let termal = termal.with_state_sessions(telegram_state_sessions_with_project_session(
+        "session-1",
+        None,
+    ));
     let config = telegram_test_config();
     let mut state = TelegramBotState::default();
     let updates = vec![TelegramUpdate {
@@ -1274,6 +1279,44 @@ fn telegram_projects_renderer_lists_subscribed_projects_and_active_marker() {
     assert!(text.contains("- TermAl (1 session)\n  id: project-1"));
     assert!(text.contains("* Side Project (1 session)\n  id: project-2"));
     assert!(text.contains("Send /project <project-id> to switch."));
+}
+
+#[test]
+fn telegram_projects_renderer_counts_only_project_root_sessions() {
+    let mut config = telegram_test_config();
+    config.subscribed_project_ids = vec!["project-1".to_owned()];
+    let bot_state = TelegramBotState::default();
+    let state = TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![
+            TelegramStateSession {
+                id: "session-root".to_owned(),
+                name: "Root".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Idle,
+                message_count: 1,
+                session_mutation_stamp: None,
+                parent_delegation_id: None,
+            },
+            TelegramStateSession {
+                id: "session-child".to_owned(),
+                name: "Delegated child".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Idle,
+                message_count: 1,
+                session_mutation_stamp: None,
+                parent_delegation_id: Some("delegation-1".to_owned()),
+            },
+        ],
+    };
+
+    let text = render_telegram_projects(&config, &bot_state, &state);
+
+    assert!(text.contains("TermAl (1 session)\n  id: project-1"));
+    assert!(!text.contains("2 sessions"));
 }
 
 #[test]
@@ -3341,6 +3384,80 @@ fn telegram_settings_validation_autofills_session_project_subscription() {
 }
 
 #[test]
+fn telegram_settings_validation_rejects_delegated_default_session() {
+    let state = test_app_state();
+    let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter_mut()
+            .find(|record| record.session.id == session_id)
+            .expect("session should exist");
+        record.session.parent_delegation_id = Some("delegation-1".to_owned());
+        state
+            .commit_locked(&mut inner)
+            .expect("state should commit");
+    }
+    let mut config = TelegramUiConfig {
+        subscribed_project_ids: vec![project_id.clone()],
+        default_project_id: Some(project_id.clone()),
+        default_session_id: Some(session_id.clone()),
+        ..TelegramUiConfig::default()
+    };
+
+    let err = state
+        .validate_and_normalize_telegram_config(&mut config)
+        .expect_err("delegated child session should not validate as a Telegram default");
+
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(
+        err.message
+            .contains("default Telegram session cannot be a delegated child session")
+    );
+    assert_eq!(
+        config.default_project_id.as_deref(),
+        Some(project_id.as_str())
+    );
+    assert_eq!(
+        config.default_session_id.as_deref(),
+        Some(session_id.as_str())
+    );
+}
+
+#[test]
+fn telegram_settings_sanitization_clears_delegated_default_session() {
+    let state = test_app_state();
+    let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter_mut()
+            .find(|record| record.session.id == session_id)
+            .expect("session should exist");
+        record.session.parent_delegation_id = Some("delegation-1".to_owned());
+        state
+            .commit_locked(&mut inner)
+            .expect("state should commit");
+    }
+    let mut config = TelegramUiConfig {
+        subscribed_project_ids: vec![project_id.clone()],
+        default_project_id: Some(project_id.clone()),
+        default_session_id: Some(session_id),
+        ..TelegramUiConfig::default()
+    };
+
+    assert!(state.sanitize_telegram_config_for_current_state_in_place(&mut config));
+
+    assert_eq!(
+        config.default_project_id.as_deref(),
+        Some(project_id.as_str())
+    );
+    assert_eq!(config.default_session_id, None);
+}
+
+#[test]
 fn telegram_settings_validation_uses_single_subscribed_project_as_default() {
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
@@ -3480,6 +3597,49 @@ fn telegram_config_update_rejects_too_many_subscribed_projects() {
 
     assert_eq!(err.status, StatusCode::BAD_REQUEST);
     assert!(err.message.contains("Telegram subscribed projects"));
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn telegram_config_update_rejects_delegated_default_session() {
+    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
+    let home = std::env::temp_dir().join(format!(
+        "termal-telegram-delegated-default-home-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&home).expect("test home should exist");
+    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let state = test_app_state();
+    let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter_mut()
+            .find(|record| record.session.id == session_id)
+            .expect("session should exist");
+        record.session.parent_delegation_id = Some("delegation-1".to_owned());
+        state
+            .commit_locked(&mut inner)
+            .expect("state should commit");
+    }
+
+    let err = state
+        .update_telegram_config(UpdateTelegramConfigRequest {
+            enabled: None,
+            forward_assistant_replies: None,
+            bot_token: None,
+            subscribed_project_ids: Some(vec![project_id.clone()]),
+            default_project_id: Some(Some(project_id)),
+            default_session_id: Some(Some(session_id)),
+        })
+        .expect_err("delegated child session should not save as Telegram default");
+
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(
+        err.message
+            .contains("default Telegram session cannot be a delegated child session")
+    );
     let _ = fs::remove_dir_all(&home);
 }
 

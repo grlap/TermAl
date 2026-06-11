@@ -361,21 +361,22 @@ fn forward_telegram_text_to_project_for_relay(
 ) -> Result<TelegramPromptForwardOutcome> {
     let (project_id, mut dirty) = resolve_telegram_active_project_id(config, state);
     let digest = termal.get_project_digest(&project_id)?;
-    let (selected_session_id, selected_session_dirty) =
-        resolve_telegram_selected_project_session(termal, &project_id, state)?;
-    dirty |= selected_session_dirty;
+    let (session_id, session_target_dirty) = resolve_telegram_project_prompt_session(
+        termal,
+        &project_id,
+        state,
+        digest.primary_session_id.as_deref(),
+    )?;
+    dirty |= session_target_dirty;
     if config.forward_assistant_replies
-        && let Some(session_id) = selected_session_id.as_deref()
+        && let Some(session_id) = state.selected_session_id.clone()
     {
-        match ensure_selected_session_forwarding_baseline(termal, state, session_id) {
+        match ensure_selected_session_forwarding_baseline(termal, state, &session_id) {
             Ok(changed) => dirty |= changed,
             Err(err) => log_telegram_error("failed to baseline selected Telegram session", &err),
         }
     }
-    let session_id = selected_session_id
-        .as_deref()
-        .or(digest.primary_session_id.as_deref());
-    let Some(session_id) = session_id else {
+    let Some(session_id) = session_id.as_deref() else {
         telegram.send_message(
             chat_id,
             "No active project session is available yet. Start one in TermAl first.",

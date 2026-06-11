@@ -276,6 +276,8 @@ fn app_router(state: AppState) -> Router {
                 .delete(delete_workspace_layout),
         )
         .route("/api/settings", post(update_app_settings))
+        .route("/api/remotes/{id}/register", post(register_remote_termal))
+        .route("/api/remotes/{id}/upgrade", post(upgrade_remote_termal))
         .route("/api/telegram/status", get(get_telegram_status))
         .route("/api/telegram/config", post(update_telegram_config))
         .route("/api/telegram/test", post(test_telegram_connection))

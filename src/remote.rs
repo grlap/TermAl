@@ -23,12 +23,15 @@ const REMOTE_FORWARD_PORT_END: u16 = 56999;
 const REMOTE_HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
 const REMOTE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const REMOTE_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+const REMOTE_ACTION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const REMOTE_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const REMOTE_EVENT_RETRY_DELAY: Duration = Duration::from_secs(2);
 const REMOTE_EVENT_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const TERMINAL_REMOTE_STREAM_READ_CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_REMOTE_ERROR_BODY_CHARS: usize = 512;
 const MAX_REMOTE_ERROR_BODY_BYTES: usize = 64 * 1024;
+const MAX_REMOTE_ACTION_OUTPUT_CHARS: usize = 4_000;
+const MAX_REMOTE_ACTION_OUTPUT_BYTES: usize = 64 * 1024;
 
 static NEXT_REMOTE_FORWARD_PORT: AtomicU16 = AtomicU16::new(REMOTE_FORWARD_PORT_START);
 

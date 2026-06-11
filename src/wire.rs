@@ -625,6 +625,8 @@ enum ClaudeEffortLevel {
     Low,
     Medium,
     High,
+    #[serde(rename = "xhigh")]
+    XHigh,
     Max,
 }
 
@@ -636,6 +638,7 @@ impl ClaudeEffortLevel {
             Self::Low => Some("low"),
             Self::Medium => Some("medium"),
             Self::High => Some("high"),
+            Self::XHigh => Some("xhigh"),
             Self::Max => Some("max"),
         }
     }
@@ -1168,6 +1171,26 @@ struct UpdateAppSettingsRequest {
     default_claude_approval_mode: Option<ClaudeApprovalMode>,
     default_claude_effort: Option<ClaudeEffortLevel>,
     remotes: Option<Vec<RemoteConfig>>,
+}
+
+/// Request payload for registering an existing TermAl checkout on an SSH remote.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteRegisterRequest {
+    source_path: String,
+}
+
+/// Response payload for one-shot SSH remote lifecycle actions.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteActionResponse {
+    remote_id: String,
+    action: String,
+    message: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    stdout: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    stderr: String,
 }
 
 /// UI-owned Telegram relay configuration committed through app preferences.

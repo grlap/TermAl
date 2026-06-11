@@ -161,6 +161,9 @@ import {
   type SessionHydrationOptions,
 } from "./app-live-state-deferred-hydration";
 import {
+  addSessionFullHydrationDemandListener,
+} from "./session-hydration-demand";
+import {
   enqueueWorkspaceFilesChangedEvent as enqueueWorkspaceFilesChangedEventInGate,
   flushWorkspaceFilesChangedEventBuffer as flushWorkspaceFilesChangedEventGateBuffer,
   resetWorkspaceFilesChangedEventGate as resetWorkspaceFilesChangedEventGateRefs,
@@ -452,7 +455,11 @@ export function useAppLiveState(
 
   function scheduleDeferredFullHydration(
     sessionId: string,
-    options: { delayMs?: number; firstScheduledAtMs?: number } = {},
+    options: {
+      autoStart?: boolean;
+      delayMs?: number;
+      firstScheduledAtMs?: number;
+    } = {},
   ) {
     scheduleDeferredFullHydrationTimer({
       timersRef: deferredFullHydrationTimersRef,
@@ -506,6 +513,17 @@ export function useAppLiveState(
       cancelDeferredFullHydrations();
     };
   }, []);
+
+  useEffect(
+    () =>
+      addSessionFullHydrationDemandListener(({ sessionId }) => {
+        if (!isMountedRef.current || !sessionStillNeedsHydration(sessionId)) {
+          return;
+        }
+        startSessionHydration(sessionId, { queueAfterCurrent: true });
+      }),
+    [],
+  );
 
   function cancelStaleSendResponseRecoveryPollForSessions(
     sessionIds: Iterable<string>,
@@ -1056,7 +1074,7 @@ export function useAppLiveState(
                 completeSessionHydration(sessionId);
                 return;
               }
-              scheduleDeferredFullHydration(sessionId);
+              scheduleDeferredFullHydration(sessionId, { autoStart: false });
               return;
             case "adopted":
               completeSessionHydration(sessionId);

@@ -7,6 +7,60 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Claude read-only reviewer delegations cannot run read-only git commands
+
+**Severity:** Medium - `/review-local` Claude delegations can fail before review because the read-only policy denies the git commands required to collect the diff.
+
+A read-only Claude reviewer delegation for `/review-local` was unable to run
+`git status`, `git diff`, `git diff --cached`, or `git ls-files` because TermAl
+denied all terminal/shell execution under the delegation's read-only policy. The
+review command explicitly permits read-only git inspection, but the enforced
+tool policy blocks the child before it can discover staged, unstaged, or
+untracked changes.
+
+**Current behavior:**
+- Claude `/review-local` delegations with `writePolicy: readOnly` can receive
+  `TermAl denied this tool request because this Claude reviewer delegation is
+  read-only.` for read-only shell/git commands.
+- The child cannot reconstruct the worktree diff reliably from file-read tools
+  alone and returns a failed result packet.
+- `/review-with-delegate` can lose the Claude reviewer while the Codex reviewer
+  still completes.
+
+**Proposal:**
+- Allow a narrow read-only command set for reviewer delegations, including
+  `git status`, `git diff`, `git diff --cached`, `git ls-files`, and `git show`,
+  while continuing to block mutating commands.
+- Or have the parent capture and pass the required diff/status/untracked outputs
+  into read-only reviewer prompts so delegated children do not need shell access
+  to start review.
+
+## Running delegation status poll mutates the parent card revision
+
+**Severity:** Medium - `cargo test --bin termal` is red because a no-op delegation status poll advances state revision unexpectedly.
+
+`tests::delegations::delegation_status_and_unavailable_result_poll_preserve_revision_without_refresh`
+fails in isolation: after creating a running read-only delegation, polling its
+status changes the revision from `3` to `4` even though the delegation remains
+running and no result is available. The mutation appears to come from parent
+parallel-agent card detail refresh: the creation path writes a detailed
+running row, while the status refresh path wants the generic
+`Delegated session is running.` detail.
+
+**Current behavior:**
+- `cargo test --bin termal` fails on the exact delegation revision assertion.
+- Polling a still-running delegation can persist an otherwise no-op parent-card
+  detail refresh.
+- Result polling for an unavailable result is intended to return `409` without
+  changing revision after any real refresh work has already been accounted for.
+
+**Proposal:**
+- Align the created running parent-card detail with the no-op refresh matcher,
+  or teach the refresh matcher to treat the initial running detail as already
+  current while still replacing pending-interaction details after they resolve.
+- Keep the unavailable-result path covered so a running delegation result poll
+  does not advance revision when there is no lifecycle, detach, or wait change.
+
 ## Windows read-only Codex delegations run with full-access sandboxing
 
 **Severity:** High - Windows Codex reviewer delegations marked read-only can still write through the Codex process sandbox and gain network egress.
@@ -32,6 +86,14 @@ the Implementation Tasks section.
   decide whether the untracked review-flow note belongs under `docs/`, should
   be added to an ignore list, or should remain local-only outside version
   control.
+- [ ] P2: Keep Telegram prompt-target selectors in parity:
+  add a shared predicate or parity coverage if `latest_project_prompt_target_session`
+  and `find_latest_telegram_project_prompt_session` diverge beyond their current
+  `SessionRecord` versus `/api/state` projection split.
+- [ ] P2: Extract Telegram prompt-target forwarding tests:
+  move the delegated/error/unknown prompt-target resolution cluster out of
+  `src/tests/telegram_forwarding.rs` before that test file crosses the active
+  size threshold.
 - [ ] P2: Extract delegation result parsing and synthesis helpers:
   move the cohesive result-packet parsing, plain-output synthesis, findings
   parsing, and summary compaction cluster out of `src/delegations.rs` so future

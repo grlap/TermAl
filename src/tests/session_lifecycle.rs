@@ -60,6 +60,14 @@ fn claude_default_model_delegates_to_claude_cli_default() {
     assert_eq!(claude_cli_model_arg(" Default "), None);
     assert_eq!(claude_cli_model_arg("opus"), Some("opus"));
     assert_eq!(
+        parse_claude_effort_level("xhigh"),
+        Some(ClaudeEffortLevel::XHigh)
+    );
+    assert_eq!(
+        serde_json::to_string(&ClaudeEffortLevel::XHigh).unwrap(),
+        "\"xhigh\""
+    );
+    assert_eq!(
         claude_cli_persistent_args(
             "opus",
             ClaudeApprovalMode::Plan,
@@ -88,6 +96,17 @@ fn claude_default_model_delegates_to_claude_cli_default() {
             "--resume",
             "claude-session",
         ],
+    );
+    let xhigh_args = claude_cli_persistent_args(
+        "opus",
+        ClaudeApprovalMode::Ask,
+        ClaudeEffortLevel::XHigh,
+        None,
+    );
+    assert!(
+        xhigh_args
+            .windows(2)
+            .any(|pair| pair[0] == "--effort" && pair[1] == "xhigh")
     );
     assert_eq!(
         claude_cli_persistent_args(

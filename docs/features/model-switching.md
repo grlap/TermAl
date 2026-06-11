@@ -37,7 +37,7 @@ palette.
   control request.
 - Session mode is also session-scoped: `ask`, `auto-approve`, or `plan`.
 - Claude effort is session-scoped as well: `default`, `low`, `medium`, `high`,
-  or `max` when the current model supports it.
+  `xhigh`, or `max` when the current model supports it.
 - Effort changes apply on the next Claude prompt because the Claude runtime has
   to restart with the new `--effort` setting.
 

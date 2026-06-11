@@ -8,7 +8,7 @@
 use super::telegram_support::{
     FakeTelegramPromptClient, FakeTelegramSender, FakeTelegramSessionReader,
     FakeTelegramSessionReaderById, RecordingTelegramSessionReaderById, telegram_project_digest,
-    telegram_test_config,
+    telegram_state_sessions_with_project_session, telegram_test_config,
 };
 use super::*;
 
@@ -481,6 +481,72 @@ fn telegram_digest_sync_does_not_forward_assistant_reply_when_disabled() {
 }
 
 #[test]
+fn telegram_digest_sync_clears_stale_selected_session_when_forwarding_disabled() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![Ok(telegram_project_digest(Some("session-1")))],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    );
+    let mut config = telegram_test_config();
+    config.forward_assistant_replies = false;
+    let mut state = TelegramBotState {
+        selected_session_id: Some("stale-session".to_owned()),
+        forward_next_assistant_message_session_ids: vec!["stale-session".to_owned()],
+        forward_next_assistant_message_session_id: Some("stale-session".to_owned()),
+        ..TelegramBotState::default()
+    };
+
+    let changed = sync_telegram_digest(&telegram, &termal, &config, &mut state, 42)
+        .expect("digest sync should clear stale selection");
+
+    assert!(changed);
+    assert_eq!(state.selected_session_id, None);
+    assert!(state.forward_next_assistant_message_session_ids.is_empty());
+    assert_eq!(state.forward_next_assistant_message_session_id, None);
+    assert_eq!(
+        termal.events.borrow().as_slice(),
+        ["digest:project-1".to_owned(), "state-sessions".to_owned()],
+        "stale selection cleanup should not fetch assistant messages"
+    );
+}
+
+#[test]
+fn telegram_digest_sync_preserves_digest_progress_when_prompt_target_resolve_fails() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![Ok(telegram_project_digest(Some("session-1")))],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions_error("state unavailable");
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+
+    let changed = sync_telegram_digest(&telegram, &termal, &config, &mut state, 42)
+        .expect("digest progress should survive target resolution failure");
+
+    assert!(changed);
+    assert_eq!(state.last_digest_message_id, Some(1));
+    assert!(state.last_digest_hash.is_some());
+    assert_eq!(
+        termal.events.borrow().as_slice(),
+        ["digest:project-1".to_owned(), "state-sessions".to_owned()]
+    );
+    let sent_texts = telegram.sent_texts.borrow();
+    assert_eq!(sent_texts.len(), 1);
+    assert!(sent_texts[0].contains("Project digest"));
+}
+
+#[test]
 fn telegram_digest_html_renderer_collapses_and_bounds_table_values() {
     let digest = ProjectDigestResponse {
         project_id: "project-1".to_owned(),
@@ -758,7 +824,11 @@ fn telegram_prompt_does_not_arm_assistant_forwarding_without_opt_in() {
                 }],
             },
         },
-    );
+    )
+    .with_state_sessions(telegram_state_sessions_with_project_session(
+        "session-1",
+        None,
+    ));
     let mut config = telegram_test_config();
     config.forward_assistant_replies = false;
     let mut state = TelegramBotState::default();
@@ -792,6 +862,579 @@ fn telegram_prompt_does_not_arm_assistant_forwarding_without_opt_in() {
 }
 
 #[test]
+fn telegram_prompt_ignores_delegated_digest_primary_session() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![Ok(telegram_project_digest(Some("session-child")))],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(telegram_state_sessions_with_project_session(
+        "session-child",
+        Some("delegation-1"),
+    ));
+    let mut config = telegram_test_config();
+    config.forward_assistant_replies = false;
+    let mut state = TelegramBotState::default();
+
+    let outcome = forward_telegram_text_to_project_for_relay(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        42,
+        "hello from Telegram",
+    )
+    .expect("delegated primary should not fail prompt routing");
+
+    assert!(!outcome.final_sync_satisfied);
+    assert!(termal.sent_prompts.borrow().is_empty());
+    assert_eq!(
+        termal.events.borrow().as_slice(),
+        ["digest:project-1".to_owned(), "state-sessions".to_owned()]
+    );
+    assert!(telegram.sent_texts.borrow()[0].contains("No active project session is available yet"));
+}
+
+#[test]
+fn telegram_prompt_routes_to_project_root_when_digest_primary_is_delegated() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(telegram_project_digest(Some("session-child"))),
+            Ok(telegram_project_digest(Some("session-root"))),
+        ],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![
+            TelegramStateSession {
+                id: "session-root".to_owned(),
+                name: "Project Root".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Idle,
+                message_count: 1,
+                session_mutation_stamp: Some(10),
+                parent_delegation_id: None,
+            },
+            TelegramStateSession {
+                id: "session-child".to_owned(),
+                name: "Delegated Child".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Active,
+                message_count: 1,
+                session_mutation_stamp: Some(11),
+                parent_delegation_id: Some("delegation-1".to_owned()),
+            },
+        ],
+    });
+    let mut config = telegram_test_config();
+    config.forward_assistant_replies = false;
+    let mut state = TelegramBotState::default();
+
+    let outcome = forward_telegram_text_to_project_for_relay(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        42,
+        "hello from Telegram",
+    )
+    .expect("delegated primary should fall back to a project-root target");
+
+    assert!(outcome.final_sync_satisfied);
+    assert_eq!(
+        termal.sent_prompts.borrow().as_slice(),
+        [("session-root".to_owned(), "hello from Telegram".to_owned())]
+    );
+    assert_eq!(
+        termal.events.borrow().as_slice(),
+        [
+            "digest:project-1".to_owned(),
+            "state-sessions".to_owned(),
+            "send:session-root".to_owned(),
+            "digest:project-1".to_owned()
+        ]
+    );
+    assert!(
+        telegram
+            .sent_texts
+            .borrow()
+            .iter()
+            .all(|text| !text.contains("No active project session"))
+    );
+}
+
+#[test]
+fn telegram_prompt_fallback_uses_latest_project_root_when_primary_is_delegated() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(telegram_project_digest(Some("session-child"))),
+            Ok(telegram_project_digest(Some("session-new"))),
+        ],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![
+            TelegramStateSession {
+                id: "session-old".to_owned(),
+                name: "Older Project Root".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Idle,
+                message_count: 1,
+                session_mutation_stamp: Some(9),
+                parent_delegation_id: None,
+            },
+            TelegramStateSession {
+                id: "session-new".to_owned(),
+                name: "Newer Project Root".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Idle,
+                message_count: 2,
+                session_mutation_stamp: Some(10),
+                parent_delegation_id: None,
+            },
+            TelegramStateSession {
+                id: "session-child".to_owned(),
+                name: "Delegated Child".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Active,
+                message_count: 3,
+                session_mutation_stamp: Some(11),
+                parent_delegation_id: Some("delegation-1".to_owned()),
+            },
+        ],
+    });
+    let mut config = telegram_test_config();
+    config.forward_assistant_replies = false;
+    let mut state = TelegramBotState::default();
+
+    let outcome = forward_telegram_text_to_project_for_relay(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        42,
+        "hello from Telegram",
+    )
+    .expect("delegated primary should fall back to the latest project root");
+
+    assert!(outcome.final_sync_satisfied);
+    assert_eq!(
+        termal.sent_prompts.borrow().as_slice(),
+        [("session-new".to_owned(), "hello from Telegram".to_owned())]
+    );
+}
+
+#[test]
+fn telegram_prompt_uses_unknown_digest_primary_as_promptable_target() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(telegram_project_digest(Some("session-unknown"))),
+            Ok(telegram_project_digest(Some("session-unknown"))),
+        ],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![TelegramStateSession {
+            id: "session-unknown".to_owned(),
+            name: "Future Status Project Root".to_owned(),
+            project_id: Some("project-1".to_owned()),
+            status: TelegramSessionStatus::Unknown,
+            message_count: 1,
+            session_mutation_stamp: Some(9),
+            parent_delegation_id: None,
+        }],
+    });
+    let mut config = telegram_test_config();
+    config.forward_assistant_replies = false;
+    let mut state = TelegramBotState::default();
+
+    let outcome = forward_telegram_text_to_project_for_relay(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        42,
+        "hello from Telegram",
+    )
+    .expect("unknown digest primary should remain promptable");
+
+    assert!(outcome.final_sync_satisfied);
+    assert_eq!(
+        termal.sent_prompts.borrow().as_slice(),
+        [(
+            "session-unknown".to_owned(),
+            "hello from Telegram".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn telegram_prompt_fallback_skips_error_digest_primary() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(telegram_project_digest(Some("session-error"))),
+            Ok(telegram_project_digest(Some("session-ok"))),
+        ],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![
+            TelegramStateSession {
+                id: "session-ok".to_owned(),
+                name: "Promptable Project Root".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Idle,
+                message_count: 1,
+                session_mutation_stamp: Some(9),
+                parent_delegation_id: None,
+            },
+            TelegramStateSession {
+                id: "session-error".to_owned(),
+                name: "Errored Project Root".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Error,
+                message_count: 2,
+                session_mutation_stamp: Some(10),
+                parent_delegation_id: None,
+            },
+        ],
+    });
+    let mut config = telegram_test_config();
+    config.forward_assistant_replies = false;
+    let mut state = TelegramBotState::default();
+
+    let outcome = forward_telegram_text_to_project_for_relay(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        42,
+        "hello from Telegram",
+    )
+    .expect("errored digest primary should fall back to a promptable root");
+
+    assert!(outcome.final_sync_satisfied);
+    assert_eq!(
+        termal.sent_prompts.borrow().as_slice(),
+        [("session-ok".to_owned(), "hello from Telegram".to_owned())]
+    );
+}
+
+#[test]
+fn telegram_prompt_fallback_skips_error_project_root_session() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(telegram_project_digest(Some("session-child"))),
+            Ok(telegram_project_digest(Some("session-ok"))),
+        ],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![
+            TelegramStateSession {
+                id: "session-ok".to_owned(),
+                name: "Promptable Project Root".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Idle,
+                message_count: 1,
+                session_mutation_stamp: Some(9),
+                parent_delegation_id: None,
+            },
+            TelegramStateSession {
+                id: "session-error".to_owned(),
+                name: "Errored Project Root".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Error,
+                message_count: 2,
+                session_mutation_stamp: Some(10),
+                parent_delegation_id: None,
+            },
+            TelegramStateSession {
+                id: "session-child".to_owned(),
+                name: "Delegated Child".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Active,
+                message_count: 3,
+                session_mutation_stamp: Some(11),
+                parent_delegation_id: Some("delegation-1".to_owned()),
+            },
+        ],
+    });
+    let mut config = telegram_test_config();
+    config.forward_assistant_replies = false;
+    let mut state = TelegramBotState::default();
+
+    let outcome = forward_telegram_text_to_project_for_relay(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        42,
+        "hello from Telegram",
+    )
+    .expect("delegated primary should skip errored project roots");
+
+    assert!(outcome.final_sync_satisfied);
+    assert_eq!(
+        termal.sent_prompts.borrow().as_slice(),
+        [("session-ok".to_owned(), "hello from Telegram".to_owned())]
+    );
+}
+
+#[test]
+fn telegram_prompt_honors_selected_error_session() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![
+            Ok(telegram_project_digest(Some("session-root"))),
+            Ok(telegram_project_digest(Some("session-root"))),
+        ],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![
+            TelegramStateSession {
+                id: "session-root".to_owned(),
+                name: "Project Root".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Idle,
+                message_count: 1,
+                session_mutation_stamp: Some(9),
+                parent_delegation_id: None,
+            },
+            TelegramStateSession {
+                id: "session-error".to_owned(),
+                name: "Explicit Error Target".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Error,
+                message_count: 2,
+                session_mutation_stamp: Some(10),
+                parent_delegation_id: None,
+            },
+        ],
+    });
+    let mut config = telegram_test_config();
+    config.forward_assistant_replies = false;
+    let mut state = TelegramBotState {
+        selected_session_id: Some("session-error".to_owned()),
+        ..TelegramBotState::default()
+    };
+
+    let outcome = forward_telegram_text_to_project_for_relay(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        42,
+        "hello from Telegram",
+    )
+    .expect("explicitly selected error session should be honored");
+
+    assert!(outcome.final_sync_satisfied);
+    assert_eq!(state.selected_session_id.as_deref(), Some("session-error"));
+    assert_eq!(
+        termal.sent_prompts.borrow().as_slice(),
+        [("session-error".to_owned(), "hello from Telegram".to_owned())]
+    );
+}
+
+#[test]
+fn telegram_digest_sync_ignores_delegated_primary_for_assistant_forwarding() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![Ok(telegram_project_digest(Some("session-child")))],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![TelegramSessionFetchMessage::Text {
+                    id: "reply-1".to_owned(),
+                    author: "assistant".to_owned(),
+                    text: "Delegated child reply".to_owned(),
+                }],
+            },
+        },
+    )
+    .with_state_sessions(telegram_state_sessions_with_project_session(
+        "session-child",
+        Some("delegation-1"),
+    ));
+    let config = telegram_test_config();
+    let mut state = TelegramBotState::default();
+
+    let changed = sync_telegram_digest(&telegram, &termal, &config, &mut state, 42)
+        .expect("digest sync should ignore delegated primary target");
+
+    assert!(changed);
+    assert!(
+        termal
+            .events
+            .borrow()
+            .iter()
+            .all(|event| !event.starts_with("session:"))
+    );
+    assert!(
+        telegram
+            .sent_texts
+            .borrow()
+            .iter()
+            .all(|text| !text.contains("Delegated child reply"))
+    );
+}
+
+#[test]
+fn telegram_digest_sync_forwards_from_project_root_when_primary_is_delegated() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        vec![Ok(telegram_project_digest(Some("session-child")))],
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: vec![
+                    TelegramSessionFetchMessage::Text {
+                        id: "baseline".to_owned(),
+                        author: "assistant".to_owned(),
+                        text: "Root baseline".to_owned(),
+                    },
+                    TelegramSessionFetchMessage::Text {
+                        id: "reply-1".to_owned(),
+                        author: "assistant".to_owned(),
+                        text: "Root reply".to_owned(),
+                    },
+                ],
+            },
+        },
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![
+            TelegramStateSession {
+                id: "session-root".to_owned(),
+                name: "Project Session".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Idle,
+                message_count: 0,
+                session_mutation_stamp: None,
+                parent_delegation_id: None,
+            },
+            TelegramStateSession {
+                id: "session-child".to_owned(),
+                name: "Delegated Child".to_owned(),
+                project_id: Some("project-1".to_owned()),
+                status: TelegramSessionStatus::Active,
+                message_count: 0,
+                session_mutation_stamp: None,
+                parent_delegation_id: Some("delegation-1".to_owned()),
+            },
+        ],
+    });
+    let config = telegram_test_config();
+    let mut state = TelegramBotState {
+        assistant_forwarding_cursors: HashMap::from([(
+            "session-root".to_owned(),
+            TelegramAssistantForwardingCursor {
+                message_id: Some("baseline".to_owned()),
+                text_chars: Some("Root baseline".chars().count()),
+                text_hash: None,
+                text_start_chars: None,
+                resend_if_grown: false,
+                sent_chunks: None,
+                failed_chunk_send_attempts: None,
+                footer_pending: false,
+                baseline_while_active: false,
+            },
+        )]),
+        ..TelegramBotState::default()
+    };
+
+    let changed = sync_telegram_digest(&telegram, &termal, &config, &mut state, 42)
+        .expect("digest sync should forward from the fallback root target");
+
+    assert!(changed);
+    assert_eq!(
+        termal.events.borrow().as_slice(),
+        [
+            "digest:project-1".to_owned(),
+            "state-sessions".to_owned(),
+            "session:session-root".to_owned(),
+        ]
+    );
+    let sent_texts = telegram.sent_texts.borrow();
+    assert!(sent_texts.iter().any(|text| text == "Root reply"));
+    assert!(
+        sent_texts
+            .iter()
+            .all(|text| !text.contains("Delegated child reply"))
+    );
+}
+
+#[test]
 fn telegram_prompt_post_failure_does_not_arm_assistant_forwarding() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramPromptClient::new(
@@ -807,6 +1450,10 @@ fn telegram_prompt_post_failure_does_not_arm_assistant_forwarding() {
             },
         },
     )
+    .with_state_sessions(telegram_state_sessions_with_project_session(
+        "session-1",
+        None,
+    ))
     .with_send_error("prompt rejected");
     let config = telegram_test_config();
     let mut state = TelegramBotState::default();
@@ -860,6 +1507,10 @@ fn telegram_prompt_keeps_pre_send_assistant_forwarding_baseline() {
         ],
         pre_send_session.clone(),
     )
+    .with_state_sessions(telegram_state_sessions_with_project_session(
+        "session-1",
+        None,
+    ))
     .with_session_responses(vec![pre_send_session, post_send_session]);
     let config = telegram_test_config();
     let mut state = TelegramBotState::default();
@@ -873,6 +1524,7 @@ fn telegram_prompt_keeps_pre_send_assistant_forwarding_baseline() {
         termal.events.borrow().as_slice(),
         [
             "digest:project-1",
+            "state-sessions",
             "session:session-1",
             "send:session-1",
             "digest:project-1",
@@ -1068,7 +1720,11 @@ fn telegram_prompt_digest_refresh_failure_keeps_single_accepted_prompt_armed() {
                 }],
             },
         },
-    );
+    )
+    .with_state_sessions(telegram_state_sessions_with_project_session(
+        "session-1",
+        None,
+    ));
     let config = telegram_test_config();
     let mut state = TelegramBotState::default();
 
@@ -1186,7 +1842,22 @@ fn telegram_prompt_uses_selected_project_digest_and_session() {
                 }],
             },
         },
-    );
+    )
+    .with_state_sessions(TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-2".to_owned(),
+            name: "Side Project".to_owned(),
+        }],
+        sessions: vec![TelegramStateSession {
+            id: "session-2".to_owned(),
+            name: "Selected Project Session".to_owned(),
+            project_id: Some("project-2".to_owned()),
+            status: TelegramSessionStatus::Idle,
+            message_count: 1,
+            session_mutation_stamp: None,
+            parent_delegation_id: None,
+        }],
+    });
     let mut config = telegram_test_config();
     config.subscribed_project_ids = vec!["project-1".to_owned(), "project-2".to_owned()];
     let mut state = TelegramBotState {

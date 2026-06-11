@@ -88,6 +88,22 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
     Ok(())
 }
 
+#[derive(Debug)]
+struct RemoteLifecycleActionGuard {
+    remote_id: String,
+    in_flight: Arc<Mutex<HashSet<String>>>,
+}
+
+impl Drop for RemoteLifecycleActionGuard {
+    fn drop(&mut self) {
+        let mut in_flight = self
+            .in_flight
+            .lock()
+            .expect("remote lifecycle action mutex poisoned");
+        in_flight.remove(&self.remote_id);
+    }
+}
+
 fn dispatch_turn_and_snapshot(
     state: &AppState,
     session_id: &str,
@@ -308,6 +324,52 @@ impl AppState {
         }
 
         self.project_digest(project_id)
+    }
+
+    fn remote_config_for_action(&self, remote_id: &str) -> Result<RemoteConfig, ApiError> {
+        validate_remote_id_value(remote_id)?;
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_remote(remote_id)
+            .cloned()
+            .ok_or_else(|| ApiError::not_found(format!("remote `{remote_id}` not found")))
+    }
+
+    fn begin_remote_lifecycle_action(
+        &self,
+        remote_id: &str,
+        remote_name: &str,
+    ) -> Result<RemoteLifecycleActionGuard, ApiError> {
+        let mut in_flight = self
+            .remote_lifecycle_actions_in_flight
+            .lock()
+            .expect("remote lifecycle action mutex poisoned");
+        if !in_flight.insert(remote_id.to_owned()) {
+            return Err(ApiError::conflict(format!(
+                "remote `{remote_name}` already has a lifecycle action running"
+            )));
+        }
+        Ok(RemoteLifecycleActionGuard {
+            remote_id: remote_id.to_owned(),
+            in_flight: self.remote_lifecycle_actions_in_flight.clone(),
+        })
+    }
+
+    fn register_remote_termal(
+        &self,
+        remote_id: &str,
+        request: RemoteRegisterRequest,
+    ) -> Result<RemoteActionResponse, ApiError> {
+        let remote = self.remote_config_for_action(remote_id)?;
+        let script = remote_register_script(&request.source_path)?;
+        let _guard = self.begin_remote_lifecycle_action(&remote.id, &remote.name)?;
+        run_remote_ssh_script(&remote, "registration", &script)
+    }
+
+    fn upgrade_remote_termal(&self, remote_id: &str) -> Result<RemoteActionResponse, ApiError> {
+        let remote = self.remote_config_for_action(remote_id)?;
+        let _guard = self.begin_remote_lifecycle_action(&remote.id, &remote.name)?;
+        upgrade_remote_ssh(&remote)
     }
 
     /// Builds project digest summary.
@@ -564,6 +626,9 @@ impl AppState {
 }
 
 fn latest_project_prompt_target_session(sessions: &[SessionRecord]) -> Option<&SessionRecord> {
+    // Keep this aligned with `find_latest_telegram_project_prompt_session`;
+    // both choose the automatic Telegram prompt target when the digest primary
+    // points at a delegated child or another non-promptable session.
     sessions.iter().rev().find(|record| {
         record.session.parent_delegation_id.is_none()
             && record.session.status != SessionStatus::Error
@@ -759,6 +824,26 @@ async fn update_app_settings(
     Json(request): Json<UpdateAppSettingsRequest>,
 ) -> Result<Json<StateResponse>, ApiError> {
     let response = run_blocking_api(move || state.update_app_settings(request)).await?;
+    Ok(Json(response))
+}
+
+async fn register_remote_termal(
+    AxumPath(remote_id): AxumPath<String>,
+    State(state): State<AppState>,
+    request: Result<Json<RemoteRegisterRequest>, JsonRejection>,
+) -> Result<Json<RemoteActionResponse>, ApiError> {
+    let Json(request) =
+        request.map_err(|rejection| api_json_rejection("remote register request", rejection))?;
+    let response =
+        run_blocking_api(move || state.register_remote_termal(&remote_id, request)).await?;
+    Ok(Json(response))
+}
+
+async fn upgrade_remote_termal(
+    AxumPath(remote_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<RemoteActionResponse>, ApiError> {
+    let response = run_blocking_api(move || state.upgrade_remote_termal(&remote_id)).await?;
     Ok(Json(response))
 }
 

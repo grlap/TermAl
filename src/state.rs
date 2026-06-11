@@ -625,6 +625,10 @@ struct AppState {
     /// the narrow unloaded-transcript path and are left un-replayed until a
     /// later event or the in-flight fetch repairs the transcript.
     remote_delta_hydrations_in_flight: Arc<Mutex<HashSet<(String, String)>>>,
+    /// Remote register/upgrade lifecycle actions currently running. The UI
+    /// disables buttons while pending, but this backend guard is the
+    /// correctness boundary for duplicate browser tabs or direct API retries.
+    remote_lifecycle_actions_in_flight: Arc<Mutex<HashSet<String>>>,
     terminal_local_command_semaphore: Arc<tokio::sync::Semaphore>,
     terminal_remote_command_semaphore: Arc<tokio::sync::Semaphore>,
     stopping_orchestrator_ids: Arc<Mutex<HashSet<String>>>,

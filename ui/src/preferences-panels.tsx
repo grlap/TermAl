@@ -61,6 +61,10 @@ import {
   defaultModelOptionsFromSessions,
 } from "./preferences/agent-default-model-control";
 import { ThemedCombobox } from "./preferences/themed-combobox";
+import {
+  remoteLifecycleKey,
+  useRemoteLifecycleActions,
+} from "./preferences/use-remote-lifecycle-actions";
 
 export { ThemedCombobox } from "./preferences/themed-combobox";
 export { TelegramPreferencesPanel } from "./preferences/telegram-preferences-panel";
@@ -999,6 +1003,13 @@ export function RemotePreferencesPanel({
   onSaveRemotes: (remotes: RemoteConfig[]) => void;
 }) {
   const [draftRemotes, setDraftRemotes] = useState<RemoteConfig[]>(remotes);
+  const {
+    remoteActionStates,
+    remoteSourcePath,
+    registerRemote,
+    setRemoteSourcePath,
+    upgradeRemote,
+  } = useRemoteLifecycleActions();
 
   useEffect(() => {
     setDraftRemotes((current) => (areRemoteConfigsEqual(current, remotes) ? current : remotes));
@@ -1008,6 +1019,10 @@ export function RemotePreferencesPanel({
   const hasChanges = useMemo(
     () => JSON.stringify(draftRemotes) !== JSON.stringify(remotes),
     [draftRemotes, remotes],
+  );
+  const savedRemoteIds = useMemo(
+    () => new Set(remotes.map((remote) => remote.id.trim()).filter(Boolean)),
+    [remotes],
   );
 
   function updateRemote(index: number, patch: Partial<RemoteConfig>) {
@@ -1035,6 +1050,13 @@ export function RemotePreferencesPanel({
         <div className="remote-settings-list">
           {draftRemotes.map((remote, index) => {
             const isLocal = isLocalRemoteId(remote.id);
+            const remoteId = remoteLifecycleKey(remote);
+            const actionState = remoteActionStates[remoteId];
+            const actionDisabled =
+              hasChanges ||
+              !savedRemoteIds.has(remoteId) ||
+              !remote.enabled ||
+              actionState?.status === "pending";
             return (
               <article key={`${remote.id}-${index}`} className="remote-settings-row">
                 <div className="remote-settings-row-header">
@@ -1132,6 +1154,19 @@ export function RemotePreferencesPanel({
                         />
                         <span>Enabled for projects and sessions</span>
                       </label>
+                      <div className="session-control-group">
+                        <label className="session-control-label" htmlFor={`remote-source-${index}`}>
+                          TermAl checkout path
+                        </label>
+                        <input
+                          id={`remote-source-${index}`}
+                          className="themed-input"
+                          type="text"
+                          value={remoteSourcePath(remote)}
+                          onChange={(event) => setRemoteSourcePath(remote, event.target.value)}
+                          placeholder="~/src/TermAl"
+                        />
+                      </div>
                     </>
                   ) : null}
                 </div>
@@ -1141,12 +1176,40 @@ export function RemotePreferencesPanel({
                     <button
                       className="ghost-button"
                       type="button"
+                      onClick={() => void registerRemote(remote)}
+                      disabled={actionDisabled || !remoteSourcePath(remote).trim()}
+                    >
+                      Register TermAl
+                    </button>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() => void upgradeRemote(remote)}
+                      disabled={actionDisabled}
+                    >
+                      Build / upgrade
+                    </button>
+                    <button
+                      className="ghost-button"
+                      type="button"
                       onClick={() => {
                         setDraftRemotes((current) => current.filter((_, remoteIndex) => remoteIndex !== index));
                       }}
                     >
                       Remove
                     </button>
+                    {actionState ? (
+                      <div
+                        className={`session-control-hint remote-action-result ${
+                          actionState.status === "error" ? "remote-action-error" : ""
+                        }`}
+                      >
+                        {actionState.message}
+                        {actionState.output ? (
+                          <pre className="remote-action-output">{actionState.output}</pre>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </article>

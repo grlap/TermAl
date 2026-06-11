@@ -600,6 +600,35 @@ export function updateAppSettings(payload: {
   });
 }
 
+export type RemoteActionResponse = {
+  remoteId: string;
+  action: string;
+  message: string;
+  stdout?: string;
+  stderr?: string;
+};
+
+export function registerRemoteTermal(remoteId: string, payload: { sourcePath: string }) {
+  return request<RemoteActionResponse>(
+    `/api/remotes/${encodeURIComponent(remoteId)}/register`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    { preserveGatewayErrorBody: true },
+  );
+}
+
+export function upgradeRemoteTermal(remoteId: string) {
+  return request<RemoteActionResponse>(
+    `/api/remotes/${encodeURIComponent(remoteId)}/upgrade`,
+    {
+      method: "POST",
+    },
+    { preserveGatewayErrorBody: true },
+  );
+}
+
 export type TelegramStatusResponse = {
   configured: boolean;
   enabled: boolean;

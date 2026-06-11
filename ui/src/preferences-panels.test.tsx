@@ -1,7 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  registerRemoteTermal,
+  upgradeRemoteTermal,
+} from "./api";
 import {
   ALL_CLAUDE_APPROVAL_MODES,
   ClaudeApprovalsPreferencesPanel,
@@ -10,7 +14,21 @@ import {
   CursorPreferencesPanel,
   GeminiPreferencesPanel,
   INTERNAL_CLAUDE_APPROVAL_MODES,
+  RemotePreferencesPanel,
 } from "./preferences-panels";
+import type { RemoteConfig } from "./types";
+
+vi.mock("./api", async () => {
+  const actual = await vi.importActual<typeof import("./api")>("./api");
+  return {
+    ...actual,
+    registerRemoteTermal: vi.fn(),
+    upgradeRemoteTermal: vi.fn(),
+  };
+});
+
+const registerRemoteTermalMock = vi.mocked(registerRemoteTermal);
+const upgradeRemoteTermalMock = vi.mocked(upgradeRemoteTermal);
 
 function renderCodexPanel({
   defaultModel = "default",
@@ -109,6 +127,117 @@ function renderGeminiPanel({
     ...render(<GeminiPreferencesPanel {...props} />),
   };
 }
+
+function createRemote(overrides: Partial<RemoteConfig> = {}): RemoteConfig {
+  return {
+    id: "ssh-1",
+    name: "SSH Remote 1",
+    transport: "ssh",
+    enabled: true,
+    host: "10.0.0.178",
+    port: 22,
+    user: "greg",
+    ...overrides,
+  };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
+describe("RemotePreferencesPanel", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    registerRemoteTermalMock.mockResolvedValue({
+      remoteId: "ssh-1",
+      action: "registration",
+      message: "remote `SSH Remote 1` registration completed",
+      stdout: "registered TermAl checkout: /srv/TermAl",
+    });
+    upgradeRemoteTermalMock.mockResolvedValue({
+      remoteId: "ssh-1",
+      action: "upgrade",
+      message: "remote `SSH Remote 1` upgrade completed",
+      stdout: "updated TermAl from /srv/TermAl",
+    });
+  });
+
+  it("disables remote lifecycle actions while remote settings have unsaved changes", () => {
+    render(
+      <RemotePreferencesPanel remotes={[createRemote()]} onSaveRemotes={vi.fn()} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Register TermAl" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Build / upgrade" })).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText("Host"), {
+      target: { value: "10.0.0.179" },
+    });
+
+    expect(screen.getByRole("button", { name: "Register TermAl" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Build / upgrade" })).toBeDisabled();
+  });
+
+  it("registers remote TermAl with the checkout path and renders capped action output", async () => {
+    render(
+      <RemotePreferencesPanel remotes={[createRemote()]} onSaveRemotes={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByLabelText("TermAl checkout path"), {
+      target: { value: "/srv/TermAl" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Register TermAl" }));
+
+    await waitFor(() => {
+      expect(registerRemoteTermalMock).toHaveBeenCalledWith("ssh-1", {
+        sourcePath: "/srv/TermAl",
+      });
+    });
+    expect(
+      await screen.findByText("remote `SSH Remote 1` registration completed"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("registered TermAl checkout: /srv/TermAl")).toBeInTheDocument();
+  });
+
+  it("renders remote upgrade errors", async () => {
+    upgradeRemoteTermalMock.mockRejectedValue(new Error("build failed"));
+    render(
+      <RemotePreferencesPanel remotes={[createRemote()]} onSaveRemotes={vi.fn()} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Build / upgrade" }));
+
+    await waitFor(() => {
+      expect(upgradeRemoteTermalMock).toHaveBeenCalledWith("ssh-1");
+    });
+    expect(await screen.findByText("build failed")).toBeInTheDocument();
+  });
+
+  it("ignores remote action completions after unmount", async () => {
+    const deferred = createDeferred<Awaited<ReturnType<typeof registerRemoteTermal>>>();
+    registerRemoteTermalMock.mockReturnValue(deferred.promise);
+    const rendered = render(
+      <RemotePreferencesPanel remotes={[createRemote()]} onSaveRemotes={vi.fn()} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Register TermAl" }));
+    rendered.unmount();
+    await act(async () => {
+      deferred.resolve({
+        remoteId: "ssh-1",
+        action: "registration",
+        message: "remote `SSH Remote 1` registration completed",
+      });
+      await deferred.promise;
+    });
+
+    expect(registerRemoteTermalMock).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("AgentDefaultModelControl", () => {
   it("keeps configured custom values in the dropdown without a text input", () => {

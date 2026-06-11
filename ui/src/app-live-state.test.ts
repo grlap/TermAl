@@ -25,6 +25,7 @@ import {
   SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
   SESSION_TAIL_WINDOW_MESSAGE_COUNT,
 } from "./session-tail-policy";
+import { requestSessionFullHydration } from "./session-hydration-demand";
 import { CONVERSATION_COMPOSER_INPUT_DATA_ATTRIBUTES } from "./panels/conversation-composer-focus";
 import type { StateResponse } from "./api";
 import type { DelegationSummary, Message, Session } from "./types";
@@ -2770,6 +2771,11 @@ describe("hydration adoption side effects", () => {
       vi.advanceTimersByTime(1);
       await Promise.resolve();
     });
+    expect(fetchSession).not.toHaveBeenCalled();
+
+    act(() => {
+      requestSessionFullHydration("session-1");
+    });
     expect(fetchSession).toHaveBeenCalledTimes(1);
 
     await act(async () => {
@@ -2802,24 +2808,16 @@ describe("hydration adoption side effects", () => {
       () => new Promise<StateResponse>(() => {}),
     );
 
-    const messages = makeHydrationMessages(
-      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
-    );
+    const messages = makeHydrationMessages(1);
     const initialSession = makeSession({
+      messages,
       messagesLoaded: false,
-      messageCount: messages.length,
+      messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
       sessionMutationStamp: 1,
     });
-    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
-      revision: 5,
-      serverInstanceId: "server-a",
-      session: makeSession({
-        messages: messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT),
-        messagesLoaded: false,
-        messageCount: messages.length,
-        sessionMutationStamp: 1,
-      }),
-    });
+    const fetchSessionTail = vi
+      .spyOn(api, "fetchSessionTail")
+      .mockImplementation(() => new Promise(() => {}));
     const fetchSession = vi
       .spyOn(api, "fetchSession")
       .mockImplementation(() => new Promise(() => {}));
@@ -2833,7 +2831,7 @@ describe("hydration adoption side effects", () => {
     await act(async () => {
       await flushHydrationMicrotasks();
     });
-    expect(api.fetchSessionTail).toHaveBeenCalledTimes(1);
+    expect(fetchSessionTail).not.toHaveBeenCalled();
     expect(fetchSession).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -2855,7 +2853,11 @@ describe("hydration adoption side effects", () => {
       vi.advanceTimersByTime(1);
       await Promise.resolve();
     });
+    expect(fetchSession).not.toHaveBeenCalled();
 
+    act(() => {
+      requestSessionFullHydration("session-1");
+    });
     expect(fetchSession).toHaveBeenCalledTimes(1);
   });
 
@@ -3314,41 +3316,34 @@ describe("hydration adoption side effects", () => {
       () => new Promise<StateResponse>(() => {}),
     );
 
-    const messages = makeHydrationMessages(
-      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
-    );
+    const messages = makeHydrationMessages(1);
     const initialSession = makeSession({
+      messages,
       messagesLoaded: false,
-      messageCount: messages.length,
+      messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
       sessionMutationStamp: 1,
     });
-    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
-      revision: 5,
-      serverInstanceId: "server-a",
-      session: makeSession({
-        messages: messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT),
-        messagesLoaded: false,
-        messageCount: messages.length,
-        sessionMutationStamp: 1,
-      }),
-    });
+    const fetchSessionTail = vi
+      .spyOn(api, "fetchSessionTail")
+      .mockImplementation(() => new Promise(() => {}));
     const fetchSession = vi
       .spyOn(api, "fetchSession")
       .mockImplementation(() => new Promise(() => {}));
     const params = makeLiveStateParams(initialSession);
     params.adoptionRefs.latestStateRevisionRef.current = 5;
     params.adoptionRefs.sessionsRef.current = [initialSession];
-    const composer = appendFocusedComposerDraft("still typing");
+    appendFocusedComposerDraft("still typing");
 
     renderLiveStateHarness(params, () => {});
 
     await act(async () => {
       await flushHydrationMicrotasks();
     });
-    expect(api.fetchSessionTail).toHaveBeenCalledTimes(1);
+    expect(fetchSessionTail).not.toHaveBeenCalled();
+    expect(fetchSession).not.toHaveBeenCalled();
 
     await act(async () => {
-      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_DEFER_MS);
+      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS);
       await Promise.resolve();
     });
     expect(fetchSession).not.toHaveBeenCalled();
@@ -3380,40 +3375,35 @@ describe("hydration adoption side effects", () => {
       () => new Promise<StateResponse>(() => {}),
     );
 
-    const messages = makeHydrationMessages(
-      SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
-    );
+    const messages = makeHydrationMessages(1);
     const initialSession = makeSession({
+      messages,
       messagesLoaded: false,
-      messageCount: messages.length,
+      messageCount: SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
       sessionMutationStamp: 1,
     });
-    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
-      revision: 5,
-      serverInstanceId: "server-a",
-      session: makeSession({
-        messages: messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT),
-        messagesLoaded: false,
-        messageCount: messages.length,
-        sessionMutationStamp: 1,
-      }),
-    });
+    const fetchSessionTail = vi
+      .spyOn(api, "fetchSessionTail")
+      .mockImplementation(() => new Promise(() => {}));
     const fetchSession = vi
       .spyOn(api, "fetchSession")
       .mockImplementation(() => new Promise(() => {}));
     const params = makeLiveStateParams(initialSession);
     params.adoptionRefs.latestStateRevisionRef.current = 5;
     params.adoptionRefs.sessionsRef.current = [initialSession];
+    const composer = appendFocusedComposerDraft("still typing");
 
     renderLiveStateHarness(params, () => {});
 
     await act(async () => {
       await flushHydrationMicrotasks();
     });
-    expect(api.fetchSessionTail).toHaveBeenCalledTimes(1);
+    expect(fetchSessionTail).not.toHaveBeenCalled();
+    expect(fetchSession).not.toHaveBeenCalled();
 
+    composer.value = "";
     await act(async () => {
-      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_DEFER_MS);
+      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS);
       await Promise.resolve();
     });
     expect(requestIdleCallback).toHaveBeenCalledTimes(1);
@@ -3744,9 +3734,8 @@ describe("hydration adoption side effects", () => {
     );
     expect(fetchSession).not.toHaveBeenCalled();
 
-    await act(async () => {
-      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_DEFER_MS);
-      await Promise.resolve();
+    act(() => {
+      requestSessionFullHydration("session-1");
     });
     expect(fetchSession).toHaveBeenCalledTimes(1);
     const eventSource =
@@ -3891,9 +3880,8 @@ describe("hydration adoption side effects", () => {
     );
     expect(fetchSession).not.toHaveBeenCalled();
 
-    await act(async () => {
-      vi.advanceTimersByTime(SESSION_TAIL_FULL_HYDRATION_DEFER_MS);
-      await Promise.resolve();
+    act(() => {
+      requestSessionFullHydration("session-1");
     });
     expect(fetchSession).toHaveBeenCalledTimes(1);
     const eventSource =

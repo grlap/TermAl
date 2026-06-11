@@ -31,10 +31,6 @@ fn sync_telegram_digest(
     let (project_id, mut dirty) = resolve_telegram_active_project_id(config, state);
     let digest = termal.get_project_digest(&project_id)?;
     let digest_hash = telegram_digest_hash(&digest, config.public_base_url.as_deref())?;
-    let (selected_session_id, selected_session_dirty) =
-        resolve_telegram_selected_project_session(termal, &project_id, state)?;
-    dirty |= selected_session_dirty;
-
     if state.last_digest_hash.as_deref() != Some(digest_hash.as_str()) {
         let message_id = edit_or_send_telegram_digest(
             telegram,
@@ -56,37 +52,84 @@ fn sync_telegram_digest(
     // Forward assistant text on every poll, not only when the compact digest
     // changes. The forwarder has its own id+char-count dedupe, so this catches
     // fresh replies whose truncated digest preview stayed byte-identical.
+    let target_session_id = match resolve_telegram_project_prompt_session(
+        termal,
+        &project_id,
+        state,
+        config
+            .forward_assistant_replies
+            .then_some(digest.primary_session_id.as_deref())
+            .flatten(),
+    ) {
+        Ok((target_session_id, target_session_dirty)) => {
+            dirty |= target_session_dirty;
+            target_session_id
+        }
+        Err(err) => {
+            // Digest sync is a background poll: preserve any successful digest
+            // send/edit progress even if the auxiliary target lookup fails.
+            // Interactive Telegram prompts still propagate this error before
+            // sending user text into a session.
+            log_telegram_error("failed to resolve Telegram prompt target", &err);
+            None
+        }
+    };
+
     if config.forward_assistant_replies {
         dirty |= forward_relevant_assistant_messages(
             telegram,
             termal,
             state,
             chat_id,
-            selected_session_id
-                .as_deref()
-                .or(digest.primary_session_id.as_deref()),
+            target_session_id.as_deref(),
         );
     }
 
     Ok(dirty)
 }
 
-fn resolve_telegram_selected_project_session(
+/// Resolves the Telegram prompt/forwarding target for a project.
+///
+/// A persisted selected session wins when it is still a visible project-root
+/// session; explicit selections are honored even when that session is currently
+/// in Error. Stale selections are cleared, including any armed assistant
+/// forwarding state, and reported through the dirty flag. If no selected
+/// session remains, the digest primary is used when it resolves to a promptable
+/// project-root session. When that primary points at a delegated child or other
+/// non-promptable session, fall back to the latest promptable project-root
+/// session so Telegram follows the same parent-session target used by project
+/// digest actions.
+fn resolve_telegram_project_prompt_session(
     termal: &impl TelegramPromptClient,
     project_id: &str,
     state: &mut TelegramBotState,
+    fallback_session_id: Option<&str>,
 ) -> Result<(Option<String>, bool)> {
-    let Some(session_id) = state.selected_session_id.clone() else {
+    let selected_session_id = state.selected_session_id.clone();
+    if selected_session_id.is_none() && fallback_session_id.is_none() {
         return Ok((None, false));
-    };
+    }
+
     let sessions = termal.get_state_sessions()?;
-    if find_telegram_project_session(&sessions, project_id, &session_id).is_some() {
-        Ok((Some(session_id), false))
-    } else {
+    let mut dirty = false;
+    if let Some(session_id) = selected_session_id {
+        if find_telegram_project_session(&sessions, project_id, &session_id).is_some() {
+            return Ok((Some(session_id), false));
+        }
         state.selected_session_id = None;
         clear_forward_next_assistant_message_session_id(state, &session_id);
-        Ok((None, true))
+        dirty = true;
     }
+
+    let fallback_session_id = fallback_session_id.and_then(|session_id| {
+        find_telegram_project_prompt_session(&sessions, project_id, session_id)
+            .map(|session| session.id.clone())
+    });
+    let fallback_session_id = fallback_session_id.or_else(|| {
+        find_latest_telegram_project_prompt_session(&sessions, project_id)
+            .map(|session| session.id.clone())
+    });
+    Ok((fallback_session_id, dirty))
 }
 
 fn ensure_selected_session_forwarding_baseline(
@@ -108,14 +151,14 @@ fn forward_relevant_assistant_messages(
     termal: &impl TelegramSessionReader,
     state: &mut TelegramBotState,
     chat_id: i64,
-    primary_session_id: Option<&str>,
+    target_session_id: Option<&str>,
 ) -> bool {
     let mut dirty = false;
-    // Suppress digest-primary forwarding when an armed session either sent
+    // Suppress automatic target forwarding when an armed session either sent
     // visible content or hit a Telegram delivery failure in this poll.
-    // Baseline-only state changes should still allow the primary digest
+    // Baseline-only state changes should still allow the resolved target
     // session to speak.
-    let mut suppress_digest_primary = false;
+    let mut suppress_automatic_target = false;
     let mut checked_session_ids = BTreeSet::new();
     let armed_session_ids = forward_next_assistant_message_session_ids(state);
 
@@ -125,7 +168,7 @@ fn forward_relevant_assistant_messages(
             Ok(outcome) => {
                 outcome.debug_assert_invariants();
                 dirty |= outcome.dirty;
-                suppress_digest_primary |= outcome.sent_visible_content || outcome.delivery_failed;
+                suppress_automatic_target |= outcome.sent_visible_content || outcome.delivery_failed;
             }
             Err(err) => {
                 dirty = true;
@@ -134,8 +177,8 @@ fn forward_relevant_assistant_messages(
         }
     }
 
-    if let Some(session_id) = primary_session_id
-        .filter(|id| !suppress_digest_primary && !checked_session_ids.contains(*id))
+    if let Some(session_id) =
+        target_session_id.filter(|id| !suppress_automatic_target && !checked_session_ids.contains(*id))
     {
         merge_assistant_forward_result(
             &mut dirty,

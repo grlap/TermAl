@@ -15,6 +15,7 @@ import {
   fetchWorkspaceLayout,
   fetchState,
   isBackendUnavailableError,
+  registerRemoteTermal,
   runTerminalCommand,
   runTerminalCommandStream,
   saveFile,
@@ -22,6 +23,7 @@ import {
   testTelegramConnection,
   updateConversationMarker,
   updateTelegramConfig,
+  upgradeRemoteTermal,
 } from "./api";
 
 describe("createOrchestratorInstance", () => {
@@ -1847,6 +1849,71 @@ describe("fetchState", () => {
       expect(isBackendUnavailableError(error)).toBe(true);
       expect((error as ApiRequestError).restartRequired).toBe(true);
       expect((error as Error).message).toContain("Restart TermAl");
+    }
+  });
+});
+
+describe("remote lifecycle API helpers", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  it("preserves 502 JSON error bodies for remote register and upgrade failures", async () => {
+    expect.assertions(8);
+
+    const cases = [
+      {
+        call: () =>
+          registerRemoteTermal("ssh/one", {
+            sourcePath: "~/src/TermAl",
+          }),
+        expectedUrl: "/api/remotes/ssh%2Fone/register",
+      },
+      {
+        call: () => upgradeRemoteTermal("ssh/one"),
+        expectedUrl: "/api/remotes/ssh%2Fone/upgrade",
+      },
+    ] as const;
+
+    for (const { call, expectedUrl } of cases) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: "remote `SSH Lab` upgrade failed: build failed",
+          }),
+          {
+            status: 502,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      try {
+        await call();
+        throw new Error("Expected remote lifecycle request to reject");
+      } catch (error) {
+        expect(isBackendUnavailableError(error)).toBe(false);
+        expect(error).toMatchObject({
+          kind: "request-failed",
+          message: "remote `SSH Lab` upgrade failed: build failed",
+          status: 502,
+        });
+        expect(fetchMock).toHaveBeenCalledWith(
+          expectedUrl,
+          expect.any(Object),
+        );
+        expect(error).toBeInstanceOf(ApiRequestError);
+      }
     }
   });
 });

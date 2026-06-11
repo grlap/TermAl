@@ -57,14 +57,42 @@ Browser -> local TermAl :8787 -> ssh -L local_port:127.0.0.1:8787 -> remote Term
 Startup attempts:
 
 1. **Managed server:** run `ssh ... remote termal server`, then probe the
-   forwarded `/api/health`.
+   forwarded `/api/health`. This intentionally stays a direct remote command so
+   Windows SSH hosts do not need a POSIX shell just to start TermAl.
 2. **Tunnel only fallback:** run `ssh -N ...` and expect a TermAl server to
    already be running on the remote host.
 
 Both modes use batch SSH, `ExitOnForwardFailure`, and keepalive options. Managed
-mode does not currently update a remote checkout, build binaries, or install
-TermAl. Those concerns are future packaging work, not part of the current remote
-config.
+mode starts a remote server only for the lifetime of the SSH process. Saving a
+remote definition does not start, stop, install, or upgrade anything.
+
+## Remote registration and upgrades
+
+SSH remotes expose one-shot lifecycle actions from the Remotes preferences panel:
+
+- **Register TermAl** verifies an existing TermAl checkout on the remote host,
+  checks that `git` and `cargo` are available, creates the remote `.termal/bin`
+  directory, and writes `remote-install.json` with the checkout path/platform.
+- **Build / upgrade** reads `~/.termal/remote-install.json`, runs
+  `git pull --ff-only`, runs `cargo build --release --bin termal`, and installs
+  the resulting binary to `~/.termal/bin/termal` on POSIX remotes or
+  `%USERPROFILE%\.termal\bin\termal.exe` on Windows remotes.
+
+Registration is intentionally based on an existing remote enlistment/checkout.
+TermAl does not clone the repository, install Rust, configure SSH keys, or manage
+a system service. The local server invokes both actions as one-shot SSH
+commands, using `sh -lc` for POSIX checkout paths and encoded PowerShell for
+Windows checkout paths, then captures stdout/stderr and returns the sanitized
+output to the browser.
+
+Build / upgrade can run for several minutes on a slow remote checkout. The
+preferences panel keeps the action pending during that request, but build output
+is returned only after the remote command finishes; progress streaming is not
+part of the current lifecycle action API.
+
+Managed startup still runs `termal server` from the remote command environment.
+If you want the managed server path to pick up the binary installed by
+**Build / upgrade**, put `~/.termal/bin` on the remote user's `PATH`.
 
 ## Routing rules
 
@@ -137,9 +165,11 @@ operations.
 
 - Remote readiness is still coarse. The UI reports SSH/connectivity problems,
   but does not model every remote agent binary independently.
-- Managed SSH startup assumes `termal server` is available on the remote PATH.
-- Remote source checkout updates and binary installation are future packaging
-  work.
+- Remote registration assumes the checkout, Rust toolchain, `git`, and SSH auth
+  already exist. TermAl verifies and uses them, but does not provision them.
+- Windows remote lifecycle support is selected from Windows-style checkout
+  paths such as `C:\src\TermAl`; POSIX `~/src/TermAl` paths keep using POSIX
+  shell scripts.
 - A documented terminal 429 peek/resolve race can transiently put a request
   against the wrong local-vs-remote concurrency counter if project routing
   changes between the cheap in-memory peek and the later full scope resolution.

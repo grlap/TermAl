@@ -31,6 +31,7 @@ import { VirtualizedConversationMessageList } from "./VirtualizedConversationMes
 import { RunningIndicator } from "./session-activity-cards";
 import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
 import { MessageCard } from "../message-cards";
+import * as sessionHydrationDemand from "../session-hydration-demand";
 import {
   resetSessionStoreForTesting,
   syncComposerSessionsStore,
@@ -359,6 +360,51 @@ describe("AgentSessionPanel virtualization", () => {
     expect(screen.getByText(activeSession.messages[0]?.id ?? "")).toBeInTheDocument();
   });
 
+  it("requests full hydration for partial transcripts with markers or active search", async () => {
+    const hydrationSpy = vi.spyOn(
+      sessionHydrationDemand,
+      "requestSessionFullHydration",
+    );
+    try {
+      const markerSession = makeSession("marker-session", {
+        messages: makeTextMessages(1),
+        messagesLoaded: false,
+        markers: [
+          makeConversationMarker({
+            id: "marker-1",
+            messageId: "message-1",
+            name: "Decision",
+          }),
+        ],
+      });
+      const markerRender = renderSessionPanelWithDefaults({
+        activeSession: markerSession,
+      });
+
+      await waitFor(() => {
+        expect(hydrationSpy).toHaveBeenCalledWith("marker-session");
+      });
+
+      markerRender.unmount();
+      hydrationSpy.mockClear();
+
+      const searchSession = makeSession("search-session", {
+        messages: makeTextMessages(1),
+        messagesLoaded: false,
+      });
+      renderSessionPanelWithDefaults({
+        activeSession: searchSession,
+        conversationSearchQuery: "Message",
+      });
+
+      await waitFor(() => {
+        expect(hydrationSpy).toHaveBeenCalledWith("search-session");
+      });
+    } finally {
+      hydrationSpy.mockRestore();
+    }
+  });
+
   it("renders a conversation overview rail for long active sessions after the initial transcript paint", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
 
@@ -472,8 +518,8 @@ describe("AgentSessionPanel virtualization", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
-      expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
-      expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
+      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
+      expect(container.querySelector(".conversation-with-overview")).toBeNull();
       expect(screen.queryByText("message-1")).not.toBeInTheDocument();
 
       act(() => {
@@ -591,7 +637,7 @@ describe("AgentSessionPanel virtualization", () => {
         outsideTarget.remove();
       }
 
-      expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
       expect(screen.getByText("message-597")).toBeInTheDocument();
       expect(screen.queryByText("message-193")).not.toBeInTheDocument();
 
@@ -602,7 +648,8 @@ describe("AgentSessionPanel virtualization", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(500);
       });
-      expect(screen.getByText("message-561")).toBeInTheDocument();
+      expect(screen.getByText("message-177")).toBeInTheDocument();
+      expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       window.TouchEvent = OriginalTouchEvent;
@@ -811,7 +858,7 @@ describe("AgentSessionPanel virtualization", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
-      expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
       expect(screen.queryByText("message-1")).not.toBeInTheDocument();
 
       act(() => {
@@ -823,7 +870,7 @@ describe("AgentSessionPanel virtualization", () => {
         await vi.advanceTimersByTimeAsync(500);
       });
 
-      expect(screen.getByText("message-1")).toBeInTheDocument();
+      expect(screen.getByText("message-177")).toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       scrollNodeMocks.cleanup();
@@ -1097,7 +1144,7 @@ describe("AgentSessionPanel virtualization", () => {
         await vi.advanceTimersByTimeAsync(500);
       });
 
-      expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
+      expect(screen.getByText("message-177")).toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       scrollNodeMocks.cleanup();

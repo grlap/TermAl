@@ -18,7 +18,7 @@ export type ClaudeApprovalMode =
   | "auto-approve"
   | "plan"
   | "read-only-auto-approve";
-export type ClaudeEffortLevel = "default" | "low" | "medium" | "high" | "max";
+export type ClaudeEffortLevel = "default" | "low" | "medium" | "high" | "xhigh" | "max";
 export type CodexReasoningEffort =
   | "none"
   | "minimal"

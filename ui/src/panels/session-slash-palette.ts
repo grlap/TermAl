@@ -104,6 +104,7 @@ export const CLAUDE_EFFORT_SLASH_OPTIONS = [
   { detail: "Keep reasoning light", label: "low", value: "low" },
   { detail: "Use the standard effort level", label: "medium", value: "medium" },
   { detail: "Use deeper reasoning for harder prompts", label: "high", value: "high" },
+  { detail: "Use extra-high effort for the hardest prompts", label: "xhigh", value: "xhigh" },
   { detail: "Use the highest available effort", label: "max", value: "max" },
 ] as const;
 export const CURSOR_MODE_SLASH_OPTIONS = [
@@ -263,7 +264,7 @@ export const ALL_CODEX_REASONING_EFFORTS = CODEX_REASONING_EFFORT_SLASH_OPTIONS.
   (option) => option.value,
 ) as CodexReasoningEffort[];
 export const DEFAULT_CLAUDE_EFFORT: ClaudeEffortLevel = "default";
-export const FALLBACK_CLAUDE_EFFORTS = ["low", "medium", "high"] as ClaudeEffortLevel[];
+export const FALLBACK_CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh"] as ClaudeEffortLevel[];
 
 export function codexReasoningEffortChoice(effort: CodexReasoningEffort) {
   return (
@@ -327,7 +328,7 @@ export function supportedClaudeEffortLevels(session: SlashPaletteSession) {
       : [...FALLBACK_CLAUDE_EFFORTS];
   }
 
-  return currentEffort === "max" ? ["max"] : [];
+  return currentEffort === "xhigh" || currentEffort === "max" ? [currentEffort] : [];
 }
 
 export function claudeEffortChoices(session: SlashPaletteSession): SlashChoiceDefinition[] {

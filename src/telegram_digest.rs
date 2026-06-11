@@ -242,6 +242,27 @@ fn find_telegram_project_session<'a>(
         })
 }
 
+fn find_telegram_project_prompt_session<'a>(
+    state: &'a TelegramStateSessionsResponse,
+    project_id: &str,
+    session_ref: &str,
+) -> Option<&'a TelegramStateSession> {
+    find_telegram_project_session(state, project_id, session_ref)
+        .filter(|session| telegram_session_is_prompt_target(session))
+}
+
+fn find_latest_telegram_project_prompt_session<'a>(
+    state: &'a TelegramStateSessionsResponse,
+    project_id: &str,
+) -> Option<&'a TelegramStateSession> {
+    // Mirrors `latest_project_prompt_target_session` for Telegram's `/api/state`
+    // projection, where hidden sessions have already been filtered out.
+    state.sessions.iter().rev().find(|session| {
+        telegram_session_is_project_root(session, project_id)
+            && telegram_session_is_prompt_target(session)
+    })
+}
+
 /// Handles send fresh Telegram digest from response.
 fn send_fresh_telegram_digest_from_response(
     telegram: &impl TelegramMessageSender,
@@ -601,7 +622,7 @@ fn render_telegram_projects(
         let session_count = state
             .sessions
             .iter()
-            .filter(|session| session.project_id.as_deref() == Some(project_id.as_str()))
+            .filter(|session| telegram_session_is_project_root(session, project_id))
             .count();
         let sessions = match session_count {
             0 => "0 sessions".to_owned(),
@@ -650,6 +671,16 @@ fn telegram_session_label(session: &TelegramStateSession) -> &str {
 
 fn telegram_session_is_project_root(session: &TelegramStateSession, project_id: &str) -> bool {
     session.project_id.as_deref() == Some(project_id) && session.parent_delegation_id.is_none()
+}
+
+fn telegram_session_is_prompt_target(session: &TelegramStateSession) -> bool {
+    match session.status {
+        TelegramSessionStatus::Active
+        | TelegramSessionStatus::Idle
+        | TelegramSessionStatus::Approval
+        | TelegramSessionStatus::Unknown => true,
+        TelegramSessionStatus::Error => false,
+    }
 }
 
 fn telegram_session_status_sort_rank(status: &TelegramSessionStatus) -> u8 {

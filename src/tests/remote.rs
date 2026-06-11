@@ -236,9 +236,10 @@ fn local_ssh_start_error_tags_spawn_failure_as_remote_connection_unavailable() {
 }
 
 // Pins that the assembled ssh argv places a literal `--` separator
-// before `alice@example.com` and the remote `termal server` command.
+// before `alice@example.com` and the direct managed server command.
 // Guards against user/host strings being mistakenly interpreted as ssh
-// options if the `--` ever disappears.
+// options if the `--` ever disappears, and against managed startup gaining a
+// POSIX-shell dependency that would break Windows SSH remotes.
 #[test]
 fn remote_ssh_command_args_insert_double_dash_before_target() {
     let remote = RemoteConfig {
@@ -260,6 +261,413 @@ fn remote_ssh_command_args_insert_double_dash_before_target() {
         .expect("SSH args should include `--` before the target");
     assert_eq!(args[separator_index + 1], "alice@example.com");
     assert_eq!(&args[separator_index + 2..], ["termal", "server"]);
+}
+
+// Pins the one-shot SSH argv used by remote registration/upgrade actions.
+// Guards against accidentally opening a tunnel, dropping the `--` target
+// separator, or failing to quote the shell script as a single remote word.
+#[test]
+fn remote_ssh_one_shot_command_args_run_quoted_script_without_tunnel() {
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(2222),
+        user: Some("alice".to_owned()),
+    };
+
+    let args = remote_ssh_one_shot_command_args(&remote, "echo 'remote ok'")
+        .expect("one-shot SSH args should build");
+
+    assert!(!args.iter().any(|arg| arg == "-L"));
+    assert!(!args.iter().any(|arg| arg == "-N"));
+    assert!(args.iter().any(|arg| arg == "ServerAliveInterval=15"));
+    assert!(args.iter().any(|arg| arg == "ServerAliveCountMax=3"));
+    let separator_index = args
+        .iter()
+        .position(|arg| arg == "--")
+        .expect("one-shot SSH args should include `--` before the target");
+    assert_eq!(args[separator_index + 1], "alice@example.com");
+    assert_eq!(
+        &args[separator_index + 2..separator_index + 4],
+        ["sh", "-lc"]
+    );
+    assert_eq!(args[separator_index + 4], "'echo '\\''remote ok'\\'''");
+}
+
+// Pins the one-shot SSH argv used for Windows remote lifecycle actions.
+// Guards against passing raw PowerShell script text through the remote shell
+// instead of using PowerShell's encoded-command form.
+#[test]
+fn remote_ssh_powershell_one_shot_command_args_use_encoded_command() {
+    let remote = RemoteConfig {
+        id: "ssh-win".to_owned(),
+        name: "SSH Windows".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("windows.example.com".to_owned()),
+        port: Some(2222),
+        user: Some("alice".to_owned()),
+    };
+
+    let args = remote_ssh_powershell_one_shot_command_args(&remote, "Write-Output 'remote ok'")
+        .expect("PowerShell one-shot SSH args should build");
+
+    assert!(!args.iter().any(|arg| arg == "-L"));
+    assert!(args.iter().any(|arg| arg == "ServerAliveInterval=15"));
+    let separator_index = args
+        .iter()
+        .position(|arg| arg == "--")
+        .expect("one-shot SSH args should include `--` before the target");
+    assert_eq!(args[separator_index + 1], "alice@windows.example.com");
+    assert_eq!(args[separator_index + 2], "powershell");
+    assert!(args.iter().any(|arg| arg == "-EncodedCommand"));
+    assert!(
+        !args
+            .iter()
+            .any(|arg| arg.contains("Write-Output 'remote ok'")),
+        "raw PowerShell script should not be exposed in argv: {args:?}"
+    );
+}
+
+// Pins the POSIX shell quoting helper used to embed local values in remote
+// scripts. Guards against source paths with single quotes splitting the
+// generated shell word.
+#[test]
+fn shell_quote_escapes_single_quotes() {
+    assert_eq!(shell_quote("a'b c"), "'a'\\''b c'");
+}
+
+// Pins the PowerShell quoting helper used to embed Windows checkout paths in
+// registration scripts.
+#[test]
+fn powershell_quote_escapes_single_quotes() {
+    assert_eq!(
+        powershell_quote(r"C:\Users\O'Hara\TermAl"),
+        r"'C:\Users\O''Hara\TermAl'"
+    );
+}
+
+// Pins the registration script contract: it validates the checkout, writes
+// metadata, and verifies build prerequisites without starting a remote server.
+// Guards against the Remotes "Register TermAl" action mutating process state
+// instead of only recording the checkout used by future upgrades.
+#[test]
+fn remote_register_script_records_checkout_metadata() {
+    let script = remote_register_script("~/src/TermAl").expect("script should build");
+    let RemoteActionScript::Posix(script) = script else {
+        panic!("POSIX source path should build a POSIX registration script");
+    };
+
+    assert!(script.contains("SOURCE='~/src/TermAl'"));
+    assert!(script.contains("Cargo.toml"));
+    assert!(script.contains("package name termal"));
+    assert!(script.contains("command -v git"));
+    assert!(script.contains("command -v cargo"));
+    assert!(script.contains("$HOME/.termal/remote-install.json"));
+    assert!(script.contains("\"sourcePath\":\"~/src/TermAl\""));
+    assert!(script.contains("\"platform\":\"posix\""));
+    assert!(script.contains("registered TermAl checkout"));
+}
+
+fn extract_supported_posix_metadata_string(metadata: &str, key: &str) -> Option<String> {
+    let key_marker = format!("\"{key}\"");
+    metadata.lines().find_map(|line| {
+        let (_, after_key) = line.split_once(&key_marker)?;
+        let after_colon = after_key.trim_start().strip_prefix(':')?.trim_start();
+        let value = after_colon.strip_prefix('"')?;
+        let end = value.find('"')?;
+        Some(value[..end].to_owned())
+    })
+}
+
+// Pins the POSIX upgrade script's shell-only metadata extraction contract.
+// Registration must keep emitting unescaped values that the sed patterns can
+// read, and the upgrade script must tolerate compact or pretty JSON spacing.
+#[test]
+fn remote_posix_upgrade_metadata_extraction_matches_registration_json() {
+    assert_eq!(
+        POSIX_METADATA_PLATFORM_SED,
+        r#"s/.*"platform"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p"#
+    );
+    assert_eq!(
+        POSIX_METADATA_SOURCE_PATH_SED,
+        r#"s/.*"sourcePath"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p"#
+    );
+
+    let compact = remote_install_metadata_json("~/src/TermAl", RemoteInstallPlatform::Posix)
+        .expect("metadata should serialize");
+    assert_eq!(
+        extract_supported_posix_metadata_string(&compact, "sourcePath").as_deref(),
+        Some("~/src/TermAl")
+    );
+    assert_eq!(
+        extract_supported_posix_metadata_string(&compact, "platform").as_deref(),
+        Some("posix")
+    );
+
+    let pretty = "{\n  \"sourcePath\" : \"~/src/TermAl\",\n  \"platform\" : \"posix\"\n}";
+    assert_eq!(
+        extract_supported_posix_metadata_string(pretty, "sourcePath").as_deref(),
+        Some("~/src/TermAl")
+    );
+    assert_eq!(
+        extract_supported_posix_metadata_string(pretty, "platform").as_deref(),
+        Some("posix")
+    );
+
+    let script = remote_posix_upgrade_script();
+    assert!(script.contains(POSIX_METADATA_PLATFORM_SED));
+    assert!(script.contains(POSIX_METADATA_SOURCE_PATH_SED));
+}
+
+// Pins that Windows-looking checkout paths select the PowerShell lifecycle
+// script and preserve the Windows binary/install contract.
+#[test]
+fn remote_register_script_supports_windows_checkout_paths() {
+    let script = remote_register_script(r"C:\Users\O'Hara\TermAl").expect("script should build");
+    let RemoteActionScript::WindowsPowerShell(script) = script else {
+        panic!("Windows source path should build a PowerShell registration script");
+    };
+
+    assert!(script.contains(r"$Source = 'C:\Users\O''Hara\TermAl'"));
+    assert!(script.contains("ConvertTo-Json -Compress"));
+    assert!(script.contains("platform = 'windows'"));
+    assert!(script.contains("remote-install.json"));
+    assert!(script.contains("registered TermAl checkout"));
+}
+
+// Pins local validation before script generation so a bad checkout path is
+// rejected before being copied into a remote shell command or remote metadata.
+#[test]
+fn remote_register_script_rejects_empty_control_and_posix_json_unsafe_paths() {
+    let empty = remote_register_script("   ").expect_err("empty path should fail");
+    assert_eq!(empty.status, StatusCode::BAD_REQUEST);
+    assert_eq!(empty.message, "remote TermAl checkout path cannot be empty");
+
+    let control = remote_register_script("good\nbad").expect_err("control path should fail");
+    assert_eq!(control.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        control.message,
+        "remote TermAl checkout path cannot contain control characters"
+    );
+
+    let quote = remote_register_script("bad\"path").expect_err("quote path should fail");
+    assert_eq!(quote.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        quote.message,
+        "remote TermAl checkout path cannot contain quotes"
+    );
+
+    let overlong_path = "a".repeat(4097);
+    let overlong = remote_register_script(&overlong_path).expect_err("long path should fail");
+    assert_eq!(overlong.status, StatusCode::BAD_REQUEST);
+    assert_eq!(overlong.message, "remote TermAl checkout path is too long");
+}
+
+// Pins that lifecycle action output is byte-capped before later display
+// sanitization. Guards against huge remote stdout/stderr growing memory even
+// though UI output is eventually character-truncated.
+#[test]
+fn remote_action_stream_reader_caps_buffered_output_bytes() {
+    let input = vec![b'a'; MAX_REMOTE_ACTION_OUTPUT_BYTES + 1024];
+    let output = read_capped_remote_action_stream(std::io::Cursor::new(input));
+
+    assert_eq!(output.len(), MAX_REMOTE_ACTION_OUTPUT_BYTES);
+}
+
+// Pins the user-facing remote action sanitizer. Guards against remote output
+// injecting terminal/control escapes into the UI and against oversized Unicode
+// output exceeding the display cap.
+#[test]
+fn remote_action_output_sanitizer_strips_controls_and_truncates_chars() {
+    let mut input = b"ok\x1b[31m\n".to_vec();
+    input.extend("å".repeat(MAX_REMOTE_ACTION_OUTPUT_CHARS + 10).as_bytes());
+
+    let output = sanitize_remote_action_output(&input);
+
+    assert!(!output.contains('\u{1b}'));
+    assert!(output.starts_with("ok[31m\n"));
+    assert!(output.ends_with("..."));
+    assert_eq!(output.chars().count(), MAX_REMOTE_ACTION_OUTPUT_CHARS);
+}
+
+// Pins the upgrade script contract. It consumes registration metadata,
+// fast-forwards the checkout, builds release TermAl, and installs the binary
+// under the path managed SSH startup prefers.
+#[test]
+fn remote_posix_upgrade_script_builds_and_installs_registered_checkout() {
+    let script = remote_posix_upgrade_script();
+
+    assert!(script.contains("$HOME/.termal/remote-install.json"));
+    assert!(script.contains("platform"));
+    assert!(script.contains("Windows PowerShell lifecycle"));
+    assert!(script.contains("git pull --ff-only"));
+    assert!(script.contains("cargo build --release --bin termal"));
+    assert!(script.contains("$HOME/.termal/bin/termal.new"));
+    assert!(script.contains("mv \"$HOME/.termal/bin/termal.new\" \"$HOME/.termal/bin/termal\""));
+    assert!(script.contains("$HOME/.termal/bin/termal\" --version"));
+}
+
+// Pins the Windows upgrade script contract. It reads the same metadata file,
+// builds the release binary, and installs `termal.exe` under the Windows remote
+// bin directory.
+#[test]
+fn remote_windows_upgrade_script_builds_and_installs_termal_exe() {
+    let script = remote_windows_upgrade_script();
+
+    assert!(script.contains("remote-install.json"));
+    assert!(script.contains("git pull --ff-only"));
+    assert!(script.contains("cargo build --release --bin termal"));
+    assert!(script.contains("target\\release\\termal.exe"));
+    assert!(script.contains("termal.exe.new"));
+    assert!(script.contains("termal.exe"));
+    assert!(script.contains("& $Binary --version"));
+}
+
+// Pins fallback selection for the POSIX -> Windows upgrade path. Guards against
+// hiding actionable POSIX precondition errors behind secondary PowerShell
+// failures.
+#[test]
+fn remote_upgrade_windows_fallback_uses_only_platform_mismatch_signals() {
+    assert!(remote_upgrade_should_try_windows_parts(
+        Some(127),
+        b"anything"
+    ));
+    assert!(remote_upgrade_should_try_windows_parts(
+        Some(2),
+        b"remote registration metadata targets Windows PowerShell lifecycle"
+    ));
+    assert!(remote_upgrade_should_try_windows_parts(
+        Some(2),
+        b"sh: command not found"
+    ));
+    assert!(remote_upgrade_should_try_windows_parts(
+        Some(2),
+        b"'sh' is not recognized"
+    ));
+
+    assert!(!remote_upgrade_should_try_windows_parts(
+        Some(2),
+        b"remote is not registered; run Register TermAl first"
+    ));
+    assert!(!remote_upgrade_should_try_windows_parts(
+        Some(2),
+        b"remote registration metadata is missing sourcePath"
+    ));
+}
+
+// Pins that the backend refuses remote registration/upgrade for missing,
+// disabled, or local remotes before attempting to spawn SSH.
+#[test]
+fn remote_action_lookup_rejects_unusable_remotes_before_ssh() {
+    let state = test_app_state();
+
+    let missing = state
+        .register_remote_termal(
+            "missing",
+            RemoteRegisterRequest {
+                source_path: "~/src/TermAl".to_owned(),
+            },
+        )
+        .expect_err("missing remote should fail before SSH");
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+
+    let disabled_remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: false,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: None,
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
+            default_codex_reasoning_effort: None,
+            default_claude_approval_mode: None,
+            default_claude_effort: None,
+            remotes: Some(vec![RemoteConfig::local(), disabled_remote]),
+        })
+        .expect("remote settings should save");
+
+    let disabled = state
+        .register_remote_termal(
+            "ssh-lab",
+            RemoteRegisterRequest {
+                source_path: "~/src/TermAl".to_owned(),
+            },
+        )
+        .expect_err("disabled remote should fail before SSH");
+    assert_eq!(disabled.status, StatusCode::BAD_REQUEST);
+    assert_eq!(disabled.message, "remote `SSH Lab` is disabled");
+
+    let local = state
+        .register_remote_termal(
+            "local",
+            RemoteRegisterRequest {
+                source_path: "~/src/TermAl".to_owned(),
+            },
+        )
+        .expect_err("local remote should not support SSH registration");
+    assert_eq!(local.status, StatusCode::BAD_REQUEST);
+    assert_eq!(local.message, "remote `Local` does not use SSH transport");
+}
+
+// Pins that malformed register JSON uses the project-standard ApiError
+// envelope instead of Axum's raw rejection response.
+#[tokio::test]
+async fn remote_register_json_rejection_uses_api_error_envelope() {
+    let (status, response): (StatusCode, Value) = request_json(
+        &app_router(test_app_state()),
+        Request::builder()
+            .method("POST")
+            .uri("/api/remotes/ssh-lab/register")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{"))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        response["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("invalid remote register request JSON")),
+        "unexpected response: {response}"
+    );
+}
+
+// Pins the backend in-flight guard that complements the UI's per-tab pending
+// state. Guards against two browser tabs or direct API retries running
+// overlapping lifecycle actions against the same remote checkout.
+#[test]
+fn remote_lifecycle_action_guard_rejects_overlap_until_released() {
+    let state = test_app_state();
+
+    let first = state
+        .begin_remote_lifecycle_action("ssh-lab", "SSH Lab")
+        .expect("first lifecycle action should start");
+    let overlap = state
+        .begin_remote_lifecycle_action("ssh-lab", "SSH Lab")
+        .expect_err("overlapping lifecycle action should fail");
+    assert_eq!(overlap.status, StatusCode::CONFLICT);
+    assert_eq!(
+        overlap.message,
+        "remote `SSH Lab` already has a lifecycle action running"
+    );
+
+    drop(first);
+
+    state
+        .begin_remote_lifecycle_action("ssh-lab", "SSH Lab")
+        .expect("lifecycle action should start again after guard release");
 }
 
 // Pins that reconciling a remote out of the config list stops its SSE

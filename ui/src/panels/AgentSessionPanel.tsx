@@ -66,6 +66,7 @@ import {
   includeUndeferredMessageTail,
   useInitialActiveTranscriptMessages,
 } from "./useInitialActiveTranscriptMessages";
+import { requestSessionFullHydration } from "../session-hydration-demand";
 import { MessageMetaMarkerMenuProvider } from "../message-cards";
 import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
 import type {
@@ -475,6 +476,19 @@ const SessionConversationPage = memo(function SessionConversationPage({
     conversationSearchQuery.trim().length > 0 ||
     conversationSearchMatchedItemKeys.size > 0 ||
     conversationSearchActiveItemKey !== null;
+  useEffect(() => {
+    if (
+      session.messagesLoaded === false &&
+      (hasConversationSearch || visibleMarkers.length > 0)
+    ) {
+      requestSessionFullHydration(session.id);
+    }
+  }, [
+    hasConversationSearch,
+    session.id,
+    session.messagesLoaded,
+    visibleMarkers.length,
+  ]);
   const baseVisibleMessages = isActive
     ? includeUndeferredMessageTail(deferredMessages, session.messages)
     : session.messages;
@@ -490,9 +504,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
     scrollContainerRef,
     sessionId: session.id,
   });
-  const overviewMessages = isInitialTranscriptWindowActive
-    ? baseVisibleMessages
-    : visibleMessages;
+  const overviewMessages = visibleMessages;
   const visiblePendingPromptsBase = isActive ? deferredPendingPrompts : pendingPrompts;
   const visibleMessageIds = useMemo(
     () => new Set(visibleMessages.map((message) => message.id)),
@@ -663,13 +675,9 @@ const SessionConversationPage = memo(function SessionConversationPage({
     sessionId: session.id,
     virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
   });
-  // Build navigation target maps from the full transcript, not the windowed
-  // tail. The initial-transcript window can be as small as
-  // `SESSION_TAIL_WINDOW_MESSAGE_COUNT` (20) messages, so navigating delegations
-  // / prompts based on the window would silently skip anything off-window.
-  // Off-window targets trigger full-transcript hydration and a retry in
-  // `useConversationMarkerJump`, so buttons remain accurate while the first
-  // paint stays cheap.
+  // Navigation scans cheap message metadata from the loaded transcript slice.
+  // Missing off-window targets request full hydration and retry through the
+  // marker jump path.
   const messageNavigationTargetMaps = useMessageNavigationTargetMaps(
     session.messages,
   );

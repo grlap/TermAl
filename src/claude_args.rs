@@ -258,6 +258,7 @@ fn parse_claude_effort_level(value: &str) -> Option<ClaudeEffortLevel> {
         "low" => Some(ClaudeEffortLevel::Low),
         "medium" => Some(ClaudeEffortLevel::Medium),
         "high" => Some(ClaudeEffortLevel::High),
+        "xhigh" => Some(ClaudeEffortLevel::XHigh),
         "max" => Some(ClaudeEffortLevel::Max),
         _ => None,
     }

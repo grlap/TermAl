@@ -15,6 +15,7 @@ import {
   SESSION_TAIL_RENDER_MIN_MESSAGES,
   SESSION_TAIL_WINDOW_MESSAGE_COUNT,
 } from "../session-tail-policy";
+import { requestSessionFullHydration } from "../session-hydration-demand";
 import type { Message } from "../types";
 
 const INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX = 160;
@@ -192,6 +193,7 @@ export function useInitialActiveTranscriptMessages({
       return false;
     }
 
+    requestSessionFullHydration(sessionId);
     setHydrationState((current) =>
       current.sessionId === sessionId && current.hydrated
         ? current

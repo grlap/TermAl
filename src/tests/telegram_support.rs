@@ -155,6 +155,7 @@ pub(super) struct FakeTelegramPromptClient {
     pub(super) events: RefCell<Vec<String>>,
     pub(super) session_responses: RefCell<VecDeque<TelegramSessionFetchResponse>>,
     pub(super) state_session_reads: Cell<usize>,
+    pub(super) state_sessions_error: Option<String>,
     pub(super) state_sessions: TelegramStateSessionsResponse,
     pub(super) send_error: Option<String>,
     pub(super) sent_prompts: RefCell<Vec<(String, String)>>,
@@ -171,6 +172,7 @@ impl FakeTelegramPromptClient {
             events: RefCell::new(Vec::new()),
             session_responses: RefCell::new(VecDeque::from([session_response])),
             state_session_reads: Cell::new(0),
+            state_sessions_error: None,
             state_sessions: TelegramStateSessionsResponse {
                 projects: Vec::new(),
                 sessions: Vec::new(),
@@ -185,6 +187,11 @@ impl FakeTelegramPromptClient {
         state_sessions: TelegramStateSessionsResponse,
     ) -> Self {
         self.state_sessions = state_sessions;
+        self
+    }
+
+    pub(super) fn with_state_sessions_error(mut self, error: &str) -> Self {
+        self.state_sessions_error = Some(error.to_owned());
         self
     }
 
@@ -244,6 +251,9 @@ impl TelegramPromptClient for FakeTelegramPromptClient {
         self.events.borrow_mut().push("state-sessions".to_owned());
         self.state_session_reads
             .set(self.state_session_reads.get() + 1);
+        if let Some(error) = self.state_sessions_error.as_deref() {
+            bail!("{error}");
+        }
         Ok(self.state_sessions.clone())
     }
 
@@ -316,6 +326,27 @@ pub(super) fn telegram_project_digest(primary_session_id: Option<&str>) -> Proje
         proposed_actions: vec![],
         deep_link: None,
         source_message_ids: vec![],
+    }
+}
+
+pub(super) fn telegram_state_sessions_with_project_session(
+    session_id: &str,
+    parent_delegation_id: Option<&str>,
+) -> TelegramStateSessionsResponse {
+    TelegramStateSessionsResponse {
+        projects: vec![TelegramStateProject {
+            id: "project-1".to_owned(),
+            name: "TermAl".to_owned(),
+        }],
+        sessions: vec![TelegramStateSession {
+            id: session_id.to_owned(),
+            name: "Project Session".to_owned(),
+            project_id: Some("project-1".to_owned()),
+            status: TelegramSessionStatus::Idle,
+            message_count: 0,
+            session_mutation_stamp: None,
+            parent_delegation_id: parent_delegation_id.map(str::to_owned),
+        }],
     }
 }
 
