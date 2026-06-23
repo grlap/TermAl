@@ -1,8 +1,12 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ConversationOverviewRail } from "./ConversationOverviewRail";
+import {
+  buildCompactOverviewVisualSegments,
+  ConversationOverviewRail,
+} from "./ConversationOverviewRail";
 import { CONVERSATION_COMPOSER_INPUT_DATASET_KEY } from "./conversation-composer-focus";
+import type { ConversationOverviewSegment } from "./conversation-overview-map";
 import type { VirtualizedConversationLayoutSnapshot } from "./VirtualizedConversationMessageList";
 import { DEFAULT_CONVERSATION_MARKER_COLOR } from "../conversation-marker-colors";
 import type { Message } from "../types";
@@ -37,6 +41,36 @@ function commandMessages(count: number): Message[] {
     output: "ok",
     status: index % 2 === 0 ? "error" : "success",
   }));
+}
+
+function overviewSegment({
+  id,
+  index,
+  kind = "assistant_text",
+  mapTopPx,
+  mapHeightPx = 2,
+  status = null,
+}: {
+  id: string;
+  index: number;
+  kind?: ConversationOverviewSegment["kind"];
+  mapTopPx: number;
+  mapHeightPx?: number;
+  status?: ConversationOverviewSegment["status"];
+}): ConversationOverviewSegment {
+  return {
+    id,
+    startItemIndex: index,
+    endItemIndex: index,
+    startMessageIndex: index,
+    endMessageIndex: index,
+    itemCount: 1,
+    kind,
+    status,
+    mapTopPx,
+    mapHeightPx,
+    markerIds: [],
+  };
 }
 
 function layoutSnapshot(messages: Message[]): VirtualizedConversationLayoutSnapshot {
@@ -595,7 +629,7 @@ describe("ConversationOverviewRail", () => {
   });
 
   it("switches from per-segment buttons to compact mode above the segment threshold", () => {
-    const boundaryMessages = commandMessages(160);
+    const boundaryMessages = commandMessages(64);
     const { container, unmount } = render(
       <ConversationOverviewRail
         messages={boundaryMessages}
@@ -607,7 +641,7 @@ describe("ConversationOverviewRail", () => {
     );
 
     expect(container.querySelectorAll(".conversation-overview-segment")).toHaveLength(
-      160,
+      64,
     );
     expect(
       screen.queryByTestId("conversation-overview-visual-track"),
@@ -615,7 +649,7 @@ describe("ConversationOverviewRail", () => {
 
     unmount();
 
-    const compactMessages = commandMessages(161);
+    const compactMessages = commandMessages(65);
     const compactRender = render(
       <ConversationOverviewRail
         messages={compactMessages}
@@ -632,8 +666,82 @@ describe("ConversationOverviewRail", () => {
     expect(screen.getByTestId("conversation-overview-visual-track")).toBeInTheDocument();
     expect(screen.getByLabelText("Conversation overview")).toHaveAttribute(
       "aria-valuemax",
-      "161",
+      "65",
     );
+  });
+
+  it("keeps compact visual segments filled instead of sampling transparent gaps", () => {
+    const gappedSegments: ConversationOverviewSegment[] = Array.from(
+      { length: 6 },
+      (_, index) =>
+        overviewSegment({
+          id: `segment-${index + 1}`,
+          index,
+          kind: index % 2 === 0 ? "command" : "assistant_text",
+          mapTopPx: index * 10,
+          status: index % 2 === 0 ? "success" : null,
+        }),
+    );
+    const visualSegments = buildCompactOverviewVisualSegments(gappedSegments, 60);
+    const lastVisualSegment = visualSegments[visualSegments.length - 1];
+
+    expect(visualSegments.length).toBeGreaterThan(0);
+    expect(visualSegments[0]?.topPx).toBe(0);
+    expect(
+      Math.abs(
+        (lastVisualSegment?.topPx ?? 0) +
+          (lastVisualSegment?.heightPx ?? 0) -
+          60,
+      ),
+    ).toBeLessThan(0.01);
+    expect(
+      visualSegments.every((segment, index) => {
+        const previousSegment = visualSegments[index - 1];
+        if (!previousSegment) {
+          return true;
+        }
+        return (
+          Math.abs(
+            previousSegment.topPx +
+              previousSegment.heightPx -
+              segment.topPx,
+          ) < 0.01
+        );
+      }),
+    ).toBe(true);
+    expect(
+      visualSegments.every(
+        (segment) =>
+          segment.fill.trim().length > 0 && segment.fill !== "transparent",
+      ),
+    ).toBe(true);
+  });
+
+  it("renders compact visual segments with non-empty fills", () => {
+    const messages = commandMessages(65);
+    const { container } = render(
+      <ConversationOverviewRail
+        messages={messages}
+        layoutSnapshot={layoutSnapshot(messages)}
+        minMessages={4}
+        maxHeightPx={1024}
+        onNavigate={() => {}}
+      />,
+    );
+
+    const visualSegments = Array.from(
+      container.querySelectorAll<HTMLElement>(
+        ".conversation-overview-visual-segment",
+      ),
+    );
+
+    expect(visualSegments.length).toBeGreaterThan(0);
+    expect(
+      visualSegments.every((segment) => {
+        const background = segment.style.background.trim();
+        return background.length > 0 && background !== "transparent";
+      }),
+    ).toBe(true);
   });
 
   it("supports compact keyboard navigation from the live viewport segment", () => {

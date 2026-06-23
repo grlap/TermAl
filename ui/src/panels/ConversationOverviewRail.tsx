@@ -32,7 +32,9 @@ import { normalizeConversationMarkerColor } from "../conversation-marker-colors"
 import type { Message } from "../types";
 
 export const CONVERSATION_OVERVIEW_MIN_MESSAGES = 80;
-const CONVERSATION_OVERVIEW_COMPACT_SEGMENT_THRESHOLD = 160;
+// Segment-based: compact alternating/status-heavy transcripts as soon as the
+// rail appears, while homogeneous long runs can stay in per-segment mode.
+const CONVERSATION_OVERVIEW_COMPACT_SEGMENT_THRESHOLD = 64;
 const CONVERSATION_OVERVIEW_COMPACT_VISUAL_SEGMENT_COUNT = 96;
 const CONVERSATION_OVERVIEW_COMPACT_NAVIGATION_STALE_DELAY_MS = 2_000;
 const EMPTY_CONVERSATION_OVERVIEW_MARKERS: readonly ConversationOverviewMarkerInput[] =
@@ -583,7 +585,7 @@ function resolvePointerEventTarget(event: PointerEvent<HTMLElement>) {
   return event.target instanceof HTMLElement ? event.target : null;
 }
 
-function buildCompactOverviewVisualSegments(
+export function buildCompactOverviewVisualSegments(
   segments: readonly ConversationOverviewSegment[],
   totalHeightPx: number,
 ) {
@@ -616,11 +618,7 @@ function buildCompactOverviewVisualSegments(
       sourceSegmentIndex += 1;
     }
 
-    const sourceSegment = segments[sourceSegmentIndex];
-    const fill =
-      sourceSegment && segmentContainsY(sourceSegment, sampleY)
-        ? overviewSegmentCompactFill(sourceSegment)
-        : "transparent";
+    const fill = overviewSegmentCompactFill(segments[sourceSegmentIndex]);
     const previousVisualSegment = visualSegments[visualSegments.length - 1];
     if (
       previousVisualSegment &&
@@ -644,12 +642,6 @@ function buildCompactOverviewVisualSegments(
   }
 
   return visualSegments;
-}
-
-function segmentContainsY(segment: ConversationOverviewSegment, y: number) {
-  const segmentTopPx = segment.mapTopPx;
-  const segmentBottomPx = segment.mapTopPx + segment.mapHeightPx;
-  return y >= segmentTopPx && y <= segmentBottomPx;
 }
 
 function overviewSegmentCompactFill(segment: ConversationOverviewSegment) {
