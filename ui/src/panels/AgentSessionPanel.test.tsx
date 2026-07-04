@@ -998,7 +998,7 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(screen.getByText("Waiting for the next chunk of output...")).toBeInTheDocument();
   });
 
-  it("suppresses a stale active live-turn tail after turn-finalizing file output", () => {
+  it("keeps the live-turn indicator visible while active, even after file-change output", () => {
     const activeSession = makeSession("session-a", {
       status: "active",
       messages: [
@@ -1029,7 +1029,7 @@ describe("AgentSessionPanel conversation caching", () => {
       waitingIndicatorPrompt: null,
     });
 
-    expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
+    expect(screen.getByText("Live turn")).toBeInTheDocument();
   });
 
   it("renders conversation marker chips and navigates between markers", () => {

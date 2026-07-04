@@ -52,28 +52,3 @@ export function hasAgentOutputAfterLatestUserPrompt(messages: readonly Message[]
 
   return sawAgentOutputAfterLatestUserPrompt;
 }
-
-export function hasTurnFinalizingOutputAfterLatestUserPrompt(
-  messages: readonly Message[],
-) {
-  let sawLatestUserPrompt = false;
-  let sawTurnFinalizingOutputAfterLatestUserPrompt = false;
-
-  for (const message of messages) {
-    if (message.author === "you") {
-      sawLatestUserPrompt = true;
-      sawTurnFinalizingOutputAfterLatestUserPrompt = false;
-      continue;
-    }
-
-    if (
-      sawLatestUserPrompt &&
-      message.author === "assistant" &&
-      message.type === "fileChanges"
-    ) {
-      sawTurnFinalizingOutputAfterLatestUserPrompt = true;
-    }
-  }
-
-  return sawTurnFinalizingOutputAfterLatestUserPrompt;
-}

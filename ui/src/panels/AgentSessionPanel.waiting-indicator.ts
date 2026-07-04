@@ -3,10 +3,7 @@
 // Split from: ui/src/panels/AgentSessionPanel.tsx.
 
 import type { Message, Session } from "../types";
-import {
-  hasAgentOutputAfterLatestUserPrompt,
-  hasTurnFinalizingOutputAfterLatestUserPrompt,
-} from "../SessionPaneView.waiting-indicator";
+import { hasAgentOutputAfterLatestUserPrompt } from "../SessionPaneView.waiting-indicator";
 import type { WaitingIndicatorKind } from "./AgentSessionPanel.types";
 
 type ShouldShowAgentSessionWaitingIndicatorOptions = {
@@ -26,8 +23,7 @@ export function shouldShowAgentSessionWaitingIndicator({
     showWaitingIndicator &&
     (waitingIndicatorKind === "delegationWait" ||
       waitingIndicatorKind === "send" ||
-      (sessionStatus === "active" &&
-        !hasTurnFinalizingOutputAfterLatestUserPrompt(visibleMessages)) ||
+      sessionStatus === "active" ||
       !hasAgentOutputAfterLatestUserPrompt(visibleMessages))
   );
 }

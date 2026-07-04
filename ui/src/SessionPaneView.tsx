@@ -135,7 +135,6 @@ import {
 import {
   delegationWaitIndicatorPrompt,
   hasAgentOutputAfterLatestUserPrompt,
-  hasTurnFinalizingOutputAfterLatestUserPrompt,
 } from "./SessionPaneView.waiting-indicator";
 import { resolveSessionPaneScrollStateKey } from "./SessionPaneView.scroll-key";
 import { useSessionPaneScrollState } from "./SessionPaneView.scroll";
@@ -444,14 +443,17 @@ export function SessionPaneView({
     !isSessionBusy &&
     !isSending &&
     activeDelegationWaits.length > 0;
+  // The live-turn indicator mirrors the authoritative backend turn state:
+  // `status === "active"` means a turn is in progress (the agent is working),
+  // flipped to idle only on the turn's `result` event. We deliberately do NOT
+  // infer "turn done" from message content — an agent can emit a file-change
+  // summary and keep working (e.g. run a command), so a content heuristic
+  // produces false negatives that make a busy session read as idle.
   const showLiveTurnWaitingIndicator =
     isSessionTabActive &&
     pane.viewMode === "session" &&
     Boolean(activeSession) &&
-    ((activeSession?.status === "active" &&
-      !hasTurnFinalizingOutputAfterLatestUserPrompt(
-        activeSession?.messages ?? [],
-      )) ||
+    (activeSession?.status === "active" ||
       (!isSessionBusy &&
         isSending &&
         !hasAgentOutputAfterLatestUserPrompt(activeSession?.messages ?? [])));

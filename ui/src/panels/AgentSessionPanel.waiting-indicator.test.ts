@@ -63,7 +63,7 @@ describe("shouldShowAgentSessionWaitingIndicator", () => {
     ).toBe(false);
   });
 
-  it("keeps active live-turn waits visible until turn-finalizing output appears", () => {
+  it("keeps active live-turn waits visible while the turn is active, even after file-change output", () => {
     expect(
       shouldShowAgentSessionWaitingIndicator({
         showWaitingIndicator: true,
@@ -73,6 +73,9 @@ describe("shouldShowAgentSessionWaitingIndicator", () => {
       }),
     ).toBe(true);
 
+    // A file-change summary is not a "turn done" signal — the agent can edit
+    // files and keep working (e.g. run a command). While the backend still
+    // reports `active`, the live-turn indicator must stay visible.
     expect(
       shouldShowAgentSessionWaitingIndicator({
         showWaitingIndicator: true,
@@ -80,6 +83,6 @@ describe("shouldShowAgentSessionWaitingIndicator", () => {
         sessionStatus: "active",
         visibleMessages: [userMessage, fileChangesMessage],
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
