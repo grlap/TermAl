@@ -31,7 +31,7 @@ import type {
 import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
 import type { Message } from "../types";
 
-export const CONVERSATION_OVERVIEW_MIN_MESSAGES = 80;
+export const CONVERSATION_OVERVIEW_MIN_MESSAGES = 30;
 // Segment-based: compact alternating/status-heavy transcripts as soon as the
 // rail appears, while homogeneous long runs can stay in per-segment mode.
 const CONVERSATION_OVERVIEW_COMPACT_SEGMENT_THRESHOLD = 64;

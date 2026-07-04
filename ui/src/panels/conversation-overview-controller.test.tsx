@@ -206,9 +206,44 @@ function OverviewGrowthHarness({
   );
 }
 
+// Reports the pure size gate (`shouldRender`) only. `isActive: false` keeps the
+// controller from scheduling async rail activation, so the boundary assertion
+// stays synchronous and free of act() warnings.
+function OverviewGateHarness({ messageCount }: { messageCount: number }) {
+  const scrollContainerRef = useRef<HTMLElement | null>(
+    document.createElement("section"),
+  );
+  const overview = useConversationOverviewController({
+    agent: "Codex",
+    isActive: false,
+    messageCount,
+    scrollContainerRef,
+    sessionId: "session-a",
+    showWaitingIndicator: false,
+    waitingIndicatorPrompt: null,
+  });
+
+  return (
+    <output data-testid="overview-gate">{overview.shouldRender ? "on" : "off"}</output>
+  );
+}
+
 describe("useConversationOverviewController", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  // Pins the conversation overview / transcript virtualization gate at 30
+  // messages (CONVERSATION_OVERVIEW_MIN_MESSAGES, shared with virtualization via
+  // AgentSessionPanel). Hard-coded boundary counts so an accidental edit to the
+  // shared constant is caught; the other gated tests use counts of 1 and 90 and
+  // miss the 30-79 band.
+  it("gates the overview rail at 30 messages, not below", () => {
+    const { rerender } = render(<OverviewGateHarness messageCount={29} />);
+    expect(screen.getByTestId("overview-gate")).toHaveTextContent("off");
+
+    rerender(<OverviewGateHarness messageCount={30} />);
+    expect(screen.getByTestId("overview-gate")).toHaveTextContent("on");
   });
 
   it("activates long-session rails from idle work after transcript paint frames", () => {

@@ -418,7 +418,11 @@ describe("AgentSessionPanel virtualization", () => {
       const { container } = renderSessionPanelWithDefaults({
         activeSession: makeSession("active-session", {
           status: "active",
-          messages: makeTextMessages(90),
+          // 40 keeps the rail in per-segment (button) mode: still long enough to
+          // render the rail + virtualize (>= the 30 gate), but under the
+          // 64-segment compact threshold that turns alternating transcripts into
+          // visual spans instead of named buttons.
+          messages: makeTextMessages(40),
         }),
         showWaitingIndicator: true,
         waitingIndicatorPrompt: "run the build",
@@ -460,7 +464,7 @@ describe("AgentSessionPanel virtualization", () => {
       ).toBeInTheDocument();
       expect(
         screen.getByRole("button", {
-          name: /^Live turn 91: Codex is working — Waiting for output/,
+          name: /^Live turn 41: Codex is working — Waiting for output/,
         }),
       ).toBeInTheDocument();
     } finally {
@@ -1493,7 +1497,9 @@ describe("AgentSessionPanel virtualization", () => {
       renderSessionPanelWithDefaults({
         activeSession: makeSession("active-session", {
           status: "active",
-          messages: makeTextMessages(90),
+          // See the sibling rail test: 40 stays under the compact-segment
+          // threshold so per-segment navigation buttons render.
+          messages: makeTextMessages(40),
         }),
         scrollContainerRef: { current: scrollNode },
         showWaitingIndicator: true,
@@ -1506,7 +1512,7 @@ describe("AgentSessionPanel virtualization", () => {
 
       act(() => {
         fireEvent.click(
-          screen.getByRole("button", { name: /^Assistant response 80:/ }),
+          screen.getByRole("button", { name: /^Assistant response 20:/ }),
         );
       });
 
@@ -1516,7 +1522,7 @@ describe("AgentSessionPanel virtualization", () => {
       act(() => {
         fireEvent.click(
           screen.getByRole("button", {
-            name: /^Live turn 91: Codex is working — Waiting for output/,
+            name: /^Live turn 41: Codex is working — Waiting for output/,
           }),
         );
       });
