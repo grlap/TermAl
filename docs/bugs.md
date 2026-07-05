@@ -7,6 +7,37 @@ the Implementation Tasks section.
 
 ## Active Repo Bugs
 
+## Codex thread discovery can re-import an orphaned thread from a failed thread/start
+
+**Severity:** Low - a Codex `thread/start` whose response errors or times out can leave a thread on disk that startup discovery re-imports as a phantom, unlinked top-level session (no `parentDelegationId`). The common fast-reap paths are suppressed; only this narrow window remains.
+
+Two narrow windows remain. On a `thread/start` timeout
+(`wait_for_codex_json_rpc_response` returns `Err`), TermAl never learns the thread
+id, so it cannot suppress rediscovery. On a persist failure
+(`set_external_session_id_if_runtime_matches` returns `Err`), the thread id is
+known, but suppression is skipped because it would need the same `commit_locked`
+persist that just failed. In either case, if the Codex app-server already wrote
+the thread to disk, `import_discovered_codex_threads` re-imports it as a visible
+session on the next startup (the match key is `external_session_id == thread.id`,
+which is `None` here), and parent-link repair cannot hide it: no delegation record
+maps it and the imported row has no marker message.
+
+**Current behavior:**
+- A thread created just before a `thread/start` response error/timeout is not
+  suppressed and can be re-imported on the next boot.
+- Isolated-worktree delegations are unaffected — their threads live outside the
+  discovery scopes.
+
+**Proposal:**
+- On the persist-failure path the thread id is already known, so a best-effort
+  suppress attempt there is cheap incremental hardening (a transient persist
+  failure may also fail the suppress persist, so it is not a full fix).
+- Record the pending `thread/start` request so the kill/detach path can reconcile
+  and ignore the created thread even when the response never yields a usable id.
+- For a durable, timing-independent fix, give read-only/reviewer delegate children
+  a Codex home outside the discovery scopes (as isolated-worktree children already
+  have), so their threads are never rediscovered.
+
 ## Claude read-only reviewer delegations cannot run read-only git commands
 
 **Severity:** Medium - `/review-local` Claude delegations can fail before review because the read-only policy denies the git commands required to collect the diff.
@@ -102,3 +133,15 @@ running row, while the status refresh path wants the generic
   move session-reference collection, delegated-child reference detection, and
   adjacent reconciliation helpers out of `ui/src/workspace.ts` so workspace tree
   utilities stay below the active size threshold.
+- [ ] P2: Cover orphan-thread suppression end-to-end:
+  add a test that drives the shared-Codex setup waiter with the AppState record
+  removed (and the detach-first ordering) so it proves `suppress_orphaned_codex_thread`
+  actually fires on the waiter path. The current
+  `suppress_orphaned_codex_thread_blocks_discovery_reimport` test only exercises
+  the helper in isolation, not the `src/codex.rs` waiter branch it guards.
+- [ ] P3: Use a lighter persist for ignore-set-only mutations:
+  `suppress_orphaned_codex_thread` (and its sibling
+  `clear_external_session_id_if_runtime_matches`) commit via `commit_locked`, which
+  bumps the state revision and broadcasts SSE for a client-invisible
+  `ignored_discovered_codex_thread_ids` change; a persist-without-revision path would
+  avoid the needless client refresh.

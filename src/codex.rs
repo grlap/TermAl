@@ -953,6 +953,25 @@ fn handle_shared_codex_prompt_command(
             Some(SHARED_CODEX_THREAD_SETUP_TIMEOUT),
         );
 
+        // Suppress startup rediscovery of a newly created (`thread/start`)
+        // thread whose session is already gone or superseded by the time we
+        // learn its id. The Codex app-server writes the thread to disk before
+        // we bind it, so an unbindable new thread would otherwise be re-imported
+        // as a phantom, unlinked top-level session on the next discovery scan
+        // (the delegation-child re-import leak). Resumed threads are pre-existing
+        // and must stay discoverable.
+        let suppress_orphaned_new_thread = |thread_id: &str| {
+            if waiter_method == "thread/start" {
+                if let Err(err) = waiter_state.suppress_orphaned_codex_thread(thread_id) {
+                    eprintln!(
+                        "runtime state warning> failed to suppress rediscovery of \
+                         orphaned Codex thread for session `{}`: {err:#}",
+                        waiter_session_id
+                    );
+                }
+            }
+        };
+
         match result {
             Ok(setup_result) => {
                 if !take_matching_shared_codex_thread_setup_request(
@@ -960,6 +979,16 @@ fn handle_shared_codex_prompt_command(
                     &waiter_session_id,
                     &request_id,
                 ) {
+                    // Detached, stopped, or superseded by a newer setup request
+                    // before this response arrived. This path returns before the
+                    // post-bind suppression below, so suppress the orphaned new
+                    // thread here too — this is the detach-first ordering that the
+                    // bind-time branch cannot reach.
+                    if let Some(orphan_thread_id) =
+                        setup_result.pointer("/thread/id").and_then(Value::as_str)
+                    {
+                        suppress_orphaned_new_thread(orphan_thread_id);
+                    }
                     return;
                 }
 
@@ -987,7 +1016,11 @@ fn handle_shared_codex_prompt_command(
                 ) {
                     Ok(RuntimeMatchOutcome::SessionMissing | RuntimeMatchOutcome::RuntimeMismatch) => {
                         // Session was stopped or rebound while we waited for
-                        // thread setup — silently discard the stale result.
+                        // thread setup — discard the stale result and suppress
+                        // rediscovery of the orphaned new thread (see the closure
+                        // above; the take-matching guard covers the detach-first
+                        // ordering that returns before this branch).
+                        suppress_orphaned_new_thread(&thread_id);
                         return;
                     }
                     Err(err) => {

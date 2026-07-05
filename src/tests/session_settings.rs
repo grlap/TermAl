@@ -100,6 +100,53 @@ fn import_discovered_codex_threads_prunes_stale_ignored_thread_ids() {
     );
 }
 
+// pins that suppress_orphaned_codex_thread ignores a newly-created but
+// unbindable Codex thread so the startup discovery scan does not re-import
+// it as a fresh top-level session. guards the delegation-child re-import
+// leak: a fast-reaped read-only reviewer child orphans its thread when the
+// async thread/start binding lands after the session is gone, and without
+// this suppression `import_discovered_codex_threads` would mint a visible,
+// unlinked session for the orphan on the next boot.
+#[test]
+fn suppress_orphaned_codex_thread_blocks_discovery_reimport() {
+    let state = test_app_state();
+    state
+        .suppress_orphaned_codex_thread("thread-orphan")
+        .unwrap();
+
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    inner.import_discovered_codex_threads(
+        "/tmp/termal-orphan",
+        vec![DiscoveredCodexThread {
+            approval_policy: Some(CodexApprovalPolicy::Never),
+            archived: false,
+            cwd: "/tmp/termal-orphan".to_owned(),
+            id: "thread-orphan".to_owned(),
+            model: Some("gpt-5-codex".to_owned()),
+            reasoning_effort: Some(CodexReasoningEffort::Medium),
+            sandbox_mode: Some(CodexSandboxMode::WorkspaceWrite),
+            title: "Orphaned reviewer".to_owned(),
+        }],
+    );
+
+    assert!(
+        inner
+            .ignored_discovered_codex_thread_ids
+            .contains("thread-orphan"),
+        "suppressed thread must stay ignored while it is still discovered"
+    );
+    assert!(
+        inner
+            .sessions
+            .iter()
+            .all(|record| record.external_session_id.as_deref() != Some("thread-orphan")),
+        "orphaned thread must not be re-imported as a session"
+    );
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // pins that update_app_settings writes the global preferences to disk
 // and that a freshly loaded AppState inherits those defaults when
 // creating new Codex, Claude, Cursor, and Gemini sessions. guards against app-settings

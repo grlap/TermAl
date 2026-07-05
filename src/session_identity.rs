@@ -131,6 +131,30 @@ impl AppState {
         Ok(())
     }
 
+    /// Adds a Codex `threadId` to the ignored-discovery set without
+    /// requiring a live session.
+    ///
+    /// Used when a newly created thread (`thread/start`) cannot be
+    /// bound back to its session because the session was stopped or
+    /// rebound while thread setup was in flight (see
+    /// [`Self::set_external_session_id_if_runtime_matches`] returning
+    /// `SessionMissing`/`RuntimeMismatch`). The Codex app-server has
+    /// already written the thread to disk, so without this it would
+    /// resurface as a fresh imported session on the next startup
+    /// discovery scan — the delegation-child re-import leak, where a
+    /// fast-reaped reviewer child leaves an orphaned thread that
+    /// `import_discovered_codex_threads` turns into a visible,
+    /// unlinked top-level session. Unlike
+    /// [`Self::clear_external_session_id_if_runtime_matches`] this does
+    /// not look up the session (it may be gone) and only touches the
+    /// ignore set.
+    fn suppress_orphaned_codex_thread(&self, thread_id: &str) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        inner.ignore_discovered_codex_thread(Some(thread_id));
+        self.commit_locked(&mut inner)?;
+        Ok(())
+    }
+
     /// Stamps the per-session Codex thread state when the RuntimeToken
     /// still matches the current Codex runtime.
     ///
