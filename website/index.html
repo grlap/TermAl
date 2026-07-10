@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html class="no-js" lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TermAl — The control room for coding agents</title>
+  <meta name="description" content="Run, supervise, review, and steer Claude Code, Codex, Gemini CLI, and Cursor Agent from one structured engineering workspace.">
+  <meta name="theme-color" content="#f4efe4">
+  <meta name="color-scheme" content="light dark">
+  <meta name="robots" content="noindex,nofollow">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="TermAl — The control room for coding agents">
+  <meta property="og:description" content="An operating environment for long-running software work performed with AI coding agents.">
+  <meta property="og:site_name" content="TermAl">
+  <meta name="twitter:card" content="summary">
+
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "TermAl",
+    "applicationCategory": "DeveloperApplication",
+    "description": "A local operating environment for running, supervising, reviewing, and steering AI coding agents.",
+    "sameAs": "https://github.com/grlap/TermAl"
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="scroll-progress" aria-hidden="true"><span id="scroll-progress-bar"></span></div>
+
+  <header class="site-header" id="site-header">
+    <nav class="nav shell" aria-label="Main navigation">
+      <a class="brand" href="#top" aria-label="TermAl home">
+        <svg class="brand__mark" viewBox="0 0 48 48" aria-hidden="true">
+          <rect x="3" y="3" width="42" height="42" rx="12"></rect>
+          <path d="M13 15h12M19 15v18M29 15v18M29 24h7"></path>
+          <circle cx="36" cy="24" r="2.5"></circle>
+        </svg>
+        <span>Term<span>Al</span></span>
+      </a>
+
+      <div class="nav__links">
+        <a href="#why">Why TermAl</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#orchestrate">Orchestrate</a>
+        <a href="#setup">Setup</a>
+      </div>
+
+      <a class="nav__github" href="https://github.com/grlap/TermAl" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.86c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.35 1.09 2.92.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.6 9.6 0 0 1 12 6.84a9.6 9.6 0 0 1 2.5.34c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.93.36.31.68.92.68 1.86v2.75c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"></path></svg>
+        <span>GitHub</span><span aria-hidden="true">↗</span>
+      </a>
+
+      <details class="mobile-menu" id="mobile-menu">
+        <summary><span>Menu</span><i aria-hidden="true"><b></b><b></b></i></summary>
+        <div class="mobile-menu__panel">
+          <a href="#why"><span>01</span><b>Why TermAl</b></a>
+          <a href="#workflow"><span>02</span><b>Workflow</b></a>
+          <a href="#orchestrate"><span>03</span><b>Orchestrate</b></a>
+          <a href="#setup"><span>04</span><b>Setup</b></a>
+          <a href="https://github.com/grlap/TermAl" target="_blank" rel="noopener"><span>05</span><b>GitHub ↗</b></a>
+        </div>
+      </details>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="hero__paper-grid" aria-hidden="true"></div>
+      <div class="hero__wash hero__wash--coral" aria-hidden="true"></div>
+      <div class="hero__wash hero__wash--blue" aria-hidden="true"></div>
+
+      <div class="hero__inner shell">
+        <div class="hero__copy">
+          <p class="eyebrow hero__eyebrow"><span></span>An operating environment for AI coding agents</p>
+          <h1>
+            <span class="hero__line"><span>Your agents need</span></span>
+            <span class="hero__line hero__line--italic"><span>a control room.</span></span>
+          </h1>
+          <p class="hero__lead">Run Claude Code, Codex, Gemini CLI, and Cursor Agent in parallel. See the work as structured sessions, approvals, files, and diffs—not a wall of terminal output.</p>
+
+          <div class="hero__actions">
+            <a class="button button--primary" href="#workflow"><span>See the workflow</span><span aria-hidden="true">↓</span></a>
+            <a class="button button--secondary" href="#setup"><span>Run from source</span><span aria-hidden="true">↘</span></a>
+          </div>
+
+          <div class="hero__plain-language">
+            <span>AI agents, in plain English</span>
+            <p>Coding agents are command-line assistants that can inspect, change, and run code. TermAl is the workspace around them—the place where you supervise what happens next.</p>
+          </div>
+        </div>
+
+        <figure class="control-room" id="control-room" data-flow-state="3">
+          <div class="control-room__frame" id="control-room-frame">
+            <header class="room-bar">
+              <span class="room-bar__lights" aria-hidden="true"><i></i><i></i><i></i></span>
+              <b>TermAl</b><span>payments-api / auth-refactor</span>
+              <i class="room-bar__live"><em></em>live</i>
+            </header>
+
+            <div class="room-rail" aria-hidden="true">
+              <span class="room-rail__active">⌂</span><span>◎</span><span>⌘</span><span>⌁</span><span>±</span>
+            </div>
+
+            <div class="room-stage">
+              <svg class="room-routes" viewBox="0 0 720 500" preserveAspectRatio="none" aria-hidden="true">
+                <path class="route route--base" d="M110 105 C190 105 180 205 270 205 S350 118 430 118 S500 270 575 270 S600 395 665 395"></path>
+                <path class="route route--signal" d="M110 105 C190 105 180 205 270 205 S350 118 430 118 S500 270 575 270 S600 395 665 395"></path>
+              </svg>
+
+              <article class="room-card room-card--brief" data-room-step="0">
+                <span class="room-card__meta">You · brief</span>
+                <p>Refactor auth without breaking the API contract. Run tests and show me the diff.</p>
+              </article>
+
+              <article class="agent-node agent-node--planner" data-room-step="1">
+                <span class="agent-node__avatar agent-node__avatar--blue">C</span>
+                <div><b>Planner</b><small>Codex · mapping impact</small></div><i></i>
+              </article>
+
+              <article class="agent-node agent-node--builder" data-room-step="1">
+                <span class="agent-node__avatar agent-node__avatar--coral">A</span>
+                <div><b>Builder</b><small>Claude · editing 4 files</small></div><i></i>
+              </article>
+
+              <article class="approval-card" data-room-step="2">
+                <header><span class="approval-card__signal"><i></i></span><div><b>Approval requested</b><small>Run integration tests</small></div></header>
+                <code>npm test -- --runInBand</code>
+                <p>This command can execute project code. Choose how to continue.</p>
+                <div class="approval-card__actions">
+                  <button id="hero-approve" type="button" disabled><span>Approve once</span><i aria-hidden="true">→</i></button>
+                  <button id="hero-reject" type="button" disabled>Reject</button>
+                </div>
+              </article>
+
+              <article class="diff-card" data-room-step="3">
+                <header><span>Review ready</span><b><i>+86</i><em>−24</em></b></header>
+                <div class="diff-card__file"><span>auth/session.ts</span><small>modified</small></div>
+                <div class="diff-card__lines" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+                <footer><span><i></i> tests passed</span><b>Open diff ↗</b></footer>
+              </article>
+
+              <div class="room-human" aria-hidden="true"><span>Human checkpoint</span><i></i></div>
+            </div>
+          </div>
+
+          <div class="control-room__controls">
+            <div class="flow-steps" role="group" aria-label="Control-room demonstration steps">
+              <button type="button" data-flow-step="0" aria-pressed="false"><span>01</span>Brief</button>
+              <button type="button" data-flow-step="1" aria-pressed="false"><span>02</span>Delegate</button>
+              <button type="button" data-flow-step="2" aria-pressed="false"><span>03</span>Approve</button>
+              <button type="button" data-flow-step="3" aria-pressed="true"><span>04</span>Review</button>
+            </div>
+            <button class="motion-toggle" id="motion-toggle" type="button" aria-pressed="false"><i aria-hidden="true"></i><span>Pause motion</span></button>
+          </div>
+          <p class="sr-only" id="flow-status">The demonstration is ready at the review step.</p>
+          <p class="sr-only" id="flow-announcer" aria-live="polite"></p>
+          <figcaption class="sr-only">A task moves from a human brief through two coding agents, stops at an explicit approval, and ends as a reviewable diff.</figcaption>
+        </figure>
+      </div>
+
+      <a class="hero__scroll" href="#basics"><span>Start with the idea</span><i aria-hidden="true"></i></a>
+    </section>
+
+    <section class="fact-rail" id="basics" aria-label="TermAl characteristics">
+      <div class="fact-rail__inner shell">
+        <div><i>⌂</i><span><b>Local backend</b><small>Browser UI on loopback</small></span></div>
+        <div><i>◎</i><span><b>Four agent families</b><small>One structured workspace</small></span></div>
+        <div><i>◆</i><span><b>Human checkpoints</b><small>Approvals stay visible</small></span></div>
+        <div><i>↻</i><span><b>Durable sessions</b><small>Resume after restart</small></span></div>
+      </div>
+    </section>
+
+    <section class="why section shell" id="why">
+      <div class="section-label" data-reveal><span>01</span><span>From output to understanding</span></div>
+      <div class="section-intro section-intro--split">
+        <p class="eyebrow" data-reveal><span></span>The terminal was the entry point</p>
+        <h2 data-reveal>Output is a stream.<br><em>Work is a system.</em></h2>
+        <p data-reveal>Long-running agent work has prompts, tools, approvals, changed files, tests, and unresolved decisions. TermAl gives each one a visible shape.</p>
+      </div>
+
+      <div class="contrast-board" data-reveal>
+        <article class="terminal-noise">
+          <header><span aria-hidden="true"><i></i><i></i><i></i></span><b>Four terminal tabs</b><small>Where did the decision go?</small></header>
+          <div class="terminal-noise__body" aria-hidden="true">
+            <p><i>$</i> agent --continue auth-refactor</p>
+            <p class="dim">Reading src/auth/session.ts...</p>
+            <p>I'll update the middleware and tests.</p>
+            <p class="gold">Allow command? [y/N]</p>
+            <p class="dim">Running tool: shell</p>
+            <p>Changed 4 files (+86 -24)</p>
+            <p class="dim">Compacting conversation...</p>
+            <p class="red">Context from tab 2 not found</p>
+          </div>
+          <footer><span>Raw transcript</span><b>You reconstruct the state</b></footer>
+        </article>
+
+        <div class="contrast-switch" aria-hidden="true"><i></i><span>structured</span></div>
+
+        <article class="structured-work">
+          <header><span class="mini-mark">T</span><b>One TermAl session</b><small>Every event has a type</small></header>
+          <div class="structured-work__body">
+            <div class="typed-card typed-card--prompt"><span>Brief</span><p>Refactor auth safely.</p></div>
+            <div class="typed-card typed-card--command"><span>Command</span><p><code>npm test</code><b>waiting for approval</b></p></div>
+            <div class="typed-card typed-card--files"><span>Files</span><p>4 changed<small>+86 −24</small></p></div>
+            <div class="typed-card typed-card--review"><span>Review</span><p>Diff ready<small>tests passed</small></p></div>
+          </div>
+          <footer><span>Structured state</span><b>See what needs you next</b></footer>
+        </article>
+      </div>
+    </section>
+
+    <section class="agents section" id="agents">
+      <div class="agents__inner shell">
+        <div class="section-label section-label--dark" data-reveal><span>02</span><span>One workspace, familiar agents</span></div>
+        <div class="agents__head">
+          <p class="eyebrow eyebrow--dark" data-reveal><span></span>Keep the tools you already use</p>
+          <h2 data-reveal>One desk.<br><em>Four agents.</em></h2>
+          <p data-reveal>TermAl normalizes different agent protocols into the same session, message, approval, and streaming model.</p>
+        </div>
+
+        <div class="agent-cards">
+          <article class="agent-card agent-card--claude" data-reveal><span class="agent-card__mark">C</span><div><small>Supported agent</small><h3>Claude Code</h3><p>Long-lived session runtime with structured turns and approvals.</p></div><i>NDJSON</i></article>
+          <article class="agent-card agent-card--codex" data-reveal><span class="agent-card__mark">⌁</span><div><small>Supported agent</small><h3>OpenAI Codex</h3><p>Live model discovery, reasoning controls, and thread operations.</p></div><i>JSON-RPC</i></article>
+          <article class="agent-card agent-card--gemini" data-reveal><span class="agent-card__mark">✦</span><div><small>Supported agent</small><h3>Gemini CLI</h3><p>ACP-backed sessions inside the same workspace model.</p></div><i>ACP</i></article>
+          <article class="agent-card agent-card--cursor" data-reveal><span class="agent-card__mark">◫</span><div><small>Supported agent</small><h3>Cursor Agent</h3><p>CLI work streamed into TermAl's structured interface.</p></div><i>ACP</i></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="workflow section" id="workflow">
+      <div class="workflow__inner shell">
+        <div class="section-label" data-reveal><span>03</span><span>The engineering loop</span></div>
+        <div class="workflow__head">
+          <div>
+            <p class="eyebrow" data-reveal><span></span>Speed without losing the thread</p>
+            <h2 data-reveal>Run the loop.<br><em>Not the tabs.</em></h2>
+          </div>
+          <p data-reveal>Brief the work, let agents execute in parallel, step in at the right checkpoint, and review the actual change before it moves on.</p>
+        </div>
+
+        <div class="workflow-grid">
+          <article class="workflow-card workflow-card--wide" data-reveal>
+            <span class="workflow-card__number">01</span><div class="workflow-card__icon icon-brief" aria-hidden="true"><i></i><i></i><i></i></div>
+            <h3>Frame the work</h3><p>Keep the brief, attachments, agent settings, and queued follow-ups in one durable session.</p><b>Prompt · context · queue</b>
+          </article>
+          <article class="workflow-card" data-reveal>
+            <span class="workflow-card__number">02</span><div class="workflow-card__icon icon-parallel" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+            <h3>Run in parallel</h3><p>Open multiple live sessions without losing scroll position or workspace context.</p><b>Sessions · panes · tabs</b>
+          </article>
+          <article class="workflow-card" data-reveal>
+            <span class="workflow-card__number">03</span><div class="workflow-card__icon icon-approval" aria-hidden="true"><i></i><b></b></div>
+            <h3>Clear checkpoints</h3><p>Approve once, reject, or choose a session policy when an agent asks to act.</p><b>Visible workflow control</b>
+          </article>
+          <article class="workflow-card" data-reveal>
+            <span class="workflow-card__number">04</span><div class="workflow-card__icon icon-diff" aria-hidden="true"><span>−</span><span>+</span></div>
+            <h3>Review the change</h3><p>Open unified diffs, files, Git state, and terminal output beside the conversation.</p><b>Diff · files · Git</b>
+          </article>
+          <article class="workflow-card workflow-card--wide workflow-card--jade" data-reveal>
+            <span class="workflow-card__number">05</span><div class="workflow-card__icon icon-resume" aria-hidden="true"><i></i><i></i></div>
+            <h3>Return without reconstructing</h3><p>Sessions, message history, projects, preferences, and workspace layouts survive restart.</p><b>Durable local context</b>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="orchestrate section" id="orchestrate">
+      <div class="orchestrate__grid" aria-hidden="true"></div>
+      <div class="orchestrate__inner shell">
+        <div class="section-label section-label--dark" data-reveal><span>04</span><span>Visual orchestration</span></div>
+        <div class="orchestrate__copy">
+          <p class="eyebrow eyebrow--dark" data-reveal><span></span>Design the handoff once</p>
+          <h2 data-reveal>Turn a workflow<br>into a map.</h2>
+          <p data-reveal>Build reusable graphs that start sessions, pass work between roles, wait for results, and expose the whole run as something you can pause, resume, or stop.</p>
+          <ul data-reveal><li><span>01</span>Choose an assistant and model per node</li><li><span>02</span>Connect prompts into explicit transitions</li><li><span>03</span>Watch every session from the same workspace</li></ul>
+        </div>
+
+        <div class="orchestrator-board" data-reveal role="img" aria-label="A visual orchestrator routes a feature brief through planning, implementation, tests, and review sessions.">
+          <header><span>release-safety-check</span><b><i></i> running</b></header>
+          <svg viewBox="0 0 760 520" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M115 95 C220 95 180 240 295 240"></path>
+            <path d="M365 240 C455 240 425 112 545 112"></path>
+            <path d="M365 240 C455 240 430 375 545 375"></path>
+            <path d="M615 112 C690 112 650 260 710 260"></path>
+            <path d="M615 375 C685 375 658 260 710 260"></path>
+          </svg>
+          <article class="graph-node graph-node--brief"><small>start</small><b>Feature brief</b><span>human prompt</span></article>
+          <article class="graph-node graph-node--plan"><small>session 01</small><b>Plan impact</b><span>Codex</span><i></i></article>
+          <article class="graph-node graph-node--build"><small>session 02</small><b>Implement</b><span>Claude</span><i></i></article>
+          <article class="graph-node graph-node--tests"><small>session 03</small><b>Run tests</b><span>Gemini</span><i></i></article>
+          <article class="graph-node graph-node--review"><small>checkpoint</small><b>Review diff</b><span>human</span><i></i></article>
+          <div class="graph-pulse" aria-hidden="true"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="remote section" id="remote">
+      <div class="remote__inner shell">
+        <div class="section-label" data-reveal><span>05</span><span>Local desk, remote reach</span></div>
+        <div class="remote__head">
+          <p class="eyebrow" data-reveal><span></span>The workspace stays close; the compute does not have to</p>
+          <h2 data-reveal>Supervise here.<br><em>Run there.</em></h2>
+        </div>
+
+        <div class="remote-map" data-reveal role="img" aria-label="A browser connects to a local TermAl backend, which reaches an optional remote TermAl backend over an SSH tunnel.">
+          <article class="remote-map__browser"><span>Browser</span><b>Your workspace</b><small>REST + live events</small></article>
+          <div class="remote-map__line remote-map__line--local" aria-hidden="true"><i></i><span>loopback</span></div>
+          <article class="remote-map__local"><span>Local</span><b>TermAl :8787</b><small>sessions · state · routing</small></article>
+          <div class="remote-map__line remote-map__line--ssh" aria-hidden="true"><i></i><span>SSH tunnel</span></div>
+          <article class="remote-map__server"><span>Remote</span><b>Build server</b><small>agents · files · Git</small></article>
+        </div>
+
+        <div class="remote-notes">
+          <article data-reveal><span>Multi-browser layouts</span><h3>Give each screen a job.</h3><p>Keep a planner workspace on one monitor and review on another. Layouts persist on the server as independent views.</p></article>
+          <article data-reveal><span>SSH-backed projects</span><h3>Use the machine with the code.</h3><p>Bind a project to a remote host and route sessions, files, Git, and terminal work through the same tunnel.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="personalize section" id="personalize">
+      <div class="personalize__inner shell">
+        <div class="section-label section-label--dark" data-reveal><span>06</span><span>A workspace that feels like yours</span></div>
+        <div class="personalize__copy">
+          <p class="eyebrow eyebrow--dark" data-reveal><span></span>Same work, different atmosphere</p>
+          <h2 data-reveal>Choose your<br><em>control surface.</em></h2>
+          <p data-reveal>TermAl ships with hand-crafted themes, multiple chrome styles, density controls, and adjustable type—without changing the work underneath.</p>
+        </div>
+
+        <div class="theme-demo" id="theme-demo" data-preview-theme="warm" data-reveal>
+          <div class="theme-demo__controls" role="group" aria-label="Workspace theme preview">
+            <button type="button" data-theme-choice="warm" aria-pressed="true"><i></i>Warm</button>
+            <button type="button" data-theme-choice="dark" aria-pressed="false"><i></i>Dark</button>
+            <button type="button" data-theme-choice="blueprint" aria-pressed="false"><i></i>Blueprint</button>
+            <button type="button" data-theme-choice="ember" aria-pressed="false"><i></i>Ember</button>
+          </div>
+          <div class="theme-workspace">
+            <div class="theme-workspace__rail" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+            <div class="theme-workspace__main">
+              <header><span>auth-refactor</span><b>Claude · working</b></header>
+              <div class="theme-message theme-message--user"><small>You</small><p>Show me the smallest safe change.</p></div>
+              <div class="theme-message theme-message--agent"><small>Claude</small><p>I mapped the callers and prepared a focused diff.</p><span><i></i><i></i><i></i></span></div>
+              <footer><span>Queue a follow-up…</span><b>↑</b></footer>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="setup section" id="setup">
+      <div class="setup__inner shell">
+        <div class="section-label" data-reveal><span>07</span><span>Run from source</span></div>
+        <div class="setup__head">
+          <div><p class="eyebrow" data-reveal><span></span>Two processes, one workspace</p><h2 data-reveal>From repository<br>to control room.</h2></div>
+          <p data-reveal>TermAl currently runs from source. Install Rust, Node 24.14+ with npm 11.9+, and at least one supported agent CLI that is already authenticated.</p>
+        </div>
+
+        <ol class="setup-steps">
+          <li class="setup-step" data-reveal>
+            <div class="setup-step__number">01</div>
+            <div class="setup-step__copy"><small>Terminal one</small><h3>Start the Rust backend.</h3><p>This serves the local API, live event stream, session runtimes, and durable state on port <code>8787</code>.</p></div>
+            <div class="code-window"><header><span>shell</span><button class="copy-button" type="button" data-copy="backend-code"><span>Copy</span><i aria-hidden="true">□</i></button></header><pre id="backend-code"><code>git clone https://github.com/grlap/<wbr>TermAl.git
+cd TermAl
+cargo run</code></pre><footer><span>Backend</span><b>http://localhost:8787</b></footer></div>
+          </li>
+          <li class="setup-step" data-reveal>
+            <div class="setup-step__number">02</div>
+            <div class="setup-step__copy"><small>Terminal two</small><h3>Start the React workspace.</h3><p>Vite serves the browser interface and proxies API calls to the backend during development.</p></div>
+            <div class="code-window"><header><span>shell</span><button class="copy-button" type="button" data-copy="frontend-code"><span>Copy</span><i aria-hidden="true">□</i></button></header><pre id="frontend-code"><code>cd TermAl/ui
+npm install
+npm run dev</code></pre><footer><span>Workspace</span><b>http://localhost:4173</b></footer></div>
+          </li>
+          <li class="setup-step setup-step--last" data-reveal>
+            <div class="setup-step__number">03</div>
+            <div class="setup-step__copy"><small>First session</small><h3>Add a project. Pick an agent.</h3><p>Choose a local folder or configured SSH remote, create a session, and send a real engineering brief.</p></div>
+            <div class="first-session"><header><span>New session</span><i></i></header><div><small>Project</small><b>payments-api</b></div><div><small>Assistant</small><b>Codex</b></div><p>Map the auth flow and propose the smallest safe refactor.</p><footer><span><i></i> ready</span><b>Start session →</b></footer></div>
+          </li>
+        </ol>
+
+        <div class="setup__links" data-reveal>
+          <a href="https://github.com/grlap/TermAl#getting-started" target="_blank" rel="noopener"><span>Read the complete setup guide</span><span aria-hidden="true">↗</span></a>
+          <a href="https://github.com/grlap/TermAl/blob/master/docs/vision.md" target="_blank" rel="noopener"><span>Read the product vision</span><span aria-hidden="true">↗</span></a>
+        </div>
+      </div>
+    </section>
+
+    <section class="boundary section" id="boundary">
+      <div class="boundary__inner shell">
+        <div class="section-label section-label--dark" data-reveal><span>08</span><span>Power with visible boundaries</span></div>
+        <div class="boundary__head">
+          <p class="eyebrow eyebrow--dark" data-reveal><span></span>Workflow controls are not a magic sandbox</p>
+          <h2 data-reveal>Know what runs.<br><em>Know where.</em></h2>
+          <p data-reveal>TermAl is a powerful local development tool. It can launch agents, execute commands, edit files, and route work to remote machines when you allow it.</p>
+        </div>
+
+        <div class="boundary-grid">
+          <article data-reveal><span>01</span><i class="boundary-icon boundary-icon--local">⌂</i><h3>Local by default</h3><p>The browser and Rust backend bind to loopback. Sessions and settings are stored under <code>~/.termal/</code>.</p></article>
+          <article data-reveal><span>02</span><i class="boundary-icon boundary-icon--agent">◎</i><h3>Agent rules still apply</h3><p>Your selected CLI and model provider process data under their own authentication, sandbox, network, and data policies.</p></article>
+          <article data-reveal><span>03</span><i class="boundary-icon boundary-icon--warning">!</i><h3>Keep the API private</h3><p>The local API can run commands and change files. Do not expose port <code>8787</code> directly to an untrusted network.</p></article>
+        </div>
+
+        <div class="faq" data-reveal>
+          <h3>Good questions before you start</h3>
+          <details><summary><span>Is TermAl an AI model?</span><i aria-hidden="true">+</i></summary><p>No. TermAl is the operating environment around supported coding-agent CLIs. You install and authenticate those agents separately.</p></details>
+          <details><summary><span>Does TermAl replace my editor?</span><i aria-hidden="true">+</i></summary><p>No. It includes files, Git, diffs, source panes, and a workspace terminal, but it is designed around supervising agent work—not replacing every editor or debugger workflow.</p></details>
+          <details><summary><span>Are approvals a security sandbox?</span><i aria-hidden="true">+</i></summary><p>No. Approvals are visible workflow controls. The effective security boundary also depends on the selected agent, its sandbox and approval settings, the operating system, and any remote machine involved.</p></details>
+          <details><summary><span>Can two people edit the same workspace together?</span><i aria-hidden="true">+</i></summary><p>Not as a collaborative multi-user editor today. Multiple browser layouts are useful across screens, but simultaneous writes to the same saved layout are last-write-wins.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta">
+      <div class="final-cta__lines" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div class="final-cta__inner shell">
+        <p class="eyebrow"><span></span>Give agent work a place to happen</p>
+        <h2>Less tab chasing.<br><em>More engineering.</em></h2>
+        <p>Explore the TermAl source, run the workspace locally, and turn long-running agent sessions into work you can actually supervise.</p>
+        <div class="final-cta__actions"><a class="button button--primary" href="#setup"><span>Run from source</span><span aria-hidden="true">↑</span></a><a class="button button--secondary" href="https://github.com/grlap/TermAl" target="_blank" rel="noopener"><span>View on GitHub</span><span aria-hidden="true">↗</span></a></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer__inner shell">
+      <a class="brand brand--footer" href="#top" aria-label="TermAl, back to top"><svg class="brand__mark" viewBox="0 0 48 48" aria-hidden="true"><rect x="3" y="3" width="42" height="42" rx="12"></rect><path d="M13 15h12M19 15v18M29 15v18M29 24h7"></path><circle cx="36" cy="24" r="2.5"></circle></svg><span>Term<span>Al</span></span></a>
+      <p>An operating environment for software engineering work done with AI agents.</p>
+      <div class="footer__links"><a href="#why">Why TermAl</a><a href="#workflow">Workflow</a><a href="#setup">Setup</a><a href="https://github.com/grlap/TermAl" target="_blank" rel="noopener">GitHub ↗</a></div>
+      <div class="footer__bottom"><span>Source available on GitHub. No public license or packaged release is currently declared.</span><span>Built around human judgment, not hidden automation.</span></div>
+    </div>
+  </footer>
+
+  <script src="script.js" defer></script>
+</body>
+</html>
