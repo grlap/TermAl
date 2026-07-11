@@ -1145,6 +1145,8 @@ fn codex_reasoning_effort_from_json_value(value: &Value) -> Option<CodexReasonin
             "medium" => Some(CodexReasoningEffort::Medium),
             "high" => Some(CodexReasoningEffort::High),
             "xhigh" => Some(CodexReasoningEffort::XHigh),
+            "max" => Some(CodexReasoningEffort::Max),
+            "ultra" => Some(CodexReasoningEffort::Ultra),
             _ => None,
         },
         _ => None,

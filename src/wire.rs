@@ -591,6 +591,8 @@ enum CodexReasoningEffort {
     High,
     #[serde(rename = "xhigh")]
     XHigh,
+    Max,
+    Ultra,
 }
 
 impl CodexReasoningEffort {
@@ -603,6 +605,8 @@ impl CodexReasoningEffort {
             Self::Medium => "medium",
             Self::High => "high",
             Self::XHigh => "xhigh",
+            Self::Max => "max",
+            Self::Ultra => "ultra",
         }
     }
 }

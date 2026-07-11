@@ -25,7 +25,9 @@ export type CodexReasoningEffort =
   | "low"
   | "medium"
   | "high"
-  | "xhigh";
+  | "xhigh"
+  | "max"
+  | "ultra";
 export type CursorMode = "agent" | "plan" | "ask";
 export type GeminiApprovalMode = "default" | "auto_edit" | "yolo" | "plan";
 export type AgentReadinessStatus = "ready" | "missing" | "needsSetup";

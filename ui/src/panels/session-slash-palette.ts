@@ -92,7 +92,9 @@ export const CODEX_REASONING_EFFORT_SLASH_OPTIONS = [
   { detail: "Keep reasoning light", label: "low", value: "low" },
   { detail: "Use the standard reasoning depth", label: "medium", value: "medium" },
   { detail: "Use deeper reasoning for harder prompts", label: "high", value: "high" },
-  { detail: "Use the maximum reasoning depth", label: "xhigh", value: "xhigh" },
+  { detail: "Use extra-high reasoning depth for complex problems", label: "xhigh", value: "xhigh" },
+  { detail: "Use the maximum reasoning depth for the hardest problems", label: "max", value: "max" },
+  { detail: "Use maximum reasoning with automatic task delegation", label: "ultra", value: "ultra" },
 ] as const;
 export const CLAUDE_MODE_SLASH_OPTIONS = [
   { detail: "Ask before tool use", label: "ask", value: "ask" },

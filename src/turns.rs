@@ -269,6 +269,8 @@ fn default_codex_reasoning_effort() -> CodexReasoningEffort {
         Some("low") => CodexReasoningEffort::Low,
         Some("high") => CodexReasoningEffort::High,
         Some("xhigh") => CodexReasoningEffort::XHigh,
+        Some("max") => CodexReasoningEffort::Max,
+        Some("ultra") => CodexReasoningEffort::Ultra,
         _ => CodexReasoningEffort::Medium,
     }
 }

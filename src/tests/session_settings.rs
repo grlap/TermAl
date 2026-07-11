@@ -968,6 +968,131 @@ fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
     );
 }
 
+// pins that the Codex `max` and `ultra` reasoning levels validate and
+// persist when the selected model advertises them. guards against the
+// effort enum or the model-option validator silently dropping the two
+// highest levels the way `parse_codex_reasoning_effort` filters an
+// unrecognized level out of a model's `supported_reasoning_levels`.
+#[test]
+fn accepts_codex_max_and_ultra_reasoning_efforts_for_supporting_model() {
+    let state = test_app_state();
+
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Codex Ultra Effort".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("gpt-5.6-sol".to_owned()),
+            approval_policy: None,
+            reasoning_effort: Some(CodexReasoningEffort::Medium),
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+
+    state
+        .sync_session_model_options(
+            &created.session_id,
+            None,
+            vec![SessionModelOption {
+                label: "GPT-5.6 Sol".to_owned(),
+                value: "gpt-5.6-sol".to_owned(),
+                description: None,
+                badges: Vec::new(),
+                supported_claude_effort_levels: Vec::new(),
+                default_reasoning_effort: Some(CodexReasoningEffort::Low),
+                supported_reasoning_efforts: vec![
+                    CodexReasoningEffort::Low,
+                    CodexReasoningEffort::Medium,
+                    CodexReasoningEffort::High,
+                    CodexReasoningEffort::XHigh,
+                    CodexReasoningEffort::Max,
+                    CodexReasoningEffort::Ultra,
+                ],
+            }],
+        )
+        .unwrap();
+
+    for effort in [CodexReasoningEffort::Max, CodexReasoningEffort::Ultra] {
+        let updated = state
+            .update_session_settings(
+                &created.session_id,
+                UpdateSessionSettingsRequest {
+                    name: None,
+                    model: None,
+                    sandbox_mode: None,
+                    approval_policy: None,
+                    reasoning_effort: Some(effort),
+                    cursor_mode: None,
+                    claude_approval_mode: None,
+                    claude_effort: None,
+                    gemini_approval_mode: None,
+                },
+            )
+            .unwrap_or_else(|error| panic!("{effort:?} should be accepted: {}", error.message));
+
+        let session = updated
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("updated Codex session should be present");
+        assert_eq!(session.reasoning_effort, Some(effort));
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == created.session_id)
+            .expect("Codex session should exist");
+        assert_eq!(record.codex_reasoning_effort, effort);
+    }
+}
+
+// pins that `max`/`ultra` survive the real model-list string-parse path, not
+// only direct enum construction. `codex_model_options` runs each advertised
+// `supported_reasoning_levels` string through `parse_codex_reasoning_effort`,
+// so a regression that dropped `"max"`/`"ultra"` (or the JSON field names)
+// would empty them here, unlike the enum-injection test above.
+#[test]
+fn codex_model_options_parses_max_and_ultra_reasoning_levels() {
+    let model_list = json!({
+        "data": [{
+            "model": "gpt-5.6-sol",
+            "default_reasoning_level": "medium",
+            "supported_reasoning_levels": [
+                { "effort": "low" },
+                { "effort": "xhigh" },
+                { "effort": "max" },
+                { "effort": "ultra" },
+            ],
+        }],
+    });
+
+    let options = codex_model_options(&model_list);
+    let option = options
+        .iter()
+        .find(|option| option.value == "gpt-5.6-sol")
+        .expect("model entry should parse");
+
+    assert_eq!(
+        option.supported_reasoning_efforts,
+        vec![
+            CodexReasoningEffort::Low,
+            CodexReasoningEffort::XHigh,
+            CodexReasoningEffort::Max,
+            CodexReasoningEffort::Ultra,
+        ]
+    );
+    assert_eq!(
+        option.default_reasoning_effort,
+        Some(CodexReasoningEffort::Medium)
+    );
+}
+
 // pins that changing the model on a running Claude session with a
 // concrete target (e.g. opus) dispatches a SetModel command over the
 // runtime's input channel and leaves runtime_reset_required false.

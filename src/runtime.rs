@@ -567,6 +567,8 @@ fn parse_codex_reasoning_effort(value: &str) -> Option<CodexReasoningEffort> {
         "medium" => Some(CodexReasoningEffort::Medium),
         "high" => Some(CodexReasoningEffort::High),
         "xhigh" => Some(CodexReasoningEffort::XHigh),
+        "max" => Some(CodexReasoningEffort::Max),
+        "ultra" => Some(CodexReasoningEffort::Ultra),
         _ => None,
     }
 }
@@ -580,6 +582,8 @@ fn codex_reasoning_effort_rank(effort: CodexReasoningEffort) -> usize {
         CodexReasoningEffort::Medium => 3,
         CodexReasoningEffort::High => 4,
         CodexReasoningEffort::XHigh => 5,
+        CodexReasoningEffort::Max => 6,
+        CodexReasoningEffort::Ultra => 7,
     }
 }
 

@@ -42,7 +42,9 @@ export const CODEX_REASONING_EFFORT_OPTIONS = [
   { label: "low", value: "low", description: "Keep reasoning light" },
   { label: "medium", value: "medium", description: "Use the standard reasoning depth" },
   { label: "high", value: "high", description: "Use deeper reasoning for harder prompts" },
-  { label: "xhigh", value: "xhigh", description: "Use the maximum reasoning depth" },
+  { label: "xhigh", value: "xhigh", description: "Use extra-high reasoning depth for complex problems" },
+  { label: "max", value: "max", description: "Use the maximum reasoning depth for the hardest problems" },
+  { label: "ultra", value: "ultra", description: "Use maximum reasoning with automatic task delegation" },
 ] as const;
 
 export const CLAUDE_EFFORT_OPTIONS = [
