@@ -126,6 +126,15 @@ fn claude_tool_permission_request_is_read_only(request: &ClaudeToolPermissionReq
 }
 
 fn claude_bash_command_is_read_only(command: &str) -> bool {
+    // Detect background separators on the ORIGINAL command, before the
+    // `2>/dev/null` strip below. That strip is a naive text replace, so on input
+    // like `echo x \2>/dev/null& touch y` it would delete `2>/dev/null` and leave
+    // `\&`, making the real background `&` look escaped to the (escape-aware)
+    // separator gate. Bash escapes the `2`, not the `&`.
+    if claude_bash_command_has_background_separator(command) {
+        return false;
+    }
+
     let normalized = command
         .replace("2> /dev/null", "")
         .replace("2>/dev/null", "");
@@ -136,13 +145,28 @@ fn claude_bash_command_is_read_only(command: &str) -> bool {
         || normalized.contains('<')
         || normalized.contains('`')
         || normalized.contains("$(")
-        || claude_bash_command_has_background_separator(&normalized)
     {
         return false;
     }
 
-    for segment in normalized.replace("&&", "|").replace("||", "|").split('|') {
-        let segment = segment.trim();
+    let pipe_normalized = normalized.replace("&&", "|").replace("||", "|");
+    let segments: Vec<&str> = pipe_normalized.split('|').map(str::trim).collect();
+
+    // `cd <dir>` retargets git exactly like `-C`/`--git-dir` do: a reviewed repo
+    // fixture's on-disk `.git/config` can carry `core.fsmonitor`/`diff.external`
+    // exec sinks. A command that both changes directory and runs git therefore
+    // fails closed, mirroring the git global-option denial.
+    let changes_directory = segments
+        .iter()
+        .any(|segment| *segment == "cd" || segment.starts_with("cd "));
+    let runs_git = segments
+        .iter()
+        .any(|segment| *segment == "git" || segment.starts_with("git "));
+    if changes_directory && runs_git {
+        return false;
+    }
+
+    for segment in segments {
         if segment.is_empty() {
             return false;
         }
@@ -171,6 +195,12 @@ fn claude_bash_command_has_background_separator(command: &str) -> bool {
 
     while let Some(character) = characters.next() {
         if let Some(active_quote) = quote {
+            // Double quotes still process `\`; single quotes do not. Either way a
+            // `\"` / `\\` must not be mistaken for the closing quote.
+            if active_quote == '"' && character == '\\' {
+                characters.next();
+                continue;
+            }
             if character == active_quote {
                 quote = None;
             }
@@ -178,6 +208,13 @@ fn claude_bash_command_has_background_separator(command: &str) -> bool {
         }
 
         match character {
+            // A backslash escapes the next character, so `\"` / `\&` are literals
+            // and must not open a quote or count as a background separator. The
+            // tokenizer already de-escapes; this gate must agree, or an escaped
+            // quote hides a trailing `& <command>` from the read-only check.
+            '\\' => {
+                characters.next();
+            }
             '\'' | '"' => quote = Some(character),
             '&' => {
                 if characters.peek() == Some(&'&') {
@@ -231,8 +268,32 @@ fn claude_bash_segment_tokens(segment: &str) -> Option<Vec<String>> {
     let mut current = String::new();
     let mut quote: Option<char> = None;
 
-    for character in segment.chars() {
+    // The permission checker MUST tokenize the way bash will, including backslash
+    // escaping. Otherwise a reviewer command like `git diff --out\put=/x`
+    // tokenizes here as the harmless literal `--out\put=/x` (which no deny-list
+    // matches) yet bash strips the backslash and runs the denied `--output=/x`.
+    // Every read-only check downstream depends on this equivalence.
+    let mut characters = segment.chars();
+    while let Some(character) = characters.next() {
         if let Some(active_quote) = quote {
+            // Inside double quotes bash still unescapes `"`, `\`, `$`, `` ` ``;
+            // every other backslash stays literal. Single quotes escape nothing.
+            if active_quote == '"' && character == '\\' {
+                match characters.next() {
+                    Some(next @ ('"' | '\\' | '$' | '`')) => current.push(next),
+                    Some(next) => {
+                        current.push('\\');
+                        current.push(next);
+                    }
+                    None => return None,
+                }
+                continue;
+            }
+            // Parameter/command expansion stays active inside double quotes; we
+            // cannot predict the expanded argv, so fail closed.
+            if active_quote == '"' && matches!(character, '$' | '`') {
+                return None;
+            }
             if character == active_quote {
                 quote = None;
             } else {
@@ -242,7 +303,23 @@ fn claude_bash_segment_tokens(segment: &str) -> Option<Vec<String>> {
         }
 
         match character {
+            // Outside quotes, `\<char>` is the literal char (bash drops the
+            // backslash) and `\<newline>` is a line continuation.
+            '\\' => match characters.next() {
+                Some('\n') => {}
+                Some(next) => current.push(next),
+                None => return None,
+            },
             '\'' | '"' => quote = Some(character),
+            // Shell expansion / subshell / glob syntax the checker does not
+            // emulate: `$'\x2d'` (ANSI-C), `$VAR`/`${..}`/`$(..)` expansion,
+            // backtick command substitution, `{a,b}` brace expansion, `(` /
+            // process substitution, and unquoted globs (`*`/`?`/`[`, which can
+            // expand to a committed filename that looks like an option, e.g.
+            // `git diff *` with a tracked `--output=x` file). All rewrite the
+            // argv before execution, so classifying the literal text would be
+            // unsound. Fail closed instead.
+            '$' | '`' | '{' | '(' | '*' | '?' | '[' => return None,
             character if character.is_whitespace() => {
                 if !current.is_empty() {
                     tokens.push(std::mem::take(&mut current));
@@ -462,44 +539,155 @@ where
 }
 
 fn claude_git_tokens_are_read_only(tokens: &[&str]) -> bool {
-    let Some(subcommand) = tokens.get(1).copied() else {
+    // Skip a conservative allow-list of leading git global options (e.g.
+    // `git --no-pager log`) before reading the subcommand. Unknown leading
+    // options fail closed, so this never widens the allowed subcommand set.
+    //
+    // Every option that can make git load configuration from an
+    // attacker-influenced source is deliberately excluded, because several
+    // config keys (`diff.external`, `core.fsmonitor`, `core.pager`) execute
+    // external programs during otherwise read-only subcommands:
+    //
+    // * `-c <name>=<value>` injects such a key inline.
+    // * `-C`/`--git-dir`/`--work-tree`/`--namespace` retarget the repository.
+    //   Only the literal `.git` name is un-committable, so a reviewed change
+    //   can track a bare-repo fixture and `git --git-dir=fixture.git
+    //   --work-tree=. status` would run that config's `core.fsmonitor` --
+    //   reviewed content executing code inside this read-only sandbox.
+    // * `--paginate`/`-p` force the pager, making `core.pager` an exec sink.
+    // * `--exec-path[=...]` repoints git at another binary.
+    //
+    // Re-enabling `-C` requires TermAl to neutralize those sinks in the
+    // reviewer child's git environment; the checker only approves the agent's
+    // verbatim command and cannot do it here.
+    let mut index = 1;
+    while let Some(option) = tokens.get(index).copied() {
+        match option {
+            // Flag-only global options that cannot retarget the repository,
+            // force a pager, or relocate the git binary.
+            "--no-pager" | "-P" | "--no-optional-locks" => index += 1,
+            // First non-option token is the subcommand.
+            _ if !option.starts_with('-') => break,
+            // Any other leading option is unknown -> fail closed.
+            _ => return false,
+        }
+    }
+
+    // Rebuild `[git, subcommand, args...]` so the downstream helpers, which use
+    // `.skip(2)`, keep their positional assumptions. A value-taking option with
+    // no following subcommand yields just `["git"]`, so `get(1)` denies below.
+    let normalized: Vec<&str> = std::iter::once("git")
+        .chain(tokens.get(index..).unwrap_or_default().iter().copied())
+        .collect();
+
+    let Some(subcommand) = normalized.get(1).copied() else {
         return false;
     };
 
+    // `--help` / `-h` dispatch through `git help`, which launches a configured
+    // man/browser viewer (a shell-evaluated exec sink) even on read-only
+    // subcommands like `git blame --help`. Deny it, and its abbreviations,
+    // everywhere.
+    if normalized
+        .iter()
+        .skip(2)
+        .any(|token| *token == "-h" || claude_git_long_option_abbreviates(token, "--help"))
+    {
+        return false;
+    }
+
     match subcommand {
-        "diff" | "log" | "show" => claude_git_output_tokens_are_read_only(tokens),
-        "grep" => claude_git_grep_tokens_are_read_only(tokens),
-        "ls-files" | "rev-parse" | "status" => true,
-        "branch" => tokens.iter().skip(2).all(|token| {
-            token.starts_with('-')
-                && !matches!(
-                    *token,
-                    "-d" | "-D" | "--delete" | "-m" | "-M" | "--move" | "-c" | "-C" | "--copy"
-                )
-                && !token.starts_with("--delete=")
-                && !token.starts_with("--move=")
-                && !token.starts_with("--copy=")
-                && !token.starts_with("--set-upstream-to")
-                && !matches!(
-                    *token,
-                    "--unset-upstream" | "--edit-description" | "--create-reflog"
-                )
+        // `shortlog` (and defensively the other listings) accept `--output
+        // <path>`, which writes/truncates an arbitrary file; route every listing
+        // subcommand through the same output/exec-sink denial as diff/log/show.
+        "diff" | "log" | "show" | "blame" | "describe" | "ls-files" | "rev-parse" | "shortlog"
+        | "status" => claude_git_output_tokens_are_read_only(&normalized),
+        "grep" => claude_git_grep_tokens_are_read_only(&normalized),
+        // Only the listing form of `remote`; `add`/`remove`/`set-url`/`prune`
+        // and friends are non-flag tokens and fail this check.
+        "remote" => normalized
+            .iter()
+            .skip(2)
+            .all(|token| matches!(*token, "-v" | "--verbose")),
+        // A read-only `git branch` is only ever a listing. A deny-list cannot be
+        // sound here: git parses clustered short options (`-quorigin/main` is
+        // `-q -u origin/main`, which sets the upstream) and expands unambiguous
+        // long-option abbreviations (`--uns` -> `--unset-upstream`, `--edi` ->
+        // `--edit-description`). Allow an exact listing-only set instead, so any
+        // cluster, abbreviation, branch name, or unknown option fails closed.
+        "branch" => normalized.iter().skip(2).all(|token| {
+            matches!(
+                *token,
+                "-a" | "--all"
+                    | "-r" | "--remotes"
+                    | "-v" | "-vv" | "--verbose"
+                    | "-l" | "--list"
+                    | "--show-current"
+                    | "--no-color"
+            ) || token.starts_with("--sort=")
+                || token.starts_with("--format=")
+                || token.starts_with("--contains=")
+                || token.starts_with("--no-contains=")
+                || token.starts_with("--merged=")
+                || token.starts_with("--no-merged=")
+                || token.starts_with("--points-at=")
         }),
         _ => false,
     }
 }
 
+/// Returns whether `token` is `option`, its `option=value` form, or any prefix
+/// git would expand to `option`. Git accepts unambiguous long-option
+/// abbreviations (`--ext` -> `--ext-diff`, `--textc` -> `--textconv`), so an
+/// exact-match deny-list is unsound; every abbreviation must fail closed too.
+fn claude_git_long_option_abbreviates(token: &str, option: &str) -> bool {
+    if !token.starts_with("--") {
+        return false;
+    }
+    let name = token.split('=').next().unwrap_or(token);
+    name.len() > 2 && option.starts_with(name)
+}
+
 fn claude_git_output_tokens_are_read_only(tokens: &[&str]) -> bool {
     !tokens.iter().skip(2).any(|token| {
-        matches!(*token, "--output" | "--ext-diff" | "--textconv")
-            || token.starts_with("--output=")
+        // `--text` is an exact, read-only diff option (force text on binary).
+        // git resolves exact option names before abbreviations, so it must not
+        // be denied as a `--textconv` abbreviation.
+        if *token == "--text" {
+            return false;
+        }
+        ["--output", "--ext-diff", "--textconv"]
+            .iter()
+            .any(|option| claude_git_long_option_abbreviates(token, option))
     })
 }
 
 fn claude_git_grep_tokens_are_read_only(tokens: &[&str]) -> bool {
     !tokens.iter().skip(2).any(|token| {
-        matches!(*token, "-O" | "--open-files-in-pager")
-            || token.starts_with("--open-files-in-pager=")
+        // `-O[<pager>]`/`--open-files-in-pager` opens matches in a pager (an exec
+        // sink). git bundles short options, so `-nOcat` parses as
+        // `-n --open-files-in-pager=cat`; scan the cluster and deny any `O` that
+        // git reads as this option. An earlier value-taking option (`-e`/`-f`,
+        // context `-A`/`-B`/`-C`, `-m`) consumes the rest as its value, so an
+        // `O` after one of those is a value character, not the sink.
+        if token.starts_with('-') && !token.starts_with("--") {
+            for flag in token.bytes().skip(1) {
+                match flag {
+                    b'O' => return true,
+                    b'e' | b'f' | b'A' | b'B' | b'C' | b'm' => break,
+                    _ => {}
+                }
+            }
+            false
+        } else {
+            // `--text` (git grep -a: treat binary as text) is an exact read-only
+            // option; git resolves it before the `--textconv` abbreviation.
+            // `--textconv` runs a config-driven filter program (an exec sink, as
+            // for diff/log/show) — denied so grep matches the other read paths.
+            *token != "--text"
+                && (claude_git_long_option_abbreviates(token, "--open-files-in-pager")
+                    || claude_git_long_option_abbreviates(token, "--textconv"))
+        }
     })
 }
 
