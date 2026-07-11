@@ -11,7 +11,7 @@ Review staged, unstaged, and untracked changes using multiple specialized review
 
 **IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Do not run mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) as part of this command.**
 
-**IMPORTANT: This command is review-only. Do NOT attempt to fix any bugs, edit source files, edit tests, run formatters that modify files, or otherwise change implementation code. The only allowed file update is `docs/bugs.md` in Step 5.**
+**IMPORTANT: This command is review-only. Do NOT attempt to fix any bugs, edit source files, edit tests, run formatters that modify files, or otherwise change implementation code. The only allowed change is updating the beads tracker via `bd` in Step 5.**
 
 ## Step 1: Get the changes
 
@@ -49,7 +49,7 @@ You are a code reviewer focusing on: [REVIEWER NAME]
 
 This is a review-only task. Do NOT attempt to fix any bugs or edit any files.
 Your job is to identify issues and propose follow-up work for the main reviewer
-to record in docs/bugs.md.
+to record in beads (bd).
 
 ## Your Review Instructions
 [CONTENT OF THE REVIEWER .md FILE]
@@ -78,7 +78,7 @@ This is TermAl — a WhatsApp-style control room for managing AI coding agents l
 Read docs/architecture.md or relevant source files for deeper context if needed.
 
 ## Known Accepted Patterns (do NOT flag these)
-- Large-file cleanup is ongoing. Do not flag untouched legacy files solely for size, but do flag reviewed files that exceed the active architecture threshold when the issue is not already tracked in `docs/bugs.md`.
+- Large-file cleanup is ongoing. Do not flag untouched legacy files solely for size, but do flag reviewed files that exceed the active architecture threshold when the issue is not already tracked in beads.
 - `expect("state mutex poisoned")` on mutex locks — project convention
 - `std::thread::spawn` for agent runtime threads (intentional — blocking stdio)
 - `0.0.0.0` binding on the HTTP server (configurable, documented as local-only)
@@ -134,49 +134,26 @@ Deduplicate: if two reviewers flag the same issue, merge them (note which review
 
 Present the consolidated note directly to the user. Do NOT write the review note to a separate file.
 
-## Step 5: Update `docs/bugs.md`
+## Step 5: Update beads (bd)
 
-After presenting the review to the user, update `docs/bugs.md` to reflect the findings. Do not modify any other file. If file edits are unavailable under the active session policy, include a "Suggested `docs/bugs.md` updates" section with the entries/tasks/removals that should be applied. If any reviewer found any issue, observation, test gap, or note of any severity, `docs/bugs.md` MUST be updated before the command is complete. Read the file first to understand the current structure, then apply these three operations:
+After presenting the review to the user, update the beads tracker (`bd`) to reflect the findings. Do not modify source or test files. If `bd` writes are unavailable under the active session policy (e.g. a read-only reviewer child), include a "Suggested beads updates" section listing the `bd` commands that should be run. If any reviewer found any issue, observation, test gap, or note of any severity, beads MUST be updated before the command is complete. Query the current state first (`bd list` / `bd ready` / `bd show <id>`), then apply these operations:
 
-### 5a. Remove resolved bugs
+### 5a. Close resolved issues
 
-If the reviewed changes fix any **active bug entries** (the `## Heading` sections with Severity/Current behavior/Proposal), **delete those entries entirely** from `docs/bugs.md`.
+If the reviewed changes fix any open issue, close it: `bd close <id> --reason "<what fixed it>"`. Beads keeps its own history, so closing is the record — do not add a "resolved" note.
 
-`docs/bugs.md` is an active-state ledger only. Its own preamble explicitly says "Resolved work, fixed-history notes, speculative refactors, cleanup notes, and external limitations do not belong here." Do NOT move resolved entries into a "fixed in the current tree" preamble paragraph or any other history-style note. Just remove them.
+### 5b. Create new issues
 
-If the reader needs to see what changed, that is what `git log` and PR descriptions are for — not `docs/bugs.md`.
+For each finding (any severity: Critical, High, Medium, Low, or Note) that is NOT already tracked, create an issue:
 
-### 5b. Add new bug entries
+`bd create "<short title>" -t bug -p <0-4> -d "<impact, current behavior, and proposed fix>"`
 
-For each finding from the review (any severity: Critical, High, Medium, Low, or Note) that is NOT already tracked in bugs.md, add a new bug entry in the active section (between the preamble and the first existing bug entry, or wherever severity-ordering fits). Use the existing format:
+Map severity to priority: Critical→P0, High→P1, Medium→P2, Low→P3, Note→P3/P4. If a finding is already tracked, do not duplicate it — update the existing issue (`bd update <id>` / `bd comment <id>`) to reflect the current evidence, affected files, priority, or proposal.
 
-```markdown
-## Short description of the issue
+### 5c. File test gaps and follow-ups
 
-**Severity:** [Critical/High/Medium/Low/Note] - brief impact summary.
-
-[1-2 paragraph explanation of the problem.]
-
-**Current behavior:**
-- [bullet points describing what happens now]
-
-**Proposal:**
-- [bullet points describing the recommended fix]
-```
-
-If a finding is already tracked in `docs/bugs.md`, do not create a duplicate. Update the existing bug entry or task item as needed to reflect the current review evidence, affected files, severity, or proposal. Do not leave `docs/bugs.md` unchanged when the review found something.
-
-### 5c. Add or update task list items
-
-For **test gaps and coverage improvements** identified by the review, add P2 task items to the Implementation Tasks section. Match the existing format:
-
-```markdown
-- [ ] Short task description:
-  longer explanation spanning one or two lines if needed.
-```
-
-Remove any task items that the reviewed changes have completed (e.g., if a test gap was filled, remove that task).
+For test gaps, coverage improvements, or refactor follow-ups the review identifies, create task issues (`bd create "<task>" -t task -p 2 -d "..."`) and link dependencies where they exist (`bd dep`). Close any task the reviewed changes have completed (`bd close <id>`).
 
 ### 5d. Skip if clean
 
-Only skip `docs/bugs.md` when the review found no issues, no observations, no notes, no test gaps, no resolved active bugs, and no completed tasks. Tell the user "bugs.md is up to date — no changes needed."
+Only skip beads when the review found no issues, no observations, no notes, no test gaps, no resolved issues, and no completed tasks. Tell the user "beads is up to date — no changes needed."

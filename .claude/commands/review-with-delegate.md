@@ -13,7 +13,7 @@ Review current staged and unstaged changes by delegating `/review-local` to both
 
 **IMPORTANT: This command must use TermAl MCP delegation tools to attempt exactly two reviewer session spawns. Do NOT use raw `claude -p`, Codex platform subagents, Claude Task agents, shell polling, raw HTTP, nested TermAl delegations, or any non-TermAl MCP review path to spawn or wait for reviewers. The delegated child sessions execute `/review-local` in read-only TermAl reviewer mode, where nested reviewer spawning is explicitly disabled. If the required TermAl MCP tools are unavailable, stop and report that `/review-with-delegate` requires the TermAl delegation MCP bridge.**
 
-Delegated child reviewers run with `writePolicy: readOnly`. They may use read-only git/file inspection commands freely, but must not edit files, run mutating git commands, launch nested reviewer agents, run build/typecheck gates, or update `docs/bugs.md` themselves. The parent session owns the compile/typecheck precheck in Step 2 and applies any `docs/bugs.md` updates in Step 6.
+Delegated child reviewers run with `writePolicy: readOnly`. They may use read-only git/file inspection commands freely, but must not edit files, run mutating git commands, launch nested reviewer agents, run build/typecheck gates, or update the beads tracker themselves. The parent session owns the compile/typecheck precheck in Step 2 and applies any beads updates in Step 6.
 
 Required MCP tools:
 - `termal_spawn_session`
@@ -56,7 +56,7 @@ Using `termal_spawn_session`, create two child delegation sessions from the curr
    - Write policy: `readOnly`.
    - Title: `Claude /review-local`
 
-Use read-only delegation sessions here so reviewers see the exact current worktree, including untracked files. Do not request `isolatedWorktree` for this command until the tracked `docs/bugs.md` issue "Isolated delegation worktree snapshots omit untracked files" is fixed by mirroring or explicitly rejecting untracked dirty state.
+Use read-only delegation sessions here so reviewers see the exact current worktree, including untracked files. Do not request `isolatedWorktree` for this command until the known "isolated delegation worktree snapshots omit untracked files" limitation is fixed by mirroring or explicitly rejecting untracked dirty state.
 
 If either spawn fails, report the failure clearly and stop unless one reviewer was already created; in that case continue to Step 4 for the created reviewer and mark the missing reviewer as failed.
 
@@ -95,15 +95,14 @@ After both reviewers finish, fetch each delegation result packet and present a c
 
 Deduplicate findings. If both reviewers report the same issue, merge it and note that both caught it.
 
-## Step 6: Update `docs/bugs.md`
+## Step 6: Update beads (bd)
 
-If either delegated reviewer reports any issue, note, test gap, stale bug-ledger item, or follow-up, update `docs/bugs.md` before completing:
+If either delegated reviewer reports any issue, note, test gap, stale tracker item, or follow-up, update the beads tracker before completing (the parent owns writes; reviewers query read-only):
 
-- Add new active bug entries for untracked actionable findings.
-- Update existing entries when a finding is already tracked.
-- Remove active bug entries or implementation tasks that the reviewed changes fixed.
-- Add implementation-task items for test gaps.
+- `bd create -t bug -p <0-4> -d "..."` for untracked actionable findings (`-t task` for test gaps and follow-ups).
+- `bd update <id>` (or `bd comment <id>`) when a finding is already tracked.
+- `bd close <id>` for any issue the reviewed changes fixed.
 
-If both reviewers report no findings and no bug-ledger cleanup is needed, tell the user `bugs.md is up to date - no changes needed.`
+If both reviewers report no findings and no tracker cleanup is needed, tell the user `beads is up to date - no changes needed.`
 
-Do not modify any files other than `docs/bugs.md`.
+Do not modify source or test files; the only tracker updates are through `bd`.
