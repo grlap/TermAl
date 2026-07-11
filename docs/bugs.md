@@ -38,33 +38,28 @@ maps it and the imported row has no marker message.
   a Codex home outside the discovery scopes (as isolated-worktree children already
   have), so their threads are never rediscovered.
 
-## Claude read-only reviewer delegations cannot run read-only git commands
+## Claude turns finalize while background Task subagents are still running
 
-**Severity:** Medium - `/review-local` Claude delegations can fail before review because the read-only policy denies the git commands required to collect the diff.
+**Severity:** Medium - a Claude session reports idle, and a delegated reviewer returns a truncated result packet, while its own work is still in flight.
 
-A read-only Claude reviewer delegation for `/review-local` was unable to run
-`git status`, `git diff`, `git diff --cached`, or `git ls-files` because TermAl
-denied all terminal/shell execution under the delegation's read-only policy. The
-review command explicitly permits read-only git inspection, but the enforced
-tool policy blocks the child before it can discover staged, unstaged, or
-untracked changes.
+`src/claude_spawn.rs` treats a `{"type":"result"}` stream message as end-of-turn.
+Claude Code now runs `Task` subagents in the background, so `result` can arrive
+while a subagent (or a command it is waiting on) is still running, and TermAl
+finalizes the turn early.
 
 **Current behavior:**
-- Claude `/review-local` delegations with `writePolicy: readOnly` can receive
-  `TermAl denied this tool request because this Claude reviewer delegation is
-  read-only.` for read-only shell/git commands.
-- The child cannot reconstruct the worktree diff reliably from file-read tools
-  alone and returns a failed result packet.
-- `/review-with-delegate` can lose the Claude reviewer while the Codex reviewer
-  still completes.
+- The session shows idle while the agent is still working.
+- Reviewer delegations can return a `## Result` packet whose own summary admits the
+  work is unfinished. Live repro: child `session-3301` returned `Findings: - None`
+  under the summary "The Rust suite is still compiling in the background. I'll
+  consolidate and deliver the final review packet as soon as it completes." A
+  `Findings: None` from a truncated reviewer must not be read as a clean review.
 
 **Proposal:**
-- Allow a narrow read-only command set for reviewer delegations, including
-  `git status`, `git diff`, `git diff --cached`, `git ls-files`, and `git show`,
-  while continuing to block mutating commands.
-- Or have the parent capture and pass the required diff/status/untracked outputs
-  into read-only reviewer prompts so delegated children do not need shell access
-  to start review.
+- Track outstanding `Task`/tool-use ids for the turn and finalize only when a
+  `result` arrives with none in flight.
+- Until fixed, treat a delegated reviewer packet whose summary admits pending work
+  as failed rather than clean.
 
 ## Running delegation status poll mutates the parent card revision
 
@@ -92,6 +87,35 @@ running row, while the status refresh path wants the generic
 - Keep the unavailable-result path covered so a running delegation result poll
   does not advance revision when there is no lifecycle, detach, or wait change.
 
+## Windows `cargo test` reads and overwrites the developer's real `~/.termal`
+
+**Severity:** Medium - on Windows dev machines with `HOME` set (e.g. Git Bash / MSYS), a normal `cargo test --bin termal` run escapes its temp sandbox, turns the telegram suite red, and clobbers the user's real `~/.termal/*` files.
+
+`resolve_home_dir()` (`src/codex_home.rs:44`) resolves `HOME` first and only falls
+back to `USERPROFILE`. The test harness overrides home via `TEST_HOME_ENV_KEY`,
+which is `USERPROFILE` on Windows (`src/tests/mod.rs:691`). When `HOME` is also set
+(the default in Git Bash), the override is ineffective, so home-relative paths such
+as `telegram_bot_file_path()` resolve to the real `~/.termal`.
+
+**Current behavior:**
+- `telegram_config_update_keyring_write_failure_does_not_persist_plaintext_token`
+  (`src/tests/telegram.rs:2547`) fails `!path.exists()` because a real
+  `~/.termal/telegram-bot.json` exists; it panics while holding
+  `TEST_HOME_ENV_MUTEX`, poisoning it and cascading ~30 telegram tests into
+  `PoisonError` failures.
+- Successful telegram tests write to the real path: the real
+  `~/.termal/telegram-bot.json` was observed holding the test fixture
+  (`chatId: 123`, `configMigratedToAppState: true`) — i.e. a plain `cargo test`
+  overwrote the developer's real Telegram config. No secret leaks (the token
+  lives in the OS credential store, not the file).
+
+**Proposal:**
+- Make `resolve_home_dir()` honor the harness override deterministically in test
+  builds (consult `TEST_HOME_ENV_KEY` before `HOME`), or have the harness override
+  `HOME` in addition to `USERPROFILE` on Windows.
+- Point the harness at a per-test temp home so one fixture assertion cannot poison
+  `TEST_HOME_ENV_MUTEX` and cascade the suite.
+
 ## Windows read-only Codex delegations run with full-access sandboxing
 
 **Severity:** High - Windows Codex reviewer delegations marked read-only can still write through the Codex process sandbox and gain network egress.
@@ -110,6 +134,26 @@ running row, while the status refresh path wants the generic
 
 ## Implementation Tasks
 
+- [ ] P2: Re-enable read-only reviewer `git -C` / `--git-dir` behind env hardening:
+  the repository-retargeting global options were removed because only the literal
+  `.git` name is un-committable, so a reviewed change can track a bare-repo fixture
+  and `git --git-dir=fixture.git --work-tree=. status` executes that config's
+  `core.fsmonitor`. To restore them, have TermAl neutralize the exec sinks in the
+  reviewer child's git environment (e.g. `GIT_CONFIG_COUNT` with `diff.external=`,
+  `core.fsmonitor=`, `core.pager=cat`), since the checker only approves the agent's
+  verbatim command and cannot rewrite it. `GIT_CONFIG_NOSYSTEM=1` does not help: it
+  disables only the system config.
+- [ ] P2: Collapse the four Codex reasoning-effort string parsers:
+  `parse_codex_reasoning_effort` (`src/runtime.rs`),
+  `parse_discovered_codex_reasoning_effort` (`src/codex_discovery.rs`),
+  `codex_reasoning_effort_from_json_value` (`src/state.rs`), and the
+  `TERMAL_CODEX_REASONING_EFFORT` match (`src/turns.rs`) each hand-maintain the same
+  string mapping and all end in a silent drop. A new Codex level is dropped rather
+  than rejected, which is how `max`/`ultra` went missing. Route them through a single
+  `CodexReasoningEffort::from_api_value`. The runtime/model-list path now has a
+  string-parse test (`codex_model_options_parses_max_and_ultra_reasoning_levels`);
+  the discovery/state/env parsers still lack direct coverage, so unify them and add a
+  shared parser test as part of the collapse.
 - [ ] P2: Extract delegation child-interaction detail helpers:
   move child pending-interaction detail synthesis and parent-card refresh
   helpers out of `src/delegations.rs` into a focused delegation status module.
