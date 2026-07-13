@@ -447,10 +447,42 @@ fn clear_shared_codex_turn_recorder_state_resets_all_fields() {
     assert_eq!(recorder_state.streaming_text_message_id, None);
 }
 
+/// An in-flight Codex thread setup carrying a parked prompt.
+///
+/// A setup always owns the prompt that opened it, so tests cannot construct one
+/// without a command — which is the point of collapsing the two into one value.
+fn test_pending_codex_thread_setup(request_id: &str) -> PendingCodexThreadSetup {
+    PendingCodexThreadSetup {
+        request_id: request_id.to_owned(),
+        command: CodexPromptCommand {
+            approval_policy: CodexApprovalPolicy::Never,
+            attachments: Vec::new(),
+            cwd: "/tmp".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            prompt: "parked prompt".to_owned(),
+            reasoning_effort: CodexReasoningEffort::Medium,
+            resume_thread_id: None,
+            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        },
+    }
+}
+
 #[test]
 fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_thread_id() {
     let mut session_state = SharedCodexSessionState {
-        pending_thread_setup_request_id: Some("thread-start-1".to_owned()),
+        pending_thread_setup: Some(PendingCodexThreadSetup {
+            request_id: "thread-start-1".to_owned(),
+            command: CodexPromptCommand {
+                approval_policy: CodexApprovalPolicy::Never,
+                attachments: Vec::new(),
+                cwd: "/tmp".to_owned(),
+                model: "gpt-5.4".to_owned(),
+                prompt: "parked prompt".to_owned(),
+                reasoning_effort: CodexReasoningEffort::Medium,
+                resume_thread_id: None,
+                sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            },
+        }),
         pending_turn_start_request_id: Some("turn-start-1".to_owned()),
         recorder: SessionRecorderState {
             command_messages: HashMap::from([("cmd-1".to_owned(), "Running".to_owned())]),
@@ -484,7 +516,11 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
 
     clear_shared_codex_turn_session_state(&mut session_state);
 
-    assert_eq!(session_state.pending_thread_setup_request_id, None);
+    assert!(
+        session_state.pending_thread_setup.is_none(),
+        "the per-turn reset must drop the in-flight setup AND the prompt parked on \
+         it — they are one value so a later setup cannot inherit a dead command"
+    );
     assert_eq!(session_state.pending_turn_start_request_id, None);
     assert_eq!(session_state.thread_id.as_deref(), Some("thread-1"));
     assert_eq!(session_state.turn_id, None);

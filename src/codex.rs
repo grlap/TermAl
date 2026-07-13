@@ -719,34 +719,19 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
     })
 }
 
-/// Remembers shared Codex thread.
-fn remember_shared_codex_thread(
-    sessions: &SharedCodexSessionMap,
-    thread_sessions: &SharedCodexThreadMap,
-    session_id: &str,
-    thread_id: String,
-) {
-    let previous_thread_id = {
-        let mut sessions = sessions
-            .lock()
-            .expect("shared Codex session mutex poisoned");
-        let session_state = sessions.entry(session_id.to_owned()).or_default();
-        clear_shared_codex_turn_session_state(session_state);
-        session_state.thread_id.replace(thread_id.clone())
-    };
-
-    let mut thread_sessions = thread_sessions
-        .lock()
-        .expect("shared Codex thread mutex poisoned");
-    if let Some(previous_thread_id) = previous_thread_id {
-        if previous_thread_id != thread_id {
-            thread_sessions.remove(&previous_thread_id);
-        }
-    }
-    thread_sessions.insert(thread_id, session_id.to_owned());
-}
-
 /// Forgets a shared Codex thread mapping that was registered provisionally.
+///
+/// CALLERS BEWARE: this calls `clear_shared_codex_turn_session_state`, which drops
+/// any prompt parked on an in-flight thread setup. The `thread_id` guard below does
+/// NOT protect you from that — `thread/started` can bind the thread while the setup
+/// is still pending, so a session can be `{setup in flight}` AND `{thread bound}` at
+/// once.
+///
+/// The one existing caller is safe by POSITION: it runs on the `StartTurnAfterSetup`
+/// hand-off failure path, i.e. after `complete_shared_codex_thread_setup` has already
+/// taken the setup out of the slot. A second caller on any other path must take the
+/// setup out itself first, or it will eat a user's prompt and leave the setup's
+/// waiter to disown the session's own live thread.
 fn forget_shared_codex_thread(
     sessions: &SharedCodexSessionMap,
     thread_sessions: &SharedCodexThreadMap,
@@ -868,74 +853,186 @@ fn handle_shared_codex_prompt_command(
 ) -> Result<()> {
     const SHARED_CODEX_THREAD_SETUP_TIMEOUT: Duration = Duration::from_secs(180);
 
-    let existing_thread_id = {
-        let sessions = sessions
+    // Decide and commit in ONE critical section. Reading the session state and
+    // then acting on it under a second lock is a check-then-act race: the waiter
+    // can complete in between, take the parked prompt, and start its turn — and
+    // the command parked afterwards is then owned by nobody (the fast path never
+    // reads the parked prompt, and the next setup overwrites it), so the user's
+    // prompt vanishes with no error.
+    //
+    // The session must always be observably in exactly one of three states:
+    // `{no thread, no setup}`, `{setup in flight}`, `{thread bound}`. Every
+    // transition happens under this lock or the waiter's (see
+    // `complete_shared_codex_thread_setup`).
+    let request_id = Uuid::new_v4().to_string();
+    let decision = {
+        let mut sessions = sessions
             .lock()
             .expect("shared Codex session mutex poisoned");
-        sessions
-            .get(session_id)
-            .and_then(|session| session.thread_id.clone())
+        let session_state = sessions.entry(session_id.to_owned()).or_default();
+        // Test the in-flight setup BEFORE `thread_id`. The `thread/started`
+        // notification can land ahead of the `thread/start` response and set
+        // `thread_id` while the setup is still pending (`codex_events.rs`), so a
+        // session really can be in both states at once. Checking `thread_id`
+        // first would let this prompt run immediately and the parked one run
+        // again afterwards — two turns from one setup.
+        match session_state.pending_thread_setup.as_mut() {
+            // A setup is in flight: ALWAYS park. Never start a second one.
+            //
+            // Parking cannot inherit the wrong thread, because a prompt can never
+            // arrive wanting a different thread while a setup is still pending:
+            //
+            //   * `resume_thread_id` comes from `record.external_session_id`
+            //     (`turn_dispatch.rs`). While a setup is in flight and the session
+            //     is attached, the only thing that writes that field is this very
+            //     setup — via the `thread/started` notification or its own response
+            //     — so it can only ever become THIS setup's thread.
+            //   * Anything that would give the session a *different* thread identity
+            //     goes through stop/detach, and `interrupt_and_detach` calls
+            //     `detach()` UNCONDITIONALLY (`session_runtime.rs`) — even when the
+            //     interrupt itself fails. `detach()` removes the whole shared-session
+            //     entry, and with it this setup. There is nothing left to park on.
+            //     (`try_detach` is the one detach that can decline: it returns `false`
+            //     on `WouldBlock` instead of blocking. Not a counterexample — it runs
+            //     only from natural turn-completion cleanup, where the turn has already
+            //     run, so no setup can be in flight for it to strand.)
+            //
+            // Earlier revisions compared thread identities here and superseded on a
+            // mismatch. That machinery was guarding an unreachable state, and it is
+            // what produced the redundant `thread/resume` + suppression of the
+            // session's own LIVE thread. Not comparing is not a shortcut; it is the
+            // invariant.
+            //
+            // Its waiter runs whatever is parked, so the newest command still wins —
+            // exactly what happened before, when superseded waiters bailed out and
+            // dropped their turns — while the app-server only ever creates one thread.
+            Some(setup) => {
+                setup.command = command;
+                CodexThreadSetupDecision::Parked
+            }
+            None => {
+                if let Some(thread_id) = session_state.thread_id.clone() {
+                    // Fast path: thread already bound and no setup pending.
+                    CodexThreadSetupDecision::StartTurn(thread_id, command)
+                } else {
+                    // Cloned before the command is MOVED into the slot below. Cloning
+                    // the whole `CodexPromptCommand` instead would copy its prompt text
+                    // and its base64 image attachments and then drop the original;
+                    // these are two short `String`s, an `Option<String>`, and two `Copy`
+                    // enums, and only this arm pays for them.
+                    let request = CodexThreadSetupRequest {
+                        approval_policy: command.approval_policy,
+                        cwd: command.cwd.clone(),
+                        model: command.model.clone(),
+                        resume_thread_id: command.resume_thread_id.clone(),
+                        sandbox_mode: command.sandbox_mode,
+                    };
+                    // Claim the slot BEFORE the request goes out, so a command
+                    // arriving while we are still writing to stdin parks instead of
+                    // racing us into another `thread/start`.
+                    session_state.pending_thread_setup = Some(PendingCodexThreadSetup {
+                        request_id: request_id.clone(),
+                        command,
+                    });
+                    CodexThreadSetupDecision::StartSetup(request)
+                }
+            }
+        }
     };
 
-    // Fast path: thread already exists, go straight to turn/start.
-    if let Some(thread_id) = existing_thread_id {
-        return handle_shared_codex_start_turn(
-            writer,
-            pending_requests,
-            state,
-            runtime_id,
-            sessions,
-            writer_context,
-            session_id,
-            &thread_id,
-            command,
-        );
-    }
+    let setup_request = match decision {
+        // Fast path: thread already exists, go straight to turn/start.
+        CodexThreadSetupDecision::StartTurn(thread_id, command) => {
+            return handle_shared_codex_start_turn(
+                writer,
+                pending_requests,
+                state,
+                runtime_id,
+                sessions,
+                writer_context,
+                session_id,
+                &thread_id,
+                command,
+            );
+        }
+        CodexThreadSetupDecision::Parked => {
+            // Coalescing: the prompt already parked here never reaches Codex. That
+            // matches the old behaviour (superseded waiters dropped their turns too),
+            // but it is a deliberate design point now rather than an accident, so say
+            // so out loud — a silent drop is what made the original "one prompt, eight
+            // threads" incident so hard to see. (`tm-xx3` tracks giving the user a
+            // real signal instead of a stderr line.)
+            //
+            // Logged out here, not in the arm above: nothing writes to stderr while
+            // holding the shared-session lock, which every Codex event contends on.
+            eprintln!(
+                "shared codex> session `{session_id}` already has a thread setup in \
+                 flight; the newer prompt replaces the one parked on it"
+            );
+            return Ok(());
+        }
+        CodexThreadSetupDecision::StartSetup(request) => request,
+    };
 
     // Slow path: need to create or resume a thread first. Fire-and-forget the
     // setup request and spawn a waiter so the writer thread is not blocked.
+    //
+    // The slot is claimed. From here until the request is actually on the wire, EVERY
+    // early return must release it — one that walks past the release leaves the
+    // session wedged in `{setup in flight}`: the setup never completes, and every
+    // later prompt parks behind it forever. This used to be a hand-written abort in
+    // each failure arm, i.e. a rule you had to remember at each new `?`; one of the
+    // two arms was in fact never exercised by a test. The guard makes releasing the
+    // default and holding the slot the thing you have to opt into.
+    let setup_guard = PendingCodexThreadSetupGuard::new(sessions, session_id, &request_id);
+
     let mcp_config = state
         .termal_delegation_mcp_codex_config(session_id)
         .context("failed to build Codex delegation MCP config")?;
-    let (method, params) = match command.resume_thread_id.as_deref() {
+
+    // The command itself now lives in the setup slot; the request is built from the
+    // parameters the decision carried back out.
+    let (method, params) = match setup_request.resume_thread_id.as_deref() {
         Some(thread_id) => (
             "thread/resume",
             json!({
                 "threadId": thread_id,
-                "cwd": command.cwd,
-                "model": command.model,
-                "sandbox": command.sandbox_mode.as_cli_value(),
-                "approvalPolicy": command.approval_policy.as_cli_value(),
+                "cwd": setup_request.cwd,
+                "model": setup_request.model,
+                "sandbox": setup_request.sandbox_mode.as_cli_value(),
+                "approvalPolicy": setup_request.approval_policy.as_cli_value(),
                 "config": mcp_config,
             }),
         ),
         None => (
             "thread/start",
             json!({
-                "cwd": command.cwd,
-                "model": command.model,
-                "sandbox": command.sandbox_mode.as_cli_value(),
-                "approvalPolicy": command.approval_policy.as_cli_value(),
+                "cwd": setup_request.cwd,
+                "model": setup_request.model,
+                "sandbox": setup_request.sandbox_mode.as_cli_value(),
+                "approvalPolicy": setup_request.approval_policy.as_cli_value(),
                 "personality": "pragmatic",
                 "config": mcp_config,
             }),
         ),
     };
 
-    let request_id = Uuid::new_v4().to_string();
     set_shared_codex_writer_context(
         writer_context,
         format!("jsonrpc_request method={method} id={request_id} session={session_id}"),
     );
-    let pending =
-        start_codex_json_rpc_request_with_id(writer, pending_requests, request_id.clone(), method, params)?;
-    {
-        let mut sessions = sessions
-            .lock()
-            .expect("shared Codex session mutex poisoned");
-        let session_state = sessions.entry(session_id.to_owned()).or_default();
-        session_state.pending_thread_setup_request_id = Some(request_id.clone());
-    }
+    let pending = start_codex_json_rpc_request_with_id(
+        writer,
+        pending_requests,
+        request_id.clone(),
+        method,
+        params,
+    )?;
+    // The request is on the wire, so the waiter spawned below now owns the slot's
+    // lifecycle: it releases it on an error response, a timeout, or a response that
+    // carries no thread id, and hands it to `complete_shared_codex_thread_setup` on
+    // success. Releasing it here as well would abort a setup that is genuinely live.
+    setup_guard.disarm();
 
     let waiter_pending = pending_requests.clone();
     let waiter_state = state.clone();
@@ -960,6 +1057,28 @@ fn handle_shared_codex_prompt_command(
         // as a phantom, unlinked top-level session on the next discovery scan
         // (the delegation-child re-import leak). Resumed threads are pre-existing
         // and must stay discoverable.
+        //
+        // Every caller below may be suppressing a thread the session record STILL
+        // CLAIMS: `set_external_session_id_if_runtime_matches` writes
+        // `external_session_id` (and un-ignores the thread) BEFORE the
+        // `commit_locked` that is the only thing able to fail, and `thread/started`
+        // writes it unconditionally. So "suppressed" and "claimed" genuinely
+        // overlap here.
+        //
+        // That is safe, and the reason lives in `import_discovered_codex_threads`,
+        // not here: discovery looks for a record whose `external_session_id` matches
+        // the thread FIRST, and when it finds one it calls
+        // `allow_discovered_codex_thread` — un-ignoring the thread — before it ever
+        // consults the ignore set. A thread someone still owns therefore cannot be
+        // stranded on the never-rediscover list; only a genuinely unowned one stays
+        // suppressed.
+        //
+        // This is load-bearing. Round after round, the failure mode that hurt was
+        // suppressing a LIVE thread, and the thing that made it hurt was clearing the
+        // record's claim on it at the same time. Do not add a rollback of
+        // `external_session_id` next to a suppression without re-reading
+        // `state_boot.rs`. `import_discovered_codex_threads_reclaims_a_suppressed_thread_a_session_still_owns`
+        // pins the invariant.
         let suppress_orphaned_new_thread = |thread_id: &str| {
             if waiter_method == "thread/start" {
                 if let Err(err) = waiter_state.suppress_orphaned_codex_thread(thread_id) {
@@ -974,16 +1093,19 @@ fn handle_shared_codex_prompt_command(
 
         match result {
             Ok(setup_result) => {
-                if !take_matching_shared_codex_thread_setup_request(
+                // Peek WITHOUT clearing. The in-flight marker has to survive until
+                // the thread is actually bound below: clearing it here left the
+                // session in a `{no thread, no setup}` limbo across the persist
+                // call, and a prompt landing in that gap saw neither state, took
+                // the slow path, and made the app-server mint a second thread.
+                if !shared_codex_thread_setup_is_current(
                     &waiter_sessions,
                     &waiter_session_id,
                     &request_id,
                 ) {
                     // Detached, stopped, or superseded by a newer setup request
-                    // before this response arrived. This path returns before the
-                    // post-bind suppression below, so suppress the orphaned new
-                    // thread here too — this is the detach-first ordering that the
-                    // bind-time branch cannot reach.
+                    // before this response arrived. The slot belongs to that newer
+                    // setup now, so leave it alone and just disown this thread.
                     if let Some(orphan_thread_id) =
                         setup_result.pointer("/thread/id").and_then(Value::as_str)
                     {
@@ -995,11 +1117,23 @@ fn handle_shared_codex_prompt_command(
                 let thread_id = match setup_result.pointer("/thread/id").and_then(Value::as_str) {
                     Some(id) => id.to_owned(),
                     None => {
-                        let _ = waiter_state.fail_turn_if_runtime_matches(
-                            &waiter_session_id,
-                            &RuntimeToken::Codex(waiter_runtime_id),
-                            "Codex app-server did not return a thread id",
-                        );
+                        // Only fail the turn if the setup was still OURS. If the slot
+                        // has moved on, the session's current turn belongs to somebody
+                        // else and failing it would kill their work.
+                        if matches!(
+                            abort_shared_codex_thread_setup(
+                                &waiter_sessions,
+                                &waiter_session_id,
+                                &request_id,
+                            ),
+                            CodexThreadSetupAbort::Released
+                        ) {
+                            let _ = waiter_state.fail_turn_if_runtime_matches(
+                                &waiter_session_id,
+                                &RuntimeToken::Codex(waiter_runtime_id),
+                                "Codex app-server did not return a thread id",
+                            );
+                        }
                         return;
                     }
                 };
@@ -1017,9 +1151,16 @@ fn handle_shared_codex_prompt_command(
                     Ok(RuntimeMatchOutcome::SessionMissing | RuntimeMatchOutcome::RuntimeMismatch) => {
                         // Session was stopped or rebound while we waited for
                         // thread setup — discard the stale result and suppress
-                        // rediscovery of the orphaned new thread (see the closure
-                        // above; the take-matching guard covers the detach-first
-                        // ordering that returns before this branch).
+                        // rediscovery of the orphaned new thread. Release the setup
+                        // slot too, so a later prompt is free to start a fresh one
+                        // and never inherits this dead command.
+                        // The session is gone either way, so the thread is an orphan
+                        // regardless of who owns the slot now.
+                        let _ = abort_shared_codex_thread_setup(
+                            &waiter_sessions,
+                            &waiter_session_id,
+                            &request_id,
+                        );
                         suppress_orphaned_new_thread(&thread_id);
                         return;
                     }
@@ -1029,6 +1170,33 @@ fn handle_shared_codex_prompt_command(
                              registration for session `{}`: {err:#}",
                             waiter_session_id
                         );
+                        // Disown the thread, like every sibling branch.
+                        //
+                        // Be precise about what failed: only `commit_locked` can Err
+                        // here, and it runs AFTER the record was already given this
+                        // thread id in memory. So the record does claim it — the claim
+                        // just may never reach disk. If it does reach disk (a later
+                        // commit succeeds), discovery reclaims the thread for that
+                        // record and this suppression is undone; see the closure above.
+                        // If it never does (the process dies first), nothing claims the
+                        // thread and the suppression is what keeps it from coming back
+                        // as a phantom top-level session — though on a genuinely full
+                        // disk the suppression will not have persisted either.
+                        //
+                        // So this is insurance, not a guarantee, and it is consistent
+                        // with the other three branches rather than the odd one out.
+                        suppress_orphaned_new_thread(&thread_id);
+                        // As above: only fail the turn if the setup was still ours.
+                        if !matches!(
+                            abort_shared_codex_thread_setup(
+                                &waiter_sessions,
+                                &waiter_session_id,
+                                &request_id,
+                            ),
+                            CodexThreadSetupAbort::Released
+                        ) {
+                            return;
+                        }
                         fail_shared_codex_turn_without_runtime_exit(
                             &waiter_state,
                             &waiter_session_id,
@@ -1040,12 +1208,42 @@ fn handle_shared_codex_prompt_command(
                     }
                     Ok(RuntimeMatchOutcome::Applied) => {}
                 }
-                remember_shared_codex_thread(
+
+                // Bind the thread, take the parked prompt, and only THEN clear the
+                // in-flight marker — all in one critical section, so the session is
+                // never observably `{no thread, no setup}`. Run the newest prompt
+                // handed to this setup; commands that arrived while the request was
+                // in flight replaced the parked one rather than starting a second
+                // thread, so this is where they get their turn.
+                let command = match complete_shared_codex_thread_setup(
                     &waiter_sessions,
                     &waiter_thread_sessions,
                     &waiter_session_id,
-                    thread_id.clone(),
-                );
+                    &request_id,
+                    &thread_id,
+                ) {
+                    CodexThreadSetupCompletion::Completed(parked) => parked,
+                    CodexThreadSetupCompletion::Superseded => {
+                        // The session was detached or reset while we waited. Since a
+                        // prompt never supersedes an in-flight setup (it parks), that
+                        // is the only way to get here. Reachable on a plain Stop:
+                        // `stop_session` detaches from the shared map before it retakes
+                        // the state lock to clear `record.runtime`, so a waiter landing
+                        // in that window still gets `Applied` above and lands here.
+                        //
+                        // Deliberately NO rollback of `external_session_id`. An earlier
+                        // revision cleared it, and that is exactly what turned a
+                        // suppression into a bug: a thread that is both unclaimed AND
+                        // suppressed is stranded forever. Leaving the record's claim
+                        // intact is what lets discovery reclaim the thread (see the
+                        // closure above) — and `stop_session` deliberately preserves
+                        // `external_session_id` precisely so the thread stays resumable.
+                        // (`kill_session` is not the owner here: it deletes the record
+                        // outright.)
+                        suppress_orphaned_new_thread(&thread_id);
+                        return;
+                    }
+                };
 
                 // Feed the turn/start back through the writer thread so it
                 // can write to stdin (which only the writer thread owns).
@@ -1120,6 +1318,54 @@ fn handle_shared_codex_start_turn(
     let runtime_token = RuntimeToken::Codex(runtime_id.to_owned());
     let request_id = Uuid::new_v4().to_string();
 
+    // A setup in flight here means this is a STALE `StartTurnAfterSetup` hand-off and
+    // the session has re-armed underneath it. Abandon it, touching nothing.
+    //
+    // Why a setup can be here at all — the earlier claim that it could not was wrong,
+    // and it was wrong in an expensive way, so state the real shape:
+    //
+    //   * The waiter clears the setup slot in `complete_shared_codex_thread_setup` and
+    //     only THEN sends the hand-off. The writer runs freely in that gap, so a detach
+    //     plus a fresh prompt can land in between — and the fresh prompt, finding no
+    //     thread and no setup, claims a NEW one.
+    //   * Serializing prompt handling and turn start on the writer thread does not help.
+    //     The hand-off is enqueued by a WAITER; writer serialization says nothing about
+    //     what a waiter puts on the queue.
+    //   * The runtime-id check below does not catch it either: every session on the
+    //     shared app-server carries the same `runtime_id` (cloned from
+    //     `SharedCodexRuntime` in `spawn_codex_runtime`), so detach + re-attach yields
+    //     the SAME id and the check returns `Applied`. It is a PROCESS check, not an
+    //     ATTACHMENT check.
+    //
+    // This is checked BEFORE the record is touched so a stale hand-off cannot persist
+    // the detached attachment's sandbox/approval/effort onto the re-armed session
+    // either. It runs on the writer thread and only the writer claims setups, so the
+    // slot cannot fill behind us between here and the block below.
+    //
+    // The prompt-command fast path never reaches this branch: it decides `StartTurn`
+    // only when the slot is empty, and parks otherwise.
+    //
+    // NOTE: the thread this stale hand-off was carrying is now unowned — nothing
+    // suppresses it, so discovery can re-import it. That is the deeper attachment-
+    // generation gap (`tm-nqc` and its follow-up), not something this bail can fix.
+    let superseding_setup_request_id = {
+        let sessions = sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        sessions
+            .get(session_id)
+            .and_then(|session_state| session_state.pending_thread_setup.as_ref())
+            .map(|setup| setup.request_id.clone())
+    };
+    if let Some(superseding_setup_request_id) = superseding_setup_request_id {
+        eprintln!(
+            "shared codex> abandoning a stale turn hand-off for session `{session_id}` \
+             (thread `{thread_id}`): the session re-armed with thread setup \
+             `{superseding_setup_request_id}` while the hand-off was in flight"
+        );
+        return Ok(());
+    }
+
     // Session may have been killed between thread setup and StartTurnAfterSetup
     // arriving. Fail the turn gracefully instead of crashing the shared runtime.
     match state.record_codex_runtime_config_if_runtime_matches(
@@ -1154,6 +1400,16 @@ fn handle_shared_codex_start_turn(
             .lock()
             .expect("shared Codex session mutex poisoned");
         let session_state = sessions.entry(session_id.to_owned()).or_default();
+        // `clear_shared_codex_turn_session_state` clears `pending_thread_setup` — which
+        // owns a user's PROMPT, not just a marker. It cannot be eating one here: we
+        // returned early above if a setup was in flight, and only this (writer) thread
+        // ever claims one, so the slot cannot have filled behind us.
+        //
+        // That early bail is the ONLY thing standing between this line and destroying a
+        // prompt the user just typed. An earlier revision relied on a `debug_assert!`
+        // and a claim that the writer thread's serialization made this unreachable. It
+        // was reachable — `stale_start_turn_handoff_leaves_the_setup_that_re_armed_the_session_alone`
+        // is the test that proves it. Do not reintroduce that reasoning.
         session_state.thread_id = Some(thread_id.to_owned());
         clear_shared_codex_turn_session_state(session_state);
         session_state.pending_turn_start_request_id = Some(request_id.clone());
@@ -1339,22 +1595,241 @@ fn handle_shared_codex_startup_response_error(
     }
 }
 
-fn take_matching_shared_codex_thread_setup_request(
+/// What a prompt should do about this session's Codex thread, decided in a
+/// single critical section so the session can never be caught mid-transition.
+enum CodexThreadSetupDecision {
+    /// `{thread bound}` — go straight to `turn/start`.
+    ///
+    /// Carries the prompt back out so the other arms can MOVE it into the setup
+    /// instead of cloning: a `CodexPromptCommand` owns its prompt text and its
+    /// base64 image attachments, and parking used to copy all of that and then
+    /// drop the original.
+    StartTurn(String, CodexPromptCommand),
+    /// `{setup in flight}` — the prompt was parked on it; its waiter will run it.
+    Parked,
+    /// `{no thread, no setup}` — we claimed the setup slot and must now fire it.
+    ///
+    /// Carries what the setup REQUEST needs, cloned out of the command inside the one
+    /// arm that actually uses it. The command itself has been moved into the slot by
+    /// then, so these cannot be read back off it — and cloning them *before* the
+    /// decision, as this used to, made every prompt on the `StartTurn` fast path pay
+    /// for two `String`s it immediately threw away.
+    StartSetup(CodexThreadSetupRequest),
+}
+
+/// The parameters of the `thread/start` / `thread/resume` request itself.
+///
+/// These come from the prompt that OPENED the setup. The turn that eventually runs
+/// uses the PARKED command's parameters instead — see `PendingCodexThreadSetup`.
+/// These shape the thread; that shapes the turn.
+struct CodexThreadSetupRequest {
+    approval_policy: CodexApprovalPolicy,
+    cwd: String,
+    model: String,
+    resume_thread_id: Option<String>,
+    sandbox_mode: CodexSandboxMode,
+}
+
+/// Reports whether `request_id` is still this session's current thread setup.
+///
+/// Peeks WITHOUT clearing. The in-flight marker must survive until the thread is
+/// actually bound: a session observed as neither `{setup in flight}` nor
+/// `{thread bound}` is free to start a new setup, which is exactly how one prompt
+/// used to make the app-server mint several threads.
+fn shared_codex_thread_setup_is_current(
     sessions: &SharedCodexSessionMap,
     session_id: &str,
     request_id: &str,
 ) -> bool {
+    let sessions = sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    sessions.get(session_id).is_some_and(|session_state| {
+        session_state
+            .pending_thread_setup
+            .as_ref()
+            .is_some_and(|setup| setup.request_id == request_id)
+    })
+}
+
+/// Outcome of releasing an in-flight Codex thread setup.
+///
+/// `#[must_use]`: discarding this silently assumes the setup was still ours. A
+/// caller that then fails "the session's turn" can be failing a turn that now
+/// belongs to somebody else.
+#[must_use]
+enum CodexThreadSetupAbort {
+    /// The setup was ours: it is released and any prompt parked on it is dropped.
+    Released,
+    /// The slot has already moved on to a different setup. Nothing was touched.
+    NotCurrent,
+}
+
+/// Releases an in-flight thread setup and drops the prompt parked on it.
+///
+/// For setups that can never complete: the request never went out, the
+/// app-server errored or timed out, or the response carried no thread id.
+/// Clearing the marker and dropping the parked prompt in the SAME critical
+/// section keeps the state machine honest — a later prompt must find
+/// `{no thread, no setup}` and be free to start a fresh setup, and must never
+/// inherit a command belonging to a dead one.
+fn abort_shared_codex_thread_setup(
+    sessions: &SharedCodexSessionMap,
+    session_id: &str,
+    request_id: &str,
+) -> CodexThreadSetupAbort {
     let mut sessions = sessions
         .lock()
         .expect("shared Codex session mutex poisoned");
     let Some(session_state) = sessions.get_mut(session_id) else {
-        return false;
+        return CodexThreadSetupAbort::NotCurrent;
     };
-    if session_state.pending_thread_setup_request_id.as_deref() != Some(request_id) {
-        return false;
+    let is_current = session_state
+        .pending_thread_setup
+        .as_ref()
+        .is_some_and(|setup| setup.request_id == request_id);
+    if !is_current {
+        return CodexThreadSetupAbort::NotCurrent;
     }
-    session_state.pending_thread_setup_request_id = None;
-    true
+    // Drops the parked prompt with the setup — they are one value precisely so a
+    // later setup cannot inherit a command belonging to a dead one.
+    session_state.pending_thread_setup = None;
+    CodexThreadSetupAbort::Released
+}
+
+/// Releases a claimed thread-setup slot unless the request reached the wire.
+///
+/// Guards the window in `handle_shared_codex_prompt_command` between claiming the
+/// slot and the setup request actually going out. Every early return in that window
+/// — including a `?` nobody has written yet — must release the slot, or the session
+/// wedges in `{setup in flight}` and parks every later prompt behind a setup that
+/// can never fire.
+///
+/// This exists because "release the slot in each failure arm" is a rule a human has
+/// to keep, and we did not keep it: of the two hand-written aborts it replaces, the
+/// one on the MCP-config path was exercised by no test at all — deleting it left the
+/// suite green. A `Drop` cannot be forgotten by the next `?`, and it is exercised by
+/// every test that fails a setup before the write.
+///
+/// Deliberately NOT used for post-write failures. Once the request is on the wire the
+/// waiter owns the slot, and releasing it from here would abort a live setup — which
+/// is why the disarm is explicit rather than implied by reaching the end of the
+/// function.
+struct PendingCodexThreadSetupGuard<'a> {
+    armed: bool,
+    request_id: &'a str,
+    session_id: &'a str,
+    sessions: &'a SharedCodexSessionMap,
+}
+
+impl<'a> PendingCodexThreadSetupGuard<'a> {
+    fn new(
+        sessions: &'a SharedCodexSessionMap,
+        session_id: &'a str,
+        request_id: &'a str,
+    ) -> Self {
+        Self {
+            armed: true,
+            request_id,
+            session_id,
+            sessions,
+        }
+    }
+
+    /// The request is in flight; the waiter owns the slot from here.
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PendingCodexThreadSetupGuard<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        // The caller is returning `Err` either way; the slot just must not stay
+        // claimed. `NotCurrent` is fine and expected — a detach can have taken the
+        // whole session out from under us while we were failing.
+        let _ = abort_shared_codex_thread_setup(self.sessions, self.session_id, self.request_id);
+    }
+}
+
+/// Outcome of completing an in-flight Codex thread setup.
+enum CodexThreadSetupCompletion {
+    /// Thread bound. Carries the prompt parked on the setup — the newest one
+    /// handed to it, not necessarily the one that opened it.
+    ///
+    /// Not an `Option`: a setup always owns its prompt, so there is no "fall back
+    /// to the command that opened the setup" case. That fallback would answer the
+    /// *older* prompt, silently — the exact failure this change exists to prevent.
+    Completed(CodexPromptCommand),
+    /// The session was detached, stopped, or rebound while the response was in
+    /// flight. The thread belongs to nobody; the caller must disown it.
+    Superseded,
+}
+
+/// Binds `thread_id` to the session, takes the parked prompt, and clears the
+/// in-flight marker — in ONE critical section.
+///
+/// Ordering here is the whole point. The marker is cleared *last*, after the
+/// thread is bound, so the session steps straight from `{setup in flight}` to
+/// `{thread bound}` with no observable gap: previously the marker was cleared
+/// first and `thread_id` set only after a persist round-trip, and a prompt
+/// landing in that window saw neither and started a second thread.
+///
+/// The setup — and with it the parked prompt — is taken *before*
+/// `clear_shared_codex_turn_session_state` runs, so this does not depend on that
+/// routine's field-by-field behaviour. It has no exhaustiveness guard, and it does
+/// clear `pending_thread_setup`; taking the prompt first means a reordering there
+/// cannot make the waiter answer the *older* prompt.
+fn complete_shared_codex_thread_setup(
+    sessions: &SharedCodexSessionMap,
+    thread_sessions: &SharedCodexThreadMap,
+    session_id: &str,
+    request_id: &str,
+    thread_id: &str,
+) -> CodexThreadSetupCompletion {
+    let (previous_thread_id, parked_command) = {
+        let mut sessions = sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        let Some(session_state) = sessions.get_mut(session_id) else {
+            return CodexThreadSetupCompletion::Superseded;
+        };
+        let is_current = session_state
+            .pending_thread_setup
+            .as_ref()
+            .is_some_and(|setup| setup.request_id == request_id);
+        if !is_current {
+            return CodexThreadSetupCompletion::Superseded;
+        }
+        // Take the setup (and with it the parked prompt) BEFORE the per-turn reset:
+        // `clear_shared_codex_turn_session_state` also clears the setup, and it has
+        // no exhaustiveness guard, so relying on its field-by-field behaviour is a
+        // trap. Clearing the setup here is also what closes the in-flight window —
+        // it happens only now, after `thread_id` is bound below, so the session
+        // steps straight from `{setup in flight}` to `{thread bound}` with no gap
+        // for another prompt to start a second thread in.
+        let setup = session_state
+            .pending_thread_setup
+            .take()
+            .expect("setup presence checked above");
+        clear_shared_codex_turn_session_state(session_state);
+        let previous_thread_id = session_state.thread_id.replace(thread_id.to_owned());
+        (previous_thread_id, setup.command)
+    };
+
+    let mut thread_sessions = thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned");
+    if let Some(previous_thread_id) = previous_thread_id {
+        if previous_thread_id != thread_id {
+            thread_sessions.remove(&previous_thread_id);
+        }
+    }
+    thread_sessions.insert(thread_id.to_owned(), session_id.to_owned());
+
+    CodexThreadSetupCompletion::Completed(parked_command)
 }
 
 /// Applies thread-setup failures only for the currently pending setup
@@ -1368,7 +1843,13 @@ fn handle_shared_codex_thread_setup_response_error_if_current(
     request_id: &str,
     err: CodexResponseError,
 ) {
-    if !take_matching_shared_codex_thread_setup_request(sessions, session_id, request_id) {
+    // Release the setup and drop the prompt parked on it in one step: the setup
+    // this prompt was waiting for has failed, so a later prompt must be free to
+    // start a fresh one and must not inherit this dead command.
+    if matches!(
+        abort_shared_codex_thread_setup(sessions, session_id, request_id),
+        CodexThreadSetupAbort::NotCurrent
+    ) {
         return;
     }
     let runtime_token = RuntimeToken::Codex(runtime_id.to_owned());

@@ -381,6 +381,84 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
     let _ = fs::remove_dir_all(&codex_home);
 }
 
+#[test]
+fn import_discovered_codex_threads_reclaims_a_suppressed_thread_a_session_still_owns() {
+    // Pins the invariant that makes orphan suppression safe at all.
+    //
+    // The thread-setup failure paths (`codex.rs`) suppress a thread they could not
+    // bind — but they may be suppressing one the session record STILL CLAIMS:
+    // `set_external_session_id_if_runtime_matches` writes `external_session_id`
+    // BEFORE the `commit_locked` that is the only thing able to fail, and
+    // `thread/started` writes it unconditionally. So "suppressed" and "claimed"
+    // genuinely overlap.
+    //
+    // That is only safe because discovery looks for an owning record FIRST and
+    // un-ignores the thread when it finds one. If this ordering is ever inverted,
+    // a live conversation lands on the never-rediscover list — which is the exact
+    // failure that bit repeatedly while this fix was being developed, and it is
+    // silent. It gets a test rather than a comment.
+    let mut inner = StateInner::new();
+    let project = inner.create_project(
+        Some("TermAl".to_owned()),
+        "/tmp/termal".to_owned(),
+        default_local_remote_id(),
+    );
+    let record = inner.create_session(
+        Agent::Codex,
+        Some("Live conversation".to_owned()),
+        "/tmp/termal".to_owned(),
+        Some(project.id.clone()),
+        None,
+    );
+    let session_id = record.session.id.clone();
+    let index = inner
+        .find_session_index(&session_id)
+        .expect("created session should exist");
+    inner.sessions[index].external_session_id = Some("thread-owned".to_owned());
+    inner.sessions[index].session.external_session_id = Some("thread-owned".to_owned());
+
+    // A failed setup disowned the thread even though the record still claims it.
+    inner.ignore_discovered_codex_thread(Some("thread-owned"));
+    assert!(
+        inner
+            .ignored_discovered_codex_thread_ids
+            .contains("thread-owned"),
+        "precondition: the thread is on the never-rediscover list"
+    );
+
+    inner.import_discovered_codex_threads(
+        "/tmp/termal",
+        vec![DiscoveredCodexThread {
+            approval_policy: None,
+            archived: false,
+            cwd: "/tmp/termal".to_owned(),
+            id: "thread-owned".to_owned(),
+            model: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            title: "Live conversation".to_owned(),
+        }],
+    );
+
+    assert!(
+        !inner
+            .ignored_discovered_codex_thread_ids
+            .contains("thread-owned"),
+        "a thread a session record still claims must be RECLAIMED, not left stranded on \
+         the never-rediscover list — suppression on the setup-failure paths is only safe \
+         because discovery checks for an owning record before it consults the ignore set"
+    );
+    assert_eq!(
+        inner
+            .sessions
+            .iter()
+            .filter(|record| record.session.agent == Agent::Codex)
+            .count(),
+        1,
+        "the owning session must be reused, not duplicated by a re-import"
+    );
+}
+
 // pins that import creates a Codex session attached to the correct project
 // with model, sandbox, approval, reasoning effort, and archived thread-state
 // all copied from the discovered row, skips threads whose `cwd` is outside

@@ -480,10 +480,48 @@ fn reset_recorder_state_fields(recorder_state: &mut SessionRecorderState) {
     recorder_state.streaming_text_message_id = None;
 }
 
+/// An in-flight `thread/start` / `thread/resume` for a shared Codex session.
+///
+/// Two fields, and they move together: the request we are waiting on, and the
+/// prompt parked on it. One value rather than two `Option`s that can drift apart.
+///
+/// It deliberately does NOT track the thread the request targets. A prompt parks
+/// on an in-flight setup unconditionally, without comparing thread identities,
+/// because a prompt can never arrive wanting a *different* thread while a setup is
+/// pending — anything that changes the session's thread identity goes through
+/// `detach()`, which removes this whole entry. Earlier revisions did carry a
+/// `resume_thread_id` here and superseded on a mismatch; that comparison was
+/// guarding an unreachable state, and it is what made a superseded waiter
+/// permanently suppress the session's own LIVE thread. Do not add it back.
+struct PendingCodexThreadSetup {
+    request_id: String,
+    /// The newest prompt handed to this setup.
+    ///
+    /// `thread_id` is only populated when the setup response arrives, so a
+    /// command showing up in the meantime used to see "no thread" and fire
+    /// *another* `thread/start` — and the app-server writes a thread to disk for
+    /// every one of them. Only one could ever be bound to the session; the rest
+    /// became orphans that resurface as phantom top-level sessions. Commands now
+    /// replace this instead, which keeps the previous last-writer-wins behaviour
+    /// (the superseded waiters already dropped their turns) without minting a
+    /// thread per command.
+    ///
+    /// Never absent while a setup exists — that is the point of storing it here.
+    ///
+    /// Note which params come from where: the setup REQUEST (`cwd`, `model`,
+    /// `sandbox`, `approvalPolicy`) is built from the command that OPENED the
+    /// setup, because it is already on the wire by the time a later prompt parks.
+    /// The TURN then runs with the parked command's params, and `turn/start`
+    /// re-sends model/sandbox/approval/effort/cwd every time — so the turn is
+    /// authoritative and a parked prompt never inherits stale ones. Only the
+    /// thread's creation-time attributes come from the opener.
+    command: CodexPromptCommand,
+}
+
 /// Tracks shared Codex session state.
 #[derive(Default)]
 struct SharedCodexSessionState {
-    pending_thread_setup_request_id: Option<String>,
+    pending_thread_setup: Option<PendingCodexThreadSetup>,
     pending_turn_start_request_id: Option<String>,
     recorder: SessionRecorderState,
     thread_id: Option<String>,

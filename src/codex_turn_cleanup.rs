@@ -255,11 +255,42 @@ fn clear_shared_codex_completed_turn_state_fields(
     clear_shared_codex_turn_recorder_state(recorder_state);
 }
 
-/// Clears every shared-session per-turn field (pending thread setup /
-/// turn-start request ids, active turn id, turn-started flag, plus
-/// completed-turn state) so the next turn starts from a clean slate.
+/// Clears every shared-session per-turn field (pending thread setup, turn-start
+/// request id, active turn id, turn-started flag, plus completed-turn state) so
+/// the next turn starts from a clean slate.
+///
+/// Note what "pending thread setup" now costs: it is a whole
+/// `PendingCodexThreadSetup`, which owns a USER'S PROMPT, not merely a request id.
+/// Calling this while a setup is in flight silently discards that prompt.
+///
+/// All three production callers are safe, but not for the same reason, and the third
+/// is the one to watch:
+///
+/// * `complete_shared_codex_thread_setup` (`codex.rs`) — takes the setup out of the
+///   slot before calling this. Nothing is left to discard.
+/// * `handle_shared_codex_start_turn` (`codex.rs`) — returns early, before reaching
+///   this, if a setup is in flight. That early bail is load-bearing and it is NOT the
+///   same claim as "the writer thread is serialized". An earlier revision asserted
+///   exactly that — prompt handling and turn start both run on the writer thread, so a
+///   setup supposedly could not be live — and it was FALSE: the `StartTurnAfterSetup`
+///   hand-off is enqueued by a WAITER thread, and the waiter clears the setup slot
+///   before it sends, so a detach plus a fresh prompt can slip into that gap and re-arm
+///   the session with a new setup. The hand-off then arrives to find one in flight.
+///   Serializing the writer says nothing about what a waiter puts on the queue.
+/// * `forget_shared_codex_thread` (`codex.rs`) — safe by POSITION, not by its guard.
+///   Its `thread_id` check does NOT imply "no setup in flight": `thread/started` can
+///   bind the thread while the setup is still pending, so `{setup in flight}` and
+///   `{thread bound}` genuinely overlap. It is safe only because its one caller runs
+///   on the `StartTurnAfterSetup` hand-off failure path, i.e. after
+///   `complete_shared_codex_thread_setup` has already taken the setup.
+///
+/// That last one is why "a new caller must justify itself" is not boilerplate. A
+/// caller reaching `forget_shared_codex_thread` on any other path would eat the
+/// parked prompt AND leave the in-flight setup's waiter to see `Superseded` and
+/// suppress the session's own LIVE thread — the exact failure this whole change
+/// exists to eliminate. If you cannot justify it, take the setup out first.
 fn clear_shared_codex_turn_session_state(session_state: &mut SharedCodexSessionState) {
-    session_state.pending_thread_setup_request_id = None;
+    session_state.pending_thread_setup = None;
     session_state.pending_turn_start_request_id = None;
     session_state.turn_id = None;
     session_state.turn_started = false;

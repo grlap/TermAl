@@ -288,11 +288,11 @@ fn handle_shared_codex_app_server_message(
         .expect("shared Codex session mutex poisoned");
     // Lazy registration: the session may exist in state.inner (via
     // find_shared_codex_session_id) but not yet in the shared session map
-    // because remember_shared_codex_thread hasn't run. Insert a default
+    // because complete_shared_codex_thread_setup hasn't run. Insert a default
     // entry so early events from Codex are not dropped.
     let session_state = shared_sessions.entry(session_id.clone()).or_default();
     let SharedCodexSessionState {
-        pending_thread_setup_request_id: _,
+        pending_thread_setup: _,
         pending_turn_start_request_id,
         recorder: recorder_state,
         thread_id,
