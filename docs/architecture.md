@@ -18,7 +18,7 @@ Browser UI
        -> in-process Telegram relay (optional)
 
 Optional sidecar:
-  TermAl MCP bridge -> parent-scoped delegation tools -> same local TermAl server
+  TermAl MCP bridge -> parent-scoped delegation + root-peer tools -> same local TermAl server
 ```
 
 **Frontend:** React 18 + TypeScript, served on `:4173` in dev with a Vite proxy to the backend.
@@ -47,8 +47,20 @@ TermAl-owned path before persisting the delegation record.
 local MCP bridge spawned per parent agent session with
 `delegation-mcp --parent-session-id <id> --base-url <origin>`. The bridge is
 configured with an implicit `parentSessionId` and wraps the existing delegation
-HTTP/API routes; it does not expose broad session/delegation listing in the
-first slice. Claude receives it through `--mcp-config`, ACP/Cursor/Gemini
+HTTP/API routes. Delegation tools stay parent-scoped (a caller only sees the
+delegation ids created under its own parent), but the bridge also exposes the
+peer-messaging tools `termal_send_to_session` and `termal_list_sessions`, which
+deliberately reach **root** sessions across projects. That crossing is bounded on
+both sides: the peer tools reach only root sessions (delegation children stay
+unreachable as peers), and they are offered only to root callers — a bridge
+serving a delegation child has the peer tools removed from its tools/list and
+rejected on invocation (failing closed if the caller cannot be resolved), so a
+child cannot reach root sessions *through the bridge* (tm-r0y). This is a
+tool-layer guardrail, not process isolation: the loopback HTTP API is
+unauthenticated under the single-user, local-only trust model (`GET /api/state`,
+`POST /api/sessions/{id}/messages`), so a child able to issue raw HTTP could
+bypass the bridge — caller-scoped REST auth is deferred with capability tokens.
+Claude receives it through `--mcp-config`, ACP/Cursor/Gemini
 receive it through `mcpServers` on `session/new` and `session/load`, and Codex
 receives it through `config.mcp_servers` on `thread/start` and `thread/resume`.
 
@@ -62,7 +74,7 @@ The binary has three modes:
 
 1. **Server mode** (default) - starts an axum HTTP server on `127.0.0.1:8787` by default, serves the API, and manages long-lived agent processes. `TERMAL_PORT` can override the port.
 2. **REPL mode** (`repl`, `cli`, or a REPL-capable agent shortcut such as `codex`) - interactive terminal loop. Reads prompts from stdin and runs one turn at a time via `run_turn_blocking()`. Claude is intentionally excluded because Claude Code runs through the long-lived server-side stdio runtime.
-3. **Delegation MCP mode** (`delegation-mcp --parent-session-id <id> [--base-url <origin>]`) - stdio JSON-RPC bridge exposing parent-scoped delegation tools to agent runtimes.
+3. **Delegation MCP mode** (`delegation-mcp --parent-session-id <id> [--base-url <origin>]`) - stdio JSON-RPC bridge exposing parent-scoped delegation tools plus the root-only peer-messaging tools to agent runtimes.
 
 The Telegram relay is not a CLI mode. It is configured from Settings ->
 Telegram and supervised inside server mode.
@@ -226,7 +238,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/markers` | Create a conversation marker and publish `ConversationMarkerCreated`. Returns `201` with `ConversationMarkerResponse`; malformed JSON uses the standard `ApiError` envelope. |
 | PATCH | `/api/sessions/{id}/markers/{marker_id}` | Patch marker kind/name/body/color/message anchors. Nullable `body` and `endMessageId` clear those fields. Publishes `ConversationMarkerUpdated`. |
 | DELETE | `/api/sessions/{id}/markers/{marker_id}` | Delete one conversation marker and publish `ConversationMarkerDeleted`. |
-| POST | `/api/sessions/{id}/messages` | Send message |
+| POST | `/api/sessions/{id}/messages` | Send a message to a session; queues on the target's pending-prompt FIFO if it is mid-turn. Optional `sourceSessionId` (set by `termal_send_to_session`) marks the message as delivered from a peer session — the backend resolves it to the sender's display name for the transcript label, so the name is backend-authoritative rather than taken from the message body. |
 | POST | `/api/sessions/{id}/delegations` | Create a Phase 1 local child delegation session with `readOnly` or `isolatedWorktree` write policy. Returns `201` with `DelegationResponse`; unsupported worker/`sharedWorktree`/remote-backed variants return `501`, active-limit conflicts return `409`, handler-level prompt/scope validation returns `400`, and JSON schema/deserialization failures return `422`. |
 | POST | `/api/sessions/{id}/delegation-waits` | Create a parent-scoped backend resume wait for one or more delegations. Returns `201` with `DelegationWaitResponse`; terminal targets may consume the wait immediately and queue/resume the parent in the same response cycle. |
 | POST | `/api/sessions/{id}/queued-prompts/{prompt_id}/cancel` | Cancel queued prompt |
@@ -239,6 +251,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | GET | `/api/sessions/{id}/delegations/{delegation_id}` | Read delegation metadata/status -> `DelegationStatusResponse`. This read also refreshes the target child delegation from its linked session, so it can persist terminal status/result data, publish delegation/card SSE deltas, and consume backend waits that watch that delegation. Unknown delegation ids, unknown parent ids, and wrong-parent requests return `404`. |
 | GET | `/api/sessions/{id}/delegations/{delegation_id}/result` | Read a completed delegation result packet -> `DelegationResultResponse`. This read also refreshes the target child delegation from its linked session before deciding whether a result is available, so it can persist terminal status/result data, publish delegation/card SSE deltas, and consume backend waits that watch that delegation. Unknown delegation ids, unknown parent ids, and wrong-parent requests return `404`; unfinished delegations return `409`. |
 | POST | `/api/sessions/{id}/delegations/{delegation_id}/cancel` | Cancel a running delegation child session -> `DelegationStatusResponse`; unknown delegation ids, unknown parent ids, and wrong-parent requests return `404`. Terminal delegations are idempotent and return the current status. |
+| POST | `/api/sessions/{id}/delegations/{delegation_id}/followup` | Re-arm a terminal (Completed/Failed) delegation and dispatch another turn to its existing child session -> `DelegationStatusResponse`. A delegation that is still Running, was canceled, or whose child was removed returns `409`; unknown/wrong-parent ids return `404`. Backs the `termal_followup_session` MCP tool. |
 
 For local sessions, `GET /api/sessions/{id}` is a local full-transcript read. For
 unloaded remote-proxy sessions, the same route synchronously calls the owning

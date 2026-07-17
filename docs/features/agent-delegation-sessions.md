@@ -634,6 +634,42 @@ the practical visibility boundary for v1: delegated children remain normal
 sessions in storage, but parent-scoped MCP callers can only reach children by
 delegation id through parent-owned routes.
 
+**v2 update — peer messaging ratifies a broader boundary.** The delegation tools
+above stay parent-scoped exactly as described. Peer messaging
+(`termal_send_to_session`, `termal_list_sessions`) deliberately crosses this
+boundary and ships the broad session listing the v1 slice deferred: a bridge MAY
+enumerate and target **root** sessions across projects — and, on the roadmap,
+across machines — because the point of peer messaging is long-running specialist
+sessions on different projects consulting each other (for example, a Kadry coding
+agent requesting changes from a LegalSystem coding agent). Delegation **children**
+remain unreachable as peers: both tools filter to root sessions
+(`parentDelegationId == null`). On top of that root-only filter,
+`termal_send_to_session` refuses to target the caller *itself* — on both id and
+name references — so a bridge cannot message itself; `termal_list_sessions`
+applies only the root-only filter and so still lists the caller. That root-only
+filter, plus send's self-rejection, is what the peer guard tests now pin, and it
+is the actual v2 visibility boundary.
+
+The exclusion is symmetric on the caller side: a bridge serving a delegation
+child (a reviewer, explorer, or worker, which may be processing untrusted
+content) is not given the peer tools at all. `tools_list_for_caller` removes
+`termal_send_to_session` and `termal_list_sessions` from that child's advertised
+tools, and the invocation path rejects them even if called directly, so a child
+cannot reach root sessions *through the bridge*. That check fails closed: an
+unreachable backend or an unresolvable caller is treated as a child and denied
+the peer tools (tm-r0y). Only a root-session caller ever sees or invokes the peer
+tools, so the note above that `termal_list_sessions` lists the caller is itself
+scoped to a root caller.
+
+This containment is a tool-layer guardrail, not process isolation. TermAl's
+loopback HTTP API is unauthenticated under the single-user, local-only trust
+model — `GET /api/state` and `POST /api/sessions/{id}/messages` answer any local
+caller — so a child able to issue raw HTTP could enumerate or message sessions
+directly, bypassing the bridge. Hiding and rejecting the peer tools keeps a
+well-behaved agent within the boundary by governing the tools it is offered and
+will run; a hard cross-session boundary would need caller-scoped REST auth, which
+is deferred with the capability-token work (see Phase 3).
+
 Keep tool names explicit:
 
 ```text
@@ -643,6 +679,9 @@ termal_get_session_result
 termal_cancel_session
 termal_wait_delegations
 termal_resume_after_delegations
+termal_followup_session
+termal_send_to_session
+termal_list_sessions
 ```
 
 The MCP tools map to the existing command/API semantics:
@@ -654,7 +693,18 @@ termal_get_session_result({ delegationId }) -> DelegationResultPacket
 termal_cancel_session({ delegationId }) -> DelegationStatusCommandResult
 termal_wait_delegations({ delegationIds, pollIntervalMs?, timeoutMs? }) -> WaitDelegationsResult
 termal_resume_after_delegations({ delegationIds, mode?, title? }) -> DelegationWaitResponse
+termal_followup_session({ delegationId, message }) -> DelegationStatusResponse
+termal_send_to_session({ sessionId, message }) -> { sessionId, resolvedFrom, delivered }
+termal_list_sessions() -> { sessions: [{ sessionId, name, agent, status, workdir, preview }] }
 ```
+
+`termal_followup_session` re-arms a completed or failed delegation for another
+turn — a still-running, canceled, or child-removed delegation is rejected (see
+the `/followup` route). `termal_send_to_session` and `termal_list_sessions` are the
+peer-messaging tools: `termal_list_sessions` returns root-session summaries for
+discovery, and `termal_send_to_session` delivers a fire-and-forget message to a
+root peer by id or name (queues if the peer is mid-turn). See the v2 visibility
+boundary above and the shipped-vs-proposed note under *Peer Session Connections*.
 
 `termal_wait_delegations` is a bounded synchronous wait for short waits and
 smoke tests. `termal_resume_after_delegations` schedules the durable backend
@@ -678,8 +728,8 @@ without opening the child transcript:
 
 Safety limits for agent-facing tools:
 - delegation ids are parent-scoped; the first MCP bridge is launched with one
-  implicit parent session and can only inspect, wait for, or cancel delegations
-  under that parent
+  implicit parent session and can only inspect, wait for, cancel, or re-arm
+  (follow up) delegations under that parent
 - default spawn permission is read-only
 - per-parent concurrency and nesting-depth limits prevent unbounded process
   spawning
@@ -755,6 +805,7 @@ POST /api/sessions/{parentSessionId}/delegations
 GET  /api/sessions/{parentSessionId}/delegations/{delegationId}
 GET  /api/sessions/{parentSessionId}/delegations/{delegationId}/result
 POST /api/sessions/{parentSessionId}/delegations/{delegationId}/cancel
+POST /api/sessions/{parentSessionId}/delegations/{delegationId}/followup
 POST /api/sessions/{parentSessionId}/delegation-waits
 ```
 
@@ -1261,6 +1312,22 @@ so the relationship is a tree. A common need does not fit that tree: two session
 that already exist, started independently, that the user now wants to let talk to
 each other — hand off context, ask a focused question, compare notes.
 
+> **Status — what shipped diverges from this proposal.** The peer feature that
+> actually ships is the simpler fire-and-forget messaging described under *MCP
+> Tools* above: `termal_send_to_session` + `termal_list_sessions`. It has **no**
+> connection object, **no** hop budget, **no** `expectsReply`, **no**
+> `termal_reply_to_session`, and **no** human-only `/connect-sessions` — any root
+> session may message any other by id or name, delivery is one-way
+> fire-and-forget (a reply is just another incoming message), and agents initiate
+> directly. In particular the *Provenance Is Mandatory* and hop-budget
+> subsections below describe the **proposed** protocol and are **not
+> implemented**: the shipped tool attaches the sender's identity as a
+> backend-resolved transcript label for the human, but does **not** prepend a
+> runtime provenance header, so the receiving agent sees an ordinary message and
+> peers coordinate reachability in-band by convention. Observed autonomous
+> consult/reply loops close without the header, so it is deferred as
+> unproven-need. Treat everything below as future design, not current behaviour.
+
 This is the same primitive with one thing removed. A delegation is a directed
 message to a session plus a reply and a backend fan-in. Take away the spawn — let
 the target be a session that already exists — and the delegation record becomes a
@@ -1507,8 +1574,12 @@ type SessionExchange = {
 - Launch the bridge per parent agent session with an implicit `parentSessionId`.
 - Wire the bridge into ACP/Codex, Cursor, Gemini, and Claude session
   startup/resume paths.
-- Keep the bridge parent-scoped. Project/workspace opt-in and capability tokens
-  are deferred until remote/shared transports need a stronger boundary.
+- Keep delegation operations parent-scoped. (The v2 peer-messaging tools
+  `termal_send_to_session` / `termal_list_sessions` are the deliberate exception:
+  they reach root sessions across projects — see the v2 visibility boundary
+  above.) Project/workspace opt-in and capability tokens are deferred until
+  remote/shared transports need a stronger boundary — the same mechanism a hard,
+  REST-level cross-session boundary would require.
 - Add regression coverage for terminal status/result refresh, backend resume
   waits, and restart/reconcile behavior before relying on the bridge for review
   automation.
@@ -1577,14 +1648,17 @@ MCP/internal commands:
   consumes any already-satisfied backend wait for that parent
 - a backend restart while a wait is pending does not leave the parent blocked
   once all watched delegations are terminal
-- a parent-scoped bridge cannot read, wait for, cancel, or fetch result packets
-  for a delegation owned by another parent session
+- a parent-scoped bridge cannot read, wait for, cancel, re-arm (follow up), or
+  fetch result packets for a delegation owned by another parent session
 - result is unavailable until completion
 - cancel is idempotent
 
 Agent MCP bridge:
-- the bridge starts with an implicit parent session id and no broad listing
-  tools
+- the bridge starts with an implicit parent session id; delegation tools expose
+  no cross-parent listing, while the peer tools (`termal_list_sessions` /
+  `termal_send_to_session`) reach root sessions only, never delegation children;
+  `termal_send_to_session` additionally refuses to target the caller itself,
+  while `termal_list_sessions` lists the caller
 - each tool delegates to the existing API/command surface and preserves its
   validation errors
 - no MCP tool accepts an arbitrary `parentSessionId`; the bridge process is
