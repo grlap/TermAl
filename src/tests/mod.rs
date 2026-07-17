@@ -723,11 +723,6 @@ fn test_remote_registry() -> Arc<RemoteRegistry> {
 static TEST_HOME_ENV_MUTEX: std::sync::LazyLock<std::sync::Mutex<()>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 
-#[cfg(windows)]
-const TEST_HOME_ENV_KEY: &str = "USERPROFILE";
-#[cfg(not(windows))]
-const TEST_HOME_ENV_KEY: &str = "HOME";
-
 struct ScopedEnvVar {
     key: &'static str,
     original: Option<std::ffi::OsString>,
@@ -765,6 +760,32 @@ impl ScopedEnvVar {
         }
         Self { key, original }
     }
+
+    /// Scopes BOTH `HOME` and `USERPROFILE` to `value` for the returned
+    /// guard's lifetime.
+    ///
+    /// `resolve_home_dir()` reads `HOME` first and only falls back to
+    /// `USERPROFILE`, so a test that overrides a single variable leaks the
+    /// developer's real home through the other. On Windows under Git Bash
+    /// `HOME` is set, so overriding only `USERPROFILE` (the old
+    /// `TEST_HOME_ENV_KEY`) let the Telegram tests read — and, via the
+    /// config-saving tests, WRITE — the real `~/.termal/telegram-bot.json`,
+    /// seeding the fixture `chatId: 123` into production state (tm-4uj).
+    /// Overriding both variables isolates home-dir resolution on every
+    /// platform. Hold `TEST_HOME_ENV_MUTEX` across the guard's lifetime.
+    fn set_home_dir(value: &FsPath) -> ScopedHomeDir {
+        ScopedHomeDir {
+            _home: ScopedEnvVar::set_path("HOME", value),
+            _userprofile: ScopedEnvVar::set_path("USERPROFILE", value),
+        }
+    }
+}
+
+/// Guard returned by [`ScopedEnvVar::set_home_dir`]; restores both `HOME` and
+/// `USERPROFILE` when dropped (each field is an independent [`ScopedEnvVar`]).
+struct ScopedHomeDir {
+    _home: ScopedEnvVar,
+    _userprofile: ScopedEnvVar,
 }
 
 impl Drop for ScopedEnvVar {
@@ -2106,6 +2127,7 @@ fn subagent_results_append_after_existing_assistant_text() {
                 author: Author::Assistant,
                 text: "Final answer".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         )
         .unwrap();

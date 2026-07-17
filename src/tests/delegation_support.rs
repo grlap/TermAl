@@ -28,6 +28,7 @@ pub(super) fn finish_delegation_child_with_assistant_text(
             author: Author::Assistant,
             text: text.to_owned(),
             expanded_text: None,
+            source: None,
         },
     );
     child.session.status = SessionStatus::Idle;

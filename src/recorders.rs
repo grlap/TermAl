@@ -456,6 +456,7 @@ fn recorder_push_text<R: SessionRecorderAccess>(recorder: &mut R, text: &str) ->
             author: Author::Assistant,
             text: trimmed.to_owned(),
             expanded_text: None,
+            source: None,
         },
     )
 }
@@ -522,6 +523,7 @@ fn recorder_text_delta<R: SessionRecorderAccess>(recorder: &mut R, delta: &str) 
                     author: Author::Assistant,
                     text: String::new(),
                     expanded_text: None,
+                    source: None,
                 },
             )?;
             recorder.recorder_state_mut().streaming_text_message_id = Some(message_id.clone());
@@ -566,6 +568,7 @@ fn recorder_replace_streaming_text<R: SessionRecorderAccess>(
                     author: Author::Assistant,
                     text: trimmed.to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             );
         }
@@ -747,6 +750,7 @@ fn recorder_error<R: SessionRecorderAccess>(recorder: &mut R, detail: &str) -> R
             author: Author::Assistant,
             text: format!("Error: {cleaned}"),
             expanded_text: None,
+            source: None,
         },
     )
 }

@@ -40,6 +40,7 @@ fn project_digest_surfaces_pending_approval_actions() {
                 author: Author::Assistant,
                 text: "Implemented the requested fix.".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         )
         .unwrap();
@@ -186,6 +187,7 @@ fn project_digest_routes_dirty_project_prompts_to_non_delegation_session() {
                 text: "Delegation result should inform the summary but not receive prompts."
                     .to_owned(),
                 expanded_text: None,
+                source: None,
             },
         )
         .unwrap();
@@ -264,6 +266,7 @@ fn project_digest_routes_clean_continue_to_non_delegation_session() {
                 author: Author::Assistant,
                 text: "Delegation found no changes to make.".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         )
         .unwrap();
@@ -339,6 +342,7 @@ fn project_digest_routes_error_fix_it_to_non_delegation_session() {
                 author: Author::Assistant,
                 text: "Delegation failed while checking the project.".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         )
         .unwrap();

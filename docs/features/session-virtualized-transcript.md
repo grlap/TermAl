@@ -9,6 +9,7 @@ Primary implementation:
 Supporting owners:
 
 - `ui/src/panels/conversation-virtualization.ts`
+- `ui/src/panels/AgentSessionPanel.tsx` (deferral + the pending-prompt queue)
 - `ui/src/SessionPaneView.tsx`
 - `ui/src/message-stack-scroll-sync.ts`
 - `ui/src/message-cards.tsx`
@@ -120,6 +121,47 @@ Mounted-range compaction is deferred until scroll idle.
 
 Once input settles, the mounted band is allowed to shrink back toward
 `workingMountedPageRange`.
+
+## Deferral and the Live Tail
+
+`SessionConversationPage` in `ui/src/panels/AgentSessionPanel.tsx` decides *what*
+the virtualizer renders, and it is the layer that keeps an actively streaming turn
+responsive. It sits above the paging model that the rest of this document describes.
+
+### Message bulk is deferred; the tail is not
+
+The transcript body flows through `useDeferredValue(session.messages)`. During a
+live turn the assistant streams tokens continuously, and re-rendering the whole
+(virtualized, often heavy-Markdown) transcript at high priority on every tick would
+starve interaction. Deferral keeps the previously rendered transcript on screen
+while React prepares the new one at low priority.
+
+Pure deferral would make streaming itself invisible, so the newest messages are
+always spliced back in undeferred:
+
+```
+baseVisibleMessages = includeUndeferredMessageTail(deferredMessages, session.messages)
+```
+
+The bulk history lags under load; the live tail is always current. That is the
+whole trick — defer the expensive history, never the part the user is watching.
+
+### Pending prompts are the live tail — never defer them
+
+Queued follow-ups (`session.pendingPrompts`) render pinned to the live turn through
+`PendingPromptCard`. They are read from the **immediate** `session.pendingPrompts`,
+never from a deferred copy.
+
+This is a load-bearing rule, not an optimization. The queue is tiny and changes
+only when a prompt is queued or dequeued — never per streamed token — so there is
+nothing to defer for. But if it *is* deferred (a `useDeferredValue(pendingPrompts)`),
+the continuous `session.messages` stream starves that low-priority update: it never
+commits until the stream stops, so a queued prompt stays invisible during the exact
+turn it was queued behind and only appears once that turn is stopped. That was a
+shipped regression (introduced by a "responsiveness" refactor that deferred both
+lists); see invariant 7. Note that `act()` in tests flushes deferred values
+synchronously, so unit tests cannot reproduce this starvation — it only appears
+under real continuous streaming.
 
 ## Render Flow
 
@@ -251,6 +293,11 @@ These rules should remain true:
 5. Heavy content inside mounted pages should render directly.
 6. Bottom-follow logic must stop immediately once the user explicitly scrolls
    away from the latest content.
+7. Pending prompts are part of the live tail and must render from the immediate
+   `session.pendingPrompts`. Never wrap the pending-prompt queue in
+   `useDeferredValue` — the continuous message stream starves the deferred update
+   and queued prompts vanish until the turn stops. Deferral is for the bulk message
+   history only, and even there the undeferred tail is always spliced back in.
 
 ## Known Limitations
 

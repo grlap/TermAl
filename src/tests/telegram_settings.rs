@@ -75,7 +75,7 @@ fn telegram_status_persists_sanitized_stale_project_and_session_references() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -143,7 +143,7 @@ fn telegram_status_does_not_reimport_migrated_file_config_after_default_reset() 
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("settings path should have a parent"))
@@ -199,7 +199,7 @@ fn telegram_config_update_does_not_reimport_migrated_file_config_after_default_r
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -263,7 +263,7 @@ fn telegram_settings_load_defaults_only_for_missing_file() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let path = state.telegram_bot_file_path();
 
@@ -293,7 +293,7 @@ fn telegram_config_update_sanitizes_stale_persisted_references_before_validation
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -355,7 +355,7 @@ fn telegram_config_update_resanitizes_project_deleted_after_validation_before_pe
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -427,7 +427,7 @@ fn telegram_config_update_resanitizes_session_deleted_after_validation_before_pe
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -492,7 +492,7 @@ fn delete_project_prunes_telegram_config_and_disables_relay_without_project_targ
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let home = std::env::temp_dir().join(format!("termal-telegram-home-{}", Uuid::new_v4()));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -555,7 +555,7 @@ fn delete_project_does_not_reimport_migrated_file_config_after_default_reset() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (deleted_project_id, _deleted_session_id) =
         create_telegram_settings_project_and_session(&state);
@@ -615,7 +615,7 @@ fn delete_project_surfaces_telegram_prune_errors() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -640,7 +640,7 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (deleted_project_id, _deleted_session_id) =
         create_telegram_settings_project_and_session(&state);
@@ -718,7 +718,7 @@ fn delete_project_restarts_running_telegram_relay_with_remaining_effective_proje
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (deleted_project_id, _deleted_session_id) =
         create_telegram_settings_project_and_session(&state);
@@ -792,7 +792,7 @@ fn delete_project_migrates_unrelated_telegram_token_without_restarting_relay() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (deleted_project_id, _deleted_session_id) =
         create_telegram_settings_project_and_session(&state);
@@ -852,7 +852,7 @@ fn kill_session_prunes_telegram_state_and_config_references() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -930,7 +930,7 @@ fn kill_session_does_not_reimport_migrated_file_config_after_default_reset() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();

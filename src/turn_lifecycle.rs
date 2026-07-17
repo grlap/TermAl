@@ -85,6 +85,7 @@ impl AppState {
                     author: Author::Assistant,
                     text: format!("Turn failed: {cleaned}"),
                     expanded_text: None,
+                    source: None,
                 });
             }
             if let Some(message_id) = file_change_message_id {
@@ -182,6 +183,7 @@ impl AppState {
                 author: Author::Assistant,
                 text: cleaned.to_owned(),
                 expanded_text: None,
+                source: None,
             });
         }
 
@@ -469,6 +471,7 @@ impl AppState {
                             author: Author::Assistant,
                             text: format!("Turn failed: {detail}"),
                             expanded_text: None,
+                            source: None,
                         });
                         created_message_indices.push(failed_message_index);
                     }

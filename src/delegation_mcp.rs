@@ -241,7 +241,7 @@ impl TermalDelegationMcpBridge {
         let result = match method {
             "initialize" => Ok(mcp_initialize_result()),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(mcp_tools_list_result()),
+            "tools/list" => Ok(self.tools_list_for_caller()),
             "tools/call" => self.handle_tool_call(params),
             "notifications/initialized" => return Ok(None),
             _ => {
@@ -264,11 +264,23 @@ impl TermalDelegationMcpBridge {
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
+        // Peer tools (message/enumerate arbitrary sessions) are root-session only. A
+        // delegation child (e.g. a read-only reviewer chewing on untrusted code) must not
+        // reach them, so reject here as well as hiding them from tools/list (tm-r0y).
+        if tool_is_peer_scoped(&name) && self.caller_is_delegation_child() {
+            bail!(
+                "`{name}` is not available to delegation-child sessions; peer messaging is \
+                 restricted to root sessions"
+            );
+        }
         let result = match name.as_str() {
             "termal_spawn_session" => self.tool_spawn_session(arguments),
             "termal_get_session_status" => self.tool_get_session_status(arguments),
             "termal_get_session_result" => self.tool_get_session_result(arguments),
             "termal_cancel_session" => self.tool_cancel_session(arguments),
+            "termal_followup_session" => self.tool_followup_session(arguments),
+            "termal_send_to_session" => self.tool_send_to_session(arguments),
+            "termal_list_sessions" => self.tool_list_sessions(arguments),
             "termal_wait_delegations" => self.tool_wait_delegations(arguments),
             "termal_resume_after_delegations" => self.tool_resume_after_delegations(arguments),
             other => Err(anyhow!("unknown TermAl delegation MCP tool `{other}`")),
@@ -447,6 +459,158 @@ impl TermalDelegationMcpBridge {
         )
     }
 
+    fn tool_followup_session(&self, arguments: Value) -> Result<Value> {
+        let delegation_id =
+            required_path_identifier(arguments.get("delegationId"), "delegationId")?;
+        let message = required_string(arguments.get("message"), "message")?;
+        self.post_json(
+            &format!(
+                "/api/sessions/{}/delegations/{}/followup",
+                self.parent_session_id, delegation_id
+            ),
+            &json!({ "message": message }),
+        )
+    }
+
+    fn tool_send_to_session(&self, arguments: Value) -> Result<Value> {
+        // `sessionId` is interpolated into the request path once resolved, so it gets the
+        // same path-identifier validation every `delegationId` in this file already uses.
+        // A session NAME containing `/`, `\`, `?`, `#` or `%` is rejected here rather than
+        // resolved; callers target such a session by its id (termal_list_sessions shows it).
+        let session_ref = required_path_identifier(arguments.get("sessionId"), "sessionId")?;
+        let message = required_string(arguments.get("message"), "message")?;
+        // Agents routinely pass a session NAME here ("LegalCodex") rather than a TermAl id,
+        // so resolve a name to its id before delivering. A value that already looks like a
+        // TermAl id ("session-…") is used directly.
+        let session_id = self.resolve_session_reference(&session_ref)?;
+        // Reuse the standard message path: it delivers immediately when the target session
+        // is idle and queues on the target's pending-prompt FIFO when it is mid-turn. Fire-
+        // and-forget — we do not wait for or return the target's reply. Discard the large
+        // state snapshot the route returns and confirm compactly.
+        // Attribute the delivered message to THIS bridge's own session id. The
+        // receiving backend resolves it to our current display name, so the
+        // peer sees "<sender name>" instead of "You". Using our own id (not a
+        // caller-supplied value) is what keeps the attribution unspoofable.
+        self.post_json(
+            &format!("/api/sessions/{}/messages", session_id),
+            &json!({ "text": message, "sourceSessionId": self.parent_session_id }),
+        )?;
+        Ok(json!({
+            "sessionId": session_id,
+            "resolvedFrom": session_ref,
+            "delivered": true
+        }))
+    }
+
+    /// Resolves a peer session reference (an id or a name) to a VALIDATED target id.
+    ///
+    /// A value prefixed `session-` is a TermAl id; anything else is a session NAME matched
+    /// case-insensitively via /api/state, across ALL projects (peer sessions frequently live
+    /// in different projects). This is why a bare name — and the external Codex thread uuid
+    /// shown in the UI — 404 without it. Ambiguous names and no match both return a guiding
+    /// error.
+    ///
+    /// BOTH paths resolve against the live session list and land in the SAME filter: the
+    /// target must exist, be a ROOT session (never a delegation child), and never be the
+    /// caller itself. An earlier revision returned any `session-`-prefixed input verbatim,
+    /// which (a) skipped the root-only filter this comment promises — letting an id target a
+    /// delegation child or the sender — and (b) fed unvalidated text into the request path,
+    /// where the `url` crate resolves dot segments, so `session-x/../../sessions/victim/stop#`
+    /// normalised to a different POST route. Resolving every reference through the session
+    /// list closes both; the `required_path_identifier` check in the caller is the
+    /// belt-and-braces half, and it is load-bearing because tm-36l proposes skipping this
+    /// fetch for id-shaped arguments.
+    fn resolve_session_reference(&self, reference: &str) -> Result<String> {
+        let state = self.get_json("/api/state")?;
+        let sessions = state
+            .get("sessions")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let reference_is_id = reference.starts_with("session-");
+        let mut matches = sessions
+            .iter()
+            // Root sessions only — a peer message never targets a delegation child.
+            .filter(|session| session.get("parentDelegationId").map_or(true, Value::is_null))
+            .filter(|session| {
+                if reference_is_id {
+                    session.get("id").and_then(Value::as_str) == Some(reference)
+                } else {
+                    session
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| name.eq_ignore_ascii_case(reference))
+                }
+            })
+            .filter_map(|session| {
+                let id = session.get("id").and_then(Value::as_str)?.to_owned();
+                let project = session
+                    .get("projectId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
+                Some((id, project))
+            })
+            .collect::<Vec<_>>();
+        match matches.len() {
+            0 => bail!(
+                "no root session has id or name `{reference}` — call termal_list_sessions to see \
+                 the available sessions and their ids"
+            ),
+            1 => {
+                let id = matches.remove(0).0;
+                if id == self.parent_session_id {
+                    bail!(
+                        "`{reference}` is this session — termal_send_to_session delivers to a PEER \
+                         session, not to yourself"
+                    );
+                }
+                Ok(id)
+            }
+            _ => {
+                let listed = matches
+                    .iter()
+                    .map(|(id, project)| format!("{id} (project {project})"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                bail!(
+                    "session name `{reference}` is ambiguous — matches {listed}; pass the exact sessionId"
+                )
+            }
+        }
+    }
+
+    fn tool_list_sessions(&self, _arguments: Value) -> Result<Value> {
+        // Peer discovery: resolve a session by name to its id for termal_send_to_session.
+        // /api/state is metadata-only (no transcripts), so this is a cheap summary read.
+        let state = self.get_json("/api/state")?;
+        let sessions = state
+            .get("sessions")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let listed = sessions
+            .iter()
+            // Root sessions only — exclude delegation children (they carry a parent id).
+            .filter(|session| {
+                session
+                    .get("parentDelegationId")
+                    .map_or(true, Value::is_null)
+            })
+            .map(|session| {
+                json!({
+                    "sessionId": session.get("id").cloned().unwrap_or(Value::Null),
+                    "name": session.get("name").cloned().unwrap_or(Value::Null),
+                    "agent": session.get("agent").cloned().unwrap_or(Value::Null),
+                    "status": session.get("status").cloned().unwrap_or(Value::Null),
+                    "workdir": session.get("workdir").cloned().unwrap_or(Value::Null),
+                    "preview": session.get("preview").cloned().unwrap_or(Value::Null),
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({ "sessions": listed }))
+    }
+
     fn tool_resume_after_delegations(&self, arguments: Value) -> Result<Value> {
         let delegation_ids =
             required_path_identifier_array(arguments.get("delegationIds"), "delegationIds")?;
@@ -534,6 +698,44 @@ impl TermalDelegationMcpBridge {
             }
             std::thread::sleep(Duration::from_millis(poll_interval_ms));
         }
+    }
+
+    /// Whether the session this bridge serves is a delegation CHILD (a spawned reviewer /
+    /// explorer / worker) rather than a root session. Peer tools are root-only, so a child
+    /// must not enumerate or message arbitrary sessions (tm-r0y). Fail SAFE: if the backend
+    /// can't be reached or the caller can't be found, treat it as a child (deny peer tools).
+    fn caller_is_delegation_child(&self) -> bool {
+        let Ok(state) = self.get_json("/api/state") else {
+            return true;
+        };
+        let Some(sessions) = state.get("sessions").and_then(Value::as_array) else {
+            return true;
+        };
+        match sessions.iter().find(|session| {
+            session.get("id").and_then(Value::as_str) == Some(self.parent_session_id.as_str())
+        }) {
+            Some(session) => session
+                .get("parentDelegationId")
+                .is_some_and(|value| !value.is_null()),
+            None => true,
+        }
+    }
+
+    /// The advertised tool list for this bridge's caller: the full set for a root session, or
+    /// the set with the peer tools removed for a delegation child (tm-r0y).
+    fn tools_list_for_caller(&self) -> Value {
+        let mut result = mcp_tools_list_result();
+        if self.caller_is_delegation_child() {
+            if let Some(tools) = result.get_mut("tools").and_then(Value::as_array_mut) {
+                tools.retain(|tool| {
+                    !tool
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(tool_is_peer_scoped)
+                });
+            }
+        }
+        result
     }
 
     fn get_json(&self, path: &str) -> Result<Value> {
@@ -635,6 +837,12 @@ fn mcp_initialize_result() -> Value {
     })
 }
 
+/// Peer tools operate on ARBITRARY root sessions (message / enumerate), so they are
+/// restricted to root callers and hidden from / rejected for delegation children (tm-r0y).
+fn tool_is_peer_scoped(name: &str) -> bool {
+    matches!(name, "termal_send_to_session" | "termal_list_sessions")
+}
+
 fn mcp_tools_list_result() -> Value {
     json!({
         "tools": [
@@ -718,6 +926,38 @@ fn mcp_tools_list_result() -> Value {
                         "mode": { "type": "string", "enum": ["all", "any"] },
                         "title": { "type": "string" }
                     }
+                }
+            },
+            {
+                "name": "termal_followup_session",
+                "description": "Resume a COMPLETED parent-scoped TermAl delegation with a follow-up message. Fails if the delegation is still running (wait via termal_resume_after_delegations first) or if its child session was removed.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["delegationId", "message"],
+                    "properties": {
+                        "delegationId": { "type": "string" },
+                        "message": { "type": "string" }
+                    }
+                }
+            },
+            {
+                "name": "termal_send_to_session",
+                "description": "Send a message to another root-level TermAl session. `sessionId` accepts either a TermAl id (session-…) OR a session NAME (e.g. \"LegalCodex\"), resolved case-insensitively across all projects. Delivered immediately if the target is idle, or queued on its pending-prompt FIFO if it is mid-turn. FIRE-AND-FORGET — this is NOT a delegation: there is no result to await and nothing to poll. The call returns as soon as the message is delivered/queued; do NOT wait for a reply. If the target replies, it arrives LATER as a separate incoming message in your own session (sent via its own termal_send_to_session), never as a return value here. If a name is ambiguous, use termal_list_sessions and pass the exact id.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["sessionId", "message"],
+                    "properties": {
+                        "sessionId": { "type": "string" },
+                        "message": { "type": "string" }
+                    }
+                }
+            },
+            {
+                "name": "termal_list_sessions",
+                "description": "List the root-level TermAl sessions (sessionId, name, agent, status, workdir, preview) so you can resolve a session by name to its id for termal_send_to_session. Excludes delegation-child sessions. Takes no arguments.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
                 }
             }
         ]
@@ -1058,9 +1298,21 @@ mod delegation_mcp_tests {
                 "termal_cancel_session",
                 "termal_wait_delegations",
                 "termal_resume_after_delegations",
+                "termal_followup_session",
+                "termal_send_to_session",
+                "termal_list_sessions",
             ]
         );
-        assert!(!names.iter().any(|name| name.contains("list")));
+        // termal_list_sessions is the intentional peer-discovery tool; guard that no OTHER
+        // broadly-scoped "list" tool creeps in.
+        assert_eq!(
+            names
+                .iter()
+                .copied()
+                .filter(|name| name.contains("list"))
+                .collect::<Vec<_>>(),
+            vec!["termal_list_sessions"]
+        );
     }
 
     #[test]
@@ -1237,6 +1489,278 @@ mod delegation_mcp_tests {
                 "note mismatch for `{tail}`"
             );
         }
+    }
+
+    #[test]
+    fn delegation_mcp_list_sessions_returns_root_sessions_only() {
+        let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |request| {
+            assert_eq!(request.method, "GET");
+            assert_eq!(request.path, "/api/state");
+            (
+                200,
+                json!({
+                    "sessions": [
+                        { "id": "session-root-a", "name": "HelloMe", "agent": "Codex", "status": "idle", "workdir": "C:/a", "preview": "hi" },
+                        { "id": "session-root-b", "name": "HelloMe2", "agent": "Codex", "status": "active", "workdir": "C:/b", "preview": "yo" },
+                        { "id": "session-child", "name": "Codex /review-local", "agent": "Codex", "status": "idle", "parentDelegationId": "delegation-x" }
+                    ]
+                }),
+            )
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let response = bridge
+            .tool_list_sessions(json!({}))
+            .expect("list should succeed");
+        let sessions = response
+            .get("sessions")
+            .and_then(Value::as_array)
+            .expect("sessions should be an array");
+        let ids = sessions
+            .iter()
+            .filter_map(|session| session.get("sessionId").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["session-root-a", "session-root-b"]);
+        assert_eq!(sessions[1]["name"], "HelloMe2");
+        server.join().expect("test server should join");
+    }
+
+    #[test]
+    fn delegation_mcp_hides_and_rejects_peer_tools_for_delegation_child() {
+        let (base_url, _requests, server) = spawn_test_mcp_http_server(2, move |request| {
+            assert_eq!(request.method, "GET");
+            assert_eq!(request.path, "/api/state");
+            (
+                200,
+                json!({
+                    "sessions": [
+                        { "id": "session-parent", "name": "Reviewer", "parentDelegationId": "delegation-x" }
+                    ]
+                }),
+            )
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        // tools/list omits the peer tools for a delegation-child caller...
+        let names = bridge
+            .tools_list_for_caller()
+            .get("tools")
+            .and_then(Value::as_array)
+            .expect("tools array")
+            .iter()
+            .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_owned))
+            .collect::<Vec<_>>();
+        assert!(!names.iter().any(|name| name == "termal_send_to_session"));
+        assert!(!names.iter().any(|name| name == "termal_list_sessions"));
+        assert!(
+            names.iter().any(|name| name == "termal_spawn_session"),
+            "delegation tools stay available to children"
+        );
+
+        // ...and invoking one through the dispatch is rejected.
+        let err = bridge
+            .handle_tool_call(json!({
+                "name": "termal_send_to_session",
+                "arguments": { "sessionId": "session-x", "message": "hi" }
+            }))
+            .expect_err("a delegation child must not invoke a peer tool");
+        assert!(
+            err.to_string().contains("root sessions"),
+            "error should explain the root-only restriction: {err}"
+        );
+        server.join().expect("test server should join");
+    }
+
+    #[test]
+    fn delegation_mcp_send_to_session_resolves_name_across_projects() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
+            match (request.method.as_str(), request.path.as_str()) {
+                ("GET", "/api/state") => (
+                    200,
+                    json!({
+                        "sessions": [
+                            { "id": "session-kadry", "name": "Kadry", "projectId": "project-kadry" },
+                            { "id": "session-legal", "name": "LegalCodex", "projectId": "project-rincon" }
+                        ]
+                    }),
+                ),
+                ("POST", "/api/sessions/session-legal/messages") => {
+                    let body: Value =
+                        serde_json::from_str(&request.body).expect("send body should be JSON");
+                    assert_eq!(body["text"], "hi legal");
+                    (202, json!({ "revision": 1, "sessions": [] }))
+                }
+                _ => (
+                    404,
+                    json!({ "error": format!("unexpected {} {}", request.method, request.path) }),
+                ),
+            }
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let response = bridge
+            .tool_send_to_session(json!({ "sessionId": "LegalCodex", "message": "hi legal" }))
+            .expect("send by name should resolve + deliver");
+        assert_eq!(response["sessionId"], "session-legal");
+        assert_eq!(response["resolvedFrom"], "LegalCodex");
+        assert_eq!(response["delivered"], true);
+        server.join().expect("test server should join");
+        let requests = requests.lock().expect("request log mutex poisoned");
+        assert_eq!(requests.len(), 2);
+    }
+
+    #[test]
+    fn delegation_mcp_send_to_session_unknown_name_errors() {
+        let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |request| {
+            assert_eq!(request.path, "/api/state");
+            (
+                200,
+                json!({ "sessions": [ { "id": "session-a", "name": "Alpha", "projectId": "p" } ] }),
+            )
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let err = bridge
+            .tool_send_to_session(json!({ "sessionId": "Nonexistent", "message": "hi" }))
+            .expect_err("unknown name should error");
+        assert!(
+            err.to_string().contains("termal_list_sessions"),
+            "error should guide to termal_list_sessions: {err}"
+        );
+        server.join().expect("test server should join");
+    }
+
+    // An id-shaped reference now resolves through /api/state like a name does, so that the
+    // root-only/non-self filter applies to BOTH paths (tm-88r). That is why this exercises
+    // two requests: the resolve, then the delivery.
+    #[test]
+    fn delegation_mcp_send_to_session_posts_message_to_target() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
+            match (request.method.as_str(), request.path.as_str()) {
+                ("GET", "/api/state") => (
+                    200,
+                    json!({
+                        "sessions": [
+                            { "id": "session-peer", "name": "Peer", "projectId": "p" }
+                        ]
+                    }),
+                ),
+                ("POST", "/api/sessions/session-peer/messages") => {
+                    let body: Value =
+                        serde_json::from_str(&request.body).expect("send body should be JSON");
+                    assert_eq!(body["text"], "hello peer");
+                    (202, json!({ "revision": 1, "sessions": [] }))
+                }
+                _ => (
+                    404,
+                    json!({ "error": format!("unexpected {} {}", request.method, request.path) }),
+                ),
+            }
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let response = bridge
+            .tool_send_to_session(json!({
+                "sessionId": "session-peer",
+                "message": "hello peer"
+            }))
+            .expect("send-to-session should succeed");
+
+        assert_eq!(response["sessionId"], "session-peer");
+        assert_eq!(response["delivered"], true);
+        server.join().expect("test server should join");
+        let requests = requests.lock().expect("request log mutex poisoned");
+        assert_eq!(requests.len(), 2);
+    }
+
+    // tm-88r: `sessionId` is interpolated into the request path, and the `url` crate
+    // resolves dot segments — so an unvalidated `session-`-prefixed reference turned
+    // termal_send_to_session into a POST primitive against arbitrary routes. The path
+    // validator must reject the traversal shape BEFORE any request is issued.
+    // Neuter-verified: swapping `required_path_identifier` back to `required_string` makes
+    // this fail (the reference reaches the resolver instead of being rejected outright).
+    #[test]
+    fn delegation_mcp_send_to_session_rejects_path_traversal_reference() {
+        // Zero expected requests: rejection must happen before any HTTP call.
+        let (base_url, requests, server) = spawn_test_mcp_http_server(0, move |request| {
+            (
+                500,
+                json!({ "error": format!("no request expected: {} {}", request.method, request.path) }),
+            )
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        for reference in [
+            "session-x/../../sessions/victim/stop#",
+            "session-x/../../sessions/victim/stop",
+            "session-a%2f..%2fvictim",
+            "../session-victim",
+            "session-x\\..\\victim",
+        ] {
+            let err = bridge
+                .tool_send_to_session(json!({ "sessionId": reference, "message": "hi" }))
+                .expect_err("a path-traversal reference must be rejected");
+            assert!(
+                err.to_string().contains("sessionId must not contain"),
+                "reference `{reference}` should be rejected by the path validator: {err}"
+            );
+        }
+
+        server.join().expect("test server should join");
+        let requests = requests.lock().expect("request log mutex poisoned");
+        assert!(
+            requests.is_empty(),
+            "a rejected reference must not reach the backend: {requests:?}"
+        );
+    }
+
+    // tm-88r: the id path used to return any `session-`-prefixed value verbatim, skipping
+    // the root-only filter its own comment promised. A delegation child is not a peer.
+    #[test]
+    fn delegation_mcp_send_to_session_rejects_delegation_child_and_self_targets() {
+        let (base_url, _requests, server) = spawn_test_mcp_http_server(2, move |request| {
+            assert_eq!(request.path, "/api/state", "no delivery should be attempted");
+            (
+                200,
+                json!({
+                    "sessions": [
+                        { "id": "session-parent", "name": "Me", "projectId": "p" },
+                        {
+                            "id": "session-child",
+                            "name": "Child",
+                            "projectId": "p",
+                            "parentDelegationId": "delegation-1"
+                        }
+                    ]
+                }),
+            )
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let child_err = bridge
+            .tool_send_to_session(json!({ "sessionId": "session-child", "message": "hi" }))
+            .expect_err("a delegation child must not be a peer target");
+        assert!(
+            child_err.to_string().contains("no root session"),
+            "child target should be filtered out by the root-only filter: {child_err}"
+        );
+
+        let self_err = bridge
+            .tool_send_to_session(json!({ "sessionId": "session-parent", "message": "hi" }))
+            .expect_err("a session must not peer-message itself");
+        assert!(
+            self_err.to_string().contains("is this session"),
+            "self target should be rejected explicitly: {self_err}"
+        );
+
+        server.join().expect("test server should join");
     }
 
     #[test]

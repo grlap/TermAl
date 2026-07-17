@@ -59,19 +59,26 @@ export function MessageMeta({
   author,
   timestamp,
   trailing,
+  sourceName,
 }: {
   author: string;
   timestamp: string;
   trailing?: ReactNode;
+  // Peer sender name for messages delivered via `termal_send_to_session`.
+  // When set on a user-authored message the label shows this instead of "You".
+  sourceName?: string | null;
 }) {
   const isUser = author === "you";
+  const trimmedSourceName =
+    typeof sourceName === "string" ? sourceName.trim() : "";
+  // A peer message keeps the user bubble styling but is labelled with the
+  // sender's session name; an empty/absent name falls back to "You".
+  const displayName = isUser ? trimmedSourceName || "You" : "Agent";
   const enableMarkerMenuTrigger = useIsMessageMetaMarkerMenuTriggerEnabled();
   const isMarkerMenuTrigger = enableMarkerMenuTrigger;
-  const markerMenuLabel = isUser
-    ? "You, open marker actions"
-    : "Agent, open marker actions";
+  const markerMenuLabel = `${displayName}, open marker actions`;
   const markerMenuTitle = isUser
-    ? "Open marker actions for your message"
+    ? `Open marker actions for ${trimmedSourceName ? `${displayName}'s` : "your"} message`
     : "Open marker actions for assistant message";
 
   return (
@@ -87,7 +94,7 @@ export function MessageMeta({
           isMarkerMenuTrigger ? true : undefined
         }
       >
-        {isUser ? "You" : "Agent"}
+        {displayName}
       </span>
       <span className="message-meta-end">
         {trailing}

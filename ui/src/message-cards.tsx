@@ -94,6 +94,101 @@ export { DiffCard } from "./diff-card";
 export { MarkdownContent } from "./markdown-content";
 export { MessageMetaMarkerMenuProvider } from "./message-meta-marker-menu-context";
 
+// Collapsed/expanded state for delegation fan-in messages, keyed by message id.
+// Held at module scope for the same reason `ExpandedPromptPanel` does it: the
+// conversation list is virtualized, so a row can unmount and remount as the user
+// scrolls — a plain `useState` would silently forget whether the user had expanded
+// this block. The map survives remounts; the id key keeps it per-message.
+const delegationFanInStateByStorageKey = new Map<string, boolean>();
+
+// Whether a "you" text message is a delegation fan-in prompt — the block that
+// `termal_resume_after_delegations` queues into the parent session when delegated
+// children finish. These render as full-height user messages that swallow the
+// viewport, so we collapse them by default.
+//
+// Detected by the fan-in template's three structural anchors (see
+// `build_delegation_wait_resume_prompt` in `src/delegations.rs`), not by a title
+// prefix, so it keeps working if the title wording changes. This is a purely
+// cosmetic collapse: a false positive only adds a harmless toggle, and a false
+// negative just leaves a message uncollapsed — so a heuristic is the right tool
+// here, unlike anywhere state correctness is on the line.
+export function isDelegationFanInText(text: string): boolean {
+  return (
+    text.includes("\nWait id: `") &&
+    text.includes("\nDelegations:\n") &&
+    text.includes("\nResults:\n")
+  );
+}
+
+// Renders a delegation fan-in message collapsed: the title line stays visible, the
+// (usually enormous) body hides behind a toggle. Mirrors `ExpandedPromptPanel` —
+// same persistence, same `.prompt-expansion` styling, same "force open while a
+// search is active so matches in the body are reachable" rule.
+function DelegationFanInMessage({
+  text,
+  storageKey,
+  searchQuery = "",
+  searchHighlightTone = "match",
+}: {
+  text: string;
+  storageKey?: string;
+  searchQuery?: string;
+  searchHighlightTone?: SearchHighlightTone;
+}) {
+  const [expanded, setExpanded] = useState(() =>
+    storageKey
+      ? (delegationFanInStateByStorageKey.get(storageKey) ?? false)
+      : false,
+  );
+  const isExpanded = expanded || searchQuery.trim().length > 0;
+
+  useEffect(() => {
+    if (!storageKey) {
+      return;
+    }
+    delegationFanInStateByStorageKey.set(storageKey, expanded);
+  }, [expanded, storageKey]);
+
+  const firstBreak = text.indexOf("\n");
+  const title = (firstBreak === -1 ? text : text.slice(0, firstBreak)).trim();
+  const body =
+    firstBreak === -1 ? "" : text.slice(firstBreak + 1).replace(/^\n+/, "");
+
+  return (
+    <>
+      <p className="plain-text-copy">
+        {renderHighlightedText(
+          title || text,
+          searchQuery,
+          searchHighlightTone,
+        )}
+      </p>
+      {body ? (
+        <div className="prompt-expansion">
+          <button
+            className="ghost-button prompt-expansion-toggle"
+            type="button"
+            onClick={() => setExpanded((open) => !open)}
+            aria-expanded={isExpanded}
+          >
+            {isExpanded
+              ? "Hide delegation results"
+              : "Show delegation results"}
+          </button>
+          {isExpanded ? (
+            <div className="prompt-expansion-shell">
+              <div className="card-label">Delegation results</div>
+              <pre className="prompt-expansion-copy">
+                {renderHighlightedText(body, searchQuery, searchHighlightTone)}
+              </pre>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export const MessageCard = memo(
   function MessageCard({
     appearance = "dark",
@@ -157,6 +252,11 @@ export const MessageCard = memo(
           message.author === "you"
             ? promptCommandMetaLabel(message.text, message.expandedText)
             : null;
+        const isDelegationFanIn =
+          message.author === "you" && isDelegationFanInText(message.text);
+        // One chip slot: a fan-in is never also a slash command, so `commandLabel`
+        // wins if both somehow matched.
+        const metaTag = commandLabel ?? (isDelegationFanIn ? "Delegation" : null);
         // Assistant text uses one stable render pipeline:
         // `<DeferredMarkdownContent>` wraps `<MarkdownContent>` for both
         // streaming and settled messages, regardless of whether the body is
@@ -205,10 +305,11 @@ export const MessageCard = memo(
             <MessageMeta
               author={message.author}
               timestamp={message.timestamp}
+              sourceName={message.source?.name}
               trailing={
                 <>
-                  {commandLabel ? (
-                    <span className="message-meta-tag">{commandLabel}</span>
+                  {metaTag ? (
+                    <span className="message-meta-tag">{metaTag}</span>
                   ) : null}
                   {showUserPromptNavigation ? (
                     <MessageNavigationButtons
@@ -238,23 +339,32 @@ export const MessageCard = memo(
                 workspaceRoot={workspaceRoot}
               />
             ) : message.text ? (
-              <>
-                <p className="plain-text-copy">
-                  {renderHighlightedText(
-                    message.text,
-                    searchQuery,
-                    searchHighlightTone,
-                  )}
-                </p>
-                {message.expandedText ? (
-                  <ExpandedPromptPanel
-                    expandedText={message.expandedText}
-                    storageKey={message.id}
-                    searchQuery={searchQuery}
-                    searchHighlightTone={searchHighlightTone}
-                  />
-                ) : null}
-              </>
+              isDelegationFanIn ? (
+                <DelegationFanInMessage
+                  text={message.text}
+                  storageKey={message.id}
+                  searchQuery={searchQuery}
+                  searchHighlightTone={searchHighlightTone}
+                />
+              ) : (
+                <>
+                  <p className="plain-text-copy">
+                    {renderHighlightedText(
+                      message.text,
+                      searchQuery,
+                      searchHighlightTone,
+                    )}
+                  </p>
+                  {message.expandedText ? (
+                    <ExpandedPromptPanel
+                      expandedText={message.expandedText}
+                      storageKey={message.id}
+                      searchQuery={searchQuery}
+                      searchHighlightTone={searchHighlightTone}
+                    />
+                  ) : null}
+                </>
+              )
             ) : (
               <p className="support-copy">
                 {imageAttachmentSummaryLabel(message.attachments?.length ?? 0)}

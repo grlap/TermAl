@@ -154,6 +154,7 @@ async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
                     timestamp: stamp_now(),
                     text: "queued orchestrator follow-up".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[planner_index]);
@@ -476,6 +477,7 @@ fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
                     timestamp: stamp_now(),
                     text: "builder work that should survive aborted cleanup".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[builder_index]);
@@ -1007,6 +1009,7 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
                     timestamp: stamp_now(),
                     text: "builder queued work should remain parked after restart".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[builder_index]);
@@ -1157,6 +1160,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
                     timestamp: stamp_now(),
                     text: "reviewer queued work should stay behind the user prompt".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[reviewer_index]);
@@ -1214,6 +1218,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
                 text: "this failed recovery should not clear the block".to_owned(),
                 expanded_text: None,
                 attachments: Vec::new(),
+                source_session_id: None,
             },
         )
         .err()
@@ -1262,6 +1267,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
                 text: "please continue with a manual recovery prompt".to_owned(),
                 expanded_text: None,
                 attachments: Vec::new(),
+                source_session_id: None,
             },
         )
         .expect("manual recovery prompt should dispatch");
@@ -1366,6 +1372,7 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
                     timestamp: stamp_now(),
                     text: "older queued user prompt".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[index]);
@@ -1410,6 +1417,7 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
                 text: "new recovery prompt should stay behind old queued user work".to_owned(),
                 expanded_text: None,
                 attachments: Vec::new(),
+                source_session_id: None,
             },
         )
         .expect("manual recovery should dispatch the oldest queued user prompt");
@@ -1525,6 +1533,7 @@ fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stal
                     timestamp: stamp_now(),
                     text: "older stale orchestrator prompt".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         inner.sessions[index]
@@ -1538,6 +1547,7 @@ fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stal
                     timestamp: stamp_now(),
                     text: "older queued user prompt behind stale orchestrator work".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[index]);
@@ -1586,6 +1596,7 @@ fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stal
                     .to_owned(),
                 expanded_text: None,
                 attachments: Vec::new(),
+                source_session_id: None,
             },
         )
         .expect("manual recovery should dispatch the older queued user prompt first");
@@ -1726,6 +1737,7 @@ fn aborted_stop_does_not_relaunch_child_work_completed_during_stop() {
                     timestamp: stamp_now(),
                     text: "builder follow-up that should be cleared on aborted stop".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[builder_index]);
@@ -1741,6 +1753,7 @@ fn aborted_stop_does_not_relaunch_child_work_completed_during_stop() {
                 author: Author::Assistant,
                 text: "Implement the panel dragging changes.".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         );
         inner.sessions[planner_index].session.preview =
@@ -2286,6 +2299,7 @@ fn load_state_recovers_completed_stop_when_active_children_finished_during_stop(
                 author: Author::Assistant,
                 text: "Implement the panel dragging changes.".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         );
         inner.sessions[planner_index].session.preview =
@@ -2497,6 +2511,7 @@ fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() 
                     timestamp: stamp_now(),
                     text: "stale queued orchestrator prompt".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[builder_index]);
@@ -2643,6 +2658,7 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
                     timestamp: stamp_now(),
                     text: "queued reviewer work should be discarded".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[reviewer_index]);
@@ -2909,6 +2925,7 @@ fn start_turn_on_record_rejects_remote_proxy_sessions() {
         "Dispatch through the remote backend.".to_owned(),
         Vec::new(),
         None,
+        None,
     ) {
         Ok(_) => panic!("remote proxy sessions should reject local turn dispatch"),
         Err(error) => error,
@@ -3004,6 +3021,7 @@ fn failed_orchestrator_transition_dispatch_becomes_a_visible_destination_error()
                 author: Author::Assistant,
                 text: "Implement the panel dragging changes.".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         );
         inner.sessions[planner_index].session.status = SessionStatus::Idle;
@@ -3165,6 +3183,7 @@ fn failed_orchestrator_transition_dispatch_does_not_block_other_instances() {
                 author: Author::Assistant,
                 text: "Implement canvas drop zones.".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         );
         inner.sessions[planner_a_index].session.status = SessionStatus::Idle;
@@ -3179,6 +3198,7 @@ fn failed_orchestrator_transition_dispatch_does_not_block_other_instances() {
                 author: Author::Assistant,
                 text: "Audit the orchestration editor UI.".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         );
         inner.sessions[planner_b_index].session.status = SessionStatus::Idle;
@@ -3563,6 +3583,7 @@ fn orchestrator_transition_uses_only_messages_from_the_current_turn() {
                 author: Author::Assistant,
                 text: "Old plan from yesterday.".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         );
         let turn_start = inner.sessions[planner_index].session.messages.len();
@@ -3577,6 +3598,7 @@ fn orchestrator_transition_uses_only_messages_from_the_current_turn() {
                 author: Author::You,
                 text: "Current task prompt.".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         );
         inner.sessions[planner_index].session.preview = "Current task prompt.".to_owned();
@@ -3769,6 +3791,7 @@ fn killing_a_session_prunes_its_orchestrator_links() {
                 author: Author::Assistant,
                 text: "Plan before kill.".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         );
         inner.sessions[planner_index].session.status = SessionStatus::Idle;

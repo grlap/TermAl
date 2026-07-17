@@ -1030,6 +1030,7 @@ fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
             author: Author::Assistant,
             text: "Partial reply".to_owned(),
             expanded_text: None,
+            source: None,
         });
         inner.sessions[index].session.messages.len()
     };
@@ -1094,6 +1095,7 @@ fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
             author: Author::Assistant,
             text: "Partial reply".to_owned(),
             expanded_text: None,
+            source: None,
         });
         inner.sessions[index].deferred_stop_callbacks = vec![
             DeferredStopCallback::TurnCompleted,
@@ -1165,6 +1167,7 @@ fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() 
             author: Author::Assistant,
             text: "Partial reply".to_owned(),
             expanded_text: None,
+            source: None,
         });
         inner.sessions[index].session.messages.len()
     };
@@ -1229,6 +1232,7 @@ fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() 
             author: Author::Assistant,
             text: "Partial reply".to_owned(),
             expanded_text: None,
+            source: None,
         });
         inner.sessions[index].deferred_stop_callbacks = vec![
             DeferredStopCallback::RuntimeExited(None),

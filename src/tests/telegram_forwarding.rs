@@ -4318,6 +4318,7 @@ fn telegram_session_fetch_message_matches_canonical_text_wire_shape() {
         author: Author::Assistant,
         text: "Canonical assistant text.".to_owned(),
         expanded_text: None,
+        source: None,
     };
     let projected: TelegramSessionFetchMessage =
         serde_json::from_value(serde_json::to_value(canonical).expect("message should encode"))

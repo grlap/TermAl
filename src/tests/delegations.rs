@@ -278,6 +278,7 @@ fn push_delegation_child_assistant_text_without_finishing(
             author: Author::Assistant,
             text: text.to_owned(),
             expanded_text: None,
+            source: None,
         },
     );
     child.session.preview = text.lines().last().unwrap_or_default().to_owned();
@@ -312,6 +313,7 @@ fn queue_delegation_child_prompt(state: &AppState, child_session_id: &str, text:
                 timestamp: stamp_now(),
                 text: text.to_owned(),
                 expanded_text: None,
+                source: None,
             },
         });
     sync_pending_prompts(&mut inner.sessions[child_index]);
@@ -1338,6 +1340,7 @@ async fn delegation_result_route_uses_camel_case_json_shape() {
                 author: Author::Assistant,
                 text: "## Result\n\nStatus: completed\n\nSummary:\nRoute shape pinned.\n\nFindings:\n- Medium src/main.rs:42 - Route result carries review findings.\n\nNotes:\n- Result packet metadata inspected.\n\nFiles Inspected:\n- src/main.rs".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         );
         child.session.status = SessionStatus::Idle;
@@ -2067,6 +2070,7 @@ fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
             text: "This prompt should not reach the runtime.".to_owned(),
             expanded_text: None,
             attachments: Vec::new(),
+            source_session_id: None,
         },
     ) {
         Ok(_) => panic!("terminal delegated child dispatch should be rejected"),
@@ -2092,6 +2096,198 @@ fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
         .iter()
         .any(|record| record.id == delegation_id
             && record.status == DelegationStatus::Canceled));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// tm-5tu: a peer message delivered via `termal_send_to_session` carries the
+// sender session's identity so the receiver's transcript labels it with the
+// sender's name instead of "You". The backend resolves source_session_id to a
+// display name while holding the state lock, so a caller cannot spoof another
+// session's name.
+#[test]
+fn peer_message_dispatch_attributes_resolved_sender_name() {
+    let state = test_app_state();
+
+    // Sender session whose NAME the receiver should see.
+    let sender_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .create_session(
+                Agent::Claude,
+                Some("Kadry".to_owned()),
+                "/tmp".to_owned(),
+                None,
+                None,
+            )
+            .session
+            .id
+            .clone()
+    };
+
+    // Idle target with a mock Claude runtime so dispatch never spawns a real
+    // process. The receiver channel is kept alive for the whole test.
+    let (target_id, _input_rx) = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_id = inner
+            .create_session(
+                Agent::Claude,
+                Some("Receiver".to_owned()),
+                "/tmp".to_owned(),
+                None,
+                None,
+            )
+            .session
+            .id
+            .clone();
+        let (runtime, input_rx) = test_claude_runtime_handle("peer-attribution-runtime");
+        let index = inner
+            .find_session_index(&target_id)
+            .expect("target session should be indexed");
+        inner
+            .session_mut_by_index(index)
+            .expect("target session index should be valid")
+            .runtime = SessionRuntime::Claude(runtime);
+        (target_id, input_rx)
+    };
+
+    state
+        .dispatch_turn(
+            &target_id,
+            SendMessageRequest {
+                text: "ping from a peer".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: Some(sender_id.clone()),
+            },
+        )
+        .expect("peer message should dispatch to the idle target");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target session should exist");
+    let last = record
+        .session
+        .messages
+        .last()
+        .expect("dispatch should append the peer message");
+    match last {
+        Message::Text {
+            author: Author::You,
+            text,
+            source: Some(source),
+            ..
+        } => {
+            assert_eq!(text, "ping from a peer");
+            assert_eq!(source.session_id, sender_id);
+            assert_eq!(source.name, "Kadry");
+        }
+        other => panic!("expected an attributed peer text message, got {other:?}"),
+    }
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// tm-5tu: when the target is mid-turn the peer message is queued, so the
+// attribution must ride on the queued prompt and be applied when it later
+// becomes a `Message::Text`. An unknown sender id resolves to no attribution,
+// leaving the message as an ordinary "You" prompt.
+#[test]
+fn peer_message_queued_while_busy_preserves_source_and_ignores_unknown_sender() {
+    let state = test_app_state();
+
+    let sender_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .create_session(
+                Agent::Claude,
+                Some("Kadry".to_owned()),
+                "/tmp".to_owned(),
+                None,
+                None,
+            )
+            .session
+            .id
+            .clone()
+    };
+
+    // Busy target: dispatch queues instead of starting a turn, so no runtime is
+    // required and the attribution must survive on the queued prompt.
+    let target_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_id = inner
+            .create_session(
+                Agent::Claude,
+                Some("Receiver".to_owned()),
+                "/tmp".to_owned(),
+                None,
+                None,
+            )
+            .session
+            .id
+            .clone();
+        let index = inner
+            .find_session_index(&target_id)
+            .expect("target session should be indexed");
+        inner
+            .session_mut_by_index(index)
+            .expect("target session index should be valid")
+            .session
+            .status = SessionStatus::Active;
+        target_id
+    };
+
+    state
+        .dispatch_turn(
+            &target_id,
+            SendMessageRequest {
+                text: "queued peer ping".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: Some(sender_id.clone()),
+            },
+        )
+        .expect("busy target should queue the known-sender peer message");
+    state
+        .dispatch_turn(
+            &target_id,
+            SendMessageRequest {
+                text: "ping from a ghost".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: Some("session-does-not-exist".to_owned()),
+            },
+        )
+        .expect("busy target should queue the unknown-sender peer message");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target session should exist");
+    assert_eq!(record.queued_prompts.len(), 2);
+
+    let known = &record.queued_prompts[0].pending_prompt;
+    assert_eq!(known.text, "queued peer ping");
+    let source = known
+        .source
+        .as_ref()
+        .expect("a known sender must be attributed on the queued prompt");
+    assert_eq!(source.session_id, sender_id);
+    assert_eq!(source.name, "Kadry");
+
+    let unknown = &record.queued_prompts[1].pending_prompt;
+    assert_eq!(unknown.text, "ping from a ghost");
+    assert!(
+        unknown.source.is_none(),
+        "an unknown sender id must not fabricate attribution"
+    );
     drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -2134,6 +2330,249 @@ fn create_delegation_terminalized_before_start_does_not_dispatch_child_prompt() 
     assert_eq!(child.session.status, SessionStatus::Idle);
     drop(inner);
 
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn followup_delegation_rejects_unknown_delegation() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let err = match state.followup_delegation(
+        &parent_session_id,
+        "delegation-does-not-exist",
+        "hi".to_owned(),
+    ) {
+        Ok(_) => panic!("unknown delegation must fail"),
+        Err(err) => err,
+    };
+    assert_eq!(err.status, StatusCode::NOT_FOUND);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn followup_delegation_rejects_empty_message() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Do a thing.".to_owned(),
+                title: Some("Empty Message".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    let err = match state.followup_delegation(
+        &parent_session_id,
+        &created.delegation.id,
+        "   ".to_owned(),
+    ) {
+        Ok(_) => panic!("empty follow-up message must fail"),
+        Err(err) => err,
+    };
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// The user's rule: a follow-up on a still-running delegation fails (wait first),
+// it does not queue behind the active turn.
+#[test]
+fn followup_delegation_rejects_running_delegation() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Long running.".to_owned(),
+                title: Some("Still Running".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    assert_eq!(created.delegation.status, DelegationStatus::Running);
+    let err = match state.followup_delegation(
+        &parent_session_id,
+        &created.delegation.id,
+        "more".to_owned(),
+    ) {
+        Ok(_) => panic!("follow-up on a running delegation must fail"),
+        Err(err) => err,
+    };
+    assert_eq!(err.status, StatusCode::CONFLICT);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// The happy path: a completed delegation resumes on follow-up and re-arms to Running
+// with the stale terminal result cleared.
+#[test]
+fn followup_delegation_resumes_completed_delegation() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review.".to_owned(),
+                title: Some("Followup Resume".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    let child_id = created.delegation.child_session_id.clone();
+    let child_token = runtime_token_for_session(&state, &child_id);
+    push_delegation_child_assistant_text_without_finishing(
+        &state,
+        &child_id,
+        "## Result\n\nStatus: completed\n\nSummary:\nFirst pass done.",
+    );
+    state
+        .finish_turn_ok_if_runtime_matches(&child_id, &child_token)
+        .expect("completion should succeed");
+
+    let child_messages_before = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == child_id)
+            .expect("child session should exist")
+            .session
+            .messages
+            .len()
+    };
+
+    let response = state
+        .followup_delegation(
+            &parent_session_id,
+            &created.delegation.id,
+            "one more thing".to_owned(),
+        )
+        .expect("follow-up on a completed delegation should resume it");
+    assert_eq!(response.delegation.status, DelegationStatus::Running);
+    assert!(
+        response.delegation.result.is_none(),
+        "re-arm must clear the stale terminal result"
+    );
+    assert!(
+        response.delegation.completed_at.is_none(),
+        "re-arm must clear completed_at"
+    );
+    // The follow-up prompt must actually be delivered + dispatched to the child, not just
+    // the delegation record re-armed (a dropped-dispatch regression must fail here).
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let child = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == child_id)
+        .expect("child session should exist");
+    assert!(
+        child.session.messages.len() > child_messages_before,
+        "the follow-up prompt must be delivered to the child transcript"
+    );
+    drop(inner);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// A canceled delegation is terminal but must NOT be resumable (re-arming would silently
+// undo the cancellation).
+#[test]
+fn followup_delegation_rejects_canceled_delegation() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Cancel me.".to_owned(),
+                title: Some("Canceled".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    state
+        .cancel_delegation(&parent_session_id, &created.delegation.id)
+        .expect("cancel should succeed");
+    let err = match state.followup_delegation(
+        &parent_session_id,
+        &created.delegation.id,
+        "resume?".to_owned(),
+    ) {
+        Ok(_) => panic!("follow-up on a canceled delegation must fail"),
+        Err(err) => err,
+    };
+    assert_eq!(err.status, StatusCode::CONFLICT);
+    assert!(
+        err.message.contains("canceled"),
+        "message should mention canceled: {}",
+        err.message
+    );
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// A completed delegation whose child session was removed is unresumable.
+#[test]
+fn followup_delegation_rejects_removed_child() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Complete then vanish.".to_owned(),
+                title: Some("Removed Child".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    let child_id = created.delegation.child_session_id.clone();
+    let child_token = runtime_token_for_session(&state, &child_id);
+    push_delegation_child_assistant_text_without_finishing(
+        &state,
+        &child_id,
+        "## Result\n\nStatus: completed\n\nSummary:\nDone.",
+    );
+    state
+        .finish_turn_ok_if_runtime_matches(&child_id, &child_token)
+        .expect("completion should succeed");
+    state
+        .kill_session(&child_id)
+        .expect("killing the child session should succeed");
+    let err = match state.followup_delegation(
+        &parent_session_id,
+        &created.delegation.id,
+        "resume?".to_owned(),
+    ) {
+        Ok(_) => panic!("follow-up on a delegation with a removed child must fail"),
+        Err(err) => err,
+    };
+    assert_eq!(err.status, StatusCode::CONFLICT);
+    assert!(
+        err.message.contains("no longer exists"),
+        "message should mention the missing child: {}",
+        err.message
+    );
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -2649,6 +3088,7 @@ fn delegation_result_is_derived_from_completed_child_session() {
                 author: Author::Assistant,
                 text: "## Result\n\nStatus: completed\n\nSummary:\nNo issues found.".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         );
         child.session.status = SessionStatus::Idle;
@@ -2733,6 +3173,7 @@ fn delegation_result_completion_clears_child_follow_up_queue() {
                     timestamp: stamp_now(),
                     text: "unrelated follow-up".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[child_index]);
@@ -2809,6 +3250,7 @@ fn delegation_failed_result_clears_child_follow_up_queue() {
                     timestamp: stamp_now(),
                     text: "do not dispatch after failure".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[child_index]);
@@ -4621,6 +5063,7 @@ fn delegation_cancel_clears_queued_child_prompts() {
                     timestamp: stamp_now(),
                     text: "do not dispatch after cancel".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[child_index]);
@@ -5019,6 +5462,7 @@ fn removing_delegation_parent_deletes_child_runtime_and_session() {
                 timestamp: stamp_now(),
                 text: "do not dispatch after parent removal".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         });
         sync_pending_prompts(child);

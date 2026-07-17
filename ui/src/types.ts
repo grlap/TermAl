@@ -441,6 +441,15 @@ export type ImageAttachment = {
   byteSize: number;
 };
 
+// Identity of the peer session that authored a message delivered via
+// `termal_send_to_session`. Absent for ordinary human/agent messages. The name
+// is resolved backend-side, so it is safe to render directly as the author
+// label.
+export type MessageSource = {
+  sessionId: string;
+  name: string;
+};
+
 export type PendingPrompt = {
   id: string;
   timestamp: string;
@@ -448,6 +457,7 @@ export type PendingPrompt = {
   expandedText?: string | null;
   attachments?: ImageAttachment[];
   localOnly?: boolean;
+  source?: MessageSource | null;
 };
 
 // Persisted transcript identity fields. If a new field is added here, update
@@ -465,6 +475,9 @@ export type TextMessage = BaseMessage & {
   attachments?: ImageAttachment[];
   text: string;
   expandedText?: string | null;
+  // Present when this text was delivered from another session via
+  // `termal_send_to_session`; drives the sender label instead of "You".
+  source?: MessageSource | null;
 };
 
 export type ThinkingMessage = BaseMessage & {

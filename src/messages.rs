@@ -457,6 +457,7 @@ fn append_codex_thread_turn_messages(
             author: Author::Assistant,
             text,
             expanded_text: None,
+            source: None,
         });
     }
     Some(())
@@ -478,6 +479,7 @@ fn append_codex_thread_item_messages(
                     author: Author::You,
                     text,
                     expanded_text: None,
+                    source: None,
                 });
             }
         }
@@ -497,6 +499,7 @@ fn append_codex_thread_item_messages(
                 author: Author::Assistant,
                 text: text.to_owned(),
                 expanded_text: None,
+                source: None,
             });
         }
         Some("reasoning") => {

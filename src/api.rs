@@ -307,6 +307,7 @@ impl AppState {
                         text: prompt.to_owned(),
                         expanded_text: None,
                         attachments: Vec::new(),
+                        source_session_id: None,
                     },
                 )?;
                 if let DispatchTurnResult::Dispatched(dispatch) = dispatch {
@@ -718,6 +719,19 @@ async fn cancel_delegation(
     let response =
         run_blocking_api(move || state.cancel_delegation(&parent_session_id, &delegation_id))
             .await?;
+    Ok(Json(response))
+}
+
+/// Delivers a follow-up prompt to a completed delegation, resuming its child session.
+async fn followup_delegation(
+    AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
+    State(state): State<AppState>,
+    Json(request): Json<FollowupDelegationRequest>,
+) -> Result<Json<DelegationStatusResponse>, ApiError> {
+    let response = run_blocking_api(move || {
+        state.followup_delegation(&parent_session_id, &delegation_id, request.message)
+    })
+    .await?;
     Ok(Json(response))
 }
 

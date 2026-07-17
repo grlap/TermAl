@@ -22,6 +22,7 @@ design decisions, and future plans.
 - [Source Renderers](./source-renderers.md)
 - [Instruction Debugger](./instruction-debugger.md)
 - [SQLite Session Storage](./sqlite-session-storage.md)
+- [Shared Codex App-Server](./shared-codex-app-server.md)
 - [Agent Integration Comparison](./agent-integration-comparison.md)
 - [Orchestration](./orchestration.md)
 - [Multi-Browser Workspaces](./multi-browser-workspaces.md)

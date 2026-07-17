@@ -470,7 +470,6 @@ const SessionConversationPage = memo(function SessionConversationPage({
 }: SessionConversationPageProps) {
   const pendingPrompts = session.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
   const deferredMessages = useDeferredValue(session.messages);
-  const deferredPendingPrompts = useDeferredValue(pendingPrompts);
   const visibleMarkers = session.markers ?? EMPTY_CONVERSATION_MARKERS;
   const hasConversationSearch =
     conversationSearchQuery.trim().length > 0 ||
@@ -500,12 +499,23 @@ const SessionConversationPage = memo(function SessionConversationPage({
     hasConversationMarkers: visibleMarkers.length > 0,
     hasConversationSearch,
     isActive,
+    // Summary count, not `baseVisibleMessages.length`: while a large session is
+    // tail-hydrated the latter is only the ~20-message window (tm-jfx/tm-2po).
+    messageCount: session.messageCount,
     messages: baseVisibleMessages,
     scrollContainerRef,
     sessionId: session.id,
   });
   const overviewMessages = visibleMessages;
-  const visiblePendingPromptsBase = isActive ? deferredPendingPrompts : pendingPrompts;
+  // Pending prompts are the live tail's queued follow-ups, NOT bulk history — keep
+  // them undeferred. The message list defers its bulk for streaming perf but always
+  // splices the undeferred tail back in (`includeUndeferredMessageTail` below); the
+  // pending queue had no such escape hatch, so the old `useDeferredValue(pendingPrompts)`
+  // was starved by the continuous message-stream updates during an active turn and the
+  // queued prompt stayed invisible until the turn stopped. The queue is tiny and only
+  // changes on queue/dequeue (never per streamed token), so rendering it immediately
+  // costs nothing. Regression from 089e9ed; do not re-defer this.
+  const visiblePendingPromptsBase = pendingPrompts;
   const visibleMessageIds = useMemo(
     () => new Set(visibleMessages.map((message) => message.id)),
     [visibleMessages],

@@ -52,6 +52,154 @@ describe("MessageCard", () => {
     expect(screen.queryByText("Command")).not.toBeInTheDocument();
   });
 
+  it("labels a peer message with the sender session name instead of 'You'", () => {
+    const message: TextMessage = {
+      id: "message-peer",
+      type: "text",
+      author: "you",
+      timestamp: "10:05",
+      text: "Hello from another session",
+      source: { sessionId: "session-4753", name: "Kadry" },
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    const author = container.querySelector(".message-meta-author");
+    expect(author).toHaveTextContent("Kadry");
+    expect(author).not.toHaveTextContent("You");
+    // A peer message keeps the user bubble styling; only the label changes.
+    expect(author).toHaveClass("message-meta-author-user");
+    expect(container.querySelector("article.bubble-you")).not.toBeNull();
+  });
+
+  it("falls back to 'You' when a peer source carries an empty name", () => {
+    const message: TextMessage = {
+      id: "message-peer-empty-name",
+      type: "text",
+      author: "you",
+      timestamp: "10:06",
+      text: "Nameless peer",
+      source: { sessionId: "session-0000", name: "   " },
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".message-meta-author")).toHaveTextContent(
+      "You",
+    );
+  });
+
+  it("labels an ordinary user message 'You' when it has no peer source", () => {
+    const message: TextMessage = {
+      id: "message-plain-you",
+      type: "text",
+      author: "you",
+      timestamp: "10:07",
+      text: "My own prompt",
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".message-meta-author")).toHaveTextContent(
+      "You",
+    );
+  });
+
+  // Mirrors `build_delegation_wait_resume_prompt` in `src/delegations.rs`.
+  const FAN_IN_TEXT = [
+    "review-with-delegate fan-in (round 5)",
+    "",
+    "Wait id: `delegation-wait-ccf50c30`",
+    "Mode: `all`",
+    "Parent session: `session-2940`",
+    "",
+    "Delegations:",
+    "- `delegation-2096c8b0`: completed - Codex /review-local",
+    "- `delegation-72daa061`: completed - Claude /review-local",
+    "",
+    "Results:",
+    "### Codex /review-local",
+    "No blocking defects found. The load-bearing needle in this haystack.",
+  ].join("\n");
+
+  it("collapses a delegation fan-in message by default and expands on toggle", () => {
+    const message: TextMessage = {
+      id: "message-fan-in",
+      type: "text",
+      author: "you",
+      timestamp: "12:44",
+      text: FAN_IN_TEXT,
+    };
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    // The title line is always visible; a "Delegation" chip labels it.
+    expect(
+      screen.getByText("review-with-delegate fan-in (round 5)"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Delegation")).toBeInTheDocument();
+
+    // Collapsed by default: the body is hidden.
+    expect(screen.queryByText(/load-bearing needle/)).not.toBeInTheDocument();
+
+    // Expanding reveals the body...
+    fireEvent.click(screen.getByRole("button", { name: "Show delegation results" }));
+    expect(screen.getByText(/load-bearing needle/)).toBeInTheDocument();
+
+    // ...and collapsing hides it again.
+    fireEvent.click(screen.getByRole("button", { name: "Hide delegation results" }));
+    expect(screen.queryByText(/load-bearing needle/)).not.toBeInTheDocument();
+  });
+
+  it("does not collapse an ordinary user prompt that merely mentions delegations", () => {
+    const message: TextMessage = {
+      id: "message-not-fan-in",
+      type: "text",
+      author: "you",
+      timestamp: "12:45",
+      text: "Please look at the Delegations: they seem off. The needle stays visible.",
+    };
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Delegation")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Show delegation results" }),
+    ).not.toBeInTheDocument();
+    // The full prompt renders inline, uncollapsed.
+    expect(screen.getByText(/The needle stays visible/)).toBeInTheDocument();
+  });
+
   it("does not expose marker menu button semantics outside the panel owner", () => {
     const message: TextMessage = {
       id: "message-standalone-assistant",

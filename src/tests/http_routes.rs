@@ -158,6 +158,7 @@ fn push_test_text_message(state: &AppState, session_id: &str, text: impl Into<St
                 author: Author::Assistant,
                 text: text.into(),
                 expanded_text: None,
+                source: None,
             },
         )
         .expect("test message should be recorded");
@@ -305,6 +306,7 @@ async fn get_session_route_can_return_tail_only() {
                     author: Author::Assistant,
                     text: format!("Tail message {index}"),
                     expanded_text: None,
+                    source: None,
                 },
             )
             .expect("message should append");
@@ -397,6 +399,7 @@ async fn get_session_route_tail_limit_covering_transcript_preserves_loaded_flag(
                     author: Author::Assistant,
                     text: format!("Short tail message {index}"),
                     expanded_text: None,
+                    source: None,
                 },
             )
             .expect("message should append");
@@ -640,6 +643,7 @@ async fn snapshot_bearing_routes_include_message_count() {
                     author: Author::Assistant,
                     text: text.to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             )
             .expect("message should be recorded");
@@ -825,6 +829,7 @@ fn local_streaming_delta_events_include_message_count() {
                 author: Author::Assistant,
                 text: String::new(),
                 expanded_text: None,
+                source: None,
             },
         )
         .expect("streaming text placeholder should be recorded");
@@ -1037,6 +1042,7 @@ async fn state_events_route_streams_initial_state_and_live_deltas() {
                 author: Author::Assistant,
                 text: "Live delta".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         )
         .expect("delta message should be recorded");
@@ -1571,6 +1577,7 @@ async fn codex_thread_action_routes_update_session_state() {
                 author: Author::Assistant,
                 text: "stale local message".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         )
         .unwrap();
@@ -1738,6 +1745,7 @@ async fn codex_thread_rollback_route_falls_back_when_history_is_unavailable() {
                 author: Author::Assistant,
                 text: "local history".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         )
         .unwrap();

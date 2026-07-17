@@ -1,5 +1,9 @@
 # SQLite Session Storage Plan
 
+> The persisted `app_state` blob also holds the Codex `ignoredDiscoveredCodexThreadIds`
+> ignore set (the serialized camelCase key; not exposed via `/api/state`); see
+> [shared-codex-app-server.md](./shared-codex-app-server.md).
+
 TermAl persists application state in `~/.termal/termal.sqlite`. Earlier builds
 used one large JSON document, but the current code no longer carries a
 `sessions.json` import path.

@@ -50,6 +50,7 @@ fn classify_claude_control_request(
     message: &Value,
     state: &mut ClaudeTurnState,
     approval_mode: ClaudeApprovalMode,
+    cwd: &str,
 ) -> Result<Option<ClaudeControlRequestAction>> {
     let Some(request) = parse_claude_tool_permission_request(message) else {
         return Ok(None);
@@ -79,7 +80,7 @@ fn classify_claude_control_request(
             })
         }
         ClaudeApprovalMode::ReadOnlyAutoApprove => {
-            ClaudeControlRequestAction::Respond(read_only_claude_permission_decision(request))
+            ClaudeControlRequestAction::Respond(read_only_claude_permission_decision(request, cwd))
         }
         ClaudeApprovalMode::Plan => {
             ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Deny {
@@ -93,8 +94,9 @@ fn classify_claude_control_request(
 
 fn read_only_claude_permission_decision(
     request: ClaudeToolPermissionRequest,
+    cwd: &str,
 ) -> ClaudePermissionDecision {
-    if claude_tool_permission_request_is_read_only(&request) {
+    if claude_tool_permission_request_is_read_only(&request, cwd) {
         return ClaudePermissionDecision::Allow {
             request_id: request.request_id,
             updated_input: request.tool_input,
@@ -112,20 +114,52 @@ fn read_only_claude_permission_decision(
 // Read-only Claude reviewer children need unattended review commands, but the
 // parser is intentionally conservative: unsupported shell syntax denies by
 // default, and only simple stderr-to-dev-null redirection is tolerated.
-fn claude_tool_permission_request_is_read_only(request: &ClaudeToolPermissionRequest) -> bool {
+fn claude_tool_permission_request_is_read_only(
+    request: &ClaudeToolPermissionRequest,
+    cwd: &str,
+) -> bool {
     match request.tool_name.as_str() {
         "Read" | "LS" | "Glob" | "Grep" => true,
+        // The Windows PowerShell tool is DENIED for read-only reviewers. It carries
+        // its command in the same `command` field, so an earlier revision routed it
+        // through the Bash reader below. That reader implements BASH grammar, and
+        // every attempt to bolt PowerShell onto it produced a security defect:
+        //
+        //   * `echo (Set-Content x y)` — PowerShell EVALUATES a parenthesized
+        //     sub-expression. Survived only because the tokenizer happens to fail
+        //     closed on `(` (tm-mdx).
+        //   * `git status 2>/dev/null` — the reader strips that literal before its
+        //     `>` gate, then approves the ORIGINAL; PowerShell writes the file
+        //     `<drive>\dev\null` (tm-1ex).
+        //   * `cd (Set-Content x y)` — the `cd ` head reached `continue` before the
+        //     tokenizer ran: arbitrary-path WRITE (tm-hfh).
+        //   * `g\it status` — the tokenizer de-escapes `\` per bash, so it reads as
+        //     `git`; PowerShell treats `\` as a PATH SEPARATOR and executes
+        //     `.\g\it(.cmd/.ps1)` FROM THE REVIEWED TREE: arbitrary code execution
+        //     (tm-jk7).
+        //
+        // Four defects, each a fresh denylist entry on a parser that models the
+        // wrong language, and the escapes got worse each time. `&` (call operator),
+        // `--%` (stop-parsing), and profile side effects are still unexamined. So
+        // the rule is structural rather than another patch: a bash parser may only
+        // gate bash.
+        //
+        // Cost is nil — reviewers already do their work through the Bash tool (Git
+        // Bash on Windows), and this arm never cleared anything beyond `git …`
+        // anyway. Restoring PowerShell needs its OWN fail-closed checker, not a
+        // re-route through this one (tm-jk7 records the design).
+        "PowerShell" => false,
         "Bash" => request
             .tool_input
             .get("command")
             .and_then(Value::as_str)
-            .is_some_and(claude_bash_command_is_read_only),
+            .is_some_and(|command| claude_bash_command_is_read_only(command, cwd)),
         "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => false,
         _ => false,
     }
 }
 
-fn claude_bash_command_is_read_only(command: &str) -> bool {
+fn claude_bash_command_is_read_only(command: &str, cwd: &str) -> bool {
     // Detect background separators on the ORIGINAL command, before the
     // `2>/dev/null` strip below. That strip is a naive text replace, so on input
     // like `echo x \2>/dev/null& touch y` it would delete `2>/dev/null` and leave
@@ -152,18 +186,35 @@ fn claude_bash_command_is_read_only(command: &str) -> bool {
     let pipe_normalized = normalized.replace("&&", "|").replace("||", "|");
     let segments: Vec<&str> = pipe_normalized.split('|').map(str::trim).collect();
 
-    // `cd <dir>` retargets git exactly like `-C`/`--git-dir` do: a reviewed repo
-    // fixture's on-disk `.git/config` can carry `core.fsmonitor`/`diff.external`
-    // exec sinks. A command that both changes directory and runs git therefore
-    // fails closed, mirroring the git global-option denial.
-    let changes_directory = segments
-        .iter()
-        .any(|segment| *segment == "cd" || segment.starts_with("cd "));
+    // `cd <dir> && git ...` can retarget git to a *different* repo whose on-disk
+    // `.git/config` carries `core.fsmonitor`/`diff.external`/`core.pager` exec sinks
+    // that fire during an otherwise read-only subcommand. Allow it ONLY when every
+    // `cd` is a no-op into the delegation's own `cwd`: that runs git against the exact
+    // same repo and config a plain `git ...` would — which is already allowed — so it
+    // adds no attack surface. A `cd` to a subdirectory (which may hold a nested or
+    // planted `.git`), a parent, `HOME` (bare `cd`), or any other path fails closed.
+    //
+    // `runs_git` MUST be decided from tokenized segments, not raw text: the tokenizer
+    // (like bash) de-quotes and unescapes, so `'git'`, `"git"`, and `g\it` all execute
+    // git. Raw-text matching here would report "no git" for `cd <other> && 'git' status`
+    // and skip this guard, while the approval pass below still de-quotes and approves the
+    // git command — retargeting git to another repo (tm-cnq).
     let runs_git = segments
         .iter()
-        .any(|segment| *segment == "git" || segment.starts_with("git "));
-    if changes_directory && runs_git {
-        return false;
+        .any(|&segment| claude_segment_invokes_git(segment));
+    if runs_git {
+        for &segment in &segments {
+            // Decide "is this a `cd`" from TOKENS, symmetrically with `runs_git`
+            // above and for the same tm-cnq reason: raw-text matching misses
+            // `'cd'` / `"cd"` / `c\d`, which the tokenizer (like bash) de-quotes
+            // and executes. Raw matching here skipped the guard for a quoted cd
+            // while the approval pass below de-quoted and accepted it.
+            let is_cd = claude_bash_segment_tokens(segment)
+                .is_some_and(|tokens| tokens.first().is_some_and(|token| token == "cd"));
+            if is_cd && !claude_cd_segment_targets_cwd(segment, cwd) {
+                return false;
+            }
+        }
     }
 
     for segment in segments {
@@ -173,20 +224,93 @@ fn claude_bash_command_is_read_only(command: &str) -> bool {
         if segment == "true" || segment == ":" {
             continue;
         }
-        if segment == "pwd" || segment.starts_with("cd ") {
-            continue;
-        }
 
+        // Tokenize BEFORE classifying the head. The token scanner is this
+        // checker's fail-closed arm for expansion / subshell / glob syntax, so no
+        // raw-text prefix may reach `continue` ahead of it. A `pwd`/`cd ` prefix
+        // used to short-circuit here, so `cd (Set-Content victim.txt data)` was
+        // auto-approved WITHOUT ever tokenizing — and PowerShell EVALUATES that
+        // parenthesized write, giving a read-only reviewer an arbitrary-path write
+        // primitive. `runs_git` learned this in tm-cnq; the `cd`/`pwd` heads had
+        // not (tm-b9k).
         let Some(tokens) = claude_bash_segment_tokens(segment) else {
             return false;
         };
         let tokens = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+
+        // `pwd` and `cd <target>` are inert on their own; a `cd` that could
+        // retarget git was already vetted against `cwd` by the guard above. Bare
+        // `cd` (HOME) and malformed `cd a b` fall through and fail closed.
+        if matches!(tokens.as_slice(), ["pwd"] | ["cd", _]) {
+            continue;
+        }
+
         if !claude_bash_tokens_are_read_only(&tokens) {
             return false;
         }
     }
 
     true
+}
+
+/// Whether a `cd <target>` segment is a no-op into the delegation's own `cwd`.
+///
+/// True only for `cd .`, `cd ./`, or `cd <path>` whose normalized form equals `cwd`.
+/// A subdirectory, a parent, a bare `cd` (which goes to `HOME`), or a `cd a b` all
+/// return false so the caller fails closed. Only a same-folder `cd` runs git against
+/// the exact repo and `.git/config` a plain `git ...` would, so it adds no exec-sink
+/// surface over what is already allowed. `cwd` is expected pre-normalized by the
+/// caller (see `spawn_claude_runtime`), and the target is normalized here the same way.
+fn claude_cd_segment_targets_cwd(segment: &str, cwd: &str) -> bool {
+    let Some(tokens) = claude_bash_segment_tokens(segment) else {
+        return false;
+    };
+    // Exactly `cd <target>`; anything else (bare `cd`, extra args) fails closed.
+    if tokens.len() != 2 || tokens[0] != "cd" {
+        return false;
+    }
+    let target = tokens[1].as_str();
+    if target == "." || target == "./" {
+        return true;
+    }
+    if cwd.is_empty() {
+        return false;
+    }
+    // Compare as directory keys, not raw strings: `normalize_user_facing_path` does
+    // NOT unify `/` vs `\` or case, but the agent writes `cd` with forward slashes
+    // while the runtime cwd is stored with backslashes on Windows. A raw `==` then
+    // rejects a genuine same-folder `cd`. The key folds separators (and case on
+    // Windows, which is case-insensitive), so `cd "C:/repo"` matches cwd `C:\repo`.
+    claude_local_dir_match_key(&normalize_local_user_facing_path(target))
+        == claude_local_dir_match_key(cwd)
+}
+
+/// Normalizes a user-facing directory path to a comparison key that is
+/// separator-insensitive (`\` folded to `/`, one trailing separator dropped) and,
+/// on Windows, case-insensitive. Used only to decide whether a `cd` target is the
+/// delegation's own `cwd`; it never touches the filesystem.
+fn claude_local_dir_match_key(path: &str) -> String {
+    let unified: String = path
+        .chars()
+        .map(|character| if character == '\\' { '/' } else { character })
+        .collect();
+    let trimmed = unified.strip_suffix('/').unwrap_or(&unified);
+    if cfg!(windows) {
+        trimmed.to_lowercase()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+/// Whether a segment, parsed the way bash will, invokes `git`. Decided from the
+/// tokenizer — which de-quotes and unescapes exactly like the read-only approval pass —
+/// so `'git'`, `"git"`, and `g\it` are all recognized. Raw-text matching would let
+/// `cd <other-repo> && 'git' status` skip the cd-guard while the approval still runs git
+/// against the other repo (tm-cnq). A segment that fails to tokenize is not treated as
+/// git here; the per-segment loop denies it regardless, so the command still fails closed.
+fn claude_segment_invokes_git(segment: &str) -> bool {
+    claude_bash_segment_tokens(segment)
+        .is_some_and(|tokens| tokens.first().map(String::as_str) == Some("git"))
 }
 
 fn claude_bash_command_has_background_separator(command: &str) -> bool {
@@ -235,7 +359,13 @@ fn claude_bash_tokens_are_read_only(tokens: &[&str]) -> bool {
         return false;
     };
 
-    let read_only_commands = ["cat", "echo", "grep", "head", "ls", "nl", "pwd", "tail", "wc"];
+    // Pure readers: they consume stdin/files and write only to stdout. The hashers
+    // are here so reviewers can fingerprint a diff (`git diff … | sha256sum`) to prove
+    // content identity — a common, entirely read-only review technique.
+    let read_only_commands = [
+        "cat", "cksum", "echo", "grep", "head", "ls", "md5sum", "nl", "pwd", "sha1sum",
+        "sha256sum", "sha512sum", "tail", "wc",
+    ];
     if read_only_commands.contains(&command) {
         return true;
     }
@@ -601,7 +731,12 @@ fn claude_git_tokens_are_read_only(tokens: &[&str]) -> bool {
         // <path>`, which writes/truncates an arbitrary file; route every listing
         // subcommand through the same output/exec-sink denial as diff/log/show.
         "diff" | "log" | "show" | "blame" | "describe" | "ls-files" | "rev-parse" | "shortlog"
-        | "status" => claude_git_output_tokens_are_read_only(&normalized),
+        | "status" | "patch-id" => claude_git_output_tokens_are_read_only(&normalized),
+        // `git hash-object` is deliberately NOT allowed: it applies gitattributes clean
+        // filters (`filter.<name>.clean = <cmd>`) unless `--no-filters`, so hashing a
+        // tracked file in the repo under review can execute a repo-defined command — an
+        // exec sink the diff/log/show arm already blocks (tm-cnq). Diff fingerprinting uses
+        // `sha256sum` on `git diff` output instead, which reaches no such sink.
         "grep" => claude_git_grep_tokens_are_read_only(&normalized),
         // Only the listing form of `remote`; `add`/`remove`/`set-url`/`prune`
         // and friends are non-flag tokens and fail this check.

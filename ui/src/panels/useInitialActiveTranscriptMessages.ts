@@ -139,6 +139,7 @@ export function useInitialActiveTranscriptMessages({
   hasConversationMarkers,
   hasConversationSearch,
   isActive,
+  messageCount,
   messages,
   scrollContainerRef,
   sessionId,
@@ -146,6 +147,16 @@ export function useInitialActiveTranscriptMessages({
   hasConversationMarkers: boolean;
   hasConversationSearch: boolean;
   isActive: boolean;
+  // The session's TRUE transcript length, which is NOT `messages.length` while a
+  // large session is tail-hydrated: `messages` then holds only the ~20-message
+  // tail window. Keying tail-eligibility off `messages.length` made a 12k-message
+  // session look like a 20-message one, so `isWindowed` was false, the demand
+  // listeners below never attached, and — because the deferred full hydration is
+  // scheduled with `autoStart: false` — nothing could ever fetch the rest. The
+  // user was stranded on the tail with no way back to older history (tm-jfx,
+  // tm-2po). Optional/nullable so callers without a summary count fall back to
+  // what they hold.
+  messageCount?: number | null;
   messages: Message[];
   scrollContainerRef: RefObject<HTMLElement | null>;
   sessionId: string;
@@ -155,11 +166,15 @@ export function useInitialActiveTranscriptMessages({
     sessionId,
   });
 
+  // Take the larger of the summary count and what we actually hold: the summary
+  // count is authoritative while tail-hydrated, and `messages.length` covers a
+  // caller that passes no count (or a summary whose count lags a live append).
+  const transcriptMessageCount = Math.max(messageCount ?? 0, messages.length);
   const isTailEligible = shouldUseInitialActiveTranscriptTailWindow({
     hasConversationMarkers,
     hasConversationSearch,
     isActive,
-    messageCount: messages.length,
+    messageCount: transcriptMessageCount,
   });
   const isImplicitlyHydrated =
     !isTailEligible &&

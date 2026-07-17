@@ -24,7 +24,7 @@ fn telegram_config_update_reflects_in_process_relay_runtime_status() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let initial_revision = state.snapshot().revision;
@@ -100,7 +100,7 @@ fn telegram_startup_from_saved_settings_starts_relay_with_single_subscribed_fall
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -161,7 +161,7 @@ fn telegram_startup_with_multiple_subscribed_projects_and_no_default_stops_relay
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_1, _session_1) = create_telegram_settings_project_and_session(&state);
     let (project_2, _session_2) = create_telegram_settings_project_and_session(&state);
@@ -220,7 +220,7 @@ fn telegram_startup_from_saved_settings_stops_running_relay_when_token_missing()
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
 
@@ -266,7 +266,7 @@ fn telegram_config_save_restarts_running_relay_with_new_default_project() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_1, _session_1) = create_telegram_settings_project_and_session(&state);
     let (project_2, _session_2) = create_telegram_settings_project_and_session(&state);
@@ -328,7 +328,7 @@ fn telegram_graceful_shutdown_stops_running_in_process_relay() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
 

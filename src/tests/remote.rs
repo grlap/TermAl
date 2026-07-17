@@ -2245,6 +2245,7 @@ pub(super) fn remote_text_message(message_id: &str, text: &str) -> Message {
         author: Author::Assistant,
         text: text.to_owned(),
         expanded_text: None,
+        source: None,
     }
 }
 

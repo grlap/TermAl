@@ -149,6 +149,18 @@ struct MessageImageAttachment {
     media_type: String,
 }
 
+/// Identifies the peer session that authored a message delivered through
+/// `termal_send_to_session`. Absent (`None`) for ordinary human/agent
+/// messages, which the UI keeps labelling "You" / the assistant. The name is
+/// resolved backend-side from the sender's session id at delivery time, so a
+/// caller cannot spoof another session's display name.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageSource {
+    session_id: String,
+    name: String,
+}
+
 /// Represents pending prompt.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -164,6 +176,11 @@ struct PendingPrompt {
         skip_serializing_if = "Option::is_none"
     )]
     expanded_text: Option<String>,
+    /// Peer sender when this queued prompt arrived via `termal_send_to_session`;
+    /// carried so a prompt queued while the target was busy keeps its
+    /// attribution when it later becomes a `Message::Text`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<MessageSource>,
 }
 
 /// Defines the message variants.
@@ -184,6 +201,12 @@ enum Message {
             skip_serializing_if = "Option::is_none"
         )]
         expanded_text: Option<String>,
+        /// Set when this text arrived from another session via
+        /// `termal_send_to_session`; drives the UI's sender label instead of
+        /// "You". `None` for ordinary human/agent text (backward-compatible:
+        /// old transcripts deserialize to `None`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<MessageSource>,
     },
     Thinking {
         id: String,

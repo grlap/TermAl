@@ -486,7 +486,7 @@ fn gemini_dotenv_env_pairs_ignore_workspace_env_files() {
     let empty_home =
         std::env::temp_dir().join(format!("termal-gemini-dotenv-home-{}", Uuid::new_v4()));
     fs::create_dir_all(&empty_home).expect("empty home dir should be created");
-    let _home_env = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &empty_home);
+    let _home_env = ScopedEnvVar::set_home_dir(&empty_home);
 
     let overrides = gemini_dotenv_env_pairs()
         .into_iter()
@@ -512,7 +512,7 @@ fn find_gemini_env_file_reads_home_directory_env_files() {
     fs::create_dir_all(&gemini_dir).expect("Gemini home directory should be created");
 
     {
-        let _home_env = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home_dir);
+        let _home_env = ScopedEnvVar::set_home_dir(&home_dir);
         assert_eq!(find_gemini_env_file(), None);
         let gemini_env = gemini_dir.join(".env");
         fs::write(&gemini_env, "GEMINI_API_KEY=home-gemini-key\n")
@@ -563,7 +563,7 @@ fn select_acp_auth_method_ignores_workspace_dotenv_credentials() {
     let empty_home =
         std::env::temp_dir().join(format!("termal-gemini-auth-home-{}", Uuid::new_v4()));
     fs::create_dir_all(&empty_home).expect("empty home dir should be created");
-    let _home_env = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &empty_home);
+    let _home_env = ScopedEnvVar::set_home_dir(&empty_home);
 
     // Unset every env var `gemini_api_key_source` / `gemini_vertex_auth_source`
     // inspect. Each `_unset_X` is an RAII guard that restores the original
@@ -617,7 +617,7 @@ fn prepare_termal_gemini_system_settings_writes_override_file() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&empty_home).expect("Gemini override home dir should be created");
-    let _home_env = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &empty_home);
+    let _home_env = ScopedEnvVar::set_home_dir(&empty_home);
     let workdir = project_root
         .to_str()
         .expect("test workdir should be valid UTF-8");
@@ -680,7 +680,7 @@ fn gemini_interactive_shell_warning_respects_workspace_settings() {
     // ~/.gemini/settings.json is not consulted either.
     let empty_home = std::env::temp_dir().join(format!("termal-gemini-home-{}", Uuid::new_v4()));
     fs::create_dir_all(&empty_home).expect("empty home dir should be created");
-    let _home_env = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &empty_home);
+    let _home_env = ScopedEnvVar::set_home_dir(&empty_home);
 
     fs::write(
         &settings_path,

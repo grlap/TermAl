@@ -128,6 +128,10 @@ fn spawn_claude_runtime(
         let reader_state = state.clone();
         let reader_input_tx = input_tx.clone();
         let reader_runtime_token = RuntimeToken::Claude(runtime_id.clone());
+        // The reviewer child's own working directory, pre-normalized. The read-only
+        // permission checker compares `cd` targets against it so a same-folder `cd`
+        // (a no-op) does not trip the cd+git exec-sink guard.
+        let reader_cwd = cwd.clone();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             let mut raw_line = String::new();
@@ -239,6 +243,7 @@ fn spawn_claude_runtime(
                         &message,
                         &mut turn_state,
                         approval_mode,
+                        &reader_cwd,
                     ) {
                         Ok(action) => action,
                         Err(err) => {

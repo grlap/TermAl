@@ -337,6 +337,7 @@ mod visible_session_hydration_error_tests {
                 timestamp: "10:00".to_owned(),
                 text: "Sensitive queued prompt".to_owned(),
                 expanded_text: Some("Expanded sensitive queued prompt".to_owned()),
+                source: None,
             });
         }
 

@@ -138,6 +138,13 @@ async fn run_server() -> Result<()> {
         .context("failed to read local backend address")?;
     state.set_local_http_base_url(format!("http://{bound}"));
 
+    // Now that the backend is bound and its base URL is published, resume/spawn session
+    // runtimes. The TermAl MCP bridges those runtimes spawn (the shared Codex app-server,
+    // Claude spares) are configured from this base URL and connect back here, so this MUST
+    // come after the two lines above — doing it during `AppState::new` left Codex sessions
+    // without TermAl MCP after a restart (tm-2fc).
+    state.run_post_listen_boot();
+
     println!("TermAl backend");
     println!("listening: http://{bound}");
     println!("default cwd: {cwd}");
@@ -343,6 +350,10 @@ fn app_router(state: AppState) -> Router {
         .route(
             "/api/sessions/{id}/delegations/{delegation_id}/cancel",
             post(cancel_delegation),
+        )
+        .route(
+            "/api/sessions/{id}/delegations/{delegation_id}/followup",
+            post(followup_delegation),
         )
         .route(
             "/api/sessions/{id}/delegation-waits",

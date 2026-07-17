@@ -52,6 +52,7 @@ fn claude_read_only_auto_approve_allows_read_only_bash_permission_request() {
         ),
         &mut turn_state,
         ClaudeApprovalMode::ReadOnlyAutoApprove,
+        "C:/reviewer-sandbox",
     )
     .unwrap()
     .expect("permission request should be classified");
@@ -116,6 +117,7 @@ fn claude_read_only_auto_approve_allows_review_local_bash_shapes() {
             &claude_permission_request("Bash", json!({ "command": command })),
             &mut turn_state,
             ClaudeApprovalMode::ReadOnlyAutoApprove,
+            "C:/reviewer-sandbox",
         )
         .unwrap()
         .expect("permission request should be classified");
@@ -136,6 +138,242 @@ fn claude_read_only_auto_approve_allows_review_local_bash_shapes() {
     }
 }
 
+// Exercises `claude_bash_command_is_read_only` (through the full permission classifier)
+// for read-only git *content* commands reviewers depend on. tm-9c5 fixed two over-broad
+// denials while keeping the write boundary intact:
+//   * `cd <cwd> && git …` was rejected wholesale by the cd+git exec-sink guard, even
+//     though a `cd` into the reviewer's OWN working directory is a no-op — byte-for-byte
+//     identical to running the git command with no `cd`. Reviewers `cd` into the target
+//     repo first, so this silently killed their entire git surface -> INCONCLUSIVE.
+//   * hashers (`sha256sum`, `md5sum`, `cksum`, `git patch-id`) were absent from the
+//     read-only allow-lists, so diff-fingerprinting was blocked.
+// The security boundary is exact-cwd-only: a `cd` into a *different* repo, or into a
+// subdir (which may carry a nested `.git`), still fails closed because that genuinely
+// retargets git the way `-C` / `--git-dir` do — AND that detection is tokenized, so a
+// quoted/escaped `'git'` / `"git"` / `g\it` cannot slip past the guard (tm-cnq). `git
+// hash-object` is deliberately excluded: it runs gitattributes clean filters, an exec sink.
+fn claude_bash_is_read_only_for_test(command: &str, cwd: &str) -> bool {
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &claude_permission_request("Bash", json!({ "command": command })),
+        &mut turn_state,
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+        cwd,
+    )
+    .unwrap()
+    .expect("permission request should be classified");
+    matches!(
+        action,
+        ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Allow { .. })
+    )
+}
+
+#[test]
+fn read_only_git_content_checker_allows_reviewer_git_and_hashers() {
+    // The reviewer child's own working directory, pre-normalized exactly as the runtime
+    // does before handing it to the classifier.
+    let cwd = normalize_local_user_facing_path("C:/github/Personal/TermAl");
+    let allowed = [
+        "git diff",
+        "git --no-pager diff",
+        "git --no-pager diff --binary --no-ext-diff --no-textconv --no-color",
+        "git --no-pager diff --binary --no-ext-diff --no-textconv --no-color | wc -c",
+        "git --no-pager diff --binary --no-ext-diff --no-textconv --no-color | cat",
+        "git diff | wc -c",
+        "git diff | cat",
+        // Hashers as pipe targets — diff fingerprinting (tm-9c5).
+        "git --no-pager diff --binary --no-ext-diff --no-textconv --no-color | sha256sum",
+        "git diff | md5sum",
+        "git diff | cksum",
+        "git --no-pager diff --no-ext-diff --no-textconv --no-color | git patch-id --stable",
+        // `cd` into the reviewer's OWN cwd is a no-op; git content stays read-only.
+        "cd \"C:/github/Personal/TermAl\" && git rev-parse HEAD",
+        "cd \"C:/github/Personal/TermAl\" && git --no-pager diff --no-ext-diff --no-textconv --no-color | wc -c",
+        "cd \"C:/github/Personal/TermAl\" && git diff | cat",
+        "cd \"C:/github/Personal/TermAl\" && git diff | sha256sum",
+        // Tokenized detection routes even a quoted `git` through the cd-guard; into the
+        // OWN cwd it still passes, so the tm-cnq fix must not over-deny same-cwd quoting.
+        "cd \"C:/github/Personal/TermAl\" && 'git' status",
+        // The `cd` HEAD is tokenized too, so a quoted `cd` into the OWN cwd is the same
+        // no-op as an unquoted one and stays allowed (tm-b9k).
+        "'cd' \"C:/github/Personal/TermAl\" && git status",
+        // `cd .` is always a no-op regardless of cwd.
+        "cd . && git diff",
+    ];
+    for command in allowed {
+        assert!(
+            claude_bash_is_read_only_for_test(command, &cwd),
+            "expected allowed (read-only): {command}"
+        );
+    }
+
+    let denied = [
+        // A subdir may carry a nested `.git`, so cd into it still retargets git.
+        "cd \"C:/github/Personal/TermAl/ui\" && git diff",
+        // A different repo entirely.
+        "cd \"C:/other/repo\" && git diff",
+        // Bare `cd` (-> $HOME) and `cd ~` are not the cwd.
+        "cd && git diff",
+        "cd ~ && git diff",
+        // A quoted/escaped `git` after `cd <other repo>` must NOT slip past the cd-guard:
+        // the tokenizer de-quotes it to a real git command, so detection must too (tm-cnq).
+        "cd \"C:/other/repo\" && 'git' status",
+        "cd \"C:/other/repo\" && \"git\" status",
+        "cd \"C:/other/repo\" && g\\it status",
+        // The mirror image (tm-b9k): a quoted/escaped `cd` retargeting git must ALSO be
+        // caught. The cd-guard decides "is this a cd" from tokens for exactly the tm-cnq
+        // reason — the tokenizer de-quotes `'cd'` into a real cd — and the approval pass
+        // accepts a tokenized `cd <target>`, so raw-text detection here would skip the
+        // cwd check and hand back a git retargeted at another repo.
+        "'cd' \"C:/other/repo\" && git status",
+        "\"cd\" \"C:/other/repo\" && git status",
+        "c\\d \"C:/other/repo\" && git status",
+        // `git hash-object` is fully denied (clean-filter exec sink), with or without `-w`.
+        "git hash-object src/claude.rs",
+        "git hash-object -w src/claude.rs",
+        "git diff | git hash-object --stdin",
+        // Genuine writes stay denied, unaffected by the cwd allowance.
+        "git commit -m x",
+        "echo mutated > README.md",
+    ];
+    for command in denied {
+        assert!(
+            !claude_bash_is_read_only_for_test(command, &cwd),
+            "expected denied: {command}"
+        );
+    }
+}
+
+// The runtime cwd is stored with backslashes on Windows while the agent writes `cd`
+// with forward slashes, so the same-folder allowance must compare paths
+// separator-insensitively (and case-insensitively on Windows). A raw string `==`
+// rejected the exact reviewer command `cd "C:/github/Personal/PhoenixCodeNav" && git ...`.
+#[test]
+fn read_only_checker_same_folder_cd_matches_across_separator() {
+    let backslash_cwd = "C:\\github\\Personal\\PhoenixCodeNav";
+    // Forward-slash `cd` into a backslash cwd — the exact denied shape from the field.
+    assert!(
+        claude_bash_is_read_only_for_test(
+            "cd \"C:/github/Personal/PhoenixCodeNav\" && git rev-parse --show-toplevel",
+            backslash_cwd,
+        ),
+        "forward-slash cd into a backslash cwd must be allowed"
+    );
+    assert!(
+        claude_bash_is_read_only_for_test(
+            "cd \"C:/github/Personal/PhoenixCodeNav\" && git --no-optional-locks status --short",
+            backslash_cwd,
+        ),
+        "forward-slash cd + git status into a backslash cwd must be allowed"
+    );
+    // Reverse: backslash `cd` into a forward-slash cwd.
+    assert!(
+        claude_bash_is_read_only_for_test(
+            "cd \"C:\\github\\Personal\\PhoenixCodeNav\" && git diff",
+            "C:/github/Personal/PhoenixCodeNav",
+        ),
+        "backslash cd into a forward-slash cwd must be allowed"
+    );
+    // A different repo, and a subdirectory (may hold a nested .git), stay denied
+    // regardless of separators.
+    assert!(
+        !claude_bash_is_read_only_for_test(
+            "cd \"C:/github/Personal/OtherRepo\" && git diff",
+            backslash_cwd,
+        ),
+        "a different repo must stay denied"
+    );
+    assert!(
+        !claude_bash_is_read_only_for_test(
+            "cd \"C:/github/Personal/PhoenixCodeNav/src\" && git diff",
+            backslash_cwd,
+        ),
+        "a subdirectory must stay denied"
+    );
+}
+
+// Windows filesystems are case-insensitive, so a case-only difference is the same dir.
+#[test]
+#[cfg(windows)]
+fn read_only_checker_same_folder_cd_is_case_insensitive_on_windows() {
+    assert!(
+        claude_bash_is_read_only_for_test(
+            "cd \"c:/GitHub/personal/PHOENIXCODENAV\" && git diff",
+            "C:\\github\\Personal\\PhoenixCodeNav",
+        ),
+        "case-only difference must be allowed on Windows"
+    );
+}
+
+// The Windows PowerShell tool is denied wholesale for read-only reviewers.
+//
+// It used to route through the Bash reader, which implements BASH grammar. Every
+// PowerShell-specific construct that reader mis-modelled became a security defect:
+// `(...)`/`@(...)` sub-expression evaluation (tm-mdx, survived only because the
+// tokenizer happens to fail closed on `(`), the `2>/dev/null` strip writing
+// `<drive>\dev\null` (tm-1ex), the `cd ` head reaching `continue` before the
+// tokenizer and giving an arbitrary-path WRITE (tm-hfh), and `\` de-escaped per
+// bash so `g\it` read as `git` while PowerShell executes `.\g\it` FROM THE
+// REVIEWED TREE — arbitrary code execution (tm-jk7).
+//
+// So this pins the structural rule, not another denylist: a bash parser gates only
+// bash. Each historical escape is listed as a case so that re-introducing a
+// PowerShell arm without its own fail-closed checker fails here first. The Bash
+// counterparts assert the shared reader was NOT collaterally tightened — bash
+// genuinely does de-escape `g\it` to git and does treat /dev/null as the null
+// device, and reviewers depend on those.
+#[test]
+fn read_only_powershell_tool_is_denied_wholesale() {
+    let cwd = "C:\\github\\Personal\\TermAl";
+    let allow = |tool: &str, command: &str| {
+        let mut turn_state = ClaudeTurnState::default();
+        let action = classify_claude_control_request(
+            &claude_permission_request(tool, json!({ "command": command })),
+            &mut turn_state,
+            ClaudeApprovalMode::ReadOnlyAutoApprove,
+            cwd,
+        )
+        .unwrap()
+        .expect("permission request should be classified");
+        matches!(
+            action,
+            ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Allow { .. })
+        )
+    };
+
+    for command in [
+        // Every historical bypass shape.
+        "echo (Set-Content victim.txt data)",
+        "echo @(Set-Content victim.txt data)",
+        "cd (Set-Content victim.txt data)",
+        "g\\it status",
+        "git status 2>/dev/null",
+        "git status 2> /dev/null",
+        // ...and the innocuous reads the arm used to clear: denial is wholesale, so
+        // nothing here is a judgement call the parser can get wrong.
+        "git --no-optional-locks status --short",
+        "git --no-pager diff --cached --name-only",
+        "echo hello",
+        "cd \"C:/github/Personal/TermAl\" && git status",
+    ] {
+        assert!(
+            !allow("PowerShell", command),
+            "PowerShell must be denied wholesale for read-only reviewers: {command}"
+        );
+    }
+
+    // The Bash reader keeps its exact behaviour — this fix must not be collateral.
+    assert!(allow("Bash", "git --no-optional-locks status --short"));
+    assert!(
+        allow("Bash", "g\\it status"),
+        "bash really does de-escape g\\it to git; the shared reader must still match bash"
+    );
+    assert!(
+        allow("Bash", "git status 2>/dev/null"),
+        "/dev/null is the real null device under bash; the idiom must survive"
+    );
+}
+
 // Pins read-only Claude reviewer delegations denying explicit file mutation
 // tool requests. This closes the bug where read-only reviewers used full
 // `AutoApprove` and could allow `Write`/`Edit` operations.
@@ -152,6 +390,7 @@ fn claude_read_only_auto_approve_denies_write_permission_request() {
         ),
         &mut turn_state,
         ClaudeApprovalMode::ReadOnlyAutoApprove,
+        "C:/reviewer-sandbox",
     )
     .unwrap()
     .expect("permission request should be classified");
@@ -180,6 +419,7 @@ fn claude_read_only_auto_approve_denies_unsafe_bash_permission_request() {
         ),
         &mut turn_state,
         ClaudeApprovalMode::ReadOnlyAutoApprove,
+        "C:/reviewer-sandbox",
     )
     .unwrap()
     .expect("permission request should be classified");
@@ -344,6 +584,7 @@ fn claude_read_only_auto_approve_denies_mutating_git_find_and_sed_shapes() {
             &claude_permission_request("Bash", json!({ "command": command })),
             &mut turn_state,
             ClaudeApprovalMode::ReadOnlyAutoApprove,
+            "C:/reviewer-sandbox",
         )
         .unwrap()
         .expect("permission request should be classified");

@@ -29,6 +29,7 @@ fn mark_delegation_child_stale_with_result_packet(
                 "## Result\nStatus: {result_status}\n\nSummary:\n{summary}\n\nFindings:\n- None\n"
             ),
             expanded_text: None,
+            source: None,
         },
     );
     child.runtime = SessionRuntime::None;
@@ -54,6 +55,7 @@ fn queue_delegation_child_prompt(state: &AppState, child_session_id: &str, promp
             timestamp: stamp_now(),
             text: "queued child follow-up".to_owned(),
             expanded_text: None,
+            source: None,
         },
     });
     sync_pending_prompts(child);

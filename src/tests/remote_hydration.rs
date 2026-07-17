@@ -3823,6 +3823,7 @@ fn remote_same_revision_deltas_apply_in_sequence() {
                     author: Author::Assistant,
                     text: "First remote message.".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
                 preview: "First remote message.".to_owned(),
                 status: SessionStatus::Active,

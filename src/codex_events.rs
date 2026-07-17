@@ -1036,6 +1036,7 @@ fn push_shared_codex_turn_notice(
         author: Author::Assistant,
         text: trimmed.to_owned(),
         expanded_text: None,
+        source: None,
     };
 
     if let Some(anchor_message_id) = turn_state.first_visible_assistant_message_id.as_deref() {

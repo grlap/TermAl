@@ -354,10 +354,6 @@ impl AppState {
             stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
             inner: inner_arc,
         };
-        state.seed_hidden_claude_spares();
-        if let Err(err) = state.reconcile_delegation_waits_after_boot() {
-            eprintln!("delegation wait> failed reconciling pending waits after boot: {err:#}");
-        }
         {
             let inner = state.inner.lock().expect("state mutex poisoned");
             state.persist_internal_locked(&inner)?;
@@ -365,10 +361,32 @@ impl AppState {
         state.restore_remote_event_bridges();
         #[cfg(not(test))]
         state.spawn_workspace_file_watcher();
-        if let Err(err) = state.resume_pending_orchestrator_transitions() {
+        // Runtime-resuming boot work is deferred to `run_post_listen_boot`, invoked by
+        // `run_server` only AFTER the HTTP listener is bound and the base URL is published
+        // (tm-2fc). Resuming a Codex session launches the shared app-server, and Claude
+        // spares spawn their own runtimes — each bakes a TermAl MCP bridge config from the
+        // base URL and connects back to this backend. Running it pre-listen pointed those
+        // bridges at the default URL / an unlistening backend, so Codex sessions came up with
+        // no TermAl MCP. Tests have no HTTP server or real runtimes, so they run it inline
+        // here to preserve behavior.
+        #[cfg(test)]
+        state.run_post_listen_boot();
+        Ok(state)
+    }
+
+    /// Boot work that RESUMES or SPAWNS session runtimes. MUST run only after the HTTP
+    /// listener is bound and `set_local_http_base_url` has published the real address, so the
+    /// TermAl MCP bridges these runtimes spawn are configured with the correct base URL and
+    /// can reach a listening backend (tm-2fc). All four steps self-persist / self-commit, so
+    /// deferring them past the boot persist above is safe.
+    fn run_post_listen_boot(&self) {
+        self.seed_hidden_claude_spares();
+        if let Err(err) = self.reconcile_delegation_waits_after_boot() {
+            eprintln!("delegation wait> failed reconciling pending waits after boot: {err:#}");
+        }
+        if let Err(err) = self.resume_pending_orchestrator_transitions() {
             eprintln!("orchestrator> failed resuming pending transitions: {err:#}");
         }
-        state.dispatch_orphaned_queued_prompts();
-        Ok(state)
+        self.dispatch_orphaned_queued_prompts();
     }
 }

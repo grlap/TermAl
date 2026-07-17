@@ -547,6 +547,7 @@ fn codex_thread_actions_require_a_live_idle_thread() {
                 timestamp: stamp_now(),
                 text: "queued prompt".to_owned(),
                 expanded_text: None,
+                source: None,
             },
             Vec::new(),
         );
@@ -641,6 +642,7 @@ fn codex_archive_and_unarchive_actions_update_thread_state_and_block_dispatch() 
             text: "resume the review".to_owned(),
             expanded_text: None,
             attachments: Vec::new(),
+            source_session_id: None,
         },
     ) {
         Ok(_) => panic!("archived Codex thread should reject new prompts"),
@@ -890,6 +892,7 @@ fn shared_codex_compaction_notice_inserts_before_visible_assistant_output() {
                 author: Author::Assistant,
                 text: "Existing assistant output".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         )
         .unwrap();

@@ -546,6 +546,7 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
                     timestamp: stamp_now(),
                     text: "queued prompt after failed interrupt".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[index]);
@@ -689,6 +690,7 @@ fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
                     timestamp: stamp_now(),
                     text: "queued prompt".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[index]);
@@ -931,6 +933,7 @@ fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
                     timestamp: stamp_now(),
                     text: "queued prompt".to_owned(),
                     expanded_text: None,
+                    source: None,
                 },
             });
         sync_pending_prompts(&mut inner.sessions[index]);

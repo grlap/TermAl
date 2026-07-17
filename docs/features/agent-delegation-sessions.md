@@ -1,5 +1,9 @@
 # Feature Brief: Agent Delegation Sessions
 
+> Delegated Codex children run on the shared Codex app-server; its identity model
+> and orphan-thread behavior are documented in
+> [shared-codex-app-server.md](./shared-codex-app-server.md).
+
 ## Status
 
 Proposed.

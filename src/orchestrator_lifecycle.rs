@@ -608,6 +608,7 @@ impl AppState {
                             timestamp: stamp_now(),
                             text: final_prompt,
                             expanded_text: None,
+                            source: None,
                         },
                         Vec::new(),
                     );

@@ -100,6 +100,11 @@ StateInner {
 
 `AppState` is the live coordination shell: SSE broadcasters, the shared Codex app-server handle, and the SSH remote registry all live there. `StateInner` is the mutex-protected durable model that gets serialized to disk.
 
+> The shared Codex app-server (one long-lived process hosting every local Codex
+> session in this backend) has its own identity model and failure modes. See
+> [features/shared-codex-app-server.md](./features/shared-codex-app-server.md) for
+> process-vs-attachment identity, thread-setup parking, and orphan-thread discovery.
+
 **SessionRecord** wraps the serializable `Session` with runtime-only fields:
 
 ```rust

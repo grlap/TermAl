@@ -940,6 +940,7 @@ fn shared_codex_task_complete_event_stays_in_current_turn_after_prior_assistant_
                 author: Author::Assistant,
                 text: "Previous shared Codex answer.".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         )
         .unwrap();
@@ -6560,6 +6561,7 @@ fn shared_codex_runtime_exit_clears_shared_slot_before_queued_dispatch_attempt()
                 timestamp: stamp_now(),
                 text: "queued recovery prompt".to_owned(),
                 expanded_text: None,
+                source: None,
             },
         });
     }

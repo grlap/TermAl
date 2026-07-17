@@ -289,6 +289,7 @@ impl StateInner {
                     author: Author::Assistant,
                     text: recovery,
                     expanded_text: None,
+                    source: None,
                 },
             );
             record.session.status = SessionStatus::Error;

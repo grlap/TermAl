@@ -2421,7 +2421,7 @@ fn telegram_config_update_stores_token_only_in_credential_store() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let token = "123456:secret-at-rest";
@@ -2466,7 +2466,7 @@ fn telegram_status_migrates_legacy_plaintext_token_out_of_settings_file() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let path = state.telegram_bot_file_path();
     let token = "123456:legacy-secret";
@@ -2513,7 +2513,7 @@ fn telegram_config_update_keyring_write_failure_does_not_persist_plaintext_token
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let token = "123456:write-failure-secret";
@@ -2568,7 +2568,7 @@ fn telegram_config_update_keyring_write_failure_preserves_existing_settings() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -2634,7 +2634,7 @@ fn telegram_config_update_post_validation_hook_error_aborts_before_persist() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -2676,7 +2676,7 @@ fn telegram_status_keyring_read_failure_surfaces_without_unconfigured_fallback()
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     state
         .save_telegram_bot_token("123456:read-failure-secret")
@@ -3577,7 +3577,7 @@ fn telegram_config_update_rejects_too_many_subscribed_projects() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
 
     let err = state
@@ -3608,7 +3608,7 @@ fn telegram_config_update_rejects_delegated_default_session() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     {
@@ -3651,7 +3651,7 @@ fn telegram_config_update_allows_enabled_without_token_or_project_target() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let initial_revision = state.snapshot().revision;
 
@@ -3698,7 +3698,7 @@ fn telegram_config_update_blank_token_clears_saved_token_before_project_target_c
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("settings path should have a parent"))
@@ -3755,7 +3755,7 @@ fn telegram_config_update_rejects_saved_token_without_project_target() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &home);
+    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("settings path should have a parent"))

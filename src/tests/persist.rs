@@ -234,7 +234,7 @@ fn app_state_new_with_paths_normalizes_verbatim_bootstrap_workdirs() {
         Uuid::new_v4()
     ));
     fs::create_dir_all(&state_root).expect("state root should exist");
-    let _home = ScopedEnvVar::set_path(TEST_HOME_ENV_KEY, &state_root);
+    let _home = ScopedEnvVar::set_home_dir(&state_root);
     let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
@@ -715,6 +715,7 @@ fn persisted_state_requires_queued_prompt_source() {
             timestamp: stamp_now(),
             text: "queued prompt".to_owned(),
             expanded_text: None,
+            source: None,
         },
         Vec::new(),
     );

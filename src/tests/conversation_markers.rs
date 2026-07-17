@@ -25,6 +25,7 @@ fn test_session_with_two_messages(state: &AppState) -> String {
             author: Author::You,
             text: "First".to_owned(),
             expanded_text: None,
+            source: None,
         },
     );
     push_message_on_record(
@@ -36,6 +37,7 @@ fn test_session_with_two_messages(state: &AppState) -> String {
             author: Author::Assistant,
             text: "Second".to_owned(),
             expanded_text: None,
+            source: None,
         },
     );
     state.commit_locked(&mut inner).unwrap();
@@ -137,6 +139,7 @@ fn remote_proxy_session_with_message(state: &AppState, remote: &RemoteConfig) ->
         author: Author::Assistant,
         text: "Remote message".to_owned(),
         expanded_text: None,
+        source: None,
     }];
     remote_session.messages_loaded = true;
     remote_session.message_count = 1;

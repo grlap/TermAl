@@ -37,6 +37,7 @@ function renderInitialActiveTranscriptHook({
   hasConversationMarkers = false,
   hasConversationSearch = false,
   isActive = true,
+  messageCount,
   messages = makeTextMessages(600),
   scrollContainerRef = {
     current: document.createElement("div"),
@@ -46,6 +47,7 @@ function renderInitialActiveTranscriptHook({
   hasConversationMarkers?: boolean;
   hasConversationSearch?: boolean;
   isActive?: boolean;
+  messageCount?: number | null;
   messages?: Message[];
   scrollContainerRef?: RefObject<HTMLElement | null>;
   sessionId?: string;
@@ -55,6 +57,7 @@ function renderInitialActiveTranscriptHook({
       hasConversationMarkers,
       hasConversationSearch,
       isActive,
+      messageCount,
       messages,
       scrollContainerRef,
       sessionId,
@@ -197,6 +200,54 @@ describe("useInitialActiveTranscriptMessages", () => {
     );
   });
 
+  // tm-jfx/tm-2po: the shape every other test here misses. After a restart a large
+  // session is TAIL-HYDRATED — `messages` holds only the ~20-message window while
+  // the summary still reports the true count. Tail-eligibility keyed off
+  // `messages.length` (20) made this look like a short transcript, so `isWindowed`
+  // was false, the demand listeners never attached, and — the deferred full
+  // hydration being scheduled `autoStart: false` — nothing could fetch the rest.
+  // The user was stranded on 20 messages: "I lost my history".
+  //
+  // Neuter-verified: reverting `isTailEligible` to `messageCount: messages.length`
+  // makes this fail.
+  it("stays windowed for a tail-hydrated long session so demand hydration can reach older history", () => {
+    const tailWindow = makeTextMessages(SESSION_TAIL_WINDOW_MESSAGE_COUNT);
+    const hook = renderInitialActiveTranscriptHook({
+      messageCount: 600,
+      messages: tailWindow,
+    });
+
+    expect(hook.result.current.isWindowed).toBe(true);
+    // Demand must be live: this is the only route back to the rest of the
+    // transcript, and it returning false means the user is stranded.
+    act(() => {
+      expect(hook.result.current.requestFullTranscriptRender()).toBe(true);
+    });
+    expect(hook.result.current.isWindowed).toBe(false);
+  });
+
+  // A genuinely short session must NOT be windowed just because a stale summary
+  // count says otherwise — `messages.length` is the floor, never the ceiling.
+  it("does not window a short transcript", () => {
+    const hook = renderInitialActiveTranscriptHook({
+      messageCount: 3,
+      messages: makeTextMessages(3),
+    });
+
+    expect(hook.result.current.isWindowed).toBe(false);
+  });
+
+  // A caller that passes no summary count keeps the previous behaviour.
+  it("falls back to the loaded message count when no summary count is given", () => {
+    const messages = makeTextMessages(600);
+    const hook = renderInitialActiveTranscriptHook({
+      messageCount: undefined,
+      messages,
+    });
+
+    expect(hook.result.current.isWindowed).toBe(true);
+  });
+
   it("renders the full transcript after an explicit demand request", () => {
     const messages = makeTextMessages(600);
     const hook = renderInitialActiveTranscriptHook({ messages });
@@ -241,6 +292,7 @@ describe("useInitialActiveTranscriptMessages", () => {
       hasConversationMarkers: false,
       hasConversationSearch: false,
       isActive: true,
+      messageCount: undefined,
       messages,
       scrollContainerRef: { current: document.createElement("div") },
       sessionId: "session-b",

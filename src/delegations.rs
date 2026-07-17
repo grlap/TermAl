@@ -989,6 +989,132 @@ impl AppState {
         })
     }
 
+    /// Delivers a follow-up prompt to a COMPLETED delegation's child, resuming it.
+    ///
+    /// On completion the child was detached (runtime dropped) but its record,
+    /// transcript, and external session/thread id survive, so delivering a prompt
+    /// respawns + resumes it (Claude `--resume`, Codex `thread/resume`) and dispatches a
+    /// new turn. Fails if the delegation is still running (the caller must wait first) or
+    /// if the child session was removed (unresumable). Re-arms the delegation terminal ->
+    /// running so the parent can wait on it again for the follow-up result.
+    fn followup_delegation(
+        &self,
+        parent_session_id: &str,
+        delegation_id: &str,
+        message: String,
+    ) -> Result<DelegationStatusResponse, ApiError> {
+        let message = message.trim().to_owned();
+        if message.is_empty() {
+            return Err(ApiError::bad_request("follow-up message cannot be empty"));
+        }
+
+        // Phase 1 (atomic): refresh from the child, then gate on a RESUMABLE state — a
+        // completed or failed delegation whose child session still exists — and re-arm it
+        // terminal -> running in the SAME critical section. Doing the gate and the re-arm
+        // under one lock is load-bearing: it makes a second concurrent follow-up observe a
+        // running delegation and get rejected, instead of both passing the gate and queuing
+        // two turns. The turn-dispatch path also rejects a turn for a delegation child whose
+        // delegation is no longer running, so the re-arm must precede dispatch.
+        let (child_session_id, response) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index =
+                find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
+            let refresh_delta = refresh_delegation_from_child_locked(&mut inner, index);
+            let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
+
+            let status = inner.delegations[index].status;
+            let child_session_id = inner.delegations[index].child_session_id.clone();
+            let child_present = inner.find_session_index(&child_session_id).is_some();
+            // Only completed/failed delegations are resumable. Canceled is terminal but a
+            // deliberate teardown — re-arming it would silently undo the cancellation.
+            let gate_error = if !delegation_is_terminal(status) {
+                Some(ApiError::conflict(
+                    "delegation is still running; wait for it to complete (termal_resume_after_delegations) before following up",
+                ))
+            } else if !matches!(status, DelegationStatus::Completed | DelegationStatus::Failed) {
+                Some(ApiError::conflict(
+                    "delegation was canceled and cannot be resumed",
+                ))
+            } else if !child_present {
+                Some(ApiError::conflict(
+                    "delegation child session no longer exists and cannot be resumed",
+                ))
+            } else {
+                None
+            };
+
+            if let Some(gate_error) = gate_error {
+                let wait_refresh = refresh_delegation_waits_locked(&mut inner);
+                let revision = if refresh_delta.is_some()
+                    || detached_child.did_mutate()
+                    || wait_refresh.did_mutate()
+                {
+                    self.commit_locked(&mut inner).map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to persist delegation status before follow-up: {err:#}"
+                        ))
+                    })?
+                } else {
+                    inner.revision
+                };
+                drop(inner);
+                self.publish_delegation_refresh_side_effects(
+                    revision,
+                    refresh_delta,
+                    detached_child,
+                    wait_refresh,
+                );
+                return Err(gate_error);
+            }
+
+            // Re-arm terminal -> running (clears result/completed_at, parent card -> running).
+            // Supersedes any transient completion the gate refresh just derived, so we publish
+            // the re-arm delta rather than `refresh_delta`.
+            let rearm_delta = rearm_terminal_delegation_for_followup_locked(&mut inner, index);
+            let wait_refresh = refresh_delegation_waits_locked(&mut inner);
+            let revision = self.commit_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!("failed to persist delegation follow-up: {err:#}"))
+            })?;
+            let delegation = inner.delegations[index].clone();
+            drop(inner);
+            self.publish_delegation_refresh_side_effects(
+                revision,
+                rearm_delta,
+                detached_child,
+                wait_refresh,
+            );
+            (
+                child_session_id,
+                DelegationStatusResponse {
+                    revision,
+                    delegation,
+                    server_instance_id: self.server_instance_id.clone(),
+                },
+            )
+        };
+
+        // Phase 2: deliver the follow-up prompt. The child was detached on completion, so
+        // `dispatch_turn_and_snapshot` respawns + resumes it (Claude `--resume`, Codex
+        // `thread/resume`) and dispatches the turn. If dispatch fails, the child is unchanged
+        // (still idle holding its prior result packet), so a refresh re-derives the original
+        // terminal state rather than leaving the delegation stuck running.
+        if let Err(err) = dispatch_turn_and_snapshot(
+            self,
+            &child_session_id,
+            SendMessageRequest {
+                text: message,
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+            },
+        ) {
+            let _ = self.refresh_delegation_for_child_session(&child_session_id);
+            return Err(err);
+        }
+
+        Ok(response)
+    }
+
     fn refresh_delegation_for_child_session(&self, child_session_id: &str) -> Result<()> {
         let (revision, lifecycle_delta, detached_child, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -1555,6 +1681,7 @@ impl AppState {
                 text: runtime_prompt,
                 expanded_text: None,
                 attachments: Vec::new(),
+                source_session_id: None,
             },
         )?;
         if let DispatchTurnResult::Dispatched(dispatch) = dispatch {
@@ -1914,6 +2041,7 @@ fn queue_delegation_wait_resume_locked(
             timestamp: stamp_now(),
             text: prompt,
             expanded_text: None,
+            source: None,
         },
         Vec::new(),
     );
@@ -2310,6 +2438,43 @@ fn refresh_delegation_from_child_locked(
     }
 }
 
+/// Re-arms a terminal delegation back to Running for a follow-up turn.
+///
+/// `refresh_delegation_from_child_locked` deliberately skips terminal delegations, so a
+/// resumed follow-up needs this explicit transition: clear the prior terminal result and
+/// completion timestamp, flip the record + parent card back to running, and re-track it as
+/// a running read-only delegation. Mirrors the Running branch of the refresh with the
+/// completion fields inverted.
+fn rearm_terminal_delegation_for_followup_locked(
+    inner: &mut StateInner,
+    delegation_index: usize,
+) -> Option<DelegationLifecycleDelta> {
+    let delegation = inner.delegations.get(delegation_index)?.clone();
+    let updated_at = stamp_now();
+    let running_detail = delegation_running_detail_locked(inner, &delegation);
+    {
+        let record = inner.delegations.get_mut(delegation_index)?;
+        record.status = DelegationStatus::Running;
+        record.completed_at = None;
+        record.result = None;
+        record.started_at = Some(updated_at.clone());
+    }
+    inner.sync_running_read_only_delegation_index(delegation_index);
+    inner.mark_delegation_mutated(delegation_index);
+    let parent_card_delta = update_parent_delegation_card_locked(
+        inner,
+        &delegation,
+        ParallelAgentStatus::Running,
+        running_detail,
+    );
+    Some(DelegationLifecycleDelta::Updated {
+        delegation_id: delegation.id,
+        status: DelegationStatus::Running,
+        updated_at,
+        parent_card_delta,
+    })
+}
+
 fn delegation_running_detail_locked(inner: &StateInner, delegation: &DelegationRecord) -> String {
     inner
         .find_session_index(&delegation.child_session_id)
@@ -2662,6 +2827,7 @@ fn detach_delegation_child_runtime_locked(
             author: Author::Assistant,
             text,
             expanded_text: None,
+            source: None,
         };
         if let Some(preview) = message.preview_text() {
             child.session.preview = preview;

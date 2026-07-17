@@ -447,6 +447,7 @@ impl AppState {
                     author: Author::Assistant,
                     text: SESSION_STOPPED_BY_USER_MESSAGE.to_owned(),
                     expanded_text: None,
+                    source: None,
                 });
                 created_message_indices.push(stopped_message_index);
                 if let Some(message_id) = file_change_message_id {

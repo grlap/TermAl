@@ -1419,6 +1419,11 @@ struct SendMessageRequest {
     expanded_text: Option<String>,
     #[serde(default)]
     attachments: Vec<SendMessageAttachmentRequest>,
+    /// Peer sender session id, set only by `termal_send_to_session`. The
+    /// backend resolves it to the sender's display name at dispatch time; a
+    /// missing/unknown id yields no attribution (the message stays "You").
+    #[serde(default, rename = "sourceSessionId")]
+    source_session_id: Option<String>,
 }
 
 /// Represents the send message attachment request payload.
@@ -1428,6 +1433,13 @@ struct SendMessageAttachmentRequest {
     data: String,
     file_name: Option<String>,
     media_type: String,
+}
+
+/// Represents the delegation follow-up request payload.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FollowupDelegationRequest {
+    message: String,
 }
 
 /// Represents the update session settings request payload.

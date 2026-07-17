@@ -667,6 +667,7 @@ impl AppState {
                     author: Author::Assistant,
                     text: format!("Turn failed: {cleaned}"),
                     expanded_text: None,
+                    source: None,
                 },
             )?;
         }

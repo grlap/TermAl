@@ -133,6 +133,7 @@ impl AppState {
         prompt: String,
         attachments: Vec<PromptImageAttachment>,
         expanded_prompt: Option<String>,
+        source: Option<MessageSource>,
     ) -> std::result::Result<StartedTurn, ApiError> {
         if record.is_remote_proxy() {
             return Err(ApiError::internal(
@@ -366,6 +367,7 @@ impl AppState {
             author: Author::You,
             text: prompt.clone(),
             expanded_text: expanded_prompt,
+            source,
         };
         let message_index = push_message_on_record(record, message.clone());
         record.session.status = SessionStatus::Active;
@@ -487,6 +489,7 @@ impl AppState {
                 queued.pending_prompt.text.clone(),
                 queued.attachments.clone(),
                 queued.pending_prompt.expanded_text.clone(),
+                queued.pending_prompt.source.clone(),
             )
             .map_err(|err| anyhow!("failed to dispatch queued prompt: {}", err.message))?;
         let mut message_delta = started.message_delta;
@@ -542,6 +545,19 @@ impl AppState {
             .filter(|value| !value.is_empty() && *value != prompt)
             .map(str::to_owned);
         let attachments = parse_prompt_image_attachments(&request.attachments)?;
+        // Resolve peer-sender attribution (`termal_send_to_session`) to the
+        // sender's current display name while we hold the state lock. The
+        // backend owns this lookup so a caller cannot spoof another session's
+        // name. An unknown id (e.g. a sender deleted before a queued prompt
+        // drains) drops to `None`, so the message simply stays "You".
+        let source = request.source_session_id.as_deref().and_then(|source_id| {
+            inner
+                .find_session_index(source_id)
+                .map(|source_index| MessageSource {
+                    session_id: source_id.to_owned(),
+                    name: inner.sessions[source_index].session.name.clone(),
+                })
+        });
         if record_has_archived_codex_thread(&inner.sessions[index]) {
             return Err(ApiError::conflict(
                 "the current Codex thread is archived; unarchive it before sending another prompt",
@@ -599,6 +615,7 @@ impl AppState {
                     timestamp: stamp_now(),
                     text: prompt,
                     expanded_text: expanded_prompt.clone(),
+                    source: source.clone(),
                 },
                 attachments,
             );
@@ -629,6 +646,7 @@ impl AppState {
                 prompt,
                 attachments,
                 expanded_prompt,
+                source,
             )?;
 
             let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
@@ -654,6 +672,7 @@ impl AppState {
                     timestamp: stamp_now(),
                     text: prompt,
                     expanded_text: expanded_prompt.clone(),
+                    source: source.clone(),
                 },
                 attachments,
             );
@@ -683,6 +702,7 @@ impl AppState {
             prompt,
             attachments,
             expanded_prompt,
+            source,
         )?;
 
         let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {

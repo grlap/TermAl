@@ -62,6 +62,7 @@ fn push_text_message(inner: &mut StateInner, session_id: &str, author: Author, t
             author,
             text,
             expanded_text: None,
+            source: None,
         },
     );
 }
