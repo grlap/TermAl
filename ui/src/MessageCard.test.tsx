@@ -12,6 +12,7 @@ import {
 } from "./deferred-render";
 import type {
   ApprovalMessage,
+  CommandMessage,
   CodexAppRequestMessage,
   DiffMessage,
   FileChangesMessage,
@@ -198,6 +199,169 @@ describe("MessageCard", () => {
     ).not.toBeInTheDocument();
     // The full prompt renders inline, uncollapsed.
     expect(screen.getByText(/The needle stays visible/)).toBeInTheDocument();
+  });
+
+  it("collapses successful command details by default and expands on toggle", () => {
+    const message: CommandMessage = {
+      id: "message-command-success",
+      type: "command",
+      author: "assistant",
+      timestamp: "10:08",
+      command: `/bin/zsh -lc "sed -n '1,40p' src/main.rs"`,
+      output: "first line\nsecond line\n",
+      status: "success",
+    };
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/sed -n '1,40p'/)).toBeInTheDocument();
+    expect(
+      screen.getByText("1 line in \u00b7 2 lines out"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("IN")).not.toBeInTheDocument();
+    expect(screen.queryByText("OUT")).not.toBeInTheDocument();
+    expect(screen.queryByText("first line")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show command details" }));
+
+    expect(screen.getByText("IN")).toBeInTheDocument();
+    expect(screen.getByText("OUT")).toBeInTheDocument();
+    expect(screen.getByText(/first line/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Hide command details" }),
+    ).toBeInTheDocument();
+  });
+
+  it("forces successful command details open during search without an inert toggle", () => {
+    const message: CommandMessage = {
+      id: "message-command-search",
+      type: "command",
+      author: "assistant",
+      timestamp: "10:09",
+      command: "npm test",
+      output: "all tests passed\n",
+      status: "success",
+    };
+
+    const { rerender } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("IN")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show command details" }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        searchQuery="tests passed"
+      />,
+    );
+
+    expect(screen.getByText("IN")).toBeInTheDocument();
+    expect(screen.getByText("OUT")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("search match: tests passed"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /command details/i }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("IN")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show command details" }),
+    ).toBeInTheDocument();
+  });
+
+  it("collapses command details when a running command succeeds", () => {
+    const runningMessage: CommandMessage = {
+      id: "message-command-transition",
+      type: "command",
+      author: "assistant",
+      timestamp: "10:10",
+      command: "npm test",
+      output: "running tests\n",
+      status: "running",
+    };
+
+    const { rerender } = render(
+      <MessageCard
+        message={runningMessage}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("IN")).toBeInTheDocument();
+    expect(screen.getByText("OUT")).toBeInTheDocument();
+    expect(screen.getByText(/running tests/)).toBeInTheDocument();
+
+    rerender(
+      <MessageCard
+        message={{
+          ...runningMessage,
+          output: "all tests passed\n",
+          status: "success",
+        }}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("IN")).not.toBeInTheDocument();
+    expect(screen.queryByText("OUT")).not.toBeInTheDocument();
+    expect(screen.getByText("1 line in \u00b7 1 line out")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show command details" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps failed command details expanded by default", () => {
+    const message: CommandMessage = {
+      id: "message-command-error",
+      type: "command",
+      author: "assistant",
+      timestamp: "10:09",
+      command: "npm test",
+      output: "failed assertion\n",
+      status: "error",
+    };
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("IN")).toBeInTheDocument();
+    expect(screen.getByText("OUT")).toBeInTheDocument();
+    expect(screen.getByText(/failed assertion/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Show command details" }),
+    ).not.toBeInTheDocument();
   });
 
   it("does not expose marker menu button semantics outside the panel owner", () => {
