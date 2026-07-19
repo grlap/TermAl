@@ -56,12 +56,19 @@ export function MessageMeta({
   author,
   timestamp,
   trailing,
+  sourceName,
 }: {
   author: string;
   timestamp: string;
   trailing?: ReactNode;
+  // Peer sender name for a queued prompt delivered through
+  // `termal_send_to_session`. Ordinary user prompts leave this unset.
+  sourceName?: string | null;
 }) {
   const isUser = author === "you";
+  const trimmedSourceName =
+    typeof sourceName === "string" ? sourceName.trim() : "";
+  const displayName = isUser ? trimmedSourceName || "You" : "Agent";
 
   return (
     <div
@@ -70,7 +77,7 @@ export function MessageMeta({
       <span
         className={`message-meta-author ${isUser ? "message-meta-author-user" : "message-meta-author-agent"}`}
       >
-        {isUser ? "You" : "Agent"}
+        {displayName}
       </span>
       <span className="message-meta-end">
         {trailing}

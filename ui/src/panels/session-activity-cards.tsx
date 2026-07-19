@@ -103,6 +103,7 @@ export const PendingPromptCard = memo(function PendingPromptCard({
         <MessageMeta
           author="you"
           timestamp={prompt.timestamp}
+          sourceName={prompt.source?.name}
           trailing={
             commandLabel ? <span className="message-meta-tag">{commandLabel}</span> : undefined
           }

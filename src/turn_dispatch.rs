@@ -45,6 +45,23 @@ struct StartedTurnMessageDelta {
     session_mutation_stamp: u64,
 }
 
+/// Adds transport context that a receiving agent cannot infer from its own
+/// repository instructions. Peer sessions may live in entirely different
+/// projects, so the prompt must explain both the context boundary and the
+/// explicit MCP reply path. This is runtime-only: the transcript keeps the
+/// original message plus its structured [`MessageSource`] attribution.
+fn peer_message_runtime_prompt(prompt: &str, source: &MessageSource) -> String {
+    format!(
+        "[TermAl cross-session message]\n\
+From session: {:?} (`{}`)\n\
+The sender may be working in a different repository. Do not assume it shares this session's repository instructions, Beads state, or skills.\n\
+To reply to the sender, use the TermAl MCP tool `termal_send_to_session` with `sessionId` set to `{}`. A normal assistant reply stays only in this session and will not reach the sender.\n\n\
+--- Message from {:?} ---\n\
+{}",
+        source.name, source.session_id, source.session_id, source.name, prompt
+    )
+}
+
 impl AppState {
     #[cfg(test)]
     fn install_test_acp_runtime_override(&self, agent: AcpAgent, runtime: AcpRuntimeHandle) {
@@ -152,6 +169,10 @@ impl AppState {
             .filter(|value| !value.is_empty() && *value != prompt)
             .map(str::to_owned);
         let runtime_prompt = expanded_prompt.clone().unwrap_or_else(|| prompt.clone());
+        let runtime_prompt = source
+            .as_ref()
+            .map(|source| peer_message_runtime_prompt(&runtime_prompt, source))
+            .unwrap_or(runtime_prompt);
 
         let dispatch = match record.session.agent {
             Agent::Claude => {

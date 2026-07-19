@@ -12,8 +12,12 @@
 // methods on `StateInner` rather than `&self` on `AppState` like
 // most of the other mutation paths.
 //
-// The four helpers:
+// The five helpers:
 //
+// - `prune_auto_imported_codex_subagent_sessions`: removes empty
+//   top-level ghost sessions that older startup discovery imported
+//   from Codex-owned subagent threads, while preserving any session
+//   with user-visible work or TermAl delegation ownership.
 // - `import_discovered_codex_threads`: on startup we scan the
 //   Codex state dir for pre-existing `threadId`s and merge them into
 //   `self.sessions` as resumeable ghost-sessions so users don't lose
@@ -34,6 +38,38 @@
 //   half-dead state machine.
 
 impl StateInner {
+    /// Removes empty top-level ghost sessions that older startup discovery
+    /// imported from Codex-owned subagent threads. Real TermAl delegation
+    /// children carry `parent_delegation_id`; sessions with transcript or queue
+    /// state are retained so startup cleanup never discards user-visible work.
+    fn prune_auto_imported_codex_subagent_sessions(
+        &mut self,
+        subagent_thread_ids: &BTreeSet<String>,
+    ) -> usize {
+        if subagent_thread_ids.is_empty() {
+            return 0;
+        }
+
+        let session_count_before = self.sessions.len();
+        self.retain_sessions(|record| {
+            let is_empty_top_level_codex_ghost = !record.hidden
+                && !record.is_remote_proxy()
+                && record.session.agent == Agent::Codex
+                && record.session.parent_delegation_id.is_none()
+                && matches!(record.session.status, SessionStatus::Idle)
+                && record.session.messages.is_empty()
+                && record.session.pending_prompts.is_empty()
+                && record.queued_prompts.is_empty();
+            let is_codex_subagent = record
+                .external_session_id
+                .as_ref()
+                .is_some_and(|thread_id| subagent_thread_ids.contains(thread_id));
+
+            !(is_empty_top_level_codex_ghost && is_codex_subagent)
+        });
+        session_count_before - self.sessions.len()
+    }
+
     /// Merges Codex threads discovered on disk into `self.sessions` as
     /// ghost-sessions that resume the existing `threadId` rather than
     /// opening a fresh Codex conversation. Threads the user has

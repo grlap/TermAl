@@ -599,6 +599,36 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(pendingPromptQueue).toContainElement(
       queuedPromptCard as HTMLElement,
     );
+    expect(
+      within(queuedPromptCard as HTMLElement).getByText("You"),
+    ).toBeInTheDocument();
+  });
+
+  it("labels a queued peer prompt with its sender session name", () => {
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        messages: [],
+        pendingPrompts: [
+          {
+            id: "pending-peer-prompt",
+            timestamp: "10:03",
+            text: "Message waiting from another session",
+            source: {
+              sessionId: "session-1743",
+              name: "Comovo",
+            },
+          },
+        ],
+      }),
+      showWaitingIndicator: true,
+    });
+
+    const queuedPromptCard = screen
+      .getByText("Message waiting from another session")
+      .closest(".pending-prompt-card") as HTMLElement;
+
+    expect(within(queuedPromptCard).getByText("Comovo")).toBeInTheDocument();
+    expect(within(queuedPromptCard).queryByText("You")).not.toBeInTheDocument();
   });
 
   it("does not expose cancel for local-only optimistic pending prompts", () => {

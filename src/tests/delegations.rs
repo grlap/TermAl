@@ -2101,13 +2101,15 @@ fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// tm-5tu: a peer message delivered via `termal_send_to_session` carries the
-// sender session's identity so the receiver's transcript labels it with the
-// sender's name instead of "You". The backend resolves source_session_id to a
-// display name while holding the state lock, so a caller cannot spoof another
-// session's name.
+// tm-5tu / tm-h30: a peer message delivered via `termal_send_to_session`
+// carries the sender session's identity so the receiver's transcript labels it
+// with the sender's name instead of "You". The backend resolves
+// source_session_id to a display name while holding the state lock, so a caller
+// cannot spoof another session's name. The runtime prompt also carries a
+// self-contained reply envelope because peer sessions can belong to different
+// repositories and cannot rely on shared Beads state, skills, or instructions.
 #[test]
-fn peer_message_dispatch_attributes_resolved_sender_name() {
+fn peer_message_dispatch_attributes_sender_and_instructs_cross_repo_reply() {
     let state = test_app_state();
 
     // Sender session whose NAME the receiver should see.
@@ -2117,7 +2119,7 @@ fn peer_message_dispatch_attributes_resolved_sender_name() {
             .create_session(
                 Agent::Claude,
                 Some("Kadry".to_owned()),
-                "/tmp".to_owned(),
+                "/repos/legal".to_owned(),
                 None,
                 None,
             )
@@ -2134,7 +2136,7 @@ fn peer_message_dispatch_attributes_resolved_sender_name() {
             .create_session(
                 Agent::Claude,
                 Some("Receiver".to_owned()),
-                "/tmp".to_owned(),
+                "/repos/product".to_owned(),
                 None,
                 None,
             )
@@ -2152,7 +2154,7 @@ fn peer_message_dispatch_attributes_resolved_sender_name() {
         (target_id, input_rx)
     };
 
-    state
+    let dispatch = state
         .dispatch_turn(
             &target_id,
             SendMessageRequest {
@@ -2163,6 +2165,24 @@ fn peer_message_dispatch_attributes_resolved_sender_name() {
             },
         )
         .expect("peer message should dispatch to the idle target");
+    let runtime_prompt = match dispatch {
+        DispatchTurnResult::Dispatched(TurnDispatch::PersistentClaude { command, .. }) => {
+            command.text
+        }
+        DispatchTurnResult::Dispatched(_) => panic!("expected a Claude turn dispatch"),
+        DispatchTurnResult::Queued => panic!("idle target should dispatch immediately"),
+    };
+    assert!(runtime_prompt.starts_with("[TermAl cross-session message]\n"));
+    assert!(runtime_prompt.contains("From session: \"Kadry\""));
+    assert!(runtime_prompt.contains(&format!("(`{sender_id}`)")));
+    assert!(runtime_prompt.contains("different repository"));
+    assert!(runtime_prompt.contains("repository instructions, Beads state, or skills"));
+    assert!(!runtime_prompt.contains("/repos/legal"));
+    assert!(!runtime_prompt.contains("/repos/product"));
+    assert!(runtime_prompt.contains("TermAl MCP tool `termal_send_to_session`"));
+    assert!(runtime_prompt.contains(&format!("`sessionId` set to `{sender_id}`")));
+    assert!(runtime_prompt.contains("A normal assistant reply stays only in this session"));
+    assert!(runtime_prompt.ends_with("--- Message from \"Kadry\" ---\nping from a peer"));
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     let record = inner

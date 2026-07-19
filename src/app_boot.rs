@@ -141,8 +141,17 @@ impl AppState {
             .unwrap_or_else(|| bootstrap_default_local_state(&default_workdir));
         let discovery_scopes = collect_codex_discovery_scopes(&default_workdir, &inner.projects);
         match discover_codex_threads(&default_workdir, &discovery_scopes) {
-            Ok(discovered_threads) => {
-                inner.import_discovered_codex_threads(&default_workdir, discovered_threads);
+            Ok(discovery) => {
+                let removed_subagent_sessions = inner
+                    .prune_auto_imported_codex_subagent_sessions(
+                        &discovery.subagent_thread_ids,
+                    );
+                if removed_subagent_sessions > 0 {
+                    eprintln!(
+                        "codex discovery> removed {removed_subagent_sessions} auto-imported subagent session(s)"
+                    );
+                }
+                inner.import_discovered_codex_threads(&default_workdir, discovery.threads);
             }
             Err(err) => {
                 eprintln!("codex discovery> failed to load Codex thread metadata: {err:#}");

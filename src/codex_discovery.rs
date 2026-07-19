@@ -26,6 +26,12 @@ struct DiscoveredCodexThread {
     title: String,
 }
 
+#[derive(Default)]
+struct DiscoveredCodexThreads {
+    threads: Vec<DiscoveredCodexThread>,
+    subagent_thread_ids: BTreeSet<String>,
+}
+
 const MAX_DISCOVERED_CODEX_THREADS_PER_HOME: usize = 500;
 
 /// Collects Codex discovery scopes.
@@ -52,7 +58,7 @@ fn collect_codex_discovery_scopes(default_workdir: &str, projects: &[Project]) -
 fn discover_codex_threads(
     default_workdir: &str,
     discovery_scopes: &[PathBuf],
-) -> Result<Vec<DiscoveredCodexThread>> {
+) -> Result<DiscoveredCodexThreads> {
     let source_codex_home = std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
         .or_else(|| {
@@ -63,18 +69,32 @@ fn discover_codex_threads(
         })
         .or_else(|| Some(PathBuf::from(default_workdir).join(".codex")));
     let termal_codex_root = resolve_termal_codex_discovery_root(default_workdir);
-    discover_codex_threads_from_sources(
+    discover_codex_threads_with_subagents_from_sources(
         source_codex_home.as_deref(),
         &termal_codex_root,
         discovery_scopes,
     )
 }
 
+#[cfg(test)]
 fn discover_codex_threads_from_sources(
     source_codex_home: Option<&FsPath>,
     termal_codex_root: &FsPath,
     discovery_scopes: &[PathBuf],
 ) -> Result<Vec<DiscoveredCodexThread>> {
+    Ok(discover_codex_threads_with_subagents_from_sources(
+        source_codex_home,
+        termal_codex_root,
+        discovery_scopes,
+    )?
+    .threads)
+}
+
+fn discover_codex_threads_with_subagents_from_sources(
+    source_codex_home: Option<&FsPath>,
+    termal_codex_root: &FsPath,
+    discovery_scopes: &[PathBuf],
+) -> Result<DiscoveredCodexThreads> {
     let codex_homes = discover_codex_home_candidates(source_codex_home, termal_codex_root);
     discover_codex_threads_from_homes(&codex_homes, discovery_scopes)
 }
@@ -146,30 +166,48 @@ fn resolve_termal_codex_discovery_root(default_workdir: &str) -> PathBuf {
 fn discover_codex_threads_from_homes(
     codex_homes: &[PathBuf],
     discovery_scopes: &[PathBuf],
-) -> Result<Vec<DiscoveredCodexThread>> {
-    let mut threads = Vec::new();
+) -> Result<DiscoveredCodexThreads> {
+    let mut discovery = DiscoveredCodexThreads::default();
     let mut seen_ids = HashSet::new();
 
     for codex_home in codex_homes {
-        for thread in discover_codex_threads_from_home(codex_home, discovery_scopes)? {
+        let home_discovery =
+            discover_codex_threads_with_subagents_from_home(codex_home, discovery_scopes)?;
+        for thread in home_discovery.threads {
             if seen_ids.insert(thread.id.clone()) {
-                threads.push(thread);
+                discovery.threads.push(thread);
+            }
+        }
+        for thread_id in home_discovery.subagent_thread_ids {
+            if seen_ids.insert(thread_id.clone()) {
+                discovery.subagent_thread_ids.insert(thread_id);
             }
         }
     }
 
-    Ok(threads)
+    Ok(discovery)
 }
 
+#[cfg(test)]
 fn discover_codex_threads_from_home(
     codex_home: &FsPath,
     discovery_scopes: &[PathBuf],
 ) -> Result<Vec<DiscoveredCodexThread>> {
+    Ok(
+        discover_codex_threads_with_subagents_from_home(codex_home, discovery_scopes)?
+            .threads,
+    )
+}
+
+fn discover_codex_threads_with_subagents_from_home(
+    codex_home: &FsPath,
+    discovery_scopes: &[PathBuf],
+) -> Result<DiscoveredCodexThreads> {
     let Some(database_path) = resolve_codex_threads_database_path(codex_home) else {
-        return Ok(Vec::new());
+        return Ok(DiscoveredCodexThreads::default());
     };
     if discovery_scopes.is_empty() {
-        return Ok(Vec::new());
+        return Ok(DiscoveredCodexThreads::default());
     }
 
     let connection = rusqlite::Connection::open_with_flags(
@@ -189,6 +227,9 @@ fn discover_codex_threads_from_home(
     let has_model_column = codex_threads_table_has_column(&connection, "model")?;
     let has_reasoning_effort_column =
         codex_threads_table_has_column(&connection, "reasoning_effort")?;
+    let has_source_column = codex_threads_table_has_column(&connection, "source")?;
+    let has_thread_source_column =
+        codex_threads_table_has_column(&connection, "thread_source")?;
     let model_select = if has_model_column { "model" } else { "null as model" };
     let reasoning_effort_select = if has_reasoning_effort_column {
         "reasoning_effort"
@@ -200,10 +241,17 @@ fn discover_codex_threads_from_home(
         .map(|_| "(cwd = ? OR cwd LIKE ? ESCAPE '\\')")
         .collect::<Vec<_>>()
         .join(" OR ");
+    let subagent_predicate = codex_subagent_thread_predicate(
+        has_source_column,
+        has_thread_source_column,
+    );
+    let subagent_filter = subagent_predicate
+        .map(|predicate| format!(" and not ({predicate})"))
+        .unwrap_or_default();
     let query = format!(
         "select id, cwd, title, sandbox_policy, approval_mode, archived, {model_select}, {reasoning_effort_select}
          from threads
-         where {scope_sql}
+         where ({scope_sql}){subagent_filter}
          order by updated_at desc
          limit ?"
     );
@@ -241,7 +289,7 @@ fn discover_codex_threads_from_home(
         })
     })?;
 
-    let mut threads = Vec::new();
+    let mut discovery = DiscoveredCodexThreads::default();
     for row in rows {
         let thread = row?;
         if thread.id.trim().is_empty() || thread.cwd.trim().is_empty() {
@@ -255,9 +303,55 @@ fn discover_codex_threads_from_home(
         }) {
             continue;
         }
-        threads.push(thread);
+        discovery.threads.push(thread);
     }
-    Ok(threads)
+
+    if let Some(subagent_predicate) = subagent_predicate {
+        let query = format!(
+            "select id, cwd
+             from threads
+             where ({scope_sql}) and ({subagent_predicate})"
+        );
+        let mut statement = connection.prepare(&query)?;
+        let mut params = Vec::with_capacity(query_scope_patterns.len() * 2);
+        for (scope, like_pattern) in &query_scope_patterns {
+            params.push(rusqlite::types::Value::from(scope.clone()));
+            params.push(rusqlite::types::Value::from(like_pattern.clone()));
+        }
+        let rows = statement.query_map(rusqlite::params_from_iter(params), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (thread_id, cwd) = row?;
+            if thread_id.trim().is_empty() || cwd.trim().is_empty() {
+                continue;
+            }
+            if normalized_scopes.iter().any(|scope| {
+                codex_discovery_scope_contains(
+                    scope.to_string_lossy().as_ref(),
+                    FsPath::new(&cwd),
+                )
+            }) {
+                discovery.subagent_thread_ids.insert(thread_id);
+            }
+        }
+    }
+
+    Ok(discovery)
+}
+
+fn codex_subagent_thread_predicate(
+    has_source_column: bool,
+    has_thread_source_column: bool,
+) -> Option<&'static str> {
+    match (has_source_column, has_thread_source_column) {
+        (true, true) => Some(
+            "coalesce(thread_source, '') = 'subagent' or coalesce(source, '') like '{\"subagent\":%'",
+        ),
+        (true, false) => Some("coalesce(source, '') like '{\"subagent\":%'"),
+        (false, true) => Some("coalesce(thread_source, '') = 'subagent'"),
+        (false, false) => None,
+    }
 }
 
 fn codex_threads_table_has_column(

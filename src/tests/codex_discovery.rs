@@ -381,6 +381,577 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
     let _ = fs::remove_dir_all(&codex_home);
 }
 
+// Pins the current Codex schema's nested-agent markers. Subagent threads are
+// real resumable Codex threads, but they belong inside their parent's agent
+// tree and must never become top-level TermAl ghost sessions after a restart.
+// The filter must run before the per-home limit: otherwise a busy parent with
+// hundreds of newer children can crowd an older top-level conversation out of
+// discovery even when every child is discarded afterward. `source` remains a
+// fallback for Codex databases that gained the nested source payload before
+// they gained the denormalized `thread_source` column value.
+#[test]
+fn discover_codex_threads_from_home_excludes_subagents_before_limit_and_reports_ids() {
+    let codex_home =
+        std::env::temp_dir().join(format!("termal-codex-home-subagents-{}", Uuid::new_v4()));
+    fs::create_dir_all(&codex_home).expect("test Codex home should be created");
+    let connection =
+        rusqlite::Connection::open(codex_home.join("state_8.sqlite")).expect("db should open");
+    connection
+        .execute_batch(
+            "create table threads (
+                id text primary key,
+                cwd text not null,
+                title text not null,
+                sandbox_policy text not null,
+                approval_mode text not null,
+                archived integer not null,
+                model text,
+                reasoning_effort text,
+                source text,
+                thread_source text,
+                updated_at integer not null
+            );",
+        )
+        .expect("threads table should be created");
+
+    for index in 0..MAX_DISCOVERED_CODEX_THREADS_PER_HOME {
+        connection
+            .execute(
+                "insert into threads (
+                    id, cwd, title, sandbox_policy, approval_mode, archived,
+                    model, reasoning_effort, source, thread_source, updated_at
+                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                rusqlite::params![
+                    format!("thread-child-{index}"),
+                    "/tmp/termal",
+                    "do git pull",
+                    r#"{"type":"read-only"}"#,
+                    "never",
+                    0,
+                    "gpt-5-codex",
+                    "high",
+                    r#"{"subagent":{"thread_spawn":{"parent_thread_id":"thread-parent"}}}"#,
+                    "subagent",
+                    10_000 - index as i64,
+                ],
+            )
+            .expect("subagent thread row should insert");
+    }
+    connection
+        .execute(
+            "insert into threads (
+                id, cwd, title, sandbox_policy, approval_mode, archived,
+                model, reasoning_effort, source, thread_source, updated_at
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                "thread-child-source-only",
+                "/tmp/termal",
+                "Inherited parent prompt",
+                r#"{"type":"read-only"}"#,
+                "never",
+                0,
+                "gpt-5-codex",
+                "high",
+                r#"{"subagent":{"thread_spawn":{"parent_thread_id":"thread-parent"}}}"#,
+                Option::<&str>::None,
+                20_000,
+            ],
+        )
+        .expect("source-only subagent row should insert");
+    connection
+        .execute(
+            "insert into threads (
+                id, cwd, title, sandbox_policy, approval_mode, archived,
+                model, reasoning_effort, source, thread_source, updated_at
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                "thread-parent",
+                "/tmp/termal",
+                "Real top-level conversation",
+                r#"{"type":"workspace-write"}"#,
+                "on-request",
+                0,
+                "gpt-5-codex",
+                "medium",
+                Option::<&str>::None,
+                Option::<&str>::None,
+                1,
+            ],
+        )
+        .expect("null-source top-level thread row should insert");
+
+    let discovery = discover_codex_threads_with_subagents_from_home(
+        &codex_home,
+        &[PathBuf::from("/tmp/termal")],
+    )
+    .expect("threads should load");
+
+    assert_eq!(
+        discovery
+            .threads
+            .iter()
+            .map(|thread| thread.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["thread-parent"],
+        "subagents must be removed in SQL before the row cap so the older parent survives"
+    );
+    assert_eq!(
+        discovery.subagent_thread_ids.len(),
+        MAX_DISCOVERED_CODEX_THREADS_PER_HOME + 1
+    );
+    assert!(discovery.subagent_thread_ids.contains("thread-child-0"));
+    assert!(
+        discovery
+            .subagent_thread_ids
+            .contains("thread-child-source-only"),
+        "the source JSON fallback should classify subagents when thread_source is null"
+    );
+    assert!(!discovery.subagent_thread_ids.contains("thread-parent"));
+
+    drop(connection);
+    let _ = fs::remove_dir_all(&codex_home);
+}
+
+// Pins the source-only Codex schema too. SQL `LIKE` returns NULL for a NULL
+// operand, so negating a raw `source like ...` expression would otherwise
+// discard a legitimate top-level thread instead of retaining it. The sibling
+// source-marked subagent must still be classified and excluded.
+#[test]
+fn discover_codex_threads_from_home_retains_null_source_without_thread_source_column() {
+    let codex_home =
+        std::env::temp_dir().join(format!("termal-codex-home-null-source-{}", Uuid::new_v4()));
+    fs::create_dir_all(&codex_home).expect("test Codex home should be created");
+    let connection =
+        rusqlite::Connection::open(codex_home.join("state_8.sqlite")).expect("db should open");
+    connection
+        .execute_batch(
+            "create table threads (
+                id text primary key,
+                cwd text not null,
+                title text not null,
+                sandbox_policy text not null,
+                approval_mode text not null,
+                archived integer not null,
+                model text,
+                reasoning_effort text,
+                source text,
+                updated_at integer not null
+            );",
+        )
+        .expect("source-only threads table should be created");
+    connection
+        .execute(
+            "insert into threads (
+                id, cwd, title, sandbox_policy, approval_mode, archived,
+                model, reasoning_effort, source, updated_at
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                "thread-parent-null-source",
+                "/tmp/termal",
+                "Top-level conversation",
+                r#"{"type":"workspace-write"}"#,
+                "on-request",
+                0,
+                "gpt-5-codex",
+                "medium",
+                Option::<&str>::None,
+                1,
+            ],
+        )
+        .expect("null-source top-level row should insert");
+    connection
+        .execute(
+            "insert into threads (
+                id, cwd, title, sandbox_policy, approval_mode, archived,
+                model, reasoning_effort, source, updated_at
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                "thread-child-source-only-schema",
+                "/tmp/termal",
+                "Nested conversation",
+                r#"{"type":"read-only"}"#,
+                "never",
+                0,
+                "gpt-5-codex",
+                "high",
+                r#"{"subagent":{"thread_spawn":{"parent_thread_id":"thread-parent-null-source"}}}"#,
+                2,
+            ],
+        )
+        .expect("source-marked subagent row should insert");
+
+    let discovery = discover_codex_threads_with_subagents_from_home(
+        &codex_home,
+        &[PathBuf::from("/tmp/termal")],
+    )
+    .expect("threads should load");
+
+    assert_eq!(
+        discovery
+            .threads
+            .iter()
+            .map(|thread| thread.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["thread-parent-null-source"]
+    );
+    assert_eq!(
+        discovery.subagent_thread_ids,
+        BTreeSet::from(["thread-child-source-only-schema".to_owned()])
+    );
+
+    drop(connection);
+    let _ = fs::remove_dir_all(&codex_home);
+}
+
+// Pins restart cleanup for the already-persisted bad rows. Only an empty,
+// visible, idle, top-level local Codex ghost may be removed. A real TermAl
+// delegation child and a non-idle session are retained even when their Codex
+// thread IDs are classified as subagents, and an unrelated top-level ghost is
+// untouched. The removed id must become a persistence tombstone so the card
+// does not return on the following restart.
+#[test]
+fn prune_auto_imported_codex_subagent_sessions_removes_only_empty_top_level_ghosts() {
+    let mut inner = StateInner::new();
+    let project = inner.create_project(
+        Some("TermAl".to_owned()),
+        "/tmp/termal".to_owned(),
+        default_local_remote_id(),
+    );
+
+    let ghost = inner.create_session(
+        Agent::Codex,
+        Some("do git pull".to_owned()),
+        "/tmp/termal".to_owned(),
+        Some(project.id.clone()),
+        None,
+    );
+    let ghost_session_id = ghost.session.id.clone();
+    let ghost_index = inner
+        .find_session_index(&ghost_session_id)
+        .expect("ghost session should exist");
+    set_record_external_session_id(
+        inner
+            .session_mut_by_index(ghost_index)
+            .expect("ghost session should be mutable"),
+        Some("thread-subagent-ghost".to_owned()),
+    );
+
+    let child = inner.create_session(
+        Agent::Codex,
+        Some("Live delegation child".to_owned()),
+        "/tmp/termal".to_owned(),
+        Some(project.id.clone()),
+        None,
+    );
+    let child_session_id = child.session.id.clone();
+    let child_index = inner
+        .find_session_index(&child_session_id)
+        .expect("child session should exist");
+    let child_record = inner
+        .session_mut_by_index(child_index)
+        .expect("child session should be mutable");
+    child_record.session.parent_delegation_id = Some("delegation-live".to_owned());
+    set_record_external_session_id(child_record, Some("thread-subagent-child".to_owned()));
+
+    let active = inner.create_session(
+        Agent::Codex,
+        Some("Active nested thread".to_owned()),
+        "/tmp/termal".to_owned(),
+        Some(project.id.clone()),
+        None,
+    );
+    let active_session_id = active.session.id.clone();
+    let active_index = inner
+        .find_session_index(&active_session_id)
+        .expect("active session should exist");
+    let active_record = inner
+        .session_mut_by_index(active_index)
+        .expect("active session should be mutable");
+    active_record.session.status = SessionStatus::Active;
+    set_record_external_session_id(active_record, Some("thread-subagent-active".to_owned()));
+
+    let unrelated = inner.create_session(
+        Agent::Codex,
+        Some("Unrelated ghost".to_owned()),
+        "/tmp/termal".to_owned(),
+        Some(project.id),
+        None,
+    );
+    let unrelated_session_id = unrelated.session.id.clone();
+    let unrelated_index = inner
+        .find_session_index(&unrelated_session_id)
+        .expect("unrelated session should exist");
+    set_record_external_session_id(
+        inner
+            .session_mut_by_index(unrelated_index)
+            .expect("unrelated session should be mutable"),
+        Some("thread-top-level".to_owned()),
+    );
+
+    let subagent_thread_ids = BTreeSet::from([
+        "thread-subagent-ghost".to_owned(),
+        "thread-subagent-child".to_owned(),
+        "thread-subagent-active".to_owned(),
+    ]);
+    let removed = inner.prune_auto_imported_codex_subagent_sessions(&subagent_thread_ids);
+
+    assert_eq!(removed, 1);
+    assert!(inner.find_session_index(&ghost_session_id).is_none());
+    assert!(inner.find_session_index(&child_session_id).is_some());
+    assert!(inner.find_session_index(&active_session_id).is_some());
+    assert!(inner.find_session_index(&unrelated_session_id).is_some());
+    assert!(
+        inner.removed_session_ids.contains(&ghost_session_id),
+        "the pruned ghost must be deleted from SQLite on the startup persist"
+    );
+}
+
+// Exercises the production restart wiring rather than only the discovery and
+// cleanup helpers in isolation. The initial SQLite state represents the bad
+// state produced by an older build: an empty top-level TermAl session points at
+// a Codex subagent thread. Boot must classify that native thread, remove the
+// persisted ghost, and still import its real top-level parent. A reload after
+// the persist worker shuts down proves the cleanup tombstone reached disk.
+#[test]
+fn app_state_restart_prunes_persisted_codex_subagent_ghost() {
+    let _env_lock = TEST_HOME_ENV_MUTEX
+        .lock()
+        .expect("test home env mutex poisoned");
+    let root =
+        std::env::temp_dir().join(format!("termal-codex-subagent-restart-{}", Uuid::new_v4()));
+    let project_root = root.join("project");
+    let test_home = root.join("home");
+    let shared_codex_home = test_home
+        .join(".termal")
+        .join("codex-home")
+        .join("shared-app-server");
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    let project_root =
+        fs::canonicalize(project_root).expect("project root should canonicalize for discovery");
+    fs::create_dir_all(&shared_codex_home).expect("shared Codex home should exist");
+    let _home = ScopedEnvVar::set_home_dir(&test_home);
+    let source_codex_home = test_home.join(".codex");
+    let _codex_home = ScopedEnvVar::set_path("CODEX_HOME", &source_codex_home);
+
+    let project_workdir = project_root.to_string_lossy().into_owned();
+    let codex_connection = rusqlite::Connection::open(shared_codex_home.join("state_5.sqlite"))
+        .expect("Codex state db should open");
+    codex_connection
+        .execute_batch(
+            "create table threads (
+                id text primary key,
+                cwd text not null,
+                title text not null,
+                sandbox_policy text not null,
+                approval_mode text not null,
+                archived integer not null,
+                model text,
+                reasoning_effort text,
+                source text,
+                thread_source text,
+                updated_at integer not null
+            );",
+        )
+        .expect("threads table should be created");
+    codex_connection
+        .execute(
+            "insert into threads (
+                id, cwd, title, sandbox_policy, approval_mode, archived,
+                model, reasoning_effort, source, thread_source, updated_at
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                "thread-child",
+                project_workdir,
+                "do git pull",
+                r#"{"type":"read-only"}"#,
+                "never",
+                0,
+                "gpt-5-codex",
+                "high",
+                r#"{"subagent":{"thread_spawn":{"parent_thread_id":"thread-parent"}}}"#,
+                "subagent",
+                2,
+            ],
+        )
+        .expect("subagent thread should insert");
+    codex_connection
+        .execute(
+            "insert into threads (
+                id, cwd, title, sandbox_policy, approval_mode, archived,
+                model, reasoning_effort, source, thread_source, updated_at
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                "thread-parent",
+                project_workdir,
+                "Real parent conversation",
+                r#"{"type":"workspace-write"}"#,
+                "on-request",
+                0,
+                "gpt-5-codex",
+                "medium",
+                "vscode",
+                Option::<&str>::None,
+                1,
+            ],
+        )
+        .expect("parent thread should insert");
+    drop(codex_connection);
+
+    assert_eq!(
+        resolve_termal_codex_discovery_root(&project_workdir),
+        test_home.join(".termal").join("codex-home")
+    );
+    let direct_discovery = discover_codex_threads_with_subagents_from_home(
+        &shared_codex_home,
+        &[project_root.clone()],
+    )
+    .expect("direct shared-home discovery should load");
+    assert!(
+        direct_discovery
+            .subagent_thread_ids
+            .contains("thread-child")
+    );
+    assert!(
+        direct_discovery
+            .threads
+            .iter()
+            .any(|thread| thread.id == "thread-parent")
+    );
+
+    let persistence_path = test_home.join("termal.sqlite");
+    let templates_path = test_home.join("orchestrators.json");
+    let mut initial_inner = StateInner::new();
+    let project = initial_inner.create_project(
+        Some("TermAl".to_owned()),
+        project_workdir.clone(),
+        default_local_remote_id(),
+    );
+    let ghost = initial_inner.create_session(
+        Agent::Codex,
+        Some("do git pull".to_owned()),
+        project_workdir.clone(),
+        Some(project.id),
+        None,
+    );
+    let ghost_session_id = ghost.session.id.clone();
+    let ghost_index = initial_inner
+        .find_session_index(&ghost_session_id)
+        .expect("persisted ghost should exist");
+    set_record_external_session_id(
+        initial_inner
+            .session_mut_by_index(ghost_index)
+            .expect("persisted ghost should be mutable"),
+        Some("thread-child".to_owned()),
+    );
+    persist_state(&persistence_path, &initial_inner).expect("bad pre-restart state should persist");
+
+    let pre_restart = load_state(&persistence_path)
+        .expect("bad pre-restart state should reload")
+        .expect("bad pre-restart state should exist");
+    let persisted_ghost = pre_restart
+        .sessions
+        .iter()
+        .find(|record| record.session.id == ghost_session_id)
+        .expect("the bad ghost should exist before restart cleanup");
+    assert_eq!(
+        persisted_ghost.external_session_id.as_deref(),
+        Some("thread-child")
+    );
+    assert!(!persisted_ghost.hidden);
+    assert!(persisted_ghost.session.parent_delegation_id.is_none());
+    assert!(persisted_ghost.session.messages.is_empty());
+    assert!(persisted_ghost.session.pending_prompts.is_empty());
+    assert!(persisted_ghost.queued_prompts.is_empty());
+    assert!(matches!(
+        persisted_ghost.session.status,
+        SessionStatus::Idle
+    ));
+
+    let discovery_scopes = collect_codex_discovery_scopes(&project_workdir, &pre_restart.projects);
+    assert!(!discovery_scopes.is_empty());
+    assert!(discovery_scopes.iter().any(|scope| scope == &project_root));
+    let discovery_homes = discover_codex_home_candidates(
+        Some(&source_codex_home),
+        &resolve_termal_codex_discovery_root(&project_workdir),
+    );
+    assert!(
+        discovery_homes
+            .iter()
+            .any(|home| home == &shared_codex_home)
+    );
+    let explicit_discovery = discover_codex_threads_with_subagents_from_sources(
+        Some(&source_codex_home),
+        &resolve_termal_codex_discovery_root(&project_workdir),
+        &discovery_scopes,
+    )
+    .expect("explicit production discovery should load");
+    assert!(
+        explicit_discovery
+            .subagent_thread_ids
+            .contains("thread-child"),
+        "explicit production discovery should retain classified child ids"
+    );
+    let pre_restart_discovery = discover_codex_threads(&project_workdir, &discovery_scopes)
+        .expect("pre-restart Codex discovery should load");
+    assert!(
+        pre_restart_discovery
+            .subagent_thread_ids
+            .contains("thread-child"),
+        "production discovery must classify the child before AppState boot cleanup; \
+         got subagents {:?} and top-level threads {:?}",
+        pre_restart_discovery.subagent_thread_ids,
+        pre_restart_discovery
+            .threads
+            .iter()
+            .map(|thread| thread.id.as_str())
+            .collect::<Vec<_>>()
+    );
+
+    let state = AppState::new_with_paths(project_workdir, persistence_path.clone(), templates_path)
+        .expect("state should restart");
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert!(
+            inner
+                .sessions
+                .iter()
+                .all(|record| record.external_session_id.as_deref() != Some("thread-child")),
+            "the previously imported subagent ghost should disappear during boot"
+        );
+        assert!(
+            inner
+                .sessions
+                .iter()
+                .any(|record| record.external_session_id.as_deref() == Some("thread-parent")),
+            "the real top-level parent must remain discoverable and resumable"
+        );
+    }
+    state.shutdown_persist_blocking();
+    drop(state);
+
+    let persisted = load_state(&persistence_path)
+        .expect("cleaned state should reload")
+        .expect("cleaned state should exist");
+    assert!(persisted.find_session_index(&ghost_session_id).is_none());
+    assert!(
+        persisted
+            .sessions
+            .iter()
+            .all(|record| record.external_session_id.as_deref() != Some("thread-child")),
+        "the cleanup must persist so the dummy card cannot return next restart"
+    );
+    assert!(
+        persisted
+            .sessions
+            .iter()
+            .any(|record| record.external_session_id.as_deref() == Some("thread-parent"))
+    );
+
+    drop(_codex_home);
+    drop(_home);
+    let _ = fs::remove_dir_all(&root);
+}
+
 #[test]
 fn import_discovered_codex_threads_reclaims_a_suppressed_thread_a_session_still_owns() {
     // Pins the invariant that makes orphan suppression safe at all.
