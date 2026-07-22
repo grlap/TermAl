@@ -1051,6 +1051,7 @@ describe("App live state - delta-gap core", () => {
       const total =
         "\n| Total | 452 | 278,043 | 9.55 MiB |\n\n";
       const finalTable = `${tableStart}${separatorAndBackend}${frontend}${total}`;
+      const encodedLength = (value: string) => new TextEncoder().encode(value).length;
       const initialSession = makeSession("session-1", {
         name: "Codex Session",
         status: "active",
@@ -1164,6 +1165,7 @@ describe("App live state - delta-gap core", () => {
             messageId: "message-assistant-1",
             messageIndex: 0,
             messageCount: 1,
+            textStartByte: encodedLength(tableStart),
             delta: separatorAndBackend,
             preview: "Tracked Project Total",
             sessionMutationStamp: 22,
@@ -1180,6 +1182,7 @@ describe("App live state - delta-gap core", () => {
             messageId: "message-assistant-1",
             messageIndex: 0,
             messageCount: 1,
+            textStartByte: encodedLength(`${tableStart}${separatorAndBackend}`),
             delta: frontend,
             preview: "Tracked Project Total",
             sessionMutationStamp: 24,
@@ -1196,6 +1199,9 @@ describe("App live state - delta-gap core", () => {
             messageId: "message-assistant-1",
             messageIndex: 0,
             messageCount: 1,
+            textStartByte: encodedLength(
+              `${tableStart}${separatorAndBackend}${frontend}`,
+            ),
             delta: total,
             preview: "Tracked Project Total",
             sessionMutationStamp: 26,

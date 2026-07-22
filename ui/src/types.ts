@@ -446,8 +446,9 @@ export type ImageAttachment = {
 // is resolved backend-side, so it is safe to render directly as the author
 // label.
 export type MessageSource = {
-  sessionId: string;
+  sessionId?: string | null;
   name: string;
+  kind?: "peer" | "peerBatch";
 };
 
 export type PendingPrompt = {
@@ -716,6 +717,7 @@ export type TextDeltaEvent = {
   messageId: string;
   messageIndex: number;
   messageCount: number;
+  textStartByte?: number | null;
   delta: string;
   preview?: string | null;
   sessionMutationStamp?: number | null;

@@ -279,7 +279,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
             cwd: "/tmp".to_owned(),
             cursor_mode: Some(CursorMode::Ask),
             model: "auto".to_owned(),
-            prompt: "review-local".to_owned(),
+            prompt: "review-code".to_owned(),
             resume_session_id: Some("cursor-session-1".to_owned()),
         }))
         .unwrap();

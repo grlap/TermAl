@@ -15,6 +15,23 @@ export const LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS = 5000;
 export const LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS =
   LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS;
 
+function utf8ByteLength(value: string) {
+  let length = 0;
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (codePoint <= 0x7f) {
+      length += 1;
+    } else if (codePoint <= 0x7ff) {
+      length += 2;
+    } else if (codePoint <= 0xffff) {
+      length += 3;
+    } else {
+      length += 4;
+    }
+  }
+  return length;
+}
+
 function isResolvedInteractionTurnBoundary(message: Message) {
   switch (message.type) {
     case "approval":
@@ -630,6 +647,20 @@ export function applyDeltaToSessions(
         };
       }
       if (message.type !== "text") {
+        return { kind: "needsResync" };
+      }
+      // `textDelta` is only safe to append to the exact prefix the backend
+      // used when it emitted the event. A rapid SSE burst can lose an earlier
+      // delta while a later one still arrives; blindly appending that later
+      // chunk creates a corrupted draft until the final textReplace. Reject a
+      // discontinuity so the transport hydrates authoritative text instead.
+      // The offset is UTF-8 bytes (Rust String::len), not JavaScript UTF-16
+      // code units, so emoji and other astral characters need explicit byte
+      // counting here.
+      if (
+        delta.textStartByte != null &&
+        utf8ByteLength(message.text) !== delta.textStartByte
+      ) {
         return { kind: "needsResync" };
       }
 

@@ -104,7 +104,7 @@ fn instruction_search_expands_directory_discovery_edges() {
     fs::create_dir_all(&reviewers_dir).unwrap();
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
-        commands_dir.join("review-local.md"),
+        commands_dir.join("review-code.md"),
         "Discover reviewers in .claude/reviewers before running checks.\n",
     )
     .unwrap();
@@ -126,7 +126,7 @@ fn instruction_search_expands_directory_discovery_edges() {
     let root_path = &matched.root_paths[0];
     assert_eq!(
         root_path.root_path,
-        normalize_path_best_effort(&commands_dir.join("review-local.md"))
+        normalize_path_best_effort(&commands_dir.join("review-code.md"))
             .to_string_lossy()
             .into_owned()
     );
@@ -274,7 +274,7 @@ fn instruction_search_ignores_internal_termal_roots_for_claude_reviewers() {
     fs::create_dir_all(&internal_skill_dir).unwrap();
 
     fs::write(
-        commands_dir.join("review-local.md"),
+        commands_dir.join("review-code.md"),
         "Run `find .claude/reviewers -name \"*.md\" 2>/dev/null` via Bash to find all available reviewer lens files.\n",
     )
     .unwrap();
@@ -321,7 +321,7 @@ fn instruction_search_ignores_internal_termal_roots_for_claude_reviewers() {
     let root_path = &matched.root_paths[0];
     assert_eq!(
         root_path.root_path,
-        normalize_path_best_effort(&commands_dir.join("review-local.md"))
+        normalize_path_best_effort(&commands_dir.join("review-code.md"))
             .to_string_lossy()
             .into_owned()
     );

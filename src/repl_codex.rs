@@ -696,24 +696,10 @@ fn handle_repl_codex_app_server_notification(
                 recorder,
             )?;
         }
-        "codex/event/agent_message_content_delta" => {
-            handle_repl_codex_event_agent_message_content_delta(
-                message,
-                repl_state.current_turn_id.as_deref(),
-                repl_state.completed_turn_id.as_deref(),
-                &mut repl_state.turn_state,
-                recorder,
-            )?;
-        }
-        "codex/event/agent_message" => {
-            handle_repl_codex_event_agent_message(
-                message,
-                repl_state.current_turn_id.as_deref(),
-                repl_state.completed_turn_id.as_deref(),
-                &mut repl_state.turn_state,
-                recorder,
-            )?;
-        }
+        // Current Codex app-server text uses typed v2 notifications. Ignore
+        // legacy text mirrors instead of merging two differently chunked
+        // streams into the same transcript message.
+        "codex/event/agent_message_content_delta" | "codex/event/agent_message" => {}
         "codex/event/task_complete" => {
             handle_repl_codex_task_complete(
                 message,
@@ -898,7 +884,7 @@ fn handle_repl_codex_event_item_completed(
     message: &Value,
     current_turn_id: Option<&str>,
     completed_turn_id: Option<&str>,
-    turn_state: &mut CodexTurnState,
+    _turn_state: &mut CodexTurnState,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
     if !repl_codex_event_matches_visible_turn(
@@ -913,16 +899,10 @@ fn handle_repl_codex_event_item_completed(
         return Ok(());
     };
     match item.get("type").and_then(Value::as_str) {
-        Some("AgentMessage") => {
-            let item_id = item.get("id").and_then(Value::as_str).unwrap_or("");
-            let text = item
-                .get("content")
-                .and_then(Value::as_array)
-                .and_then(|content| concatenate_codex_text_parts(content));
-            if let Some(text) = text.as_deref() {
-                record_repl_codex_completed_agent_message(turn_state, recorder, item_id, text)?;
-            }
-        }
+        // Typed v2 `item/completed` owns assistant text. This legacy mirror
+        // remains ignored even when it arrives during the completion grace
+        // window so it cannot race the typed delta stream.
+        Some("AgentMessage") => {}
         Some("CommandExecution") => {
             if let Some(command) = item.get("command").and_then(Value::as_str) {
                 let key = item.get("id").and_then(Value::as_str).unwrap_or(command);
@@ -947,71 +927,6 @@ fn handle_repl_codex_event_item_completed(
     }
 
     Ok(())
-}
-
-/// Handles REPL Codex event agent message content delta.
-fn handle_repl_codex_event_agent_message_content_delta(
-    message: &Value,
-    current_turn_id: Option<&str>,
-    completed_turn_id: Option<&str>,
-    turn_state: &mut CodexTurnState,
-    recorder: &mut dyn TurnRecorder,
-) -> Result<()> {
-    if !repl_codex_event_matches_visible_turn(
-        current_turn_id,
-        completed_turn_id,
-        shared_codex_event_turn_id(message),
-    ) {
-        return Ok(());
-    }
-
-    let Some(delta) = message.pointer("/params/msg/delta").and_then(Value::as_str) else {
-        return Ok(());
-    };
-    let Some(item_id) = message
-        .pointer("/params/msg/item_id")
-        .and_then(Value::as_str)
-    else {
-        return Ok(());
-    };
-
-    record_repl_codex_agent_message_delta(turn_state, recorder, item_id, delta)
-}
-
-/// Handles REPL Codex event agent message.
-fn handle_repl_codex_event_agent_message(
-    message: &Value,
-    current_turn_id: Option<&str>,
-    completed_turn_id: Option<&str>,
-    turn_state: &mut CodexTurnState,
-    recorder: &mut dyn TurnRecorder,
-) -> Result<()> {
-    if !repl_codex_event_matches_visible_turn(
-        current_turn_id,
-        completed_turn_id,
-        shared_codex_event_turn_id(message),
-    ) {
-        return Ok(());
-    }
-
-    let Some(text) = message
-        .pointer("/params/msg/message")
-        .and_then(Value::as_str)
-    else {
-        return Ok(());
-    };
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return Ok(());
-    }
-
-    if let Some(item_id) = turn_state.current_agent_message_id.clone() {
-        return record_repl_codex_completed_agent_message(turn_state, recorder, &item_id, trimmed);
-    }
-
-    let mut recorder_ref = DynTurnRecorderRef::new(recorder);
-    begin_codex_assistant_output(turn_state, &mut recorder_ref)?;
-    recorder.push_text(trimmed)
 }
 
 /// Handles REPL Codex app server item completed.
@@ -1103,9 +1018,9 @@ fn record_repl_codex_agent_message_delta(
         .streamed_agent_message_text_by_item_id
         .entry(item_id.to_owned())
         .or_default();
-    let Some(unseen_suffix) = next_codex_delta_suffix(entry, delta) else {
+    if !append_codex_agent_message_delta(entry, delta) {
         return Ok(());
-    };
+    }
 
     {
         let mut recorder_ref = DynTurnRecorderRef::new(recorder);
@@ -1114,7 +1029,7 @@ fn record_repl_codex_agent_message_delta(
     turn_state
         .streamed_agent_message_item_ids
         .insert(item_id.to_owned());
-    recorder.text_delta(&unseen_suffix)
+    recorder.text_delta(delta)
 }
 
 /// Shuts down REPL Codex process.

@@ -603,6 +603,9 @@ describe("App live state - delta-gap core", () => {
 
         expect(requestAnimationFrameMock).toHaveBeenCalledTimes(1);
         expect(pendingFrames.size).toBe(1);
+        fireEvent.click(
+          screen.getByRole("button", { name: "Show command details" }),
+        );
         expect(screen.getAllByText("new command output").length).toBeGreaterThan(
           0,
         );

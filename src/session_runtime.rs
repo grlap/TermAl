@@ -68,6 +68,13 @@ impl CodexRuntimeHandle {
     }
 }
 
+/// Last time the shared Codex app-server produced ANY stdout line. Stamped by
+/// the stdout reader thread (`src/codex.rs`), read by the response-timeout
+/// handlers to tell a busy server from a wedged one: a server that spoke
+/// during a request's wait window is alive and merely slow, so timing out that
+/// one request must not tear down the runtime under every other session.
+type SharedCodexStdoutActivityState = Arc<Mutex<std::time::Instant>>;
+
 /// Represents shared Codex runtime.
 #[derive(Clone)]
 struct SharedCodexRuntime {
@@ -76,6 +83,7 @@ struct SharedCodexRuntime {
     process: Arc<SharedChild>,
     sessions: SharedCodexSessionMap,
     thread_sessions: SharedCodexThreadMap,
+    stdout_activity: SharedCodexStdoutActivityState,
 }
 
 impl SharedCodexRuntime {

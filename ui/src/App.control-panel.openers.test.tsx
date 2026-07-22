@@ -1081,7 +1081,7 @@ describe("App control panel - openers and canvas", () => {
       }
     });
   });
-  it("opens Files and Git status from the control panel using the pane-local session context", async () => {
+  it("opens Files and Git status from the control panel using the pane-local project context", async () => {
     await withSuppressedActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
@@ -1313,7 +1313,7 @@ describe("App control panel - openers and canvas", () => {
         await waitFor(() => {
           const request = latestRequestTo("/api/fs");
           expect(request.searchParams.get("path")).toBe("/projects/termal");
-          expect(request.searchParams.get("sessionId")).toBe("session-1");
+          expect(request.searchParams.get("sessionId")).toBeNull();
           expect(request.searchParams.get("projectId")).toBe("project-termal");
         });
 
@@ -1335,7 +1335,7 @@ describe("App control panel - openers and canvas", () => {
         await waitFor(() => {
           const request = latestRequestTo("/api/git/status");
           expect(request.searchParams.get("path")).toBe("/projects/termal");
-          expect(request.searchParams.get("sessionId")).toBe("session-1");
+          expect(request.searchParams.get("sessionId")).toBeNull();
           expect(request.searchParams.get("projectId")).toBe("project-termal");
         });
       } finally {

@@ -27,7 +27,12 @@ and rendered Git diff regions — leave `isStreaming` at its default
 ## Problem
 
 Streaming assistant replies arrive as a sequence of `textDelta` events.
-Each delta extends the message text by some bytes. CommonMark/GFM
+Each current delta carries `textStartByte`, so the client first verifies that
+its retained UTF-8 prefix ends exactly where the new chunk begins. A mismatch
+means an earlier SSE event was lost; the client leaves the last valid draft
+untouched and hydrates authoritative session text rather than appending across
+the gap. Once continuity is established, each delta extends the message text by
+some bytes. CommonMark/GFM
 rendering is intrinsically structural:
 
 - A pipe-table doesn't commit to a `<table>` until it sees `header +

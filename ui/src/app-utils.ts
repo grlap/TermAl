@@ -24,7 +24,7 @@ export type DraftImageAttachment = ImageAttachment & {
 };
 
 export const SUPPORTED_PASTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
-export const MAX_PASTED_IMAGE_BYTES = 5 * 1024 * 1024;
+export const MAX_PASTED_IMAGE_BYTES = 10 * 1024 * 1024;
 export const DEFERRED_PREVIEW_LINE_LIMIT = 12;
 export const DEFERRED_PREVIEW_CHARACTER_LIMIT = 720;
 export const MAX_DEFERRED_PLACEHOLDER_HEIGHT = 960;

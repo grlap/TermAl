@@ -358,6 +358,7 @@ enum RemoteDeltaReplayPayload {
         message_id: String,
         message_index: usize,
         message_count: u32,
+        text_start_byte: Option<usize>,
         delta_fingerprint: String,
         preview_fingerprint: Option<String>,
         session_mutation_stamp: Option<u64>,
@@ -595,6 +596,10 @@ struct AppState {
     telegram_relay_runtime: Arc<Mutex<TelegramRelayRuntime>>,
     /// Lazily created shared Codex app-server reused across Codex sessions.
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
+    /// Whether this state may launch real local agent subprocesses. Production
+    /// states enable spawning; lightweight test states disable it so ordinary
+    /// state-transition tests cannot accidentally retain real agent runtimes.
+    agent_runtime_spawning_enabled: bool,
     #[cfg(test)]
     test_acp_runtime_overrides: Arc<Mutex<Vec<TestAcpRuntimeOverride>>>,
     #[cfg(test)]
@@ -1085,6 +1090,9 @@ struct SessionRecord {
     pending_acp_approvals: HashMap<String, AcpPendingApproval>,
     /// FIFO follow-up prompts collected while the runtime is busy.
     queued_prompts: VecDeque<QueuedPromptRecord>,
+    /// Original peer messages represented by a coalesced queued prompt, keyed
+    /// by that prompt's stable id. Ordinary queued prompts have no entry.
+    queued_peer_messages: HashMap<String, Vec<PendingPrompt>>,
     message_positions: HashMap<String, usize>,
     /// Present only for proxy sessions mirrored from a remote TermAl backend.
     remote_id: Option<String>,

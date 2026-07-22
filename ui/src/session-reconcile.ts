@@ -484,6 +484,7 @@ function reconcileTextMessage(previous: TextMessage, next: TextMessage): TextMes
     (previous.expandedText ?? null) === (next.expandedText ?? null) &&
     (previous.source?.sessionId ?? null) === (next.source?.sessionId ?? null) &&
     (previous.source?.name ?? null) === (next.source?.name ?? null) &&
+    (previous.source?.kind ?? "peer") === (next.source?.kind ?? "peer") &&
     attachments === previous.attachments
   ) {
     return previous;

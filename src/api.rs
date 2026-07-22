@@ -108,12 +108,42 @@ fn dispatch_turn_and_snapshot(
     state: &AppState,
     session_id: &str,
     request: SendMessageRequest,
-) -> Result<StateResponse, ApiError> {
+) -> Result<SendMessageRouteResponse, ApiError> {
+    let is_peer_message = request.source_session_id.is_some();
     let dispatch = state.dispatch_turn(session_id, request)?;
-    if let DispatchTurnResult::Dispatched(dispatch) = dispatch {
-        deliver_turn_dispatch(state, dispatch)?;
+    let message_disposition = is_peer_message.then(|| match &dispatch {
+        DispatchTurnResult::Dispatched(_) => PeerMessageDisposition::DeliveredToIdleSession,
+        DispatchTurnResult::DispatchedAfterQueue(_) | DispatchTurnResult::Queued => {
+            PeerMessageDisposition::QueuedBehindActiveTurn
+        }
+    });
+    match dispatch {
+        DispatchTurnResult::Dispatched(dispatch)
+        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
+            deliver_turn_dispatch(state, dispatch)?;
+        }
+        DispatchTurnResult::Queued => {}
     }
-    Ok(state.summary_snapshot_with_full_session(session_id))
+    Ok(SendMessageRouteResponse {
+        state: state.summary_snapshot_with_full_session(session_id),
+        message_disposition,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SendMessageRouteResponse {
+    #[serde(flatten)]
+    state: StateResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_disposition: Option<PeerMessageDisposition>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum PeerMessageDisposition {
+    DeliveredToIdleSession,
+    QueuedBehindActiveTurn,
 }
 
 /// Returns the backend health response.
@@ -310,8 +340,12 @@ impl AppState {
                         source_session_id: None,
                     },
                 )?;
-                if let DispatchTurnResult::Dispatched(dispatch) = dispatch {
-                    deliver_turn_dispatch(self, dispatch)?;
+                match dispatch {
+                    DispatchTurnResult::Dispatched(dispatch)
+                    | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
+                        deliver_turn_dispatch(self, dispatch)?;
+                    }
+                    DispatchTurnResult::Queued => {}
                 }
             }
             ProjectActionId::Stop => {
@@ -945,7 +979,7 @@ async fn send_message(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     Json(request): Json<SendMessageRequest>,
-) -> Result<(StatusCode, Json<StateResponse>), ApiError> {
+) -> Result<(StatusCode, Json<SendMessageRouteResponse>), ApiError> {
     let snapshot = run_blocking_api({
         let state = state.clone();
         let session_id = session_id.clone();

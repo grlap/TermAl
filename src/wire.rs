@@ -1996,6 +1996,12 @@ enum DeltaEvent {
         message_index: usize,
         #[serde(rename = "messageCount")]
         message_count: u32,
+        #[serde(
+            rename = "textStartByte",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        text_start_byte: Option<usize>,
         delta: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         preview: Option<String>,

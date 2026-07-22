@@ -69,9 +69,9 @@ Run these checks sequentially:
 
 All checks must pass before proceeding.
 
-## Step 5: Review via /review-local
+## Step 5: Review via /review-changes
 
-Invoke the `/review-local` command to get multi-reviewer sign-off on the changes.
+Invoke `/review-changes` directly in the active parent session to run validation and get independent Codex and Claude `/review-code` sign-off on the changes.
 
 After the review completes:
 - **Critical or High findings** → fix them, re-run Step 4, and re-review

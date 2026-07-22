@@ -1684,8 +1684,12 @@ impl AppState {
                 source_session_id: None,
             },
         )?;
-        if let DispatchTurnResult::Dispatched(dispatch) = dispatch {
-            deliver_turn_dispatch(self, dispatch)?;
+        match dispatch {
+            DispatchTurnResult::Dispatched(dispatch)
+            | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
+                deliver_turn_dispatch(self, dispatch)?;
+            }
+            DispatchTurnResult::Queued => {}
         }
         Ok(())
     }
@@ -2233,17 +2237,7 @@ fn add_parent_delegation_card_locked(
     };
     let message_id = inner.next_message_id();
     let agent = ParallelAgentProgress {
-        detail: Some(format!(
-            "{} delegation in `{}` using {}{}",
-            delegation_write_policy_label(&delegation.write_policy),
-            delegation.cwd,
-            delegation.agent.name(),
-            delegation
-                .model
-                .as_deref()
-                .map(|model| format!(" / {model}"))
-                .unwrap_or_default()
-        )),
+        detail: Some(delegation_default_running_detail(delegation)),
         id: delegation.id.clone(),
         source: ParallelAgentSource::Delegation,
         status: ParallelAgentStatus::Running,
@@ -2480,7 +2474,21 @@ fn delegation_running_detail_locked(inner: &StateInner, delegation: &DelegationR
         .find_session_index(&delegation.child_session_id)
         .and_then(|index| inner.sessions.get(index))
         .and_then(delegation_child_pending_interaction_detail)
-        .unwrap_or_else(|| "Delegated session is running.".to_owned())
+        .unwrap_or_else(|| delegation_default_running_detail(delegation))
+}
+
+fn delegation_default_running_detail(delegation: &DelegationRecord) -> String {
+    format!(
+        "{} delegation in `{}` using {}{}",
+        delegation_write_policy_label(&delegation.write_policy),
+        delegation.cwd,
+        delegation.agent.name(),
+        delegation
+            .model
+            .as_deref()
+            .map(|model| format!(" / {model}"))
+            .unwrap_or_default()
+    )
 }
 
 fn delegation_child_pending_interaction_detail(record: &SessionRecord) -> Option<String> {

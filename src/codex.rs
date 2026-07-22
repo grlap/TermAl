@@ -52,6 +52,20 @@ fn spawn_codex_runtime(
 const SHARED_CODEX_STDIN_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 const SHARED_CODEX_STDIN_WATCHDOG_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
+/// How often `wait_for_shared_codex_response_while_server_active` wakes up to
+/// re-check the server's stdout liveness while a response is outstanding.
+const SHARED_CODEX_RESPONSE_POLL_SLICE: Duration = Duration::from_secs(15);
+
+/// Hard cap on how long a thread-setup / turn-start wait may extend while the
+/// app-server keeps showing stdout activity. A demonstrably-alive server gets
+/// patience (a `thread/resume` replaying a huge rollout behind another
+/// session's streaming turn can legitimately need several minutes); this cap
+/// is what keeps a lost request from parking the session on "working"
+/// forever. Giving up here fails only the requesting turn — the server is
+/// active, so `handle_shared_codex_startup_response_error` takes its scoped
+/// branch.
+const SHARED_CODEX_RESPONSE_MAX_WAIT_WHILE_ACTIVE: Duration = Duration::from_secs(900);
+
 #[derive(Clone, Debug)]
 struct SharedCodexStdinActivity {
     operation: &'static str,
@@ -235,6 +249,9 @@ fn spawn_shared_codex_stdin_watchdog(
 }
 
 fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
+    if !state.agent_runtime_spawning_enabled {
+        bail!("agent runtime spawning is disabled for this AppState");
+    }
     // Codex threads carry their own cwd, so one shared app-server can serve all sessions.
     let codex_home = prepare_termal_codex_home(&state.default_workdir, "shared-app-server")?;
     let runtime_id = Uuid::new_v4().to_string();
@@ -268,6 +285,10 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let sessions = SharedCodexSessions::new();
     let thread_sessions: SharedCodexThreadMap = Arc::new(Mutex::new(HashMap::new()));
+    // Seeded with the spawn instant so a server that dies before its first line
+    // reads as "silent since spawn", never as "recently active".
+    let stdout_activity: SharedCodexStdoutActivityState =
+        Arc::new(Mutex::new(std::time::Instant::now()));
 
     {
         let writer_state = state.clone();
@@ -564,6 +585,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         let reader_thread_sessions = thread_sessions.clone();
         let reader_runtime_id = runtime_id.clone();
         let reader_input_tx = input_tx.clone();
+        let reader_stdout_activity = stdout_activity.clone();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             let mut line_buf = Vec::new();
@@ -589,6 +611,16 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                 if bytes_read == 0 {
                     break;
                 }
+
+                // Any stdout line — event, response, even a bad-JSON one — proves
+                // the app-server process is alive and producing output. Stamp
+                // BEFORE parsing/validity checks: this feeds the busy-vs-wedged
+                // decision in `handle_shared_codex_startup_response_error`, and
+                // that decision is about liveness, not about protocol health.
+                *reader_stdout_activity
+                    .lock()
+                    .expect("shared Codex stdout activity mutex poisoned") =
+                    std::time::Instant::now();
 
                 let raw_line = String::from_utf8_lossy(&line_buf);
                 let trimmed = raw_line.trim_end();
@@ -716,6 +748,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         process,
         sessions,
         thread_sessions,
+        stdout_activity,
     })
 }
 
@@ -828,6 +861,90 @@ fn shared_codex_session_thread_id<'a>(method: &str, message: &'a Value) -> Optio
             }),
         _ => None,
     })
+}
+
+/// Waits for a shared-Codex JSON-RPC response with liveness-scaled patience.
+///
+/// A flat per-request timeout treats two very different servers identically:
+/// one that wedged quietly and one that is grinding through expensive work —
+/// a `thread/resume` whose rollout runs tens-to-hundreds of MB, queued behind
+/// another session's streaming turn. The first deserves the fast failure; the
+/// second just needs more time, and failing it is actively harmful: the
+/// abandoned request's work still completes server-side, and the retry queues
+/// the same expensive replay on top of the very contention that caused the
+/// miss (observed live: a ~39MB resume failing at exactly 180s, twice, while
+/// a ~170MB sibling thread streamed — tm-bmd.1).
+///
+/// So instead of one `recv_timeout(limit)`, this waits in `poll_slice` steps
+/// and consults the stdout activity stamp on each miss:
+///
+///   * Server silent for `silence_limit` and counting → give up now. This is
+///     the old flat-timeout behaviour to the second, and the downstream
+///     `handle_shared_codex_startup_response_error` will observe the same
+///     silence and retire the wedge-shaped runtime.
+///   * Server emitted stdout within `silence_limit` → keep waiting, up to
+///     `max_wait_while_active`. Hitting the cap fails only this turn
+///     downstream (the server is demonstrably alive), so a lost request
+///     cannot park the session on "working" forever.
+///   * Runtime slot no longer holds `runtime_id` → the probe returns `None`
+///     and the wait degrades to the silent budget. Normally moot: every
+///     teardown path fails pending requests, which lands here as an error on
+///     the channel, not a timeout.
+///
+/// Only used for requests a busy server can legitimately answer late (thread
+/// setup, `turn/start`). The initialize request keeps its flat window —
+/// nothing else runs on a server that has not even said hello.
+fn wait_for_shared_codex_response_while_server_active(
+    pending_requests: &CodexPendingRequestMap,
+    pending_request: PendingCodexJsonRpcRequest,
+    method: &str,
+    state: &AppState,
+    runtime_id: &str,
+    silence_limit: Duration,
+    max_wait_while_active: Duration,
+    poll_slice: Duration,
+) -> std::result::Result<Value, CodexResponseError> {
+    let PendingCodexJsonRpcRequest {
+        request_id,
+        response_rx,
+    } = pending_request;
+    let started = std::time::Instant::now();
+
+    loop {
+        match response_rx.recv_timeout(poll_slice) {
+            Ok(response) => return response,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                pending_requests
+                    .lock()
+                    .expect("Codex pending requests mutex poisoned")
+                    .remove(&request_id);
+                return Err(CodexResponseError::Transport(format!(
+                    "Codex app-server response channel closed while waiting for `{method}`"
+                )));
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+
+        let elapsed = started.elapsed();
+        let server_recently_active = state
+            .shared_codex_stdout_silence_if_matches(runtime_id)
+            .is_some_and(|silence| silence < silence_limit);
+        let deadline = if server_recently_active {
+            max_wait_while_active
+        } else {
+            silence_limit
+        };
+        if elapsed >= deadline {
+            pending_requests
+                .lock()
+                .expect("Codex pending requests mutex poisoned")
+                .remove(&request_id);
+            return Err(CodexResponseError::Timeout(format!(
+                "timed out waiting for Codex app-server response to `{method}` after {}s",
+                elapsed.as_secs()
+            )));
+        }
+    }
 }
 
 /// Handles shared Codex prompt command.
@@ -1043,11 +1160,18 @@ fn handle_shared_codex_prompt_command(
     let waiter_input_tx = input_tx.clone();
     let waiter_method = method.to_owned();
     std::thread::spawn(move || {
-        let result = wait_for_codex_json_rpc_response(
+        // Liveness-scaled wait: a resume replaying a large rollout behind a
+        // busy sibling turn may legitimately outlast the flat window. See the
+        // helper's docs for the exact extend/give-up rules.
+        let result = wait_for_shared_codex_response_while_server_active(
             &waiter_pending,
             pending,
             &waiter_method,
-            Some(SHARED_CODEX_THREAD_SETUP_TIMEOUT),
+            &waiter_state,
+            &waiter_runtime_id,
+            SHARED_CODEX_THREAD_SETUP_TIMEOUT,
+            SHARED_CODEX_RESPONSE_MAX_WAIT_WHILE_ACTIVE,
+            SHARED_CODEX_RESPONSE_POLL_SLICE,
         );
 
         // Suppress startup rediscovery of a newly created (`thread/start`)
@@ -1292,6 +1416,7 @@ fn handle_shared_codex_prompt_command(
                     &waiter_runtime_id,
                     &waiter_session_id,
                     &request_id,
+                    SHARED_CODEX_THREAD_SETUP_TIMEOUT,
                     err,
                 );
             }
@@ -1458,11 +1583,18 @@ fn handle_shared_codex_start_turn(
     let wait_runtime_id = runtime_id.to_owned();
     let wait_session_id = session_id.to_owned();
     std::thread::spawn(move || {
-        let result = wait_for_codex_json_rpc_response(
+        // Same liveness-scaled wait as thread setup: a busy server can ack
+        // `turn/start` late without being dead, and the ack mattering less
+        // than the events does not make a spurious runtime-wide failure okay.
+        let result = wait_for_shared_codex_response_while_server_active(
             &wait_pending_requests,
             pending_turn_request,
             "turn/start",
-            Some(SHARED_CODEX_TURN_START_TIMEOUT),
+            &wait_state,
+            &wait_runtime_id,
+            SHARED_CODEX_TURN_START_TIMEOUT,
+            SHARED_CODEX_RESPONSE_MAX_WAIT_WHILE_ACTIVE,
+            SHARED_CODEX_RESPONSE_POLL_SLICE,
         );
 
         match result {
@@ -1528,6 +1660,7 @@ fn handle_shared_codex_start_turn(
                         &wait_state,
                         &wait_runtime_id,
                         &wait_session_id,
+                        SHARED_CODEX_TURN_START_TIMEOUT,
                         CodexResponseError::Timeout(detail),
                     );
                 }
@@ -1564,10 +1697,16 @@ fn handle_shared_codex_start_turn(
     Ok(())
 }
 
+/// `response_timeout` is the silence budget the timed-out request waited under
+/// (`SHARED_CODEX_THREAD_SETUP_TIMEOUT` / `SHARED_CODEX_TURN_START_TIMEOUT` —
+/// the liveness-scaled waiter may have stayed longer, but only while the
+/// server kept talking); the `Timeout` arm compares it against the server's
+/// stdout silence to pick between failing one turn and retiring the runtime.
 fn handle_shared_codex_startup_response_error(
     state: &AppState,
     runtime_id: &str,
     session_id: &str,
+    response_timeout: Duration,
     err: CodexResponseError,
 ) {
     match err {
@@ -1582,7 +1721,65 @@ fn handle_shared_codex_startup_response_error(
                 );
             }
         }
-        CodexResponseError::Timeout(detail) | CodexResponseError::Transport(detail) => {
+        CodexResponseError::Timeout(detail) => {
+            // A response timeout on its own does not prove the server is gone.
+            // Dead servers are detected independently of these per-request
+            // timeouts — the stdout reader's EOF path and the `wait()` thread
+            // fail all pending requests and retire the runtime the moment the
+            // process actually dies — so a timeout only ever fires against a
+            // process that is still running. Two very different states look
+            // identical from the unanswered request alone:
+            //
+            //   * BUSY: the server is grinding through expensive work (e.g.
+            //     resuming a thread whose rollout is tens or hundreds of MB
+            //     while another session's turn streams). Tearing down here
+            //     kills every sibling session's in-flight turn AND forces the
+            //     replacement server to re-parse the same rollouts from
+            //     scratch — which is precisely the condition that produced
+            //     the timeout, so the teardown seeds its own repeat.
+            //   * WEDGED: the event loop is stuck. Keeping the runtime would
+            //     route every later Codex session into the same dead process,
+            //     and nothing else would ever retire it (the stdin watchdog
+            //     only covers blocked WRITES).
+            //
+            // The stdout reader's activity stamp separates them: a server
+            // that emitted ANYTHING during this request's wait window is
+            // alive and merely slow — fail only this turn and leave the
+            // runtime (and every other session's turn) alone. A server that
+            // was silent for the entire window is wedge-shaped — keep the
+            // old teardown so it cannot poison later sessions. When the
+            // runtime slot no longer holds this runtime the probe returns
+            // `None` and the teardown path is a token-guarded no-op cascade,
+            // matching the pre-probe behaviour.
+            //
+            // A late response from a server left alive is harmless: the
+            // pending entry was removed on timeout and unknown-id responses
+            // are dropped (`codex_events.rs`).
+            let server_spoke_during_wait = state
+                .shared_codex_stdout_silence_if_matches(runtime_id)
+                .is_some_and(|silence| silence < response_timeout);
+            if server_spoke_during_wait {
+                fail_shared_codex_turn_without_runtime_exit(
+                    state,
+                    session_id,
+                    runtime_id,
+                    &format!(
+                        "{detail}; the shared app-server is still emitting events for \
+                         other sessions, so only this turn was abandoned — send the \
+                         prompt again to retry"
+                    ),
+                    "shared Codex response timeout on a busy app-server",
+                );
+            } else if let Err(err) = state.handle_shared_codex_runtime_exit(
+                runtime_id,
+                Some(&shared_codex_runtime_command_error_detail(&anyhow!(detail))),
+            ) {
+                eprintln!(
+                    "runtime state warning> failed to tear down shared Codex runtime for session `{session_id}`: {err:#}"
+                );
+            }
+        }
+        CodexResponseError::Transport(detail) => {
             if let Err(err) = state.handle_shared_codex_runtime_exit(
                 runtime_id,
                 Some(&shared_codex_runtime_command_error_detail(&anyhow!(detail))),
@@ -1841,6 +2038,7 @@ fn handle_shared_codex_thread_setup_response_error_if_current(
     runtime_id: &str,
     session_id: &str,
     request_id: &str,
+    response_timeout: Duration,
     err: CodexResponseError,
 ) {
     // Release the setup and drop the prompt parked on it in one step: the setup
@@ -1856,7 +2054,7 @@ fn handle_shared_codex_thread_setup_response_error_if_current(
     if !state.session_matches_runtime_token(session_id, &runtime_token) {
         return;
     }
-    handle_shared_codex_startup_response_error(state, runtime_id, session_id, err);
+    handle_shared_codex_startup_response_error(state, runtime_id, session_id, response_timeout, err);
 }
 
 fn fail_shared_codex_turn_without_runtime_exit(

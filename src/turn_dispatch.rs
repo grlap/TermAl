@@ -51,6 +51,7 @@ struct StartedTurnMessageDelta {
 /// explicit MCP reply path. This is runtime-only: the transcript keeps the
 /// original message plus its structured [`MessageSource`] attribution.
 fn peer_message_runtime_prompt(prompt: &str, source: &MessageSource) -> String {
+    let session_id = source.session_id.as_deref().unwrap_or("unknown");
     format!(
         "[TermAl cross-session message]\n\
 From session: {:?} (`{}`)\n\
@@ -58,7 +59,7 @@ The sender may be working in a different repository. Do not assume it shares thi
 To reply to the sender, use the TermAl MCP tool `termal_send_to_session` with `sessionId` set to `{}`. A normal assistant reply stays only in this session and will not reach the sender.\n\n\
 --- Message from {:?} ---\n\
 {}",
-        source.name, source.session_id, source.session_id, source.name, prompt
+        source.name, session_id, session_id, source.name, prompt
     )
 }
 
@@ -118,6 +119,45 @@ impl AppState {
         });
     }
 
+    /// Promotes the current queue head while the caller still owns the state
+    /// lock. Keeping selection, turn start, and removal in one critical
+    /// section prevents a concurrent sender or lifecycle drain from stealing
+    /// the prompt between a queue commit and its dispatch.
+    fn start_next_queued_turn_locked(
+        &self,
+        inner: &mut StateInner,
+        index: usize,
+        allow_blocked_dispatch: bool,
+    ) -> Result<Option<StartedTurn>> {
+        if inner.sessions[index].orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch {
+            return Ok(None);
+        }
+
+        let Some(queued) = inner.sessions[index].queued_prompts.front().cloned() else {
+            return Ok(None);
+        };
+
+        let mut started = self
+            .start_turn_on_record(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                queued.pending_prompt.id.clone(),
+                queued.pending_prompt.text.clone(),
+                queued.attachments.clone(),
+                queued.pending_prompt.expanded_text.clone(),
+                queued.pending_prompt.source.clone(),
+            )
+            .map_err(|err| anyhow!("failed to dispatch queued prompt: {}", err.message))?;
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        record.queued_prompts.pop_front();
+        sync_pending_prompts(record);
+        started.message_delta.session_mutation_stamp = record.mutation_stamp;
+        Ok(Some(started))
+    }
+
     /// Kicks off a turn against the given `SessionRecord`, spawning or
     /// reusing the agent runtime as needed and returning the
     /// [`TurnDispatch`] that the caller wires into the runtime.
@@ -169,10 +209,17 @@ impl AppState {
             .filter(|value| !value.is_empty() && *value != prompt)
             .map(str::to_owned);
         let runtime_prompt = expanded_prompt.clone().unwrap_or_else(|| prompt.clone());
-        let runtime_prompt = source
+        let runtime_prompt = if source
             .as_ref()
-            .map(|source| peer_message_runtime_prompt(&runtime_prompt, source))
-            .unwrap_or(runtime_prompt);
+            .is_some_and(MessageSource::is_peer_batch)
+        {
+            runtime_prompt
+        } else {
+            source
+                .as_ref()
+                .map(|source| peer_message_runtime_prompt(&runtime_prompt, source))
+                .unwrap_or(runtime_prompt)
+        };
 
         let dispatch = match record.session.agent {
             Agent::Claude => {
@@ -491,40 +538,16 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
 
-        if inner.sessions[index].orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch {
-            return Ok(None);
-        }
-
-        let queued = inner.sessions[index].queued_prompts.front().cloned();
-
-        let Some(queued) = queued else {
+        let Some(started) = self.start_next_queued_turn_locked(
+            &mut inner,
+            index,
+            allow_blocked_dispatch,
+        )? else {
             return Ok(None);
         };
-
-        let started = self
-            .start_turn_on_record(
-                inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"),
-                queued.pending_prompt.id.clone(),
-                queued.pending_prompt.text.clone(),
-                queued.attachments.clone(),
-                queued.pending_prompt.expanded_text.clone(),
-                queued.pending_prompt.source.clone(),
-            )
-            .map_err(|err| anyhow!("failed to dispatch queued prompt: {}", err.message))?;
-        let mut message_delta = started.message_delta;
-        {
-            let record = inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid");
-            record.queued_prompts.pop_front();
-            sync_pending_prompts(record);
-            message_delta.session_mutation_stamp = record.mutation_stamp;
-        }
         let revision = self.commit_persisted_delta_locked(&mut inner)?;
         drop(inner);
-        self.publish_started_turn_message_delta(revision, message_delta);
+        self.publish_started_turn_message_delta(revision, started.message_delta);
         Ok(Some(started.dispatch))
     }
 
@@ -574,9 +597,11 @@ impl AppState {
         let source = request.source_session_id.as_deref().and_then(|source_id| {
             inner
                 .find_session_index(source_id)
-                .map(|source_index| MessageSource {
-                    session_id: source_id.to_owned(),
-                    name: inner.sessions[source_index].session.name.clone(),
+                .map(|source_index| {
+                    MessageSource::peer(
+                        source_id.to_owned(),
+                        inner.sessions[source_index].session.name.clone(),
+                    )
                 })
         });
         if record_has_archived_codex_thread(&inner.sessions[index]) {
@@ -647,14 +672,16 @@ impl AppState {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
 
-            drop(inner);
-            let dispatch = self
-                .dispatch_next_queued_turn(session_id, true)
-                .map_err(|err| {
-                    ApiError::internal(format!("failed to dispatch queued turn: {err:#}"))
-                })?
+            let started = self
+                .start_next_queued_turn_locked(&mut inner, index, true)
+                .map_err(|err| ApiError::internal(format!("failed to dispatch queued turn: {err:#}")))?
                 .ok_or_else(|| ApiError::internal("queued prompt disappeared before dispatch"))?;
-            return Ok(DispatchTurnResult::Dispatched(dispatch));
+            let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!("failed to persist queued turn dispatch: {err:#}"))
+            })?;
+            drop(inner);
+            self.publish_started_turn_message_delta(revision, started.message_delta);
+            return Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch));
         }
 
         if prioritize_manual_dispatch_over_blocked_queue {
@@ -704,14 +731,16 @@ impl AppState {
                 return Ok(DispatchTurnResult::Queued);
             }
 
-            drop(inner);
-            let dispatch = self
-                .dispatch_next_queued_turn(session_id, true)
-                .map_err(|err| {
-                    ApiError::internal(format!("failed to dispatch queued turn: {err:#}"))
-                })?
+            let started = self
+                .start_next_queued_turn_locked(&mut inner, index, true)
+                .map_err(|err| ApiError::internal(format!("failed to dispatch queued turn: {err:#}")))?
                 .ok_or_else(|| ApiError::internal("queued prompt disappeared before dispatch"))?;
-            return Ok(DispatchTurnResult::Dispatched(dispatch));
+            let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!("failed to persist queued turn dispatch: {err:#}"))
+            })?;
+            drop(inner);
+            self.publish_started_turn_message_delta(revision, started.message_delta);
+            return Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch));
         }
 
         let message_id = inner.next_message_id();

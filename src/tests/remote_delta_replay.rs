@@ -26,6 +26,7 @@ fn remote_text_delta_exact_replay_is_skipped_for_loaded_proxy_session() {
             message_id: "remote-message-1".to_owned(),
             message_index: 0,
             message_count: 1,
+            text_start_byte: None,
             delta: " world".to_owned(),
             preview: Some("Hello world".to_owned()),
             session_mutation_stamp: Some(11),
@@ -50,6 +51,52 @@ fn remote_text_delta_exact_replay_is_skipped_for_loaded_proxy_session() {
     assert_eq!(record.session.preview, "Hello world");
     assert_eq!(record.session.session_mutation_stamp, Some(11));
     assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&3));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_text_delta_rejects_a_gap_before_mutating_the_local_proxy() {
+    let state = test_app_state();
+    let remote = local_replay_test_remote();
+    seed_remote_proxy_session_via_apply_delta(
+        &state,
+        &remote,
+        vec![remote_text_message("remote-message-1", "Hello")],
+    );
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    let error = state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::TextDelta {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                // The remote generated this after one byte that the proxy
+                // never received. Applying it would corrupt the local draft.
+                text_start_byte: Some(6),
+                delta: " world".to_owned(),
+                preview: Some("Hello world".to_owned()),
+                session_mutation_stamp: Some(11),
+            },
+        )
+        .expect_err("a discontinuous remote text delta must be rejected");
+
+    assert!(error.to_string().contains("starts at byte 6"));
+    assert!(delta_receiver.try_recv().is_err());
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_remote_session_index(&remote.id, "remote-session-1")
+        .expect("remote proxy session should exist");
+    assert!(matches!(
+        &inner.sessions[index].session.messages[0],
+        Message::Text { text, .. } if text == "Hello"
+    ));
+    assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&2));
     drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -503,6 +550,7 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         message_id: "remote-message-1".to_owned(),
         message_index: 0,
         message_count: 1,
+        text_start_byte: None,
         delta: delta.to_owned(),
         preview: preview.map(str::to_owned),
         session_mutation_stamp: Some(12),
@@ -516,6 +564,22 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         replay_key(text_delta(" same delta", Some("first preview"))),
         replay_key(text_delta(" same delta", Some("second preview"))),
         "TextDelta replay identity must include preview changes"
+    );
+    let text_delta_at = |text_start_byte| DeltaEvent::TextDelta {
+        revision: 5,
+        session_id: "remote-session-1".to_owned(),
+        message_id: "remote-message-1".to_owned(),
+        message_index: 0,
+        message_count: 1,
+        text_start_byte: Some(text_start_byte),
+        delta: " repeated".to_owned(),
+        preview: Some("same preview".to_owned()),
+        session_mutation_stamp: Some(12),
+    };
+    assert_ne!(
+        replay_key(text_delta_at(10)),
+        replay_key(text_delta_at(20)),
+        "TextDelta replay identity must include its byte-continuity offset"
     );
 
     let text_replace = |text: &str, preview: Option<&str>| DeltaEvent::TextReplace {
@@ -706,6 +770,7 @@ fn remote_delta_replay_key_isolates_individual_fingerprinted_fields() {
         message_id: "remote-message-1".to_owned(),
         message_index: 0,
         message_count: 1,
+        text_start_byte: None,
         delta: delta.to_owned(),
         preview: preview.map(str::to_owned),
         session_mutation_stamp: Some(12),
@@ -1222,6 +1287,7 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
             message_id: message_id.to_owned(),
             message_index,
             message_count,
+            text_start_byte: None,
             delta: " same delta".to_owned(),
             preview: Some("same preview".to_owned()),
             session_mutation_stamp: stamp,
@@ -1256,6 +1322,22 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
         text_delta(5, "remote-session-1", "remote-message-1", 0, 1, Some(12)),
         text_delta(5, "remote-session-1", "remote-message-1", 0, 1, Some(13)),
         "TextDelta replay identity must include session_mutation_stamp",
+    );
+    let text_delta_at = |text_start_byte| DeltaEvent::TextDelta {
+        revision: 5,
+        session_id: "remote-session-1".to_owned(),
+        message_id: "remote-message-1".to_owned(),
+        message_index: 0,
+        message_count: 1,
+        text_start_byte: Some(text_start_byte),
+        delta: " same delta".to_owned(),
+        preview: Some("same preview".to_owned()),
+        session_mutation_stamp: Some(12),
+    };
+    assert_changed(
+        text_delta_at(5),
+        text_delta_at(6),
+        "TextDelta replay identity must include text_start_byte",
     );
 
     let text_replace = |revision: u64,
@@ -1720,6 +1802,7 @@ fn remote_delta_replay_cache_clears_with_remote_revision_watermark() {
         message_id: "remote-message-1".to_owned(),
         message_index: 0,
         message_count: 1,
+        text_start_byte: None,
         delta: " world".to_owned(),
         preview: Some("Hello world".to_owned()),
         session_mutation_stamp: Some(11),

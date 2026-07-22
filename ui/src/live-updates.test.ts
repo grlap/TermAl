@@ -2403,6 +2403,70 @@ describe("applyDeltaToSessions", () => {
     });
   });
 
+  it("applies a text delta whose UTF-8 start offset matches emoji content", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Emoji 👋",
+          },
+        ],
+      }),
+    ];
+    const result = applyDeltaToSessions(sessions, {
+      type: "textDelta",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: "message-1",
+      messageIndex: 0,
+      messageCount: 1,
+      textStartByte: 10,
+      delta: " 🌍",
+    });
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected byte-contiguous delta to apply");
+    }
+    expect(result.sessions[0].messages[0]).toMatchObject({
+      text: "Emoji 👋 🌍",
+    });
+  });
+
+  it("rejects a text delta when an earlier streamed chunk is missing", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "message-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "| Italiano |",
+          },
+        ],
+      }),
+    ];
+    const result = applyDeltaToSessions(sessions, {
+      type: "textDelta",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "message-1",
+      messageIndex: 0,
+      messageCount: 1,
+      // The backend generated this after a missing " Ciao |" chunk.
+      textStartByte: 19,
+      delta: " Sessione scaduta | ✅ |",
+    });
+
+    expect(result).toEqual({ kind: "needsResync" });
+    expect(sessions[0].messages[0]).toMatchObject({ text: "| Italiano |" });
+  });
+
   it("applies conversation marker create, update, and delete deltas", () => {
     const sessions = [
       makeSession("session-a", {

@@ -50,6 +50,7 @@ fn reset_hidden_claude_spare_record(record: &mut SessionRecord) {
     record.session.preview = "Ready for a prompt.".to_owned();
     clear_all_pending_requests(record);
     record.queued_prompts.clear();
+    record.queued_peer_messages.clear();
     record.message_positions.clear();
     record.runtime_reset_required = false;
     record.orchestrator_auto_dispatch_blocked = false;
@@ -198,6 +199,40 @@ fn sync_pending_prompts(record: &mut SessionRecord) {
     if record.is_remote_proxy() {
         return;
     }
+    let missing_single_peer_messages = record
+        .queued_prompts
+        .iter()
+        .filter(|queued| {
+            queued.attachments.is_empty()
+                && queued
+                    .pending_prompt
+                    .source
+                    .as_ref()
+                    .is_some_and(MessageSource::is_peer)
+        })
+        .filter(|queued| {
+            !record
+                .queued_peer_messages
+                .contains_key(&queued.pending_prompt.id)
+        })
+        .map(|queued| {
+            (
+                queued.pending_prompt.id.clone(),
+                vec![queued.pending_prompt.clone()],
+            )
+        })
+        .collect::<Vec<_>>();
+    record
+        .queued_peer_messages
+        .extend(missing_single_peer_messages);
+    let live_prompt_ids = record
+        .queued_prompts
+        .iter()
+        .map(|queued| queued.pending_prompt.id.as_str())
+        .collect::<Vec<_>>();
+    record
+        .queued_peer_messages
+        .retain(|prompt_id, _| live_prompt_ids.contains(&prompt_id.as_str()));
     record.session.pending_prompts = record
         .queued_prompts
         .iter()
@@ -498,12 +533,129 @@ fn queue_prompt_on_record_with_source(
     attachments: Vec<PromptImageAttachment>,
     source: QueuedPromptSource,
 ) {
+    if pending_prompt
+        .source
+        .as_ref()
+        .is_some_and(MessageSource::is_peer)
+        && attachments.is_empty()
+        && append_to_tail_peer_message_batch(record, pending_prompt.clone(), source)
+    {
+        sync_pending_prompts(record);
+        return;
+    }
+
+    let peer_prompt = pending_prompt
+        .source
+        .as_ref()
+        .is_some_and(MessageSource::is_peer)
+        && attachments.is_empty();
+    let prompt_id = pending_prompt.id.clone();
     record.queued_prompts.push_back(QueuedPromptRecord {
         source,
         attachments,
         pending_prompt,
     });
+    if peer_prompt {
+        let pending_prompt = record
+            .queued_prompts
+            .back()
+            .expect("queued peer prompt should exist")
+            .pending_prompt
+            .clone();
+        record
+            .queued_peer_messages
+            .insert(prompt_id, vec![pending_prompt]);
+    }
     sync_pending_prompts(record);
+}
+
+const PEER_MESSAGE_BATCH_PREFIX: &str = "[TermAl cross-session message batch]";
+
+fn append_to_tail_peer_message_batch(
+    record: &mut SessionRecord,
+    pending_prompt: PendingPrompt,
+    source: QueuedPromptSource,
+) -> bool {
+    let Some((tail_id, tail_prompt)) = record.queued_prompts.back().and_then(|queued| {
+        (queued.source == source && queued.attachments.is_empty())
+            .then(|| (queued.pending_prompt.id.clone(), queued.pending_prompt.clone()))
+    }) else {
+        return false;
+    };
+
+    let Some(messages) = record.queued_peer_messages.get_mut(&tail_id) else {
+        return false;
+    };
+    if messages.is_empty() {
+        messages.push(tail_prompt);
+    }
+    messages.push(pending_prompt);
+    let envelope = peer_message_batch_pending_prompt(messages);
+    record
+        .queued_prompts
+        .back_mut()
+        .expect("peer message batch tail should exist")
+        .pending_prompt = envelope;
+    true
+}
+
+fn peer_message_batch_pending_prompt(messages: &[PendingPrompt]) -> PendingPrompt {
+    let first = messages
+        .first()
+        .expect("peer message batch must contain at least one message");
+    let common_source = first.source.as_ref().and_then(|candidate| {
+        messages
+            .iter()
+            .all(|message| {
+                message
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| source.session_id == candidate.session_id)
+            })
+            .then_some(candidate)
+    });
+
+    PendingPrompt {
+        attachments: Vec::new(),
+        id: first.id.clone(),
+        timestamp: first.timestamp.clone(),
+        text: peer_message_batch_prompt(messages),
+        expanded_text: None,
+        source: Some(MessageSource::peer_batch(common_source)),
+    }
+}
+
+fn peer_message_batch_prompt(messages: &[PendingPrompt]) -> String {
+    let oldest = messages
+        .first()
+        .map(|message| message.timestamp.as_str())
+        .unwrap_or("unknown");
+    let mut prompt = format!(
+        "{PEER_MESSAGE_BATCH_PREFIX}\n\
+{} pending messages, oldest `{oldest}`. FIFO order; newest is last.\n\
+Review the entire batch before acting on any individual message.\n\
+The senders may be working in different repositories. Do not assume they share this session's repository instructions, Beads state, or skills.\n\
+To reply, use the TermAl MCP tool `termal_send_to_session` with the `sessionId` shown on the corresponding message. A normal assistant reply stays only in this session.\n",
+        messages.len()
+    );
+
+    for (index, message) in messages.iter().enumerate() {
+        let source = message
+            .source
+            .as_ref()
+            .expect("batched peer message must retain its source");
+        prompt.push_str(&format!(
+            "\n--- Message {} of {} from {:?} (`{}`), queued `{}`, id `{}` ---\n{}\n",
+            index + 1,
+            messages.len(),
+            source.name,
+            source.session_id.as_deref().unwrap_or("unknown"),
+            message.timestamp,
+            message.id,
+            message.text
+        ));
+    }
+    prompt
 }
 
 /// Handles prioritize user queued prompts.

@@ -808,10 +808,10 @@ fn next_delta_event(delta_events: &mut broadcast::Receiver<String>) -> DeltaEven
     serde_json::from_str(&payload).expect("delta event should decode")
 }
 
-// Pins `message_count` on representative local streaming delta emitters. The
-// frontend uses this metadata to reconcile metadata-first snapshots with
-// transcript deltas, so Rust-side wire regressions must fail here instead of
-// only in frontend fixture tests.
+// Pins `message_count` and byte-continuity offsets on representative local
+// streaming delta emitters. The frontend uses this metadata to reconcile
+// metadata-first snapshots and reject an append after a missed text chunk, so
+// Rust-side wire regressions must fail here instead of only in frontend tests.
 #[test]
 fn local_streaming_delta_events_include_message_count() {
     let state = test_app_state();
@@ -839,7 +839,24 @@ fn local_streaming_delta_events_include_message_count() {
         .append_text_delta(&session_id, "text-1", "hello")
         .expect("text delta should append");
     match next_delta_event(&mut delta_events) {
-        DeltaEvent::TextDelta { message_count, .. } => assert_eq!(message_count, 1),
+        DeltaEvent::TextDelta {
+            message_count,
+            text_start_byte,
+            ..
+        } => {
+            assert_eq!(message_count, 1);
+            assert_eq!(text_start_byte, Some(0));
+        }
+        _ => panic!("expected TextDelta"),
+    }
+
+    state
+        .append_text_delta(&session_id, "text-1", " 👋")
+        .expect("unicode text delta should append");
+    match next_delta_event(&mut delta_events) {
+        DeltaEvent::TextDelta {
+            text_start_byte, ..
+        } => assert_eq!(text_start_byte, Some(5)),
         _ => panic!("expected TextDelta"),
     }
 

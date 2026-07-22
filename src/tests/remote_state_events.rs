@@ -9,6 +9,105 @@ use super::remote::{
 use super::remote_delta_replay::local_replay_test_remote;
 use super::*;
 
+// Pins the live SSE consumer recovery path, not only the low-level delta
+// validator. A byte-offset gap must reject the incremental mutation and fetch
+// one authoritative snapshot before any corrupt text can become visible.
+#[test]
+fn remote_text_delta_gap_triggers_authoritative_state_resync() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+
+    let mut initial_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    initial_state.sessions[0].preview = "Hello".to_owned();
+    initial_state.sessions[0].messages = vec![remote_text_message("remote-message-1", "Hello")];
+    initial_state.sessions[0].messages_loaded = true;
+    initial_state.sessions[0].message_count = 1;
+    let initial_data_lines =
+        vec![serde_json::to_string(&initial_state).expect("initial state should encode")];
+    dispatch_remote_event(&state, &remote.id, "state", &initial_data_lines)
+        .expect("initial remote state should apply");
+
+    let mut repaired_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        3,
+        OrchestratorInstanceStatus::Running,
+    );
+    repaired_state.sessions[0].preview = "Hello world".to_owned();
+    repaired_state.sessions[0].messages =
+        vec![remote_text_message("remote-message-1", "Hello world")];
+    repaired_state.sessions[0].messages_loaded = true;
+    repaired_state.sessions[0].message_count = 1;
+    repaired_state.sessions[0].session_mutation_stamp = Some(11);
+    let (port, requests, server) = spawn_remote_state_response_server(repaired_state);
+    insert_test_remote_connection(&state, &remote, port);
+
+    let discontinuous_delta = DeltaEvent::TextDelta {
+        revision: 3,
+        session_id: "remote-session-1".to_owned(),
+        message_id: "remote-message-1".to_owned(),
+        message_index: 0,
+        message_count: 1,
+        // The producer had already emitted one byte that this proxy missed.
+        // Appending at local byte 5 would silently produce corrupt text.
+        text_start_byte: Some(6),
+        delta: " world".to_owned(),
+        preview: Some("Hello world".to_owned()),
+        session_mutation_stamp: Some(11),
+    };
+    let delta_data_lines =
+        vec![serde_json::to_string(&discontinuous_delta).expect("text delta should encode")];
+    dispatch_remote_event(&state, &remote.id, "delta", &delta_data_lines)
+        .expect("a rejected text delta should recover from authoritative state");
+
+    let request_lines = requests.lock().expect("requests mutex poisoned").clone();
+    assert_eq!(
+        request_lines,
+        vec![
+            "GET /api/health HTTP/1.1".to_owned(),
+            "GET /api/state HTTP/1.1".to_owned(),
+        ],
+        "a byte gap should trigger exactly one authoritative state fetch"
+    );
+    join_test_server(server);
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_remote_session_index(&remote.id, "remote-session-1")
+        .expect("remote proxy session should remain");
+    let record = &inner.sessions[index];
+    assert!(matches!(
+        &record.session.messages[0],
+        Message::Text { text, .. } if text == "Hello world"
+    ));
+    assert_eq!(record.session.preview, "Hello world");
+    assert_eq!(record.session.session_mutation_stamp, Some(11));
+    assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&3));
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Pins that a marked empty-state SSE "state" event triggers one full
 // /api/state resync per revision, deduplicates repeated sends of the
 // same revision, and still resyncs when the revision bumps.
@@ -1415,6 +1514,7 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
                 message_id: "remote-message-1".to_owned(),
                 message_index: 0,
                 message_count: 1,
+                text_start_byte: None,
                 delta: " duplicate".to_owned(),
                 preview: Some("Hydrated body duplicate".to_owned()),
                 session_mutation_stamp: Some(11),

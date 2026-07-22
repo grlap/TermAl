@@ -7,11 +7,10 @@
 // Finding the `codex` executable across all supported platforms is
 // non-trivial. TermAl tries in order:
 //
-// 1. The `CODEX_PATH` env var if set (trusted opt-out).
-// 2. A native binary bundled under the npm-installed `codex` package
-//    in `<npm-prefix>/lib/node_modules/@openai/codex/bin/<triple>/codex`
-//    (way faster than the Node shim when present).
-// 3. `codex` on `PATH` — the normal case.
+// 1. The native binary bundled under the npm-installed platform package
+//    in `vendor/<triple>/bin/codex` (avoids leaving the launcher's native
+//    child behind when TermAl restarts the shared app-server).
+// 2. `codex` on `PATH` as a fallback.
 //
 // `codex_command` wraps the resolved path in a `Command` with the
 // right shim handling (npm installs ship `.cmd` / `.bat` shims on
@@ -124,7 +123,7 @@ fn resolve_codex_native_binary(launcher: &PathBuf) -> Option<PathBuf> {
             .path()
             .join("vendor")
             .join(target_triple)
-            .join("codex")
+            .join("bin")
             .join(binary_name);
         if candidate.is_file() {
             return Some(candidate);
@@ -217,4 +216,3 @@ fn summarize_codex_app_server_web_search_output(item: &Value) -> String {
         .unwrap_or("Web search completed")
         .to_owned()
 }
-

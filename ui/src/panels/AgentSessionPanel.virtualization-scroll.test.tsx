@@ -27,7 +27,10 @@ import {
   splitAgentCommandResolverTail,
 } from "./AgentSessionPanel";
 import { buildConversationOverviewTailItems } from "./conversation-overview-controller";
-import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
+import {
+  VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS,
+  VirtualizedConversationMessageList,
+} from "./VirtualizedConversationMessageList";
 import { RunningIndicator } from "./session-activity-cards";
 import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
 import { MessageCard } from "../message-cards";
@@ -589,6 +592,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
     const compactMeasuredSlotHeight = 40;
     const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
     let scrollTop = 0;
+    let performanceNowSpy: ReturnType<typeof vi.spyOn> | null = null;
 
     class ResizeObserverMock {
       constructor(private readonly callback: ResizeObserverCallback) {}
@@ -883,27 +887,36 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
       );
 
       const firstMountedBeforeMultiTouch = getFirstMountedMessageIndex(container);
+      let performanceNowCallCount = 0;
+      const prewarmInputTime = performance.now();
+      performanceNowSpy = vi.spyOn(performance, "now").mockImplementation(() => {
+        performanceNowCallCount += 1;
+        return performanceNowCallCount === 1
+          ? prewarmInputTime
+          : prewarmInputTime + VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS + 1;
+      });
 
-      await act(async () => {
+      act(() => {
         // If the first finger lifts while another finger remains down,
         // touchend must keep tracking the remaining touch. The following
-        // touchmove should still prewarm before native scroll writes.
+        // touchmove should still prewarm before native scroll writes. Simulate
+        // a slow synchronous render crossing the wall-clock cooldown: the
+        // scheduled idle transition, not render duration, owns compaction.
         dispatchTouch("touchstart", [100, 300], [100, 300]);
         dispatchTouch("touchend", [300], [100]);
         dispatchTouch("touchmove", [1900], [1900]);
-        await Promise.resolve();
       });
 
-      await waitFor(() => {
-        expect(getFirstMountedMessageIndex(container)).toBeLessThan(
-          firstMountedBeforeMultiTouch,
-        );
-        expect(
-          container
-            .querySelector<HTMLElement>(".virtualized-message-page")
-            ?.getBoundingClientRect().top,
-        ).toBeLessThanOrEqual(0);
-      });
+      expect(getFirstMountedMessageIndex(container)).toBeLessThan(
+        firstMountedBeforeMultiTouch,
+      );
+      expect(
+        container
+          .querySelector<HTMLElement>(".virtualized-message-page")
+          ?.getBoundingClientRect().top,
+      ).toBeLessThanOrEqual(0);
+      performanceNowSpy.mockRestore();
+      performanceNowSpy = null;
 
       await act(async () => {
         scrollTop = 0;
@@ -975,6 +988,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
       );
       expect(firstMountedPage?.getBoundingClientRect().top).toBeLessThanOrEqual(0);
     } finally {
+      performanceNowSpy?.mockRestore();
       window.ResizeObserver = OriginalResizeObserver;
       window.TouchEvent = OriginalTouchEvent;
       window.requestAnimationFrame = originalRequestAnimationFrame;

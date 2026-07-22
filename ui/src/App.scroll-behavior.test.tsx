@@ -50,7 +50,11 @@ import {
   resolveUnknownSessionModelSendAttempt,
 } from "./session-model-utils";
 import { setAppTestHooksForTests } from "./app-test-hooks";
-import { resolveStandaloneControlPanelDockWidthRatio } from "./control-panel-layout";
+import {
+  CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX,
+  CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX,
+  resolveStandaloneControlPanelDockWidthRatio,
+} from "./control-panel-layout";
 import {
   buildControlSurfaceSessionListEntries,
   formatSessionOrchestratorGroupName,
@@ -2919,7 +2923,7 @@ describe("App scroll behaviour", () => {
             } | null;
           };
         };
-        expect(persistedLayout.workspace.root?.ratio).toBeCloseTo(0.64, 5);
+        expect(persistedLayout.workspace.root?.ratio).toBeCloseTo(0.576, 5);
       });
     } finally {
       delete (document.documentElement as { clientWidth?: number }).clientWidth;
@@ -2930,6 +2934,11 @@ describe("App scroll behaviour", () => {
       restoreGlobal("EventSource", originalEventSource);
       restoreGlobal("ResizeObserver", originalResizeObserver);
     }
+  });
+
+  it("keeps control panel width fallbacks aligned with the 36rem floor", () => {
+    expect(CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX).toBe(36 * 16);
+    expect(CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX).toBe(36 * 16);
   });
 
   it("stores manual message scroll state immediately when leaving the bottom", () => {

@@ -1494,7 +1494,7 @@ describe("App control panel - scoping", () => {
         await waitFor(() => {
           const request = latestRequestTo("/api/fs");
           expect(request.searchParams.get("path")).toBe("/projects/api");
-          expect(request.searchParams.get("sessionId")).toBe("session-2");
+          expect(request.searchParams.get("sessionId")).toBeNull();
           expect(request.searchParams.get("projectId")).toBe("project-api");
         });
 
@@ -1799,4 +1799,3 @@ describe("App control panel - scoping", () => {
     });
   });
 });
-

@@ -589,6 +589,7 @@ impl AppState {
                 message_id,
                 message_index,
                 message_count,
+                text_start_byte,
                 delta,
                 preview,
                 session_mutation_stamp,
@@ -598,6 +599,7 @@ impl AppState {
                 message_id: message_id.clone(),
                 message_index: *message_index,
                 message_count: *message_count,
+                text_start_byte: *text_start_byte,
                 delta_fingerprint: Self::remote_delta_text_fingerprint(delta),
                 preview_fingerprint: preview.as_deref().map(Self::remote_delta_text_fingerprint),
                 session_mutation_stamp: *session_mutation_stamp,
@@ -1539,6 +1541,7 @@ impl AppState {
                 preview,
                 session_id,
                 session_mutation_stamp: remote_session_mutation_stamp,
+                text_start_byte: remote_text_start_byte,
                 ..
             } => {
                 let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
@@ -1559,6 +1562,7 @@ impl AppState {
                     message_index,
                     message_count,
                     revision,
+                    text_start_byte,
                     session_mutation_stamp,
                 ) = {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -1572,7 +1576,37 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let (local_session_id, message_index, message_count, session_mutation_stamp) = {
+                    if let Some(expected) = remote_text_start_byte {
+                        let record = inner
+                            .session_by_index(index)
+                            .expect("remote session index should be valid");
+                        let message = record
+                            .session
+                            .messages
+                            .iter()
+                            .find(|message| message.id() == message_id)
+                            .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
+                        let actual = match message {
+                            Message::Text { text, .. } => text.len(),
+                            _ => {
+                                return Err(anyhow!(
+                                    "remote message `{message_id}` is not a text message"
+                                ));
+                            }
+                        };
+                        if expected != actual {
+                            return Err(anyhow!(
+                                "remote text delta for message `{message_id}` starts at byte {expected} but the local mirror is at byte {actual}"
+                            ));
+                        }
+                    }
+                    let (
+                        local_session_id,
+                        message_index,
+                        message_count,
+                        text_start_byte,
+                        session_mutation_stamp,
+                    ) = {
                         let record = inner
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
@@ -1583,14 +1617,18 @@ impl AppState {
                                 "remote message index `{message_index}` is out of bounds"
                             ));
                         };
-                        match message {
-                            Message::Text { text, .. } => text.push_str(&delta),
+                        let text_start_byte = match message {
+                            Message::Text { text, .. } => {
+                                let text_start_byte = text.len();
+                                text.push_str(&delta);
+                                text_start_byte
+                            }
                             _ => {
                                 return Err(anyhow!(
                                     "remote message `{message_id}` is not a text message"
                                 ));
                             }
-                        }
+                        };
                         if let Some(next_preview) = preview.as_ref() {
                             record.session.preview = next_preview.clone();
                         }
@@ -1601,6 +1639,7 @@ impl AppState {
                             record.session.id.clone(),
                             message_index,
                             session_message_count(record),
+                            text_start_byte,
                             record.mutation_stamp,
                         )
                     };
@@ -1611,6 +1650,7 @@ impl AppState {
                         message_index,
                         message_count,
                         revision,
+                        text_start_byte,
                         session_mutation_stamp,
                     )
                 };
@@ -1620,6 +1660,7 @@ impl AppState {
                     message_id,
                     message_index,
                     message_count,
+                    text_start_byte: Some(text_start_byte),
                     delta,
                     preview,
                     session_mutation_stamp: Some(session_mutation_stamp),

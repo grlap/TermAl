@@ -406,7 +406,7 @@ fn describe_codex_mcp_elicitation_request(request: &McpElicitationRequestPayload
 }
 
 /// Surfaces `item/completed` events by type: agent messages are
-/// reconciled against any streamed text via dedup; command executions
+/// reconciled against any verbatim streamed text; command executions
 /// and web searches finalize their recorder entries with the exit
 /// status; file changes are pushed as diff messages annotated with
 /// create/edit change type. Other item types are intentionally
@@ -487,4 +487,3 @@ fn handle_codex_app_server_item_completed(
 
     Ok(())
 }
-

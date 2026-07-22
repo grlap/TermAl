@@ -54,7 +54,8 @@ use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
-const MAX_IMAGE_ATTACHMENT_BYTES: usize = 5 * 1024 * 1024;
+const MAX_IMAGE_ATTACHMENT_BYTES: usize = 10 * 1024 * 1024;
+const MAX_JSON_REQUEST_BODY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_FILE_CONTENT_BYTES: usize = 10 * 1024 * 1024;
 
 /// Starts the backend entrypoint.
@@ -424,7 +425,8 @@ fn app_router(state: AppState) -> Router {
             post(submit_codex_app_request),
         )
         .with_state(state)
-        .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10 MB — image attachments are base64 in JSON
+        // One 10 MiB image expands to about 13.4 MiB when base64-encoded.
+        .layer(DefaultBodyLimit::max(MAX_JSON_REQUEST_BODY_BYTES))
         .layer(cors)
 }
 

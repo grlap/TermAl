@@ -366,16 +366,16 @@ describe("SessionPaneView composer delegation click-through", () => {
     const session = makeSession({ id: "session-parent" });
     const reviewLocalCommand: AgentCommand = {
       kind: "promptTemplate",
-      name: "review-local",
+      name: "review-code",
       description: "Review staged and unstaged changes.",
       content: "Review local changes.",
-      source: ".claude/commands/review-local.md",
+      source: ".claude/commands/review-code.md",
     };
     resolveAgentCommandMock.mockResolvedValue({
-      name: "review-local",
-      source: ".claude/commands/review-local.md",
+      name: "review-code",
+      source: ".claude/commands/review-code.md",
       kind: "promptTemplate",
-      visiblePrompt: "/review-local",
+      visiblePrompt: "/review-code",
       expandedPrompt: "Review local changes.",
       title: "Review staged and unstaged changes.",
       delegation: {
@@ -394,7 +394,7 @@ describe("SessionPaneView composer delegation click-through", () => {
 
     expect(textarea!.value).toBe("/rev");
     expect(
-      screen.getByRole("option", { name: /\/review-local/ }),
+      screen.getByRole("option", { name: /\/review-code/ }),
     ).toBeInTheDocument();
 
     await withSuppressedActWarnings(async () => {
@@ -403,7 +403,7 @@ describe("SessionPaneView composer delegation click-through", () => {
       await waitFor(() => {
         expect(resolveAgentCommandMock).toHaveBeenCalledWith(
           "session-parent",
-          "review-local",
+          "review-code",
           {
             arguments: "",
             intent: "delegate",

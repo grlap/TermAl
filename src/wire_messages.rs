@@ -149,16 +149,59 @@ struct MessageImageAttachment {
     media_type: String,
 }
 
-/// Identifies the peer session that authored a message delivered through
-/// `termal_send_to_session`. Absent (`None`) for ordinary human/agent
-/// messages, which the UI keeps labelling "You" / the assistant. The name is
-/// resolved backend-side from the sender's session id at delivery time, so a
-/// caller cannot spoof another session's display name.
+/// Structured provenance for text delivered through
+/// `termal_send_to_session`. Ordinary peer messages identify one backend-
+/// resolved sender; a peer batch is marked explicitly and may omit
+/// `session_id` when it contains multiple senders. Absent (`None`) for
+/// ordinary human/agent messages.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MessageSource {
-    session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_id: Option<String>,
     name: String,
+    #[serde(default, skip_serializing_if = "MessageSourceKind::is_peer")]
+    kind: MessageSourceKind,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum MessageSourceKind {
+    #[default]
+    Peer,
+    PeerBatch,
+}
+
+impl MessageSourceKind {
+    fn is_peer(&self) -> bool {
+        *self == Self::Peer
+    }
+}
+
+impl MessageSource {
+    fn peer(session_id: String, name: String) -> Self {
+        Self {
+            session_id: Some(session_id),
+            name,
+            kind: MessageSourceKind::Peer,
+        }
+    }
+
+    fn peer_batch(common_source: Option<&Self>) -> Self {
+        Self {
+            session_id: common_source.and_then(|source| source.session_id.clone()),
+            name: "Peer queue".to_owned(),
+            kind: MessageSourceKind::PeerBatch,
+        }
+    }
+
+    fn is_peer(&self) -> bool {
+        self.kind == MessageSourceKind::Peer
+    }
+
+    fn is_peer_batch(&self) -> bool {
+        self.kind == MessageSourceKind::PeerBatch
+    }
 }
 
 /// Represents pending prompt.

@@ -483,6 +483,7 @@ fn upsert_remote_proxy_session_record(
         pending_codex_app_requests: HashMap::new(),
         pending_acp_approvals: HashMap::new(),
         queued_prompts: VecDeque::new(),
+        queued_peer_messages: HashMap::new(),
         message_positions: build_message_positions(&session.messages),
         remote_id: Some(remote_id.to_owned()),
         remote_session_id: Some(remote_session.id.clone()),

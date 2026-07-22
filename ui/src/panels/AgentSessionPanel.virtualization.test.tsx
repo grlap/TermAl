@@ -1437,7 +1437,7 @@ describe("AgentSessionPanel virtualization", () => {
     ["Claude", "new prompt", "Claude is working — Waiting for output"],
     ["Cursor", "new prompt", "Cursor is working — Waiting for output"],
     ["Gemini", "new prompt", "Gemini is working — Waiting for output"],
-    ["Codex", "/review-local", "Codex is working — Executing a command"],
+    ["Codex", "/review-code", "Codex is working — Executing a command"],
   ] as const)(
     "builds the conversation overview live-turn sample for %s",
     (agent, waitingIndicatorPrompt, expectedSample) => {

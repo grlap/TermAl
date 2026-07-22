@@ -402,7 +402,7 @@ Required contract:
   grant delegation defaults.
 - `spawn_delegation` receives the already-resolved prompt and the resolver's
   write policy. React components must not special-case command names such as
-  `review-local`.
+  `review-code`.
 - The TermAl delegation MCP bridge applies the same rule for single-line
   prompts that match a known slash command: it resolves the command with
   `intent: "delegate"` before posting the delegation create request. When the
@@ -414,7 +414,7 @@ Required contract:
 - Caller-supplied MCP spawn options (`title`, `mode`, and `writePolicy`) override
   resolver-provided defaults. Omit those fields to use trusted command metadata.
 
-This keeps `/fix-bug`, future trusted `/review-local` commands, and future
+This keeps `/fix-bug`, future trusted `/review-code` commands, and future
 Claude skills consistent whether the user sends them in the parent session or
 delegates them to a child.
 
@@ -578,7 +578,7 @@ Current direction:
   resume wait must yield instead of shell-polling, raw-HTTP polling, or scraping
   session logs, otherwise the queued fan-in prompt cannot run.
 - Expose the same TermAl-owned MCP bridge to Codex, Claude, Cursor, and Gemini
-  startup/resume hooks. Agent commands such as `/review-with-delegate` should
+  startup/resume hooks. Agent commands such as `/review-changes` should
   use only those tools and fail fast when the bridge is absent.
 
 Delegation tools are parent-scoped. The first local implementation injects the
@@ -694,7 +694,7 @@ termal_cancel_session({ delegationId }) -> DelegationStatusCommandResult
 termal_wait_delegations({ delegationIds, pollIntervalMs?, timeoutMs? }) -> WaitDelegationsResult
 termal_resume_after_delegations({ delegationIds, mode?, title? }) -> DelegationWaitResponse
 termal_followup_session({ delegationId, message }) -> DelegationStatusResponse
-termal_send_to_session({ sessionId, message }) -> { sessionId, resolvedFrom, delivered }
+termal_send_to_session({ sessionId, message }) -> { sessionId, resolvedFrom, delivered, queued, disposition }
 termal_list_sessions() -> { sessions: [{ sessionId, name, agent, status, workdir, preview }] }
 ```
 
@@ -703,8 +703,14 @@ turn — a still-running, canceled, or child-removed delegation is rejected (see
 the `/followup` route). `termal_send_to_session` and `termal_list_sessions` are the
 peer-messaging tools: `termal_list_sessions` returns root-session summaries for
 discovery, and `termal_send_to_session` delivers a fire-and-forget message to a
-root peer by id or name (queues if the peer is mid-turn). See the v2 visibility
-boundary above and the shipped-vs-proposed note under *Peer Session Connections*.
+root peer by id or name. Its `disposition` mirrors the message route:
+`deliveredToIdleSession` means the target began the turn immediately, while
+`queuedBehindActiveTurn` means the target accepted it into its pending FIFO and
+also sets `queued: true`. The bridge reports `accepted` only as a compatibility
+fallback when an older or remote TermAl response omits `messageDisposition`; it
+still means the message request succeeded, but cannot distinguish immediate
+delivery from queueing. See the v2 visibility boundary above and the
+shipped-vs-proposed note under *Peer Session Connections*.
 
 `termal_wait_delegations` is a bounded synchronous wait for short waits and
 smoke tests. `termal_resume_after_delegations` schedules the durable backend
@@ -778,7 +784,7 @@ Agent integration hooks:
   delegated review must fail fast instead of silently falling back to raw HTTP,
   shell polling, Task agents, or Codex platform subagents.
 
-`/review-with-delegate` depends on this MCP surface. Its final form should:
+`/review-changes` depends on this MCP surface. Its final form should:
 - verify `termal_spawn_session` and `termal_resume_after_delegations` are
   available before spawning reviewers
 - spawn one Codex and one Claude read-only reviewer child session
@@ -794,7 +800,7 @@ Implementation order:
    parent-scoped spawn/status/result/cancel/wait tools.
 3. Wire the same bridge descriptor into Codex, Claude, Cursor, and Gemini
    startup/resume hooks.
-4. Rewrite `/review-with-delegate` to use only the TermAl MCP tools. The command
+4. Rewrite `/review-changes` to use only the TermAl MCP tools. The command
    must not fall back to raw HTTP, shell polling, Claude Task agents, Codex
    platform subagents, or manual session-log scraping.
 
@@ -1592,7 +1598,7 @@ type SessionExchange = {
   one-call reviewer-batch path.
 - Keep UI result insertion human-driven unless the parent explicitly schedules a
   resume wait.
-- Rewrite `/review-with-delegate` to require TermAl MCP tools and stop if they
+- Rewrite `/review-changes` to require TermAl MCP tools and stop if they
   are absent.
 
 ### Phase 5: Worker Delegation
@@ -1671,7 +1677,7 @@ Agent MCP bridge:
   child-session deletion after every review
 - ACP/Codex, Cursor, and Claude startup paths can opt into the same bridge
   descriptor
-- `/review-with-delegate` fails fast when the required TermAl MCP tools are
+- `/review-changes` fails fast when the required TermAl MCP tools are
   missing
 - long-running review waits use backend resume waits instead of shell polling
 

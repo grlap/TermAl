@@ -105,6 +105,10 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Keep timer-heavy React/jsdom suites below machine-wide CPU saturation.
+    // At the default all-core parallelism, watchdog tests can exceed their
+    // existing 10-second timeout and leave overlapping `act()` work behind.
+    maxWorkers: 4,
     setupFiles: "./src/test-setup.ts",
     testTimeout: 10_000,
   },

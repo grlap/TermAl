@@ -491,14 +491,20 @@ impl TermalDelegationMcpBridge {
         // receiving backend resolves it to our current display name, so the
         // peer sees "<sender name>" instead of "You". Using our own id (not a
         // caller-supplied value) is what keeps the attribution unspoofable.
-        self.post_json(
+        let response = self.post_json(
             &format!("/api/sessions/{}/messages", session_id),
             &json!({ "text": message, "sourceSessionId": self.parent_session_id }),
         )?;
+        let disposition = response
+            .get("messageDisposition")
+            .and_then(Value::as_str)
+            .unwrap_or("accepted");
         Ok(json!({
             "sessionId": session_id,
             "resolvedFrom": session_ref,
-            "delivered": true
+            "delivered": true,
+            "queued": disposition == "queuedBehindActiveTurn",
+            "disposition": disposition
         }))
     }
 
@@ -942,7 +948,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_send_to_session",
-                "description": "Send a message to another root-level TermAl session. `sessionId` accepts either a TermAl id (session-…) OR a session NAME (e.g. \"LegalCodex\"), resolved case-insensitively across all projects. Delivered immediately if the target is idle, or queued on its pending-prompt FIFO if it is mid-turn. FIRE-AND-FORGET — this is NOT a delegation: there is no result to await and nothing to poll. The call returns as soon as the message is delivered/queued; do NOT wait for a reply. If the target replies, it arrives LATER as a separate incoming message in your own session (sent via its own termal_send_to_session), never as a return value here. If a name is ambiguous, use termal_list_sessions and pass the exact id.",
+                "description": "Send a message to another root-level TermAl session. `sessionId` accepts either a TermAl id (session-…) OR a session NAME (e.g. \"LegalCodex\"), resolved case-insensitively across all projects. Delivered immediately if the target is idle, or queued on its pending-prompt FIFO if it is mid-turn. The result's `disposition` is `deliveredToIdleSession` or `queuedBehindActiveTurn`. FIRE-AND-FORGET — this is NOT a delegation: there is no result to await and nothing to poll. The call returns as soon as the message is delivered/queued; do NOT wait for a reply. If the target replies, it arrives LATER as a separate incoming message in your own session (sent via its own termal_send_to_session), never as a return value here. If a name is ambiguous, use termal_list_sessions and pass the exact id.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["sessionId", "message"],
@@ -1083,8 +1089,8 @@ struct McpSlashCommandPrompt {
 
 /// Parses the single-line slash-command shape supported by `termal_spawn_session`.
 ///
-/// Example: `/review-local staged -- include tests` resolves to command
-/// `review-local`, arguments `staged`, and note `include tests`.
+/// Example: `/review-code staged -- include tests` resolves to command
+/// `review-code`, arguments `staged`, and note `include tests`.
 fn parse_mcp_slash_command_prompt(prompt: &str) -> Option<McpSlashCommandPrompt> {
     let prompt = prompt.trim_end();
     if prompt.contains('\n') || prompt.contains('\r') {
@@ -1419,32 +1425,32 @@ mod delegation_mcp_tests {
 
     #[test]
     fn parse_mcp_slash_command_prompt_pins_ui_compatible_shape() {
-        let parsed = parse_mcp_slash_command_prompt("/review-local staged -- include tests")
+        let parsed = parse_mcp_slash_command_prompt("/review-code staged -- include tests")
             .expect("valid slash command should parse");
-        assert_eq!(parsed.command_name, "review-local");
+        assert_eq!(parsed.command_name, "review-code");
         assert_eq!(parsed.arguments.as_deref(), Some("staged"));
         assert_eq!(parsed.note.as_deref(), Some("include tests"));
 
-        let parsed = parse_mcp_slash_command_prompt("/review-local   ")
+        let parsed = parse_mcp_slash_command_prompt("/review-code   ")
             .expect("trailing whitespace should not prevent parsing");
-        assert_eq!(parsed.command_name, "review-local");
+        assert_eq!(parsed.command_name, "review-code");
         assert_eq!(parsed.arguments, None);
         assert_eq!(parsed.note, None);
 
-        let parsed = parse_mcp_slash_command_prompt("/review-local staged -- include tests\r")
+        let parsed = parse_mcp_slash_command_prompt("/review-code staged -- include tests\r")
             .expect("trailing carriage return should be trimmed like other trailing whitespace");
-        assert_eq!(parsed.command_name, "review-local");
+        assert_eq!(parsed.command_name, "review-code");
         assert_eq!(parsed.arguments.as_deref(), Some("staged"));
         assert_eq!(parsed.note.as_deref(), Some("include tests"));
 
         for prompt in [
-            " /review-local",
-            "/ review-local",
+            " /review-code",
+            "/ review-code",
             "/",
             "/review/local",
-            "/review-local\nextra",
-            "/review-local\rextra",
-            "review-local",
+            "/review-code\nextra",
+            "/review-code\rextra",
+            "review-code",
         ] {
             assert!(
                 parse_mcp_slash_command_prompt(prompt).is_none(),
@@ -1502,7 +1508,7 @@ mod delegation_mcp_tests {
                     "sessions": [
                         { "id": "session-root-a", "name": "HelloMe", "agent": "Codex", "status": "idle", "workdir": "C:/a", "preview": "hi" },
                         { "id": "session-root-b", "name": "HelloMe2", "agent": "Codex", "status": "active", "workdir": "C:/b", "preview": "yo" },
-                        { "id": "session-child", "name": "Codex /review-local", "agent": "Codex", "status": "idle", "parentDelegationId": "delegation-x" }
+                        { "id": "session-child", "name": "Codex /review-code", "agent": "Codex", "status": "idle", "parentDelegationId": "delegation-x" }
                     ]
                 }),
             )
@@ -1590,7 +1596,14 @@ mod delegation_mcp_tests {
                     let body: Value =
                         serde_json::from_str(&request.body).expect("send body should be JSON");
                     assert_eq!(body["text"], "hi legal");
-                    (202, json!({ "revision": 1, "sessions": [] }))
+                    (
+                        202,
+                        json!({
+                            "revision": 1,
+                            "sessions": [],
+                            "messageDisposition": "deliveredToIdleSession"
+                        }),
+                    )
                 }
                 _ => (
                     404,
@@ -1607,6 +1620,8 @@ mod delegation_mcp_tests {
         assert_eq!(response["sessionId"], "session-legal");
         assert_eq!(response["resolvedFrom"], "LegalCodex");
         assert_eq!(response["delivered"], true);
+        assert_eq!(response["queued"], false);
+        assert_eq!(response["disposition"], "deliveredToIdleSession");
         server.join().expect("test server should join");
         let requests = requests.lock().expect("request log mutex poisoned");
         assert_eq!(requests.len(), 2);
@@ -1653,7 +1668,14 @@ mod delegation_mcp_tests {
                     let body: Value =
                         serde_json::from_str(&request.body).expect("send body should be JSON");
                     assert_eq!(body["text"], "hello peer");
-                    (202, json!({ "revision": 1, "sessions": [] }))
+                    (
+                        202,
+                        json!({
+                            "revision": 1,
+                            "sessions": [],
+                            "messageDisposition": "queuedBehindActiveTurn"
+                        }),
+                    )
                 }
                 _ => (
                     404,
@@ -1673,6 +1695,8 @@ mod delegation_mcp_tests {
 
         assert_eq!(response["sessionId"], "session-peer");
         assert_eq!(response["delivered"], true);
+        assert_eq!(response["queued"], true);
+        assert_eq!(response["disposition"], "queuedBehindActiveTurn");
         server.join().expect("test server should join");
         let requests = requests.lock().expect("request log mutex poisoned");
         assert_eq!(requests.len(), 2);
@@ -1813,7 +1837,7 @@ mod delegation_mcp_tests {
     fn delegation_mcp_spawn_session_resolves_known_slash_command_prompt() {
         let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
             match (request.method.as_str(), request.path.as_str()) {
-                ("POST", "/api/sessions/session-parent/agent-commands/review-local/resolve") => {
+                ("POST", "/api/sessions/session-parent/agent-commands/review-code/resolve") => {
                     let body: Value =
                         serde_json::from_str(&request.body).expect("resolve body should be JSON");
                     assert_eq!(body["arguments"], "staged");
@@ -1823,9 +1847,9 @@ mod delegation_mcp_tests {
                     (
                         200,
                         json!({
-                            "name": "review-local",
-                            "visiblePrompt": "/review-local staged",
-                            "expandedPrompt": "Expanded review-local command body",
+                            "name": "review-code",
+                            "visiblePrompt": "/review-code staged",
+                            "expandedPrompt": "Expanded review-code command body",
                             "title": "Review local changes",
                             "delegation": {
                                 "mode": "explorer",
@@ -1837,7 +1861,7 @@ mod delegation_mcp_tests {
                 ("POST", "/api/sessions/session-parent/delegations") => {
                     let body: Value = serde_json::from_str(&request.body)
                         .expect("delegation body should be JSON");
-                    assert_eq!(body["prompt"], "Expanded review-local command body");
+                    assert_eq!(body["prompt"], "Expanded review-code command body");
                     assert_eq!(body["title"], "Review local changes");
                     assert_eq!(body["cwd"], "C:\\repo\\child");
                     assert_eq!(body["mode"], "explorer");
@@ -1864,7 +1888,7 @@ mod delegation_mcp_tests {
 
         let response = bridge
             .tool_spawn_session(json!({
-                "prompt": "/review-local staged -- include tests",
+                "prompt": "/review-code staged -- include tests",
                 "agent": "Codex",
                 "cwd": "C:\\repo\\child"
             }))
@@ -1924,7 +1948,7 @@ mod delegation_mcp_tests {
             assert_eq!(request.method, "POST");
             assert_eq!(
                 request.path,
-                "/api/sessions/session-parent/agent-commands/review-local/resolve"
+                "/api/sessions/session-parent/agent-commands/review-code/resolve"
             );
             (
                 404,
@@ -1938,7 +1962,7 @@ mod delegation_mcp_tests {
 
         let err = bridge
             .tool_spawn_session(json!({
-                "prompt": "/review-local"
+                "prompt": "/review-code"
             }))
             .expect_err("non-command 404 should surface");
 
@@ -2045,7 +2069,7 @@ mod delegation_mcp_tests {
             assert_eq!(request.method, "POST");
             assert_eq!(
                 request.path,
-                "/api/sessions/session-parent/agent-commands/review-local/resolve"
+                "/api/sessions/session-parent/agent-commands/review-code/resolve"
             );
             let body: Value =
                 serde_json::from_str(&request.body).expect("resolve body should be JSON");
@@ -2060,8 +2084,8 @@ mod delegation_mcp_tests {
             (
                 200,
                 json!({
-                    "name": "review-local",
-                    "visiblePrompt": "/review-local",
+                    "name": "review-code",
+                    "visiblePrompt": "/review-code",
                     "expandedPrompt": "Parent-scope review command"
                 }),
             )
@@ -2071,14 +2095,14 @@ mod delegation_mcp_tests {
 
         let err = bridge
             .tool_spawn_session(json!({
-                "prompt": "/review-local",
+                "prompt": "/review-code",
                 "cwd": "C:\\repo\\child"
             }))
             .expect_err("parent-known command missing from requested cwd should fail");
 
         assert!(err
             .to_string()
-            .contains("agent command `review-local` was not found in requested cwd"));
+            .contains("agent command `review-code` was not found in requested cwd"));
         server.join().expect("test server should join");
         assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
     }
@@ -2090,7 +2114,7 @@ mod delegation_mcp_tests {
             assert_eq!(request.path, "/api/sessions/session-parent/delegations");
             let body: Value =
                 serde_json::from_str(&request.body).expect("delegation body should be JSON");
-            assert_eq!(body["prompt"], "/review-local\nleave this literal");
+            assert_eq!(body["prompt"], "/review-code\nleave this literal");
             (
                 200,
                 json!({
@@ -2107,7 +2131,7 @@ mod delegation_mcp_tests {
 
         bridge
             .tool_spawn_session(json!({
-                "prompt": "/review-local\nleave this literal"
+                "prompt": "/review-code\nleave this literal"
             }))
             .expect("multiline prompts should not be slash-expanded");
 
@@ -2122,7 +2146,7 @@ mod delegation_mcp_tests {
             assert_eq!(request.path, "/api/sessions/session-parent/delegations");
             let body: Value =
                 serde_json::from_str(&request.body).expect("delegation body should be JSON");
-            assert_eq!(body["prompt"], "/ review-local");
+            assert_eq!(body["prompt"], "/ review-code");
             (
                 200,
                 json!({
@@ -2139,7 +2163,7 @@ mod delegation_mcp_tests {
 
         bridge
             .tool_spawn_session(json!({
-                "prompt": "/ review-local"
+                "prompt": "/ review-code"
             }))
             .expect("slash followed by whitespace should stay literal like the UI parser");
 
@@ -2151,7 +2175,7 @@ mod delegation_mcp_tests {
     fn delegation_mcp_spawn_session_explicit_options_override_resolved_defaults() {
         let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
             match (request.method.as_str(), request.path.as_str()) {
-                ("POST", "/api/sessions/session-parent/agent-commands/review-local/resolve") => {
+                ("POST", "/api/sessions/session-parent/agent-commands/review-code/resolve") => {
                     let body: Value =
                         serde_json::from_str(&request.body).expect("resolve body should be JSON");
                     assert!(body.get("arguments").is_none());
@@ -2160,9 +2184,9 @@ mod delegation_mcp_tests {
                     (
                         200,
                         json!({
-                            "name": "review-local",
-                            "visiblePrompt": "/review-local",
-                            "expandedPrompt": "Expanded review-local command body",
+                            "name": "review-code",
+                            "visiblePrompt": "/review-code",
+                            "expandedPrompt": "Expanded review-code command body",
                             "title": "Resolved title",
                             "delegation": {
                                 "mode": "explorer",
@@ -2174,7 +2198,7 @@ mod delegation_mcp_tests {
                 ("POST", "/api/sessions/session-parent/delegations") => {
                     let body: Value = serde_json::from_str(&request.body)
                         .expect("delegation body should be JSON");
-                    assert_eq!(body["prompt"], "Expanded review-local command body");
+                    assert_eq!(body["prompt"], "Expanded review-code command body");
                     assert_eq!(body["title"], "Explicit title");
                     assert_eq!(body["mode"], "reviewer");
                     assert_eq!(body.pointer("/writePolicy/kind"), Some(&json!("readOnly")));
@@ -2197,7 +2221,7 @@ mod delegation_mcp_tests {
 
         bridge
             .tool_spawn_session(json!({
-                "prompt": "/review-local",
+                "prompt": "/review-code",
                 "title": "Explicit title",
                 "mode": "reviewer",
                 "writePolicy": "readOnly"
@@ -2214,12 +2238,12 @@ mod delegation_mcp_tests {
             assert_eq!(request.method, "POST");
             assert_eq!(
                 request.path,
-                "/api/sessions/session-parent/agent-commands/review-local/resolve"
+                "/api/sessions/session-parent/agent-commands/review-code/resolve"
             );
             (
                 200,
                 json!({
-                    "name": "review-local",
+                    "name": "review-code",
                     "visiblePrompt": " ",
                     "expandedPrompt": ""
                 }),
@@ -2230,13 +2254,13 @@ mod delegation_mcp_tests {
 
         let err = bridge
             .tool_spawn_session(json!({
-                "prompt": "/review-local"
+                "prompt": "/review-code"
             }))
             .expect_err("empty resolved prompts should be rejected before spawning");
 
         assert!(err
             .to_string()
-            .contains("agent command `review-local` resolved without prompt content"));
+            .contains("agent command `review-code` resolved without prompt content"));
         server.join().expect("test server should join");
         assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
     }

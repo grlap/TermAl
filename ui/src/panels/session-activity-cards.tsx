@@ -40,7 +40,18 @@
 // prompt"), same memo comparator keys.
 
 import { memo } from "react";
+import {
+  DELEGATION_FAN_IN_AUTHOR_LABEL,
+  isDelegationFanInText,
+} from "../delegation-fan-in";
+import { DelegationFanInMessage } from "../delegation-fan-in-message";
 import { ExpandedPromptPanel } from "../ExpandedPromptPanel";
+import {
+  isLongPeerMessage,
+  isPeerMessageBatch,
+  LongPeerMessage,
+  PEER_MESSAGE_BATCH_AUTHOR_LABEL,
+} from "../long-peer-message";
 import { renderHighlightedText, type SearchHighlightTone } from "../search-highlight";
 import type { PendingPrompt, Session } from "../types";
 import {
@@ -96,6 +107,11 @@ export const PendingPromptCard = memo(function PendingPromptCard({
   searchHighlightTone?: SearchHighlightTone;
 }) {
   const commandLabel = promptCommandMetaLabel(prompt.text, prompt.expandedText);
+  const isDelegationFanIn =
+    !prompt.source && isDelegationFanInText(prompt.text);
+  const isPeerBatch = isPeerMessageBatch(prompt.source);
+  const shouldCollapsePeerMessage =
+    (Boolean(prompt.source) || isPeerBatch) && isLongPeerMessage(prompt.text);
 
   return (
     <article className="message-card bubble bubble-you pending-prompt-card">
@@ -103,7 +119,13 @@ export const PendingPromptCard = memo(function PendingPromptCard({
         <MessageMeta
           author="you"
           timestamp={prompt.timestamp}
-          sourceName={prompt.source?.name}
+          sourceName={
+            isDelegationFanIn
+              ? DELEGATION_FAN_IN_AUTHOR_LABEL
+              : isPeerBatch
+                ? PEER_MESSAGE_BATCH_AUTHOR_LABEL
+              : prompt.source?.name
+          }
           trailing={
             commandLabel ? <span className="message-meta-tag">{commandLabel}</span> : undefined
           }
@@ -127,19 +149,35 @@ export const PendingPromptCard = memo(function PendingPromptCard({
         />
       ) : null}
       {prompt.text ? (
-        <>
-          <p className="plain-text-copy">
-            {renderHighlightedText(prompt.text, searchQuery, searchHighlightTone)}
-          </p>
-          {prompt.expandedText ? (
-            <ExpandedPromptPanel
-              expandedText={prompt.expandedText}
-              storageKey={prompt.id}
-              searchQuery={searchQuery}
-              searchHighlightTone={searchHighlightTone}
-            />
-          ) : null}
-        </>
+        isDelegationFanIn ? (
+          <DelegationFanInMessage
+            text={prompt.text}
+            storageKey={prompt.id}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+          />
+        ) : shouldCollapsePeerMessage ? (
+          <LongPeerMessage
+            text={prompt.text}
+            storageKey={prompt.id}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+          />
+        ) : (
+          <>
+            <p className="plain-text-copy">
+              {renderHighlightedText(prompt.text, searchQuery, searchHighlightTone)}
+            </p>
+            {prompt.expandedText ? (
+              <ExpandedPromptPanel
+                expandedText={prompt.expandedText}
+                storageKey={prompt.id}
+                searchQuery={searchQuery}
+                searchHighlightTone={searchHighlightTone}
+              />
+            ) : null}
+          </>
+        )
       ) : (
         <p className="support-copy">{imageAttachmentSummaryLabel(prompt.attachments?.length ?? 0)}</p>
       )}

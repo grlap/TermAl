@@ -206,6 +206,8 @@ struct PersistedSessionRecord {
     external_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
     queued_prompts: VecDeque<QueuedPromptRecord>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    queued_peer_messages: HashMap<String, Vec<PendingPrompt>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     remote_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -233,6 +235,7 @@ impl PersistedSessionRecord {
             codex_sandbox_mode: record.codex_sandbox_mode,
             external_session_id: record.external_session_id.clone(),
             queued_prompts: record.queued_prompts.clone(),
+            queued_peer_messages: record.queued_peer_messages.clone(),
             remote_id: record.remote_id.clone(),
             remote_session_id: record.remote_session_id.clone(),
             orchestrator_auto_dispatch_blocked: record.orchestrator_auto_dispatch_blocked,
@@ -272,6 +275,7 @@ impl PersistedSessionRecord {
             pending_codex_app_requests: HashMap::new(),
             pending_acp_approvals: HashMap::new(),
             queued_prompts: self.queued_prompts,
+            queued_peer_messages: self.queued_peer_messages,
             message_positions: build_message_positions(&session.messages),
             remote_id: self.remote_id,
             remote_session_id: self.remote_session_id,

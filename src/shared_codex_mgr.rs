@@ -191,6 +191,35 @@ impl AppState {
         })
     }
 
+    /// Returns how long the shared Codex app-server identified by
+    /// `runtime_id` has been silent on stdout, or `None` when that runtime
+    /// is no longer the one in the shared slot (already torn down or
+    /// replaced — in which case the caller has nothing live to protect).
+    ///
+    /// This is the busy-vs-wedged discriminator for response timeouts: a
+    /// server that emitted ANY stdout line during a request's wait window
+    /// is alive and merely slow (e.g. resuming a multi-hundred-MB rollout
+    /// while other sessions stream), and must not be torn down for one
+    /// unanswered request. Genuinely dead servers never need this probe —
+    /// the stdout reader's EOF path and the `wait()` thread already fail
+    /// pending requests and retire the runtime (`src/codex.rs`).
+    fn shared_codex_stdout_silence_if_matches(&self, runtime_id: &str) -> Option<Duration> {
+        let shared_runtime = self
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        shared_runtime
+            .as_ref()
+            .filter(|runtime| runtime.runtime_id == runtime_id)
+            .map(|runtime| {
+                runtime
+                    .stdout_activity
+                    .lock()
+                    .expect("shared Codex stdout activity mutex poisoned")
+                    .elapsed()
+            })
+    }
+
     /// Zeros the shared runtime slot if and only if it still holds the
     /// runtime with `runtime_id`, then kills that child.
     ///

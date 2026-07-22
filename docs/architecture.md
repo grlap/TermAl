@@ -238,7 +238,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/markers` | Create a conversation marker and publish `ConversationMarkerCreated`. Returns `201` with `ConversationMarkerResponse`; malformed JSON uses the standard `ApiError` envelope. |
 | PATCH | `/api/sessions/{id}/markers/{marker_id}` | Patch marker kind/name/body/color/message anchors. Nullable `body` and `endMessageId` clear those fields. Publishes `ConversationMarkerUpdated`. |
 | DELETE | `/api/sessions/{id}/markers/{marker_id}` | Delete one conversation marker and publish `ConversationMarkerDeleted`. |
-| POST | `/api/sessions/{id}/messages` | Send a message to a session; queues on the target's pending-prompt FIFO if it is mid-turn. Optional `sourceSessionId` (set by `termal_send_to_session`) marks the message as delivered from a peer session — the backend resolves it to the sender's display name for the transcript label, so the name is backend-authoritative rather than taken from the message body. |
+| POST | `/api/sessions/{id}/messages` | Send a message to a session; queues on the target's pending-prompt FIFO if it is mid-turn. The `202` state response adds `messageDisposition: "deliveredToIdleSession" | "queuedBehindActiveTurn"`, distinguishing a turn started immediately from a message accepted behind an active turn. Optional `sourceSessionId` (set by `termal_send_to_session`) marks the message as delivered from a peer session — the backend resolves it to the sender's display name for the transcript label, so the name is backend-authoritative rather than taken from the message body. |
 | POST | `/api/sessions/{id}/delegations` | Create a Phase 1 local child delegation session with `readOnly` or `isolatedWorktree` write policy. Returns `201` with `DelegationResponse`; unsupported worker/`sharedWorktree`/remote-backed variants return `501`, active-limit conflicts return `409`, handler-level prompt/scope validation returns `400`, and JSON schema/deserialization failures return `422`. |
 | POST | `/api/sessions/{id}/delegation-waits` | Create a parent-scoped backend resume wait for one or more delegations. Returns `201` with `DelegationWaitResponse`; terminal targets may consume the wait immediately and queue/resume the parent in the same response cycle. |
 | POST | `/api/sessions/{id}/queued-prompts/{prompt_id}/cancel` | Cancel queued prompt |
@@ -357,7 +357,7 @@ remote SSE bridges that omit delta counts are treated as a hard protocol break;
 see `docs/metadata-first-state-plan.md` Contract Precisions -> Field semantics.
 
 ```
-DeltaEvent::TextDelta            { revision, session_id, message_id, message_index, message_count, delta, preview, session_mutation_stamp? }
+DeltaEvent::TextDelta            { revision, session_id, message_id, message_index, message_count, text_start_byte?, delta, preview, session_mutation_stamp? }
 DeltaEvent::TextReplace          { revision, session_id, message_id, message_index, message_count, text, preview, session_mutation_stamp? }
 DeltaEvent::CommandUpdate        { revision, session_id, message_id, message_index, message_count, command, output, status, preview, session_mutation_stamp?, ... }
 DeltaEvent::ParallelAgentsUpdate { revision, session_id, message_id, message_index, message_count, agents, preview, session_mutation_stamp? }
@@ -419,7 +419,15 @@ WorkspaceFilesChangedEvent {
 scope a watcher hint when it can be tied to a project root or session workdir;
 unscoped events still carry the absolute changed path as a fallback.
 
-`TextDelta` appends streaming text to an in-progress message. `TextReplace` overwrites the full message text when the backend receives an authoritative completed payload that diverges from the streamed draft, so clients should replace the target message body instead of appending.
+`TextDelta` appends streaming text to an in-progress message. Current backends
+include `textStartByte`, the UTF-8 byte length of the exact message prefix the
+delta extends. Clients append only when their retained prefix has that byte
+length; a mismatch proves an earlier streaming event was missed and must trigger
+authoritative session hydration instead of displaying a corrupted draft. The
+field is optional only for soft rollout across existing remote TermAl peers.
+`TextReplace` overwrites the full message text when the backend receives an
+authoritative completed payload that diverges from the streamed draft, so
+clients should replace the target message body instead of appending.
 
 On broadcast channel lag, the backend falls back to sending a full state snapshot.
 

@@ -470,7 +470,7 @@ function recordTextareaHeightWrites(
 
 describe("AgentSessionPanelFooter", () => {
   it("shows a command badge in the live turn card for slash commands", () => {
-    render(<RunningIndicator agent="Codex" lastPrompt="/review-local" />);
+    render(<RunningIndicator agent="Codex" lastPrompt="/review-code" />);
 
     expect(screen.getAllByText("Command")).toHaveLength(2);
     expect(screen.getByText("Executing a command...")).toBeInTheDocument();
@@ -810,10 +810,10 @@ describe("AgentSessionPanelFooter", () => {
     const onSend = vi.fn(() => true);
     const onSpawnDelegation = vi.fn(async () => true);
     const fetchMock = stubResolvedAgentCommand({
-      name: "review-local",
-      source: ".claude/commands/review-local.md",
+      name: "review-code",
+      source: ".claude/commands/review-code.md",
       kind: "promptTemplate",
-      visiblePrompt: "/review-local",
+      visiblePrompt: "/review-code",
       expandedPrompt: "Expanded review command body.",
       title: "Review staged and unstaged changes.",
       delegation: {
@@ -831,10 +831,10 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "promptTemplate",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
             content: "Expanded review command body.",
-            source: ".claude/commands/review-local.md",
+            source: ".claude/commands/review-code.md",
           },
         ],
         canSpawnDelegation: true,
@@ -846,7 +846,7 @@ describe("AgentSessionPanelFooter", () => {
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/rev" } });
     expect(
-      screen.getByRole("option", { name: /\/review-local/ }),
+      screen.getByRole("option", { name: /\/review-code/ }),
     ).toBeInTheDocument();
 
     await act(async () => {
@@ -876,10 +876,10 @@ describe("AgentSessionPanelFooter", () => {
     const onSend = vi.fn(() => true);
     const onSpawnDelegation = vi.fn(async () => true);
     stubResolvedAgentCommand({
-      name: "review-local",
-      source: ".claude/commands/review-local.md",
+      name: "review-code",
+      source: ".claude/commands/review-code.md",
       kind: "promptTemplate",
-      visiblePrompt: "/review-local",
+      visiblePrompt: "/review-code",
       expandedPrompt: "Expanded review command body.",
       title: "Review staged and unstaged changes.",
       delegation: {
@@ -898,10 +898,10 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "promptTemplate",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
             content: "Expanded review command body.",
-            source: ".claude/commands/review-local.md",
+            source: ".claude/commands/review-code.md",
           },
         ],
         canSpawnDelegation: true,
@@ -914,7 +914,7 @@ describe("AgentSessionPanelFooter", () => {
     await user.click(textarea);
     await user.keyboard("/rev");
     expect(
-      screen.getByRole("option", { name: /\/review-local/ }),
+      screen.getByRole("option", { name: /\/review-code/ }),
     ).toBeInTheDocument();
     const hint = screen.getByText(/Tab moves focus to Delegate\./);
     expect(textarea).toHaveAttribute("aria-describedby", hint.id);
@@ -948,10 +948,10 @@ describe("AgentSessionPanelFooter", () => {
     const onSend = vi.fn(() => true);
     const onSpawnDelegation = vi.fn(async () => true);
     const fetchMock = stubResolvedAgentCommand({
-      name: "review-local",
-      source: ".claude/commands/review-local.md",
+      name: "review-code",
+      source: ".claude/commands/review-code.md",
       kind: "promptTemplate",
-      visiblePrompt: "/review-local",
+      visiblePrompt: "/review-code",
       expandedPrompt: "Expanded review command body.",
       title: "Review staged and unstaged changes.",
       delegation: {
@@ -969,10 +969,10 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "promptTemplate",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
             content: "Expanded review command body.",
-            source: ".claude/commands/review-local.md",
+            source: ".claude/commands/review-code.md",
           },
         ],
         canSpawnDelegation: true,
@@ -984,7 +984,7 @@ describe("AgentSessionPanelFooter", () => {
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/rev" } });
     expect(
-      screen.getByRole("option", { name: /\/review-local/ }),
+      screen.getByRole("option", { name: /\/review-code/ }),
     ).toBeInTheDocument();
 
     await act(async () => {
@@ -1000,10 +1000,10 @@ describe("AgentSessionPanelFooter", () => {
   it("keeps Tab as send when delegation is unavailable for active agent slash commands", async () => {
     const onSend = vi.fn(() => true);
     const fetchMock = stubResolvedAgentCommand({
-      name: "review-local",
+      name: "review-code",
       source: "Claude project command",
       kind: "nativeSlash",
-      visiblePrompt: "/review-local",
+      visiblePrompt: "/review-code",
       title: "Review staged and unstaged changes.",
     });
     render(
@@ -1016,9 +1016,9 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "nativeSlash",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
-            content: "/review-local",
+            content: "/review-code",
             source: "Claude project command",
           },
         ],
@@ -1029,7 +1029,7 @@ describe("AgentSessionPanelFooter", () => {
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/rev" } });
     expect(
-      screen.getByRole("option", { name: /\/review-local/ }),
+      screen.getByRole("option", { name: /\/review-code/ }),
     ).toBeInTheDocument();
     expect(
       screen.queryByText(/Tab moves focus to Delegate\./),
@@ -1044,7 +1044,7 @@ describe("AgentSessionPanelFooter", () => {
     });
 
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("session-a", "/review-local"),
+      expect(onSend).toHaveBeenCalledWith("session-a", "/review-code"),
     );
     expect(lastJsonRequestBody(fetchMock)).toEqual({
       arguments: "",
@@ -1056,10 +1056,10 @@ describe("AgentSessionPanelFooter", () => {
     const onSend = vi.fn(() => true);
     const onSpawnDelegation = vi.fn(async () => true);
     const fetchMock = stubResolvedAgentCommand({
-      name: "review-local",
-      source: ".claude/commands/review-local.md",
+      name: "review-code",
+      source: ".claude/commands/review-code.md",
       kind: "promptTemplate",
-      visiblePrompt: "/review-local",
+      visiblePrompt: "/review-code",
       expandedPrompt: "Expanded review command body.",
       title: "Review staged and unstaged changes.",
       delegation: {
@@ -1078,10 +1078,10 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "promptTemplate",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
             content: "Expanded review command body.",
-            source: ".claude/commands/review-local.md",
+            source: ".claude/commands/review-code.md",
           },
         ],
         canSpawnDelegation: true,
@@ -1093,7 +1093,7 @@ describe("AgentSessionPanelFooter", () => {
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/rev" } });
     expect(
-      screen.getByRole("option", { name: /\/review-local/ }),
+      screen.getByRole("option", { name: /\/review-code/ }),
     ).toBeInTheDocument();
     const delegateButton = screen.getByRole("button", { name: "Delegate" });
     expect(delegateButton).toBeDisabled();
@@ -1138,9 +1138,9 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "nativeSlash",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
-            content: "/review-local",
+            content: "/review-code",
             source: "Claude project command",
           },
         ],
@@ -1149,7 +1149,7 @@ describe("AgentSessionPanelFooter", () => {
 
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, {
-      target: { value: "/review-local -- include staged and unstaged files" },
+      target: { value: "/review-code -- include staged and unstaged files" },
     });
 
     await act(async () => {
@@ -1162,7 +1162,7 @@ describe("AgentSessionPanelFooter", () => {
     );
     expect(screen.getByRole("alert").closest(".composer-slash-menu")).not.toBeNull();
     expect(textarea).toHaveValue(
-      "/review-local -- include staged and unstaged files",
+      "/review-code -- include staged and unstaged files",
     );
     expect(lastJsonRequestBody(fetchMock)).toEqual({
       arguments: "",
@@ -1171,7 +1171,7 @@ describe("AgentSessionPanelFooter", () => {
     });
     expect(onSend).not.toHaveBeenCalled();
 
-    fireEvent.change(textarea, { target: { value: "/review-local" } });
+    fireEvent.change(textarea, { target: { value: "/review-code" } });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -1181,7 +1181,7 @@ describe("AgentSessionPanelFooter", () => {
       return new Response(
         JSON.stringify({
           error:
-            "failed to read config=/workspace/secrets/review-local.md token=secret",
+            "failed to read config=/workspace/secrets/review-code.md token=secret",
         }),
         {
           status: 400,
@@ -1200,17 +1200,17 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "promptTemplate",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
             content: "Expanded review command body.",
-            source: ".claude/commands/review-local.md",
+            source: ".claude/commands/review-code.md",
           },
         ],
       }),
     );
 
     const textarea = screen.getByLabelText("Message session-a");
-    fireEvent.change(textarea, { target: { value: "/review-local" } });
+    fireEvent.change(textarea, { target: { value: "/review-code" } });
 
     await act(async () => {
       fireEvent.keyDown(textarea, { key: "Enter" });
@@ -1223,7 +1223,7 @@ describe("AgentSessionPanelFooter", () => {
     );
     expect(document.body).not.toHaveTextContent("/workspace/secrets");
     expect(document.body).not.toHaveTextContent("token=secret");
-    expect(document.body).not.toHaveTextContent("review-local.md");
+    expect(document.body).not.toHaveTextContent("review-code.md");
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -1251,9 +1251,9 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "nativeSlash",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
-            content: "/review-local",
+            content: "/review-code",
             source: "Claude project command",
           },
           {
@@ -1294,7 +1294,7 @@ describe("AgentSessionPanelFooter", () => {
       return new Response(
         JSON.stringify({
           error:
-            "failed to read agent command metadata C:\\secret\\project\\.claude\\commands\\review-local.md",
+            "failed to read agent command metadata C:\\secret\\project\\.claude\\commands\\review-code.md",
         }),
         {
           status: 500,
@@ -1313,17 +1313,17 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "promptTemplate",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
             content: "Expanded review command body.",
-            source: ".claude/commands/review-local.md",
+            source: ".claude/commands/review-code.md",
           },
         ],
       }),
     );
 
     const textarea = screen.getByLabelText("Message session-a");
-    fireEvent.change(textarea, { target: { value: "/review-local" } });
+    fireEvent.change(textarea, { target: { value: "/review-code" } });
 
     await act(async () => {
       fireEvent.keyDown(textarea, { key: "Enter" });
@@ -1335,8 +1335,8 @@ describe("AgentSessionPanelFooter", () => {
       "Could not resolve the slash command. Check the command file and try again.",
     );
     expect(document.body).not.toHaveTextContent("C:\\secret");
-    expect(document.body).not.toHaveTextContent("review-local.md");
-    expect(textarea).toHaveValue("/review-local");
+    expect(document.body).not.toHaveTextContent("review-code.md");
+    expect(textarea).toHaveValue("/review-code");
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -1356,10 +1356,10 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "promptTemplate",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
             content: "Expanded review command body.",
-            source: ".claude/commands/review-local.md",
+            source: ".claude/commands/review-code.md",
           },
         ],
         canSpawnDelegation: true,
@@ -1507,9 +1507,9 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "nativeSlash",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
-            content: "/review-local",
+            content: "/review-code",
             source: "Claude project command",
           },
         ],
@@ -1537,10 +1537,10 @@ describe("AgentSessionPanelFooter", () => {
       pendingResolve.resolve(
         new Response(
           JSON.stringify({
-            name: "review-local",
+            name: "review-code",
             source: "Claude project command",
             kind: "nativeSlash",
-            visiblePrompt: "/review-local",
+            visiblePrompt: "/review-code",
             title: "Review staged and unstaged changes.",
             delegation: {
               mode: "reviewer",
@@ -1556,7 +1556,7 @@ describe("AgentSessionPanelFooter", () => {
     });
 
     await waitFor(() =>
-      expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "/review-local", {
+      expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "/review-code", {
         mode: "reviewer",
         title: "Review staged and unstaged changes.",
         writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
@@ -1582,9 +1582,9 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "nativeSlash",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
-            content: "/review-local",
+            content: "/review-code",
             source: "Claude project command",
           },
         ],
@@ -1622,10 +1622,10 @@ describe("AgentSessionPanelFooter", () => {
       pendingResolve.resolve(
         new Response(
           JSON.stringify({
-            name: "review-local",
+            name: "review-code",
             source: "Claude project command",
             kind: "nativeSlash",
-            visiblePrompt: "/review-local",
+            visiblePrompt: "/review-code",
             title: "Review staged and unstaged changes.",
             delegation: {
               mode: "reviewer",
@@ -1663,9 +1663,9 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "nativeSlash",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
-            content: "/review-local",
+            content: "/review-code",
             source: "Claude project command",
           },
         ],
@@ -1707,14 +1707,14 @@ describe("AgentSessionPanelFooter", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("delegates review-local native slash commands in an isolated worktree", async () => {
+  it("delegates review-code native slash commands in an isolated worktree", async () => {
     const onSend = vi.fn(() => true);
     const onSpawnDelegation = vi.fn(async () => true);
     stubResolvedAgentCommand({
-      name: "review-local",
-      source: ".claude/commands/review-local.md",
+      name: "review-code",
+      source: ".claude/commands/review-code.md",
       kind: "nativeSlash",
-      visiblePrompt: "/review-local",
+      visiblePrompt: "/review-code",
       title: "Review staged and unstaged changes.",
       delegation: {
         mode: "reviewer",
@@ -1731,10 +1731,10 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "nativeSlash",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
-            content: "/review-local",
-            source: ".claude/commands/review-local.md",
+            content: "/review-code",
+            source: ".claude/commands/review-code.md",
           },
         ],
         canSpawnDelegation: true,
@@ -1751,7 +1751,7 @@ describe("AgentSessionPanelFooter", () => {
       await Promise.resolve();
     });
 
-    expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "/review-local", {
+    expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "/review-code", {
       mode: "reviewer",
       title: "Review staged and unstaged changes.",
       writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
@@ -3054,10 +3054,10 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "promptTemplate",
-            name: "review-local",
+            name: "review-code",
             description: "Review local changes.",
             content: "Review local changes.",
-            source: ".claude/commands/review-local.md",
+            source: ".claude/commands/review-code.md",
           },
         ],
       }),
@@ -3083,10 +3083,10 @@ describe("AgentSessionPanelFooter", () => {
           agentCommands: [
             {
               kind: "promptTemplate",
-              name: "review-local",
+              name: "review-code",
               description: "Review local changes.",
               content: "Review local changes.",
-              source: ".claude/commands/review-local.md",
+              source: ".claude/commands/review-code.md",
             },
           ],
         }),
@@ -3130,10 +3130,10 @@ describe("AgentSessionPanelFooter", () => {
         }),
         agentCommands: [
           {
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
             content: "Review staged and unstaged changes.",
-            source: ".claude/commands/review-local.md",
+            source: ".claude/commands/review-code.md",
           },
         ],
       }),
@@ -3145,17 +3145,17 @@ describe("AgentSessionPanelFooter", () => {
 
     expect(screen.getByText("Agent Commands")).toBeInTheDocument();
     expect(screen.getByText("Session Controls")).toBeInTheDocument();
-    expect(screen.getByText("/review-local")).toBeInTheDocument();
+    expect(screen.getByText("/review-code")).toBeInTheDocument();
     expect(screen.getByText("/model")).toBeInTheDocument();
   });
 
   it("sends a no-argument agent command directly from the slash menu", async () => {
     const onSend = vi.fn(() => true);
     const fetchMock = stubResolvedAgentCommand({
-      name: "review-local",
+      name: "review-code",
       source: "Claude project command",
       kind: "nativeSlash",
-      visiblePrompt: "/review-local",
+      visiblePrompt: "/review-code",
       title: "Review staged and unstaged changes.",
     });
 
@@ -3169,9 +3169,9 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "nativeSlash",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
-            content: "/review-local",
+            content: "/review-code",
             source: "Claude project command",
           },
         ],
@@ -3186,7 +3186,7 @@ describe("AgentSessionPanelFooter", () => {
     });
 
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("session-a", "/review-local"),
+      expect(onSend).toHaveBeenCalledWith("session-a", "/review-code"),
     );
     expect(lastJsonRequestBody(fetchMock)).toEqual({
       arguments: "",
@@ -3210,9 +3210,9 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "nativeSlash",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
-            content: "/review-local",
+            content: "/review-code",
             source: "Claude project command",
           },
         ],
@@ -3235,10 +3235,10 @@ describe("AgentSessionPanelFooter", () => {
       pendingResolve.resolve(
         new Response(
           JSON.stringify({
-            name: "review-local",
+            name: "review-code",
             source: "Claude project command",
             kind: "nativeSlash",
-            visiblePrompt: "/review-local",
+            visiblePrompt: "/review-code",
             title: "Review staged and unstaged changes.",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -3249,7 +3249,7 @@ describe("AgentSessionPanelFooter", () => {
     });
 
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("session-a", "/review-local"),
+      expect(onSend).toHaveBeenCalledWith("session-a", "/review-code"),
     );
     expect(onSend).toHaveBeenCalledTimes(1);
   });
@@ -3269,9 +3269,9 @@ describe("AgentSessionPanelFooter", () => {
         agentCommands: [
           {
             kind: "nativeSlash",
-            name: "review-local",
+            name: "review-code",
             description: "Review staged and unstaged changes.",
-            content: "/review-local",
+            content: "/review-code",
             source: "Claude project command",
           },
         ],

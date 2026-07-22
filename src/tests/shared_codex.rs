@@ -7,19 +7,17 @@
 //! the right per-session transcript — `SharedCodexSessionState` in
 //! `src/runtime.rs` tracks the active `turn_id`, a grace-period
 //! `completed_turn_id`, pending thread-setup / turn-start request ids, and
-//! the recorder bookkeeping that ties item-completed / content-delta / final
+//! the recorder bookkeeping that ties typed item/completed and text deltas
 //! messages back to a single on-screen assistant message.
 //!
-//! Routing is fragile because events race: a `codex/event/agent_message`
-//! final can arrive AFTER `turn/completed`, still-in-flight chunks for the
+//! Routing is fragile because events race: a typed `item/completed`
+//! can arrive AFTER `turn/completed`, still-in-flight chunks for the
 //! previous turn can land AFTER the next turn started (stale turn_id), and
 //! a dropped `session_id` forces a fallback through `conversation_id`. The
-//! streaming reconciler further has to cope with Codex sending both
-//! `agent_message_content_delta` chunks AND a `final` whole-text message —
-//! it must append a missing suffix, skip an exact duplicate, or replace
-//! divergent text, and tolerate the final arriving outside the turn window.
+//! streaming reconciler concatenates typed deltas verbatim and then appends,
+//! skips, or replaces against authoritative item/completed text.
 //! Codex's subagent "agent message" results are buffered during the turn
-//! and flushed as a summary AFTER the final assistant text so narrative
+//! and flushed as a summary BEFORE the final assistant text so narrative
 //! order is preserved; a stop-in-progress flag defers runtime events while
 //! stop machinery finalizes state (dedicated replay tests live in
 //! `tests/session_stop.rs`). Production entry points are the
@@ -28,8 +26,8 @@
 
 use super::*;
 
-// Pins that a subagent task_complete summary is buffered until the final
-// agent_message lands, then inserted BEFORE the final assistant text.
+// Pins that a subagent task_complete summary is buffered until typed
+// item/completed lands, then inserted BEFORE the final assistant text.
 // Guards against surfacing the subagent result out of narrative order
 // (above or without the human-facing answer).
 #[test]
@@ -94,14 +92,14 @@ fn shared_codex_task_complete_event_buffers_subagent_result_until_final_agent_me
         }
     });
     let final_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-sub-1",
-            "msg": {
-                "message": "Final shared Codex answer.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-sub-1",
+            "item": {
+                "id": "msg-final",
+                "type": "agentMessage",
+                "text": "Final shared Codex answer."
             }
         }
     });
@@ -230,13 +228,13 @@ fn shared_codex_agent_message_event_without_turn_id_uses_active_turn() {
         }
     });
     let final_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "msg": {
-                "message": "Final shared Codex answer.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "item": {
+                "id": "msg-final",
+                "type": "agentMessage",
+                "text": "Final shared Codex answer."
             }
         }
     });
@@ -277,12 +275,10 @@ fn shared_codex_agent_message_event_without_turn_id_uses_active_turn() {
     ));
 }
 
-// Pins that final and completion notifications without a thread id can still
-// route by the in-flight turn id. Live shared-Codex app-server events can be
-// persisted in Codex rollout state with only `turn_id`; dropping those leaves
-// TermAl sessions active even though Codex produced the final answer.
+// Pins that typed turn/completed can still route by its in-flight turn id when
+// threadId is absent. The legacy final-message mirror remains ignored.
 #[test]
-fn shared_codex_turn_events_without_thread_id_route_by_active_turn_id() {
+fn shared_codex_turn_completed_without_thread_id_routes_by_active_turn_id() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _input_rx, process) =
@@ -370,24 +366,14 @@ fn shared_codex_turn_events_without_thread_id_route_by_active_turn_id() {
         .expect("updated session should be present");
 
     assert_eq!(session.status, SessionStatus::Idle);
-    assert_eq!(
-        session.preview,
-        "Final shared Codex answer without thread id."
-    );
-    assert_eq!(session.messages.len(), 1);
-    assert!(matches!(
-        session.messages.first(),
-        Some(Message::Text { text, .. }) if text == "Final shared Codex answer without thread id."
-    ));
+    assert_eq!(session.preview, "Ready for a prompt.");
+    assert!(session.messages.is_empty());
 }
 
-// Pins that a terminal task_complete without a thread id can finish the
-// active turn by turn id and use last_agent_message as the final assistant
-// text. Live delegate reviewers can emit this shape after the canonical
-// agent_message, and dropping it leaves the TermAl session active until
-// runtime shutdown marks it failed.
+// Legacy terminal task_complete is ignored entirely; typed turn/completed
+// owns the current Codex lifecycle.
 #[test]
-fn shared_codex_terminal_task_complete_without_thread_id_finishes_turn() {
+fn shared_codex_legacy_terminal_task_complete_without_thread_id_is_ignored() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _input_rx, process) =
@@ -454,19 +440,14 @@ fn shared_codex_terminal_task_complete_without_thread_id_finishes_turn() {
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
 
-    assert_eq!(session.status, SessionStatus::Idle);
-    assert_eq!(session.preview, "Final answer from task_complete.");
-    assert_eq!(session.messages.len(), 1);
-    assert!(matches!(
-        session.messages.first(),
-        Some(Message::Text { text, .. }) if text == "Final answer from task_complete."
-    ));
+    assert_eq!(session.status, SessionStatus::Active);
+    assert_eq!(session.preview, "Ready for a prompt.");
+    assert!(session.messages.is_empty());
 }
 
-// Pins that task_complete is a terminal fallback, not a second final bubble,
-// when Codex already delivered the canonical agent_message first.
+// Pins that a legacy task_complete cannot duplicate authoritative typed text.
 #[test]
-fn shared_codex_terminal_task_complete_after_agent_message_does_not_duplicate_final_text() {
+fn shared_codex_legacy_task_complete_after_typed_message_does_not_duplicate_text() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _input_rx, process) =
@@ -502,16 +483,22 @@ fn shared_codex_terminal_task_complete_after_agent_message_does_not_duplicate_fi
                 ..SharedCodexSessionState::default()
             },
         );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
 
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let final_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "id": "turn-terminal-after-final",
-            "msg": {
-                "message": "Final answer before task_complete.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-terminal-after-final",
+            "item": {
+                "id": "msg-final",
+                "type": "agentMessage",
+                "text": "Final answer before task_complete."
             }
         }
     });
@@ -554,7 +541,7 @@ fn shared_codex_terminal_task_complete_after_agent_message_does_not_duplicate_fi
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
 
-    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(session.status, SessionStatus::Active);
     assert_eq!(session.preview, "Final answer before task_complete.");
     assert_eq!(session.messages.len(), 1);
     assert!(matches!(
@@ -563,11 +550,10 @@ fn shared_codex_terminal_task_complete_after_agent_message_does_not_duplicate_fi
     ));
 }
 
-// Pins that terminal task_complete can act as an early finalization fallback
-// without duplicating the canonical final agent_message if Codex sends it
-// during the completed-turn grace window.
+// Pins that typed item/completed remains authoritative after an ignored
+// legacy task_complete mirror.
 #[test]
-fn shared_codex_terminal_task_complete_before_agent_message_does_not_duplicate_final_text() {
+fn shared_codex_typed_message_after_legacy_task_complete_uses_only_typed_text() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _input_rx, process) =
@@ -603,6 +589,11 @@ fn shared_codex_terminal_task_complete_before_agent_message_does_not_duplicate_f
                 ..SharedCodexSessionState::default()
             },
         );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
 
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let task_complete = json!({
@@ -616,13 +607,14 @@ fn shared_codex_terminal_task_complete_before_agent_message_does_not_duplicate_f
         }
     });
     let final_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "id": "turn-terminal-before-final",
-            "msg": {
-                "message": "Final answer from task_complete.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-terminal-before-final",
+            "item": {
+                "id": "msg-final",
+                "type": "agentMessage",
+                "text": "Final answer from task_complete."
             }
         }
     });
@@ -655,7 +647,7 @@ fn shared_codex_terminal_task_complete_before_agent_message_does_not_duplicate_f
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
 
-    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(session.status, SessionStatus::Active);
     assert_eq!(session.preview, "Final answer from task_complete.");
     assert_eq!(session.messages.len(), 1);
     assert!(matches!(
@@ -664,11 +656,10 @@ fn shared_codex_terminal_task_complete_before_agent_message_does_not_duplicate_f
     ));
 }
 
-// Pins that a terminal task_complete fallback remains open for reconciliation:
-// if Codex later sends a canonical final agent_message with extra text, the
-// transcript is updated in place rather than receiving a second assistant block.
+// Pins that a longer typed item/completed remains authoritative after an
+// ignored legacy task_complete payload.
 #[test]
-fn shared_codex_terminal_task_complete_before_agent_message_appends_final_suffix() {
+fn shared_codex_typed_message_after_legacy_task_complete_records_full_text() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _input_rx, process) =
@@ -704,6 +695,11 @@ fn shared_codex_terminal_task_complete_before_agent_message_appends_final_suffix
                 ..SharedCodexSessionState::default()
             },
         );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-123".to_owned(), session_id.clone());
 
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let task_complete = json!({
@@ -717,13 +713,14 @@ fn shared_codex_terminal_task_complete_before_agent_message_appends_final_suffix
         }
     });
     let final_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "id": "turn-terminal-before-final-suffix",
-            "msg": {
-                "message": "Final answer from task_complete. More detail.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-terminal-before-final-suffix",
+            "item": {
+                "id": "msg-final",
+                "type": "agentMessage",
+                "text": "Final answer from task_complete. More detail."
             }
         }
     });
@@ -756,7 +753,7 @@ fn shared_codex_terminal_task_complete_before_agent_message_appends_final_suffix
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
 
-    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(session.status, SessionStatus::Active);
     assert_eq!(
         session.preview,
         "Final answer from task_complete. More detail."
@@ -833,26 +830,26 @@ fn shared_codex_agent_message_event_ignores_stale_turn_id_from_params_id() {
         }
     });
     let stale_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-stale",
-            "msg": {
-                "message": "Stale shared Codex answer.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-stale",
+            "item": {
+                "id": "msg-stale",
+                "type": "agentMessage",
+                "text": "Stale shared Codex answer."
             }
         }
     });
     let current_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-current",
-            "msg": {
-                "message": "Current shared Codex answer.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-current",
+            "item": {
+                "id": "msg-current",
+                "type": "agentMessage",
+                "text": "Current shared Codex answer."
             }
         }
     });
@@ -1003,14 +1000,14 @@ fn shared_codex_task_complete_event_stays_in_current_turn_after_prior_assistant_
         }
     });
     let final_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-sub-2",
-            "msg": {
-                "message": "Current shared Codex answer.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-sub-2",
+            "item": {
+                "id": "msg-final",
+                "type": "agentMessage",
+                "text": "Current shared Codex answer."
             }
         }
     });
@@ -1223,17 +1220,12 @@ fn shared_codex_task_complete_event_after_streaming_output_inserts_before_answer
         }
     });
     let delta_message = json!({
-        "method": "codex/event/agent_message_content_delta",
+        "method": "item/agentMessage/delta",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-sub-3",
-            "msg": {
-                "delta": "Current shared Codex answer.",
-                "item_id": "msg-123",
-                "thread_id": "conversation-123",
-                "turn_id": "turn-sub-3",
-                "type": "agent_message_content_delta"
-            }
+            "threadId": "conversation-123",
+            "turnId": "turn-sub-3",
+            "itemId": "msg-123",
+            "delta": "Current shared Codex answer."
         }
     });
     let task_complete = json!({
@@ -1404,14 +1396,14 @@ fn shared_codex_task_complete_event_ignores_stale_summary_from_previous_turn() {
         }
     });
     let final_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-current",
-            "msg": {
-                "message": "Current shared Codex answer.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-current",
+            "item": {
+                "id": "msg-current",
+                "type": "agentMessage",
+                "text": "Current shared Codex answer."
             }
         }
     });
@@ -1763,25 +1755,14 @@ fn shared_codex_item_completed_event_records_agent_message() {
         }
     });
     let message = json!({
-        "method": "codex/event/item_completed",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-123",
-            "msg": {
-                "item": {
-                    "content": [
-                        {
-                            "text": "Hello.",
-                            "type": "Text"
-                        }
-                    ],
-                    "id": "msg-123",
-                    "phase": "final_answer",
-                    "type": "AgentMessage"
-                },
-                "thread_id": "conversation-123",
-                "turn_id": "turn-123",
-                "type": "item_completed"
+            "threadId": "conversation-123",
+            "turnId": "turn-123",
+            "item": {
+                "id": "msg-123",
+                "type": "agentMessage",
+                "text": "Hello."
             }
         }
     });
@@ -1885,46 +1866,26 @@ fn shared_codex_item_completed_event_ignores_stale_turn_id_from_params_id() {
         }
     });
     let stale_message = json!({
-        "method": "codex/event/item_completed",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-stale",
-            "msg": {
-                "item": {
-                    "content": [
-                        {
-                            "text": "Stale shared Codex answer.",
-                            "type": "Text"
-                        }
-                    ],
-                    "id": "msg-stale",
-                    "phase": "final_answer",
-                    "type": "AgentMessage"
-                },
-                "thread_id": "conversation-123",
-                "type": "item_completed"
+            "threadId": "conversation-123",
+            "turnId": "turn-stale",
+            "item": {
+                "id": "msg-stale",
+                "type": "agentMessage",
+                "text": "Stale shared Codex answer."
             }
         }
     });
     let current_message = json!({
-        "method": "codex/event/item_completed",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-current",
-            "msg": {
-                "item": {
-                    "content": [
-                        {
-                            "text": "Current shared Codex answer.",
-                            "type": "Text"
-                        }
-                    ],
-                    "id": "msg-current",
-                    "phase": "final_answer",
-                    "type": "AgentMessage"
-                },
-                "thread_id": "conversation-123",
-                "type": "item_completed"
+            "threadId": "conversation-123",
+            "turnId": "turn-current",
+            "item": {
+                "id": "msg-current",
+                "type": "agentMessage",
+                "text": "Current shared Codex answer."
             }
         }
     });
@@ -2051,35 +2012,14 @@ fn shared_codex_item_completed_event_concatenates_multipart_agent_message() {
         }
     });
     let message = json!({
-        "method": "codex/event/item_completed",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-123",
-            "msg": {
-                "item": {
-                    "content": [
-                        {
-                            "text": "Hello",
-                            "type": "Text"
-                        },
-                        {
-                            "metadata": {
-                                "ignored": true
-                            },
-                            "type": "Reasoning"
-                        },
-                        {
-                            "text": ", world.",
-                            "type": "Text"
-                        }
-                    ],
-                    "id": "msg-123",
-                    "phase": "final_answer",
-                    "type": "AgentMessage"
-                },
-                "thread_id": "conversation-123",
-                "turn_id": "turn-123",
-                "type": "item_completed"
+            "threadId": "conversation-123",
+            "turnId": "turn-123",
+            "item": {
+                "id": "msg-123",
+                "type": "agentMessage",
+                "text": "Hello, world."
             }
         }
     });
@@ -2184,29 +2124,21 @@ fn shared_codex_agent_message_content_delta_event_ignores_stale_turn_id_from_par
         }
     });
     let stale_delta_message = json!({
-        "method": "codex/event/agent_message_content_delta",
+        "method": "item/agentMessage/delta",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-stale",
-            "msg": {
-                "delta": "Stale shared Codex answer.",
-                "item_id": "msg-stale",
-                "thread_id": "conversation-123",
-                "type": "agent_message_content_delta"
-            }
+            "threadId": "conversation-123",
+            "turnId": "turn-stale",
+            "itemId": "msg-stale",
+            "delta": "Stale shared Codex answer."
         }
     });
     let current_delta_message = json!({
-        "method": "codex/event/agent_message_content_delta",
+        "method": "item/agentMessage/delta",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-current",
-            "msg": {
-                "delta": "Current shared Codex answer.",
-                "item_id": "msg-current",
-                "thread_id": "conversation-123",
-                "type": "agent_message_content_delta"
-            }
+            "threadId": "conversation-123",
+            "turnId": "turn-current",
+            "itemId": "msg-current",
+            "delta": "Current shared Codex answer."
         }
     });
 
@@ -2332,28 +2264,23 @@ fn shared_codex_agent_message_final_event_appends_missing_suffix_after_streamed_
         }
     });
     let delta_message = json!({
-        "method": "codex/event/agent_message_content_delta",
+        "method": "item/agentMessage/delta",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-123",
-            "msg": {
-                "delta": "Hello",
-                "item_id": "msg-123",
-                "thread_id": "conversation-123",
-                "turn_id": "turn-123",
-                "type": "agent_message_content_delta"
-            }
+            "threadId": "conversation-123",
+            "turnId": "turn-123",
+            "itemId": "msg-123",
+            "delta": "Hello"
         }
     });
     let final_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-123",
-            "msg": {
-                "message": "Hello there.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-123",
+            "item": {
+                "id": "msg-123",
+                "type": "agentMessage",
+                "text": "Hello there."
             }
         }
     });
@@ -2457,28 +2384,23 @@ fn shared_codex_agent_message_final_event_replaces_divergent_streamed_text() {
         }
     });
     let delta_message = json!({
-        "method": "codex/event/agent_message_content_delta",
+        "method": "item/agentMessage/delta",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-123",
-            "msg": {
-                "delta": "Hello from stream",
-                "item_id": "msg-123",
-                "thread_id": "conversation-123",
-                "turn_id": "turn-123",
-                "type": "agent_message_content_delta"
-            }
+            "threadId": "conversation-123",
+            "turnId": "turn-123",
+            "itemId": "msg-123",
+            "delta": "Hello from stream"
         }
     });
     let final_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-123",
-            "msg": {
-                "message": "Different final answer.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-123",
+            "item": {
+                "id": "msg-123",
+                "type": "agentMessage",
+                "text": "Different final answer."
             }
         }
     });
@@ -2535,14 +2457,10 @@ fn shared_codex_agent_message_final_event_replaces_divergent_streamed_text() {
         Some(Message::Text { text, .. }) if text == "Different final answer."
     ));
 }
-// Pins the skip-duplicate reconciliation case: when the final
-// agent_message exactly matches the accumulated delta text, the streamed
-// message is kept and the final is NOT emitted as a second transcript
-// entry.
-// Guards against the "Hello." streamed answer being doubled by a matching
-// final that arrives immediately after.
+// Pins the typed-only text contract: once a typed v2 delta is recorded,
+// legacy delta and final-message mirrors cannot alter that transcript text.
 #[test]
-fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_message() {
+fn shared_codex_legacy_agent_message_notifications_do_not_change_typed_stream() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex-agent-delta");
@@ -2594,6 +2512,8 @@ fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_mess
     let app_server_delta_message = json!({
         "method": "item/agentMessage/delta",
         "params": {
+            "threadId": "conversation-123",
+            "turnId": "turn-123",
             "delta": "Hello.",
             "itemId": "msg-123"
         }
@@ -2604,7 +2524,7 @@ fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_mess
             "conversationId": "conversation-123",
             "id": "turn-123",
             "msg": {
-                "delta": "Hello.",
+                "delta": "CORRUPT LEGACY DELTA",
                 "item_id": "msg-123",
                 "thread_id": "conversation-123",
                 "turn_id": "turn-123",
@@ -2618,7 +2538,7 @@ fn shared_codex_agent_message_content_delta_streams_without_duplicate_final_mess
             "conversationId": "conversation-123",
             "id": "turn-123",
             "msg": {
-                "message": "Hello.",
+                "message": "CORRUPT LEGACY FINAL",
                 "phase": "final_answer",
                 "type": "agent_message"
             }
@@ -2746,14 +2666,14 @@ fn shared_codex_agent_message_event_after_turn_completed_is_recorded() {
         }
     });
     let late_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-finished",
-            "msg": {
-                "message": "Late shared Codex answer.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-finished",
+            "item": {
+                "id": "msg-final",
+                "type": "agentMessage",
+                "text": "Late shared Codex answer."
             }
         }
     });
@@ -2879,14 +2799,14 @@ fn shared_codex_previous_turn_message_is_ignored_after_next_turn_starts() {
         }
     });
     let late_first_turn_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-first",
-            "msg": {
-                "message": "Late first-turn answer.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-first",
+            "item": {
+                "id": "msg-first",
+                "type": "agentMessage",
+                "text": "Late first-turn answer."
             }
         }
     });
@@ -3091,17 +3011,12 @@ fn shared_codex_late_final_agent_message_replaces_streamed_text_after_turn_compl
         }
     });
     let corrupted_delta = json!({
-        "method": "codex/event/agent_message_content_delta",
+        "method": "item/agentMessage/delta",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-finished",
-            "msg": {
-                "delta": "| Group || Lines Size ||---|---|---|---| Backend | 107 |,395 | 3.19 Mi |",
-                "item_id": "msg-final",
-                "thread_id": "conversation-123",
-                "turn_id": "turn-finished",
-                "type": "agent_message_content_delta"
-            }
+            "threadId": "conversation-123",
+            "turnId": "turn-finished",
+            "itemId": "msg-final",
+            "delta": "| Group || Lines Size ||---|---|---|---| Backend | 107 |,395 | 3.19 Mi |"
         }
     });
     let turn_completed = json!({
@@ -3120,14 +3035,14 @@ fn shared_codex_late_final_agent_message_replaces_streamed_text_after_turn_compl
 | Backend | 107 | 87,395 | 3.19 MiB |
 ";
     let late_final_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-finished",
-            "msg": {
-                "message": canonical_final,
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-finished",
+            "item": {
+                "id": "msg-final",
+                "type": "agentMessage",
+                "text": canonical_final
             }
         }
     });
@@ -3352,14 +3267,14 @@ fn shared_codex_completed_turn_cleanup_expires_late_event_window() {
         }
     });
     let late_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-finished",
-            "msg": {
-                "message": "Late shared Codex answer.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-finished",
+            "item": {
+                "id": "msg-final",
+                "type": "agentMessage",
+                "text": "Late shared Codex answer."
             }
         }
     });
@@ -4361,6 +4276,7 @@ fn thread_setup_response_error_releases_the_setup_slot() {
         &runtime.runtime_id,
         &session_id,
         "doomed-setup",
+        Duration::from_secs(180),
         CodexResponseError::Timeout("codex app-server did not respond".to_owned()),
     );
 
@@ -4873,7 +4789,7 @@ fn shared_codex_turn_started_notification_does_not_restore_pending_state() {
 
 // Pins that shared Codex thread setup includes TermAl's parent-scoped
 // delegation MCP bridge in the app-server `thread/start` config. This is the
-// hook that makes `/review-with-delegate` available inside Codex sessions.
+// hook that makes `/review-changes` available inside Codex sessions.
 #[test]
 fn shared_codex_thread_start_includes_delegation_mcp_config() {
     let state = test_app_state();
@@ -5778,14 +5694,14 @@ fn shared_codex_server_request_with_unknown_thread_id_does_not_fallback_to_turn_
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     handle_shared_codex_app_server_message(
         &json!({
-            "method": "codex/event/agent_message",
+            "method": "item/completed",
             "params": {
-                "conversationId": "wrong-thread",
-                "id": "turn-live",
-                "msg": {
-                    "message": "Wrong-thread final answer.",
-                    "phase": "final_answer",
-                    "type": "agent_message"
+                "threadId": "wrong-thread",
+                "turnId": "turn-live",
+                "item": {
+                    "id": "msg-wrong-thread",
+                    "type": "agentMessage",
+                    "text": "Wrong-thread final answer."
                 }
             }
         }),
@@ -6257,11 +6173,16 @@ fn shared_codex_prompt_json_rpc_errors_fail_the_turn_without_tearing_down_runtim
     assert!(matches!(record.runtime, SessionRuntime::Codex(_)));
 }
 
-// Pins that startup timeouts are treated as shared-transport failures, not as
-// one bad turn. If the app-server is wedged, keeping the shared runtime attached
-// would route every later Codex session into the same stuck process.
+// Pins that a startup timeout against a SILENT app-server is treated as a
+// shared-transport failure, not as one bad turn. If the server said nothing for
+// the entire wait window it is wedge-shaped, and keeping the shared runtime
+// attached would route every later Codex session into the same stuck process —
+// nothing else would ever retire it (reader EOF and the `wait()` thread only
+// fire when the process actually dies; the stdin watchdog only covers blocked
+// writes). The busy-server counterpart is
+// `shared_codex_startup_timeout_on_active_server_fails_only_that_turn`.
 #[test]
-fn shared_codex_startup_timeout_tears_down_runtime() {
+fn shared_codex_startup_timeout_on_silent_server_tears_down_runtime() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let idle_session_id = test_session_id(&state, Agent::Codex);
@@ -6309,10 +6230,15 @@ fn shared_codex_startup_timeout_tears_down_runtime() {
         inner.sessions[idle_index].session.preview = "Idle Codex tab".to_owned();
     }
 
+    // `test_shared_codex_runtime` stamps stdout activity at construction, so a
+    // zero-length wait window means the server cannot have spoken DURING the
+    // wait — the silence condition — without back-dating an `Instant` (which
+    // would underflow on a freshly booted machine).
     handle_shared_codex_startup_response_error(
         &state,
         &runtime.runtime_id,
         &session_id,
+        Duration::ZERO,
         CodexResponseError::Timeout(
             "timed out waiting for Codex app-server response to `turn/start`".to_owned(),
         ),
@@ -6370,6 +6296,322 @@ fn shared_codex_startup_timeout_tears_down_runtime() {
     drop(runtime_token);
 }
 
+/// Builds a pending request entry the liveness-scaled waiter can be pointed
+/// at, plus the sender a test uses to play the app-server's side.
+fn test_pending_codex_response(
+    request_id: &str,
+) -> (
+    CodexPendingRequestMap,
+    PendingCodexJsonRpcRequest,
+    mpsc::Sender<std::result::Result<Value, CodexResponseError>>,
+) {
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let (tx, rx) = mpsc::channel();
+    pending_requests
+        .lock()
+        .expect("Codex pending requests mutex poisoned")
+        .insert(request_id.to_owned(), tx.clone());
+    (
+        pending_requests,
+        PendingCodexJsonRpcRequest {
+            request_id: request_id.to_owned(),
+            response_rx: rx,
+        },
+        tx,
+    )
+}
+
+// Pins the extension rule of the liveness-scaled waiter: a response that
+// lands AFTER the silence budget still completes as long as the app-server
+// kept emitting stdout — under the old flat wait this exact timing failed the
+// turn. This is the ~39MB-resume-behind-a-170MB-sibling incident in
+// miniature (tm-bmd.1).
+#[test]
+fn shared_codex_patient_wait_outlasts_silence_budget_while_server_is_active() {
+    let state = test_app_state();
+    let (runtime, _input_rx, _process) = test_shared_codex_runtime("shared-codex-patient-wait");
+    {
+        let mut shared_runtime = state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        *shared_runtime = Some(runtime.clone());
+    }
+    let (pending_requests, pending, tx) = test_pending_codex_response("patient-wait");
+
+    // The app-server side: stdout stays chatty the whole time, and the
+    // response arrives well after the 100ms silence budget.
+    let stamper_activity = runtime.stdout_activity.clone();
+    let server = std::thread::spawn(move || {
+        for _ in 0..30 {
+            std::thread::sleep(Duration::from_millis(10));
+            *stamper_activity
+                .lock()
+                .expect("shared Codex stdout activity mutex poisoned") = std::time::Instant::now();
+        }
+        let _ = tx.send(Ok(json!({"thread": {"id": "thread-patient"}})));
+    });
+
+    let result = wait_for_shared_codex_response_while_server_active(
+        &pending_requests,
+        pending,
+        "thread/resume",
+        &state,
+        &runtime.runtime_id,
+        Duration::from_millis(100),
+        Duration::from_secs(5),
+        Duration::from_millis(20),
+    );
+    server.join().expect("server thread should finish");
+
+    assert_eq!(
+        result.expect("late response from an active server should succeed"),
+        json!({"thread": {"id": "thread-patient"}})
+    );
+}
+
+// Pins that a server silent past the budget still fails on the old schedule:
+// the waiter must NOT extend for a server that stopped talking, or a wedged
+// process would hold sessions on "working" until the hard cap. The stamp is
+// only ever the construction-time one here, so silence and elapsed cross the
+// budget together.
+#[test]
+fn shared_codex_patient_wait_gives_up_on_silent_server_at_silence_budget() {
+    let state = test_app_state();
+    let (runtime, _input_rx, _process) = test_shared_codex_runtime("shared-codex-silent-wait");
+    {
+        let mut shared_runtime = state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        *shared_runtime = Some(runtime.clone());
+    }
+    let (pending_requests, pending, _tx) = test_pending_codex_response("silent-wait");
+
+    let started = std::time::Instant::now();
+    let result = wait_for_shared_codex_response_while_server_active(
+        &pending_requests,
+        pending,
+        "thread/resume",
+        &state,
+        &runtime.runtime_id,
+        Duration::from_millis(80),
+        Duration::from_secs(30),
+        Duration::from_millis(20),
+    );
+    let took = started.elapsed();
+
+    assert!(matches!(
+        result,
+        Err(CodexResponseError::Timeout(detail))
+            if detail.contains("timed out waiting for Codex app-server response to `thread/resume`")
+    ));
+    // Far below the 30s active-cap: the silent budget governed the give-up.
+    assert!(took < Duration::from_secs(5), "took {took:?}");
+    // The abandoned entry must not linger — a late response has nobody to
+    // reach and unknown ids are dropped by the reader.
+    assert!(
+        pending_requests
+            .lock()
+            .expect("Codex pending requests mutex poisoned")
+            .is_empty()
+    );
+}
+
+// Pins the hard cap: stdout activity alone cannot extend a wait forever — a
+// lost request against a chatty server fails once `max_wait_while_active`
+// elapses (scoped downstream, since the server is demonstrably alive).
+#[test]
+fn shared_codex_patient_wait_hits_hard_cap_despite_active_server() {
+    let state = test_app_state();
+    let (runtime, _input_rx, _process) = test_shared_codex_runtime("shared-codex-capped-wait");
+    {
+        let mut shared_runtime = state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        *shared_runtime = Some(runtime.clone());
+    }
+    let (pending_requests, pending, _tx) = test_pending_codex_response("capped-wait");
+
+    let stamper_activity = runtime.stdout_activity.clone();
+    let stamper_done = Arc::new(Mutex::new(false));
+    let stamper_stop = stamper_done.clone();
+    let stamper = std::thread::spawn(move || {
+        while !*stamper_stop.lock().expect("stamper stop mutex poisoned") {
+            std::thread::sleep(Duration::from_millis(10));
+            *stamper_activity
+                .lock()
+                .expect("shared Codex stdout activity mutex poisoned") = std::time::Instant::now();
+        }
+    });
+
+    let started = std::time::Instant::now();
+    let result = wait_for_shared_codex_response_while_server_active(
+        &pending_requests,
+        pending,
+        "turn/start",
+        &state,
+        &runtime.runtime_id,
+        Duration::from_secs(30),
+        Duration::from_millis(200),
+        Duration::from_millis(20),
+    );
+    let took = started.elapsed();
+    *stamper_done.lock().expect("stamper stop mutex poisoned") = true;
+    stamper.join().expect("stamper thread should finish");
+
+    assert!(matches!(
+        result,
+        Err(CodexResponseError::Timeout(detail))
+            if detail.contains("timed out waiting for Codex app-server response to `turn/start`")
+    ));
+    // The cap is a floor on the give-up (an active server is never failed
+    // early) and the assertion ceiling is generous for scheduler noise.
+    assert!(took >= Duration::from_millis(200), "took {took:?}");
+    assert!(took < Duration::from_secs(10), "took {took:?}");
+}
+
+// Pins the degraded path: when the shared slot no longer holds this runtime,
+// the probe reports no liveness and the wait falls back to the silent budget
+// instead of extending on a runtime that is already gone.
+#[test]
+fn shared_codex_patient_wait_without_registered_runtime_uses_silence_budget() {
+    let state = test_app_state();
+    let (runtime, _input_rx, _process) =
+        test_shared_codex_runtime("shared-codex-unregistered-wait");
+    // Deliberately NOT placed into `state.shared_codex_runtime`.
+    let (pending_requests, pending, _tx) = test_pending_codex_response("unregistered-wait");
+
+    let started = std::time::Instant::now();
+    let result = wait_for_shared_codex_response_while_server_active(
+        &pending_requests,
+        pending,
+        "thread/resume",
+        &state,
+        &runtime.runtime_id,
+        Duration::from_millis(80),
+        Duration::from_secs(30),
+        Duration::from_millis(20),
+    );
+    let took = started.elapsed();
+
+    assert!(matches!(result, Err(CodexResponseError::Timeout(_))));
+    assert!(took < Duration::from_secs(5), "took {took:?}");
+}
+
+// Pins the busy-server side of the timeout split: when the app-server emitted
+// stdout during the wait window (here: the activity stamp is fresh and the
+// window is 120s), a response timeout fails ONLY the requesting session's
+// turn. The shared runtime survives and a sibling session's in-flight turn is
+// untouched. The incident this pins against: one slow `thread/resume` (a
+// ~39MB rollout, contending with a ~170MB thread mid-turn) killed every
+// session on the shared server, and the replacement server then had to
+// re-parse the same rollouts — re-creating the very contention that caused
+// the timeout.
+#[test]
+fn shared_codex_startup_timeout_on_active_server_fails_only_that_turn() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let busy_session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex-busy-timeout");
+
+    {
+        let mut shared_runtime = state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned");
+        *shared_runtime = Some(runtime.clone());
+    }
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Waiting for Codex".to_owned();
+
+        let busy_index = inner
+            .find_session_index(&busy_session_id)
+            .expect("busy Codex session should exist");
+        inner.sessions[busy_index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: busy_session_id.clone(),
+            }),
+        });
+        inner.sessions[busy_index].session.status = SessionStatus::Active;
+        inner.sessions[busy_index].session.preview = "Streaming a sibling turn".to_owned();
+    }
+
+    handle_shared_codex_startup_response_error(
+        &state,
+        &runtime.runtime_id,
+        &session_id,
+        Duration::from_secs(120),
+        CodexResponseError::Timeout(
+            "timed out waiting for Codex app-server response to `turn/start`".to_owned(),
+        ),
+    );
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(session.status, SessionStatus::Error);
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. })
+            if text.contains(
+                "Turn failed: timed out waiting for Codex app-server response to `turn/start`"
+            ) && text.contains("only this turn was abandoned")
+    ));
+
+    let busy_session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == busy_session_id)
+        .expect("busy session should remain present");
+    assert_eq!(busy_session.status, SessionStatus::Active);
+    assert_eq!(busy_session.preview, "Streaming a sibling turn");
+
+    assert!(
+        state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .as_ref()
+            .is_some_and(|shared_runtime| shared_runtime.runtime_id == runtime.runtime_id)
+    );
+
+    // Scoped failure must not detach anyone from the surviving runtime.
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    for id in [&session_id, &busy_session_id] {
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| &record.session.id == id)
+            .expect("session record should exist");
+        assert!(matches!(record.runtime, SessionRuntime::Codex(_)));
+    }
+    drop(inner);
+}
+
 // Pins that an old thread-setup waiter cannot retire the shared app-server
 // after its session has already stopped or rebound away from that runtime.
 #[test]
@@ -6393,6 +6635,7 @@ fn shared_codex_stale_thread_setup_timeout_does_not_clear_shared_runtime() {
         &runtime.runtime_id,
         &session_id,
         "old-thread-setup-request",
+        Duration::from_secs(180),
         CodexResponseError::Timeout(
             "timed out waiting for Codex app-server response to `thread/start`".to_owned(),
         ),
@@ -6472,6 +6715,7 @@ fn shared_codex_stale_thread_setup_timeout_ignores_newer_same_runtime_request() 
         &runtime.runtime_id,
         &session_id,
         "old-thread-setup-request",
+        Duration::from_secs(180),
         CodexResponseError::Timeout(
             "timed out waiting for Codex app-server response to `thread/start`".to_owned(),
         ),

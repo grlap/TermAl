@@ -125,6 +125,14 @@ impl AppState {
     /// would be noise; the next real turn for this session will just
     /// pay the normal cold-start cost instead.
     fn try_start_hidden_claude_spare(&self, session_id: &str) {
+        // Lightweight test states still exercise hidden-spare bookkeeping,
+        // but must not launch the developer's real Claude CLI. The spawn
+        // function repeats this check as the authoritative boundary for every
+        // caller, including prompt dispatch and settings-triggered respawns.
+        if !self.agent_runtime_spawning_enabled {
+            return;
+        }
+
         let spawn_request = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {

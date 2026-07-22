@@ -49,7 +49,7 @@ fn reads_claude_agent_commands_from_markdown_files() {
 
     fs::create_dir_all(commands_dir.join("nested")).unwrap();
     fs::write(
-        commands_dir.join("review-local.md"),
+        commands_dir.join("review-code.md"),
         "Review local changes.
 
 ## Step 1
@@ -91,7 +91,7 @@ $ARGUMENTS
             },
             AgentCommand {
                 kind: AgentCommandKind::PromptTemplate,
-                name: "review-local".to_owned(),
+                name: "review-code".to_owned(),
                 description: "Review local changes.".to_owned(),
                 content: "Review local changes.
 
@@ -99,7 +99,7 @@ $ARGUMENTS
 Inspect diffs.
 "
                 .to_owned(),
-                source: ".claude/commands/review-local.md".to_owned(),
+                source: ".claude/commands/review-code.md".to_owned(),
                 argument_hint: None,
                 resolver_frontmatter: None,
                 resolver_frontmatter_trusted: false,
@@ -149,7 +149,7 @@ fn read_agent_command_file_rejects_symlink_open() {
     fs::create_dir_all(&commands_dir).unwrap();
     let target_path = commands_dir.join("target.md");
     fs::write(&target_path, "Review local changes.").unwrap();
-    let link_path = commands_dir.join("review-local.md");
+    let link_path = commands_dir.join("review-code.md");
     symlink(&target_path, &link_path).unwrap();
 
     let error = read_agent_command_file(&link_path).unwrap_err();
@@ -173,9 +173,9 @@ fn reads_claude_agent_commands_strip_yaml_frontmatter() {
 
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
-        commands_dir.join("review-local.md"),
+        commands_dir.join("review-code.md"),
         "---
-name: review-local
+name: review-code
 description: Review local changes.
 metadata:
   termal:
@@ -583,7 +583,7 @@ fn returns_agent_commands_for_non_claude_sessions() {
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
-        commands_dir.join("review-local.md"),
+        commands_dir.join("review-code.md"),
         "Review local changes.
 
 Use the active agent's tools.
@@ -611,7 +611,7 @@ Use the active agent's tools.
 
     let response = state.list_agent_commands(&created.session_id).unwrap();
     assert_eq!(response.commands.len(), 1);
-    assert_eq!(response.commands[0].name, "review-local");
+    assert_eq!(response.commands[0].name, "review-code");
     assert_eq!(response.commands[0].description, "Review local changes.");
     assert_eq!(response.commands[0].kind, AgentCommandKind::PromptTemplate);
 }
@@ -634,7 +634,7 @@ fn extracts_claude_native_agent_commands_from_initialize_response() {
                         "argumentHint": ""
                     },
                     {
-                        "name": "review-local",
+                        "name": "review-code",
                         "description": "Review local changes. (project)",
                         "argumentHint": "[scope]"
                     }
@@ -658,9 +658,9 @@ fn extracts_claude_native_agent_commands_from_initialize_response() {
             },
             AgentCommand {
                 kind: AgentCommandKind::NativeSlash,
-                name: "review-local".to_owned(),
+                name: "review-code".to_owned(),
                 description: "Review local changes.".to_owned(),
-                content: "/review-local".to_owned(),
+                content: "/review-code".to_owned(),
                 source: "Claude project command".to_owned(),
                 argument_hint: Some("[scope]".to_owned()),
                 resolver_frontmatter: None,
@@ -744,7 +744,7 @@ fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
-        commands_dir.join("review-local.md"),
+        commands_dir.join("review-code.md"),
         "Review local changes from the filesystem template.",
     )
     .unwrap();
@@ -788,9 +788,9 @@ fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
                 },
                 AgentCommand {
                     kind: AgentCommandKind::NativeSlash,
-                    name: "review-local".to_owned(),
+                    name: "review-code".to_owned(),
                     description: "Review local changes.".to_owned(),
-                    content: "/review-local".to_owned(),
+                    content: "/review-code".to_owned(),
                     source: "Claude project command".to_owned(),
                     argument_hint: Some("[scope]".to_owned()),
                     resolver_frontmatter: None,
@@ -808,7 +808,7 @@ fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
             .iter()
             .map(|command| command.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["fix-bug", "review", "review-local"]
+        vec!["fix-bug", "review", "review-code"]
     );
     assert_eq!(response.commands[0].kind, AgentCommandKind::PromptTemplate);
     assert_eq!(response.commands[1].kind, AgentCommandKind::NativeSlash);
@@ -918,10 +918,10 @@ fn sync_session_agent_commands_filters_runtime_prompt_templates() {
             vec![
                 AgentCommand {
                     kind: AgentCommandKind::PromptTemplate,
-                    name: "review-local".to_owned(),
+                    name: "review-code".to_owned(),
                     description: "Runtime-provided prompt template.".to_owned(),
                     content: "Runtime review $ARGUMENTS".to_owned(),
-                    source: ".claude/commands/review-local.md".to_owned(),
+                    source: ".claude/commands/review-code.md".to_owned(),
                     argument_hint: None,
                     resolver_frontmatter: None,
                     resolver_frontmatter_trusted: false,
@@ -953,7 +953,7 @@ fn sync_session_agent_commands_filters_runtime_prompt_templates() {
     let error = state
         .resolve_agent_command(
             &created.session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: Some("staged".to_owned()),
                 note: None,
@@ -991,7 +991,7 @@ async fn agent_command_resolve_route_json_rejection_uses_endpoint_label() {
         Request::builder()
             .method("POST")
             .uri(format!(
-                "/api/sessions/{session_id}/agent-commands/review-local/resolve"
+                "/api/sessions/{session_id}/agent-commands/review-code/resolve"
             ))
             .header("content-type", "application/json")
             .body(Body::from(r#"{"arguments":"unterminated"#))
@@ -1157,18 +1157,18 @@ fn rejects_oversized_agent_command_arguments_and_note() {
 // not hard-code the isolated-worktree special case, and repository-owned
 // frontmatter must not grant trusted delegation defaults by itself.
 #[test]
-fn project_local_review_local_metadata_does_not_grant_delegation_defaults() {
+fn project_local_review_code_metadata_does_not_grant_delegation_defaults() {
     let root = std::env::temp_dir().join(format!(
-        "termal-agent-command-resolve-review-local-{}",
+        "termal-agent-command-resolve-review-code-{}",
         Uuid::new_v4()
     ));
     let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
-        commands_dir.join("review-local.md"),
+        commands_dir.join("review-code.md"),
         "---
-name: review-local
+name: review-code
 description: Review staged and unstaged changes.
 metadata:
   termal:
@@ -1207,7 +1207,7 @@ Review staged and unstaged changes.
     let response = state
         .resolve_agent_command(
             &created.session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: None,
                 note: None,
@@ -1217,7 +1217,7 @@ Review staged and unstaged changes.
         )
         .unwrap();
 
-    assert_eq!(response.visible_prompt, "/review-local");
+    assert_eq!(response.visible_prompt, "/review-code");
     assert_eq!(
         response.title.as_deref(),
         Some("Review staged and unstaged changes.")
@@ -1242,7 +1242,7 @@ fn delegation_command_resolution_uses_requested_cwd() {
     let child_commands_dir = child_root.join(".claude").join("commands");
     fs::create_dir_all(&child_commands_dir).unwrap();
     fs::write(
-        child_commands_dir.join("review-local.md"),
+        child_commands_dir.join("review-code.md"),
         "Review child cwd command for $ARGUMENTS.\n",
     )
     .unwrap();
@@ -1269,7 +1269,7 @@ fn delegation_command_resolution_uses_requested_cwd() {
     let response = state
         .resolve_agent_command(
             &created.session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: Some("staged".to_owned()),
                 note: None,
@@ -1279,7 +1279,7 @@ fn delegation_command_resolution_uses_requested_cwd() {
         )
         .unwrap();
 
-    assert_eq!(response.visible_prompt, "/review-local staged");
+    assert_eq!(response.visible_prompt, "/review-code staged");
     assert_eq!(
         response.expanded_prompt.as_deref(),
         Some("Review child cwd command for staged.\n")
@@ -1301,7 +1301,7 @@ fn claude_delegation_command_resolution_cwd_ignores_parent_cached_commands() {
     let child_commands_dir = child_root.join(".claude").join("commands");
     fs::create_dir_all(&child_commands_dir).unwrap();
     fs::write(
-        child_commands_dir.join("review-local.md"),
+        child_commands_dir.join("review-code.md"),
         "Review child cwd command for $ARGUMENTS.\n",
     )
     .unwrap();
@@ -1329,9 +1329,9 @@ fn claude_delegation_command_resolution_cwd_ignores_parent_cached_commands() {
             &created.session_id,
             vec![AgentCommand {
                 kind: AgentCommandKind::NativeSlash,
-                name: "review-local".to_owned(),
+                name: "review-code".to_owned(),
                 description: "Parent cached command".to_owned(),
-                content: "/review-local".to_owned(),
+                content: "/review-code".to_owned(),
                 source: "Claude project command".to_owned(),
                 argument_hint: None,
                 resolver_frontmatter: None,
@@ -1343,7 +1343,7 @@ fn claude_delegation_command_resolution_cwd_ignores_parent_cached_commands() {
     let response = state
         .resolve_agent_command(
             &created.session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: Some("staged".to_owned()),
                 note: None,
@@ -1391,9 +1391,9 @@ fn claude_delegation_command_resolution_cwd_keeps_cache_for_session_workdir() {
             &created.session_id,
             vec![AgentCommand {
                 kind: AgentCommandKind::NativeSlash,
-                name: "review-local".to_owned(),
+                name: "review-code".to_owned(),
                 description: "Cached command".to_owned(),
-                content: "/review-local".to_owned(),
+                content: "/review-code".to_owned(),
                 source: "Claude project command".to_owned(),
                 argument_hint: None,
                 resolver_frontmatter: None,
@@ -1405,7 +1405,7 @@ fn claude_delegation_command_resolution_cwd_keeps_cache_for_session_workdir() {
     let response = state
         .resolve_agent_command(
             &created.session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: None,
                 note: None,
@@ -1477,9 +1477,9 @@ fn claude_delegation_command_resolution_cwd_keeps_global_cached_commands() {
                 },
                 AgentCommand {
                     kind: AgentCommandKind::NativeSlash,
-                    name: "review-local".to_owned(),
+                    name: "review-code".to_owned(),
                     description: "Project review command".to_owned(),
-                    content: "/review-local".to_owned(),
+                    content: "/review-code".to_owned(),
                     source: "Claude project command".to_owned(),
                     argument_hint: None,
                     resolver_frontmatter: None,
@@ -1520,7 +1520,7 @@ fn claude_delegation_command_resolution_cwd_keeps_global_cached_commands() {
     let project = state
         .resolve_agent_command(
             &created.session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: None,
                 note: None,
@@ -1543,7 +1543,7 @@ fn delegation_command_resolution_cwd_allows_child_directory_inside_project() {
     let child_commands_dir = child_root.join(".claude").join("commands");
     fs::create_dir_all(&child_commands_dir).unwrap();
     fs::write(
-        child_commands_dir.join("review-local.md"),
+        child_commands_dir.join("review-code.md"),
         "Review project child cwd for $ARGUMENTS.\n",
     )
     .unwrap();
@@ -1555,7 +1555,7 @@ fn delegation_command_resolution_cwd_allows_child_directory_inside_project() {
     let response = state
         .resolve_agent_command(
             &session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: Some("staged".to_owned()),
                 note: None,
@@ -1593,7 +1593,7 @@ fn rejects_delegation_command_resolution_cwd_outside_project() {
     let error = state
         .resolve_agent_command(
             &session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: None,
                 note: None,
@@ -1638,7 +1638,7 @@ fn rejects_delegation_command_resolution_cwd_for_remote_project() {
     let error = state
         .resolve_agent_command(
             &session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: None,
                 note: None,
@@ -1892,10 +1892,10 @@ fn project_local_invalid_delegation_metadata_does_not_block_resolution() {
         let commands_dir = root.join(".claude").join("commands");
         fs::create_dir_all(&commands_dir).unwrap();
         fs::write(
-            commands_dir.join("review-local.md"),
+            commands_dir.join("review-code.md"),
             format!(
                 "---
-name: review-local
+name: review-code
 description: Frontmatter review title.
 {frontmatter}
 ---
@@ -1927,7 +1927,7 @@ Body fallback should not win.
         let response = state
             .resolve_agent_command(
                 &created.session_id,
-                "review-local",
+                "review-code",
                 ResolveAgentCommandRequest {
                     arguments: None,
                     note: None,
@@ -1937,7 +1937,7 @@ Body fallback should not win.
             )
             .unwrap();
 
-        assert_eq!(response.visible_prompt, "/review-local", "{case_name}");
+        assert_eq!(response.visible_prompt, "/review-code", "{case_name}");
         assert_eq!(
             response.title.as_deref(),
             Some("Frontmatter review title."),
@@ -2161,7 +2161,7 @@ fn resolves_termal_metadata_while_ignoring_unrelated_frontmatter_errors() {
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
-        commands_dir.join("review-local.md"),
+        commands_dir.join("review-code.md"),
         "---
 description: 'Review local' stale'
 tools:
@@ -2201,7 +2201,7 @@ Review staged and unstaged changes.
     let response = state
         .resolve_agent_command(
             &created.session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: None,
                 note: None,
@@ -2211,7 +2211,7 @@ Review staged and unstaged changes.
         )
         .unwrap();
 
-    assert_eq!(response.visible_prompt, "/review-local");
+    assert_eq!(response.visible_prompt, "/review-code");
     assert_eq!(
         response.title.as_deref(),
         Some("Review staged and unstaged changes.")
@@ -2229,7 +2229,7 @@ fn resolves_dotted_termal_metadata_frontmatter() {
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
-        commands_dir.join("review-local.md"),
+        commands_dir.join("review-code.md"),
         "---
 metadata.termal.title.strategy: prefixFirstArgument
 metadata.termal.title.prefix: Review local
@@ -2264,7 +2264,7 @@ Review $ARGUMENTS.
     let response = state
         .resolve_agent_command(
             &created.session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: Some("staged changes".to_owned()),
                 note: None,
@@ -2274,7 +2274,7 @@ Review $ARGUMENTS.
         )
         .unwrap();
 
-    assert_eq!(response.visible_prompt, "/review-local staged changes");
+    assert_eq!(response.visible_prompt, "/review-code staged changes");
     assert_eq!(response.title.as_deref(), Some("Review local staged"));
     assert_eq!(response.delegation, None);
 }
@@ -2306,7 +2306,7 @@ fn native_delegate_resolution_uses_metadata_name_not_source_suffix() {
                 name: "audit".to_owned(),
                 description: "Audit the current state.".to_owned(),
                 content: "/audit".to_owned(),
-                source: ".claude/commands/review-local.md".to_owned(),
+                source: ".claude/commands/review-code.md".to_owned(),
                 argument_hint: None,
                 resolver_frontmatter: None,
                 resolver_frontmatter_trusted: false,
@@ -2359,7 +2359,7 @@ fn legacy_cached_prompt_template_delegate_resolution_uses_metadata_name_not_sour
             name: "audit".to_owned(),
             description: "Audit the current state.".to_owned(),
             content: "Audit $ARGUMENTS".to_owned(),
-            source: ".claude/commands/review-local.md".to_owned(),
+            source: ".claude/commands/review-code.md".to_owned(),
             argument_hint: None,
             resolver_frontmatter: None,
             resolver_frontmatter_trusted: false,
@@ -2411,7 +2411,7 @@ fn prompt_template_delegate_resolution_does_not_use_metadata_when_source_path_mi
             name: "audit".to_owned(),
             description: "Audit the current state.".to_owned(),
             content: "Audit $ARGUMENTS".to_owned(),
-            source: ".claude/commands/review-local.md".to_owned(),
+            source: ".claude/commands/review-code.md".to_owned(),
             argument_hint: None,
             resolver_frontmatter: Some(
                 "metadata:
@@ -2455,7 +2455,7 @@ fn resolver_metadata_and_prompt_content_refresh_together_after_file_edit() {
     let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
-    let command_path = commands_dir.join("review-local.md");
+    let command_path = commands_dir.join("review-code.md");
     fs::write(
         &command_path,
         "---
@@ -2496,7 +2496,7 @@ First prompt $ARGUMENTS.
     let first = state
         .resolve_agent_command(
             &created.session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: Some("scope".to_owned()),
                 note: None,
@@ -2530,7 +2530,7 @@ Second prompt $ARGUMENTS.
     let second = state
         .resolve_agent_command(
             &created.session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: Some("scope".to_owned()),
                 note: None,
@@ -2577,10 +2577,10 @@ fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
         &created.session_id,
         vec![AgentCommand {
             kind: AgentCommandKind::PromptTemplate,
-            name: "review-local".to_owned(),
+            name: "review-code".to_owned(),
             description: "Cached prompt template.".to_owned(),
             content: "Cached review $ARGUMENTS".to_owned(),
-            source: ".claude/commands/review-local.md".to_owned(),
+            source: ".claude/commands/review-code.md".to_owned(),
             argument_hint: None,
             resolver_frontmatter: None,
             resolver_frontmatter_trusted: false,
@@ -2590,7 +2590,7 @@ fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
     let response = state
         .resolve_agent_command(
             &created.session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: Some("staged".to_owned()),
                 note: None,
@@ -2600,7 +2600,7 @@ fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
         )
         .unwrap();
 
-    assert_eq!(response.visible_prompt, "/review-local staged");
+    assert_eq!(response.visible_prompt, "/review-code staged");
     assert_eq!(
         response.expanded_prompt.as_deref(),
         Some("Cached review staged")
@@ -2612,10 +2612,10 @@ fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
 fn resolver_metadata_uses_cached_frontmatter_snapshot_without_disk_reread() {
     let command = AgentCommand {
         kind: AgentCommandKind::PromptTemplate,
-        name: "review-local".to_owned(),
+        name: "review-code".to_owned(),
         description: "Review cached frontmatter.".to_owned(),
         content: "Review $ARGUMENTS".to_owned(),
-        source: ".claude/commands/review-local.md".to_owned(),
+        source: ".claude/commands/review-code.md".to_owned(),
         argument_hint: None,
         resolver_frontmatter: Some(
             "metadata:
@@ -2647,7 +2647,7 @@ fn resolver_metadata_uses_cached_frontmatter_snapshot_without_disk_reread() {
     )
     .unwrap();
 
-    assert_eq!(response.visible_prompt, "/review-local staged");
+    assert_eq!(response.visible_prompt, "/review-code staged");
     assert_eq!(
         response.delegation,
         Some(ResolvedAgentCommandDelegationDefaults {
@@ -2685,9 +2685,9 @@ fn native_delegate_resolution_does_not_use_prompt_template_metadata_by_name() {
             &created.session_id,
             vec![AgentCommand {
                 kind: AgentCommandKind::NativeSlash,
-                name: "review-local".to_owned(),
+                name: "review-code".to_owned(),
                 description: "Runtime-provided review command.".to_owned(),
-                content: "/review-local".to_owned(),
+                content: "/review-code".to_owned(),
                 source: "claude/native".to_owned(),
                 argument_hint: None,
                 resolver_frontmatter: None,
@@ -2699,7 +2699,7 @@ fn native_delegate_resolution_does_not_use_prompt_template_metadata_by_name() {
     let response = state
         .resolve_agent_command(
             &created.session_id,
-            "review-local",
+            "review-code",
             ResolveAgentCommandRequest {
                 arguments: Some("staged".to_owned()),
                 note: None,
@@ -2709,7 +2709,7 @@ fn native_delegate_resolution_does_not_use_prompt_template_metadata_by_name() {
         )
         .unwrap();
 
-    assert_eq!(response.visible_prompt, "/review-local staged");
+    assert_eq!(response.visible_prompt, "/review-code staged");
     assert_eq!(response.expanded_prompt, None);
     assert_eq!(response.delegation, None);
 }
@@ -2779,70 +2779,122 @@ fn assert_command_contains(command: &str, expected: &str, reason: &str) {
     );
 }
 
-// `/review-with-delegate` owns top-level reviewer orchestration and must not
+// `/review-changes` owns top-level reviewer orchestration and must not
 // keep the parent turn active while waiting for reviewer fan-in.
 #[test]
-fn review_with_delegate_pins_two_child_resume_wait_flow() {
-    let review_with_delegate = include_str!(concat!(
+fn review_changes_pins_two_child_resume_wait_flow() {
+    let review_changes = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/.claude/commands/review-with-delegate.md"
+        "/.claude/commands/review-changes.md"
     ));
 
     assert_command_contains(
-        review_with_delegate,
+        review_changes,
         "attempt exactly two reviewer session spawns",
-        "/review-with-delegate must attempt the bounded two-child review shape",
+        "/review-changes must attempt the bounded two-child review shape",
     );
     assert_command_contains(
-        review_with_delegate,
+        review_changes,
+        "Run `/review-changes` directly in the existing active, writable parent session",
+        "/review-changes must remain a writable-session coordinator",
+    );
+    assert_command_contains(
+        review_changes,
+        "only the `/review-code` children are delegated with `writePolicy: readOnly`",
+        "/review-changes must restrict read-only delegation to leaf reviewers",
+    );
+    assert_command_contains(
+        review_changes,
         "nested TermAl delegations",
-        "/review-with-delegate must forbid recursive TermAl reviewer trees",
+        "/review-changes must forbid recursive TermAl reviewer trees",
     );
     assert_command_contains(
-        review_with_delegate,
+        review_changes,
         "termal_resume_after_delegations",
-        "/review-with-delegate must schedule backend resume waits",
+        "/review-changes must schedule backend resume waits",
     );
     assert_command_contains(
-        review_with_delegate,
+        review_changes,
         "stop this turn immediately",
-        "/review-with-delegate must yield so the backend fan-in prompt can resume",
+        "/review-changes must yield so the backend fan-in prompt can resume",
     );
     assert_command_contains(
-        review_with_delegate,
+        review_changes,
         "Never use `termal_wait_delegations`, PowerShell, shell, raw HTTP polling, or session-log polling",
-        "/review-with-delegate must not reintroduce active polling hangs",
+        "/review-changes must not reintroduce active polling hangs",
+    );
+    assert_command_contains(
+        review_changes,
+        "The parent session exclusively owns all compilation, build, test, type-check, lint, and formatting gates",
+        "/review-changes must own quality gates instead of delegated reviewers",
+    );
+    assert_command_contains(
+        review_changes,
+        "Then run `cargo test` in the parent session",
+        "/review-changes must run backend tests in the parent session",
+    );
+    assert_command_contains(
+        review_changes,
+        "Then run `cd ui && npx vitest run` in the parent session",
+        "/review-changes must run frontend tests in the parent session",
     );
 }
 
-// Delegated `/review-local` children are reviewer leaves for
-// `/review-with-delegate`; they run lens checklists inline instead of spawning
+#[test]
+fn legacy_review_command_names_are_removed() {
+    let command_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(".claude")
+        .join("commands");
+
+    assert!(!command_dir.join("review-with-delegate.md").exists());
+    assert!(!command_dir.join("review-local.md").exists());
+    assert!(command_dir.join("review-changes.md").is_file());
+    assert!(command_dir.join("review-code.md").is_file());
+}
+
+// Delegated `/review-code` children are reviewer leaves for
+// `/review-changes`; they run lens checklists inline instead of spawning
 // any nested reviewer processes.
 #[test]
-fn review_local_pins_delegated_child_inline_reviewer_mode() {
-    let review_local = include_str!(concat!(
+fn review_code_pins_delegated_child_inline_reviewer_mode() {
+    let review_code = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/.claude/commands/review-local.md"
+        "/.claude/commands/review-code.md"
     ));
 
     assert_command_contains(
-        review_local,
+        review_code,
         "You are a delegated child session for TermAl delegation",
-        "/review-local must name the delegated-session marker it keys off",
+        "/review-code must name the delegated-session marker it keys off",
     );
     assert_command_contains(
-        review_local,
+        review_code,
         "Claude Task agents, Codex subagents, shell-launched agents, TermAl nested delegations via `termal_spawn_session`",
-        "/review-local delegated children must not spawn nested reviewers through any current path",
+        "/review-code delegated children must not spawn nested reviewers through any current path",
     );
     assert_command_contains(
-        review_local,
+        review_code,
         "do not use Task tool calls or TermAl delegation MCP tools",
-        "/review-local delegated children must run reviewer lenses inline",
+        "/review-code delegated children must run reviewer lenses inline",
     );
     assert_command_contains(
-        review_local,
+        review_code,
         "nested reviewer spawning was intentionally skipped",
-        "/review-local delegated children must report that nested spawning was skipped",
+        "/review-code delegated children must report that nested spawning was skipped",
+    );
+    assert_command_contains(
+        review_code,
+        "`/review-code` is inspection-only in both direct and delegated sessions",
+        "/review-code must remain inspection-only in every invocation mode",
+    );
+    assert_command_contains(
+        review_code,
+        "Do NOT run compilation, build, test, type-check, lint, benchmark, coverage, or formatting gates",
+        "/review-code must forbid quality gates",
+    );
+    assert_command_contains(
+        review_code,
+        "Do not run any `bd` command",
+        "/review-code must leave tracker inspection and mutation to its caller",
     );
 }

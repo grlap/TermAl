@@ -1273,14 +1273,18 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
         .expect("manual recovery prompt should dispatch");
 
     match dispatch_result {
-        DispatchTurnResult::Dispatched(TurnDispatch::PersistentClaude { command, .. }) => {
+        DispatchTurnResult::Dispatched(TurnDispatch::PersistentClaude { command, .. })
+        | DispatchTurnResult::DispatchedAfterQueue(TurnDispatch::PersistentClaude {
+            command,
+            ..
+        }) => {
             assert!(
                 command
                     .text
                     .contains("please continue with a manual recovery prompt")
             );
         }
-        DispatchTurnResult::Dispatched(_) => {
+        DispatchTurnResult::Dispatched(_) | DispatchTurnResult::DispatchedAfterQueue(_) => {
             panic!("manual recovery should dispatch on the reviewer Claude runtime")
         }
         DispatchTurnResult::Queued => panic!("manual recovery prompt should dispatch immediately"),
@@ -1423,10 +1427,14 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
         .expect("manual recovery should dispatch the oldest queued user prompt");
 
     match dispatch_result {
-        DispatchTurnResult::Dispatched(TurnDispatch::PersistentClaude { command, .. }) => {
+        DispatchTurnResult::Dispatched(TurnDispatch::PersistentClaude { command, .. })
+        | DispatchTurnResult::DispatchedAfterQueue(TurnDispatch::PersistentClaude {
+            command,
+            ..
+        }) => {
             assert_eq!(command.text, "older queued user prompt");
         }
-        DispatchTurnResult::Dispatched(_) => {
+        DispatchTurnResult::Dispatched(_) | DispatchTurnResult::DispatchedAfterQueue(_) => {
             panic!("plain blocked FIFO recovery should dispatch on the Claude runtime")
         }
         DispatchTurnResult::Queued => {
@@ -1602,13 +1610,17 @@ fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stal
         .expect("manual recovery should dispatch the older queued user prompt first");
 
     match dispatch_result {
-        DispatchTurnResult::Dispatched(TurnDispatch::PersistentClaude { command, .. }) => {
+        DispatchTurnResult::Dispatched(TurnDispatch::PersistentClaude { command, .. })
+        | DispatchTurnResult::DispatchedAfterQueue(TurnDispatch::PersistentClaude {
+            command,
+            ..
+        }) => {
             assert_eq!(
                 command.text,
                 "older queued user prompt behind stale orchestrator work"
             );
         }
-        DispatchTurnResult::Dispatched(_) => {
+        DispatchTurnResult::Dispatched(_) | DispatchTurnResult::DispatchedAfterQueue(_) => {
             panic!("mixed blocked recovery should dispatch on the Claude runtime")
         }
         DispatchTurnResult::Queued => {

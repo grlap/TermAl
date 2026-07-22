@@ -631,6 +631,147 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(within(queuedPromptCard).queryByText("You")).not.toBeInTheDocument();
   });
 
+  it("collapses a long queued peer prompt inside the live tail", () => {
+    const finalFinding = "Queued peer report final finding.";
+    const peerText = [
+      "Greg asked me to send you this review.",
+      "",
+      "Detailed queued finding. ".repeat(40),
+      finalFinding,
+    ].join("\n");
+
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        messages: [],
+        pendingPrompts: [
+          {
+            id: "pending-long-peer-prompt",
+            timestamp: "10:04",
+            text: peerText,
+            source: {
+              sessionId: "session-investor",
+              name: "Investor",
+            },
+          },
+        ],
+      }),
+      showWaitingIndicator: true,
+    });
+
+    const queuedPromptCard = screen
+      .getByText("Greg asked me to send you this review.")
+      .closest(".pending-prompt-card") as HTMLElement;
+
+    expect(within(queuedPromptCard).getByText("Investor")).toBeInTheDocument();
+    expect(within(queuedPromptCard).queryByText(finalFinding)).not.toBeInTheDocument();
+
+    fireEvent.click(
+      within(queuedPromptCard).getByRole("button", {
+        name: "Show full message",
+      }),
+    );
+
+    expect(
+      queuedPromptCard.querySelector(".expandable-session-message"),
+    ).toHaveClass("is-expanded");
+    expect(queuedPromptCard.querySelector(".long-peer-message-copy")).toHaveTextContent(
+      finalFinding,
+    );
+  });
+
+  it("labels and collapses a mixed-sender queued peer batch", () => {
+    const finalFinding = "The second queued peer finding.";
+    const peerBatchText = [
+      "[TermAl cross-session message batch]",
+      "2 pending messages, FIFO, newest last.",
+      "Detailed queued batch message. ".repeat(30),
+      finalFinding,
+    ].join("\n");
+
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        messages: [],
+        pendingPrompts: [
+          {
+            id: "pending-peer-batch",
+            timestamp: "10:05",
+            text: peerBatchText,
+            source: { kind: "peerBatch", name: "Peer queue" },
+          },
+        ],
+      }),
+      showWaitingIndicator: true,
+    });
+
+    const queuedPromptCard = screen
+      .getByText("[TermAl cross-session message batch]")
+      .closest(".pending-prompt-card") as HTMLElement;
+
+    expect(within(queuedPromptCard).getByText("Peer queue")).toBeInTheDocument();
+    expect(within(queuedPromptCard).queryByText(finalFinding)).not.toBeInTheDocument();
+    expect(
+      within(queuedPromptCard).getByRole("button", {
+        name: "Show full message",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("labels and collapses a queued delegation result prompt", () => {
+    const fanInText = [
+      "Codex + Claude /review-code fan-in",
+      "",
+      "Wait id: `delegation-wait-1234`",
+      "Mode: `all`",
+      "Parent session: `session-630`",
+      "",
+      "Delegations:",
+      "- `delegation-codex`: completed - Codex /review-code",
+      "- `delegation-claude`: completed - Claude /review-code",
+      "",
+      "Results:",
+      "### Codex /review-code",
+      "No findings.",
+    ].join("\n");
+
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        messages: [],
+        pendingPrompts: [
+          {
+            id: "pending-delegation-fan-in",
+            timestamp: "10:04",
+            text: fanInText,
+          },
+        ],
+      }),
+      showWaitingIndicator: true,
+    });
+
+    const queuedPromptCard = screen
+      .getByText("Codex + Claude /review-code fan-in", { exact: false })
+      .closest(".pending-prompt-card") as HTMLElement;
+
+    expect(within(queuedPromptCard).getByText("Fan-in")).toBeInTheDocument();
+    expect(within(queuedPromptCard).queryByText("You")).not.toBeInTheDocument();
+    expect(within(queuedPromptCard).queryByText("No findings.")).not.toBeInTheDocument();
+
+    fireEvent.click(
+      within(queuedPromptCard).getByRole("button", {
+        name: "Show delegation results",
+      }),
+    );
+
+    expect(
+      queuedPromptCard.querySelector(".delegation-fan-in-message"),
+    ).toHaveClass("is-expanded");
+    expect(
+      queuedPromptCard.querySelector(".delegation-fan-in-results"),
+    ).not.toBeNull();
+    expect(
+      queuedPromptCard.querySelector(".prompt-expansion-copy"),
+    ).toHaveTextContent("No findings.");
+  });
+
   it("does not expose cancel for local-only optimistic pending prompts", () => {
     const onCancelQueuedPrompt = vi.fn();
     renderSessionPanelWithDefaults({

@@ -20,6 +20,7 @@ mod agent_commands;
 mod agent_readiness;
 mod claude;
 mod cli;
+mod codex_bin;
 mod codex_discovery;
 mod codex_protocol;
 mod codex_threads;
@@ -45,6 +46,7 @@ mod orchestrator;
 pub use orchestrator::{
     sample_deadlocked_orchestrator_template_draft, sample_orchestrator_template_draft,
 };
+mod peer_messages;
 mod persist;
 mod project_digest;
 mod projects;
@@ -67,6 +69,7 @@ mod telegram_relay_lifecycle;
 mod telegram_settings;
 mod telegram_support;
 mod terminal;
+mod turns;
 mod workspace;
 
 #[derive(Default)]
@@ -690,6 +693,7 @@ fn test_app_state() -> AppState {
         state_broadcast_mailbox: None,
         telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
         shared_codex_runtime: Arc::new(Mutex::new(None)),
+        agent_runtime_spawning_enabled: false,
         test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),
         test_agent_setup_failures: Arc::new(Mutex::new(Vec::new())),
         agent_readiness_cache: Arc::new(RwLock::new(fresh_agent_readiness_cache("/tmp"))),
@@ -1387,6 +1391,10 @@ fn test_shared_codex_runtime(
         process: process.clone(),
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+        // Fresh stamp = "the app-server spoke just now". Timeout tests that
+        // need a silent (wedge-shaped) server pass a `response_timeout` the
+        // elapsed time cannot undercut instead of back-dating this Instant.
+        stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
     };
     (runtime, input_rx, process)
 }
@@ -2065,14 +2073,14 @@ fn shared_codex_agent_message_event_uses_conversation_id_for_session_routing() {
         }
     });
     let message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-123",
-            "msg": {
-                "message": "Final shared Codex answer.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-123",
+            "item": {
+                "id": "msg-final",
+                "type": "agentMessage",
+                "text": "Final shared Codex answer."
             }
         }
     });

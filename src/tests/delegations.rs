@@ -29,7 +29,7 @@ fn attach_sleeping_claude_runtime_to_delegation_child(
 }
 
 #[test]
-fn delegation_prompt_marker_stays_in_sync_with_review_local_command() {
+fn delegation_prompt_marker_stays_in_sync_with_review_code_command() {
     let record = DelegationRecord {
         id: "delegation-marker-test".to_owned(),
         parent_session_id: "session-parent".to_owned(),
@@ -37,7 +37,7 @@ fn delegation_prompt_marker_stays_in_sync_with_review_local_command() {
         mode: DelegationMode::Reviewer,
         status: DelegationStatus::Running,
         title: "Marker Test".to_owned(),
-        prompt: "/review-local".to_owned(),
+        prompt: "/review-code".to_owned(),
         cwd: "/tmp/termal-marker-test".to_owned(),
         agent: Agent::Codex,
         model: None,
@@ -48,9 +48,9 @@ fn delegation_prompt_marker_stays_in_sync_with_review_local_command() {
         result: None,
     };
     let prompt = build_delegation_prompt(&record);
-    let review_local = include_str!(concat!(
+    let review_code = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/.claude/commands/review-local.md"
+        "/.claude/commands/review-code.md"
     ));
 
     assert!(
@@ -58,8 +58,8 @@ fn delegation_prompt_marker_stays_in_sync_with_review_local_command() {
         "delegation runtime prompt must expose the delegated-session marker"
     );
     assert!(
-        review_local.contains(DELEGATED_CHILD_SESSION_MARKER),
-        "/review-local must key delegated-child mode off the emitted marker"
+        review_code.contains(DELEGATED_CHILD_SESSION_MARKER),
+        "/review-code must key delegated-child mode off the emitted marker"
     );
 }
 
@@ -818,6 +818,12 @@ fn delegated_interaction_submission_returns_post_refresh_state_and_restores_runn
         Ok(_) => panic!("expected initial delegation prompt"),
         Err(err) => panic!("initial delegation prompt should dispatch: {err}"),
     }
+    let initial_running_detail = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        parent_delegation_card_agent_snapshot(&inner, &parent_session_id, &created.delegation.id)
+            .expect("parent delegation card row should exist")
+            .1
+    };
 
     let message_id = "delegation-response-mcp-message";
     let request = match test_mcp_elicitation_message(message_id) {
@@ -868,9 +874,8 @@ fn delegated_interaction_submission_returns_post_refresh_state_and_restores_runn
             .expect("parent delegation card row should exist");
     assert_eq!(status, ParallelAgentStatus::Running);
     assert_eq!(
-        detail.as_deref(),
-        Some("Delegated session is running."),
-        "parent card should return to the generic running detail after the interaction resolves"
+        detail, initial_running_detail,
+        "parent card should restore its original running detail after the interaction resolves"
     );
     drop(inner);
 
@@ -903,6 +908,16 @@ fn interaction_message_update_returns_post_refresh_state_for_each_request_varian
                 },
             )
             .expect("delegation should be created");
+        let initial_running_detail = {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            parent_delegation_card_agent_snapshot(
+                &inner,
+                &parent_session_id,
+                &created.delegation.id,
+            )
+            .expect("parent delegation card row should exist")
+            .1
+        };
         let message_id = format!("delegation-refresh-message-{index}");
         state
             .push_message(
@@ -999,7 +1014,10 @@ fn interaction_message_update_returns_post_refresh_state_for_each_request_varian
         )
         .expect("parent delegation card row should exist");
         assert_eq!(status, ParallelAgentStatus::Running);
-        assert_eq!(detail.as_deref(), Some("Delegated session is running."));
+        assert_eq!(
+            detail, initial_running_detail,
+            "parent card should restore its original running detail"
+        );
         drop(inner);
 
         let _ = fs::remove_file(state.persistence_path.as_path());
@@ -2166,10 +2184,14 @@ fn peer_message_dispatch_attributes_sender_and_instructs_cross_repo_reply() {
         )
         .expect("peer message should dispatch to the idle target");
     let runtime_prompt = match dispatch {
-        DispatchTurnResult::Dispatched(TurnDispatch::PersistentClaude { command, .. }) => {
-            command.text
+        DispatchTurnResult::Dispatched(TurnDispatch::PersistentClaude { command, .. })
+        | DispatchTurnResult::DispatchedAfterQueue(TurnDispatch::PersistentClaude {
+            command,
+            ..
+        }) => command.text,
+        DispatchTurnResult::Dispatched(_) | DispatchTurnResult::DispatchedAfterQueue(_) => {
+            panic!("expected a Claude turn dispatch")
         }
-        DispatchTurnResult::Dispatched(_) => panic!("expected a Claude turn dispatch"),
         DispatchTurnResult::Queued => panic!("idle target should dispatch immediately"),
     };
     assert!(runtime_prompt.starts_with("[TermAl cross-session message]\n"));
@@ -2203,7 +2225,7 @@ fn peer_message_dispatch_attributes_sender_and_instructs_cross_repo_reply() {
             ..
         } => {
             assert_eq!(text, "ping from a peer");
-            assert_eq!(source.session_id, sender_id);
+            assert_eq!(source.session_id.as_deref(), Some(sender_id.as_str()));
             assert_eq!(source.name, "Kadry");
         }
         other => panic!("expected an attributed peer text message, got {other:?}"),
@@ -2299,7 +2321,7 @@ fn peer_message_queued_while_busy_preserves_source_and_ignores_unknown_sender() 
         .source
         .as_ref()
         .expect("a known sender must be attributed on the queued prompt");
-    assert_eq!(source.session_id, sender_id);
+    assert_eq!(source.session_id.as_deref(), Some(sender_id.as_str()));
     assert_eq!(source.name, "Kadry");
 
     let unknown = &record.queued_prompts[1].pending_prompt;
@@ -3789,6 +3811,11 @@ fn delegation_status_and_unavailable_result_poll_preserve_revision_without_refre
         )
         .expect("delegation should be created");
     let revision_before_poll = state.snapshot().revision;
+    let parent_card_before_poll = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        parent_delegation_card_agent_snapshot(&inner, &parent_session_id, &created.delegation.id)
+            .expect("parent delegation card should exist")
+    };
 
     let status_response = state
         .get_delegation(&parent_session_id, &created.delegation.id)
@@ -3796,6 +3823,12 @@ fn delegation_status_and_unavailable_result_poll_preserve_revision_without_refre
 
     assert_eq!(status_response.revision, revision_before_poll);
     assert_eq!(state.snapshot().revision, revision_before_poll);
+    let parent_card_after_poll = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        parent_delegation_card_agent_snapshot(&inner, &parent_session_id, &created.delegation.id)
+            .expect("parent delegation card should still exist")
+    };
+    assert_eq!(parent_card_after_poll, parent_card_before_poll);
 
     let err = match state.get_delegation_result(&parent_session_id, &created.delegation.id) {
         Ok(_) => panic!("running delegation should not expose a result"),

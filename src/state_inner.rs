@@ -111,6 +111,7 @@ impl StateInner {
             pending_codex_app_requests: HashMap::new(),
             pending_acp_approvals: HashMap::new(),
             queued_prompts: VecDeque::new(),
+            queued_peer_messages: HashMap::new(),
             message_positions: HashMap::new(),
             remote_id: None,
             remote_session_id: None,

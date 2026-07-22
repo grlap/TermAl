@@ -1,5 +1,6 @@
 use super::delegation_support::{
     finish_delegation_child_with_assistant_text, test_app_state_with_delegation_codex_runtime,
+    test_app_state_with_drained_delegation_codex_runtime,
 };
 use super::*;
 
@@ -76,7 +77,8 @@ fn assert_delegation_wait_response_serializes_queue_flags(
 
 #[test]
 fn already_terminal_delegation_wait_reports_queued_prompt_without_dispatch_for_busy_parent() {
-    let state = test_app_state();
+    let state =
+        test_app_state_with_drained_delegation_codex_runtime("already-terminal-busy-parent");
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_read_only_delegation(
@@ -151,7 +153,7 @@ fn already_terminal_delegation_wait_reports_queued_prompt_without_dispatch_for_b
 
 #[test]
 fn stale_busy_delegation_child_without_runtime_fails_and_releases_wait() {
-    let state = test_app_state();
+    let state = test_app_state_with_drained_delegation_codex_runtime("stale-runtime-release-wait");
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_read_only_delegation(
@@ -243,7 +245,8 @@ fn stale_busy_delegation_child_without_runtime_fails_and_releases_wait() {
 
 #[test]
 fn stale_busy_delegation_child_without_runtime_keeps_completed_result_packet() {
-    let state = test_app_state();
+    let state =
+        test_app_state_with_drained_delegation_codex_runtime("stale-runtime-completed-result");
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_read_only_delegation(
@@ -343,7 +346,7 @@ fn stale_busy_delegation_child_without_runtime_keeps_completed_result_packet() {
 
 #[test]
 fn stale_busy_delegation_child_without_runtime_keeps_failed_result_summary() {
-    let state = test_app_state();
+    let state = test_app_state_with_drained_delegation_codex_runtime("stale-runtime-failed-result");
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_read_only_delegation(
@@ -416,7 +419,10 @@ fn stale_busy_delegation_child_without_runtime_keeps_failed_result_summary() {
 
 #[test]
 fn stale_busy_delegation_child_without_runtime_uses_agent_name_in_summary() {
-    let state = test_app_state();
+    let state = test_app_state_with_drained_delegation_codex_runtime("stale-cursor-runtime");
+    let (cursor_runtime, _cursor_input_rx) =
+        test_acp_runtime_handle(AcpAgent::Cursor, "stale-cursor-runtime");
+    state.install_test_acp_runtime_override(AcpAgent::Cursor, cursor_runtime);
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_read_only_delegation(
@@ -582,7 +588,8 @@ fn already_terminal_delegation_wait_reports_dispatch_for_idle_parent() {
 
 #[test]
 fn delegation_wait_resume_dispatch_failure_emits_structured_delta() {
-    let state = test_app_state();
+    let state =
+        test_app_state_with_drained_delegation_codex_runtime("wait-resume-dispatch-failure");
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_read_only_delegation(

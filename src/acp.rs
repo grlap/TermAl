@@ -78,6 +78,9 @@ fn spawn_acp_runtime(
     agent: AcpAgent,
     gemini_approval_mode: Option<GeminiApprovalMode>,
 ) -> Result<AcpRuntimeHandle> {
+    if !state.agent_runtime_spawning_enabled {
+        bail!("agent runtime spawning is disabled for this AppState");
+    }
     let runtime_id = Uuid::new_v4().to_string();
     let cwd = normalize_local_user_facing_path(&cwd);
     let mut command = agent.command(AcpLaunchOptions {

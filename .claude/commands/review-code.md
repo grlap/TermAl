@@ -1,17 +1,19 @@
 ---
-name: review-local
-description: Review staged, unstaged, and untracked changes using multiple specialized reviewers.
+name: review-code
+description: Inspect staged, unstaged, and untracked changes using multiple specialized reviewer lenses.
 metadata:
   termal:
     title:
       strategy: default
 ---
 
-Review staged, unstaged, and untracked changes using multiple specialized reviewers.
+Inspect staged, unstaged, and untracked changes using multiple specialized reviewer lenses.
 
 **IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Do not run mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) as part of this command.**
 
-**IMPORTANT: This command is review-only. Do NOT attempt to fix any bugs, edit source files, edit tests, run formatters that modify files, or otherwise change implementation code. The only allowed change is updating the beads tracker via `bd` in Step 5.**
+**IMPORTANT: `/review-code` is inspection-only in both direct and delegated sessions. Do NOT attempt to fix bugs, edit files, run mutating Git commands, or call `bd`. Report findings and suggested tracker follow-ups without changing the workspace or tracker.**
+
+**IMPORTANT: Do NOT run compilation, build, test, type-check, lint, benchmark, coverage, or formatting gates from `/review-code`, even when a command appears read-only. This includes `cargo check`, `cargo build`, `cargo test`, `cargo clippy`, `cargo fmt`, TypeScript compilers, Vitest, ESLint, Prettier, and package-manager test/build scripts. The parent `/review-changes` session exclusively owns quality gates. Reviewers may inspect existing source, tests, configuration, diffs, and previously produced output.**
 
 ## Step 1: Get the changes
 
@@ -40,7 +42,7 @@ disallowed nested paths are Claude Task agents, Codex subagents, shell-launched 
 raw HTTP reviewers, and nested review commands. In the final summary, state
 that nested reviewer spawning was intentionally skipped.
 
-Run each reviewer lens in this same session using the prompt below as the lens checklist. Do not launch TermAl delegations, Claude Task agents, Codex subagents, shell-launched agents, raw HTTP reviewers, or nested review commands from `/review-local`; use `/review-with-delegate` for cross-agent delegated review.
+Run each reviewer lens in this same session using the prompt below as the lens checklist. Do not launch TermAl delegations, Claude Task agents, Codex subagents, shell-launched agents, raw HTTP reviewers, or nested review commands from `/review-code`; use `/review-changes` for cross-agent delegated review.
 
 For each reviewer found in Step 3, use this prompt:
 
@@ -49,7 +51,7 @@ You are a code reviewer focusing on: [REVIEWER NAME]
 
 This is a review-only task. Do NOT attempt to fix any bugs or edit any files.
 Your job is to identify issues and propose follow-up work for the main reviewer
-to record in beads (bd).
+to record in beads (bd). Do not run quality gates or call `bd`; inspect only.
 
 ## Your Review Instructions
 [CONTENT OF THE REVIEWER .md FILE]
@@ -134,26 +136,8 @@ Deduplicate: if two reviewers flag the same issue, merge them (note which review
 
 Present the consolidated note directly to the user. Do NOT write the review note to a separate file.
 
-## Step 5: Update beads (bd)
+## Step 5: Suggest tracker follow-ups
 
-After presenting the review to the user, update the beads tracker (`bd`) to reflect the findings. Do not modify source or test files. If `bd` writes are unavailable under the active session policy (e.g. a read-only reviewer child), include a "Suggested beads updates" section listing the `bd` commands that should be run. If any reviewer found any issue, observation, test gap, or note of any severity, beads MUST be updated before the command is complete. Query the current state first (`bd list` / `bd ready` / `bd show <id>`), then apply these operations:
+Do not run any `bd` command. If the review identifies an issue, observation, test gap, resolved issue, or follow-up, include a `Suggested beads updates` section describing what the caller or the parent `/review-changes` session should create, update, or close. Include the proposed issue type and priority for new work, but leave tracker inspection and mutation to the parent workflow.
 
-### 5a. Close resolved issues
-
-If the reviewed changes fix any open issue, close it: `bd close <id> --reason "<what fixed it>"`. Beads keeps its own history, so closing is the record — do not add a "resolved" note.
-
-### 5b. Create new issues
-
-For each finding (any severity: Critical, High, Medium, Low, or Note) that is NOT already tracked, create an issue:
-
-`bd create "<short title>" -t bug -p <0-4> -d "<impact, current behavior, and proposed fix>"`
-
-Map severity to priority: Critical→P0, High→P1, Medium→P2, Low→P3, Note→P3/P4. If a finding is already tracked, do not duplicate it — update the existing issue (`bd update <id>` / `bd comment <id>`) to reflect the current evidence, affected files, priority, or proposal.
-
-### 5c. File test gaps and follow-ups
-
-For test gaps, coverage improvements, or refactor follow-ups the review identifies, create task issues (`bd create "<task>" -t task -p 2 -d "..."`) and link dependencies where they exist (`bd dep`). Close any task the reviewed changes have completed (`bd close <id>`).
-
-### 5d. Skip if clean
-
-Only skip beads when the review found no issues, no observations, no notes, no test gaps, no resolved issues, and no completed tasks. Tell the user "beads is up to date — no changes needed."
+If the review is clean, say `No tracker follow-up suggested.` Do not claim that Beads is up to date because `/review-code` does not inspect the tracker.

@@ -341,6 +341,9 @@ enum TurnDispatch {
 /// Defines the dispatch turn result variants.
 enum DispatchTurnResult {
     Dispatched(TurnDispatch),
+    /// The submitted prompt remained queued while a pre-existing queue head
+    /// was dispatched to recover an otherwise-idle queue.
+    DispatchedAfterQueue(TurnDispatch),
     Queued,
 }
 

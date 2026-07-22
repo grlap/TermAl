@@ -79,10 +79,10 @@ Response:
 {
   "commands": [
     {
-      "name": "review-local",
+      "name": "review-code",
       "description": "Review staged and unstaged changes using multiple specialized reviewers.",
       "content": "Review staged and unstaged changes using...\n\n## Step 1: ...",
-      "source": ".claude/commands/review-local.md"
+      "source": ".claude/commands/review-code.md"
     },
     {
       "name": "fix-bug",
@@ -157,10 +157,10 @@ do not return delegation defaults:
 
 ```json
 {
-  "name": "review-local",
-  "source": ".claude/commands/review-local.md",
+  "name": "review-code",
+  "source": ".claude/commands/review-code.md",
   "kind": "promptTemplate",
-  "visiblePrompt": "/review-local",
+  "visiblePrompt": "/review-code",
   "expandedPrompt": "Review staged and unstaged changes...",
   "title": "Review staged and unstaged changes using multiple specialized reviewers.",
   "delegation": {
@@ -225,7 +225,7 @@ Metadata contract:
 
 ```yaml
 ---
-name: review-local
+name: review-code
 description: Review staged and unstaged changes using multiple specialized reviewers.
 metadata:
   termal:
@@ -235,7 +235,7 @@ metadata:
       enabled: true
       mode: reviewer
       writePolicy:
-        kind: isolatedWorktree
+        kind: readOnly
 ---
 ```
 
@@ -258,14 +258,16 @@ Trust rules:
 
 - Only metadata from future TermAl-trusted filesystem command/skill files may
   grant delegation defaults. Native runtime-advertised commands or untrusted
-  project entries named `review-local` must not inherit TermAl privileges by
+  project entries named `review-code` must not inherit TermAl privileges by
   name.
 - Invalid trusted `metadata.termal` must fail command resolution with a clear
   validation error. It must not silently broaden permissions or fall back to a
   more permissive policy. Untrusted delegation metadata is ignored rather than
   applied.
-- Metadata is declarative; command names are not policy. `/review-local` and
-  `/fix-bug` are examples, not special cases in Rust code.
+- Metadata is declarative; command names are not policy. `/review-code` and
+  `/fix-bug` are examples, not special cases in Rust code. Review coordinators
+  such as `/review-changes` run directly in the active writable session and
+  explicitly delegate only their leaf reviewers.
 
 Example user intent:
 
@@ -289,8 +291,8 @@ type SlashPaletteItem =
   | { kind: "choice"; ... }       // existing: setting value (applies immediately)
   | { kind: "agent-command";      // new: agent slash command
       key: string;
-      command: string;            // "/review-local"
-      label: string;             // "/review-local"
+      command: string;            // "/review-code"
+      label: string;             // "/review-code"
       detail: string;            // first line of .md file
       content: string;           // full .md template content for display/compatibility
       hasArguments: boolean;     // true if content contains $ARGUMENTS
@@ -322,7 +324,7 @@ User types "/"
   → Show two sections:
     ┌─────────────────────────────────────┐
     │ Agent Commands                      │
-    │   /review-local  Review staged...   │
+    │   /review-code  Review staged...   │
     │   /fix-bug       Fix a bug from...  │
     │ Session Controls                    │
     │   /model         Change the model   │
@@ -334,7 +336,7 @@ User types "/rev"
   → Filter to matching commands:
     ┌─────────────────────────────────────┐
     │ Agent Commands                      │
-    │   /review-local  Review staged...   │
+    │   /review-code  Review staged...   │
     └─────────────────────────────────────┘
 ```
 
@@ -358,7 +360,7 @@ When an agent command is selected:
 - Spawn the child session with the resolver's `expandedPrompt`.
 - Apply resolver-provided delegation defaults such as `writePolicy`, `mode`,
   and title. React components must not hard-code command names such as
-  `review-local` to choose write policy.
+  `review-code` to choose write policy.
 
 ### 6. Argument substitution and notes
 
@@ -483,7 +485,7 @@ Frontend:
 
 - Typing `/` in the composer shows agent commands from `.claude/commands/` alongside
   session controls.
-- Selecting `/review-local` resolves through the backend and sends the resolved
+- Selecting `/review-code` resolves through the backend and sends the resolved
   prompt to the active session.
 - Selecting `/fix-bug` expands to `/fix-bug ` in the composer; typing `3` and pressing
   Enter resolves with `arguments: "3"` and sends the resolved prompt.

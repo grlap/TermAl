@@ -161,6 +161,76 @@ fn creates_claude_sessions_with_requested_plan_mode() {
 
     assert_eq!(session.claude_approval_mode, Some(ClaudeApprovalMode::Plan));
     assert_eq!(session.claude_effort, Some(ClaudeEffortLevel::High));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .sessions
+            .iter()
+            .filter(|record| record.hidden && record.session.agent == Agent::Claude)
+            .all(|record| matches!(record.runtime, SessionRuntime::None)),
+        "lightweight test states must keep hidden spare bookkeeping without spawning Claude",
+    );
+}
+
+#[test]
+fn lightweight_test_state_rejects_direct_claude_runtime_spawning() {
+    let state = test_app_state();
+    let result = spawn_claude_runtime(
+        state,
+        "session-no-real-claude".to_owned(),
+        "/tmp".to_owned(),
+        Agent::Claude.default_model().to_owned(),
+        ClaudeApprovalMode::Ask,
+        ClaudeEffortLevel::Default,
+        None,
+        None,
+    );
+
+    let err = match result {
+        Ok(_) => panic!("lightweight test state must not start a real Claude runtime"),
+        Err(err) => err,
+    };
+    assert_eq!(
+        err.to_string(),
+        "agent runtime spawning is disabled for this AppState"
+    );
+}
+
+#[test]
+fn lightweight_test_state_rejects_direct_shared_codex_runtime_spawning() {
+    let state = test_app_state();
+    let result = spawn_shared_codex_runtime(state);
+
+    let err = match result {
+        Ok(_) => panic!("lightweight test state must not start a real Codex runtime"),
+        Err(err) => err,
+    };
+    assert_eq!(
+        err.to_string(),
+        "agent runtime spawning is disabled for this AppState"
+    );
+}
+
+#[test]
+fn lightweight_test_state_rejects_direct_acp_runtime_spawning() {
+    let state = test_app_state();
+    let result = spawn_acp_runtime(
+        state,
+        "session-no-real-acp".to_owned(),
+        "/tmp".to_owned(),
+        AcpAgent::Cursor,
+        None,
+    );
+
+    let err = match result {
+        Ok(_) => panic!("lightweight test state must not start a real ACP runtime"),
+        Err(err) => err,
+    };
+    assert_eq!(
+        err.to_string(),
+        "agent runtime spawning is disabled for this AppState"
+    );
 }
 
 // pins the invisibility contract for hidden claude spares: a spare
@@ -458,6 +528,7 @@ fn killing_session_persists_removal_even_when_shared_codex_interrupt_fails() {
         process: process.clone(),
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+        stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
     };
     drop(input_rx);
 
@@ -558,6 +629,7 @@ async fn kill_session_route_returns_ok_when_shared_codex_interrupt_fails() {
         process: process.clone(),
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+        stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
     };
     drop(input_rx);
 
@@ -664,6 +736,7 @@ fn killing_shared_codex_session_does_not_reset_other_shared_sessions_when_interr
         process: process.clone(),
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+        stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
     };
     drop(input_rx);
 

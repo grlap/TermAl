@@ -189,19 +189,29 @@ impl AppState {
     /// placeholder creation happens one layer up in
     /// `recorder_text_delta` (see `src/recorders.rs`), which pushes an
     /// empty `Message::Text` on the first delta of a turn and reuses
-    /// that id for every subsequent delta. Refreshes `session.preview`
-    /// from the growing text when non-empty. Called from every runtime's
+    /// that id for every subsequent delta. Each event carries the UTF-8
+    /// byte length of the pre-append text so clients can reject a later
+    /// chunk when an earlier SSE delta was missed instead of corrupting
+    /// the draft. Refreshes `session.preview` from the growing text when
+    /// non-empty. Called from every runtime's
     /// streaming-text path (Claude NDJSON in `src/claude.rs`, Codex
     /// reasoning/assistant deltas in `src/codex_events.rs`, ACP
     /// `text_delta` in `src/acp.rs`).
     fn append_text_delta(&self, session_id: &str, message_id: &str, delta: &str) -> Result<()> {
-        let (preview, revision, message_index, message_count, session_mutation_stamp) = {
+        let (
+            preview,
+            revision,
+            message_index,
+            message_count,
+            text_start_byte,
+            session_mutation_stamp,
+        ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let mut preview = None;
-            let (message_index, message_count, session_mutation_stamp) = {
+            let (message_index, message_count, text_start_byte, session_mutation_stamp) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -215,20 +225,22 @@ impl AppState {
                         "session `{session_id}` message index `{message_index}` is out of bounds"
                     ));
                 };
-                match message {
+                let text_start_byte = match message {
                     Message::Text { id, text, .. } if id == message_id => {
+                        let text_start_byte = text.len();
                         text.push_str(delta);
                         let trimmed = text.trim();
                         if !trimmed.is_empty() {
                             preview = Some(make_preview(trimmed));
                         }
+                        text_start_byte
                     }
                     _ => {
                         return Err(anyhow!(
                             "session `{session_id}` message `{message_id}` is not a text message"
                         ));
                     }
-                }
+                };
 
                 if let Some(next_preview) = preview.as_ref() {
                     session.preview = next_preview.clone();
@@ -236,6 +248,7 @@ impl AppState {
                 (
                     message_index,
                     session_message_count(record),
+                    text_start_byte,
                     record.mutation_stamp,
                 )
             };
@@ -245,6 +258,7 @@ impl AppState {
                 revision,
                 message_index,
                 message_count,
+                text_start_byte,
                 session_mutation_stamp,
             )
         };
@@ -255,6 +269,7 @@ impl AppState {
             message_id: message_id.to_owned(),
             message_index,
             message_count,
+            text_start_byte: Some(text_start_byte),
             delta: delta.to_owned(),
             preview,
             session_mutation_stamp: Some(session_mutation_stamp),

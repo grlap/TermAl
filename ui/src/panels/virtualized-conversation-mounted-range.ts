@@ -44,6 +44,7 @@ export function useVirtualizedConversationMountedRangeEffects({
   pageHeights,
   pagesLength,
   pendingAggressiveIdleCompactionRef,
+  pendingIdleCompactionTimerRef,
   pendingMountedPrependRestoreRef,
   pendingPrependedMessageAnchorRef,
   pendingProgrammaticBottomFollowUntilRef,
@@ -67,6 +68,7 @@ export function useVirtualizedConversationMountedRangeEffects({
   pageHeights: number[];
   pagesLength: number;
   pendingAggressiveIdleCompactionRef: MutableRefObject<boolean>;
+  pendingIdleCompactionTimerRef: MutableRefObject<number | null>;
   pendingMountedPrependRestoreRef: MutableRefObject<MountedPrependRestore | null>;
   pendingPrependedMessageAnchorRef: MutableRefObject<PendingVisibleMessageAnchor | null>;
   pendingProgrammaticBottomFollowUntilRef: MutableRefObject<number>;
@@ -140,8 +142,11 @@ export function useVirtualizedConversationMountedRangeEffects({
       return;
     }
 
-    const inUserScrollCooldown =
-      performance.now() - lastUserScrollInputTimeRef.current < userScrollAdjustmentCooldownMs;
+    // The scheduled idle transition is authoritative for shrinking the band.
+    // A synchronous prewarm render can itself exceed the nominal cooldown on
+    // a busy machine; elapsed wall time would then collapse the just-mounted
+    // range before the input handler returns and before the browser can paint.
+    const inUserScrollCooldown = pendingIdleCompactionTimerRef.current !== null;
     const viewportEscapedMountedBand = !rangeContainsRange(
       mountedPageRange,
       visiblePageRange,
@@ -197,9 +202,9 @@ export function useVirtualizedConversationMountedRangeEffects({
     captureMountedPrependRestore,
     isActive,
     mountedPageRange,
+    pendingIdleCompactionTimerRef,
     scrollContainerRef,
     scrollIdleVersion,
-    userScrollAdjustmentCooldownMs,
     visiblePageRange,
     workingMountedPageRange,
   ]);

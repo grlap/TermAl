@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   canNestedScrollableConsumeWheel,
+  createDraftAttachment,
   isMonacoEditorEventTarget,
+  MAX_PASTED_IMAGE_BYTES,
   messageChangeMarker,
 } from "./app-utils";
 import type { ParallelAgentsMessage } from "./types";
@@ -108,5 +110,33 @@ describe("canNestedScrollableConsumeWheel", () => {
     paneScroller.appendChild(editor);
 
     expect(canNestedScrollableConsumeWheel(target, paneScroller, 120)).toBe(true);
+  });
+});
+
+describe("createDraftAttachment", () => {
+  it("accepts an image at the 10 MiB boundary", async () => {
+    const file = new File(
+      [new Uint8Array(MAX_PASTED_IMAGE_BYTES)],
+      "pasted.png",
+      { type: "image/png" },
+    );
+
+    const attachment = await createDraftAttachment(file, 0);
+
+    expect(attachment.byteSize).toBe(10 * 1024 * 1024);
+    expect(attachment.fileName).toBe("pasted.png");
+    expect(attachment.mediaType).toBe("image/png");
+  });
+
+  it("rejects an image one byte over 10 MiB", async () => {
+    const file = new File(
+      [new Uint8Array(MAX_PASTED_IMAGE_BYTES + 1)],
+      "too-large.png",
+      { type: "image/png" },
+    );
+
+    await expect(createDraftAttachment(file, 0)).rejects.toThrow(
+      "Pasted image exceeds the 10 MB limit.",
+    );
   });
 });

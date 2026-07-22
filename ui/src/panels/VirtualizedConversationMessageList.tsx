@@ -97,7 +97,12 @@ export {
 } from "./virtualized-conversation-scroll-events";
 
 const ACTIVE_MOUNTED_RESERVE_ABOVE_VIEWPORTS = 3;
-const ACTIVE_MOUNTED_RESERVE_BELOW_VIEWPORTS = 3;
+// Expandable delegation and peer-message bodies are capped at 60vh. When one
+// collapses, content below it can move upward by most of a viewport before the
+// ResizeObserver measurement and native scroll anchoring settle. Keep one more
+// viewport mounted below than above so that movement lands on real DOM instead
+// of briefly exposing only the virtual spacer.
+const ACTIVE_MOUNTED_RESERVE_BELOW_VIEWPORTS = 4;
 const BOUNDARY_SEEK_MOUNTED_RESERVE_ABOVE_VIEWPORTS = 1;
 const BOUNDARY_SEEK_MOUNTED_RESERVE_BELOW_VIEWPORTS = 0;
 const ACTIVE_MOUNTED_EXTRA_PAGES_BELOW = 2;
@@ -1482,6 +1487,7 @@ export function VirtualizedConversationMessageList({
     pageHeights,
     pagesLength: pages.length,
     pendingAggressiveIdleCompactionRef,
+    pendingIdleCompactionTimerRef,
     pendingMountedPrependRestoreRef,
     pendingPrependedMessageAnchorRef,
     pendingProgrammaticBottomFollowUntilRef,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   fetchDirectory,
   fetchGitStatus,
@@ -71,7 +71,20 @@ export function FileSystemPanel({
   const normalizedRootPath = rootPath?.trim() ?? "";
   const normalizedSessionId = sessionId?.trim() ?? "";
   const normalizedProjectId = projectId?.trim() ?? "";
-  const hasScope = Boolean(normalizedSessionId || normalizedProjectId);
+  // An explicit project selection owns the file-tree scope. Sending both IDs
+  // lets the backend's session-first resolver validate a newly selected
+  // project path against a stale session's project root.
+  const requestProjectId = normalizedProjectId || null;
+  const requestSessionId = requestProjectId
+    ? null
+    : normalizedSessionId || null;
+  const hasScope = Boolean(requestSessionId || requestProjectId);
+  const requestScopeKey = JSON.stringify([
+    normalizedRootPath,
+    requestSessionId,
+    requestProjectId,
+  ]);
+  const activeRequestScopeKeyRef = useRef(requestScopeKey);
   const rootDirectory = normalizedRootPath ? directoriesByPath[normalizedRootPath] ?? null : null;
   const rootError = normalizedRootPath ? errorsByPath[normalizedRootPath] ?? null : null;
   const isRootLoading = Boolean(normalizedRootPath && loadingPaths[normalizedRootPath]);
@@ -84,6 +97,18 @@ export function FileSystemPanel({
   useEffect(() => {
     setRootDraft(rootPath ?? "");
   }, [rootPath]);
+
+  useLayoutEffect(() => {
+    activeRequestScopeKeyRef.current = requestScopeKey;
+  }, [requestScopeKey]);
+
+  useEffect(() => {
+    setDirectoriesByPath({});
+    setErrorsByPath({});
+    setExpandedPaths({});
+    setLoadingPaths({});
+    setGitDecorations(createEmptyGitDecorations());
+  }, [requestScopeKey]);
 
   useEffect(() => {
     directoriesByPathRef.current = directoriesByPath;
@@ -115,7 +140,7 @@ export function FileSystemPanel({
           },
     );
     void loadDirectory(normalizedRootPath, true);
-  }, [hasScope, normalizedRootPath, normalizedProjectId, normalizedSessionId]);
+  }, [hasScope, normalizedRootPath, requestProjectId, requestSessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,8 +155,8 @@ export function FileSystemPanel({
       return;
     }
 
-    void fetchGitStatus(normalizedRootPath, normalizedSessionId || null, {
-      projectId: normalizedProjectId || null,
+    void fetchGitStatus(normalizedRootPath, requestSessionId, {
+      projectId: requestProjectId,
     })
       .then((status) => {
         if (cancelled) {
@@ -151,7 +176,7 @@ export function FileSystemPanel({
     return () => {
       cancelled = true;
     };
-  }, [hasScope, normalizedProjectId, normalizedRootPath, normalizedSessionId]);
+  }, [hasScope, normalizedRootPath, requestProjectId, requestSessionId]);
 
   useEffect(() => {
     if (
@@ -163,7 +188,7 @@ export function FileSystemPanel({
         normalizedRootPath,
         {
           rootPath: normalizedRootPath,
-          sessionId: normalizedSessionId || null,
+          sessionId: requestSessionId,
         },
       )
     ) {
@@ -174,8 +199,8 @@ export function FileSystemPanel({
 
     async function refreshVisibleTree() {
       try {
-        const statusPromise = fetchGitStatus(normalizedRootPath, normalizedSessionId || null, {
-          projectId: normalizedProjectId || null,
+        const statusPromise = fetchGitStatus(normalizedRootPath, requestSessionId, {
+          projectId: requestProjectId,
         });
         const expandedDirectoryPaths = Object.keys(expandedPathsRef.current).filter(
           (path) => directoriesByPathRef.current[path],
@@ -183,8 +208,8 @@ export function FileSystemPanel({
         const directoryPromises = expandedDirectoryPaths.map(async (path) => {
           try {
             const response = await fetchDirectory(path, {
-              sessionId: normalizedSessionId || null,
-              projectId: normalizedProjectId || null,
+              sessionId: requestSessionId,
+              projectId: requestProjectId,
             });
             return { path, response };
           } catch (error) {
@@ -246,9 +271,9 @@ export function FileSystemPanel({
     };
   }, [
     hasScope,
-    normalizedProjectId,
     normalizedRootPath,
-    normalizedSessionId,
+    requestProjectId,
+    requestSessionId,
     workspaceFilesChangedEvent,
   ]);
 
@@ -279,21 +304,32 @@ export function FileSystemPanel({
       return nextState;
     });
 
+    const requestScopeKeyAtStart = requestScopeKey;
+
     try {
       const response = await fetchDirectory(path, {
-        sessionId: normalizedSessionId || null,
-        projectId: normalizedProjectId || null,
+        sessionId: requestSessionId,
+        projectId: requestProjectId,
       });
+      if (activeRequestScopeKeyRef.current !== requestScopeKeyAtStart) {
+        return;
+      }
       setDirectoriesByPath((current) => ({
         ...current,
         [path]: response,
       }));
     } catch (error) {
+      if (activeRequestScopeKeyRef.current !== requestScopeKeyAtStart) {
+        return;
+      }
       setErrorsByPath((current) => ({
         ...current,
         [path]: getErrorMessage(error),
       }));
     } finally {
+      if (activeRequestScopeKeyRef.current !== requestScopeKeyAtStart) {
+        return;
+      }
       setLoadingPaths((current) => {
         if (!current[path]) {
           return current;

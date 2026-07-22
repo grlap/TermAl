@@ -41,7 +41,7 @@
 // events; `shared_codex_app_server_event_matches_active_turn` is the
 // variant used for method-bearing app-server traffic.
 //
-// Related modules: `src/codex.rs` owns the spawn/init + delta-dedup +
+// Related modules: `src/codex.rs` owns the spawn/init + delta-stream +
 // stdout line helpers; `src/codex_rpc.rs` owns `send_codex_json_rpc_request`
 // and `wait_for_codex_json_rpc_response`; `src/codex_validation.rs`
 // validates request bodies before dispatch; `src/state.rs` +
@@ -508,9 +508,9 @@ fn handle_shared_codex_app_server_notification(
             *pending_turn_start_request_id = None;
             flush_pending_codex_subagent_results(turn_state, recorder)?;
             // Keep the streaming text message id alive through the completed-turn
-            // grace window. Codex can emit the canonical final agent message after
-            // turn/completed; if the streamed chunks were deduped incorrectly or
-            // otherwise diverged, that late final must replace the existing bubble
+            // grace window. Codex can emit the canonical item/completed after
+            // turn/completed; if the streamed draft otherwise diverged, that late
+            // final must replace the existing bubble
             // in place rather than appending a second message. The cleanup worker
             // or the next turn/started event clears this recorder state.
             state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
@@ -685,44 +685,13 @@ fn handle_shared_codex_app_server_notification(
                 recorder,
             )?;
         }
-        "codex/event/agent_message_content_delta" => {
-            handle_shared_codex_event_agent_message_content_delta(
-                message,
-                turn_id.as_deref(),
-                completed_turn_id.as_deref(),
-                turn_state,
-                recorder,
-                state,
-                session_id,
-            )?;
-        }
-        "codex/event/agent_message" => {
-            handle_shared_codex_event_agent_message(
-                message,
-                state,
-                session_id,
-                turn_id.as_deref(),
-                completed_turn_id.as_deref(),
-                turn_state,
-                recorder,
-            )?;
-        }
+        // Current Codex app-server text is carried by the typed v2
+        // `item/agentMessage/delta` + `item/completed` lifecycle above.
+        // Consuming these legacy mirrors as well would merge two differently
+        // chunked streams and corrupt repetitive Markdown such as tables.
+        "codex/event/agent_message_content_delta" | "codex/event/agent_message" => {}
         "codex/event/task_complete" => {
-            if shared_codex_session_thread_id(method, message).is_none() {
-                handle_shared_codex_terminal_task_complete(
-                    message,
-                    state,
-                    session_id,
-                    runtime_token,
-                    sessions,
-                    turn_id,
-                    completed_turn_id,
-                    turn_started,
-                    pending_turn_start_request_id,
-                    turn_state,
-                    recorder,
-                )?;
-            } else {
+            if shared_codex_session_thread_id(method, message).is_some() {
                 handle_shared_codex_task_complete(
                     message,
                     state,
@@ -759,93 +728,6 @@ fn shared_codex_task_complete_last_agent_message(message: &Value) -> Option<&str
                 .pointer("/params/last_agent_message")
                 .and_then(Value::as_str)
         })
-}
-
-fn handle_shared_codex_terminal_task_complete(
-    message: &Value,
-    state: &AppState,
-    session_id: &str,
-    runtime_token: &RuntimeToken,
-    sessions: &SharedCodexSessionMap,
-    turn_id: &mut Option<String>,
-    completed_turn_id: &mut Option<String>,
-    turn_started: &mut bool,
-    pending_turn_start_request_id: &mut Option<String>,
-    turn_state: &mut CodexTurnState,
-    recorder: &mut impl TurnRecorder,
-) -> Result<()> {
-    let event_turn_id = shared_codex_event_turn_id(message);
-    if !shared_codex_event_matches_active_turn(turn_id.as_deref(), event_turn_id) {
-        trace_shared_codex_event(
-            "drop",
-            "codex/event/task_complete",
-            Some(session_id),
-            None,
-            event_turn_id,
-            turn_id.as_deref(),
-            completed_turn_id.as_deref(),
-            Some(*turn_started),
-            pending_turn_start_request_id.as_deref(),
-            Some("terminal_task_complete_not_active_turn"),
-        );
-        return Ok(());
-    }
-
-    if let Some(summary) = shared_codex_task_complete_last_agent_message(message) {
-        let trimmed = summary.trim();
-        if !trimmed.is_empty() {
-            if turn_state.current_agent_message_id.is_some()
-                || turn_state.first_visible_assistant_message_id.is_none()
-            {
-                let item_id = turn_state
-                    .current_agent_message_id
-                    .clone()
-                    .or_else(|| event_turn_id.map(str::to_owned))
-                    .unwrap_or_else(|| "task_complete".to_owned());
-                record_completed_codex_agent_message(
-                    turn_state, recorder, state, session_id, &item_id, trimmed,
-                )?;
-                trace_shared_codex_event(
-                    "record",
-                    "codex/event/task_complete",
-                    Some(session_id),
-                    None,
-                    event_turn_id,
-                    turn_id.as_deref(),
-                    completed_turn_id.as_deref(),
-                    Some(*turn_started),
-                    pending_turn_start_request_id.as_deref(),
-                    Some("terminal_task_complete_last_agent_message"),
-                );
-            }
-        }
-    }
-
-    trace_shared_codex_event(
-        "finish",
-        "codex/event/task_complete",
-        Some(session_id),
-        None,
-        event_turn_id,
-        turn_id.as_deref(),
-        completed_turn_id.as_deref(),
-        Some(*turn_started),
-        pending_turn_start_request_id.as_deref(),
-        Some("terminal_task_complete"),
-    );
-    *completed_turn_id = turn_id
-        .clone()
-        .or_else(|| event_turn_id.map(str::to_owned));
-    *turn_id = None;
-    *turn_started = false;
-    *pending_turn_start_request_id = None;
-    flush_pending_codex_subagent_results(turn_state, recorder)?;
-    state.finish_turn_ok_if_runtime_matches(session_id, runtime_token)?;
-    if let Some(completed_turn_id) = completed_turn_id.as_deref() {
-        schedule_shared_codex_completed_turn_cleanup(sessions, session_id, completed_turn_id);
-    }
-
-    Ok(())
 }
 
 fn handle_shared_codex_task_complete(
@@ -1111,7 +993,7 @@ fn handle_shared_codex_thread_compacted(
 /// has already been streamed for the same `item_id`. If nothing was
 /// streamed, the trimmed text opens a streaming message so later final
 /// variants for the same item can still append/replace in place; otherwise
-/// the delta-suffix dedup logic computes append/replace/no-change against
+/// completion reconciliation computes append/replace/no-change against
 /// the already-seen stream content. Finalizes any prior streaming text
 /// when switching to a new `item_id`.
 fn record_completed_codex_agent_message(
@@ -1170,11 +1052,11 @@ fn record_completed_codex_agent_message(
 /// finalizations still land correctly.
 fn handle_shared_codex_event_item_completed(
     message: &Value,
-    state: &AppState,
-    session_id: &str,
+    _state: &AppState,
+    _session_id: &str,
     current_turn_id: Option<&str>,
     completed_turn_id: Option<&str>,
-    turn_state: &mut CodexTurnState,
+    _turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
     let event_turn_id = shared_codex_event_turn_id(message);
@@ -1191,19 +1073,10 @@ fn handle_shared_codex_event_item_completed(
     };
 
     match item.get("type").and_then(Value::as_str) {
-        Some("AgentMessage") => {
-            let item_id = item.get("id").and_then(Value::as_str).unwrap_or("");
-            let text = item
-                .get("content")
-                .and_then(Value::as_array)
-                .and_then(|content| concatenate_codex_text_parts(content));
-
-            if let Some(text) = text.as_deref() {
-                record_completed_codex_agent_message(
-                    turn_state, recorder, state, session_id, item_id, text,
-                )?;
-            }
-        }
+        // Agent-message completion is authoritative only on the typed v2
+        // `item/completed` path. Ignore the legacy mirror here so it cannot
+        // race typed deltas or replace their in-flight text.
+        Some("AgentMessage") => {}
         Some("CommandExecution") => {
             if let Some(command) = item.get("command").and_then(Value::as_str) {
                 let key = item.get("id").and_then(Value::as_str).unwrap_or(command);
@@ -1228,27 +1101,4 @@ fn handle_shared_codex_event_item_completed(
     }
 
     Ok(())
-}
-
-/// Concatenates the `Text`-typed parts of a multi-part Codex content
-/// array into a single string, skipping other part types. Returns
-/// `None` when no text parts were found.
-fn concatenate_codex_text_parts(content: &[Value]) -> Option<String> {
-    let mut combined = String::new();
-
-    for part in content {
-        if part.get("type").and_then(Value::as_str) != Some("Text") {
-            continue;
-        }
-        let Some(text) = part.get("text").and_then(Value::as_str) else {
-            continue;
-        };
-        combined.push_str(text);
-    }
-
-    if combined.is_empty() {
-        None
-    } else {
-        Some(combined)
-    }
 }

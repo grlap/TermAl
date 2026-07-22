@@ -351,12 +351,12 @@ describe("delegation command surface", () => {
         agent: "Codex",
         model: "gpt-5.5",
       }),
-      "Run /review-local.",
+      "Run /review-code.",
       { writePolicy: { kind: "isolatedWorktree", ownedPaths: [] } },
     );
 
     expect(request).toMatchObject({
-      prompt: "Run /review-local.",
+      prompt: "Run /review-code.",
       agent: "Codex",
       model: "gpt-5.5",
       mode: "reviewer",

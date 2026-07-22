@@ -2,7 +2,7 @@
 
 Read this before making changes in this repository. These rules override
 anything implied by my default behaviour or by the Claude-Code skills
-(`review-local`, etc.).
+(`review-code`, etc.).
 
 ## Never commit or push without explicit permission
 
@@ -64,10 +64,12 @@ anything implied by my default behaviour or by the Claude-Code skills
 
 ## Review cadence
 
-- The `review-local` skill can be invoked to run the review lenses
-  against staged / unstaged changes. It never commits — reviewers
-  read, I present, the user decides. See the skill definition for
-  the full loop.
+- Invoke `/review-changes` directly in the active writable session. It owns
+  quality gates and delegates exactly one Codex and one Claude `/review-code`
+  child with `writePolicy: readOnly`.
+- `/review-code` is the read-only, non-nesting leaf. It inspects staged,
+  unstaged, and untracked changes through every reviewer lens and never runs
+  quality gates, edits files, or mutates Beads.
 
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->

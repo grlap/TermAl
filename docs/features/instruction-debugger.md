@@ -99,8 +99,8 @@ Examples:
 
 - project root contains `AGENTS.md`
 - current path falls under a subdirectory rule
-- `.claude/commands/review-local.md` was loaded because the user invoked
-  `/review-local`
+- `.claude/commands/review-code.md` was loaded because the user invoked
+  `/review-code`
 - a reviewer file was discovered from `.claude/reviewers/`
 
 ### Instruction provenance
@@ -327,7 +327,7 @@ These are context anchors that explain why a structural root mattered for this
 resolution:
 
 - current session agent is `Claude`
-- current command is `/review-local`
+- current command is `/review-code`
 - current target path is `src/api.rs`
 - current workdir is the project root
 

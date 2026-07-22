@@ -981,6 +981,44 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("retains an extra below-viewport page band for collapsing tall messages", async () => {
+    const messages = makeTextMessages(160);
+    const measuredSlotHeight = 100;
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      clientHeight: 500,
+      messages,
+      scrollHeight: () =>
+        buildVirtualizedMessageLayout(
+          messages.map(() => measuredSlotHeight),
+        ).totalHeight,
+      slotHeight: () => measuredSlotHeight,
+      virtualizerHandleRef,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(virtualizerHandleRef.current).not.toBeNull();
+      });
+      act(() => {
+        harness.setScrollTop(3_800);
+        fireEvent.wheel(harness.scrollNode, { deltaY: -2_000 });
+        fireEvent.scroll(harness.scrollNode);
+      });
+      await waitFor(() => {
+        expect(
+          virtualizerHandleRef.current!.getLayoutSnapshot().mountedPageRange.endIndex,
+        ).toBe(10);
+      });
+      expect(screen.getByText("message-80")).toBeInTheDocument();
+      expect(screen.queryByText("message-81")).not.toBeInTheDocument();
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("keeps page measurement observers stable across visible-range-only scroll changes", async () => {
     const messages = makeTextMessages(16);
     const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {

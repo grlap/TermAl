@@ -116,6 +116,7 @@ fn shared_codex_stdin_watchdog_times_out_stalled_writer_and_clears_runtime() {
         process: process.clone(),
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+        stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
     };
     let handle = CodexRuntimeHandle {
         runtime_id: runtime.runtime_id.clone(),

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchDirectory, fetchGitStatus, type DirectoryResponse, type GitStatusResponse } from "../api";
@@ -143,6 +143,107 @@ describe("FileSystemPanel", () => {
     expect(
       screen.queryByText("This file browser is no longer associated with a live session or project."),
     ).not.toBeInTheDocument();
+  });
+
+  it("uses an explicit project instead of a stale session for file requests", async () => {
+    fetchDirectoryMock.mockResolvedValue(
+      makeDirectoryResponse("repo", "/repo", [
+        { kind: "file", name: "main.rs", path: "/repo/main.rs" },
+      ]),
+    );
+    fetchGitStatusMock.mockResolvedValue(makeStatusResponse([]));
+
+    render(
+      <FileSystemPanel
+        rootPath="/repo"
+        sessionId="session-from-previous-project"
+        projectId="project-current"
+        showPathControls={false}
+        onOpenPath={() => {}}
+        onOpenRootPath={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchDirectoryMock).toHaveBeenCalledWith("/repo", {
+        sessionId: null,
+        projectId: "project-current",
+      });
+    });
+    await waitFor(() => {
+      expect(fetchGitStatusMock).toHaveBeenCalledWith("/repo", null, {
+        projectId: "project-current",
+      });
+    });
+  });
+
+  it("ignores a directory failure from the previous project scope", async () => {
+    let rejectPreviousRequest: (error: Error) => void = () => {};
+    const previousRequest = new Promise<DirectoryResponse>((_resolve, reject) => {
+      rejectPreviousRequest = reject;
+    });
+    fetchDirectoryMock.mockImplementation((_path, scope) => {
+      if (scope?.projectId === "project-previous") {
+        return previousRequest;
+      }
+      return Promise.resolve(
+        makeDirectoryResponse("repo", "/repo", [
+          { kind: "file", name: "current.rs", path: "/repo/current.rs" },
+        ]),
+      );
+    });
+    fetchGitStatusMock.mockResolvedValue(makeStatusResponse([]));
+
+    const { rerender } = render(
+      <FileSystemPanel
+        rootPath="/repo"
+        sessionId={null}
+        projectId="project-previous"
+        showPathControls={false}
+        onOpenPath={() => {}}
+        onOpenRootPath={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchDirectoryMock).toHaveBeenCalledWith("/repo", {
+        sessionId: null,
+        projectId: "project-previous",
+      });
+    });
+
+    rerender(
+      <FileSystemPanel
+        rootPath="/repo"
+        sessionId="session-from-previous-project"
+        projectId="project-current"
+        showPathControls={false}
+        onOpenPath={() => {}}
+        onOpenRootPath={() => {}}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: /^current\.rs/i }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      rejectPreviousRequest(
+        new Error(
+          "path `/repo` must stay inside project `/previous-project`",
+        ),
+      );
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.queryByText(
+        "path `/repo` must stay inside project `/previous-project`",
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^current\.rs/i }),
+    ).toBeInTheDocument();
   });
 
   it("passes openInNewTab when ctrl-clicking a file", async () => {

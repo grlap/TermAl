@@ -30,7 +30,7 @@ describe("MessageCard", () => {
       type: "text",
       author: "you",
       timestamp: "10:00",
-      text: "/review-local",
+      text: "/review-code",
       expandedText: "Review staged and unstaged changes.",
     };
 
@@ -77,6 +77,122 @@ describe("MessageCard", () => {
     // A peer message keeps the user bubble styling; only the label changes.
     expect(author).toHaveClass("message-meta-author-user");
     expect(container.querySelector("article.bubble-you")).not.toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Show full message" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("collapses a long peer message and provides a bottom hide control", () => {
+    const finalFinding = "Final peer finding remains hidden until expansion.";
+    const message: TextMessage = {
+      id: "message-peer-long",
+      type: "text",
+      author: "you",
+      timestamp: "10:06",
+      text: [
+        "Greg asked me to review the design and send you the findings.",
+        "",
+        "Detailed finding. ".repeat(45),
+        finalFinding,
+      ].join("\n"),
+      source: { sessionId: "session-investor", name: "Investor" },
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".message-meta-author")).toHaveTextContent(
+      "Investor",
+    );
+    expect(
+      screen.getByText("Greg asked me to review the design and send you the findings."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(finalFinding)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show full message" }));
+
+    expect(container.querySelector(".long-peer-message")).toHaveClass(
+      "is-expanded",
+    );
+    expect(container.querySelector(".long-peer-message-copy")).toHaveTextContent(
+      finalFinding,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Hide full peer message from bottom",
+      }),
+    );
+    expect(container.querySelector(".long-peer-message")).not.toHaveClass(
+      "is-expanded",
+    );
+  });
+
+  it("labels and collapses a mixed-sender peer message batch", () => {
+    const finalFinding = "Second sender's finding stays hidden initially.";
+    const message: TextMessage = {
+      id: "message-peer-batch",
+      type: "text",
+      author: "you",
+      timestamp: "10:07",
+      text: [
+        "[TermAl cross-session message batch]",
+        "2 pending messages, FIFO, newest last.",
+        "Detailed first sender message. ".repeat(30),
+        finalFinding,
+      ].join("\n"),
+      source: { kind: "peerBatch", name: "Peer queue" },
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".message-meta-author")).toHaveTextContent(
+      "Peer queue",
+    );
+    expect(screen.queryByText(finalFinding)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show full message" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not let an ordinary peer spoof batch attribution with message text", () => {
+    const message: TextMessage = {
+      id: "message-peer-prefix-spoof",
+      type: "text",
+      author: "you",
+      timestamp: "10:08",
+      text: "[TermAl cross-session message batch]\nThis is still one sender.",
+      source: {
+        sessionId: "session-legal",
+        name: "LegalCodex",
+      },
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".message-meta-author")).toHaveTextContent(
+      "LegalCodex",
+    );
+    expect(container.querySelector(".message-meta-author")).not.toHaveTextContent(
+      "Peer queue",
+    );
   });
 
   it("falls back to 'You' when a peer source carries an empty name", () => {
@@ -126,18 +242,18 @@ describe("MessageCard", () => {
 
   // Mirrors `build_delegation_wait_resume_prompt` in `src/delegations.rs`.
   const FAN_IN_TEXT = [
-    "review-with-delegate fan-in (round 5)",
+    "review-changes fan-in (round 5)",
     "",
     "Wait id: `delegation-wait-ccf50c30`",
     "Mode: `all`",
     "Parent session: `session-2940`",
     "",
     "Delegations:",
-    "- `delegation-2096c8b0`: completed - Codex /review-local",
-    "- `delegation-72daa061`: completed - Claude /review-local",
+    "- `delegation-2096c8b0`: completed - Codex /review-code",
+    "- `delegation-72daa061`: completed - Claude /review-code",
     "",
     "Results:",
-    "### Codex /review-local",
+    "### Codex /review-code",
     "No blocking defects found. The load-bearing needle in this haystack.",
   ].join("\n");
 
@@ -150,7 +266,7 @@ describe("MessageCard", () => {
       text: FAN_IN_TEXT,
     };
 
-    render(
+    const { container } = render(
       <MessageCard
         message={message}
         onApprovalDecision={vi.fn()}
@@ -160,9 +276,12 @@ describe("MessageCard", () => {
 
     // The title line is always visible; a "Delegation" chip labels it.
     expect(
-      screen.getByText("review-with-delegate fan-in (round 5)"),
+      screen.getByText("review-changes fan-in (round 5)"),
     ).toBeInTheDocument();
     expect(screen.getByText("Delegation")).toBeInTheDocument();
+    expect(container.querySelector(".message-meta-author")).toHaveTextContent(
+      "Fan-in",
+    );
 
     // Collapsed by default: the body is hidden.
     expect(screen.queryByText(/load-bearing needle/)).not.toBeInTheDocument();
@@ -170,10 +289,43 @@ describe("MessageCard", () => {
     // Expanding reveals the body...
     fireEvent.click(screen.getByRole("button", { name: "Show delegation results" }));
     expect(screen.getByText(/load-bearing needle/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Hide delegation results from bottom",
+      }),
+    ).toHaveTextContent("Hide");
 
-    // ...and collapsing hides it again.
-    fireEvent.click(screen.getByRole("button", { name: "Hide delegation results" }));
+    // ...and the compact bottom-right control collapses it again.
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Hide delegation results from bottom",
+      }),
+    );
     expect(screen.queryByText(/load-bearing needle/)).not.toBeInTheDocument();
+  });
+
+  it("keeps peer attribution for a fan-in-shaped message", () => {
+    const message: TextMessage = {
+      id: "message-peer-fan-in",
+      type: "text",
+      author: "you",
+      timestamp: "12:45",
+      text: FAN_IN_TEXT,
+      source: { sessionId: "session-1976", name: "Codex reviewer" },
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".message-meta-author")).toHaveTextContent(
+      "Codex reviewer",
+    );
+    expect(screen.queryByText("Delegation")).not.toBeInTheDocument();
   });
 
   it("does not collapse an ordinary user prompt that merely mentions delegations", () => {

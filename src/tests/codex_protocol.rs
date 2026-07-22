@@ -18,9 +18,9 @@
 // between deltas and `item/completed` payloads (suffix append, divergent
 // replace, duplicate skip), `task_complete` ordering against the final
 // `agent_message`, and late agent messages arriving after `turn/completed`.
-// The `codex_delta_suffix_*` tests exercise `next_codex_delta_suffix`, the
-// dedup primitive shared by both modes that collapses Codex's cumulative /
-// overlapping stream chunks while staying safe on UTF-8 char boundaries.
+// The `codex_typed_delta_append_*` tests pin the v2 contract shared by both
+// modes: ordered incremental chunks are concatenated verbatim, including
+// repeated text and Markdown table delimiters.
 //
 // All tests operate on the pure event-handler functions in isolation: no
 // real subprocess is spawned, no socket is opened. `TestRecorder` stands in
@@ -373,14 +373,14 @@ fn repl_codex_task_complete_event_buffers_subagent_result_until_final_message() 
         }
     });
     let final_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-sub-1",
-            "msg": {
-                "message": "Final REPL Codex answer.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-sub-1",
+            "item": {
+                "id": "msg-final",
+                "type": "agentMessage",
+                "text": "Final REPL Codex answer."
             }
         }
     });
@@ -404,7 +404,7 @@ fn repl_codex_task_complete_event_buffers_subagent_result_until_final_message() 
     assert!(recorder.texts.is_empty());
 
     handle_repl_codex_app_server_notification(
-        "codex/event/agent_message",
+        "item/completed",
         &final_message,
         &mut repl_state,
         &mut recorder,
@@ -431,8 +431,8 @@ fn repl_codex_task_complete_event_buffers_subagent_result_until_final_message() 
 // the streamed delta (streamed "Hello", completed "Hello from REPL."),
 // only the missing suffix " from REPL." is emitted as an additional
 // delta, not the whole completed string. exercises
-// `handle_repl_codex_app_server_notification` plus
-// `append_codex_streamed_text_with_dedup` / `next_codex_delta_suffix`.
+// `handle_repl_codex_app_server_notification` plus completion
+// reconciliation.
 // guards against the transcript showing "HelloHello from REPL." because
 // the completed payload was appended wholesale on top of the delta.
 #[test]
@@ -520,8 +520,8 @@ fn repl_codex_streamed_agent_message_appends_missing_completed_suffix() {
 // streamed delta (stream "Hello from stream" vs completed "Different
 // final answer."), the handler emits the completed text as the canonical
 // answer and drops the preliminary stream. exercises
-// `handle_repl_codex_app_server_notification` and
-// `append_codex_streamed_text_with_dedup`. guards against a stale
+// `handle_repl_codex_app_server_notification` and completion
+// reconciliation. guards against a stale
 // streamed preamble staying in the transcript when Codex revises its
 // final answer between the delta stream and the completion event.
 #[test]
@@ -630,8 +630,8 @@ fn completed_codex_text_replaces_corrupted_stream_when_final_is_suffix() {
 // pins that when the `item/completed` text exactly equals the streamed
 // delta ("Hello from REPL." both times), the handler emits nothing new
 // and the transcript keeps a single copy. exercises
-// `handle_repl_codex_app_server_notification` and
-// `next_codex_delta_suffix`'s `incoming == existing` early-out.
+// `handle_repl_codex_app_server_notification` and the completed-text
+// equality branch.
 // guards against the most common duplication bug, where a matching
 // completion still appends a second copy of the full answer after the
 // streamed one, doubling every agent message in the transcript.
@@ -713,15 +713,65 @@ fn repl_codex_streamed_agent_message_skips_duplicate_completed_text() {
     assert!(repl_state.current_turn_id.is_none());
 }
 
-// pins that a `codex/event/agent_message` arriving *after* `turn/completed`
-// (Codex sometimes flushes the final answer as a trailing event) is still
-// recorded to the transcript rather than dropped as out-of-turn. exercises
-// `handle_repl_codex_app_server_notification` plus the late-message branch
-// in `handle_repl_codex_event_agent_message`. guards against a race where
-// the turn looks finished, the state is reset, and the real final answer
-// never makes it into the transcript.
+// Legacy text notifications may still be mirrored by Codex, but TermAl's
+// current integration consumes only typed v2 assistant text. Deliberately
+// corrupt legacy payloads must not alter the typed stream.
 #[test]
-fn repl_codex_agent_message_after_turn_completed_is_recorded() {
+fn repl_codex_legacy_agent_message_notifications_do_not_change_typed_stream() {
+    let mut recorder = TestRecorder::default();
+    let mut repl_state = ReplCodexSessionState::default();
+    let turn_started = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "conversation-123",
+            "turn": { "id": "turn-stream-1" }
+        }
+    });
+    let typed_delta = json!({
+        "method": "item/agentMessage/delta",
+        "params": {
+            "threadId": "conversation-123",
+            "turnId": "turn-stream-1",
+            "itemId": "item-1",
+            "delta": "Hello."
+        }
+    });
+    let legacy_delta = json!({
+        "method": "codex/event/agent_message_content_delta",
+        "params": {
+            "msg": {
+                "item_id": "item-1",
+                "delta": "CORRUPT LEGACY DELTA"
+            }
+        }
+    });
+    let legacy_final = json!({
+        "method": "codex/event/agent_message",
+        "params": {
+            "msg": {
+                "message": "CORRUPT LEGACY FINAL"
+            }
+        }
+    });
+
+    for (method, message) in [
+        ("turn/started", &turn_started),
+        ("item/agentMessage/delta", &typed_delta),
+        ("codex/event/agent_message_content_delta", &legacy_delta),
+        ("codex/event/agent_message", &legacy_final),
+    ] {
+        handle_repl_codex_app_server_notification(method, message, &mut repl_state, &mut recorder)
+            .unwrap();
+    }
+
+    assert_eq!(recorder.text_deltas, vec!["Hello.".to_owned()]);
+    assert!(recorder.texts.is_empty());
+}
+
+// Pins that the typed `item/completed` arriving after `turn/completed` is
+// still recorded during the completed-turn grace window.
+#[test]
+fn repl_codex_typed_agent_message_after_turn_completed_is_recorded() {
     let mut recorder = TestRecorder::default();
     let mut repl_state = ReplCodexSessionState::default();
     let turn_started = json!({
@@ -744,14 +794,14 @@ fn repl_codex_agent_message_after_turn_completed_is_recorded() {
         }
     });
     let late_message = json!({
-        "method": "codex/event/agent_message",
+        "method": "item/completed",
         "params": {
-            "conversationId": "conversation-123",
-            "id": "turn-finished",
-            "msg": {
-                "message": "Late REPL answer.",
-                "phase": "final_answer",
-                "type": "agent_message"
+            "threadId": "conversation-123",
+            "turnId": "turn-finished",
+            "item": {
+                "id": "msg-final",
+                "type": "agentMessage",
+                "text": "Late REPL answer."
             }
         }
     });
@@ -771,7 +821,7 @@ fn repl_codex_agent_message_after_turn_completed_is_recorded() {
     )
     .unwrap();
     handle_repl_codex_app_server_notification(
-        "codex/event/agent_message",
+        "item/completed",
         &late_message,
         &mut repl_state,
         &mut recorder,
@@ -788,8 +838,8 @@ fn repl_codex_agent_message_after_turn_completed_is_recorded() {
 // `turn/completed` is still recorded, using the `allow_late_agent_message`
 // branch in `handle_repl_codex_app_server_notification`. guards against
 // that late-delivery branch only being wired for the
-// `codex/event/agent_message` variant, which would cause late
-// `item/completed` agent messages to be silently dropped.
+// typed delta variant, which would cause late `item/completed` agent
+// messages to be silently dropped.
 #[test]
 fn repl_codex_app_server_agent_message_completed_after_turn_completed_is_recorded() {
     let mut recorder = TestRecorder::default();
@@ -965,148 +1015,24 @@ fn codex_app_server_file_change_item_records_create_and_edit_diffs() {
     );
 }
 
-// Pins the three unambiguous branches of `next_codex_delta_suffix`:
-// initial chunk seeds the buffer, a cumulative extension (incoming
-// starts_with existing) yields only the new suffix, and an exact
-// repeat yields `None`. The fourth historical branch — overlap
-// fallback for partial-suffix retransmissions — was removed because
-// it caused streamed-transcript corruption against any repetitive
-// agent output (Markdown pipe-tables, fenced code, prose with
-// repeated row prefixes); see the function-level comment in
-// `codex_text_stream.rs::next_codex_delta_suffix` for the rationale.
+// Typed v2 agent-message deltas are ordered incremental chunks. Repeated
+// bytes are legitimate content and must never be interpreted as a replay.
 #[test]
-fn codex_delta_suffix_deduplicates_cumulative_chunks() {
+fn codex_typed_delta_append_preserves_repeated_text_verbatim() {
     let mut text = String::new();
 
-    assert_eq!(
-        next_codex_delta_suffix(&mut text, "Try"),
-        Some("Try".to_owned())
-    );
-    assert_eq!(text, "Try");
+    assert!(append_codex_agent_message_delta(&mut text, "ha"));
+    assert!(append_codex_agent_message_delta(&mut text, "ha"));
+    assert!(!append_codex_agent_message_delta(&mut text, ""));
 
-    assert_eq!(
-        next_codex_delta_suffix(&mut text, "Try these"),
-        Some(" these".to_owned())
-    );
-    assert_eq!(text, "Try these");
-
-    assert_eq!(next_codex_delta_suffix(&mut text, "Try these"), None);
-    assert_eq!(text, "Try these");
+    assert_eq!(text, "haha");
 }
 
-// Pins that a partial-suffix delta — one where `incoming` shares a
-// prefix with the existing tail but does NOT start with the full
-// `existing` — is appended verbatim instead of being deduped against
-// a guessed overlap. This is a deliberate trade-off: a true
-// retransmission window (e.g., the agent re-sending " these" before
-// " plain" after a reconnect) duplicates during streaming, but
-// `next_completed_codex_text_update` reconciles the streamed text
-// against the canonical `agentMessage` text once the turn settles.
-// Duplication is a strictly less-bad failure mode than dropping new
-// characters and breaking Markdown rendering. See
-// `codex_text_stream.rs::next_codex_delta_suffix`.
+// A complete GFM table must survive typed delta boundaries byte-for-byte.
+// In particular, the repeated `|` characters carry structure and are not
+// candidates for content-based deduplication.
 #[test]
-fn codex_delta_suffix_appends_partial_suffix_chunks_verbatim() {
-    let mut text = String::from("Try these");
-
-    assert_eq!(
-        next_codex_delta_suffix(&mut text, " these plain"),
-        Some(" these plain".to_owned()),
-        "partial-suffix delta must be appended verbatim, not partially deduped against a guessed overlap",
-    );
-    assert_eq!(
-        text, "Try these these plain",
-        "duplication during streaming is the documented trade-off; `next_completed_codex_text_update` reconciles at turn end",
-    );
-
-    // Exact-suffix repeat (case 3) is still deduped — `existing.ends_with(incoming)`
-    // is unambiguous (the new chunk is wholly contained as the tail of
-    // the existing buffer).
-    assert_eq!(next_codex_delta_suffix(&mut text, " plain"), None);
-    assert_eq!(text, "Try these these plain");
-}
-
-// Pins that `next_codex_delta_suffix` does not panic on multi-byte
-// UTF-8 boundaries. A 3-byte smart quote (U+2018) appearing at the
-// chunk boundary must be appended cleanly (no slicing mid-codepoint).
-// The dedup no longer attempts overlap detection, so the second chunk
-// is appended verbatim — duplicated leading bytes are reconciled at
-// `agentMessage` time.
-#[test]
-fn codex_delta_suffix_handles_multibyte_utf8_characters() {
-    let mut text = String::new();
-
-    // Smart quote ' is 3 bytes (U+2018: E2 80 98)
-    assert_eq!(
-        next_codex_delta_suffix(&mut text, "I\u{2018}m"),
-        Some("I\u{2018}m".to_owned())
-    );
-    assert_eq!(text, "I\u{2018}m");
-
-    // Partial-suffix chunk that shares a multi-byte codepoint boundary
-    // with the existing buffer's tail. Appended verbatim (with
-    // duplication) rather than overlap-deduped.
-    assert_eq!(
-        next_codex_delta_suffix(&mut text, "\u{2018}m here"),
-        Some("\u{2018}m here".to_owned())
-    );
-    assert_eq!(text, "I\u{2018}m\u{2018}m here");
-}
-
-// Regression for the streaming Markdown-table corruption case. Older
-// overlap-detection code would silently strip the leading `c` here
-// (it matched the trailing `c` of `existing`) and emit only `def`,
-// producing a corrupted `abcdef` instead of the intended `abccdef`.
-// Markdown tables tripped the same pattern at every row boundary
-// because rows both start and end with `|`. The current contract
-// appends ambiguous partial-suffix chunks verbatim and relies on the
-// final completed text to reconcile any temporary duplication.
-#[test]
-fn codex_delta_suffix_does_not_strip_short_coincidental_prefix_overlap() {
-    let mut text = String::from("abc");
-    let suffix = next_codex_delta_suffix(&mut text, "cdef");
-
-    assert_eq!(
-        suffix,
-        Some("cdef".to_owned()),
-        "an incremental delta whose first character coincidentally matches the existing tail must not be classified as a retransmission",
-    );
-    assert_eq!(
-        text, "abccdef",
-        "accumulated text must include the full `cdef` suffix; the leading `c` is new content, not a re-send",
-    );
-}
-
-// Pipe-table boundary regression. Streams `| Header |\n|` followed by
-// `|---|---:|`: the second chunk does not start with the existing
-// buffer (case 2 fails) and the existing does not end with the
-// incoming (case 3 fails), so the new contract appends verbatim
-// instead of guessing at an overlap. The result preserves every `|`
-// from both chunks, which is what GFM needs to recognise the table.
-#[test]
-fn codex_delta_suffix_preserves_double_pipe_across_table_row_chunk_boundary() {
-    let mut text = String::new();
-
-    next_codex_delta_suffix(&mut text, "| Header |\n|");
-    assert_eq!(text, "| Header |\n|");
-
-    next_codex_delta_suffix(&mut text, "|---|---:|");
-    assert_eq!(
-        text, "| Header |\n||---|---:|",
-        "the leading `|` of the separator row must survive the chunk boundary; verbatim append guarantees no `|` is dropped",
-    );
-}
-
-// End-to-end streaming-Markdown-table scenario. Codex sends a
-// realistic 4-row table in incremental chunks where each chunk
-// starts where the previous left off. The chunking pattern produces
-// several `|`/`|` and `\n`/`\n`-style coincidental boundaries that
-// would have been mis-deduped before the fix. After the fix the
-// reassembled text must be identical to the source.
-#[test]
-fn codex_delta_suffix_assembles_streaming_markdown_table_without_corruption() {
-    // Source text: a complete GFM table (header + separator + 3 body
-    // rows + trailing blank line so GFM commits the table).
+fn codex_typed_delta_append_assembles_markdown_table_without_corruption() {
     let source = "\
 | Group | Files | Lines | Size |
 |---|---:|---:|---:|
@@ -1115,25 +1041,6 @@ fn codex_delta_suffix_assembles_streaming_markdown_table_without_corruption() {
 | Docs | 42 | 1,042 | 0.5 MiB |
 
 ";
-
-    // Plausible incremental chunking. Boundaries land:
-    //   - mid-header (so the next chunk starts with ` `, no overlap),
-    //   - end of header row at `|` (next chunk starts with `\n`,
-    //     no overlap),
-    //   - end of separator row at `|` (next chunk starts with `\n`,
-    //     no overlap),
-    //   - mid-body-cell (boundary between `Backend` and ` |`),
-    //   - end of last body row right after `|` (next chunk starts
-    //     with `\n`, no overlap),
-    //   - the trailing blank line.
-    //
-    // Two of these boundaries used to trigger the 1-byte coincidental
-    // overlap bug (existing ending `|`, incoming starting with `\n` —
-    // those are different bytes so they wouldn't have, but earlier
-    // iterations of this test exercised a wider class of patterns).
-    // The chunking below additionally splits a body row mid-cell so
-    // we cover the "end of one cell" → "start of next cell" boundary
-    // as well.
     let chunks = [
         "| Group | Files",
         " | Lines | Size |",
@@ -1147,11 +1054,8 @@ fn codex_delta_suffix_assembles_streaming_markdown_table_without_corruption() {
 
     let mut text = String::new();
     for chunk in chunks {
-        next_codex_delta_suffix(&mut text, chunk);
+        assert!(append_codex_agent_message_delta(&mut text, chunk));
     }
 
-    assert_eq!(
-        text, source,
-        "streaming a Markdown table through the dedup must preserve every `|` and newline so GFM can still recognise it as a table",
-    );
+    assert_eq!(text, source);
 }

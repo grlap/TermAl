@@ -40,6 +40,12 @@ fn spawn_claude_runtime(
     resume_session_id: Option<String>,
     model_options_tx: Option<Sender<std::result::Result<Vec<SessionModelOption>, String>>>,
 ) -> Result<ClaudeRuntimeHandle> {
+    if !state.agent_runtime_spawning_enabled {
+        return Err(anyhow!(
+            "agent runtime spawning is disabled for this AppState"
+        ));
+    }
+
     let runtime_id = Uuid::new_v4().to_string();
     let cwd = normalize_local_user_facing_path(&cwd);
     let mut command = Command::new("claude");

@@ -52,13 +52,13 @@ import type { ControlPanelSide } from "./workspace-storage";
 
 export const DEFAULT_SPLIT_MIN_RATIO = 0.22;
 export const DEFAULT_SPLIT_MAX_RATIO = 0.78;
-// 40rem is the minimum acceptable docked control-panel width. Keep
+// 36rem is the minimum acceptable docked control-panel width. Keep
 // these fallbacks aligned with the CSS dock width/min-width so saved
 // layouts do not permit a narrower manual resize that later snaps
 // back.
-export const CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX = 40 * 16;
+export const CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX = 36 * 16;
 export const STANDALONE_CONTROL_SURFACE_PANE_MIN_WIDTH_FALLBACK_PX = 16 * 16;
-export const CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX = 40 * 16;
+export const CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX = 36 * 16;
 
 export function getDockedControlPanelWidthRatioForWorkspace(
   workspace: WorkspaceState,

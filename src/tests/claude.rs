@@ -39,7 +39,7 @@ fn claude_permission_request(tool_name: &str, tool_input: Value) -> Value {
 
 // Pins read-only auto-approval as a filtered Claude permission mode, not a
 // shortcut to full `AutoApprove`. Read-only Bash commands may proceed without
-// surfacing an approval card so `/review-local` can finish unattended.
+// surfacing an approval card so `/review-code` can finish unattended.
 #[test]
 fn claude_read_only_auto_approve_allows_read_only_bash_permission_request() {
     let mut turn_state = ClaudeTurnState::default();
@@ -73,7 +73,7 @@ fn claude_read_only_auto_approve_allows_read_only_bash_permission_request() {
 }
 
 #[test]
-fn claude_read_only_auto_approve_allows_review_local_bash_shapes() {
+fn claude_read_only_auto_approve_allows_review_code_bash_shapes() {
     for command in [
         "git status",
         "git status --short",
@@ -127,7 +127,7 @@ fn claude_read_only_auto_approve_allows_review_local_bash_shapes() {
             updated_input,
         }) = action
         else {
-            panic!("read-only review-local command should be auto-allowed: {command}");
+            panic!("read-only review-code command should be auto-allowed: {command}");
         };
 
         assert_eq!(request_id, "permission-request-1");
