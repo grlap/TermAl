@@ -756,6 +756,50 @@ impl AppState {
         })
     }
 
+    /// Lists only delegations owned by one visible parent session.
+    ///
+    /// Each status read uses the same active freshness path as
+    /// `get_delegation`, so a parent recovering ids after context compaction
+    /// also sees children that became terminal since its last state snapshot.
+    fn list_delegations(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<DelegationListResponse, ApiError> {
+        let parent_session_id = normalize_optional_identifier(Some(parent_session_id))
+            .ok_or_else(|| ApiError::not_found("session not found"))?
+            .to_owned();
+        let (mut revision, delegation_ids) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if inner
+                .find_visible_session_index(&parent_session_id)
+                .is_none()
+            {
+                return Err(ApiError::not_found("session not found"));
+            }
+            (
+                inner.revision,
+                inner
+                    .delegations
+                    .iter()
+                    .filter(|record| record.parent_session_id == parent_session_id)
+                    .map(|record| record.id.clone())
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        let mut delegations = Vec::with_capacity(delegation_ids.len());
+        for delegation_id in delegation_ids {
+            let response = self.get_delegation(&parent_session_id, &delegation_id)?;
+            revision = revision.max(response.revision);
+            delegations.push(delegation_summary_from_record(&response.delegation));
+        }
+        Ok(DelegationListResponse {
+            revision,
+            delegations,
+            server_instance_id: self.server_instance_id.clone(),
+        })
+    }
+
     fn get_delegation_result(
         &self,
         parent_session_id: &str,

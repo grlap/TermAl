@@ -275,6 +275,7 @@ impl TermalDelegationMcpBridge {
         }
         let result = match name.as_str() {
             "termal_spawn_session" => self.tool_spawn_session(arguments),
+            "termal_list_delegations" => self.tool_list_delegations(arguments),
             "termal_get_session_status" => self.tool_get_session_status(arguments),
             "termal_get_session_result" => self.tool_get_session_result(arguments),
             "termal_cancel_session" => self.tool_cancel_session(arguments),
@@ -323,6 +324,13 @@ impl TermalDelegationMcpBridge {
             &format!("/api/sessions/{}/delegations", self.parent_session_id),
             &Value::Object(body),
         )
+    }
+
+    fn tool_list_delegations(&self, _arguments: Value) -> Result<Value> {
+        self.get_json(&format!(
+            "/api/sessions/{}/delegations",
+            self.parent_session_id
+        ))
     }
 
     fn resolve_spawn_prompt_if_agent_command(
@@ -881,6 +889,14 @@ fn mcp_tools_list_result() -> Value {
                 }
             },
             {
+                "name": "termal_list_delegations",
+                "description": "List compact metadata for every delegation owned by the current parent session. Use this to recover exact delegationId and childSessionId values after a spawn result or conversation context was truncated; the recovered ids can be passed directly to status, result, cancel, follow-up, wait, or resume tools. Same-title delegations remain separate. Takes no arguments.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            },
+            {
                 "name": "termal_get_session_status",
                 "description": "Get a parent-scoped TermAl delegation status.",
                 "inputSchema": {
@@ -1299,6 +1315,7 @@ mod delegation_mcp_tests {
             names,
             vec![
                 "termal_spawn_session",
+                "termal_list_delegations",
                 "termal_get_session_status",
                 "termal_get_session_result",
                 "termal_cancel_session",
@@ -1309,15 +1326,15 @@ mod delegation_mcp_tests {
                 "termal_list_sessions",
             ]
         );
-        // termal_list_sessions is the intentional peer-discovery tool; guard that no OTHER
-        // broadly-scoped "list" tool creeps in.
+        // The delegation inventory is parent-scoped; termal_list_sessions is the one
+        // intentionally broad peer-discovery tool.
         assert_eq!(
             names
                 .iter()
                 .copied()
                 .filter(|name| name.contains("list"))
                 .collect::<Vec<_>>(),
-            vec!["termal_list_sessions"]
+            vec!["termal_list_delegations", "termal_list_sessions"]
         );
     }
 
@@ -1563,6 +1580,10 @@ mod delegation_mcp_tests {
         assert!(
             names.iter().any(|name| name == "termal_spawn_session"),
             "delegation tools stay available to children"
+        );
+        assert!(
+            names.iter().any(|name| name == "termal_list_delegations"),
+            "parent-scoped delegation recovery stays available to children"
         );
 
         // ...and invoking one through the dispatch is rejected.
@@ -1831,6 +1852,88 @@ mod delegation_mcp_tests {
         assert_eq!(response["childSessionId"], "session-child");
         server.join().expect("test server should join");
         assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
+    }
+
+    #[test]
+    fn delegation_mcp_list_recovers_ids_for_resume_without_respawning() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
+            match (request.method.as_str(), request.path.as_str()) {
+                ("GET", "/api/sessions/session-parent/delegations") => (
+                    200,
+                    json!({
+                        "revision": 7,
+                        "delegations": [
+                            {
+                                "id": "delegation-running",
+                                "parentSessionId": "session-parent",
+                                "childSessionId": "session-child-running",
+                                "mode": "reviewer",
+                                "status": "running",
+                                "title": "Same review",
+                                "agent": "Codex",
+                                "writePolicy": { "kind": "readOnly" },
+                                "createdAt": "2026-07-22T10:00:00Z"
+                            },
+                            {
+                                "id": "delegation-completed",
+                                "parentSessionId": "session-parent",
+                                "childSessionId": "session-child-completed",
+                                "mode": "reviewer",
+                                "status": "completed",
+                                "title": "Same review",
+                                "agent": "Claude",
+                                "writePolicy": { "kind": "readOnly" },
+                                "createdAt": "2026-07-22T10:00:01Z"
+                            }
+                        ],
+                        "serverInstanceId": "server-test"
+                    }),
+                ),
+                ("POST", "/api/sessions/session-parent/delegation-waits") => {
+                    let body: Value = serde_json::from_str(&request.body)
+                        .expect("resume wait body should be JSON");
+                    assert_eq!(
+                        body["delegationIds"],
+                        json!(["delegation-running", "delegation-completed"])
+                    );
+                    assert_eq!(body["mode"], "all");
+                    (201, json!({ "wait": { "id": "wait-recovered" } }))
+                }
+                other => panic!("unexpected request: {other:?}"),
+            }
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let listed = bridge
+            .tool_list_delegations(json!({}))
+            .expect("delegation inventory should be recoverable");
+        let delegations = listed["delegations"]
+            .as_array()
+            .expect("delegations should be an array");
+        assert_eq!(delegations.len(), 2);
+        assert_eq!(delegations[0]["id"], "delegation-running");
+        assert_eq!(delegations[0]["childSessionId"], "session-child-running");
+        assert_eq!(delegations[0]["status"], "running");
+        assert_eq!(delegations[1]["id"], "delegation-completed");
+        assert_eq!(delegations[1]["childSessionId"], "session-child-completed");
+        assert_eq!(delegations[1]["status"], "completed");
+        assert_eq!(delegations[0]["title"], delegations[1]["title"]);
+
+        let recovered_ids = delegations
+            .iter()
+            .map(|delegation| delegation["id"].clone())
+            .collect::<Vec<_>>();
+        let resumed = bridge
+            .tool_resume_after_delegations(json!({
+                "delegationIds": recovered_ids,
+                "mode": "all"
+            }))
+            .expect("recovered ids should schedule a resume wait");
+        assert_eq!(resumed.pointer("/wait/id"), Some(&json!("wait-recovered")));
+
+        server.join().expect("test server should join");
+        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
     }
 
     #[test]

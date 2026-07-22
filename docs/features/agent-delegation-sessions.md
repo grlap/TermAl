@@ -674,6 +674,7 @@ Keep tool names explicit:
 
 ```text
 termal_spawn_session
+termal_list_delegations
 termal_get_session_status
 termal_get_session_result
 termal_cancel_session
@@ -688,6 +689,7 @@ The MCP tools map to the existing command/API semantics:
 
 ```text
 termal_spawn_session(request) -> SpawnDelegationCommandResult
+termal_list_delegations() -> DelegationListResponse
 termal_get_session_status({ delegationId }) -> DelegationStatusCommandResult
 termal_get_session_result({ delegationId }) -> DelegationResultPacket
 termal_cancel_session({ delegationId }) -> DelegationStatusCommandResult
@@ -697,6 +699,13 @@ termal_followup_session({ delegationId, message }) -> DelegationStatusResponse
 termal_send_to_session({ sessionId, message }) -> { sessionId, resolvedFrom, delivered, queued, disposition }
 termal_list_sessions() -> { sessions: [{ sessionId, name, agent, status, workdir, preview }] }
 ```
+
+`termal_list_delegations` is the recovery path when a spawn result or parent
+conversation context was truncated. It lists only the bridge's implicit parent,
+keeps same-title children as separate records, and returns compact summaries
+with exact delegation and child-session ids plus current status. Those ids can
+be reused directly with status, result, cancel, follow-up, wait, or resume; no
+respawn or direct persistence-database access is needed.
 
 `termal_followup_session` re-arms a completed or failed delegation for another
 turn — a still-running, canceled, or child-removed delegation is rejected (see
@@ -1656,12 +1665,15 @@ MCP/internal commands:
   once all watched delegations are terminal
 - a parent-scoped bridge cannot read, wait for, cancel, re-arm (follow up), or
   fetch result packets for a delegation owned by another parent session
+- compact delegation listing recovers distinct same-title running/completed
+  children and their exact delegation/child-session ids for reuse by resume
+  waits, without exposing another parent's delegations
 - result is unavailable until completion
 - cancel is idempotent
 
 Agent MCP bridge:
-- the bridge starts with an implicit parent session id; delegation tools expose
-  no cross-parent listing, while the peer tools (`termal_list_sessions` /
+- the bridge starts with an implicit parent session id; `termal_list_delegations`
+  lists only that parent's children, while the peer tools (`termal_list_sessions` /
   `termal_send_to_session`) reach root sessions only, never delegation children;
   `termal_send_to_session` additionally refuses to target the caller itself,
   while `termal_list_sessions` lists the caller

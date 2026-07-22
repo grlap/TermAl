@@ -1293,6 +1293,100 @@ async fn delegation_routes_create_status_and_unavailable_result() {
 }
 
 #[tokio::test]
+async fn delegation_list_route_is_parent_scoped_compact_and_status_fresh() {
+    let state = test_app_state_with_drained_delegation_codex_runtime("delegation-list-runtime");
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let other_parent_session_id = test_session_id(&state, Agent::Codex);
+    let create = |parent_session_id: &str, prompt: &str| {
+        state
+            .create_read_only_delegation(
+                parent_session_id,
+                CreateDelegationRequest {
+                    prompt: prompt.to_owned(),
+                    title: Some("Same review".to_owned()),
+                    cwd: None,
+                    agent: Some(Agent::Codex),
+                    model: None,
+                    mode: Some(DelegationMode::Reviewer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                },
+            )
+            .expect("delegation should be created")
+    };
+    let completed = create(&parent_session_id, "First parent-scoped review");
+    let running = create(&parent_session_id, "Second parent-scoped review");
+    let other = create(&other_parent_session_id, "Other parent's review");
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &completed.delegation.child_session_id,
+        "## Result\n\nStatus: completed\n\nSummary:\nRecovered.",
+    );
+
+    let app = app_router(state.clone());
+    let (status, body): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/sessions/{parent_session_id}/delegations"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["revision"].is_u64());
+    assert!(body["serverInstanceId"].is_string());
+    let delegations = body["delegations"]
+        .as_array()
+        .expect("delegations should be an array");
+    assert_eq!(delegations.len(), 2);
+    assert_eq!(delegations[0]["id"], completed.delegation.id);
+    assert_eq!(
+        delegations[0]["childSessionId"],
+        completed.delegation.child_session_id
+    );
+    assert_eq!(delegations[0]["title"], "Same review");
+    assert_eq!(delegations[0]["agent"], "Codex");
+    assert_eq!(delegations[0]["status"], "completed");
+    assert_eq!(delegations[1]["id"], running.delegation.id);
+    assert_eq!(delegations[1]["status"], "running");
+    assert!(
+        delegations
+            .iter()
+            .all(|delegation| delegation.get("prompt").is_none()),
+        "recovery inventory must remain compact"
+    );
+
+    let (status, other_body): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/sessions/{other_parent_session_id}/delegations"
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(other_body["delegations"].as_array().map(Vec::len), Some(1));
+    assert_eq!(other_body["delegations"][0]["id"], other.delegation.id);
+
+    let (status, missing_body): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/sessions/session-missing/delegations")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(missing_body["error"], "session not found");
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[tokio::test]
 async fn delegation_result_route_uses_camel_case_json_shape() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);

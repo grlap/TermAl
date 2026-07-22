@@ -724,6 +724,15 @@ async fn create_session_delegation(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+/// Lists compact delegation metadata owned by one parent session.
+async fn list_session_delegations(
+    AxumPath(parent_session_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<DelegationListResponse>, ApiError> {
+    let response = run_blocking_api(move || state.list_delegations(&parent_session_id)).await?;
+    Ok(Json(response))
+}
+
 /// Gets delegation status and metadata.
 async fn get_delegation_status(
     AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,

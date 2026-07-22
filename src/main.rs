@@ -338,7 +338,7 @@ fn app_router(state: AppState) -> Router {
         .route("/api/sessions/{id}", get(get_session))
         .route(
             "/api/sessions/{id}/delegations",
-            post(create_session_delegation),
+            get(list_session_delegations).post(create_session_delegation),
         )
         .route(
             "/api/sessions/{id}/delegations/{delegation_id}",

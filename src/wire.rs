@@ -1107,6 +1107,16 @@ struct DelegationStatusResponse {
     server_instance_id: String,
 }
 
+/// Compact parent-scoped delegation inventory used to recover delegation ids.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationListResponse {
+    revision: u64,
+    delegations: Vec<DelegationSummary>,
+    #[serde(default)]
+    server_instance_id: String,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegationResultResponse {
