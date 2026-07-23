@@ -15,7 +15,7 @@ Review current staged and unstaged changes by delegating `/review-code` to both 
 
 **IMPORTANT: This command must use TermAl MCP delegation tools to attempt exactly two reviewer session spawns. Do NOT use raw `claude -p`, Codex platform subagents, Claude Task agents, shell polling, raw HTTP, nested TermAl delegations, or any non-TermAl MCP review path to spawn or wait for reviewers. The delegated child sessions execute `/review-code` in read-only TermAl reviewer mode, where nested reviewer spawning is explicitly disabled. If the required TermAl MCP tools are unavailable, stop and report that `/review-changes` requires the TermAl delegation MCP bridge.**
 
-Delegated child reviewers run with `writePolicy: readOnly`. They may use read-only git/file inspection commands freely, but must not edit files, run mutating git commands, launch nested reviewer agents, run quality gates, or call `bd`. The parent session exclusively owns all compilation, build, test, type-check, lint, and formatting gates, and applies any beads updates in Step 6.
+Delegated child reviewers run with `writePolicy: readOnly`. They may use read-only git/file inspection commands freely, but must not edit files, run mutating git commands, launch nested reviewer agents, run quality gates, inspect the existing Beads tracker, or call `bd`. Their `Suggested beads updates` sections are proposals only. The parent session exclusively owns all compilation, build, test, type-check, lint, and formatting gates; it first consolidates and deduplicates both reviews in Step 5, then reconciles the consolidated result with Beads in Step 6.
 
 Required MCP tools:
 - `termal_spawn_session`
@@ -104,14 +104,28 @@ After both reviewers finish, fetch each delegation result packet and present a c
 ```
 
 Deduplicate findings. If both reviewers report the same issue, merge it and note that both caught it.
+Also merge their proposed tracker follow-ups into the consolidated action list.
+Do not create, update, comment on, or close tracker items until this
+consolidation is complete.
 
-## Step 6: Update beads (bd)
+## Step 6: Reconcile consolidated findings with Beads (bd)
 
-If either delegated reviewer reports any issue, note, test gap, stale tracker item, or follow-up, update the beads tracker before completing (the parent owns writes; reviewers query read-only):
+The writable parent owns this entire step. Reviewers neither inspect nor mutate
+Beads. Use only the deduplicated findings and follow-ups produced in Step 5:
 
-- `bd create -t bug -p <0-4> -d "..."` for untracked actionable findings (`-t task` for test gaps and follow-ups).
-- `bd update <id>` (or `bd comment <id>`) when a finding is already tracked.
-- `bd close <id>` for any issue the reviewed changes fixed.
+1. Search and inspect the existing tracker for each consolidated actionable
+   finding or resolved issue. Suggested issue ids from reviewers are hints, not
+   authoritative matches.
+2. Deduplicate against existing work before making any tracker mutation.
+3. Apply the appropriate parent-owned action:
+   - `bd create -t bug -p <0-4> -d "..."` only for an actionable finding that
+     is not already tracked (`-t task` for test gaps and follow-ups).
+   - `bd update <id>` or `bd comment <id>` when the consolidated finding is
+     already tracked.
+   - `bd close <id>` only when the reviewed changes demonstrably fixed the
+     tracked issue.
+4. Do not create tracker work for purely informational observations that need
+   no action.
 
 If both reviewers report no findings and no tracker cleanup is needed, tell the user `beads is up to date - no changes needed.`
 

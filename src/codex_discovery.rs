@@ -28,6 +28,7 @@ struct DiscoveredCodexThread {
 
 #[derive(Default)]
 struct DiscoveredCodexThreads {
+    delegation_thread_ids: BTreeSet<String>,
     threads: Vec<DiscoveredCodexThread>,
     subagent_thread_ids: BTreeSet<String>,
 }
@@ -179,11 +180,20 @@ fn discover_codex_threads_from_homes(
             }
         }
         for thread_id in home_discovery.subagent_thread_ids {
-            if seen_ids.insert(thread_id.clone()) {
-                discovery.subagent_thread_ids.insert(thread_id);
-            }
+            discovery.subagent_thread_ids.insert(thread_id);
+        }
+        for thread_id in home_discovery.delegation_thread_ids {
+            discovery.delegation_thread_ids.insert(thread_id);
         }
     }
+
+    // A stale copy of a thread can exist under more than one Codex home. A
+    // non-root classification from any authoritative copy wins over an older
+    // top-level-looking copy, so an internal child never leaks into discovery.
+    discovery.threads.retain(|thread| {
+        !discovery.subagent_thread_ids.contains(&thread.id)
+            && !discovery.delegation_thread_ids.contains(&thread.id)
+    });
 
     Ok(discovery)
 }
@@ -248,6 +258,70 @@ fn discover_codex_threads_with_subagents_from_home(
     let subagent_filter = subagent_predicate
         .map(|predicate| format!(" and not ({predicate})"))
         .unwrap_or_default();
+
+    // TermAl Codex delegation sessions are ordinary top-level Codex threads
+    // from the app-server's perspective, so Codex's native `subagent` fields
+    // cannot identify them. Current Codex persists the complete first user
+    // message in `threads.title`; TermAl deliberately makes the structured
+    // delegation bootstrap that first message. Use the reserved prefix only to
+    // narrow candidates, then validate the complete marker shape in Rust. If a
+    // future Codex build truncates or changes that title contract, validation
+    // fails open: the row remains a normal importable thread instead of being
+    // silently deleted as a child. The validated id set is also used by the
+    // primary query below, so malformed or truncated prefix matches remain
+    // ordinary importable threads instead of disappearing in SQL.
+    let delegated_child_prompt_pattern =
+        codex_discovery_like_prefix_pattern(DELEGATED_CHILD_SESSION_MARKER);
+    let query = format!(
+        "select id, cwd, title
+         from threads
+         where ({scope_sql}) and coalesce(title, '') like ? escape '\\'"
+    );
+    let mut statement = connection.prepare(&query)?;
+    let mut params = Vec::with_capacity((query_scope_patterns.len() * 2) + 1);
+    for (scope, like_pattern) in &query_scope_patterns {
+        params.push(rusqlite::types::Value::from(scope.clone()));
+        params.push(rusqlite::types::Value::from(like_pattern.clone()));
+    }
+    params.push(rusqlite::types::Value::from(
+        delegated_child_prompt_pattern,
+    ));
+    let rows = statement.query_map(rusqlite::params_from_iter(params), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+    let mut discovery = DiscoveredCodexThreads::default();
+    for row in rows {
+        let (thread_id, cwd, title) = row?;
+        if thread_id.trim().is_empty() || cwd.trim().is_empty() {
+            continue;
+        }
+        if title
+            .as_deref()
+            .is_some_and(is_delegated_child_bootstrap_title)
+            && normalized_scopes.iter().any(|scope| {
+                codex_discovery_scope_contains(
+                    scope.to_string_lossy().as_ref(),
+                    FsPath::new(&cwd),
+                )
+            })
+        {
+            discovery.delegation_thread_ids.insert(thread_id);
+        }
+    }
+
+    // The query remains bounded after valid delegation children are filtered:
+    // requesting `cap + classified children` guarantees enough ordered rows
+    // to return the normal per-home cap without allowing child rows to crowd
+    // out an older top-level conversation.
+    let query_row_limit = i64::try_from(
+        MAX_DISCOVERED_CODEX_THREADS_PER_HOME
+            .saturating_add(discovery.delegation_thread_ids.len()),
+    )
+    .unwrap_or(i64::MAX);
     let query = format!(
         "select id, cwd, title, sandbox_policy, approval_mode, archived, {model_select}, {reasoning_effort_select}
          from threads
@@ -261,9 +335,7 @@ fn discover_codex_threads_with_subagents_from_home(
         params.push(rusqlite::types::Value::from(scope.clone()));
         params.push(rusqlite::types::Value::from(like_pattern.clone()));
     }
-    params.push(rusqlite::types::Value::from(
-        MAX_DISCOVERED_CODEX_THREADS_PER_HOME as i64,
-    ));
+    params.push(rusqlite::types::Value::from(query_row_limit));
     let rows = statement.query_map(rusqlite::params_from_iter(params), |row| {
         let sandbox_policy: Option<String> = row.get(3)?;
         let approval_mode: Option<String> = row.get(4)?;
@@ -285,11 +357,10 @@ fn discover_codex_threads_with_subagents_from_home(
             sandbox_mode: sandbox_policy
                 .as_deref()
                 .and_then(parse_discovered_codex_sandbox_mode),
-            title: row.get::<_, String>(2)?,
+            title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
         })
     })?;
 
-    let mut discovery = DiscoveredCodexThreads::default();
     for row in rows {
         let thread = row?;
         if thread.id.trim().is_empty() || thread.cwd.trim().is_empty() {
@@ -303,7 +374,13 @@ fn discover_codex_threads_with_subagents_from_home(
         }) {
             continue;
         }
+        if discovery.delegation_thread_ids.contains(&thread.id) {
+            continue;
+        }
         discovery.threads.push(thread);
+        if discovery.threads.len() == MAX_DISCOVERED_CODEX_THREADS_PER_HOME {
+            break;
+        }
     }
 
     if let Some(subagent_predicate) = subagent_predicate {
@@ -410,16 +487,24 @@ fn codex_discovery_scope_query_patterns(scope: &str) -> Vec<(String, String)> {
 
 /// Handles Codex discovery like pattern.
 fn codex_discovery_like_pattern(scope: &str) -> String {
-    let escaped_scope = scope
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_");
+    let escaped_scope = codex_discovery_escape_like_literal(scope);
     let separator = if scope.contains('\\') { '\\' } else { '/' };
     if escaped_scope.ends_with(separator) {
         format!("{escaped_scope}%")
     } else {
         format!("{escaped_scope}{separator}%")
     }
+}
+
+fn codex_discovery_like_prefix_pattern(prefix: &str) -> String {
+    format!("{}%", codex_discovery_escape_like_literal(prefix))
+}
+
+fn codex_discovery_escape_like_literal(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 /// Resolves Codex threads database path.

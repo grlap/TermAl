@@ -190,6 +190,27 @@ struct TermalDelegationMcpBridge {
     client: reqwest::blocking::Client,
 }
 
+fn delegation_child_session_ids(state: &Value) -> HashSet<&str> {
+    state
+        .get("delegations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|delegation| delegation.get("childSessionId").and_then(Value::as_str))
+        .filter(|session_id| !session_id.trim().is_empty())
+        .collect()
+}
+
+fn is_root_peer_session(session: &Value, delegation_child_ids: &HashSet<&str>) -> bool {
+    session
+        .get("parentDelegationId")
+        .map_or(true, Value::is_null)
+        && session
+            .get("id")
+            .and_then(Value::as_str)
+            .map_or(true, |session_id| !delegation_child_ids.contains(session_id))
+}
+
 impl TermalDelegationMcpBridge {
     fn new(parent_session_id: String, base_url: String) -> Result<Self> {
         let parent_session_id = required_path_identifier(
@@ -536,6 +557,7 @@ impl TermalDelegationMcpBridge {
     /// fetch for id-shaped arguments.
     fn resolve_session_reference(&self, reference: &str) -> Result<String> {
         let state = self.get_json("/api/state")?;
+        let delegation_child_ids = delegation_child_session_ids(&state);
         let sessions = state
             .get("sessions")
             .and_then(Value::as_array)
@@ -544,8 +566,10 @@ impl TermalDelegationMcpBridge {
         let reference_is_id = reference.starts_with("session-");
         let mut matches = sessions
             .iter()
-            // Root sessions only — a peer message never targets a delegation child.
-            .filter(|session| session.get("parentDelegationId").map_or(true, Value::is_null))
+            // Root sessions only — use both the direct parent link and the
+            // durable delegation inventory so a stale/missing denormalized
+            // link cannot turn a child into a peer target.
+            .filter(|session| is_root_peer_session(session, &delegation_child_ids))
             .filter(|session| {
                 if reference_is_id {
                     session.get("id").and_then(Value::as_str) == Some(reference)
@@ -598,6 +622,7 @@ impl TermalDelegationMcpBridge {
         // Peer discovery: resolve a session by name to its id for termal_send_to_session.
         // /api/state is metadata-only (no transcripts), so this is a cheap summary read.
         let state = self.get_json("/api/state")?;
+        let delegation_child_ids = delegation_child_session_ids(&state);
         let sessions = state
             .get("sessions")
             .and_then(Value::as_array)
@@ -605,12 +630,9 @@ impl TermalDelegationMcpBridge {
             .unwrap_or_default();
         let listed = sessions
             .iter()
-            // Root sessions only — exclude delegation children (they carry a parent id).
-            .filter(|session| {
-                session
-                    .get("parentDelegationId")
-                    .map_or(true, Value::is_null)
-            })
+            // Root sessions only. The delegation row is authoritative even
+            // if an older/re-attached child temporarily lacks its parent id.
+            .filter(|session| is_root_peer_session(session, &delegation_child_ids))
             .map(|session| {
                 json!({
                     "sessionId": session.get("id").cloned().unwrap_or(Value::Null),
@@ -722,15 +744,14 @@ impl TermalDelegationMcpBridge {
         let Ok(state) = self.get_json("/api/state") else {
             return true;
         };
+        let delegation_child_ids = delegation_child_session_ids(&state);
         let Some(sessions) = state.get("sessions").and_then(Value::as_array) else {
             return true;
         };
         match sessions.iter().find(|session| {
             session.get("id").and_then(Value::as_str) == Some(self.parent_session_id.as_str())
         }) {
-            Some(session) => session
-                .get("parentDelegationId")
-                .is_some_and(|value| !value.is_null()),
+            Some(session) => !is_root_peer_session(session, &delegation_child_ids),
             None => true,
         }
     }
@@ -1525,7 +1546,11 @@ mod delegation_mcp_tests {
                     "sessions": [
                         { "id": "session-root-a", "name": "HelloMe", "agent": "Codex", "status": "idle", "workdir": "C:/a", "preview": "hi" },
                         { "id": "session-root-b", "name": "HelloMe2", "agent": "Codex", "status": "active", "workdir": "C:/b", "preview": "yo" },
-                        { "id": "session-child", "name": "Codex /review-code", "agent": "Codex", "status": "idle", "parentDelegationId": "delegation-x" }
+                        { "id": "session-child", "name": "Codex /review-code", "agent": "Codex", "status": "idle", "parentDelegationId": "delegation-x" },
+                        { "id": "session-child-unlinked", "name": "Leaked child", "agent": "Codex", "status": "idle" }
+                    ],
+                    "delegations": [
+                        { "id": "delegation-y", "childSessionId": "session-child-unlinked" }
                     ]
                 }),
             )
@@ -1593,6 +1618,50 @@ mod delegation_mcp_tests {
                 "arguments": { "sessionId": "session-x", "message": "hi" }
             }))
             .expect_err("a delegation child must not invoke a peer tool");
+        assert!(
+            err.to_string().contains("root sessions"),
+            "error should explain the root-only restriction: {err}"
+        );
+        server.join().expect("test server should join");
+    }
+
+    #[test]
+    fn delegation_mcp_hides_and_rejects_peer_tools_for_unlinked_durable_child() {
+        let (base_url, _requests, server) = spawn_test_mcp_http_server(2, move |request| {
+            assert_eq!(request.method, "GET");
+            assert_eq!(request.path, "/api/state");
+            (
+                200,
+                json!({
+                    "sessions": [
+                        { "id": "session-parent", "name": "Reattached reviewer" }
+                    ],
+                    "delegations": [
+                        { "id": "delegation-x", "childSessionId": "session-parent" }
+                    ]
+                }),
+            )
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let names = bridge
+            .tools_list_for_caller()
+            .get("tools")
+            .and_then(Value::as_array)
+            .expect("tools array")
+            .iter()
+            .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_owned))
+            .collect::<Vec<_>>();
+        assert!(!names.iter().any(|name| name == "termal_send_to_session"));
+        assert!(!names.iter().any(|name| name == "termal_list_sessions"));
+
+        let err = bridge
+            .handle_tool_call(json!({
+                "name": "termal_send_to_session",
+                "arguments": { "sessionId": "session-x", "message": "hi" }
+            }))
+            .expect_err("a durable delegation child must not invoke a peer tool");
         assert!(
             err.to_string().contains("root sessions"),
             "error should explain the root-only restriction: {err}"
@@ -1769,7 +1838,7 @@ mod delegation_mcp_tests {
     // the root-only filter its own comment promised. A delegation child is not a peer.
     #[test]
     fn delegation_mcp_send_to_session_rejects_delegation_child_and_self_targets() {
-        let (base_url, _requests, server) = spawn_test_mcp_http_server(2, move |request| {
+        let (base_url, _requests, server) = spawn_test_mcp_http_server(3, move |request| {
             assert_eq!(request.path, "/api/state", "no delivery should be attempted");
             (
                 200,
@@ -1781,7 +1850,15 @@ mod delegation_mcp_tests {
                             "name": "Child",
                             "projectId": "p",
                             "parentDelegationId": "delegation-1"
+                        },
+                        {
+                            "id": "session-child-unlinked",
+                            "name": "Unlinked child",
+                            "projectId": "p"
                         }
+                    ],
+                    "delegations": [
+                        { "id": "delegation-2", "childSessionId": "session-child-unlinked" }
                     ]
                 }),
             )
@@ -1795,6 +1872,14 @@ mod delegation_mcp_tests {
         assert!(
             child_err.to_string().contains("no root session"),
             "child target should be filtered out by the root-only filter: {child_err}"
+        );
+
+        let unlinked_child_err = bridge
+            .tool_send_to_session(json!({ "sessionId": "session-child-unlinked", "message": "hi" }))
+            .expect_err("a child named only by the durable delegation row must not be a peer target");
+        assert!(
+            unlinked_child_err.to_string().contains("no root session"),
+            "the delegation inventory must close a stale parent-link gap: {unlinked_child_err}"
         );
 
         let self_err = bridge

@@ -11,7 +11,7 @@ Inspect staged, unstaged, and untracked changes using multiple specialized revie
 
 **IMPORTANT: NEVER `git commit` or `git push` without explicit user approval. Read-only git commands (`diff`, `status`, `ls-files`, `show`, etc.) may be executed freely. Do not run mutating git commands (`add`, `stash`, `checkout`, reset operations, etc.) as part of this command.**
 
-**IMPORTANT: `/review-code` is inspection-only in both direct and delegated sessions. Do NOT attempt to fix bugs, edit files, run mutating Git commands, or call `bd`. Report findings and suggested tracker follow-ups without changing the workspace or tracker.**
+**IMPORTANT: `/review-code` is inspection-only in both direct and delegated sessions. Do NOT attempt to fix bugs, edit files, run mutating Git commands, inspect the existing Beads tracker, or call `bd`. Report findings and proposed tracker follow-ups for the parent `/review-changes` coordinator without changing the workspace or tracker. These proposals are not tracker updates and may duplicate existing issues; only `/review-changes` reconciles them with Beads after consolidating all reviewer results.**
 
 **IMPORTANT: Do NOT run compilation, build, test, type-check, lint, benchmark, coverage, or formatting gates from `/review-code`, even when a command appears read-only. This includes `cargo check`, `cargo build`, `cargo test`, `cargo clippy`, `cargo fmt`, TypeScript compilers, Vitest, ESLint, Prettier, and package-manager test/build scripts. The parent `/review-changes` session exclusively owns quality gates. Reviewers may inspect existing source, tests, configuration, diffs, and previously produced output.**
 
@@ -50,8 +50,10 @@ For each reviewer found in Step 3, use this prompt:
 You are a code reviewer focusing on: [REVIEWER NAME]
 
 This is a review-only task. Do NOT attempt to fix any bugs or edit any files.
-Your job is to identify issues and propose follow-up work for the main reviewer
-to record in beads (bd). Do not run quality gates or call `bd`; inspect only.
+Your job is to identify issues and propose follow-up work for the parent
+`/review-changes` coordinator to evaluate after consolidating all reviewer
+results. Do not inspect the existing tracker, run quality gates, or call `bd`;
+inspect code only.
 
 ## Your Review Instructions
 [CONTENT OF THE REVIEWER .md FILE]
@@ -136,8 +138,8 @@ Deduplicate: if two reviewers flag the same issue, merge them (note which review
 
 Present the consolidated note directly to the user. Do NOT write the review note to a separate file.
 
-## Step 5: Suggest tracker follow-ups
+## Step 5: Propose tracker follow-ups
 
-Do not run any `bd` command. If the review identifies an issue, observation, test gap, resolved issue, or follow-up, include a `Suggested beads updates` section describing what the caller or the parent `/review-changes` session should create, update, or close. Include the proposed issue type and priority for new work, but leave tracker inspection and mutation to the parent workflow.
+Do not inspect the existing tracker or run any `bd` command. If the review identifies an actionable issue, test gap, resolved issue, or follow-up, include a `Suggested beads updates` section describing what the parent `/review-changes` session should evaluate for creation, update, comment, or closure. Include the proposed issue type and priority for possible new work, but label every item as a proposal that may already be tracked.
 
-If the review is clean, say `No tracker follow-up suggested.` Do not claim that Beads is up to date because `/review-code` does not inspect the tracker.
+If the review is clean, say `No tracker follow-up suggested.` Do not claim that Beads is up to date, that an issue was created or updated, or that a specific existing issue is the correct target because `/review-code` does not inspect the tracker. The parent `/review-changes` workflow owns consolidation, deduplication, tracker lookup, and all tracker mutations.

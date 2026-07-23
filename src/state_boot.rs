@@ -14,10 +14,11 @@
 //
 // The five helpers:
 //
-// - `prune_auto_imported_codex_subagent_sessions`: removes empty
+// - `prune_auto_imported_codex_child_sessions`: removes empty
 //   top-level ghost sessions that older startup discovery imported
-//   from Codex-owned subagent threads, while preserving any session
-//   with user-visible work or TermAl delegation ownership.
+//   from Codex-owned subagent threads or orphaned TermAl delegation
+//   threads, while preserving any session with user-visible work or
+//   TermAl delegation ownership.
 // - `import_discovered_codex_threads`: on startup we scan the
 //   Codex state dir for pre-existing `threadId`s and merge them into
 //   `self.sessions` as resumeable ghost-sessions so users don't lose
@@ -37,35 +38,40 @@
 //   so the next turn starts a fresh runtime instead of inheriting a
 //   half-dead state machine.
 
+fn is_empty_top_level_auto_imported_codex_ghost(record: &SessionRecord) -> bool {
+    !record.hidden
+        && !record.is_remote_proxy()
+        && record.session.agent == Agent::Codex
+        && record.external_session_id.is_some()
+        && record.session.parent_delegation_id.is_none()
+        && matches!(record.session.status, SessionStatus::Idle)
+        && record.session.messages.is_empty()
+        && record.session.pending_prompts.is_empty()
+        && record.queued_prompts.is_empty()
+}
+
 impl StateInner {
     /// Removes empty top-level ghost sessions that older startup discovery
-    /// imported from Codex-owned subagent threads. Real TermAl delegation
-    /// children carry `parent_delegation_id`; sessions with transcript or queue
-    /// state are retained so startup cleanup never discards user-visible work.
-    fn prune_auto_imported_codex_subagent_sessions(
+    /// imported from Codex-owned subagent threads or orphaned TermAl
+    /// delegation threads. Real live delegation children carry
+    /// `parent_delegation_id`; sessions with transcript or queue state are
+    /// retained so startup cleanup never discards user-visible work.
+    fn prune_auto_imported_codex_child_sessions(
         &mut self,
-        subagent_thread_ids: &BTreeSet<String>,
+        child_thread_ids: &BTreeSet<String>,
     ) -> usize {
-        if subagent_thread_ids.is_empty() {
+        if child_thread_ids.is_empty() {
             return 0;
         }
 
         let session_count_before = self.sessions.len();
         self.retain_sessions(|record| {
-            let is_empty_top_level_codex_ghost = !record.hidden
-                && !record.is_remote_proxy()
-                && record.session.agent == Agent::Codex
-                && record.session.parent_delegation_id.is_none()
-                && matches!(record.session.status, SessionStatus::Idle)
-                && record.session.messages.is_empty()
-                && record.session.pending_prompts.is_empty()
-                && record.queued_prompts.is_empty();
-            let is_codex_subagent = record
+            let is_codex_child_thread = record
                 .external_session_id
                 .as_ref()
-                .is_some_and(|thread_id| subagent_thread_ids.contains(thread_id));
+                .is_some_and(|thread_id| child_thread_ids.contains(thread_id));
 
-            !(is_empty_top_level_codex_ghost && is_codex_subagent)
+            !(is_empty_top_level_auto_imported_codex_ghost(record) && is_codex_child_thread)
         });
         session_count_before - self.sessions.len()
     }
@@ -147,6 +153,13 @@ impl StateInner {
                 let record = self
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
+                let has_legacy_auto_imported_name =
+                    is_empty_top_level_auto_imported_codex_ghost(record)
+                    && record.session.name == thread.title;
+                if has_legacy_auto_imported_name {
+                    record.session.name =
+                        generated_session_name(Agent::Codex, &record.session.id);
+                }
                 if record.session.workdir != thread.cwd {
                     record.session.workdir = thread.cwd.clone();
                 }
@@ -166,7 +179,7 @@ impl StateInner {
 
             let mut record = self.create_session(
                 Agent::Codex,
-                Some(thread.title.clone()),
+                None,
                 thread.cwd.clone(),
                 Some(project_id),
                 thread.model.clone(),

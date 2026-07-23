@@ -1644,6 +1644,15 @@ describe("App scroll behaviour", () => {
       });
       const scrollToMock = mockScrollToAndApplyTop();
       const context = await renderAppWithProjectAndSession();
+      // Keep the production bottom-follow cooldown active while this test
+      // advances the simulated scroll sequence. Under full-suite CPU load,
+      // more than the real 1.2-second window can elapse between assertions,
+      // which makes the test exercise cooldown expiry instead of smooth
+      // follow continuation. Install the spy only after potentially-throwing
+      // setup so its immediately following `try` owns the full lifetime.
+      const performanceNowSpy = vi
+        .spyOn(performance, "now")
+        .mockReturnValue(1_000);
 
       try {
         const messageStack = Array.from(
@@ -1907,6 +1916,7 @@ describe("App scroll behaviour", () => {
       } finally {
         context.cleanup();
         restoreScrollGeometry();
+        performanceNowSpy.mockRestore();
       }
     });
   });

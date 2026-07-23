@@ -1351,7 +1351,10 @@ fn get_session_propagates_remote_protocol_error_instead_of_cached_summary() {
     });
     insert_test_remote_connection(&state, &remote, port);
 
-    let err = match state.get_session(&local_session_id) {
+    let result = state.get_session(&local_session_id);
+    join_test_server(server);
+
+    let err = match result {
         Ok(_) => panic!("bad owner protocol response should not fall back to cached summary"),
         Err(err) => err,
     };
@@ -1361,8 +1364,6 @@ fn get_session_propagates_remote_protocol_error_instead_of_cached_summary() {
         "unexpected error: {}",
         err.message
     );
-
-    join_test_server(server);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }

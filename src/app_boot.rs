@@ -142,16 +142,20 @@ impl AppState {
         let discovery_scopes = collect_codex_discovery_scopes(&default_workdir, &inner.projects);
         match discover_codex_threads(&default_workdir, &discovery_scopes) {
             Ok(discovery) => {
-                let removed_subagent_sessions = inner
-                    .prune_auto_imported_codex_subagent_sessions(
-                        &discovery.subagent_thread_ids,
-                    );
-                if removed_subagent_sessions > 0 {
+                let DiscoveredCodexThreads {
+                    delegation_thread_ids,
+                    threads,
+                    mut subagent_thread_ids,
+                } = discovery;
+                subagent_thread_ids.extend(delegation_thread_ids);
+                let removed_child_sessions =
+                    inner.prune_auto_imported_codex_child_sessions(&subagent_thread_ids);
+                if removed_child_sessions > 0 {
                     eprintln!(
-                        "codex discovery> removed {removed_subagent_sessions} auto-imported subagent session(s)"
+                        "codex discovery> removed {removed_child_sessions} auto-imported child session(s)"
                     );
                 }
-                inner.import_discovered_codex_threads(&default_workdir, discovery.threads);
+                inner.import_discovered_codex_threads(&default_workdir, threads);
             }
             Err(err) => {
                 eprintln!("codex discovery> failed to load Codex thread metadata: {err:#}");

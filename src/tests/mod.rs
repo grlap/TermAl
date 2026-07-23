@@ -644,19 +644,23 @@ fn write_test_http_response(
     content_type: &str,
     body: &str,
 ) {
+    let headers = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+        status.as_u16(),
+        status.canonical_reason().unwrap_or("OK"),
+        content_type,
+        body.len(),
+    );
     stream
-        .write_all(
-            format!(
-                "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-                status.as_u16(),
-                status.canonical_reason().unwrap_or("OK"),
-                content_type,
-                body.as_bytes().len(),
-                body
-            )
-            .as_bytes(),
-        )
-        .expect("test response should write");
+        .write_all(headers.as_bytes())
+        .expect("test response headers should write");
+    stream
+        .write_all(body.as_bytes())
+        .expect("test response body should write");
+    stream.flush().expect("test response should flush");
+    stream
+        .shutdown(std::net::Shutdown::Write)
+        .expect("test response write side should shut down");
 }
 
 fn test_app_state() -> AppState {

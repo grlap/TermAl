@@ -2838,6 +2838,21 @@ fn review_changes_pins_two_child_resume_wait_flow() {
         "Then run `cd ui && npx vitest run` in the parent session",
         "/review-changes must run frontend tests in the parent session",
     );
+    assert_command_contains(
+        review_changes,
+        "Do not create, update, comment on, or close tracker items until this\nconsolidation is complete.",
+        "/review-changes must consolidate reviewer findings before mutating Beads",
+    );
+    assert_command_contains(
+        review_changes,
+        "Search and inspect the existing tracker for each consolidated actionable",
+        "/review-changes must reconcile deduplicated findings with existing Beads work",
+    );
+    assert_command_contains(
+        review_changes,
+        "Reviewers neither inspect nor mutate\nBeads.",
+        "/review-changes must keep tracker ownership in the writable parent",
+    );
 }
 
 #[test]
@@ -2894,7 +2909,17 @@ fn review_code_pins_delegated_child_inline_reviewer_mode() {
     );
     assert_command_contains(
         review_code,
-        "Do not run any `bd` command",
-        "/review-code must leave tracker inspection and mutation to its caller",
+        "Do not inspect the existing tracker or run any `bd` command",
+        "/review-code must leave tracker inspection and mutation to /review-changes",
+    );
+    assert_command_contains(
+        review_code,
+        "These proposals are not tracker updates and may duplicate existing issues",
+        "/review-code must label tracker suggestions as unverified proposals",
+    );
+    assert_command_contains(
+        review_code,
+        "The parent `/review-changes` workflow owns consolidation, deduplication, tracker lookup, and all tracker mutations.",
+        "/review-code must explicitly assign the full tracker lifecycle to /review-changes",
     );
 }

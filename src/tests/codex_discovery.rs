@@ -236,6 +236,68 @@ fn discover_codex_threads_from_sources_skips_repl_home_and_uses_shared_runtime_h
     let _ = fs::remove_dir_all(&root);
 }
 
+// A stale top-level-looking copy can be encountered before a newer home copy
+// identifies the same thread as a TermAl delegation child. Classification
+// from any home must win after deduplication so the stale copy is not imported.
+#[test]
+fn discover_codex_threads_from_homes_retains_delegation_classification_across_duplicates() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-codex-cross-home-delegation-{}",
+        Uuid::new_v4()
+    ));
+    let stale_home = root.join("stale");
+    let classified_home = root.join("classified");
+    let delegated_child_prompt = format!(
+        "{DELEGATED_CHILD_SESSION_MARKER} `delegation-cross-home`.\n\n\
+         Mode: Reviewer\n\
+         Parent session: `session-parent`\n\
+         Child session: `session-child`\n\n\
+         Task:\nReview the patch"
+    );
+    write_test_codex_threads_db(
+        &stale_home,
+        &[(
+            "thread-cross-home",
+            "/tmp/termal",
+            "Stale top-level title",
+            r#"{"type":"workspace-write"}"#,
+            "on-request",
+            0,
+            Some("gpt-5-codex"),
+            Some("medium"),
+            20,
+        )],
+    );
+    write_test_codex_threads_db(
+        &classified_home,
+        &[(
+            "thread-cross-home",
+            "/tmp/termal",
+            delegated_child_prompt.as_str(),
+            r#"{"type":"read-only"}"#,
+            "never",
+            0,
+            Some("gpt-5-codex"),
+            Some("high"),
+            10,
+        )],
+    );
+
+    let discovery = discover_codex_threads_from_homes(
+        &[stale_home, classified_home],
+        &[PathBuf::from("/tmp/termal")],
+    )
+    .expect("cross-home discovery should load");
+
+    assert!(discovery.threads.is_empty());
+    assert_eq!(
+        discovery.delegation_thread_ids,
+        BTreeSet::from(["thread-cross-home".to_owned()])
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
 // pins the scope-before-limit ordering: with 101 unrelated threads plus one
 // in-scope thread at the end of the table, the single in-scope thread is
 // still returned. guards against a SQL regression that limits rows before
@@ -458,6 +520,34 @@ fn discover_codex_threads_from_home_excludes_subagents_before_limit_and_reports_
             ],
         )
         .expect("source-only subagent row should insert");
+    let delegated_child_prompt = format!(
+        "{DELEGATED_CHILD_SESSION_MARKER} `delegation-leaked`.\n\n\
+         Mode: Reviewer\n\
+         Parent session: `session-parent`\n\
+         Child session: `session-child`\n\n\
+         Task:\nReview the patch"
+    );
+    connection
+        .execute(
+            "insert into threads (
+                id, cwd, title, sandbox_policy, approval_mode, archived,
+                model, reasoning_effort, source, thread_source, updated_at
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                "thread-termal-delegation-child",
+                "/tmp/termal",
+                delegated_child_prompt,
+                r#"{"type":"read-only"}"#,
+                "never",
+                0,
+                "gpt-5-codex",
+                "high",
+                Option::<&str>::None,
+                Option::<&str>::None,
+                30_000,
+            ],
+        )
+        .expect("TermAl delegation child row should insert");
     connection
         .execute(
             "insert into threads (
@@ -507,9 +597,200 @@ fn discover_codex_threads_from_home_excludes_subagents_before_limit_and_reports_
         "the source JSON fallback should classify subagents when thread_source is null"
     );
     assert!(!discovery.subagent_thread_ids.contains("thread-parent"));
+    assert_eq!(
+        discovery.delegation_thread_ids,
+        BTreeSet::from(["thread-termal-delegation-child".to_owned()]),
+        "TermAl delegation bootstrap threads must be removed before the row cap and reported for cleanup"
+    );
 
     drop(connection);
     let _ = fs::remove_dir_all(&codex_home);
+}
+
+// The SQL prefix is only a candidate accelerator. Rust owns the authoritative
+// marker validation, so malformed prefix matches and NULL titles remain normal
+// top-level threads while a structurally valid bootstrap is classified.
+#[test]
+fn discover_codex_threads_from_home_retains_invalid_delegation_prefixes_and_null_titles() {
+    let codex_home = std::env::temp_dir().join(format!(
+        "termal-codex-home-delegation-marker-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&codex_home).expect("test Codex home should be created");
+    let connection =
+        rusqlite::Connection::open(codex_home.join("state_8.sqlite")).expect("db should open");
+    connection
+        .execute_batch(
+            "create table threads (
+                id text primary key,
+                cwd text not null,
+                title text,
+                sandbox_policy text not null,
+                approval_mode text not null,
+                archived integer not null,
+                model text,
+                reasoning_effort text,
+                updated_at integer not null
+            );",
+        )
+        .expect("threads table should be created");
+    let valid_prompt = format!(
+        "{DELEGATED_CHILD_SESSION_MARKER} `delegation-valid`.\n\n\
+         Mode: Reviewer\n\
+         Parent session: `session-parent`\n\
+         Child session: `session-child`\n\n\
+         Task:\nReview the patch"
+    );
+    let truncated_prompt = format!(
+        "{DELEGATED_CHILD_SESSION_MARKER} `delegation-truncated`.\n\n\
+         Mode: Reviewer\n\
+         Parent session: `session-parent`"
+    );
+    for (id, title, updated_at) in [
+        ("thread-valid-child", Some(valid_prompt.as_str()), 40),
+        (
+            "thread-truncated-child",
+            Some(truncated_prompt.as_str()),
+            35,
+        ),
+        (
+            "thread-invalid-prefix",
+            Some("You are a delegated child session for TermAl delegation but malformed"),
+            30,
+        ),
+        ("thread-null-title", None, 20),
+        ("thread-ordinary", Some("Ordinary top-level thread"), 10),
+    ] {
+        connection
+            .execute(
+                "insert into threads (
+                    id, cwd, title, sandbox_policy, approval_mode, archived,
+                    model, reasoning_effort, updated_at
+                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    id,
+                    "/tmp/termal",
+                    title,
+                    r#"{"type":"workspace-write"}"#,
+                    "on-request",
+                    0,
+                    "gpt-5-codex",
+                    "medium",
+                    updated_at,
+                ],
+            )
+            .expect("thread row should insert");
+    }
+
+    let discovery = discover_codex_threads_with_subagents_from_home(
+        &codex_home,
+        &[PathBuf::from("/tmp/termal")],
+    )
+    .expect("threads should load");
+
+    assert_eq!(
+        discovery
+            .threads
+            .iter()
+            .map(|thread| (thread.id.as_str(), thread.title.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("thread-truncated-child", truncated_prompt.as_str()),
+            (
+                "thread-invalid-prefix",
+                "You are a delegated child session for TermAl delegation but malformed",
+            ),
+            ("thread-null-title", ""),
+            ("thread-ordinary", "Ordinary top-level thread"),
+        ]
+    );
+    assert_eq!(
+        discovery.delegation_thread_ids,
+        BTreeSet::from(["thread-valid-child".to_owned()])
+    );
+
+    drop(connection);
+    let _ = fs::remove_dir_all(&codex_home);
+}
+
+// Current Codex stores the complete first user prompt as `threads.title`, but
+// the discovery classifier still re-checks filesystem scope after the SQL
+// prefix query. A syntactically valid delegation marker whose raw cwd starts
+// inside the project and then escapes through `..` must not be classified or
+// imported.
+#[test]
+fn discover_codex_threads_from_home_rejects_delegation_marker_outside_normalized_scope() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-codex-home-delegation-outside-scope-{}",
+        Uuid::new_v4()
+    ));
+    let codex_home = root.join("codex");
+    let project_scope = root.join("project");
+    let outside_repo = root.join("outside").join("repo");
+    fs::create_dir_all(&codex_home).expect("test Codex home should be created");
+    fs::create_dir_all(&project_scope).expect("project scope should be created");
+    fs::create_dir_all(&outside_repo).expect("outside repository should be created");
+    let raw_escaping_cwd = project_scope.join("..").join("outside").join("repo");
+    let connection =
+        rusqlite::Connection::open(codex_home.join("state_8.sqlite")).expect("db should open");
+    connection
+        .execute_batch(
+            "create table threads (
+                id text primary key,
+                cwd text not null,
+                title text,
+                sandbox_policy text not null,
+                approval_mode text not null,
+                archived integer not null,
+                model text,
+                reasoning_effort text,
+                updated_at integer not null
+            );",
+        )
+        .expect("threads table should be created");
+    let valid_prompt = format!(
+        "{DELEGATED_CHILD_SESSION_MARKER} `delegation-outside`.\n\n\
+         Mode: Reviewer\n\
+         Parent session: `session-parent`\n\
+         Child session: `session-child`\n\n\
+         Task:\nReview the patch"
+    );
+    connection
+        .execute(
+            "insert into threads (
+                id, cwd, title, sandbox_policy, approval_mode, archived,
+                model, reasoning_effort, updated_at
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![
+                "thread-outside-child",
+                raw_escaping_cwd.to_string_lossy().as_ref(),
+                valid_prompt,
+                r#"{"type":"workspace-write"}"#,
+                "on-request",
+                0,
+                "gpt-5-codex",
+                "medium",
+                1,
+            ],
+        )
+        .expect("out-of-scope delegation row should insert");
+
+    let discovery = discover_codex_threads_with_subagents_from_home(&codex_home, &[project_scope])
+        .expect("threads should load");
+
+    assert!(discovery.delegation_thread_ids.is_empty());
+    assert!(discovery.threads.is_empty());
+
+    drop(connection);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn codex_discovery_like_prefix_pattern_escapes_sql_wildcards() {
+    assert_eq!(
+        codex_discovery_like_prefix_pattern(r"delegated%_\child"),
+        r"delegated\%\_\\child%"
+    );
 }
 
 // Pins the source-only Codex schema too. SQL `LIKE` returns NULL for a NULL
@@ -610,7 +891,7 @@ fn discover_codex_threads_from_home_retains_null_source_without_thread_source_co
 // untouched. The removed id must become a persistence tombstone so the card
 // does not return on the following restart.
 #[test]
-fn prune_auto_imported_codex_subagent_sessions_removes_only_empty_top_level_ghosts() {
+fn prune_auto_imported_codex_child_sessions_removes_only_empty_top_level_ghosts() {
     let mut inner = StateInner::new();
     let project = inner.create_project(
         Some("TermAl".to_owned()),
@@ -634,6 +915,24 @@ fn prune_auto_imported_codex_subagent_sessions_removes_only_empty_top_level_ghos
             .session_mut_by_index(ghost_index)
             .expect("ghost session should be mutable"),
         Some("thread-subagent-ghost".to_owned()),
+    );
+
+    let delegation_ghost = inner.create_session(
+        Agent::Codex,
+        Some("delegation bootstrap prompt".to_owned()),
+        "/tmp/termal".to_owned(),
+        Some(project.id.clone()),
+        None,
+    );
+    let delegation_ghost_session_id = delegation_ghost.session.id.clone();
+    let delegation_ghost_index = inner
+        .find_session_index(&delegation_ghost_session_id)
+        .expect("delegation ghost session should exist");
+    set_record_external_session_id(
+        inner
+            .session_mut_by_index(delegation_ghost_index)
+            .expect("delegation ghost session should be mutable"),
+        Some("thread-delegation-ghost".to_owned()),
     );
 
     let child = inner.create_session(
@@ -688,15 +987,21 @@ fn prune_auto_imported_codex_subagent_sessions_removes_only_empty_top_level_ghos
         Some("thread-top-level".to_owned()),
     );
 
-    let subagent_thread_ids = BTreeSet::from([
+    let child_thread_ids = BTreeSet::from([
         "thread-subagent-ghost".to_owned(),
+        "thread-delegation-ghost".to_owned(),
         "thread-subagent-child".to_owned(),
         "thread-subagent-active".to_owned(),
     ]);
-    let removed = inner.prune_auto_imported_codex_subagent_sessions(&subagent_thread_ids);
+    let removed = inner.prune_auto_imported_codex_child_sessions(&child_thread_ids);
 
-    assert_eq!(removed, 1);
+    assert_eq!(removed, 2);
     assert!(inner.find_session_index(&ghost_session_id).is_none());
+    assert!(
+        inner
+            .find_session_index(&delegation_ghost_session_id)
+            .is_none()
+    );
     assert!(inner.find_session_index(&child_session_id).is_some());
     assert!(inner.find_session_index(&active_session_id).is_some());
     assert!(inner.find_session_index(&unrelated_session_id).is_some());
@@ -704,6 +1009,69 @@ fn prune_auto_imported_codex_subagent_sessions_removes_only_empty_top_level_ghos
         inner.removed_session_ids.contains(&ghost_session_id),
         "the pruned ghost must be deleted from SQLite on the startup persist"
     );
+    assert!(
+        inner
+            .removed_session_ids
+            .contains(&delegation_ghost_session_id),
+        "the orphaned delegation ghost must also be deleted from SQLite"
+    );
+}
+
+#[test]
+fn auto_imported_codex_empty_ghost_predicate_rejects_owned_or_user_visible_sessions() {
+    let mut inner = StateInner::new();
+    let project = inner.create_project(
+        Some("TermAl".to_owned()),
+        "/tmp/termal".to_owned(),
+        default_local_remote_id(),
+    );
+    let ghost = inner.create_session(
+        Agent::Codex,
+        Some("legacy raw prompt".to_owned()),
+        "/tmp/termal".to_owned(),
+        Some(project.id),
+        None,
+    );
+    let ghost_index = inner
+        .find_session_index(&ghost.session.id)
+        .expect("ghost session should exist");
+    set_record_external_session_id(
+        inner
+            .session_mut_by_index(ghost_index)
+            .expect("ghost session should be mutable"),
+        Some("thread-ghost-predicate".to_owned()),
+    );
+    let baseline = inner.sessions[ghost_index].clone();
+
+    assert!(is_empty_top_level_auto_imported_codex_ghost(&baseline));
+
+    let mut hidden = baseline.clone();
+    hidden.hidden = true;
+    assert!(!is_empty_top_level_auto_imported_codex_ghost(&hidden));
+
+    let mut remote = baseline.clone();
+    remote.remote_id = Some("remote-1".to_owned());
+    remote.remote_session_id = Some("remote-session-1".to_owned());
+    assert!(!is_empty_top_level_auto_imported_codex_ghost(&remote));
+
+    let mut delegated = baseline.clone();
+    delegated.session.parent_delegation_id = Some("delegation-1".to_owned());
+    assert!(!is_empty_top_level_auto_imported_codex_ghost(&delegated));
+
+    let mut active = baseline.clone();
+    active.session.status = SessionStatus::Active;
+    assert!(!is_empty_top_level_auto_imported_codex_ghost(&active));
+
+    let mut nonempty = baseline;
+    nonempty.session.pending_prompts.push(PendingPrompt {
+        attachments: Vec::new(),
+        id: "message-pending".to_owned(),
+        timestamp: stamp_now(),
+        text: "queued user work".to_owned(),
+        expanded_text: None,
+        source: None,
+    });
+    assert!(!is_empty_top_level_auto_imported_codex_ghost(&nonempty));
 }
 
 // Exercises the production restart wiring rather than only the discovery and
@@ -774,6 +1142,34 @@ fn app_state_restart_prunes_persisted_codex_subagent_ghost() {
             ],
         )
         .expect("subagent thread should insert");
+    let delegated_child_prompt = format!(
+        "{DELEGATED_CHILD_SESSION_MARKER} `delegation-orphaned`.\n\n\
+         Mode: Reviewer\n\
+         Parent session: `session-old-parent`\n\
+         Child session: `session-old-child`\n\n\
+         Task:\nReview the patch"
+    );
+    codex_connection
+        .execute(
+            "insert into threads (
+                id, cwd, title, sandbox_policy, approval_mode, archived,
+                model, reasoning_effort, source, thread_source, updated_at
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                "thread-delegation-child",
+                project_workdir,
+                delegated_child_prompt,
+                r#"{"type":"read-only"}"#,
+                "never",
+                0,
+                "gpt-5-codex",
+                "high",
+                Option::<&str>::None,
+                Option::<&str>::None,
+                3,
+            ],
+        )
+        .expect("TermAl delegation thread should insert");
     codex_connection
         .execute(
             "insert into threads (
@@ -813,6 +1209,11 @@ fn app_state_restart_prunes_persisted_codex_subagent_ghost() {
     );
     assert!(
         direct_discovery
+            .delegation_thread_ids
+            .contains("thread-delegation-child")
+    );
+    assert!(
+        direct_discovery
             .threads
             .iter()
             .any(|thread| thread.id == "thread-parent")
@@ -830,7 +1231,7 @@ fn app_state_restart_prunes_persisted_codex_subagent_ghost() {
         Agent::Codex,
         Some("do git pull".to_owned()),
         project_workdir.clone(),
-        Some(project.id),
+        Some(project.id.clone()),
         None,
     );
     let ghost_session_id = ghost.session.id.clone();
@@ -842,6 +1243,23 @@ fn app_state_restart_prunes_persisted_codex_subagent_ghost() {
             .session_mut_by_index(ghost_index)
             .expect("persisted ghost should be mutable"),
         Some("thread-child".to_owned()),
+    );
+    let delegation_ghost = initial_inner.create_session(
+        Agent::Codex,
+        Some("delegation bootstrap prompt".to_owned()),
+        project_workdir.clone(),
+        Some(project.id),
+        None,
+    );
+    let delegation_ghost_session_id = delegation_ghost.session.id.clone();
+    let delegation_ghost_index = initial_inner
+        .find_session_index(&delegation_ghost_session_id)
+        .expect("persisted delegation ghost should exist");
+    set_record_external_session_id(
+        initial_inner
+            .session_mut_by_index(delegation_ghost_index)
+            .expect("persisted delegation ghost should be mutable"),
+        Some("thread-delegation-child".to_owned()),
     );
     persist_state(&persistence_path, &initial_inner).expect("bad pre-restart state should persist");
 
@@ -891,6 +1309,12 @@ fn app_state_restart_prunes_persisted_codex_subagent_ghost() {
             .contains("thread-child"),
         "explicit production discovery should retain classified child ids"
     );
+    assert!(
+        explicit_discovery
+            .delegation_thread_ids
+            .contains("thread-delegation-child"),
+        "explicit production discovery should retain classified TermAl delegation ids"
+    );
     let pre_restart_discovery = discover_codex_threads(&project_workdir, &discovery_scopes)
         .expect("pre-restart Codex discovery should load");
     assert!(
@@ -906,17 +1330,23 @@ fn app_state_restart_prunes_persisted_codex_subagent_ghost() {
             .map(|thread| thread.id.as_str())
             .collect::<Vec<_>>()
     );
+    assert!(
+        pre_restart_discovery
+            .delegation_thread_ids
+            .contains("thread-delegation-child"),
+        "production discovery must classify orphaned TermAl delegation threads"
+    );
 
     let state = AppState::new_with_paths(project_workdir, persistence_path.clone(), templates_path)
         .expect("state should restart");
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
         assert!(
-            inner
-                .sessions
-                .iter()
-                .all(|record| record.external_session_id.as_deref() != Some("thread-child")),
-            "the previously imported subagent ghost should disappear during boot"
+            inner.sessions.iter().all(|record| !matches!(
+                record.external_session_id.as_deref(),
+                Some("thread-child" | "thread-delegation-child")
+            )),
+            "previously imported child ghosts should disappear during boot"
         );
         assert!(
             inner
@@ -935,10 +1365,15 @@ fn app_state_restart_prunes_persisted_codex_subagent_ghost() {
     assert!(persisted.find_session_index(&ghost_session_id).is_none());
     assert!(
         persisted
-            .sessions
-            .iter()
-            .all(|record| record.external_session_id.as_deref() != Some("thread-child")),
-        "the cleanup must persist so the dummy card cannot return next restart"
+            .find_session_index(&delegation_ghost_session_id)
+            .is_none()
+    );
+    assert!(
+        persisted.sessions.iter().all(|record| !matches!(
+            record.external_session_id.as_deref(),
+            Some("thread-child" | "thread-delegation-child")
+        )),
+        "the cleanup must persist so child dummy cards cannot return next restart"
     );
     assert!(
         persisted
@@ -1043,12 +1478,17 @@ fn import_discovered_codex_threads_adds_project_scoped_sessions_without_duplicat
         "/tmp/termal".to_owned(),
         default_local_remote_id(),
     );
-    inner.create_session(
+    let existing_session = inner.create_session(
         Agent::Codex,
-        Some("Codex Live".to_owned()),
+        None,
         "/tmp/termal".to_owned(),
         Some(project.id.clone()),
         None,
+    );
+    assert_eq!(existing_session.session.name, "Codex 1");
+    assert_eq!(
+        existing_session.session.name,
+        generated_session_name(Agent::Codex, &existing_session.session.id)
     );
 
     let discovered = vec![
@@ -1083,6 +1523,15 @@ fn import_discovered_codex_threads_adds_project_scoped_sessions_without_duplicat
         .find(|record| record.external_session_id.as_deref() == Some("thread-local"))
         .expect("project-scoped discovered thread should be imported");
     assert_eq!(discovered_session.session.agent, Agent::Codex);
+    assert_eq!(
+        discovered_session.session.name, "Codex 2",
+        "auto-imported Codex sessions must not expose the raw first prompt as their label"
+    );
+    assert_eq!(
+        discovered_session.session.name,
+        generated_session_name(Agent::Codex, &discovered_session.session.id),
+        "normal creation and Codex import must share one generated-name contract"
+    );
     assert_eq!(discovered_session.session.workdir, "/tmp/termal");
     assert_eq!(
         discovered_session.session.project_id.as_deref(),
@@ -1122,6 +1571,99 @@ fn import_discovered_codex_threads_adds_project_scoped_sessions_without_duplicat
             .sessions
             .iter()
             .all(|record| record.external_session_id.as_deref() != Some("thread-other"))
+    );
+}
+
+#[test]
+fn import_discovered_codex_threads_relabels_legacy_raw_prompt_names_but_preserves_user_names() {
+    let mut inner = StateInner::new();
+    let project = inner.create_project(
+        Some("TermAl".to_owned()),
+        "/tmp/termal".to_owned(),
+        default_local_remote_id(),
+    );
+    let legacy = inner.create_session(
+        Agent::Codex,
+        Some("can you fix compilation".to_owned()),
+        "/tmp/termal".to_owned(),
+        Some(project.id.clone()),
+        None,
+    );
+    let legacy_id = legacy.session.id.clone();
+    let legacy_index = inner
+        .find_session_index(&legacy_id)
+        .expect("legacy imported session should exist");
+    set_record_external_session_id(
+        inner
+            .session_mut_by_index(legacy_index)
+            .expect("legacy imported session should be mutable"),
+        Some("thread-legacy-name".to_owned()),
+    );
+
+    let renamed = inner.create_session(
+        Agent::Codex,
+        Some("My investigation".to_owned()),
+        "/tmp/termal".to_owned(),
+        Some(project.id),
+        None,
+    );
+    let renamed_id = renamed.session.id.clone();
+    let renamed_index = inner
+        .find_session_index(&renamed_id)
+        .expect("renamed imported session should exist");
+    set_record_external_session_id(
+        inner
+            .session_mut_by_index(renamed_index)
+            .expect("renamed imported session should be mutable"),
+        Some("thread-user-name".to_owned()),
+    );
+
+    inner.import_discovered_codex_threads(
+        "/tmp/termal",
+        vec![
+            DiscoveredCodexThread {
+                approval_policy: None,
+                archived: false,
+                cwd: "/tmp/termal".to_owned(),
+                id: "thread-legacy-name".to_owned(),
+                model: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                title: "can you fix compilation".to_owned(),
+            },
+            DiscoveredCodexThread {
+                approval_policy: None,
+                archived: false,
+                cwd: "/tmp/termal".to_owned(),
+                id: "thread-user-name".to_owned(),
+                model: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                title: "the original first prompt".to_owned(),
+            },
+        ],
+    );
+
+    assert_eq!(
+        inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == legacy_id)
+            .expect("legacy session should remain")
+            .session
+            .name,
+        "Codex 1"
+    );
+    assert_eq!(
+        inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == renamed_id)
+            .expect("renamed session should remain")
+            .session
+            .name,
+        "My investigation",
+        "a user-selected session name must survive discovery refresh"
     );
 }
 

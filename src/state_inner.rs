@@ -40,6 +40,19 @@
 // them callable from `#[cfg(test)]` code without a `#[cfg(test)]`
 // gate here lets the shared helper stay one definition.
 
+/// Returns the privacy-safe default label for a session id. Keeping this
+/// contract next to `create_session` lets startup import/migration paths reuse
+/// the exact same label instead of reconstructing `{agent} {number}`.
+fn generated_session_name(agent: Agent, session_id: &str) -> String {
+    session_id
+        .strip_prefix("session-")
+        .filter(|suffix| {
+            !suffix.is_empty() && suffix.chars().all(|candidate| candidate.is_ascii_digit())
+        })
+        .map(|suffix| format!("{} {suffix}", agent.name()))
+        .unwrap_or_else(|| format!("{} session", agent.name()))
+}
+
 impl StateInner {
     /// Appends a new [`Project`] record to `self.projects` and
     /// returns a clone. The public `AppState::create_project` in
@@ -91,6 +104,9 @@ impl StateInner {
     ) -> SessionRecord {
         let number = self.next_session_number;
         self.next_session_number += 1;
+        let session_id = format!("session-{number}");
+        let session_name =
+            name.unwrap_or_else(|| generated_session_name(agent, session_id.as_str()));
 
         let record = SessionRecord {
             active_codex_approval_policy: None,
@@ -127,8 +143,8 @@ impl StateInner {
             // stamp as soon as a mutation happens.
             mutation_stamp: 0,
             session: Session {
-                id: format!("session-{number}"),
-                name: name.unwrap_or_else(|| format!("{} {}", agent.name(), number)),
+                id: session_id,
+                name: session_name,
                 emoji: agent.avatar().to_owned(),
                 agent,
                 workdir,
@@ -714,9 +730,18 @@ fn delegation_id_from_delegated_child_marker(
     text: &str,
     expected_child_session_id: &str,
 ) -> Option<String> {
+    let (delegation_id, child_session_id) = delegated_child_marker_parts(text)?;
+    (child_session_id == expected_child_session_id).then(|| delegation_id.to_owned())
+}
+
+/// Parses the identity-bearing fields from the reserved delegation bootstrap
+/// prefix once. Callers that only need classification can test this helper,
+/// while durable parent-link repair additionally compares the child id.
+fn delegated_child_marker_parts(text: &str) -> Option<(&str, &str)> {
     // This mirrors `build_delegation_prompt`: the marker must be the leading
-    // prompt text, and the child-session line must match the repaired session.
-    // That keeps quoted prompts in ordinary sessions from becoming parent links.
+    // prompt text and both identity fields must use the reserved shape. The
+    // caller that repairs a durable parent link additionally checks that the
+    // parsed child id matches the session being repaired.
     let after_marker = text.trim_start().strip_prefix(DELEGATED_CHILD_SESSION_MARKER)?;
     let after_opening_tick = after_marker.strip_prefix(" `")?;
     let closing_tick = after_opening_tick.find('`')?;
@@ -729,7 +754,11 @@ fn delegation_id_from_delegated_child_marker(
         return None;
     }
     let child_session_id = child_session_id_from_delegated_child_marker(text)?;
-    (child_session_id == expected_child_session_id).then(|| delegation_id.to_owned())
+    Some((delegation_id, child_session_id))
+}
+
+fn is_delegated_child_bootstrap_title(text: &str) -> bool {
+    delegated_child_marker_parts(text).is_some()
 }
 
 fn child_session_id_from_delegated_child_marker(text: &str) -> Option<&str> {
