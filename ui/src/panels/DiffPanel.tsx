@@ -174,6 +174,7 @@ export function DiffPanel({
   documentEnrichmentNote = null,
   documentContent = null,
   diffMessageId,
+  displayPath = null,
   filePath,
   gitSectionId = null,
   language,
@@ -196,6 +197,7 @@ export function DiffPanel({
   documentEnrichmentNote?: string | null;
   documentContent?: GitDiffDocumentContent | null;
   diffMessageId: string;
+  displayPath?: string | null;
   filePath: string | null;
   gitSectionId?: GitDiffSection | null;
   language?: string | null;
@@ -210,7 +212,11 @@ export function DiffPanel({
   onSaveFile: (path: string, content: string, options?: SourceSaveOptions) => Promise<FileResponse | void>;
   summary: string;
 }) {
-  const [latestFile, setLatestFile] = useState<LatestFileState>(() => createInitialLatestFileState(filePath));
+  const isGitSubmoduleDiff = language === "git-submodule";
+  const effectiveDisplayPath = displayPath ?? filePath;
+  const [latestFile, setLatestFile] = useState<LatestFileState>(() =>
+    createInitialLatestFileState(isGitSubmoduleDiff ? null : filePath),
+  );
   const [reviewState, setReviewState] = useState<ReviewState>({
     status: "idle",
     review: null,
@@ -516,11 +522,13 @@ export function DiffPanel({
   const preferMarkdownView =
     canShowMarkdownView && Boolean(gitSectionId && documentContent?.isCompleteDocument);
   const [viewMode, setViewMode] = useState<DiffViewMode>(() =>
-    defaultDiffViewMode(
-      buildDiffPreviewModel(diff, changeType).hasStructuredPreview,
-      Boolean(filePath),
-      preferMarkdownView,
-    ),
+    isGitSubmoduleDiff
+      ? "raw"
+      : defaultDiffViewMode(
+          buildDiffPreviewModel(diff, changeType).hasStructuredPreview,
+          Boolean(filePath),
+          preferMarkdownView,
+        ),
   );
 
   function readDiffViewScrollTop(mode: DiffViewMode) {
@@ -599,12 +607,21 @@ export function DiffPanel({
     setViewMode(nextViewMode);
   }
 
-  // This reset is intentionally tied to tab identity only. Derived preview
-  // values can change during git refreshes, but user-selected view mode should
-  // stay sticky while the same diff tab remains open.
+  // This reset is tied to tab identity and path kind. Derived preview values
+  // can change during git refreshes, but user-selected view mode should stay
+  // sticky while the same regular-file diff remains open. A newly resolved
+  // submodule must switch away from the pending tab's edit-mode default.
   useEffect(() => {
     diffViewScrollPositionsRef.current = createInitialDiffViewScrollPositions();
-    setViewMode(defaultDiffViewMode(preview.hasStructuredPreview, Boolean(filePath), preferMarkdownView));
+    setViewMode(
+      isGitSubmoduleDiff
+        ? "raw"
+        : defaultDiffViewMode(
+            preview.hasStructuredPreview,
+            Boolean(filePath),
+            preferMarkdownView,
+          ),
+    );
     setEditEditorStatus(DEFAULT_EDITOR_STATUS);
     setVisualEditorStatus(DEFAULT_DIFF_EDITOR_STATUS);
     setSaveError(null);
@@ -618,7 +635,7 @@ export function DiffPanel({
     setMarkdownEditContentState(null);
     setRenderLargeMarkdownFullDocument(false);
     clearRenderedMarkdownDraftSegments();
-  }, [diffMessageId, filePath]);
+  }, [diffMessageId, filePath, isGitSubmoduleDiff]);
 
   useEffect(() => {
     const restoreToken = diffViewRestoreTokenRef.current + 1;
@@ -663,7 +680,7 @@ export function DiffPanel({
   useEffect(() => {
     let cancelled = false;
 
-    if (!filePath) {
+    if (!filePath || isGitSubmoduleDiff) {
       setLatestFileState(createInitialLatestFileState(null));
       setVisualBaseContent(null);
       setExternalFileNotice(null);
@@ -730,7 +747,14 @@ export function DiffPanel({
     return () => {
       cancelled = true;
     };
-  }, [filePath, hasScope, language, normalizedProjectId, normalizedSessionId]);
+  }, [
+    filePath,
+    hasScope,
+    isGitSubmoduleDiff,
+    language,
+    normalizedProjectId,
+    normalizedSessionId,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -825,8 +849,13 @@ export function DiffPanel({
   // Keep them navigable in rendered mode, but route edits through unstaged
   // worktree diffs where saving can write to an actual file buffer.
   const isStagedMarkdownDiff = gitSectionId === "staged" && canShowMarkdownView;
+  const canUseStructuredPreview =
+    preview.hasStructuredPreview && !isGitSubmoduleDiff;
   const canEditVisualDiff =
-    preview.hasStructuredPreview && latestFile.status === "ready" && Boolean(filePath) && !isStagedMarkdownDiff;
+    canUseStructuredPreview &&
+    latestFile.status === "ready" &&
+    Boolean(filePath) &&
+    !isStagedMarkdownDiff;
   const renderedMarkdownEditBlockedReason = isStagedMarkdownDiff
     ? documentContent?.editBlockedReason ?? "Staged Markdown diffs are read-only. Use the unstaged worktree diff to edit this file."
     : documentContent?.editBlockedReason ?? null;
@@ -851,13 +880,17 @@ export function DiffPanel({
     gitSectionId === "staged" ? "Staged" : gitSectionId === "unstaged" ? "Unstaged" : null;
   const visibleSummary = gitSectionLabel ? null : summary;
   const displayFilePath = useMemo(() => {
-    if (!filePath) {
+    if (!effectiveDisplayPath) {
       return null;
     }
 
-    return normalizeDisplayPath(relativizePathToWorkspace(filePath, workspaceRoot));
-  }, [filePath, workspaceRoot]);
-  const filePathTitle = filePath ? normalizeDisplayPath(filePath) : null;
+    return normalizeDisplayPath(
+      relativizePathToWorkspace(effectiveDisplayPath, workspaceRoot),
+    );
+  }, [effectiveDisplayPath, workspaceRoot]);
+  const filePathTitle = effectiveDisplayPath
+    ? normalizeDisplayPath(effectiveDisplayPath)
+    : null;
   const copyablePath = displayFilePath ?? filePathTitle;
   const hasReviewScope = normalizedChangeSetId.length > 0 && hasScope;
   const canEditReview = hasReviewScope && reviewState.status === "ready";
@@ -1477,6 +1510,7 @@ export function DiffPanel({
         <div className="source-editor-toolbar">
           <div className="source-editor-status">
             {gitSectionLabel ? <span className="chip">{gitSectionLabel}</span> : null}
+            {isGitSubmoduleDiff ? <span className="chip">Submodule</span> : null}
             {!gitSectionLabel && changeType === "create" ? <span className="chip">New file</span> : null}
             {preview.changeSummary.changedLineCount > 0 ? (
               <span
@@ -1505,9 +1539,13 @@ export function DiffPanel({
                 -{preview.changeSummary.removedLineCount}
               </span>
             ) : null}
-            {filePath || language ? (
+            {effectiveDisplayPath || language ? (
               <div className="diff-preview-file-meta" title={filePathTitle ?? undefined}>
-                <FileTabIcon className="diff-preview-file-icon" language={language ?? null} path={filePath} />
+                <FileTabIcon
+                  className="diff-preview-file-icon"
+                  language={language ?? null}
+                  path={effectiveDisplayPath}
+                />
                 {displayFilePath ? <span className="diff-preview-file-path">{displayFilePath}</span> : null}
                 {copyablePath ? (
                   <button
@@ -1528,7 +1566,7 @@ export function DiffPanel({
             ) : null}
           </div>
           <div className="source-editor-actions diff-preview-actions">
-            {preview.hasStructuredPreview ? (
+            {canUseStructuredPreview ? (
               <DiffPreviewToggleButton
                 selected={viewMode === "all"}
                 label="All lines"
@@ -1537,7 +1575,7 @@ export function DiffPanel({
                 <AllLinesIcon />
               </DiffPreviewToggleButton>
             ) : null}
-            {preview.hasStructuredPreview ? (
+            {canUseStructuredPreview ? (
               <DiffPreviewToggleButton
                 selected={viewMode === "changes"}
                 label="Changed only"
@@ -1564,7 +1602,7 @@ export function DiffPanel({
                 <MarkdownModeIcon />
               </DiffPreviewToggleButton>
             ) : null}
-            {filePath ? (
+            {filePath && !isGitSubmoduleDiff ? (
               <DiffPreviewToggleButton
                 selected={viewMode === "edit"}
                 label="Edit mode"
@@ -1580,7 +1618,7 @@ export function DiffPanel({
             >
               <RawPatchIcon />
             </DiffPreviewToggleButton>
-            {filePath ? (
+            {filePath && !isGitSubmoduleDiff ? (
               <button className="ghost-button" type="button" onClick={() => onOpenPath(filePath)}>
                 Open file
               </button>
@@ -1683,7 +1721,7 @@ export function DiffPanel({
             </button>
           </div>
         ) : null}
-        {!normalizedChangeSetId && preview.hasStructuredPreview ? (
+        {!normalizedChangeSetId && canUseStructuredPreview ? (
           <p className="support-copy diff-preview-note">
             Review comments are unavailable for this diff because it does not have a stable change set id yet.
           </p>
@@ -1722,7 +1760,7 @@ export function DiffPanel({
           </>
         ) : null}
 
-        {viewMode === "all" && preview.hasStructuredPreview ? (
+        {viewMode === "all" && canUseStructuredPreview ? (
           <div className="source-editor-shell source-editor-shell-with-statusbar">
             <div className="diff-editor-shell">
               <Suspense fallback={<div className="source-editor-loading">Loading diff editor...</div>}>
@@ -1784,7 +1822,7 @@ export function DiffPanel({
           </div>
         ) : null}
 
-        {viewMode === "changes" && preview.hasStructuredPreview ? (
+        {viewMode === "changes" && canUseStructuredPreview ? (
           <StructuredDiffView
             filePath={filePath}
             preview={preview}
@@ -1840,7 +1878,9 @@ export function DiffPanel({
           />
         ) : null}
 
-        {viewMode === "raw" || (viewMode === "all" && !preview.hasStructuredPreview) ? (
+        {viewMode === "raw" ||
+        ((viewMode === "all" || viewMode === "changes") &&
+          !canUseStructuredPreview) ? (
           <RawPatchView diff={diff} scrollRef={rawPatchScrollRef} />
         ) : null}
 

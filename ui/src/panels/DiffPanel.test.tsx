@@ -349,6 +349,60 @@ describe("DiffPanel", () => {
     expect(await screen.findByTestId("monaco-code-editor")).toHaveValue("const latest = true;\n");
   });
 
+  it("renders submodule diffs as read-only nested raw patches", async () => {
+    const nestedPatch = [
+      "Submodule modules/demo contains modified content",
+      "diff --git a/modules/demo/file.txt b/modules/demo/file.txt",
+      "index df967b9..2ecd216 100644",
+      "--- a/modules/demo/file.txt",
+      "+++ b/modules/demo/file.txt",
+      "@@ -1 +1,2 @@",
+      " base",
+      "+worktree",
+      "diff --git a/modules/demo/other.txt b/modules/demo/other.txt",
+      "index 7898192..422c2b7 100644",
+      "--- a/modules/demo/other.txt",
+      "+++ b/modules/demo/other.txt",
+      "@@ -1 +1,2 @@",
+      " other",
+      "+second change",
+    ].join("\n");
+
+    await act(async () => {
+      render(
+        <DiffPanel
+          appearance="dark"
+          fontSizePx={13}
+          changeType="edit"
+          diff={nestedPatch}
+          diffMessageId="diff-submodule"
+          displayPath="/repo/modules/demo"
+          filePath={null}
+          gitSectionId="unstaged"
+          language="git-submodule"
+          sessionId="session-1"
+          workspaceRoot="/repo"
+          onOpenPath={() => {}}
+          onSaveFile={async () => {}}
+          summary="Unstaged submodule changes in modules/demo"
+        />,
+      );
+    });
+
+    expect(screen.getByText("Submodule")).toHaveClass("chip");
+    expect(screen.getByRole("table", { name: "Raw patch preview" })).toBeInTheDocument();
+    expect(
+      screen.getByText("diff --git a/modules/demo/file.txt b/modules/demo/file.txt"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit mode" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open file" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "All lines" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Changed only" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("structured-diff-view")).not.toBeInTheDocument();
+    expect(screen.getByText("modules/demo")).toBeInTheDocument();
+    expect(fetchFileMock).not.toHaveBeenCalled();
+  });
+
   it("does not show rendered Markdown mode for non-Markdown diffs", async () => {
     fetchFileMock.mockResolvedValue({
       content: "export const latest = true;\n",

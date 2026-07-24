@@ -397,7 +397,8 @@ describe("App diff preview", () => {
       changeType: "edit",
       diff: "-# Before restored\n+# After restored\n",
       diffMessageId: restoredGitDiffRequestKey,
-      filePath: "/repo/docs/README.md",
+      displayPath: "/repo/docs/README.md",
+      filePath: null,
       gitDiffRequest: restoredGitDiffRequest,
       gitDiffRequestKey: restoredGitDiffRequestKey,
       gitSectionId: "unstaged",
@@ -764,6 +765,9 @@ describe("App diff preview", () => {
         });
         const alert = await screen.findByRole("alert");
         expect(within(alert).getByText("Unable to load diff")).toBeInTheDocument();
+        expect(
+          within(alert).getByText("/repo/docs/README.md"),
+        ).toBeInTheDocument();
         expect(within(alert).getByText("restore failed")).toBeInTheDocument();
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
@@ -954,6 +958,12 @@ describe("App diff preview", () => {
         await waitFor(() => {
           expect(fetchGitDiffSpy).toHaveBeenCalledTimes(1);
         });
+        const loadingStatus = await screen.findByRole("status");
+        expect(within(loadingStatus).getByText("Loading diff")).toBeInTheDocument();
+        expect(within(loadingStatus).getByText("src/example.ts")).toBeInTheDocument();
+        expect(
+          screen.getByRole("tab", { name: /Diff: example\.ts/i }),
+        ).toBeInTheDocument();
 
         await clickAndSettle(screen.getByRole("tab", { name: /Git status: repo/i }));
         await clickAndSettle(await screen.findByRole("button", { name: /^example\.ts$/i }));

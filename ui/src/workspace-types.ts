@@ -135,6 +135,7 @@ export type WorkspaceDiffPreviewTab = {
   documentEnrichmentNote?: string | null;
   documentContent?: GitDiffDocumentContent | null;
   diffMessageId: string;
+  displayPath?: string | null;
   filePath: string | null;
   gitSectionId?: GitDiffSection | null;
   language?: string | null;

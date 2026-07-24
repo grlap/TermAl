@@ -670,6 +670,7 @@ export function useAppWorkspaceActions({
             changeSetId: message.changeSetId ?? `change-${message.id}`,
             diff: message.diff,
             diffMessageId: message.id,
+            displayPath: message.filePath,
             filePath: message.filePath,
             language: message.language ?? null,
             originSessionId,
@@ -709,7 +710,11 @@ export function useAppWorkspaceActions({
       documentEnrichmentNote: null,
       documentContent: null,
       diffMessageId: requestKey,
-      filePath: request.path,
+      // Keep display metadata while waiting for `/api/git/diff` to identify
+      // whether the selected path has an editable file target. Submodules are
+      // directory-backed and must never be sent through the file-content API.
+      displayPath: request.path,
+      filePath: null,
       gitSectionId,
       language: null,
       originSessionId,
@@ -765,7 +770,11 @@ export function useAppWorkspaceActions({
               documentEnrichmentNote:
                 diffPreview.documentEnrichmentNote ?? null,
               documentContent: diffPreview.documentContent ?? null,
-              filePath: diffPreview.filePath ?? tab.filePath,
+              displayPath: diffPreview.filePath ?? tab.displayPath ?? request.path,
+              filePath:
+                diffPreview.language === "git-submodule"
+                  ? null
+                  : (diffPreview.filePath ?? null),
               gitSectionId,
               language: diffPreview.language ?? null,
               summary: diffPreview.summary,

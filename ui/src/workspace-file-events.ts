@@ -159,6 +159,7 @@ export function workspaceFilesChangedEventTouchesGitDiffTab(
 ) {
   const request = tab.gitDiffRequest ?? null;
   const candidates = [
+    tab.displayPath,
     tab.filePath,
     request?.path,
     request?.originalPath,

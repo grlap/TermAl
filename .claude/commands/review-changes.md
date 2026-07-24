@@ -40,7 +40,9 @@ Warnings are acceptable; report them and continue.
 Then run `cd ui && npx tsc --noEmit`.
 If it produces ANY errors, stop immediately and present the output.
 
-Then run `cargo test` in the parent session.
+Then run `scripts/test-rust.sh` in the parent session. This wrapper raises the
+Unix file-descriptor soft limit where possible and bounds Rust test
+parallelism so FD-heavy fixtures do not make the gate flaky.
 If it produces ANY failures or errors, stop immediately and present the output.
 
 Then run `cd ui && npx vitest run` in the parent session.

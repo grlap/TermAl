@@ -1662,9 +1662,14 @@ export function SessionPaneView({
                     ? "Loading diff"
                     : "Unable to load diff"}
                 </strong>
-                {activeDiffPreviewTab.filePath ? (
+                {activeDiffPreviewTab.displayPath ??
+                activeDiffPreviewTab.filePath ? (
                   <span className="diff-preview-loading-path">
-                    {normalizeDisplayPath(activeDiffPreviewTab.filePath)}
+                    {normalizeDisplayPath(
+                      activeDiffPreviewTab.displayPath ??
+                        activeDiffPreviewTab.filePath ??
+                        "",
+                    )}
                   </span>
                 ) : null}
                 <span className="diff-preview-loading-detail">
@@ -1685,6 +1690,10 @@ export function SessionPaneView({
               }
               documentContent={activeDiffPreviewTab.documentContent ?? null}
               diffMessageId={activeDiffPreviewTab.diffMessageId}
+              displayPath={
+                activeDiffPreviewTab.displayPath ??
+                activeDiffPreviewTab.filePath
+              }
               filePath={activeDiffPreviewTab.filePath}
               gitSectionId={activeDiffPreviewTab.gitSectionId ?? null}
               language={activeDiffPreviewTab.language ?? null}

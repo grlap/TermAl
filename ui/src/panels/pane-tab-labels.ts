@@ -104,7 +104,7 @@ export function formatTabLabel(
     return `Instructions: ${formatPathTabLabel(tab.workdir, "Workspace")}`;
   }
 
-  return `Diff: ${formatPathTabLabel(tab.filePath, "Preview")}`;
+  return `Diff: ${formatPathTabLabel(tab.displayPath ?? tab.filePath, "Preview")}`;
 }
 
 export function formatPathTabLabel(path: string | null, fallback: string) {

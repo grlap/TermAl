@@ -1,6 +1,14 @@
 /// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { configDefaults } from "vitest/config";
+
+const SERIALIZED_REACT_TESTS = [
+  "src/App.control-panel.test.tsx",
+  "src/App.diff-preview.test.tsx",
+  "src/App.live-state.watchdog.test.tsx",
+  "src/SessionPaneView.retry-display.test.tsx",
+];
 
 function monacoEsmCssStub() {
   return {
@@ -105,12 +113,41 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    // Keep timer-heavy React/jsdom suites below machine-wide CPU saturation.
-    // At the default all-core parallelism, watchdog tests can exceed their
-    // existing 10-second timeout and leave overlapping `act()` work behind.
+    // Keep React/jsdom suites below machine-wide CPU saturation.
     maxWorkers: 4,
     setupFiles: "./src/test-setup.ts",
     testTimeout: 10_000,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "default",
+          exclude: [
+            ...configDefaults.exclude,
+            ...SERIALIZED_REACT_TESTS,
+          ],
+          sequence: {
+            groupOrder: 0,
+          },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "serialized-react",
+          include: SERIALIZED_REACT_TESTS,
+          // These integration suites are fast in isolation but can exceed
+          // their timeout when several heavyweight App/jsdom files compile
+          // and run beside them. Run them one at a time after the parallel
+          // default project so contention cannot cause false timeouts or
+          // poison later React `act()` state.
+          maxWorkers: 1,
+          sequence: {
+            groupOrder: 1,
+          },
+        },
+      },
+    ],
   },
   server: {
     host: "127.0.0.1",

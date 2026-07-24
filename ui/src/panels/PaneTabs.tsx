@@ -971,7 +971,10 @@ export const PaneTabs = memo(function PaneTabs({
                     ) : tab.kind === "source" ? (
                       <FileTabIcon path={tab.path} />
                     ) : tab.kind === "diffPreview" ? (
-                      <FileTabIcon language={tab.language ?? null} path={tab.filePath} />
+                      <FileTabIcon
+                        language={tab.language ?? null}
+                        path={tab.displayPath ?? tab.filePath}
+                      />
                     ) : (
                       <TabKindIcon kind={tab.kind} />
                     )}

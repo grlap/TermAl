@@ -220,7 +220,7 @@ export function getFileTabPath(tab: WorkspaceTab) {
   }
 
   if (tab.kind === "diffPreview") {
-    return tab.filePath?.trim() || null;
+    return tab.displayPath?.trim() || tab.filePath?.trim() || null;
   }
 
   return null;

@@ -191,7 +191,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | PUT | `/api/file` | Write file content |
 | GET | `/api/fs?path=...` | List directory entries |
 | GET | `/api/git/status?path=...` | Git status and branch info |
-| POST | `/api/git/diff` | Build a structured git diff preview |
+| POST | `/api/git/diff` | Build a structured git diff preview; registered submodules return a read-only nested patch |
 | POST | `/api/git/file` | Apply a file-level git action |
 | POST | `/api/git/commit` | Create a git commit from staged changes |
 | POST | `/api/git/push` | Push the current repo |

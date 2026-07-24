@@ -256,6 +256,138 @@ fn git_stage_pathspecs_include_original_paths_for_copy_and_rename() {
     );
 }
 
+// Pins the submodule-specific Git diff path used by the Git Status viewer.
+// A normal `git diff -- <submodule>` collapses nested worktree changes to a
+// `Subproject commit ...-dirty` pointer. The viewer instead needs
+// `--submodule=diff` output so users can inspect the actual changed files.
+#[test]
+fn git_diff_skips_submodule_probe_for_untracked_worktree_files() {
+    assert!(!git_diff_request_requires_submodule_probe(
+        GitDiffSection::Unstaged,
+        Some("?"),
+    ));
+    assert!(git_diff_request_requires_submodule_probe(
+        GitDiffSection::Unstaged,
+        Some("M"),
+    ));
+    assert!(git_diff_request_requires_submodule_probe(
+        GitDiffSection::Staged,
+        Some("A"),
+    ));
+}
+
+#[test]
+fn git_diff_expands_unstaged_and_staged_submodule_changes() {
+    let test_root =
+        std::env::temp_dir().join(format!("termal-git-submodule-diff-{}", Uuid::new_v4()));
+    let source_repo = test_root.join("source");
+    let parent_repo = test_root.join("parent");
+    let checked_out_submodule = parent_repo.join("modules").join("demo");
+
+    fs::create_dir_all(&source_repo).unwrap();
+    fs::create_dir_all(&parent_repo).unwrap();
+    fs::write(source_repo.join("file.txt"), "base\n").unwrap();
+    init_git_document_test_repo(&source_repo);
+    run_git_test_command(&source_repo, &["add", "file.txt"]);
+    run_git_test_command(&source_repo, &["commit", "-m", "base"]);
+
+    init_git_document_test_repo(&parent_repo);
+    let source_path = source_repo.to_string_lossy().into_owned();
+    run_git_test_command(
+        &parent_repo,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            &source_path,
+            "modules/demo",
+        ],
+    );
+    run_git_test_command(&parent_repo, &["commit", "-am", "add submodule"]);
+
+    fs::write(checked_out_submodule.join("file.txt"), "base\nworktree\n").unwrap();
+    let unstaged = load_git_diff_for_request(
+        &parent_repo,
+        &GitDiffRequest {
+            original_path: None,
+            path: "modules/demo".to_owned(),
+            section_id: GitDiffSection::Unstaged,
+            status_code: Some("M".to_owned()),
+            workdir: parent_repo.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(unstaged.language.as_deref(), Some("git-submodule"));
+    assert!(
+        unstaged
+            .file_path
+            .as_deref()
+            .is_some_and(|path| FsPath::new(path).ends_with(PathBuf::from("modules").join("demo")))
+    );
+    assert_eq!(
+        unstaged.summary,
+        "Unstaged submodule changes in modules/demo"
+    );
+    assert!(
+        unstaged
+            .diff
+            .contains("Submodule modules/demo contains modified content")
+    );
+    assert!(
+        unstaged
+            .diff
+            .contains("diff --git a/modules/demo/file.txt b/modules/demo/file.txt")
+    );
+    assert!(unstaged.diff.contains("+worktree"));
+
+    run_git_test_command(
+        &checked_out_submodule,
+        &["config", "user.email", "termal@example.com"],
+    );
+    run_git_test_command(&checked_out_submodule, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&checked_out_submodule, &["add", "file.txt"]);
+    run_git_test_command(
+        &checked_out_submodule,
+        &["commit", "-m", "change nested file"],
+    );
+    run_git_test_command(&parent_repo, &["add", "modules/demo"]);
+
+    let staged = load_git_diff_for_request(
+        &parent_repo,
+        &GitDiffRequest {
+            original_path: None,
+            path: "modules/demo".to_owned(),
+            section_id: GitDiffSection::Staged,
+            status_code: Some("M".to_owned()),
+            workdir: parent_repo.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(staged.language.as_deref(), Some("git-submodule"));
+    assert!(
+        staged
+            .file_path
+            .as_deref()
+            .is_some_and(|path| FsPath::new(path).ends_with(PathBuf::from("modules").join("demo")))
+    );
+    assert_eq!(staged.summary, "Staged submodule changes in modules/demo");
+    assert!(
+        staged
+            .diff
+            .contains("diff --git a/modules/demo/file.txt b/modules/demo/file.txt")
+    );
+    assert!(staged.diff.contains("+worktree"));
+
+    fs::remove_dir_all(test_root).unwrap();
+}
+
 // Pins the staged/unstaged side mapping for Markdown enrichment:
 // staged reads HEAD → index, unstaged reads index → worktree, and a
 // staged view is marked read-only when the worktree has unstaged

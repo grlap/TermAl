@@ -2830,8 +2830,8 @@ fn review_changes_pins_two_child_resume_wait_flow() {
     );
     assert_command_contains(
         review_changes,
-        "Then run `cargo test` in the parent session",
-        "/review-changes must run backend tests in the parent session",
+        "Then run `scripts/test-rust.sh` in the parent session",
+        "/review-changes must run backend tests through the stable parent-session wrapper",
     );
     assert_command_contains(
         review_changes,

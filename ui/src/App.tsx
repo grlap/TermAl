@@ -1688,7 +1688,14 @@ export default function App() {
                   documentEnrichmentNote:
                     diffPreview.documentEnrichmentNote ?? null,
                   documentContent: diffPreview.documentContent ?? null,
-                  filePath: diffPreview.filePath ?? tab.filePath,
+                  displayPath:
+                    diffPreview.filePath ??
+                    tab.displayPath ??
+                    restore.request.path,
+                  filePath:
+                    diffPreview.language === "git-submodule"
+                      ? null
+                      : (diffPreview.filePath ?? null),
                   gitSectionId: restore.sectionId,
                   language: diffPreview.language ?? null,
                   summary: diffPreview.summary,
@@ -1777,7 +1784,14 @@ export default function App() {
                   documentEnrichmentNote:
                     diffPreview.documentEnrichmentNote ?? null,
                   documentContent: diffPreview.documentContent ?? null,
-                  filePath: diffPreview.filePath ?? tab.filePath,
+                  displayPath:
+                    diffPreview.filePath ??
+                    tab.displayPath ??
+                    refresh.request.path,
+                  filePath:
+                    diffPreview.language === "git-submodule"
+                      ? null
+                      : (diffPreview.filePath ?? null),
                   gitSectionId: refresh.sectionId,
                   language: diffPreview.language ?? null,
                   summary: diffPreview.summary,

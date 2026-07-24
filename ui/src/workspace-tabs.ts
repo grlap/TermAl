@@ -231,6 +231,7 @@ export function createDiffPreviewTab({
   documentEnrichmentNote = null,
   documentContent = null,
   diffMessageId,
+  displayPath = null,
   filePath = null,
   gitSectionId = null,
   language = null,
@@ -248,6 +249,7 @@ export function createDiffPreviewTab({
   documentEnrichmentNote?: string | null;
   documentContent?: GitDiffDocumentContent | null;
   diffMessageId: string;
+  displayPath?: string | null;
   filePath?: string | null;
   gitSectionId?: GitDiffSection | null;
   language?: string | null;
@@ -264,6 +266,7 @@ export function createDiffPreviewTab({
   const normalizedOriginProjectId = normalizeWorkspaceIdentifier(originProjectId);
   const normalizedGitDiffRequestKey = normalizeWorkspaceIdentifier(gitDiffRequestKey);
   const normalizedLoadError = normalizeWorkspaceIdentifier(loadError);
+  const normalizedDisplayPath = normalizeWorkspacePath(displayPath);
 
   return {
     id: crypto.randomUUID(),
@@ -276,6 +279,7 @@ export function createDiffPreviewTab({
       : {}),
     ...(documentContent ? { documentContent } : {}),
     diffMessageId,
+    ...(normalizedDisplayPath ? { displayPath: normalizedDisplayPath } : {}),
     filePath: normalizeWorkspacePath(filePath),
     ...(gitSectionId ? { gitSectionId } : {}),
     language,

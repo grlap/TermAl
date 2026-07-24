@@ -51,12 +51,26 @@ where
         .as_deref()
         .and_then(|value| value.chars().next())
         .and_then(normalize_git_status_code);
+    let is_submodule = if git_diff_request_requires_submodule_probe(
+        request.section_id,
+        status_code.as_deref(),
+    ) {
+        git_diff_path_is_submodule(
+            &repo_root,
+            &current_path,
+            original_path.as_deref(),
+            request.section_id,
+        )?
+    } else {
+        false
+    };
     let diff = load_git_file_diff_text(
         &repo_root,
         &current_path,
         original_path.as_deref(),
         status_code.as_deref(),
         request.section_id,
+        is_submodule,
     )?;
 
     if diff.trim().is_empty() {
@@ -77,7 +91,14 @@ where
     .join("\n");
 
     let diff_hash = stable_text_hash(&diff_identity);
-    let language = infer_language_from_path(FsPath::new(&current_path)).map(str::to_owned);
+    // `git-submodule` is a UI discriminator rather than a Monaco language.
+    // It keeps the directory-backed path read-only and defaults the preview to
+    // the raw nested patch, where per-file headers remain visible.
+    let language = if is_submodule {
+        Some("git-submodule".to_owned())
+    } else {
+        infer_language_from_path(FsPath::new(&current_path)).map(str::to_owned)
+    };
     let mut document_enrichment_note = None;
     let document_content = if language.as_deref() == Some("markdown") {
         match load_document_content(
@@ -117,11 +138,19 @@ where
         language,
         document_enrichment_note,
         document_content,
-        summary: format!(
-            "{} changes in {}",
-            request.section_id.summary_label(),
-            current_path
-        ),
+        summary: if is_submodule {
+            format!(
+                "{} submodule changes in {}",
+                request.section_id.summary_label(),
+                current_path
+            )
+        } else {
+            format!(
+                "{} changes in {}",
+                request.section_id.summary_label(),
+                current_path
+            )
+        },
     })
 }
 
@@ -283,6 +312,7 @@ fn load_git_file_diff_text(
     original_path: Option<&str>,
     status_code: Option<&str>,
     section_id: GitDiffSection,
+    is_submodule: bool,
 ) -> Result<String, ApiError> {
     if matches!(section_id, GitDiffSection::Unstaged) && status_code == Some("?") {
         return build_untracked_git_diff(repo_root, current_path);
@@ -298,6 +328,11 @@ fn load_git_file_diff_text(
 
     if matches!(section_id, GitDiffSection::Staged) {
         command.arg("--cached");
+    }
+    if is_submodule {
+        command
+            .arg("--ignore-submodules=none")
+            .arg("--submodule=diff");
     }
 
     let output = command
@@ -318,6 +353,67 @@ fn load_git_file_diff_text(
             "failed to load git diff: {stderr}"
         )))
     }
+}
+
+/// Returns whether the selected diff contains a Git link (mode `160000`).
+///
+/// Querying the selected staged/unstaged side via `git diff --raw` handles
+/// additions, removals, pointer moves, and dirty checked-out submodules
+/// without depending on the submodule directory being populated.
+fn git_diff_path_is_submodule(
+    repo_root: &FsPath,
+    current_path: &str,
+    original_path: Option<&str>,
+    section_id: GitDiffSection,
+) -> Result<bool, ApiError> {
+    let pathspecs = collect_git_pathspecs(current_path, original_path);
+    let mut command = git_literal_pathspec_command();
+    command
+        .arg("-C")
+        .arg(repo_root)
+        .arg("diff")
+        .arg("--raw")
+        .arg("--no-abbrev")
+        .arg("--ignore-submodules=none");
+
+    if matches!(section_id, GitDiffSection::Staged) {
+        command.arg("--cached");
+    }
+
+    let output = command
+        .arg("--")
+        .args(&pathspecs)
+        .output()
+        .map_err(|err| ApiError::internal(format!("failed to inspect git diff modes: {err}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return if stderr.is_empty() {
+            Err(ApiError::internal("failed to inspect git diff modes"))
+        } else {
+            Err(ApiError::internal(format!(
+                "failed to inspect git diff modes: {stderr}"
+            )))
+        };
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .any(git_raw_diff_line_is_submodule))
+}
+
+fn git_diff_request_requires_submodule_probe(
+    section_id: GitDiffSection,
+    status_code: Option<&str>,
+) -> bool {
+    !matches!(section_id, GitDiffSection::Unstaged) || status_code != Some("?")
+}
+
+fn git_raw_diff_line_is_submodule(line: &str) -> bool {
+    let mut fields = line.split('\t').next().unwrap_or(line).split_whitespace();
+    let old_mode = fields.next().and_then(|value| value.strip_prefix(':'));
+    let new_mode = fields.next();
+    old_mode == Some("160000") || new_mode == Some("160000")
 }
 
 /// Builds untracked Git diff.

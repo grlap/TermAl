@@ -13,7 +13,7 @@ Backend:
 - Tests cover state persistence, remote routing, SSE parsing, terminal command
   execution, project deletion, workspace layouts, file/git APIs, agent-runtime
   normalization, and regression edges.
-- Run with `cargo test`.
+- Run with `scripts/test-rust.sh`.
 
 Frontend:
 
@@ -47,8 +47,20 @@ reported and triaged with the review.
 For higher-confidence changes, also run:
 
 ```bash
-cargo test
+scripts/test-rust.sh
 cd ui && npx vitest run
+```
+
+The Rust wrapper raises the inherited Unix file-descriptor soft limit toward
+4096 and defaults libtest to four threads. This prevents FD-heavy SQLite,
+HTTP, and runtime fixtures from intermittently exhausting macOS's common
+256-descriptor default. Set `TERMAL_TEST_FD_LIMIT` or `TERMAL_TEST_THREADS` to
+positive integers to override those defaults; existing `RUST_TEST_THREADS` is
+also honored when `TERMAL_TEST_THREADS` is unset. Extra arguments are passed
+through to `cargo test`, for example:
+
+```bash
+scripts/test-rust.sh mailbox_store_tests
 ```
 
 ## Backend Testing Guidelines

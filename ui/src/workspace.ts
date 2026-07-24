@@ -235,8 +235,14 @@ export function normalizeWorkspaceStatePaths(
             };
           }
           if (tab.kind === "diffPreview") {
+            const normalizedDisplayPath = normalizeWorkspacePath(
+              tab.displayPath,
+            );
             return {
               ...tab,
+              ...(typeof tab.displayPath === "undefined"
+                ? {}
+                : { displayPath: normalizedDisplayPath }),
               filePath: normalizeWorkspacePath(tab.filePath),
             };
           }
@@ -423,6 +429,7 @@ export function reconcileWorkspaceState(
       const normalizedChangeSetId = normalizeWorkspaceIdentifier(
         tab.changeSetId,
       );
+      const normalizedDisplayPath = normalizeWorkspacePath(tab.displayPath);
       return [
         {
           ...tabWithoutOriginProjectId,
@@ -431,6 +438,9 @@ export function reconcileWorkspaceState(
           ...(normalizedChangeSetId
             ? { changeSetId: normalizedChangeSetId }
             : {}),
+          ...(typeof tab.displayPath === "undefined"
+            ? {}
+            : { displayPath: normalizedDisplayPath }),
           filePath: normalizeWorkspacePath(tab.filePath),
         },
       ];
@@ -1186,6 +1196,7 @@ export function openDiffPreviewInWorkspaceState(
     documentEnrichmentNote?: string | null;
     documentContent?: GitDiffDocumentContent | null;
     diffMessageId: string;
+    displayPath?: string | null;
     filePath: string | null;
     gitSectionId?: GitDiffSection | null;
     language?: string | null;
