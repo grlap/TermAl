@@ -518,6 +518,12 @@ struct AppState {
     /// TERMAL_BASE_URL/TERMAL_PORT for tests and non-server modes.
     local_http_base_url: Arc<Mutex<Option<String>>>,
     persistence_path: Arc<PathBuf>,
+    /// Durable neutral coordination mailboxes use their own long-lived SQLite
+    /// connection. This deliberately bypasses the asynchronous state persist
+    /// worker: append/fetch/ack must remain available during and after worker
+    /// shutdown, and committed messages must be visible before any receiver
+    /// wake-up is attempted.
+    mailbox_store: Arc<MailboxStore>,
     orchestrator_templates_path: Arc<PathBuf>,
     /// Must not be held at the same time as `self.inner`; template file I/O happens
     /// outside the main state mutex so we never invert lock ordering.

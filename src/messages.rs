@@ -374,9 +374,9 @@ fn push_active_turn_file_changes_on_record(
         .collect::<Vec<_>>();
     let count = files.len();
     let title = if count == 1 {
-        "Agent changed 1 file".to_owned()
+        "1 file changed during turn".to_owned()
     } else {
-        format!("Agent changed {count} files")
+        format!("{count} files changed during turn")
     };
     push_message_on_record(
         record,

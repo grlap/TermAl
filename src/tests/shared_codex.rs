@@ -4052,6 +4052,17 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
         1,
         "the first prompt resumed the pre-existing thread"
     );
+    let resume_request = written
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|request| request["method"] == "thread/resume")
+        .expect("the resume request should be valid JSON-RPC");
+    assert_eq!(
+        resume_request.pointer("/params/excludeTurns"),
+        Some(&Value::Bool(true)),
+        "resuming a long thread must request metadata only so its full turn history \
+         cannot exceed the shared app-server stdout line cap"
+    );
     assert_eq!(
         written.matches("thread/start").count(),
         1,
@@ -4059,6 +4070,29 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
     );
 
     retire_pending_codex_thread_setups(&pending_requests);
+}
+
+// Pins the initialize handshake both Codex paths share. The
+// `capabilities.experimentalApi` opt-in is what authorizes
+// `thread/resume.excludeTurns`; shipping the resume param without the
+// capability bricked every Codex session on 2026-07-23 with
+// "excludeTurns requires experimentalApi capability" — including the
+// implementer session that would have fixed it. One helper, one pin, no
+// drift between the shared app-server and REPL handshakes.
+#[test]
+fn codex_initialize_params_declare_the_experimental_api_capability() {
+    let params = codex_initialize_params();
+
+    assert_eq!(
+        params.pointer("/clientInfo/name"),
+        Some(&Value::String("termal".to_owned()))
+    );
+    assert_eq!(
+        params.pointer("/capabilities/experimentalApi"),
+        Some(&Value::Bool(true)),
+        "thread/resume.excludeTurns is rejected by the app-server unless the \
+         initialize handshake opts into the experimental API"
+    );
 }
 
 // Pins the `{setup in flight, thread bound}` window — the one the decision

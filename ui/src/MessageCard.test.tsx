@@ -82,6 +82,40 @@ describe("MessageCard", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("renders the durable mailbox link for structured mailbox sources", () => {
+    const message: TextMessage = {
+      id: "message-mailbox",
+      type: "text",
+      author: "you",
+      timestamp: "10:05",
+      text: "[TermAl mailbox notification]",
+      source: {
+        kind: "mailbox",
+        sessionId: "session-sol",
+        name: "Sol",
+        mailbox: {
+          mailboxId: "mailbox-1",
+          messageId: "mailbox-message-3",
+          sequence: 3,
+          unreadCount: 2,
+        },
+      },
+    };
+
+    render(
+      <MessageCard
+        message={message}
+        mailboxViewerSessionId="session-fable"
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Open mailbox (2 unread)" }),
+    ).toBeInTheDocument();
+  });
+
   it("collapses a long peer message and provides a bottom hide control", () => {
     const finalFinding = "Final peer finding remains hidden until expansion.";
     const message: TextMessage = {

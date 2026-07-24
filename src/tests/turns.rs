@@ -57,6 +57,7 @@ async fn send_message_route_accepts_ten_mebibyte_image_body() {
         expanded_text: None,
         attachments: vec![image_attachment_request(MAX_IMAGE_ATTACHMENT_BYTES)],
         source_session_id: None,
+        source_mailbox: None,
     })
     .expect("message body should serialize");
     assert!(body.len() > 10 * 1024 * 1024);

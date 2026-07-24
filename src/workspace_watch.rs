@@ -331,9 +331,11 @@ fn workspace_file_change_event_key(change: &WorkspaceFileChangeEvent) -> String 
     )
 }
 
-#[cfg(not(test))]
+#[cfg_attr(test, allow(dead_code))]
 fn is_ignored_workspace_file_event_path(path: &FsPath) -> bool {
     const IGNORED_COMPONENTS: &[&str] = &[
+        ".beads",
+        ".collab",
         ".git",
         ".hg",
         ".svn",

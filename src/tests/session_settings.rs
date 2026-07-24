@@ -225,6 +225,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         default_workdir: "/tmp".to_owned(),
         local_http_base_url: state.local_http_base_url.clone(),
         persistence_path: state.persistence_path.clone(),
+        mailbox_store: state.mailbox_store.clone(),
         orchestrator_templates_path: state.orchestrator_templates_path.clone(),
         orchestrator_templates_lock: state.orchestrator_templates_lock.clone(),
         review_documents_lock: state.review_documents_lock.clone(),

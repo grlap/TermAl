@@ -303,6 +303,10 @@ impl TermalDelegationMcpBridge {
             "termal_followup_session" => self.tool_followup_session(arguments),
             "termal_send_to_session" => self.tool_send_to_session(arguments),
             "termal_list_sessions" => self.tool_list_sessions(arguments),
+            "termal_list_mailboxes" => self.tool_list_mailboxes(arguments),
+            "termal_read_mailbox" => self.tool_read_mailbox(arguments),
+            "termal_read_mailbox_message" => self.tool_read_mailbox_message(arguments),
+            "termal_acknowledge_mailbox" => self.tool_acknowledge_mailbox(arguments),
             "termal_wait_delegations" => self.tool_wait_delegations(arguments),
             "termal_resume_after_delegations" => self.tool_resume_after_delegations(arguments),
             other => Err(anyhow!("unknown TermAl delegation MCP tool `{other}`")),
@@ -508,33 +512,103 @@ impl TermalDelegationMcpBridge {
         // resolved; callers target such a session by its id (termal_list_sessions shows it).
         let session_ref = required_path_identifier(arguments.get("sessionId"), "sessionId")?;
         let message = required_string(arguments.get("message"), "message")?;
+        let idempotency_key = required_string(arguments.get("idempotencyKey"), "idempotencyKey")?;
+        if idempotency_key.len() > 256 {
+            bail!("idempotencyKey exceeds 256 bytes");
+        }
         // Agents routinely pass a session NAME here ("LegalCodex") rather than a TermAl id,
         // so resolve a name to its id before delivering. A value that already looks like a
         // TermAl id ("session-…") is used directly.
         let session_id = self.resolve_session_reference(&session_ref)?;
-        // Reuse the standard message path: it delivers immediately when the target session
-        // is idle and queues on the target's pending-prompt FIFO when it is mid-turn. Fire-
-        // and-forget — we do not wait for or return the target's reply. Discard the large
-        // state snapshot the route returns and confirm compactly.
-        // Attribute the delivered message to THIS bridge's own session id. The
-        // receiving backend resolves it to our current display name, so the
-        // peer sees "<sender name>" instead of "You". Using our own id (not a
-        // caller-supplied value) is what keeps the attribution unspoofable.
-        let response = self.post_json(
-            &format!("/api/sessions/{}/messages", session_id),
-            &json!({ "text": message, "sourceSessionId": self.parent_session_id }),
+        let mut body = serde_json::Map::new();
+        body.insert(
+            "targetSessionId".to_owned(),
+            Value::String(session_id.clone()),
+        );
+        body.insert("message".to_owned(), Value::String(message));
+        body.insert(
+            "idempotencyKey".to_owned(),
+            Value::String(idempotency_key),
+        );
+        insert_optional_string(&mut body, "topic", arguments.get("topic"));
+        insert_optional_string(&mut body, "stateStamp", arguments.get("stateStamp"));
+        if let Some(class) = optional_string(arguments.get("class")) {
+            body.insert("class".to_owned(), Value::String(class));
+        }
+        let mut response = self.post_json(
+            &format!(
+                "/api/sessions/{}/mailboxes/send",
+                self.parent_session_id
+            ),
+            &Value::Object(body),
         )?;
-        let disposition = response
-            .get("messageDisposition")
-            .and_then(Value::as_str)
-            .unwrap_or("accepted");
-        Ok(json!({
-            "sessionId": session_id,
-            "resolvedFrom": session_ref,
-            "delivered": true,
-            "queued": disposition == "queuedBehindActiveTurn",
-            "disposition": disposition
-        }))
+        let object = response
+            .as_object_mut()
+            .context("mailbox send response must be an object")?;
+        object.insert("sessionId".to_owned(), Value::String(session_id));
+        object.insert("resolvedFrom".to_owned(), Value::String(session_ref));
+        Ok(response)
+    }
+
+    fn tool_list_mailboxes(&self, _arguments: Value) -> Result<Value> {
+        let mailboxes = self.get_json(&format!(
+            "/api/sessions/{}/mailboxes",
+            self.parent_session_id
+        ))?;
+        Ok(json!({ "mailboxes": mailboxes }))
+    }
+
+    fn tool_read_mailbox(&self, arguments: Value) -> Result<Value> {
+        let mailbox_id =
+            required_path_identifier(arguments.get("mailboxId"), "mailboxId")?;
+        let after_sequence = arguments
+            .get("afterSequence")
+            .map(|value| required_u64(Some(value), "afterSequence"))
+            .transpose()?
+            .unwrap_or(0);
+        let limit = arguments
+            .get("limit")
+            .map(|value| required_u64(Some(value), "limit"))
+            .transpose()?
+            .unwrap_or(50);
+        let messages = self.post_json(
+            &format!(
+                "/api/sessions/{}/mailboxes/{}/read",
+                self.parent_session_id, mailbox_id
+            ),
+            &json!({ "afterSequence": after_sequence, "limit": limit }),
+        )?;
+        Ok(json!({ "mailboxId": mailbox_id, "messages": messages }))
+    }
+
+    fn tool_read_mailbox_message(&self, arguments: Value) -> Result<Value> {
+        let message_id =
+            required_path_identifier(arguments.get("messageId"), "messageId")?;
+        self.get_json(&format!(
+            "/api/sessions/{}/mailbox-messages/{}",
+            self.parent_session_id, message_id
+        ))
+    }
+
+    fn tool_acknowledge_mailbox(&self, arguments: Value) -> Result<Value> {
+        let mailbox_id =
+            required_path_identifier(arguments.get("mailboxId"), "mailboxId")?;
+        let expected_processed_through = required_u64(
+            arguments.get("expectedProcessedThrough"),
+            "expectedProcessedThrough",
+        )?;
+        let processed_through =
+            required_u64(arguments.get("processedThrough"), "processedThrough")?;
+        self.post_json(
+            &format!(
+                "/api/sessions/{}/mailboxes/{}/acknowledge",
+                self.parent_session_id, mailbox_id
+            ),
+            &json!({
+                "expectedProcessedThrough": expected_processed_through,
+                "processedThrough": processed_through
+            }),
+        )
     }
 
     /// Resolves a peer session reference (an id or a name) to a VALIDATED target id.
@@ -875,7 +949,15 @@ fn mcp_initialize_result() -> Value {
 /// Peer tools operate on ARBITRARY root sessions (message / enumerate), so they are
 /// restricted to root callers and hidden from / rejected for delegation children (tm-r0y).
 fn tool_is_peer_scoped(name: &str) -> bool {
-    matches!(name, "termal_send_to_session" | "termal_list_sessions")
+    matches!(
+        name,
+        "termal_send_to_session"
+            | "termal_list_sessions"
+            | "termal_list_mailboxes"
+            | "termal_read_mailbox"
+            | "termal_read_mailbox_message"
+            | "termal_acknowledge_mailbox"
+    )
 }
 
 fn mcp_tools_list_result() -> Value {
@@ -985,13 +1067,21 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_send_to_session",
-                "description": "Send a message to another root-level TermAl session. `sessionId` accepts either a TermAl id (session-…) OR a session NAME (e.g. \"LegalCodex\"), resolved case-insensitively across all projects. Delivered immediately if the target is idle, or queued on its pending-prompt FIFO if it is mid-turn. The result's `disposition` is `deliveredToIdleSession` or `queuedBehindActiveTurn`. FIRE-AND-FORGET — this is NOT a delegation: there is no result to await and nothing to poll. The call returns as soon as the message is delivered/queued; do NOT wait for a reply. If the target replies, it arrives LATER as a separate incoming message in your own session (sent via its own termal_send_to_session), never as a return value here. If a name is ambiguous, use termal_list_sessions and pass the exact id.",
+                "description": "Durably append a routine message to the neutral mailbox shared with another root-level TermAl session, then best-effort wake that peer with metadata only. `sessionId` accepts a TermAl id or case-insensitive session name. `idempotencyKey` is required and sender-scoped: retrying the same intent returns the original receipt with duplicate=true; reusing it for different content conflicts. The durable body is fetched through termal_read_mailbox. FIRE-AND-FORGET — there is no reply to await.",
                 "inputSchema": {
                     "type": "object",
-                    "required": ["sessionId", "message"],
+                    "required": ["sessionId", "message", "idempotencyKey"],
                     "properties": {
                         "sessionId": { "type": "string" },
-                        "message": { "type": "string" }
+                        "message": { "type": "string" },
+                        "idempotencyKey": { "type": "string", "maxLength": 256 },
+                        "topic": { "type": "string" },
+                        "stateStamp": { "type": "string" },
+                        "class": {
+                            "type": "string",
+                            "enum": ["routine"],
+                            "description": "Foundation mailboxes support routine delivery only. STOP/urgent delivery is intentionally inactive."
+                        }
                     }
                 }
             },
@@ -1001,6 +1091,51 @@ fn mcp_tools_list_result() -> Value {
                 "inputSchema": {
                     "type": "object",
                     "properties": {}
+                }
+            },
+            {
+                "name": "termal_list_mailboxes",
+                "description": "List durable neutral mailboxes for this session, including participants, latest sequence, and this session's unread count. Takes no arguments.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            },
+            {
+                "name": "termal_read_mailbox",
+                "description": "Fetch a FIFO range of durable mailbox messages. Reading never advances the processed cursor; acknowledge separately after processing.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["mailboxId"],
+                    "properties": {
+                        "mailboxId": { "type": "string" },
+                        "afterSequence": { "type": "integer", "minimum": 0 },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 200 }
+                    }
+                }
+            },
+            {
+                "name": "termal_read_mailbox_message",
+                "description": "Fetch one exact durable mailbox message by receipt messageId. The caller must be a current participant.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["messageId"],
+                    "properties": {
+                        "messageId": { "type": "string" }
+                    }
+                }
+            },
+            {
+                "name": "termal_acknowledge_mailbox",
+                "description": "Advance this session's mailbox processed cursor with a forward-only compare-and-swap. Supply the cursor value you observed and the sequence processed through.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["mailboxId", "expectedProcessedThrough", "processedThrough"],
+                    "properties": {
+                        "mailboxId": { "type": "string" },
+                        "expectedProcessedThrough": { "type": "integer", "minimum": 0 },
+                        "processedThrough": { "type": "integer", "minimum": 0 }
+                    }
                 }
             }
         ]
@@ -1048,6 +1183,12 @@ fn required_string(value: Option<&Value>, label: &str) -> Result<String> {
     optional_string(value)
         .filter(|value| !value.is_empty())
         .with_context(|| format!("{label} is required"))
+}
+
+fn required_u64(value: Option<&Value>, label: &str) -> Result<u64> {
+    value
+        .and_then(Value::as_u64)
+        .with_context(|| format!("{label} must be a non-negative integer"))
 }
 
 fn required_path_identifier(value: Option<&Value>, label: &str) -> Result<String> {
@@ -1345,6 +1486,10 @@ mod delegation_mcp_tests {
                 "termal_followup_session",
                 "termal_send_to_session",
                 "termal_list_sessions",
+                "termal_list_mailboxes",
+                "termal_read_mailbox",
+                "termal_read_mailbox_message",
+                "termal_acknowledge_mailbox",
             ]
         );
         // The delegation inventory is parent-scoped; termal_list_sessions is the one
@@ -1355,7 +1500,11 @@ mod delegation_mcp_tests {
                 .copied()
                 .filter(|name| name.contains("list"))
                 .collect::<Vec<_>>(),
-            vec!["termal_list_delegations", "termal_list_sessions"]
+            vec![
+                "termal_list_delegations",
+                "termal_list_sessions",
+                "termal_list_mailboxes"
+            ]
         );
     }
 
@@ -1682,16 +1831,21 @@ mod delegation_mcp_tests {
                         ]
                     }),
                 ),
-                ("POST", "/api/sessions/session-legal/messages") => {
+                ("POST", "/api/sessions/session-parent/mailboxes/send") => {
                     let body: Value =
                         serde_json::from_str(&request.body).expect("send body should be JSON");
-                    assert_eq!(body["text"], "hi legal");
+                    assert_eq!(body["targetSessionId"], "session-legal");
+                    assert_eq!(body["message"], "hi legal");
+                    assert_eq!(body["idempotencyKey"], "legal-1");
                     (
                         202,
                         json!({
-                            "revision": 1,
-                            "sessions": [],
-                            "messageDisposition": "deliveredToIdleSession"
+                            "mailboxId": "mailbox-1",
+                            "messageId": "mailbox-message-1",
+                            "sequence": 1,
+                            "unreadDepth": 1,
+                            "notificationDisposition": "deliveredToIdleSession",
+                            "duplicate": false
                         }),
                     )
                 }
@@ -1705,13 +1859,20 @@ mod delegation_mcp_tests {
             .expect("bridge should initialize");
 
         let response = bridge
-            .tool_send_to_session(json!({ "sessionId": "LegalCodex", "message": "hi legal" }))
+            .tool_send_to_session(json!({
+                "sessionId": "LegalCodex",
+                "message": "hi legal",
+                "idempotencyKey": "legal-1"
+            }))
             .expect("send by name should resolve + deliver");
         assert_eq!(response["sessionId"], "session-legal");
         assert_eq!(response["resolvedFrom"], "LegalCodex");
-        assert_eq!(response["delivered"], true);
-        assert_eq!(response["queued"], false);
-        assert_eq!(response["disposition"], "deliveredToIdleSession");
+        assert_eq!(response["mailboxId"], "mailbox-1");
+        assert_eq!(
+            response["notificationDisposition"],
+            "deliveredToIdleSession"
+        );
+        assert_eq!(response["duplicate"], false);
         server.join().expect("test server should join");
         let requests = requests.lock().expect("request log mutex poisoned");
         assert_eq!(requests.len(), 2);
@@ -1730,7 +1891,11 @@ mod delegation_mcp_tests {
             .expect("bridge should initialize");
 
         let err = bridge
-            .tool_send_to_session(json!({ "sessionId": "Nonexistent", "message": "hi" }))
+            .tool_send_to_session(json!({
+                "sessionId": "Nonexistent",
+                "message": "hi",
+                "idempotencyKey": "unknown-1"
+            }))
             .expect_err("unknown name should error");
         assert!(
             err.to_string().contains("termal_list_sessions"),
@@ -1744,6 +1909,7 @@ mod delegation_mcp_tests {
     // two requests: the resolve, then the delivery.
     #[test]
     fn delegation_mcp_send_to_session_posts_message_to_target() {
+        let idempotency_key = r"peer/1?#%\stable";
         let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
             match (request.method.as_str(), request.path.as_str()) {
                 ("GET", "/api/state") => (
@@ -1754,16 +1920,21 @@ mod delegation_mcp_tests {
                         ]
                     }),
                 ),
-                ("POST", "/api/sessions/session-peer/messages") => {
+                ("POST", "/api/sessions/session-parent/mailboxes/send") => {
                     let body: Value =
                         serde_json::from_str(&request.body).expect("send body should be JSON");
-                    assert_eq!(body["text"], "hello peer");
+                    assert_eq!(body["targetSessionId"], "session-peer");
+                    assert_eq!(body["message"], "hello peer");
+                    assert_eq!(body["idempotencyKey"], idempotency_key);
                     (
                         202,
                         json!({
-                            "revision": 1,
-                            "sessions": [],
-                            "messageDisposition": "queuedBehindActiveTurn"
+                            "mailboxId": "mailbox-1",
+                            "messageId": "mailbox-message-1",
+                            "sequence": 1,
+                            "unreadDepth": 1,
+                            "notificationDisposition": "queuedBehindActiveTurn",
+                            "duplicate": false
                         }),
                     )
                 }
@@ -1779,14 +1950,17 @@ mod delegation_mcp_tests {
         let response = bridge
             .tool_send_to_session(json!({
                 "sessionId": "session-peer",
-                "message": "hello peer"
+                "message": "hello peer",
+                "idempotencyKey": idempotency_key
             }))
             .expect("send-to-session should succeed");
 
         assert_eq!(response["sessionId"], "session-peer");
-        assert_eq!(response["delivered"], true);
-        assert_eq!(response["queued"], true);
-        assert_eq!(response["disposition"], "queuedBehindActiveTurn");
+        assert_eq!(response["mailboxId"], "mailbox-1");
+        assert_eq!(
+            response["notificationDisposition"],
+            "queuedBehindActiveTurn"
+        );
         server.join().expect("test server should join");
         let requests = requests.lock().expect("request log mutex poisoned");
         assert_eq!(requests.len(), 2);
@@ -1818,7 +1992,11 @@ mod delegation_mcp_tests {
             "session-x\\..\\victim",
         ] {
             let err = bridge
-                .tool_send_to_session(json!({ "sessionId": reference, "message": "hi" }))
+                .tool_send_to_session(json!({
+                    "sessionId": reference,
+                    "message": "hi",
+                    "idempotencyKey": "traversal-1"
+                }))
                 .expect_err("a path-traversal reference must be rejected");
             assert!(
                 err.to_string().contains("sessionId must not contain"),
@@ -1867,7 +2045,11 @@ mod delegation_mcp_tests {
             .expect("bridge should initialize");
 
         let child_err = bridge
-            .tool_send_to_session(json!({ "sessionId": "session-child", "message": "hi" }))
+            .tool_send_to_session(json!({
+                "sessionId": "session-child",
+                "message": "hi",
+                "idempotencyKey": "child-1"
+            }))
             .expect_err("a delegation child must not be a peer target");
         assert!(
             child_err.to_string().contains("no root session"),
@@ -1875,7 +2057,11 @@ mod delegation_mcp_tests {
         );
 
         let unlinked_child_err = bridge
-            .tool_send_to_session(json!({ "sessionId": "session-child-unlinked", "message": "hi" }))
+            .tool_send_to_session(json!({
+                "sessionId": "session-child-unlinked",
+                "message": "hi",
+                "idempotencyKey": "unlinked-child-1"
+            }))
             .expect_err("a child named only by the durable delegation row must not be a peer target");
         assert!(
             unlinked_child_err.to_string().contains("no root session"),
@@ -1883,7 +2069,11 @@ mod delegation_mcp_tests {
         );
 
         let self_err = bridge
-            .tool_send_to_session(json!({ "sessionId": "session-parent", "message": "hi" }))
+            .tool_send_to_session(json!({
+                "sessionId": "session-parent",
+                "message": "hi",
+                "idempotencyKey": "self-1"
+            }))
             .expect_err("a session must not peer-message itself");
         assert!(
             self_err.to_string().contains("is this session"),
@@ -1891,6 +2081,82 @@ mod delegation_mcp_tests {
         );
 
         server.join().expect("test server should join");
+    }
+
+    #[test]
+    fn delegation_mcp_mailbox_tools_list_read_exact_and_acknowledge() {
+        let (base_url, requests, server) = spawn_test_mcp_http_server(4, move |request| {
+            match (request.method.as_str(), request.path.as_str()) {
+                ("GET", "/api/sessions/session-parent/mailboxes") => (
+                    200,
+                    json!([{
+                        "id": "mailbox-1",
+                        "participants": [],
+                        "latestSequence": 3,
+                        "unreadCount": 2
+                    }]),
+                ),
+                ("POST", "/api/sessions/session-parent/mailboxes/mailbox-1/read") => {
+                    let body: Value =
+                        serde_json::from_str(&request.body).expect("read body should be JSON");
+                    assert_eq!(body["afterSequence"], 1);
+                    assert_eq!(body["limit"], 25);
+                    (200, json!([{ "id": "mailbox-message-2", "sequence": 2 }]))
+                }
+                ("GET", "/api/sessions/session-parent/mailbox-messages/mailbox-message-2") => {
+                    (200, json!({ "id": "mailbox-message-2", "sequence": 2 }))
+                }
+                (
+                    "POST",
+                    "/api/sessions/session-parent/mailboxes/mailbox-1/acknowledge",
+                ) => {
+                    let body: Value =
+                        serde_json::from_str(&request.body).expect("ack body should be JSON");
+                    assert_eq!(body["expectedProcessedThrough"], 1);
+                    assert_eq!(body["processedThrough"], 3);
+                    (200, json!({ "id": "mailbox-1", "unreadCount": 0 }))
+                }
+                _ => (
+                    404,
+                    json!({ "error": format!("unexpected {} {}", request.method, request.path) }),
+                ),
+            }
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+
+        let listed = bridge
+            .tool_list_mailboxes(json!({}))
+            .expect("mailboxes should list");
+        assert_eq!(listed["mailboxes"][0]["id"], "mailbox-1");
+        let range = bridge
+            .tool_read_mailbox(json!({
+                "mailboxId": "mailbox-1",
+                "afterSequence": 1,
+                "limit": 25
+            }))
+            .expect("mailbox range should read");
+        assert_eq!(range["messages"][0]["sequence"], 2);
+        let exact = bridge
+            .tool_read_mailbox_message(json!({
+                "messageId": "mailbox-message-2"
+            }))
+            .expect("exact mailbox message should read");
+        assert_eq!(exact["sequence"], 2);
+        let ack = bridge
+            .tool_acknowledge_mailbox(json!({
+                "mailboxId": "mailbox-1",
+                "expectedProcessedThrough": 1,
+                "processedThrough": 3
+            }))
+            .expect("mailbox acknowledgement should succeed");
+        assert_eq!(ack["unreadCount"], 0);
+
+        server.join().expect("test server should join");
+        assert_eq!(
+            requests.lock().expect("request log mutex poisoned").len(),
+            4
+        );
     }
 
     #[test]

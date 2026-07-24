@@ -915,11 +915,13 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
     let state_root = std::env::temp_dir().join(format!("termal-test-state-{}", Uuid::new_v4()));
     fs::create_dir_all(&state_root).expect("state root should exist");
     let persistence_path = state_root.join("termal.sqlite");
+    let mailbox_store = Arc::new(MailboxStore::disabled_for_tests());
     let state = AppState {
         server_instance_id: Uuid::new_v4().to_string(),
         default_workdir: "/tmp".to_owned(),
         local_http_base_url: Arc::new(Mutex::new(None)),
         persistence_path: Arc::new(persistence_path),
+        mailbox_store,
         orchestrator_templates_path: Arc::new(
             std::env::temp_dir().join(format!("termal-orchestrators-test-{}.json", Uuid::new_v4())),
         ),
@@ -2410,14 +2412,59 @@ fn commit_session_created_locked_signals_background_persist_instead_of_blocking(
     // the test, which is the desired signal).
     assert!(matches!(received, PersistRequest::Delta));
 
-    // Negative assertion: no synchronous persist happened. Under
-    // the `#[cfg(test)]` build, the fallback path writes via
-    // `persist_state_from_persisted` to the JSON `persistence_path`.
-    // A synchronous fallback would create that file; the async
-    // path never touches it.
-    assert!(
-        !persistence_path.exists(),
-        "persistence path should not exist — fallback persist ran unexpectedly"
+    // Negative assertion: no synchronous state persist happened. Production
+    // AppState construction opens the durable mailbox store and creates the
+    // shared SQLite schema, while this lightweight test fixture deliberately
+    // keeps that store disabled. Therefore an untouched database may either
+    // have empty state tables or no state tables at all. A synchronous fallback
+    // would necessarily create them and write both metadata and the session.
+    let connection = open_sqlite_state_connection(&persistence_path)
+        .expect("test SQLite state should remain readable");
+    let app_state_table_exists = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'app_state'
+            )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .expect("app_state table state should read");
+    let app_state_rows = if app_state_table_exists {
+        connection
+            .query_row("SELECT COUNT(*) FROM app_state", [], |row| {
+                row.get::<_, u64>(0)
+            })
+            .expect("app_state row count should read")
+    } else {
+        0
+    };
+    let sessions_table_exists = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'sessions'
+            )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .expect("sessions table state should read");
+    let session_rows = if sessions_table_exists {
+        connection
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| {
+                row.get::<_, u64>(0)
+            })
+            .expect("session row count should read")
+    } else {
+        0
+    };
+    assert_eq!(
+        app_state_rows, 0,
+        "synchronous fallback unexpectedly persisted app metadata"
+    );
+    assert_eq!(
+        session_rows, 0,
+        "synchronous fallback unexpectedly persisted the created session"
     );
 
     // Sanity: the revision did advance (the pre-persist increment
@@ -2433,10 +2480,9 @@ fn commit_session_created_locked_signals_background_persist_instead_of_blocking(
         "record id should follow `session-<n>` shape, got: {record_id}"
     );
 
-    // Defensive cleanup: the negative assertion above already
-    // proves the fallback persist did not run, but in a regression
-    // where it did, clean up so the rogue file doesn't linger in
-    // the shared temp dir. `remove_file` on a non-existent path
-    // returns an error we ignore.
-    let _ = fs::remove_file(&persistence_path);
+    // Defensive cleanup for the per-test SQLite directory and sidecars.
+    drop(connection);
+    if let Some(state_root) = persistence_path.parent() {
+        let _ = fs::remove_dir_all(state_root);
+    }
 }

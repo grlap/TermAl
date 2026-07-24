@@ -2183,6 +2183,7 @@ fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
             expanded_text: None,
             attachments: Vec::new(),
             source_session_id: None,
+            source_mailbox: None,
         },
     ) {
         Ok(_) => panic!("terminal delegated child dispatch should be rejected"),
@@ -2274,6 +2275,7 @@ fn peer_message_dispatch_attributes_sender_and_instructs_cross_repo_reply() {
                 expanded_text: None,
                 attachments: Vec::new(),
                 source_session_id: Some(sender_id.clone()),
+                source_mailbox: None,
             },
         )
         .expect("peer message should dispatch to the idle target");
@@ -2386,6 +2388,7 @@ fn peer_message_queued_while_busy_preserves_source_and_ignores_unknown_sender() 
                 expanded_text: None,
                 attachments: Vec::new(),
                 source_session_id: Some(sender_id.clone()),
+                source_mailbox: None,
             },
         )
         .expect("busy target should queue the known-sender peer message");
@@ -2397,6 +2400,7 @@ fn peer_message_queued_while_busy_preserves_source_and_ignores_unknown_sender() 
                 expanded_text: None,
                 attachments: Vec::new(),
                 source_session_id: Some("session-does-not-exist".to_owned()),
+                source_mailbox: None,
             },
         )
         .expect("busy target should queue the unknown-sender peer message");

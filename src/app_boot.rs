@@ -23,8 +23,9 @@
 // 7. Restores remote SSE event bridges (`remote_sync.rs`).
 // 8. (Non-test only) Spawns the workspace file watcher and
 //    orchestrator transition resumer.
-// 9. Calls `dispatch_orphaned_queued_prompts` so any queued prompts
-//    that were stranded at shutdown fire their next turn immediately.
+// 9. Performs the one-time broad recovery of durable unread mailbox wake-ups,
+//    then calls `dispatch_orphaned_queued_prompts` so mailbox notifications and
+//    other queued prompts stranded at shutdown fire their next turn immediately.
 //
 // Returns the `AppState` owning all of the above. The caller (in
 // `main.rs`) then hands it to Axum + the HTTP server.
@@ -174,6 +175,7 @@ impl AppState {
         let inner_for_persist = Arc::clone(&inner_arc);
         let persist_path_for_persist = Arc::new(persistence_path.clone());
         let persist_path_for_state = Arc::clone(&persist_path_for_persist);
+        let mailbox_store = Arc::new(MailboxStore::open(&persistence_path)?);
 
         // Background persist thread: drains `PersistRequest::Delta`
         // wake signals and writes the accumulated diff to SQLite.
@@ -328,6 +330,7 @@ impl AppState {
             default_workdir,
             local_http_base_url: Arc::new(Mutex::new(None)),
             persistence_path: persist_path_for_state,
+            mailbox_store,
             orchestrator_templates_path: Arc::new(orchestrator_templates_path),
             orchestrator_templates_lock: Arc::new(Mutex::new(())),
             review_documents_lock: Arc::new(Mutex::new(())),
@@ -391,7 +394,7 @@ impl AppState {
     /// Boot work that RESUMES or SPAWNS session runtimes. MUST run only after the HTTP
     /// listener is bound and `set_local_http_base_url` has published the real address, so the
     /// TermAl MCP bridges these runtimes spawn are configured with the correct base URL and
-    /// can reach a listening backend (tm-2fc). All four steps self-persist / self-commit, so
+    /// can reach a listening backend (tm-2fc). All five steps self-persist / self-commit, so
     /// deferring them past the boot persist above is safe.
     fn run_post_listen_boot(&self) {
         self.seed_hidden_claude_spares();
@@ -401,6 +404,7 @@ impl AppState {
         if let Err(err) = self.resume_pending_orchestrator_transitions() {
             eprintln!("orchestrator> failed resuming pending transitions: {err:#}");
         }
+        self.reconcile_unread_mailbox_wakeups_after_boot();
         self.dispatch_orphaned_queued_prompts();
     }
 }

@@ -183,6 +183,12 @@ impl AppState {
             )
         };
 
+        if let Err(err) = self.mailbox_store.mark_session_left(session_id) {
+            eprintln!(
+                "mailbox cleanup> failed to mark deleted session `{session_id}` as left: {err:#}"
+            );
+        }
+
         if let Err(err) = self.prune_telegram_state_for_deleted_session(session_id) {
             eprintln!(
                 "telegram settings> failed to prune deleted session `{session_id}`: {}",

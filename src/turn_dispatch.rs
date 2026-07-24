@@ -209,10 +209,9 @@ impl AppState {
             .filter(|value| !value.is_empty() && *value != prompt)
             .map(str::to_owned);
         let runtime_prompt = expanded_prompt.clone().unwrap_or_else(|| prompt.clone());
-        let runtime_prompt = if source
-            .as_ref()
-            .is_some_and(MessageSource::is_peer_batch)
-        {
+        let runtime_prompt = if source.as_ref().is_some_and(|source| {
+            source.is_peer_batch() || source.is_mailbox()
+        }) {
             runtime_prompt
         } else {
             source
@@ -220,6 +219,14 @@ impl AppState {
                 .map(|source| peer_message_runtime_prompt(&runtime_prompt, source))
                 .unwrap_or(runtime_prompt)
         };
+        let mailbox_notification = source
+            .as_ref()
+            .and_then(|source| source.mailbox.as_ref())
+            .map(|mailbox| MailboxNotificationDelivery {
+                mailbox_id: mailbox.mailbox_id.clone(),
+                session_id: record.session.id.clone(),
+                through_sequence: mailbox.sequence,
+            });
 
         let dispatch = match record.session.agent {
             Agent::Claude => {
@@ -280,6 +287,7 @@ impl AppState {
                         attachments: attachments.clone(),
                         text: runtime_prompt.clone(),
                     },
+                    mailbox_notification: mailbox_notification.clone(),
                     sender: handle.input_tx,
                     session_id: record.session.id.clone(),
                 }
@@ -344,6 +352,7 @@ impl AppState {
                         resume_thread_id: record.external_session_id.clone(),
                         sandbox_mode: record.codex_sandbox_mode,
                     },
+                    mailbox_notification: mailbox_notification.clone(),
                     sender: handle.input_tx,
                     session_id: record.session.id.clone(),
                 }
@@ -419,6 +428,7 @@ impl AppState {
                         prompt: runtime_prompt.to_owned(),
                         resume_session_id: record.external_session_id.clone(),
                     },
+                    mailbox_notification,
                     sender: handle.input_tx,
                     session_id: record.session.id.clone(),
                 }
@@ -533,6 +543,14 @@ impl AppState {
         session_id: &str,
         allow_blocked_dispatch: bool,
     ) -> Result<Option<TurnDispatch>> {
+        if let Err(err) =
+            self.reconcile_never_woken_mailbox_notifications_for_session(session_id)
+        {
+            eprintln!(
+                "mailbox> failed reconciling notifications before queue drain for `{session_id}`: {err:#}"
+            );
+        }
+        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
@@ -571,6 +589,16 @@ impl AppState {
             self.proxy_remote_turn_dispatch(session_id, request)?;
             return Ok(DispatchTurnResult::Queued);
         }
+        if request.source_mailbox.is_none() {
+            if let Err(err) =
+                self.reconcile_never_woken_mailbox_notifications_for_session(session_id)
+            {
+                eprintln!(
+                    "mailbox> failed reconciling notifications before turn start for `{session_id}`: {err:#}"
+                );
+            }
+        }
+        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_visible_session_index(session_id)
@@ -595,14 +623,15 @@ impl AppState {
         // name. An unknown id (e.g. a sender deleted before a queued prompt
         // drains) drops to `None`, so the message simply stays "You".
         let source = request.source_session_id.as_deref().and_then(|source_id| {
-            inner
-                .find_session_index(source_id)
-                .map(|source_index| {
-                    MessageSource::peer(
-                        source_id.to_owned(),
-                        inner.sessions[source_index].session.name.clone(),
-                    )
-                })
+            inner.find_session_index(source_id).map(|source_index| {
+                let source_name = inner.sessions[source_index].session.name.clone();
+                match request.source_mailbox.clone() {
+                    Some(mailbox) => {
+                        MessageSource::mailbox(source_id.to_owned(), source_name, mailbox)
+                    }
+                    None => MessageSource::peer(source_id.to_owned(), source_name),
+                }
+            })
         });
         if record_has_archived_codex_thread(&inner.sessions[index]) {
             return Err(ApiError::conflict(
@@ -637,18 +666,116 @@ impl AppState {
             .queued_prompts
             .iter()
             .any(|queued| queued.source == QueuedPromptSource::User);
+        let orchestrator_auto_dispatch_blocked =
+            inner.sessions[index].orchestrator_auto_dispatch_blocked;
+        if session_is_busy || has_queued_prompts {
+            if let Some(mailbox_id) = source
+                .as_ref()
+                .and_then(|source| source.mailbox.as_ref())
+                .map(|mailbox| mailbox.mailbox_id.clone())
+            {
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                if let Some(existing) = record.queued_prompts.iter_mut().find(|queued| {
+                    queued
+                        .pending_prompt
+                        .source
+                        .as_ref()
+                        .and_then(|source| source.mailbox.as_ref())
+                        .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id)
+                }) {
+                    // The durable mailbox is the queue. Whether the receiver
+                    // is busy or idle with queued work, retain one compact
+                    // wake-up prompt per mailbox and replace its metadata with
+                    // the newest receipt/unread count. Message bodies remain
+                    // only in SQLite.
+                    existing.pending_prompt.timestamp = stamp_now();
+                    existing.pending_prompt.text = prompt;
+                    existing.pending_prompt.expanded_text = expanded_prompt;
+                    existing.pending_prompt.source = source;
+                    existing.source = QueuedPromptSource::Mailbox;
+                    sync_pending_prompts(record);
+                    self.commit_locked(&mut inner).map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to persist mailbox notification: {err:#}"
+                        ))
+                    })?;
+                    if session_is_busy
+                        || (orchestrator_auto_dispatch_blocked
+                            && !blocked_queue_contains_user_prompt)
+                    {
+                        return Ok(DispatchTurnResult::Queued);
+                    }
+                    if blocked_queue_contains_user_prompt {
+                        prioritize_user_queued_prompts(
+                            inner
+                                .session_mut_by_index(index)
+                                .expect("session index should be valid"),
+                        );
+                    }
+                    let started = self
+                        .start_next_queued_turn_locked(&mut inner, index, true)
+                        .map_err(|err| {
+                            ApiError::internal(format!(
+                                "failed to dispatch coalesced mailbox queue: {err:#}"
+                            ))
+                        })?
+                        .ok_or_else(|| {
+                            ApiError::internal(
+                                "coalesced mailbox prompt disappeared before dispatch",
+                            )
+                        })?;
+                    let revision =
+                        self.commit_persisted_delta_locked(&mut inner)
+                            .map_err(|err| {
+                                ApiError::internal(format!(
+                                    "failed to persist coalesced mailbox dispatch: {err:#}"
+                                ))
+                            })?;
+                    let started_current_mailbox = matches!(
+                        &started.message_delta.message,
+                        Message::Text {
+                            source: Some(source),
+                            ..
+                        } if source
+                            .mailbox
+                            .as_ref()
+                            .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id)
+                    );
+                    drop(inner);
+                    self.publish_started_turn_message_delta(
+                        revision,
+                        started.message_delta,
+                    );
+                    return Ok(if started_current_mailbox {
+                        DispatchTurnResult::Dispatched(started.dispatch)
+                    } else {
+                        DispatchTurnResult::DispatchedAfterQueue(started.dispatch)
+                    });
+                }
+            }
+        }
+        let queued_prompt_source = if source
+            .as_ref()
+            .is_some_and(|message_source| message_source.is_mailbox())
+        {
+            QueuedPromptSource::Mailbox
+        } else {
+            QueuedPromptSource::User
+        };
         let recover_blocked_queue_with_existing_user_prompt = !session_is_busy
             && has_queued_prompts
-            && inner.sessions[index].orchestrator_auto_dispatch_blocked
+            && orchestrator_auto_dispatch_blocked
             && blocked_queue_contains_user_prompt;
         let prioritize_manual_dispatch_over_blocked_queue = !session_is_busy
             && has_queued_prompts
-            && inner.sessions[index].orchestrator_auto_dispatch_blocked
+            && orchestrator_auto_dispatch_blocked
             && !blocked_queue_contains_user_prompt;
 
         if recover_blocked_queue_with_existing_user_prompt {
             let message_id = inner.next_message_id();
-            queue_prompt_on_record(
+            queue_prompt_on_record_with_source(
                 inner
             .session_mut_by_index(index)
             .expect("session index should be valid"),
@@ -664,6 +791,7 @@ impl AppState {
                     source: source.clone(),
                 },
                 attachments,
+                queued_prompt_source,
             );
             prioritize_user_queued_prompts(inner
             .session_mut_by_index(index)
@@ -707,7 +835,7 @@ impl AppState {
 
         if session_is_busy || has_queued_prompts {
             let message_id = inner.next_message_id();
-            queue_prompt_on_record(
+            queue_prompt_on_record_with_source(
                 inner
             .session_mut_by_index(index)
             .expect("session index should be valid"),
@@ -723,6 +851,7 @@ impl AppState {
                     source: source.clone(),
                 },
                 attachments,
+                queued_prompt_source,
             );
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))

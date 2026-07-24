@@ -485,6 +485,14 @@ function reconcileTextMessage(previous: TextMessage, next: TextMessage): TextMes
     (previous.source?.sessionId ?? null) === (next.source?.sessionId ?? null) &&
     (previous.source?.name ?? null) === (next.source?.name ?? null) &&
     (previous.source?.kind ?? "peer") === (next.source?.kind ?? "peer") &&
+    (previous.source?.mailbox?.mailboxId ?? null) ===
+      (next.source?.mailbox?.mailboxId ?? null) &&
+    (previous.source?.mailbox?.messageId ?? null) ===
+      (next.source?.mailbox?.messageId ?? null) &&
+    (previous.source?.mailbox?.sequence ?? null) ===
+      (next.source?.mailbox?.sequence ?? null) &&
+    (previous.source?.mailbox?.unreadCount ?? null) ===
+      (next.source?.mailbox?.unreadCount ?? null) &&
     attachments === previous.attachments
   ) {
     return previous;

@@ -28,6 +28,12 @@ Optional sidecar:
 
 **Current status:** The current implementation includes server-backed workspace layouts, project-scoped SSH remotes, orchestrator templates and runtime instances, session-scoped model controls, workspace terminal tabs, file-change awareness, and the Telegram relay.
 
+**Agent mailbox status:** Root sessions coordinate through
+[durable neutral mailboxes](features/agent-mailboxes.md). Mailbox bodies commit
+to SQLite before a metadata-only receiver wake-up, are fetched explicitly, and
+use forward-only compare-and-swap acknowledgements. A mailbox is a separate
+domain object, not an agent session or runtime.
+
 **Remote model:** The browser connects to a single local TermAl server. That
 server stores preferences, manages remote connections, and routes project work
 to local or remote TermAl servers over SSH-managed tunnels.
@@ -58,7 +64,7 @@ rejected on invocation (failing closed if the caller cannot be resolved), so a
 child cannot reach root sessions *through the bridge* (tm-r0y). This is a
 tool-layer guardrail, not process isolation: the loopback HTTP API is
 unauthenticated under the single-user, local-only trust model (`GET /api/state`,
-`POST /api/sessions/{id}/messages`), so a child able to issue raw HTTP could
+the mailbox endpoints), so a child able to issue raw HTTP could
 bypass the bridge — caller-scoped REST auth is deferred with capability tokens.
 Claude receives it through `--mcp-config`, ACP/Cursor/Gemini
 receive it through `mcpServers` on `session/new` and `session/load`, and Codex
@@ -238,7 +244,12 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/markers` | Create a conversation marker and publish `ConversationMarkerCreated`. Returns `201` with `ConversationMarkerResponse`; malformed JSON uses the standard `ApiError` envelope. |
 | PATCH | `/api/sessions/{id}/markers/{marker_id}` | Patch marker kind/name/body/color/message anchors. Nullable `body` and `endMessageId` clear those fields. Publishes `ConversationMarkerUpdated`. |
 | DELETE | `/api/sessions/{id}/markers/{marker_id}` | Delete one conversation marker and publish `ConversationMarkerDeleted`. |
-| POST | `/api/sessions/{id}/messages` | Send a message to a session; queues on the target's pending-prompt FIFO if it is mid-turn. The `202` state response adds `messageDisposition: "deliveredToIdleSession" | "queuedBehindActiveTurn"`, distinguishing a turn started immediately from a message accepted behind an active turn. Optional `sourceSessionId` (set by `termal_send_to_session`) marks the message as delivered from a peer session — the backend resolves it to the sender's display name for the transcript label, so the name is backend-authoritative rather than taken from the message body. |
+| POST | `/api/sessions/{id}/messages` | Send an ordinary prompt to a session; queues on the target's pending-prompt FIFO if it is mid-turn. Peer coordination uses the durable mailbox routes below rather than injecting bodies through this route. |
+| GET | `/api/sessions/{id}/mailboxes` | List neutral mailbox summaries for a participant, including peer display names, latest sequence, and unread count. Unknown session ids return `404`. |
+| POST | `/api/sessions/{id}/mailboxes/send` | Atomically append a routine message from `{id}` to a target root session. Requires a sender-scoped idempotency key; returns the durable receipt before/beside a best-effort metadata wake-up. |
+| POST | `/api/sessions/{id}/mailboxes/{mailbox_id}/read` | Read a FIFO mailbox range without advancing the participant cursor. This intentionally uses POST because the bounded range request is a JSON body; it remains read-only. |
+| POST | `/api/sessions/{id}/mailboxes/{mailbox_id}/acknowledge` | Advance `{id}`'s processed cursor with a forward-only compare-and-swap. |
+| GET | `/api/sessions/{id}/mailbox-messages/{message_id}` | Read one exact durable mailbox message after participant authorization. |
 | POST | `/api/sessions/{id}/delegations` | Create a Phase 1 local child delegation session with `readOnly` or `isolatedWorktree` write policy. Returns `201` with `DelegationResponse`; unsupported worker/`sharedWorktree`/remote-backed variants return `501`, active-limit conflicts return `409`, handler-level prompt/scope validation returns `400`, and JSON schema/deserialization failures return `422`. |
 | GET | `/api/sessions/{id}/delegations` | List compact summaries for delegations owned by this parent -> `DelegationListResponse`. This recovery endpoint returns exact delegation/child-session ids, title, agent, and fresh lifecycle status without prompts or transcripts; same-title delegations remain distinct. Unknown parent ids return `404`. Backs `termal_list_delegations`. |
 | POST | `/api/sessions/{id}/delegation-waits` | Create a parent-scoped backend resume wait for one or more delegations. Returns `201` with `DelegationWaitResponse`; terminal targets may consume the wait immediately and queue/resume the parent in the same response cycle. |

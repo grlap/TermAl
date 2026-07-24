@@ -12,6 +12,28 @@
 // Extracted from codex.rs so the event-handler block can stay separate
 // from the transport layer.
 
+/// The `initialize` params every Codex app-server handshake sends — shared by
+/// the persistent app-server writer (`src/codex.rs`) and the REPL path
+/// (`src/turns.rs`) so the two cannot drift.
+///
+/// `capabilities.experimentalApi` is load-bearing: `thread/resume.excludeTurns`
+/// (which keeps huge rollout histories out of the resume response and under
+/// the 32MiB stdout line cap) is gated behind the app-server's
+/// experimental-API opt-in. Without the flag the server rejects every resume
+/// with "excludeTurns requires experimentalApi capability" — which bricked
+/// all Codex sessions on 2026-07-23 when excludeTurns shipped without it.
+fn codex_initialize_params() -> Value {
+    json!({
+        "clientInfo": {
+            "name": "termal",
+            "version": env!("CARGO_PKG_VERSION"),
+        },
+        "capabilities": {
+            "experimentalApi": true,
+        }
+    })
+}
+
 /// Handles send Codex JSON RPC request.
 fn send_codex_json_rpc_request(
     writer: &mut impl Write,

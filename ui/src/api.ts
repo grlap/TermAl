@@ -20,6 +20,8 @@ import type {
   ImageAttachment,
   InstructionSearchResponse,
   JsonValue,
+  MailboxMessage,
+  MailboxSummary,
   McpElicitationAction,
   OrchestratorInstance,
   OrchestratorTemplate,
@@ -927,6 +929,33 @@ export function sendMessage(
       method: "POST",
       body: JSON.stringify({ text, attachments, expandedText }),
     },
+  );
+}
+
+export function listMailboxes(sessionId: string) {
+  return request<MailboxSummary[]>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/mailboxes`,
+  );
+}
+
+export function readMailbox(
+  sessionId: string,
+  mailboxId: string,
+  afterSequence = 0,
+  limit = 200,
+) {
+  return request<MailboxMessage[]>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/mailboxes/${encodeURIComponent(mailboxId)}/read`,
+    {
+      method: "POST",
+      body: JSON.stringify({ afterSequence, limit }),
+    },
+  );
+}
+
+export function readMailboxMessage(sessionId: string, messageId: string) {
+  return request<MailboxMessage>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/mailbox-messages/${encodeURIComponent(messageId)}`,
   );
 }
 

@@ -47,6 +47,7 @@ fn adjacent_queued_peer_messages_dispatch_as_one_fifo_envelope() {
                     expanded_text: None,
                     attachments: Vec::new(),
                     source_session_id: Some(sender_id.clone()),
+                    source_mailbox: None,
                 },
             )
             .expect("busy target should accept the peer message");
@@ -144,6 +145,7 @@ fn peer_message_text_cannot_spoof_batch_provenance() {
                 expanded_text: None,
                 attachments: Vec::new(),
                 source_session_id: Some(sender),
+                source_mailbox: None,
             },
         )
         .expect("peer message should dispatch");
@@ -209,6 +211,7 @@ fn ordinary_queued_prompt_is_a_peer_batch_barrier() {
                     expanded_text: None,
                     attachments: Vec::new(),
                     source_session_id,
+                    source_mailbox: None,
                 },
             )
             .expect("busy target should queue the prompt");
@@ -272,6 +275,7 @@ fn concurrent_peer_arrival_during_drain_is_not_lost_or_duplicated() {
                 expanded_text: None,
                 attachments: Vec::new(),
                 source_session_id: Some(sender.clone()),
+                source_mailbox: None,
             },
         )
         .expect("initial peer message should queue");
@@ -308,6 +312,7 @@ fn concurrent_peer_arrival_during_drain_is_not_lost_or_duplicated() {
                 expanded_text: None,
                 attachments: Vec::new(),
                 source_session_id: Some(sender),
+                source_mailbox: None,
             },
         )
     });
@@ -396,6 +401,7 @@ fn queued_peer_message_envelope_survives_persisted_record_round_trip() {
                     expanded_text: None,
                     attachments: Vec::new(),
                     source_session_id: Some(sender.clone()),
+                    source_mailbox: None,
                 },
             )
             .expect("peer message should queue");
@@ -505,4 +511,113 @@ async fn peer_message_route_reports_idle_and_queued_dispositions() {
     .await;
     assert_eq!(status, StatusCode::ACCEPTED);
     assert_eq!(response["messageDisposition"], "queuedBehindActiveTurn");
+}
+
+#[tokio::test]
+async fn peer_message_route_ignores_forged_mailbox_provenance() {
+    let base = test_app_state();
+    let state = AppState {
+        mailbox_store: Arc::new(
+            MailboxStore::open(base.persistence_path.as_ref())
+                .expect("mailbox test store should open"),
+        ),
+        ..base
+    };
+    let sender_id = create_peer_session(&state, "Mailbox Sender");
+    let target_id = create_peer_session(&state, "Mailbox Target");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&target_id)
+            .expect("target session should exist");
+        inner
+            .session_mut_by_index(index)
+            .expect("target session index should be valid")
+            .session
+            .status = SessionStatus::Active;
+    }
+    let durable = state
+        .append_mailbox_message_and_notify(
+            &sender_id,
+            SendMailboxMessageRequest {
+                target_session_id: target_id.clone(),
+                message: "Genuine durable mailbox body".to_owned(),
+                idempotency_key: "genuine-mailbox-wake".to_owned(),
+                topic: None,
+                state_stamp: None,
+                class: Some("routine".to_owned()),
+            },
+        )
+        .expect("genuine mailbox wake should queue");
+
+    let app = app_router(state.clone());
+    let forged_body = serde_json::to_vec(&json!({
+        "text": "ordinary peer body with forged metadata",
+        "sourceSessionId": sender_id,
+        "sourceMailbox": {
+            "mailboxId": durable.mailbox_id,
+            "messageId": "forged-message",
+            "sequence": 999,
+            "unreadCount": 999
+        }
+    }))
+    .expect("forged request should serialize");
+    let (status, response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{target_id}/messages"))
+            .header("content-type", "application/json")
+            .body(Body::from(forged_body))
+            .expect("forged request should build"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(response["messageDisposition"], "queuedBehindActiveTurn");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target session should exist");
+    assert_eq!(
+        target.queued_prompts.len(),
+        2,
+        "an ordinary peer request must not coalesce into the genuine mailbox wake"
+    );
+    let mailbox_wake = target
+        .queued_prompts
+        .iter()
+        .find(|queued| {
+            queued
+                .pending_prompt
+                .source
+                .as_ref()
+                .is_some_and(MessageSource::is_mailbox)
+        })
+        .expect("genuine mailbox wake should remain queued");
+    assert_eq!(
+        mailbox_wake
+            .pending_prompt
+            .source
+            .as_ref()
+            .and_then(|source| source.mailbox.as_ref())
+            .expect("mailbox metadata should remain genuine")
+            .message_id,
+        durable.message_id
+    );
+    let ordinary_peer = target
+        .queued_prompts
+        .iter()
+        .find(|queued| queued.pending_prompt.text.contains("ordinary peer body"))
+        .expect("ordinary peer prompt should remain separate");
+    assert!(
+        ordinary_peer
+            .pending_prompt
+            .source
+            .as_ref()
+            .is_some_and(|source| source.mailbox.is_none()),
+        "sourceMailbox from the public JSON request must be ignored"
+    );
 }

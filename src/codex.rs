@@ -326,12 +326,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                 &mut stdin,
                 &writer_pending_requests,
                 "initialize",
-                json!({
-                    "clientInfo": {
-                        "name": "termal",
-                        "version": env!("CARGO_PKG_VERSION"),
-                    }
-                }),
+                codex_initialize_params(),
                 Duration::from_secs(180),
             )
             .map_err(anyhow::Error::new)
@@ -1114,6 +1109,12 @@ fn handle_shared_codex_prompt_command(
             "thread/resume",
             json!({
                 "threadId": thread_id,
+                // TermAl only consumes `/thread/id` from this response. Asking
+                // Codex to reconstruct the full turn history can produce one
+                // JSON-RPC line larger than our stdout safety cap for long,
+                // compaction-heavy rollouts, which discards the response and
+                // strands this setup until its timeout.
+                "excludeTurns": true,
                 "cwd": setup_request.cwd,
                 "model": setup_request.model,
                 "sandbox": setup_request.sandbox_mode.as_cli_value(),

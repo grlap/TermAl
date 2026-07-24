@@ -10729,3 +10729,48 @@ textarea {
     align-items: stretch;
   }
 }
+.mailbox-message-link {
+  margin-top: 10px;
+}
+
+.mailbox-message-open {
+  font-size: 12px;
+}
+
+.mailbox-message-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.mailbox-message-panel > header,
+.mailbox-message-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mailbox-message-panel > header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.mailbox-message-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.mailbox-message-meta {
+  color: var(--muted);
+  font-size: 11px;
+}

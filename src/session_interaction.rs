@@ -28,8 +28,8 @@
 //   `approval_preview_text`, `user_input_request_preview_text`,
 //   `mcp_elicitation_request_preview_text`, `codex_app_request_preview_text`,
 //   `sync_session_interaction_state`
-// - Queue mutations: `queue_prompt_on_record`,
-//   `queue_orchestrator_prompt_on_record`,
+// - Test-only queue fixture: `queue_prompt_on_record`
+// - Queue mutations: `queue_orchestrator_prompt_on_record`,
 //   `queue_prompt_on_record_with_source`,
 //   `prioritize_user_queued_prompts`,
 //   `clear_queued_prompts_by_source`,
@@ -183,6 +183,7 @@ fn record_has_archived_codex_thread(record: &SessionRecord) -> bool {
 enum QueuedPromptSource {
     #[default]
     User,
+    Mailbox,
     Orchestrator,
 }
 
@@ -496,9 +497,8 @@ fn sync_session_interaction_state(record: &mut SessionRecord, resolved_preview: 
         record.session.preview = resolved_preview;
     }
 }
-
-
 /// Queues prompt on record.
+#[cfg(test)]
 fn queue_prompt_on_record(
     record: &mut SessionRecord,
     pending_prompt: PendingPrompt,
@@ -661,17 +661,17 @@ To reply, use the TermAl MCP tool `termal_send_to_session` with the `sessionId` 
 /// Handles prioritize user queued prompts.
 fn prioritize_user_queued_prompts(record: &mut SessionRecord) {
     let mut user_prompts = VecDeque::new();
-    let mut deferred_orchestrator_prompts = VecDeque::new();
+    let mut deferred_prompts = VecDeque::new();
 
     while let Some(queued) = record.queued_prompts.pop_front() {
         if queued.source == QueuedPromptSource::User {
             user_prompts.push_back(queued);
         } else {
-            deferred_orchestrator_prompts.push_back(queued);
+            deferred_prompts.push_back(queued);
         }
     }
 
-    user_prompts.append(&mut deferred_orchestrator_prompts);
+    user_prompts.append(&mut deferred_prompts);
     record.queued_prompts = user_prompts;
     sync_pending_prompts(record);
 }

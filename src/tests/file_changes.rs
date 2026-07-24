@@ -46,7 +46,8 @@ use super::*;
 // currently active turn, but only for paths inside the session's workdir.
 // a path outside the workdir must be dropped. once
 // `push_active_turn_file_changes_on_record` is called, the map is drained
-// and a `Message::FileChanges` entry with a singular "Agent changed 1 file"
+// and a `Message::FileChanges` entry with a singular
+// "1 file changed during turn"
 // title is appended.
 // guards against: regressions where watcher noise from unrelated dirs
 // leaks into the session transcript, or where the summary message title
@@ -119,7 +120,7 @@ fn active_turn_file_changes_are_summarized_on_record() {
     assert!(inner.sessions[index].active_turn_file_changes.is_empty());
     match inner.sessions[index].session.messages.last() {
         Some(Message::FileChanges { title, files, .. }) => {
-            assert_eq!(title, "Agent changed 1 file");
+            assert_eq!(title, "1 file changed during turn");
             assert_eq!(files.len(), 1);
             assert_eq!(files[0].path, changed_file.to_string_lossy());
             assert_eq!(files[0].kind, WorkspaceFileChangeKind::Modified);
@@ -130,6 +131,26 @@ fn active_turn_file_changes_are_summarized_on_record() {
     drop(inner);
     fs::remove_dir_all(root).unwrap();
     fs::remove_file(ignored_file).unwrap();
+}
+
+#[test]
+fn workspace_watcher_ignores_internal_beads_and_collaboration_metadata() {
+    let root = FsPath::new("/tmp/termal-workspace");
+    for path in [
+        root.join(".beads").join("embeddeddolt").join("journal.idx"),
+        root.join(".collab").join("fable-outbox").join("verdict.md"),
+        root.join(".BEADS").join("last-touched"),
+    ] {
+        assert!(
+            is_ignored_workspace_file_event_path(&path),
+            "internal coordination metadata should not be attributed to an agent turn: {}",
+            path.display()
+        );
+    }
+    assert!(
+        !is_ignored_workspace_file_event_path(&root.join("src").join("main.rs")),
+        "ordinary project source must remain visible to turn file tracking"
+    );
 }
 
 // pins: when two sessions share the same workdir and a single watcher

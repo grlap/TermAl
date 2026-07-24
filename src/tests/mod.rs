@@ -42,6 +42,7 @@ mod git;
 mod http_routes;
 mod instruction_search;
 mod json_rpc;
+mod mailboxes;
 mod orchestrator;
 pub use orchestrator::{
     sample_deadlocked_orchestrator_template_draft, sample_orchestrator_template_draft,
@@ -667,12 +668,18 @@ fn test_app_state() -> AppState {
     let state_root = std::env::temp_dir().join(format!("termal-test-state-{}", Uuid::new_v4()));
     fs::create_dir_all(&state_root).expect("state root should exist");
     let persistence_path = state_root.join("termal.sqlite");
+    // Most tests do not exercise mailboxes. Keeping the production-shaped
+    // persistent SQLite connection open in every retained test AppState
+    // exhausts macOS's default 256-fd limit before the full suite completes.
+    // Mailbox tests opt into a real isolated store explicitly.
+    let mailbox_store = Arc::new(MailboxStore::disabled_for_tests());
 
     AppState {
         server_instance_id: Uuid::new_v4().to_string(),
         default_workdir: "/tmp".to_owned(),
         local_http_base_url: Arc::new(Mutex::new(None)),
         persistence_path: Arc::new(persistence_path),
+        mailbox_store,
         orchestrator_templates_path: Arc::new(
             std::env::temp_dir().join(format!("termal-orchestrators-test-{}.json", Uuid::new_v4())),
         ),

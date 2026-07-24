@@ -154,7 +154,7 @@ struct MessageImageAttachment {
 /// resolved sender; a peer batch is marked explicitly and may omit
 /// `session_id` when it contains multiple senders. Absent (`None`) for
 /// ordinary human/agent messages.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MessageSource {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -162,6 +162,8 @@ struct MessageSource {
     name: String,
     #[serde(default, skip_serializing_if = "MessageSourceKind::is_peer")]
     kind: MessageSourceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mailbox: Option<MailboxMessageSource>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -170,6 +172,7 @@ enum MessageSourceKind {
     #[default]
     Peer,
     PeerBatch,
+    Mailbox,
 }
 
 impl MessageSourceKind {
@@ -184,6 +187,16 @@ impl MessageSource {
             session_id: Some(session_id),
             name,
             kind: MessageSourceKind::Peer,
+            mailbox: None,
+        }
+    }
+
+    fn mailbox(session_id: String, name: String, mailbox: MailboxMessageSource) -> Self {
+        Self {
+            session_id: Some(session_id),
+            name,
+            kind: MessageSourceKind::Mailbox,
+            mailbox: Some(mailbox),
         }
     }
 
@@ -192,6 +205,7 @@ impl MessageSource {
             session_id: common_source.and_then(|source| source.session_id.clone()),
             name: "Peer queue".to_owned(),
             kind: MessageSourceKind::PeerBatch,
+            mailbox: None,
         }
     }
 
@@ -202,6 +216,19 @@ impl MessageSource {
     fn is_peer_batch(&self) -> bool {
         self.kind == MessageSourceKind::PeerBatch
     }
+
+    fn is_mailbox(&self) -> bool {
+        self.kind == MessageSourceKind::Mailbox
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MailboxMessageSource {
+    mailbox_id: String,
+    message_id: String,
+    sequence: u64,
+    unread_count: u64,
 }
 
 /// Represents pending prompt.

@@ -402,6 +402,23 @@ fn app_router(state: AppState) -> Router {
             post(resolve_agent_command),
         )
         .route("/api/sessions/{id}/messages", post(send_message))
+        .route("/api/sessions/{id}/mailboxes", get(list_mailboxes))
+        .route(
+            "/api/sessions/{id}/mailboxes/send",
+            post(send_mailbox_message),
+        )
+        .route(
+            "/api/sessions/{id}/mailboxes/{mailbox_id}/read",
+            post(read_mailbox),
+        )
+        .route(
+            "/api/sessions/{id}/mailboxes/{mailbox_id}/acknowledge",
+            post(acknowledge_mailbox),
+        )
+        .route(
+            "/api/sessions/{id}/mailbox-messages/{message_id}",
+            get(read_mailbox_message),
+        )
         .route(
             "/api/sessions/{id}/queued-prompts/{prompt_id}/cancel",
             post(cancel_queued_prompt),
@@ -570,6 +587,7 @@ include!("codex_discovery.rs");
 include!("codex_validation.rs");
 include!("persisted_state.rs");
 include!("persist.rs");
+include!("mailboxes.rs");
 include!("runtime.rs");
 include!("claude_spawn.rs");
 include!("codex_home.rs");

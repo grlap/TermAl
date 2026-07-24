@@ -121,12 +121,7 @@ fn run_codex_turn(
             &mut repl_state,
             recorder,
             "initialize",
-            json!({
-                "clientInfo": {
-                    "name": "termal",
-                    "version": env!("CARGO_PKG_VERSION"),
-                }
-            }),
+            codex_initialize_params(),
             Duration::from_secs(15),
         )?;
         write_codex_json_rpc_message(

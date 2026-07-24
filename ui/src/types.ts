@@ -448,7 +448,47 @@ export type ImageAttachment = {
 export type MessageSource = {
   sessionId?: string | null;
   name: string;
-  kind?: "peer" | "peerBatch";
+  kind?: "peer" | "peerBatch" | "mailbox";
+  mailbox?: MailboxMessageSource | null;
+};
+
+export type MailboxMessageSource = {
+  mailboxId: string;
+  messageId: string;
+  sequence: number;
+  unreadCount: number;
+};
+
+export type MailboxParticipant = {
+  sessionId: string;
+  displayName: string;
+  processedThrough: number;
+  leftAt?: string | null;
+};
+
+export type MailboxSummary = {
+  id: string;
+  participants: MailboxParticipant[];
+  latestSequence: number;
+  unreadCount: number;
+  latestMessagePreview?: string | null;
+  latestMessageAt?: string | null;
+};
+
+export type MailboxMessage = {
+  id: string;
+  mailboxId: string;
+  sequence: number;
+  senderSessionId: string;
+  senderName: string;
+  targetSessionId: string;
+  targetName: string;
+  createdAt: string;
+  class: "routine";
+  topic?: string | null;
+  stateStamp?: string | null;
+  body: string;
+  notificationDisposition: string;
 };
 
 export type PendingPrompt = {

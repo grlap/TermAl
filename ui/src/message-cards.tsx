@@ -17,6 +17,7 @@ import {
 } from "./message-card-meta";
 import { copyTextToClipboard } from "./clipboard";
 import { DeferredMarkdownContent } from "./deferred-markdown-content";
+import { MailboxMessageLink } from "./mailbox-message-link";
 import {
   DELEGATION_FAN_IN_AUTHOR_LABEL,
   isDelegationFanInText,
@@ -127,6 +128,7 @@ export const MessageCard = memo(
     isLatestAssistantMessage = true,
     connectionRetryDisplayState,
     workspaceRoot = null,
+    mailboxViewerSessionId,
   }: {
     appearance?: MonacoAppearance;
     message: Message;
@@ -158,6 +160,7 @@ export const MessageCard = memo(
     isLatestAssistantMessage?: boolean;
     connectionRetryDisplayState?: ConnectionRetryDisplayState;
     workspaceRoot?: string | null;
+    mailboxViewerSessionId?: string | null;
   }) {
     switch (message.type) {
       case "text": {
@@ -308,6 +311,14 @@ export const MessageCard = memo(
                 {imageAttachmentSummaryLabel(message.attachments?.length ?? 0)}
               </p>
             )}
+            {message.source?.kind === "mailbox" &&
+            message.source.mailbox &&
+            mailboxViewerSessionId ? (
+              <MailboxMessageLink
+                sessionId={mailboxViewerSessionId}
+                source={message.source.mailbox}
+              />
+            ) : null}
           </article>
         );
       }
@@ -462,7 +473,8 @@ export const MessageCard = memo(
       previous.isLatestAssistantMessage === next.isLatestAssistantMessage &&
       previous.connectionRetryDisplayState ===
         next.connectionRetryDisplayState &&
-      previous.workspaceRoot === next.workspaceRoot
+      previous.workspaceRoot === next.workspaceRoot &&
+      previous.mailboxViewerSessionId === next.mailboxViewerSessionId
     );
   },
 );

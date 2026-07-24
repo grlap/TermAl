@@ -1211,11 +1211,12 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
 
       act(() => {
-        for (
-          let nextScrollTop = 400;
-          nextScrollTop < harness.estimatedLayout.totalHeight - 500;
-          nextScrollTop += 400
-        ) {
+        const maxScrollTop = harness.estimatedLayout.totalHeight - 500;
+        const dragPositions = Array.from(
+          { length: 12 },
+          (_, index) => (maxScrollTop * (index + 1)) / 12,
+        );
+        for (const nextScrollTop of dragPositions) {
           harness.setScrollTop(nextScrollTop);
           fireEvent.scroll(harness.scrollNode);
         }

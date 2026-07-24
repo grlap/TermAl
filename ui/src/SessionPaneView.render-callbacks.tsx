@@ -497,6 +497,7 @@ export function useSessionRenderCallbacks({
         isLatestAssistantMessage={message.id === latestAssistantMessageId}
         connectionRetryDisplayState={getConnectionRetryDisplayState(message.id)}
         workspaceRoot={activeSession?.workdir ?? null}
+        mailboxViewerSessionId={activeSession?.id ?? null}
       />
     ),
     [

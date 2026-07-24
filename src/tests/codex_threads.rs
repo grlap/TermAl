@@ -643,6 +643,7 @@ fn codex_archive_and_unarchive_actions_update_thread_state_and_block_dispatch() 
             expanded_text: None,
             attachments: Vec::new(),
             source_session_id: None,
+            source_mailbox: None,
         },
     ) {
         Ok(_) => panic!("archived Codex thread should reject new prompts"),

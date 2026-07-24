@@ -652,6 +652,48 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
               id TEXT PRIMARY KEY,
               value_json TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS mailboxes (
+              id TEXT PRIMARY KEY,
+              participant_key TEXT NOT NULL UNIQUE,
+              created_at TEXT NOT NULL,
+              next_sequence INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS mailbox_participants (
+              mailbox_id TEXT NOT NULL,
+              session_id TEXT NOT NULL,
+              display_name TEXT NOT NULL,
+              processed_through INTEGER NOT NULL DEFAULT 0,
+              joined_at TEXT NOT NULL,
+              left_at TEXT,
+              PRIMARY KEY (mailbox_id, session_id),
+              FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS mailbox_messages (
+              id TEXT PRIMARY KEY,
+              mailbox_id TEXT NOT NULL,
+              sequence INTEGER NOT NULL,
+              sender_session_id TEXT NOT NULL,
+              sender_name TEXT NOT NULL,
+              target_session_id TEXT NOT NULL,
+              target_name TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              class TEXT NOT NULL CHECK (class = 'routine'),
+              topic TEXT,
+              state_stamp TEXT,
+              body TEXT NOT NULL,
+              idempotency_key TEXT NOT NULL,
+              unread_depth_at_append INTEGER NOT NULL,
+              notification_disposition TEXT NOT NULL,
+              UNIQUE (mailbox_id, sequence),
+              UNIQUE (sender_session_id, idempotency_key),
+              FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS mailbox_participants_session
+              ON mailbox_participants(session_id, left_at);
             ",
         )
         .context("failed to initialize SQLite state schema")?;

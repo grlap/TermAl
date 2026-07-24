@@ -319,20 +319,32 @@ struct TurnConfig {
     external_session_id: Option<String>,
 }
 
+/// Durable mailbox notification metadata that must not be marked delivered
+/// until the runtime command channel accepts the turn.
+#[derive(Clone, Debug)]
+struct MailboxNotificationDelivery {
+    mailbox_id: String,
+    session_id: String,
+    through_sequence: u64,
+}
+
 /// Defines the turn dispatch variants.
 enum TurnDispatch {
     PersistentClaude {
         command: ClaudePromptCommand,
+        mailbox_notification: Option<MailboxNotificationDelivery>,
         sender: Sender<ClaudeRuntimeCommand>,
         session_id: String,
     },
     PersistentCodex {
         command: CodexPromptCommand,
+        mailbox_notification: Option<MailboxNotificationDelivery>,
         sender: Sender<CodexRuntimeCommand>,
         session_id: String,
     },
     PersistentAcp {
         command: AcpPromptCommand,
+        mailbox_notification: Option<MailboxNotificationDelivery>,
         sender: Sender<AcpRuntimeCommand>,
         session_id: String,
     },

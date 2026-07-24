@@ -31,9 +31,10 @@ fn file_metadata_mtime_ms(metadata: &fs::Metadata) -> Option<u64> {
 
 /// Delivers turn dispatch.
 fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(), ApiError> {
-    match dispatch {
+    let mailbox_notification = match dispatch {
         TurnDispatch::PersistentClaude {
             command,
+            mailbox_notification,
             sender,
             session_id,
         } => {
@@ -47,9 +48,11 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
                     "failed to queue prompt for Claude session",
                 ));
             }
+            mailbox_notification
         }
         TurnDispatch::PersistentCodex {
             command,
+            mailbox_notification,
             sender,
             session_id,
         } => {
@@ -66,9 +69,11 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
                     "failed to queue prompt for Codex session",
                 ));
             }
+            mailbox_notification
         }
         TurnDispatch::PersistentAcp {
             command,
+            mailbox_notification,
             sender,
             session_id,
         } => {
@@ -82,7 +87,11 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
                     "failed to queue prompt for agent session",
                 ));
             }
+            mailbox_notification
         }
+    };
+    if let Some(mailbox_notification) = mailbox_notification.as_ref() {
+        state.mark_mailbox_notification_delivered(mailbox_notification);
     }
 
     Ok(())
@@ -338,6 +347,7 @@ impl AppState {
                         expanded_text: None,
                         attachments: Vec::new(),
                         source_session_id: None,
+                        source_mailbox: None,
                     },
                 )?;
                 match dispatch {

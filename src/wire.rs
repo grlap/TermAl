@@ -1434,6 +1434,11 @@ struct SendMessageRequest {
     /// missing/unknown id yields no attribution (the message stays "You").
     #[serde(default, rename = "sourceSessionId")]
     source_session_id: Option<String>,
+    /// Internal durable-mailbox provenance for the compact wake-up prompt
+    /// created by the backend after committing a peer message. The ordinary
+    /// `/messages` JSON surface must not be able to forge this field.
+    #[serde(default, rename = "sourceMailbox", skip_deserializing)]
+    source_mailbox: Option<MailboxMessageSource>,
 }
 
 /// Represents the send message attachment request payload.

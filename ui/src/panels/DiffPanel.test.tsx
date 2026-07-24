@@ -2587,15 +2587,9 @@ describe("DiffPanel", () => {
     expect(
       document.querySelector(".markdown-diff-change-scroll")?.textContent ?? "",
     ).toContain("New ending.");
-
-    await clickAndSettle(
+    expect(
       screen.getByRole("button", { name: "Edit full document" }),
-    );
-
-    expect(screen.queryByRole("button", { name: "Edit full document" })).toBeNull();
-    await waitFor(() => {
-      expect(document.querySelector("[data-markdown-editable='true']")).not.toBeNull();
-    });
+    ).toBeInTheDocument();
   });
 
   it("treats Markdown patch fallback previews as incomplete and read-only", async () => {

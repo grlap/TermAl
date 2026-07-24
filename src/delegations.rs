@@ -1150,6 +1150,7 @@ impl AppState {
                 expanded_text: None,
                 attachments: Vec::new(),
                 source_session_id: None,
+                source_mailbox: None,
             },
         ) {
             let _ = self.refresh_delegation_for_child_session(&child_session_id);
@@ -1726,6 +1727,7 @@ impl AppState {
                 expanded_text: None,
                 attachments: Vec::new(),
                 source_session_id: None,
+                source_mailbox: None,
             },
         )?;
         match dispatch {

@@ -1219,6 +1219,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
                 expanded_text: None,
                 attachments: Vec::new(),
                 source_session_id: None,
+                source_mailbox: None,
             },
         )
         .err()
@@ -1268,6 +1269,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
                 expanded_text: None,
                 attachments: Vec::new(),
                 source_session_id: None,
+                source_mailbox: None,
             },
         )
         .expect("manual recovery prompt should dispatch");
@@ -1422,6 +1424,7 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
                 expanded_text: None,
                 attachments: Vec::new(),
                 source_session_id: None,
+                source_mailbox: None,
             },
         )
         .expect("manual recovery should dispatch the oldest queued user prompt");
@@ -1605,6 +1608,7 @@ fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stal
                 expanded_text: None,
                 attachments: Vec::new(),
                 source_session_id: None,
+                source_mailbox: None,
             },
         )
         .expect("manual recovery should dispatch the older queued user prompt first");
