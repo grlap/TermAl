@@ -268,21 +268,49 @@ impl AppState {
 
         let disposition = match self.dispatch_turn(&input.target_session_id, notification_request) {
             Ok(DispatchTurnResult::Dispatched(dispatch)) => {
-                if deliver_turn_dispatch(self, dispatch).is_ok() {
-                    Some("deliveredToIdleSession")
-                } else {
-                    None
+                match deliver_turn_dispatch(self, dispatch) {
+                    Ok(()) => Some("deliveredToIdleSession"),
+                    Err(err) => {
+                        eprintln!(
+                            "mailbox> failed waking target session `{}` for mailbox `{}` message `{}` ({}): {}",
+                            input.target_session_id,
+                            receipt.mailbox_id,
+                            receipt.message_id,
+                            err.status,
+                            err.message
+                        );
+                        None
+                    }
                 }
             }
             Ok(DispatchTurnResult::DispatchedAfterQueue(dispatch)) => {
-                if deliver_turn_dispatch(self, dispatch).is_ok() {
-                    Some("queuedBehindActiveTurn")
-                } else {
-                    None
+                match deliver_turn_dispatch(self, dispatch) {
+                    Ok(()) => Some("queuedBehindActiveTurn"),
+                    Err(err) => {
+                        eprintln!(
+                            "mailbox> failed waking queued target session `{}` for mailbox `{}` message `{}` ({}): {}",
+                            input.target_session_id,
+                            receipt.mailbox_id,
+                            receipt.message_id,
+                            err.status,
+                            err.message
+                        );
+                        None
+                    }
                 }
             }
             Ok(DispatchTurnResult::Queued) => Some("queuedBehindActiveTurn"),
-            Err(_) => None,
+            Err(err) => {
+                eprintln!(
+                    "mailbox> failed dispatching wake to target session `{}` for mailbox `{}` message `{}` ({}): {}",
+                    input.target_session_id,
+                    receipt.mailbox_id,
+                    receipt.message_id,
+                    err.status,
+                    err.message
+                );
+                None
+            }
         };
         if let Some(disposition) = disposition {
             match self

@@ -3,6 +3,9 @@
 TermAl peer coordination uses durable neutral mailboxes. A mailbox is not an
 agent session: it has no assigned agent, runtime, model, workdir, composer, or
 turn lifecycle. It is an ordered conversation record shared by root sessions.
+See [Agent delegation sessions](agent-delegation-sessions.md#peer-session-connections)
+for root-peer eligibility and the boundary between this shipped mailbox flow
+and the older connection-oriented proposal.
 
 ## Delivery contract
 

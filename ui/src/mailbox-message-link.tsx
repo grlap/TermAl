@@ -48,6 +48,7 @@ export function MailboxMessageLink({
       return;
     }
     setOpen(true);
+    setMessages(null);
     const requestId = loadRequestRef.current + 1;
     loadRequestRef.current = requestId;
     setLoading(true);
@@ -58,12 +59,7 @@ export function MailboxMessageLink({
           mailboxes.find((mailbox) => mailbox.id === source.mailboxId)
             ?.latestSequence ?? source.sequence;
         const afterSequence = Math.max(0, latestSequence - 200);
-        return readMailbox(
-          sessionId,
-          source.mailboxId,
-          afterSequence,
-          200,
-        );
+        return readMailbox(sessionId, source.mailboxId, afterSequence, 200);
       })
       .then((nextMessages) => {
         if (mountedRef.current && loadRequestRef.current === requestId) {

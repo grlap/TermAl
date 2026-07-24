@@ -2587,6 +2587,10 @@ describe("DiffPanel", () => {
     expect(
       document.querySelector(".markdown-diff-change-scroll")?.textContent ?? "",
     ).toContain("New ending.");
+    // The adjacent large-Markdown case exercises the shared click-through
+    // transition into editable mode. This character-cap case pins only its
+    // distinct fallback preview and affordance so it does not duplicate the
+    // timing-sensitive editor transition.
     expect(
       screen.getByRole("button", { name: "Edit full document" }),
     ).toBeInTheDocument();

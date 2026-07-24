@@ -1,13 +1,45 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { listMailboxes, readMailbox } from "./api";
 import { MailboxMessageLink } from "./mailbox-message-link";
+import type { MailboxMessage } from "./types";
 
 vi.mock("./api", () => ({
   listMailboxes: vi.fn(),
   readMailbox: vi.fn(),
 }));
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
+function mailboxMessage(id: string, body: string): MailboxMessage {
+  return {
+    id,
+    mailboxId: "mailbox-1",
+    sequence: 1,
+    senderSessionId: "session-sol",
+    senderName: "Sol",
+    targetSessionId: "session-fable",
+    targetName: "Fable",
+    createdAt: "2026-07-23T12:00:00+02:00",
+    class: "routine",
+    topic: null,
+    body,
+    notificationDisposition: "queuedBehindActiveTurn",
+  };
+}
 
 describe("MailboxMessageLink", () => {
   beforeEach(() => {
@@ -85,7 +117,12 @@ describe("MailboxMessageLink", () => {
         unreadCount: 0,
       },
     ]);
-    vi.mocked(readMailbox).mockResolvedValue([]);
+    const reopenedRead = deferred<MailboxMessage[]>();
+    vi.mocked(readMailbox)
+      .mockResolvedValueOnce([
+        mailboxMessage("mailbox-message-1", "First window"),
+      ])
+      .mockReturnValueOnce(reopenedRead.promise);
     render(
       <MailboxMessageLink
         sessionId="session-fable"
@@ -101,12 +138,96 @@ describe("MailboxMessageLink", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Open mailbox (0 unread)" }),
     );
-    await screen.findByText("No messages in this mailbox.");
+    await screen.findByText("First window");
     fireEvent.click(screen.getByRole("button", { name: "Hide mailbox" }));
     fireEvent.click(
       screen.getByRole("button", { name: "Open mailbox (0 unread)" }),
     );
     await waitFor(() => expect(listMailboxes).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(readMailbox).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Loading messages…")).toBeTruthy();
+    expect(screen.queryByText("First window")).toBeNull();
+
+    await act(async () => {
+      reopenedRead.resolve([]);
+    });
+    expect(
+      await screen.findByText("No messages in this mailbox."),
+    ).toBeTruthy();
+  });
+
+  it("renders mailbox read failures without attempting a range read", async () => {
+    vi.mocked(listMailboxes).mockRejectedValue(
+      new Error("Mailbox index unavailable"),
+    );
+    render(
+      <MailboxMessageLink
+        sessionId="session-fable"
+        source={{
+          mailboxId: "mailbox-1",
+          messageId: "mailbox-message-1",
+          sequence: 1,
+          unreadCount: 1,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open mailbox (1 unread)" }),
+    );
+
+    expect(await screen.findByText("Mailbox index unavailable")).toBeTruthy();
+    expect(readMailbox).not.toHaveBeenCalled();
+  });
+
+  it("ignores an obsolete read that resolves after a newer open", async () => {
+    vi.mocked(listMailboxes).mockResolvedValue([
+      {
+        id: "mailbox-1",
+        participants: [],
+        latestSequence: 1,
+        unreadCount: 1,
+      },
+    ]);
+    const firstRead = deferred<MailboxMessage[]>();
+    const secondRead = deferred<MailboxMessage[]>();
+    vi.mocked(readMailbox)
+      .mockReturnValueOnce(firstRead.promise)
+      .mockReturnValueOnce(secondRead.promise);
+    render(
+      <MailboxMessageLink
+        sessionId="session-fable"
+        source={{
+          mailboxId: "mailbox-1",
+          messageId: "mailbox-message-1",
+          sequence: 1,
+          unreadCount: 1,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open mailbox (1 unread)" }),
+    );
+    await waitFor(() => expect(readMailbox).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Hide mailbox" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open mailbox (1 unread)" }),
+    );
+    await waitFor(() => expect(readMailbox).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      firstRead.resolve([
+        mailboxMessage("mailbox-message-stale", "Stale window"),
+      ]);
+    });
+    expect(screen.queryByText("Stale window")).toBeNull();
+
+    await act(async () => {
+      secondRead.resolve([
+        mailboxMessage("mailbox-message-fresh", "Fresh window"),
+      ]);
+    });
+    expect(await screen.findByText("Fresh window")).toBeTruthy();
   });
 });

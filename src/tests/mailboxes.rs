@@ -323,6 +323,57 @@ fn idle_blocked_receiver_coalesces_repeated_mailbox_wakes() {
 }
 
 #[test]
+fn dispatch_coalescing_never_regresses_to_an_older_sequence() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let first = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("first mailbox wake should queue");
+    let mut second_request = mailbox_send_request(&target_id);
+    second_request.idempotency_key = "dispatch-sequence-2".to_owned();
+    second_request.message = "Newer durable message owns the retained wake.".to_owned();
+    let second = state
+        .append_mailbox_message_and_notify(&sender_id, second_request)
+        .expect("second mailbox wake should coalesce");
+
+    let stale_dispatch = state
+        .dispatch_turn(
+            &target_id,
+            SendMessageRequest {
+                text: "Stale wake that acquired the state lock last.".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: Some(sender_id),
+                source_mailbox: Some(MailboxMessageSource {
+                    mailbox_id: first.mailbox_id,
+                    message_id: first.message_id,
+                    sequence: first.sequence,
+                    unread_count: first.unread_depth,
+                }),
+            },
+        )
+        .expect("stale wake should coalesce without replacing newer metadata");
+    assert!(matches!(stale_dispatch, DispatchTurnResult::Queued));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should exist");
+    assert_eq!(target.queued_prompts.len(), 1);
+    let pending = &target.queued_prompts[0].pending_prompt;
+    let source = pending
+        .source
+        .as_ref()
+        .and_then(|source| source.mailbox.as_ref())
+        .expect("retained wake should have mailbox metadata");
+    assert_eq!(source.message_id, second.message_id);
+    assert_eq!(source.sequence, second.sequence);
+    assert_eq!(source.unread_count, second.unread_depth);
+    assert!(pending.text.contains(&format!("#{}", second.sequence)));
+}
+
+#[test]
 fn idle_receiver_dispatches_the_coalesced_mailbox_wake_it_started() {
     let (state, sender_id, target_id) = mailbox_test_state();
     let first = state

@@ -687,14 +687,30 @@ impl AppState {
                 }) {
                     // The durable mailbox is the queue. Whether the receiver
                     // is busy or idle with queued work, retain one compact
-                    // wake-up prompt per mailbox and replace its metadata with
-                    // the newest receipt/unread count. Message bodies remain
-                    // only in SQLite.
-                    existing.pending_prompt.timestamp = stamp_now();
-                    existing.pending_prompt.text = prompt;
-                    existing.pending_prompt.expanded_text = expanded_prompt;
-                    existing.pending_prompt.source = source;
-                    existing.source = QueuedPromptSource::Mailbox;
+                    // wake-up prompt per mailbox. Concurrent appends allocate
+                    // sequence numbers before taking the state lock, so an
+                    // older sender can arrive here last; never let it replace
+                    // metadata for a newer retained wake. Message bodies
+                    // remain only in SQLite.
+                    let existing_sequence = existing
+                        .pending_prompt
+                        .source
+                        .as_ref()
+                        .and_then(|source| source.mailbox.as_ref())
+                        .map(|mailbox| mailbox.sequence)
+                        .unwrap_or_default();
+                    let incoming_sequence = source
+                        .as_ref()
+                        .and_then(|source| source.mailbox.as_ref())
+                        .map(|mailbox| mailbox.sequence)
+                        .unwrap_or_default();
+                    if existing_sequence <= incoming_sequence {
+                        existing.pending_prompt.timestamp = stamp_now();
+                        existing.pending_prompt.text = prompt;
+                        existing.pending_prompt.expanded_text = expanded_prompt;
+                        existing.pending_prompt.source = source;
+                        existing.source = QueuedPromptSource::Mailbox;
+                    }
                     sync_pending_prompts(record);
                     self.commit_locked(&mut inner).map_err(|err| {
                         ApiError::internal(format!(
