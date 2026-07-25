@@ -578,7 +578,41 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
     }
   });
 
-  it("prewarms pages above on large upward wheel and touch gestures before native scroll paints", async () => {
+  it.each([
+    {
+      name: "pixel wheel input",
+      kind: "wheel",
+      wheelInput: { deltaY: -1800 },
+    },
+    {
+      name: "line wheel input",
+      kind: "wheel",
+      wheelInput: { deltaMode: WheelEvent.DOM_DELTA_LINE, deltaY: -45 },
+    },
+    {
+      name: "page wheel input",
+      kind: "wheel",
+      wheelInput: { deltaMode: WheelEvent.DOM_DELTA_PAGE, deltaY: -3 },
+    },
+    {
+      name: "stale touch input",
+      kind: "stale-touch",
+    },
+    {
+      name: "multi-touch input across the compaction cooldown",
+      kind: "multi-touch",
+    },
+    {
+      name: "touch input",
+      kind: "touch",
+    },
+    {
+      name: "large native scroll after a small wheel input",
+      kind: "large-write",
+    },
+  ] as const)(
+    "prewarms pages above for $name before native scroll paints",
+    async (prewarmCase) => {
     const OriginalResizeObserver = window.ResizeObserver;
     const OriginalTouchEvent = window.TouchEvent;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
@@ -789,11 +823,6 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
         expect(container.querySelectorAll(".virtualized-message-slot").length).toBeGreaterThan(0);
       });
 
-      const wheelInputs: WheelEventInit[] = [
-        { deltaY: -1800 },
-        { deltaMode: WheelEvent.DOM_DELTA_LINE, deltaY: -45 },
-        { deltaMode: WheelEvent.DOM_DELTA_PAGE, deltaY: -3 },
-      ];
       const resolveWheelDelta = (wheelInput: WheelEventInit) => {
         if (wheelInput.deltaMode === WheelEvent.DOM_DELTA_LINE) {
           const computedLineHeight = Number.parseFloat(
@@ -826,7 +855,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
         }));
       };
 
-      for (const wheelInput of wheelInputs) {
+      const seekToMiddle = async () => {
         await act(async () => {
           scrollTop = 0;
           notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
@@ -841,152 +870,98 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
         await waitFor(() => {
           expect(getFirstMountedMessageIndex(container)).toBeGreaterThan(1);
         });
-        const firstMountedBeforeWheel = getFirstMountedMessageIndex(container);
-
-        await act(async () => {
-          fireEvent.wheel(scrollNode, wheelInput);
-          scrollTop = Math.max(3600 + resolveWheelDelta(wheelInput), 0);
-          notifyMessageStackScrollWrite(scrollNode);
-          await Promise.resolve();
-        });
-
+      };
+      const expectPrewarmedAbove = async (firstMountedBeforeInput: number) => {
         await waitFor(() => {
-          expect(getFirstMountedMessageIndex(container)).toBeLessThan(firstMountedBeforeWheel);
+          expect(getFirstMountedMessageIndex(container)).toBeLessThan(
+            firstMountedBeforeInput,
+          );
           const firstMountedPage = container.querySelector<HTMLElement>(
             ".virtualized-message-page",
           );
           expect(firstMountedPage?.getBoundingClientRect().top).toBeLessThanOrEqual(0);
         });
+      };
+
+      await seekToMiddle();
+      const firstMountedBeforeInput = getFirstMountedMessageIndex(container);
+
+      switch (prewarmCase.kind) {
+        case "wheel": {
+          await act(async () => {
+            fireEvent.wheel(scrollNode, prewarmCase.wheelInput);
+            scrollTop = Math.max(
+              3600 + resolveWheelDelta(prewarmCase.wheelInput),
+              0,
+            );
+            notifyMessageStackScrollWrite(scrollNode);
+            await Promise.resolve();
+          });
+          await expectPrewarmedAbove(firstMountedBeforeInput);
+          break;
+        }
+        case "stale-touch": {
+          await act(async () => {
+            dispatchTouch("touchstart", [100], [100]);
+            dispatchTouch("touchend", [], [100]);
+            dispatchTouch("touchmove", [1900], [1900]);
+            await Promise.resolve();
+          });
+          expect(getFirstMountedMessageIndex(container)).toBe(
+            firstMountedBeforeInput,
+          );
+          break;
+        }
+        case "multi-touch": {
+          let performanceNowCallCount = 0;
+          const prewarmInputTime = performance.now();
+          performanceNowSpy = vi.spyOn(performance, "now").mockImplementation(() => {
+            performanceNowCallCount += 1;
+            return performanceNowCallCount === 1
+              ? prewarmInputTime
+              : prewarmInputTime +
+                  VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS +
+                  1;
+          });
+
+          act(() => {
+            // If the first finger lifts while another finger remains down,
+            // touchend must keep tracking the remaining touch. A slow render
+            // crossing the cooldown must not compact until the scheduled idle
+            // transition runs.
+            dispatchTouch("touchstart", [100, 300], [100, 300]);
+            dispatchTouch("touchend", [300], [100]);
+            dispatchTouch("touchmove", [1900], [1900]);
+          });
+          await expectPrewarmedAbove(firstMountedBeforeInput);
+          break;
+        }
+        case "touch": {
+          await act(async () => {
+            // Finger moving down by 1800 px scrolls content upward by the same
+            // magnitude before the browser's native scroll write paints.
+            dispatchTouchGesture(100, 1900);
+            scrollTop = 1800;
+            notifyMessageStackScrollWrite(scrollNode);
+            await Promise.resolve();
+          });
+          await expectPrewarmedAbove(firstMountedBeforeInput);
+          break;
+        }
+        case "large-write": {
+          await act(async () => {
+            fireEvent.wheel(scrollNode, { deltaY: -1 });
+            scrollTop = 1800;
+            notifyMessageStackScrollWrite(scrollNode, {
+              scrollKind: "incremental",
+              scrollSource: "user",
+            });
+            await Promise.resolve();
+          });
+          await expectPrewarmedAbove(firstMountedBeforeInput);
+          break;
+        }
       }
-
-      await act(async () => {
-        scrollTop = 0;
-        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
-        await Promise.resolve();
-      });
-      await act(async () => {
-        scrollTop = 3600;
-        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
-        await Promise.resolve();
-      });
-
-      await waitFor(() => {
-        expect(getFirstMountedMessageIndex(container)).toBeGreaterThan(1);
-      });
-      const firstMountedBeforeStaleTouchMove = getFirstMountedMessageIndex(container);
-
-      await act(async () => {
-        dispatchTouch("touchstart", [100], [100]);
-        dispatchTouch("touchend", [], [100]);
-        dispatchTouch("touchmove", [1900], [1900]);
-        await Promise.resolve();
-      });
-
-      expect(getFirstMountedMessageIndex(container)).toBe(
-        firstMountedBeforeStaleTouchMove,
-      );
-
-      const firstMountedBeforeMultiTouch = getFirstMountedMessageIndex(container);
-      let performanceNowCallCount = 0;
-      const prewarmInputTime = performance.now();
-      performanceNowSpy = vi.spyOn(performance, "now").mockImplementation(() => {
-        performanceNowCallCount += 1;
-        return performanceNowCallCount === 1
-          ? prewarmInputTime
-          : prewarmInputTime + VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS + 1;
-      });
-
-      act(() => {
-        // If the first finger lifts while another finger remains down,
-        // touchend must keep tracking the remaining touch. The following
-        // touchmove should still prewarm before native scroll writes. Simulate
-        // a slow synchronous render crossing the wall-clock cooldown: the
-        // scheduled idle transition, not render duration, owns compaction.
-        dispatchTouch("touchstart", [100, 300], [100, 300]);
-        dispatchTouch("touchend", [300], [100]);
-        dispatchTouch("touchmove", [1900], [1900]);
-      });
-
-      expect(getFirstMountedMessageIndex(container)).toBeLessThan(
-        firstMountedBeforeMultiTouch,
-      );
-      expect(
-        container
-          .querySelector<HTMLElement>(".virtualized-message-page")
-          ?.getBoundingClientRect().top,
-      ).toBeLessThanOrEqual(0);
-      performanceNowSpy.mockRestore();
-      performanceNowSpy = null;
-
-      await act(async () => {
-        scrollTop = 0;
-        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
-        await Promise.resolve();
-      });
-      await act(async () => {
-        scrollTop = 3600;
-        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
-        await Promise.resolve();
-      });
-
-      await waitFor(() => {
-        expect(getFirstMountedMessageIndex(container)).toBeGreaterThan(1);
-      });
-      const firstMountedBeforeTouch = getFirstMountedMessageIndex(container);
-
-      await act(async () => {
-        // Finger moving down by 1800 px scrolls content upward by the same
-        // magnitude, so the touch path should prewarm the pages above before
-        // the browser's native scroll write paints.
-        dispatchTouchGesture(100, 1900);
-        scrollTop = 1800;
-        notifyMessageStackScrollWrite(scrollNode);
-        await Promise.resolve();
-      });
-
-      await waitFor(() => {
-        expect(getFirstMountedMessageIndex(container)).toBeLessThan(
-          firstMountedBeforeTouch,
-        );
-        const firstMountedPage = container.querySelector<HTMLElement>(
-          ".virtualized-message-page",
-        );
-        expect(firstMountedPage?.getBoundingClientRect().top).toBeLessThanOrEqual(0);
-      });
-
-      await act(async () => {
-        scrollTop = 0;
-        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
-        await Promise.resolve();
-      });
-      await act(async () => {
-        scrollTop = 3600;
-        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "seek" });
-        await Promise.resolve();
-      });
-
-      await waitFor(() => {
-        expect(getFirstMountedMessageIndex(container)).toBeGreaterThan(1);
-      });
-      const firstMountedBeforeLargeWrite = getFirstMountedMessageIndex(container);
-
-      await act(async () => {
-        fireEvent.wheel(scrollNode, { deltaY: -1 });
-        scrollTop = 1800;
-        notifyMessageStackScrollWrite(scrollNode, {
-          scrollKind: "incremental",
-          scrollSource: "user",
-        });
-        await Promise.resolve();
-      });
-
-      expect(getFirstMountedMessageIndex(container)).toBeLessThan(
-        firstMountedBeforeLargeWrite,
-      );
-      const firstMountedPage = container.querySelector<HTMLElement>(
-        ".virtualized-message-page",
-      );
-      expect(firstMountedPage?.getBoundingClientRect().top).toBeLessThanOrEqual(0);
     } finally {
       performanceNowSpy?.mockRestore();
       window.ResizeObserver = OriginalResizeObserver;

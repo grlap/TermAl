@@ -79,7 +79,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -106,7 +106,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -241,7 +241,7 @@ describe("App live state - delta-gap core", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -338,7 +338,7 @@ describe("App live state - delta-gap core", () => {
   ];
 
   it("rehydrates an active transcript when a summary snapshot overtakes a delayed delta", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -509,7 +509,7 @@ describe("App live state - delta-gap core", () => {
   });
 
   it("does not let stale hydration clobber an in-flight text delta with matching metadata", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -680,7 +680,7 @@ describe("App live state - delta-gap core", () => {
   });
 
   it("adopts equal-revision state repair after a skipped global revision and session delta", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -860,7 +860,7 @@ describe("App live state - delta-gap core", () => {
   });
 
   it("adopts lower-revision text-repair hydration after a newer unrelated live event", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1035,7 +1035,7 @@ describe("App live state - delta-gap core", () => {
   });
 
   it("keeps streamed markdown table chunks intact across repeated revision gaps", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1272,7 +1272,7 @@ describe("App live state - delta-gap core", () => {
   });
 
   it("replaces a corrupted streaming markdown table with final authoritative text across a revision gap", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1453,7 +1453,7 @@ describe("App live state - delta-gap core", () => {
   });
 
   it("rejects stale session hydration after a newer metadata delta", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1644,7 +1644,7 @@ describe("App live state - delta-gap core", () => {
   });
 
   it("keeps a newly created prompt visible while active session hydration is pending", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1850,7 +1850,7 @@ describe("App live state - delta-gap core", () => {
   ])(
     "keeps $label terminal message deltas visible across equal-revision state snapshots",
     async ({ status, terminalText }) => {
-      await withSuppressedActWarnings(async () => {
+      await withVerifiedNoReactActWarnings(async () => {
         const originalFetch = globalThis.fetch;
         const originalEventSource = globalThis.EventSource;
         const originalResizeObserver = globalThis.ResizeObserver;

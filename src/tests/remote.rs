@@ -43,6 +43,8 @@ fn persists_remote_settings() {
             default_cursor_model: None,
             default_gemini_model: None,
             default_codex_reasoning_effort: None,
+            default_codex_sandbox_mode: None,
+            default_codex_approval_policy: None,
             default_claude_approval_mode: None,
             default_claude_effort: None,
             remotes: Some(vec![
@@ -90,6 +92,8 @@ fn rejects_remote_settings_with_unsafe_remote_id() {
         default_cursor_model: None,
         default_gemini_model: None,
         default_codex_reasoning_effort: None,
+        default_codex_sandbox_mode: None,
+        default_codex_approval_policy: None,
         default_claude_approval_mode: None,
         default_claude_effort: None,
         remotes: Some(vec![
@@ -130,6 +134,8 @@ fn rejects_remote_settings_with_invalid_ssh_host() {
         default_cursor_model: None,
         default_gemini_model: None,
         default_codex_reasoning_effort: None,
+        default_codex_sandbox_mode: None,
+        default_codex_approval_policy: None,
         default_claude_approval_mode: None,
         default_claude_effort: None,
         remotes: Some(vec![
@@ -167,6 +173,8 @@ fn rejects_remote_settings_with_invalid_ssh_user() {
         default_cursor_model: None,
         default_gemini_model: None,
         default_codex_reasoning_effort: None,
+        default_codex_sandbox_mode: None,
+        default_codex_approval_policy: None,
         default_claude_approval_mode: None,
         default_claude_effort: None,
         remotes: Some(vec![
@@ -591,6 +599,8 @@ fn remote_action_lookup_rejects_unusable_remotes_before_ssh() {
             default_cursor_model: None,
             default_gemini_model: None,
             default_codex_reasoning_effort: None,
+            default_codex_sandbox_mode: None,
+            default_codex_approval_policy: None,
             default_claude_approval_mode: None,
             default_claude_effort: None,
             remotes: Some(vec![RemoteConfig::local(), disabled_remote]),

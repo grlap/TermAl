@@ -76,7 +76,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -103,7 +103,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -238,7 +238,7 @@ describe("App control panel - helpers and compact coverage", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -442,7 +442,7 @@ describe("App control panel - helpers and compact coverage", () => {
   });
 
   it("filters sessions from the control panel project selector", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;

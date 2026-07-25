@@ -454,29 +454,48 @@ describe("Backend connection state", () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const target = String(input);
-      if (target === "/api/state") {
-        return new Response(
-          JSON.stringify({
-            error: "proxy failed while reading C:\\internal\\server.ts",
-          }),
-          {
-            status: 502,
-            headers: {
-              "Content-Type": "application/json",
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = String(input);
+        if (target === "/api/state") {
+          return new Response(
+            JSON.stringify({
+              error: "proxy failed while reading C:\\internal\\server.ts",
+            }),
+            {
+              status: 502,
+              headers: {
+                "Content-Type": "application/json",
+              },
             },
-          },
-        );
-      }
-      if (target.startsWith("/api/workspaces/")) {
-        return new Response("", {
-          status: 404,
-        });
-      }
+          );
+        }
+        if (target.startsWith("/api/workspaces/")) {
+          if (init?.method === "PUT") {
+            return new Response(
+              JSON.stringify({
+                layout: {
+                  id: target.slice("/api/workspaces/".length),
+                  revision: 1,
+                  updatedAt: "2026-07-25 12:00:00",
+                  controlPanelSide: "left",
+                  workspace: { activePaneId: null, panes: [], root: null },
+                },
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+          return new Response("", {
+            status: 404,
+          });
+        }
 
-      throw new Error(`Unexpected fetch: ${target}`);
-    });
+        throw new Error(`Unexpected fetch: ${target}`);
+      },
+    );
     const countStateFetches = () =>
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/state")
         .length;

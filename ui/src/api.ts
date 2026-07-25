@@ -588,6 +588,8 @@ export function deleteWorkspaceLayout(workspaceId: string) {
 
 export function updateAppSettings(payload: {
   defaultCodexModel?: string;
+  defaultCodexSandboxMode?: SandboxMode;
+  defaultCodexApprovalPolicy?: ApprovalPolicy;
   defaultClaudeModel?: string;
   defaultCursorModel?: string;
   defaultGeminiModel?: string;

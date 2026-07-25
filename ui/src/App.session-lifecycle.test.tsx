@@ -81,7 +81,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -108,7 +108,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -243,7 +243,7 @@ describe("App session lifecycle", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -284,7 +284,7 @@ describe("App session lifecycle", () => {
   });
 
   it("arms the active-prompt poll and adopts a replacement-instance recovery state when a successful send response is stale", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalFetch = globalThis.fetch;
@@ -498,7 +498,7 @@ describe("App session lifecycle", () => {
     // immediately when the rejected response was from a different instance,
     // so adoption flips within a single round trip. See bugs.md
     // "Send-after-restart leaves session preview tooltip stale for 30 s".
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalFetch = globalThis.fetch;
@@ -714,7 +714,7 @@ describe("App session lifecycle", () => {
   });
 
   it("streams assistant deltas on a recreated EventSource after approval recovery crosses a backend restart", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalFetch = globalThis.fetch;
@@ -930,7 +930,7 @@ describe("App session lifecycle", () => {
   });
 
   it("cancels the active-prompt poll once live updates resume for that session", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalFetch = globalThis.fetch;
@@ -1127,7 +1127,7 @@ describe("App session lifecycle", () => {
   });
 
   it("arms the active-prompt poll when an adopted send response is still active", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalFetch = globalThis.fetch;
@@ -1291,7 +1291,7 @@ describe("App session lifecycle", () => {
   });
 
   it("does not arm the active-prompt poll when an adopted send response is idle", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalFetch = globalThis.fetch;
@@ -1465,7 +1465,7 @@ describe("App session lifecycle", () => {
   });
 
   it("shows the Gemini interactive-shell warning when Gemini is selected", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1543,7 +1543,7 @@ describe("App session lifecycle", () => {
   });
 
   it("keeps the Create Session assistant pick after changing away from the active session agent", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const setup = await renderAppWithProjectAndSession();
       try {
         await openCreateSessionDialog();
@@ -1583,7 +1583,7 @@ describe("App session lifecycle", () => {
   });
 
   it("refreshes model options after creating a new Codex session", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -1715,7 +1715,7 @@ describe("App session lifecycle", () => {
   });
 
   it("uses a one-shot state probe after a backend-unavailable create-session error", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -1830,7 +1830,7 @@ describe("App session lifecycle", () => {
   });
 
   it("resyncs on the first wake-gap tick for a newly created active session before any SSE arrives", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -2006,12 +2006,15 @@ describe("App session lifecycle", () => {
         ).toBeInTheDocument();
         fetchStateSpy.mockClear();
 
-        // Fake timers trigger overlapping React act() work in this create-session
-        // flow, so keep one real watchdog interval and drive only Date.now.
+        // Keep one real watchdog interval and own every update it can trigger
+        // inside the same act boundary. Fake timers are inappropriate here
+        // because the create-session flow also has independently scheduled work.
         mockedNow =
           baseline.getTime() + LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS + 2000;
-        await new Promise((resolve) => window.setTimeout(resolve, 1500));
-        await settleAsyncUi();
+        await act(async () => {
+          await new Promise((resolve) => window.setTimeout(resolve, 1500));
+          await flushUiWork();
+        });
 
         await waitFor(() => {
           expect(fetchStateSpy).toHaveBeenCalledTimes(1);
@@ -2034,7 +2037,7 @@ describe("App session lifecycle", () => {
   });
 
   it("shows a Codex notice when live model refresh resets reasoning effort after session creation", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -2174,14 +2177,12 @@ describe("App session lifecycle", () => {
       }
     });
   });
-  it("applies the configured Codex reasoning effort to new Codex sessions", async () => {
-    await withSuppressedActWarnings(async () => {
+  it("leaves the configured Codex reasoning effort to the backend when creating sessions", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       const fetchStateDeferred =
-        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
-      const updateSettingsDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       const createSessionDeferred =
         createDeferred<Awaited<ReturnType<typeof api.createSession>>>();
@@ -2190,9 +2191,6 @@ describe("App session lifecycle", () => {
       const fetchStateSpy = vi
         .spyOn(api, "fetchState")
         .mockImplementation(() => fetchStateDeferred.promise);
-      const updateAppSettingsSpy = vi
-        .spyOn(api, "updateAppSettings")
-        .mockImplementation(() => updateSettingsDeferred.promise);
       const createSessionSpy = vi
         .spyOn(api, "createSession")
         .mockImplementation(() => createSessionDeferred.promise);
@@ -2216,7 +2214,7 @@ describe("App session lifecycle", () => {
             makeStateResponse({
               revision: 1,
               preferences: {
-                defaultCodexReasoningEffort: "medium",
+                defaultCodexReasoningEffort: "high",
                 defaultClaudeApprovalMode: "auto-approve",
                 defaultClaudeEffort: "default",
               },
@@ -2229,41 +2227,55 @@ describe("App session lifecycle", () => {
           await flushUiWork();
         });
 
-        await clickAndSettle(
-          await screen.findByRole("button", { name: "Open preferences" }),
-        );
-        await clickAndSettle(screen.getByRole("tab", { name: "Codex" }));
-        await selectComboboxOption("Default reasoning effort", /high/i);
-        await waitFor(() => {
-          expect(updateAppSettingsSpy).toHaveBeenCalledWith({
-            defaultCodexReasoningEffort: "high",
-          });
-        });
-        await act(async () => {
-          updateSettingsDeferred.resolve(
-            makeStateResponse({
-              revision: 2,
-              preferences: {
-                defaultCodexReasoningEffort: "high",
-                defaultClaudeEffort: "default",
-              },
-              projects: [],
-              orchestrators: [],
-              workspaces: [],
-              sessions: [],
-            }),
-          );
-          await flushUiWork();
-        });
-        await clickAndSettle(
-          screen.getByRole("button", { name: "Close dialog" }),
-        );
-
         await openCreateSessionDialog();
         await settleAsyncUi();
-        expect(
-          screen.getByRole("combobox", { name: "Codex reasoning effort" }),
-        ).toHaveTextContent("high");
+        createSessionDeferred.resolve({
+          sessionId: "session-1",
+          revision: 2,
+          serverInstanceId: "test-instance",
+          session: {
+            id: "session-1",
+            name: "Codex 1",
+            emoji: "O",
+            agent: "Codex",
+            workdir: "/tmp",
+            model: "gpt-5.4",
+            approvalPolicy: "never",
+            reasoningEffort: "high",
+            sandboxMode: "workspace-write",
+            status: "idle",
+            preview: "Ready for a prompt.",
+            messages: [],
+          },
+        });
+        refreshSessionModelOptionsDeferred.resolve(
+          makeStateResponse({
+            revision: 3,
+            preferences: {
+              defaultCodexReasoningEffort: "high",
+              defaultClaudeEffort: "default",
+            },
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              {
+                id: "session-1",
+                name: "Codex 1",
+                emoji: "O",
+                agent: "Codex",
+                workdir: "/tmp",
+                model: "gpt-5.4",
+                approvalPolicy: "never",
+                reasoningEffort: "high",
+                sandboxMode: "workspace-write",
+                status: "idle",
+                preview: "Ready for a prompt.",
+                messages: [],
+              },
+            ],
+          }),
+        );
         await submitButtonAndSettle(
           screen.getByRole("button", { name: "Create session" }),
         );
@@ -2272,67 +2284,16 @@ describe("App session lifecycle", () => {
           expect(createSessionSpy).toHaveBeenCalledWith(
             expect.objectContaining({
               agent: "Codex",
-              reasoningEffort: "high",
             }),
           );
-        });
-        await act(async () => {
-          createSessionDeferred.resolve({
-            sessionId: "session-1",
-            revision: 3,
-            serverInstanceId: "test-instance",
-            session: {
-              id: "session-1",
-              name: "Codex 1",
-              emoji: "O",
-              agent: "Codex",
-              workdir: "/tmp",
-              model: "gpt-5.4",
-              approvalPolicy: "never",
-              reasoningEffort: "high",
-              sandboxMode: "workspace-write",
-              status: "idle",
-              preview: "Ready for a prompt.",
-              messages: [],
-            },
-          });
-          await flushUiWork();
+          expect(createSessionSpy.mock.calls[0]?.[0]).not.toHaveProperty(
+            "reasoningEffort",
+          );
         });
         await waitFor(() => {
           expect(refreshSessionModelOptionsSpy).toHaveBeenCalledWith(
             "session-1",
           );
-        });
-        await act(async () => {
-          refreshSessionModelOptionsDeferred.resolve(
-            makeStateResponse({
-              revision: 4,
-              preferences: {
-                defaultCodexReasoningEffort: "high",
-                defaultClaudeEffort: "default",
-              },
-              projects: [],
-              orchestrators: [],
-              workspaces: [],
-              sessions: [
-                {
-                  id: "session-1",
-                  name: "Codex 1",
-                  emoji: "O",
-                  agent: "Codex",
-                  workdir: "/tmp",
-                  model: "gpt-5.4",
-                  approvalPolicy: "never",
-                  reasoningEffort: "high",
-                  sandboxMode: "workspace-write",
-                  status: "idle",
-                  preview: "Ready for a prompt.",
-                  messages: [],
-                },
-              ],
-            }),
-          );
-          await flushUiWork();
         });
         await settleAsyncUi();
       } finally {
@@ -2340,7 +2301,6 @@ describe("App session lifecycle", () => {
         window.localStorage.clear();
         scrollIntoViewSpy.mockRestore();
         fetchStateSpy.mockRestore();
-        updateAppSettingsSpy.mockRestore();
         createSessionSpy.mockRestore();
         refreshSessionModelOptionsSpy.mockRestore();
         restoreGlobal("EventSource", originalEventSource);
@@ -2350,7 +2310,7 @@ describe("App session lifecycle", () => {
   });
 
   it("applies the configured Claude effort to new Claude sessions", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -2526,7 +2486,7 @@ describe("App session lifecycle", () => {
   });
 
   it("keeps unsaved remote draft edits across unrelated state refreshes", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -2661,7 +2621,7 @@ describe("App session lifecycle", () => {
   });
 
   it("routes current-workspace session creation through the active remote project", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -2860,7 +2820,7 @@ describe("App session lifecycle", () => {
   });
 
   it("does not open a phantom pane for a stale create response whose session is still absent", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -2975,7 +2935,7 @@ describe("App session lifecycle", () => {
   });
 
   it("recovers instead of directly adopting an unknown cross-instance create response", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -3086,7 +3046,7 @@ describe("App session lifecycle", () => {
   });
 
   it("opens the created session after action-recovery resync adopts a stale create response", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -3207,7 +3167,7 @@ describe("App session lifecycle", () => {
   });
 
   it("opens the created session only after a later state event when the first recovery snapshot still omits it", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -3347,7 +3307,7 @@ describe("App session lifecycle", () => {
   });
 
   it("does not open a phantom pane for a stale fork response whose session is still absent", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -3515,7 +3475,7 @@ describe("App session lifecycle", () => {
   });
 
   it("shows fork notice when the fork response materializes the new session", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -3634,7 +3594,7 @@ describe("App session lifecycle", () => {
   });
 
   it("opens the forked session after action-recovery resync adopts a stale fork response", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -3795,7 +3755,7 @@ describe("App session lifecycle", () => {
   });
 
   it("opens the forked session only after a later state event when the first recovery snapshot still omits it", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;

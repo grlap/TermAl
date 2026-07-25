@@ -51,7 +51,9 @@ import {
 import {
   DEFAULT_CLAUDE_APPROVAL_MODE,
   DEFAULT_CLAUDE_EFFORT,
+  DEFAULT_CODEX_APPROVAL_POLICY,
   DEFAULT_CODEX_REASONING_EFFORT,
+  DEFAULT_CODEX_SANDBOX_MODE,
   resolveAppPreferences,
 } from "./session-model-utils";
 import type {
@@ -106,9 +108,9 @@ export function useAppPreferencesState(
     initialWorkspaceBootstrap.densityPercent,
   );
   const [defaultCodexSandboxMode, setDefaultCodexSandboxMode] =
-    useState<SandboxMode>("workspace-write");
+    useState<SandboxMode>(DEFAULT_CODEX_SANDBOX_MODE);
   const [defaultCodexApprovalPolicy, setDefaultCodexApprovalPolicy] =
-    useState<ApprovalPolicy>("never");
+    useState<ApprovalPolicy>(DEFAULT_CODEX_APPROVAL_POLICY);
   const [defaultCodexModel, setDefaultCodexModel] = useState("default");
   const [defaultClaudeModel, setDefaultClaudeModel] = useState("default");
   const [defaultCursorModel, setDefaultCursorModel] = useState("default");

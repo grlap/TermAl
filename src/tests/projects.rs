@@ -51,6 +51,8 @@ fn creates_sessions_for_remote_projects_over_ssh() {
             default_cursor_model: None,
             default_gemini_model: None,
             default_codex_reasoning_effort: None,
+            default_codex_sandbox_mode: None,
+            default_codex_approval_policy: None,
             default_claude_approval_mode: None,
             default_claude_effort: None,
             remotes: Some(vec![

@@ -2,11 +2,13 @@ import type {
   AgentReadiness,
   AgentType,
   AppPreferences,
+  ApprovalPolicy,
   ClaudeApprovalMode,
   ClaudeEffortLevel,
   CodexReasoningEffort,
   Project,
   RemoteConfig,
+  SandboxMode,
   Session,
   SessionModelOption,
   TelegramUiConfig,
@@ -65,6 +67,8 @@ export const SESSION_SCOPED_MODEL_AGENTS = new Set<AgentType>(["Claude", "Codex"
 export const ALL_CODEX_REASONING_EFFORTS = CODEX_REASONING_EFFORT_OPTIONS.map(
   (option) => option.value,
 ) as CodexReasoningEffort[];
+export const DEFAULT_CODEX_SANDBOX_MODE: SandboxMode = "workspace-write";
+export const DEFAULT_CODEX_APPROVAL_POLICY: ApprovalPolicy = "never";
 export const DEFAULT_CODEX_REASONING_EFFORT: CodexReasoningEffort = "medium";
 export const DEFAULT_CLAUDE_APPROVAL_MODE: ClaudeApprovalMode = "ask";
 export const DEFAULT_CLAUDE_EFFORT: ClaudeEffortLevel = "default";
@@ -155,6 +159,9 @@ export function currentSessionModelOption(session: Session) {
 export function resolveAppPreferences(preferences?: AppPreferences | null) {
   return {
     defaultCodexModel: preferences?.defaultCodexModel ?? DEFAULT_MODEL_PREFERENCE,
+    defaultCodexSandboxMode: preferences?.defaultCodexSandboxMode ?? DEFAULT_CODEX_SANDBOX_MODE,
+    defaultCodexApprovalPolicy:
+      preferences?.defaultCodexApprovalPolicy ?? DEFAULT_CODEX_APPROVAL_POLICY,
     defaultClaudeModel: preferences?.defaultClaudeModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultCursorModel: preferences?.defaultCursorModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultGeminiModel: preferences?.defaultGeminiModel ?? DEFAULT_MODEL_PREFERENCE,

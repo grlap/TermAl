@@ -78,7 +78,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -105,7 +105,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -240,7 +240,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =

@@ -1444,7 +1444,16 @@ describe("OrchestratorTemplatesPanel", () => {
     }
     fireEvent.click(boardSurface);
 
-    const addSessionButton = screen.getByRole("button", {
+    // This boundary fixture deliberately renders 50 full canvas cards. Query
+    // the known inspector action directly instead of asking the accessibility
+    // engine to recompute names for the entire board.
+    const inspectorActions = document.querySelector(
+      ".orchestrator-inspector-empty-actions",
+    );
+    if (!(inspectorActions instanceof HTMLElement)) {
+      throw new Error("Orchestrator inspector actions not found");
+    }
+    const addSessionButton = within(inspectorActions).getByRole("button", {
       name: "Add session",
     });
     expect(addSessionButton).toBeDisabled();

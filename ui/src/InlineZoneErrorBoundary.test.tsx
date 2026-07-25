@@ -28,6 +28,18 @@ function Safe({ text }: { text: string }): ReactNode {
 
 describe("InlineZoneErrorBoundary", () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  const expectedRenderErrors = new Set([
+    "KaTeX parse failed",
+    "first throw",
+    "mermaid parse failed",
+  ]);
+  const preventExpectedWindowError = (event: ErrorEvent) => {
+    const message =
+      event.error instanceof Error ? event.error.message : event.message;
+    if (expectedRenderErrors.has(message)) {
+      event.preventDefault();
+    }
+  };
 
   beforeEach(() => {
     // React logs a secondary "The above error occurred in ..."
@@ -36,9 +48,14 @@ describe("InlineZoneErrorBoundary", () => {
     // stays readable. We still inspect the spy for assertions
     // that care about logging.
     consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // jsdom also forwards React's deliberately thrown render error through the
+    // window error channel. Prevent its virtual-console duplicate; each test
+    // still proves the throw was caught through the fallback or logged error.
+    window.addEventListener("error", preventExpectedWindowError);
   });
 
   afterEach(() => {
+    window.removeEventListener("error", preventExpectedWindowError);
     consoleErrorSpy.mockRestore();
   });
 

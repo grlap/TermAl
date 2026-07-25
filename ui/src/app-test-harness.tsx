@@ -3,7 +3,7 @@
 // Owns: shared frontend-test scaffolding that every App.* test
 // file in this directory depends on. That includes the
 // EventSource/ResizeObserver stubs, a JSON `Response` shim, the
-// act-wrapped UI-settling helpers (`flushUiWork`, `settleAsyncUi`,
+// act-owned UI-settling helpers (`flushUiWork`, `settleAsyncUi`,
 // `advanceTimers`, `clickAndSettle`, `submitButtonAndSettle`), the
 // `renderApp` / `renderAppWithProjectAndSession` harnesses, the
 // fallback-state harness used by the SSE-recovery tests, fixture
@@ -25,6 +25,15 @@ import { vi } from "vitest";
 
 import * as api from "./api";
 import App from "./App";
+import {
+  appTestHooks,
+  setAppTestHooksForTests,
+} from "./app-test-hooks";
+import {
+  DEFAULT_CODEX_APPROVAL_POLICY,
+  DEFAULT_CODEX_REASONING_EFFORT,
+  DEFAULT_CODEX_SANDBOX_MODE,
+} from "./session-model-utils";
 import type { AgentReadiness, OrchestratorInstance, Session } from "./types";
 import type { WorkspaceState } from "./workspace";
 
@@ -120,7 +129,7 @@ export function restoreGlobal<Key extends RestorableGlobalKey>(
   globalThis[key] = originalValue;
 }
 
-export function createActWrappedAnimationFrameMocks() {
+export function createScheduledAnimationFrameMocks() {
   let nextFrameId = 1;
   const callbacks = new Map<number, FrameRequestCallback>();
 
@@ -135,9 +144,12 @@ export function createActWrappedAnimationFrameMocks() {
       }
 
       callbacks.delete(frameId);
-      act(() => {
-        pending(Date.now());
-      });
+      // The mock only reproduces animation-frame scheduling. Callers whose
+      // callbacks can commit React state must flush this queued microtask from
+      // their own act() boundary (normally via settleAsyncUi). Opening a
+      // second act() here can overlap that boundary and corrupt React's global
+      // test scope.
+      pending(Date.now());
     });
     return frameId;
   }
@@ -220,6 +232,8 @@ export function makeStateResponse(overrides: AppTestStateResponseOverrides): App
     agentReadiness: overrides.agentReadiness ?? [],
     preferences: {
       defaultCodexModel: "default",
+      defaultCodexSandboxMode: DEFAULT_CODEX_SANDBOX_MODE,
+      defaultCodexApprovalPolicy: DEFAULT_CODEX_APPROVAL_POLICY,
       defaultClaudeModel: "default",
       defaultCursorModel: "default",
       defaultGeminiModel: "default",
@@ -263,11 +277,64 @@ export async function advanceTimers(durationMs: number) {
   });
 }
 
-export async function renderApp() {
-  await act(async () => {
-    render(<App />);
-  });
-  await settleAsyncUi();
+export async function renderApp({
+  waitForWorkspaceLayout = true,
+}: {
+  waitForWorkspaceLayout?: boolean;
+} = {}) {
+  if (!waitForWorkspaceLayout) {
+    await act(async () => {
+      render(<App />);
+    });
+    await settleAsyncUi();
+    return;
+  }
+
+  const workspaceLayoutCommitRelease = createDeferred<void>();
+  const workspaceLayoutCommitEntered = createDeferred<void>();
+  const previousTestHooks = appTestHooks;
+  let didEnterWorkspaceLayoutCommit = false;
+  const beforeWorkspaceLayoutLoadCommit = async () => {
+    if (!didEnterWorkspaceLayoutCommit) {
+      didEnterWorkspaceLayoutCommit = true;
+      workspaceLayoutCommitEntered.resolve();
+    }
+    await workspaceLayoutCommitRelease.promise;
+  };
+
+  try {
+    setAppTestHooksForTests({
+      ...previousTestHooks,
+      beforeWorkspaceLayoutLoadCommit,
+    });
+    await act(async () => {
+      render(<App />);
+    });
+    await act(async () => {
+      await flushUiWork();
+      if (!didEnterWorkspaceLayoutCommit) {
+        throw new Error(
+          "renderApp did not reach the workspace-layout commit barrier; " +
+            "resolve the fetchWorkspaceLayout fixture or call " +
+            "renderApp({ waitForWorkspaceLayout: false }) when the pending " +
+            "request is the behavior under test.",
+        );
+      }
+      await workspaceLayoutCommitEntered.promise;
+      workspaceLayoutCommitRelease.resolve();
+      await flushUiWork();
+    });
+  } finally {
+    // A render failure can happen before the app reaches the hook. Release any
+    // hook invocation already in flight before restoring the previous object.
+    workspaceLayoutCommitRelease.resolve();
+    if (
+      appTestHooks?.beforeWorkspaceLayoutLoadCommit ===
+      beforeWorkspaceLayoutLoadCommit
+    ) {
+      setAppTestHooksForTests(previousTestHooks);
+    }
+  }
 }
 
 export function latestEventSource(): EventSourceMock {
@@ -403,27 +470,34 @@ export async function submitButtonAndSettle(target: HTMLElement) {
   await settleAsyncUi();
 }
 
-// React still warns for detached async handlers kicked off by these integration
-// flows. Keep any suppression local to the specific tests that exercise them.
-export async function withSuppressedActWarnings<T>(run: () => Promise<T>) {
+export async function withVerifiedNoReactActWarnings<T>(run: () => Promise<T>) {
+  // Tests that also inspect console errors must install their spy before this
+  // helper so the verifier remains the outermost interceptor.
   const originalConsoleError = console.error;
-  const consoleErrorSpy = vi
-    .spyOn(console, "error")
-    .mockImplementation((message?: unknown, ...args: unknown[]) => {
-      if (
-        typeof message === "string" &&
-        message.includes("not wrapped in act")
-      ) {
-        return;
-      }
+  const actWarnings: string[] = [];
+  const interceptConsoleError = (message?: unknown, ...args: unknown[]) => {
+    if (
+      typeof message === "string" &&
+      (message.includes("not wrapped in act") ||
+        message.includes("overlapping act()"))
+    ) {
+      actWarnings.push(message);
+    }
 
-      originalConsoleError.call(console, message, ...args);
-    });
+    originalConsoleError.call(console, message, ...args);
+  };
+  console.error = interceptConsoleError;
 
   try {
-    return await run();
+    const result = await run();
+    if (actWarnings.length > 0) {
+      throw new Error(
+        `React act warning emitted during test flow:\n${actWarnings.join("\n")}`,
+      );
+    }
+    return result;
   } finally {
-    consoleErrorSpy.mockRestore();
+    console.error = originalConsoleError;
   }
 }
 
@@ -607,7 +681,22 @@ export async function renderAppWithProjectAndSession(
         requestUrl.pathname.startsWith("/api/workspaces/")
       ) {
         if ((init?.method ?? "GET").toUpperCase() === "PUT") {
-          return jsonResponse({ ok: true });
+          if (typeof init?.body !== "string") {
+            throw new Error(
+              "Workspace persistence fixture requires a JSON body.",
+            );
+          }
+          const workspaceId = decodeURIComponent(
+            requestUrl.pathname.slice("/api/workspaces/".length),
+          );
+          return jsonResponse({
+            layout: {
+              id: workspaceId,
+              revision: 1,
+              updatedAt: "2026-03-30 09:00:00",
+              ...(JSON.parse(init.body) as object),
+            },
+          });
         }
 
         return new Response("", { status: 404 });
@@ -685,9 +774,9 @@ export function makeSession(id: string, overrides?: Partial<Session>): Session {
     agent: "Codex",
     workdir: "/tmp",
     model: "gpt-5.4",
-    approvalPolicy: "never",
-    reasoningEffort: "medium",
-    sandboxMode: "workspace-write",
+    approvalPolicy: DEFAULT_CODEX_APPROVAL_POLICY,
+    reasoningEffort: DEFAULT_CODEX_REASONING_EFFORT,
+    sandboxMode: DEFAULT_CODEX_SANDBOX_MODE,
     status: "idle",
     preview: "",
     messages: [],

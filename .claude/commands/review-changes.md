@@ -42,7 +42,7 @@ If it produces ANY errors, stop immediately and present the output.
 
 Then run `scripts/test-rust.sh` in the parent session. This wrapper raises the
 Unix file-descriptor soft limit where possible and bounds Rust test
-parallelism so FD-heavy fixtures do not make the gate flaky.
+parallelism so FD-heavy fixtures do not exhaust the process descriptor budget.
 If it produces ANY failures or errors, stop immediately and present the output.
 
 Then run `cd ui && npx vitest run` in the parent session.

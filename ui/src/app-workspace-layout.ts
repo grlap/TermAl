@@ -56,6 +56,7 @@ import {
   workspaceHasDelegatedChildSessionReferences,
   type WorkspaceState,
 } from "./workspace";
+import { appTestHooks } from "./app-test-hooks";
 import {
   createWorkspaceViewId,
   deleteStoredWorkspaceLayout,
@@ -169,6 +170,16 @@ function workspaceHasSessionReferences(workspace: WorkspaceState) {
       return "originSessionId" in tab && !!tab.originSessionId;
     });
   });
+}
+
+async function waitForWorkspaceLayoutLoadCommitTestBarrier() {
+  // Production never installs this hook. Tests use it as a data-free,
+  // cancellation-safe boundary immediately before either fetch outcome
+  // commits state, so renderApp can deterministically own that commit.
+  const beforeCommit = appTestHooks?.beforeWorkspaceLayoutLoadCommit;
+  if (beforeCommit) {
+    await beforeCommit();
+  }
 }
 
 export function useAppWorkspaceLayout(
@@ -536,7 +547,10 @@ export function useAppWorkspaceLayout(
     setIsWorkspaceLayoutReady(false);
 
     void fetchWorkspaceLayout(workspaceViewId)
-      .then((response) => {
+      .then(async (response) => {
+        if (import.meta.env.MODE === "test") {
+          await waitForWorkspaceLayoutLoadCommitTestBarrier();
+        }
         if (cancelled) {
           return;
         }
@@ -637,7 +651,10 @@ export function useAppWorkspaceLayout(
           isFetchedWorkspaceLayoutWaitingForSessions;
         setIsWorkspaceLayoutReady(!isFetchedWorkspaceLayoutWaitingForSessions);
       })
-      .catch((error) => {
+      .catch(async (error) => {
+        if (import.meta.env.MODE === "test") {
+          await waitForWorkspaceLayoutLoadCommitTestBarrier();
+        }
         console.warn(
           "workspace layout warning> failed to load server workspace layout:",
           error,

@@ -79,7 +79,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -106,7 +106,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 const RECONNECT_STATE_RESYNC_TEST_BUFFER_MS = Math.max(
@@ -252,7 +252,7 @@ describe("App live state — reconnect", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -322,24 +322,21 @@ describe("App live state — reconnect", () => {
 
       const eventSource = latestEventSource();
 
-      act(() => {
-        eventSource.dispatchOpen();
-        eventSource.dispatchNamedEvent("state", {
-          revision: 2,
-          projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Newer Session",
-              preview: "Fresh preview",
-              status: "active",
-            }),
-          ],
-        });
+      await dispatchOpenedStateEvent(eventSource, {
+        revision: 2,
+        projects: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Newer Session",
+            preview: "Fresh preview",
+            status: "active",
+          }),
+        ],
       });
 
       await screen.findByText("Newer Session");
 
-      act(() => {
+      await act(async () => {
         eventSource.dispatchNamedEvent("delta", {
           type: "messageCreated",
           revision: 4,
@@ -357,6 +354,7 @@ describe("App live state — reconnect", () => {
           preview: "Should trigger resync",
           status: "active",
         });
+        await flushUiWork();
       });
 
       await waitFor(() => {
@@ -938,7 +936,7 @@ describe("App live state — reconnect", () => {
     // earlier-scheduled reconnect /api/state could roll the active pane back
     // past streamed assistant content that already arrived via SSE deltas,
     // making the latest message disappear with no further deltas to re-add it.
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
     const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
       makeStateResponse({
         revision: 4,
@@ -1347,7 +1345,7 @@ describe("App live state — reconnect", () => {
   });
 
   it("resyncs marked fallback state events instead of adopting their empty snapshot", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const resyncStateDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       let fetchStateCallCount = 0;
@@ -1429,7 +1427,7 @@ describe("App live state — reconnect", () => {
   });
 
   it("keeps fallback-only assistant text hidden until a fresh SSE state confirms it", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const resyncStateDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(
@@ -1580,7 +1578,7 @@ describe("App live state — reconnect", () => {
   });
 
   it("ignores a stale same-revision reconnect state after fallback-driven resync", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const resyncStateDeferred =
         createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
       let fetchStateCallCount = 0;
@@ -1678,7 +1676,7 @@ describe("App live state — reconnect", () => {
   });
 
   it("retries the armed reconnect fallback after a fallback-driven /api/state failure", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let fetchStateCallCount = 0;
       const fetchStateSpy = vi
         .spyOn(api, "fetchState")
@@ -1768,7 +1766,7 @@ describe("App live state — reconnect", () => {
   });
 
   it("retries fallback-driven resyncs on a live stream after a transient /api/state failure", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let fetchStateCallCount = 0;
       const fetchStateSpy = vi
         .spyOn(api, "fetchState")
@@ -1854,7 +1852,7 @@ describe("App live state — reconnect", () => {
   });
 
   it("adopts a newer replacement-instance snapshot from reconnect fallback recovery", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
         makeStateResponse({
           revision: 6,
@@ -1929,7 +1927,7 @@ describe("App live state — reconnect", () => {
     // matching `messageCount` would keep the flag at `true` and the
     // visible-session hydration effect would never re-fire — leaving
     // the user staring at the streaming partial until hard-refresh.
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
     const initialSession = makeSession("session-1", {
       name: "Active Session",
       preview: "Hello, I'll he",
@@ -2479,7 +2477,7 @@ describe("App live state — reconnect", () => {
   });
 
   it("retries initial-connect fallback resyncs after a transient /api/state failure", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let fetchStateCallCount = 0;
       const fetchStateSpy = vi
         .spyOn(api, "fetchState")
@@ -2545,7 +2543,7 @@ describe("App live state — reconnect", () => {
   });
 
   it("still adopts non-fallback empty state snapshots", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({

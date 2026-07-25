@@ -179,13 +179,29 @@ describe("SessionPaneView retry display state", () => {
 
   it("passes retry display states through the session renderer as lifecycle changes", async () => {
     const activeState = makeState(makeRetrySession("active"), 1);
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const target = String(input);
-      if (target === "/api/state") {
-        return jsonResponse(activeState);
-      }
-      throw new Error(`Unexpected fetch: ${target}`);
-    });
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = String(input);
+        if (target === "/api/state") {
+          return jsonResponse(activeState);
+        }
+        if (target.startsWith("/api/workspaces/")) {
+          if (init?.method === "PUT") {
+            return jsonResponse({
+              layout: {
+                id: target.slice("/api/workspaces/".length),
+                revision: 1,
+                updatedAt: "2026-07-25 12:00:00",
+                controlPanelSide: "left",
+                workspace: { activePaneId: null, panes: [], root: null },
+              },
+            });
+          }
+          return new Response("", { status: 404 });
+        }
+        throw new Error(`Unexpected fetch: ${target}`);
+      },
+    );
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal(
       "EventSource",

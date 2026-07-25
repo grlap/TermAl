@@ -150,10 +150,7 @@ export function useAppSessionActions(
     newProjectRemoteId,
     newProjectUsesLocalRemote,
     defaults: {
-      defaultCodexApprovalPolicy,
       defaultCodexModel,
-      defaultCodexReasoningEffort,
-      defaultCodexSandboxMode,
       defaultClaudeApprovalMode,
       defaultClaudeEffort,
       defaultClaudeModel,
@@ -739,17 +736,15 @@ export function useAppSessionActions(
       const created = await createSession({
         agent,
         model: requestedModel,
-        approvalPolicy:
-          agent === "Codex" ? defaultCodexApprovalPolicy : undefined,
-        reasoningEffort:
-          agent === "Codex" ? defaultCodexReasoningEffort : undefined,
         cursorMode: agent === "Cursor" ? defaultCursorMode : undefined,
         claudeApprovalMode:
           agent === "Claude" ? defaultClaudeApprovalMode : undefined,
         claudeEffort: agent === "Claude" ? defaultClaudeEffort : undefined,
         geminiApprovalMode:
           agent === "Gemini" ? defaultGeminiApprovalMode : undefined,
-        sandboxMode: agent === "Codex" ? defaultCodexSandboxMode : undefined,
+        // Ordinary Codex creates intentionally omit persisted prompt defaults.
+        // The target backend is authoritative, including for remote projects.
+        // Clone requests below still send the source session's explicit values.
         projectId: targetProjectId ?? targetProject?.id ?? undefined,
         workdir:
           targetProjectId || targetProject ? undefined : activeSession?.workdir,
@@ -794,11 +789,11 @@ export function useAppSessionActions(
         model: session.model,
         approvalPolicy:
           session.agent === "Codex"
-            ? (session.approvalPolicy ?? defaultCodexApprovalPolicy)
+            ? (session.approvalPolicy ?? undefined)
             : undefined,
         reasoningEffort:
           session.agent === "Codex"
-            ? (session.reasoningEffort ?? defaultCodexReasoningEffort)
+            ? (session.reasoningEffort ?? undefined)
             : undefined,
         cursorMode:
           session.agent === "Cursor"
@@ -818,7 +813,7 @@ export function useAppSessionActions(
             : undefined,
         sandboxMode:
           session.agent === "Codex"
-            ? (session.sandboxMode ?? defaultCodexSandboxMode)
+            ? (session.sandboxMode ?? undefined)
             : undefined,
         projectId:
           session.projectId && projectLookup.has(session.projectId)

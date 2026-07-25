@@ -67,7 +67,13 @@ import {
   LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
   LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,
 } from "./live-updates";
-import type { AgentReadiness, OrchestratorInstance, Session } from "./types";
+import type {
+  AgentReadiness,
+  ApprovalPolicy,
+  OrchestratorInstance,
+  SandboxMode,
+  Session,
+} from "./types";
 import * as workspaceStorage from "./workspace-storage";
 import { WORKSPACE_LAYOUT_STORAGE_KEY } from "./workspace-storage";
 import type { WorkspaceState, WorkspaceTab } from "./workspace";
@@ -77,7 +83,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -104,7 +110,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -239,7 +245,7 @@ describe("App preferences", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -412,6 +418,107 @@ describe("App preferences", () => {
     );
   });
 
+  it("persists and rehydrates Codex sandbox and approval defaults", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      let persistedSandboxMode: SandboxMode = "read-only";
+      let persistedApprovalPolicy: ApprovalPolicy = "on-failure";
+      let revision = 1;
+      const updateAppSettingsSpy = vi
+        .spyOn(api, "updateAppSettings")
+        .mockImplementation(async (payload) => {
+          persistedSandboxMode =
+            payload.defaultCodexSandboxMode ?? persistedSandboxMode;
+          persistedApprovalPolicy =
+            payload.defaultCodexApprovalPolicy ?? persistedApprovalPolicy;
+          revision += 1;
+          return makeStateResponse({
+            revision,
+            preferences: {
+              defaultCodexSandboxMode: persistedSandboxMode,
+              defaultCodexApprovalPolicy: persistedApprovalPolicy,
+            },
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          });
+        });
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        await dispatchStateEvent(
+          latestEventSource(),
+          makeStateResponse({
+            revision,
+            preferences: {
+              defaultCodexSandboxMode: persistedSandboxMode,
+              defaultCodexApprovalPolicy: persistedApprovalPolicy,
+            },
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }),
+        );
+
+        await clickAndSettle(
+          await screen.findByRole("button", { name: "Open preferences" }),
+        );
+        await clickAndSettle(screen.getByRole("tab", { name: "Codex" }));
+        await waitFor(() => {
+          expect(
+            screen.getByRole("combobox", { name: "Default sandbox" }),
+          ).toHaveTextContent("read-only");
+          expect(
+            screen.getByRole("combobox", {
+              name: "Default approval policy",
+            }),
+          ).toHaveTextContent("on-failure");
+        });
+
+        await selectComboboxOption(
+          "Default sandbox",
+          "danger-full-access",
+        );
+        await selectComboboxOption(
+          "Default approval policy",
+          "on-request",
+        );
+
+        await waitFor(() => {
+          expect(updateAppSettingsSpy.mock.calls).toEqual([
+            [{ defaultCodexSandboxMode: "danger-full-access" }],
+            [{ defaultCodexApprovalPolicy: "on-request" }],
+          ]);
+          expect(
+            screen.getByRole("combobox", { name: "Default sandbox" }),
+          ).toHaveTextContent("danger-full-access");
+          expect(
+            screen.getByRole("combobox", {
+              name: "Default approval policy",
+            }),
+          ).toHaveTextContent("on-request");
+        });
+      } finally {
+        scrollIntoViewSpy.mockRestore();
+        updateAppSettingsSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("separates theme selection from editor and UI appearance controls in preferences", async () => {
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
@@ -488,7 +595,7 @@ describe("App preferences", () => {
   });
 
   it("adopts a replacement-instance preferences fallback after a failed settings save", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       // This flow intentionally exercises a detached async settings-save
       // rejection. The fallback fetch is resolved in act below; keep the known
       // React warning local so the assertion remains load-bearing.
@@ -645,7 +752,7 @@ describe("App preferences", () => {
   });
 
   it("rejects replacement-instance preferences fallback after a non-backend settings save failure", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       type FetchStateResult = Awaited<ReturnType<typeof api.fetchState>>;

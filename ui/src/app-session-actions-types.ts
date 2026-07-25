@@ -17,17 +17,14 @@ import type {
   AgentReadiness,
   AgentType,
   ApprovalDecision,
-  ApprovalPolicy,
   ClaudeApprovalMode,
   ClaudeEffortLevel,
-  CodexReasoningEffort,
   CreateConversationMarkerOptions,
   CursorMode,
   GeminiApprovalMode,
   JsonValue,
   McpElicitationAction,
   Project,
-  SandboxMode,
   Session,
   SessionSettingsField,
   SessionSettingsValue,
@@ -42,10 +39,7 @@ export type UseAppSessionActionsLookups = {
 };
 
 export type UseAppSessionActionsDefaults = {
-  defaultCodexApprovalPolicy: ApprovalPolicy;
   defaultCodexModel: string;
-  defaultCodexReasoningEffort: CodexReasoningEffort;
-  defaultCodexSandboxMode: SandboxMode;
   defaultClaudeApprovalMode: ClaudeApprovalMode;
   defaultClaudeEffort: ClaudeEffortLevel;
   defaultClaudeModel: string;

@@ -80,7 +80,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -107,7 +107,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -242,7 +242,7 @@ describe("App diff preview", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -459,7 +459,7 @@ describe("App diff preview", () => {
   }
 
   it("hydrates stripped restored Git diff tabs after workspace layout readiness", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -538,7 +538,7 @@ describe("App diff preview", () => {
   });
 
   it("forwards diff preview save options through the App save adapter", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -712,7 +712,7 @@ describe("App diff preview", () => {
   });
 
   it("shows a restore error on stripped Git diff tabs when document refresh fails", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -782,7 +782,7 @@ describe("App diff preview", () => {
   });
 
   it("ignores late restored Git diff document responses after App unmount", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -862,7 +862,7 @@ describe("App diff preview", () => {
   });
 
   it("ignores stale manual Git diff responses after reopening the same request key", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;

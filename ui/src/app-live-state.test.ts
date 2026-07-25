@@ -321,6 +321,8 @@ function makeLiveStateParams(
     },
     preferenceSetters: {
       setDefaultCodexModel: noopSetter,
+      setDefaultCodexSandboxMode: noopSetter,
+      setDefaultCodexApprovalPolicy: noopSetter,
       setDefaultClaudeModel: noopSetter,
       setDefaultCursorModel: noopSetter,
       setDefaultGeminiModel: noopSetter,

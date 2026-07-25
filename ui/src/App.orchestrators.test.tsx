@@ -80,7 +80,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -107,7 +107,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -242,7 +242,7 @@ describe("App orchestrators", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -298,7 +298,7 @@ describe("App orchestrators", () => {
   });
 
   it("adopts the full orchestrator-start state so the next delta does not force a resync", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -512,7 +512,7 @@ describe("App orchestrators", () => {
   });
 
   it("updates the orchestrator library from live orchestrator deltas without forcing a resync", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
@@ -585,7 +585,7 @@ describe("App orchestrators", () => {
   });
 
   it("merges sessions carried by live orchestrator deltas without forcing a resync", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
@@ -763,7 +763,7 @@ describe("App orchestrators", () => {
   });
 
   it("groups orchestrated sessions inside the control panel session list", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -965,7 +965,7 @@ describe("App orchestrators", () => {
     });
   });
   it("controls orchestrators from the grouped session view", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1194,7 +1194,7 @@ describe("App orchestrators", () => {
   });
 
   it("shows orchestrator action errors from the grouped session view", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1331,7 +1331,7 @@ describe("App orchestrators", () => {
   });
 
   it("shows pending orchestrator actions as busy and disabled until the request resolves", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;

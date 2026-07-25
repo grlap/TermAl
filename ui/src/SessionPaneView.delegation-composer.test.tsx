@@ -5,8 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CreateDelegationRequest } from "./api";
 import {
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
-  withSuppressedActWarnings,
+  createScheduledAnimationFrameMocks,
+  settleAsyncUi,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 import { SessionPaneView } from "./SessionPaneView";
 import {
@@ -27,12 +28,14 @@ import type {
 
 const spawnDelegationCommandMock = vi.hoisted(() => vi.fn());
 const resolveAgentCommandMock = vi.hoisted(() => vi.fn());
+const fetchFileMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./api")>();
 
   return {
     ...actual,
+    fetchFile: fetchFileMock,
     resolveAgentCommand: resolveAgentCommandMock,
   };
 });
@@ -62,7 +65,23 @@ vi.mock("./panels/PaneTabs", () => ({
 }));
 
 vi.mock("./panels/SourcePanel", () => ({
-  SourcePanel: () => <div data-testid="source-panel" />,
+  SourcePanel: ({
+    fileState,
+  }: {
+    fileState: {
+      content: string;
+      path: string;
+      status: string;
+    };
+  }) => (
+    <div
+      data-testid="source-panel"
+      data-file-path={fileState.path}
+      data-file-status={fileState.status}
+    >
+      {fileState.content}
+    </div>
+  ),
 }));
 
 function makeProject(overrides: Partial<Project> = {}): Project {
@@ -305,11 +324,19 @@ describe("SessionPaneView composer delegation click-through", () => {
   beforeEach(() => {
     spawnDelegationCommandMock.mockReset();
     resolveAgentCommandMock.mockReset();
+    fetchFileMock.mockReset().mockResolvedValue({
+      path: "src/main.rs",
+      content: "fn main() {}\n",
+      contentHash: "sha256:source-fixture",
+      mtimeMs: 1,
+      sizeBytes: 13,
+      language: "rust",
+    });
     resetSessionStoreForTesting();
     const {
       cancelAnimationFrameMock,
       requestAnimationFrameMock,
-    } = createActWrappedAnimationFrameMocks();
+    } = createScheduledAnimationFrameMocks();
     animationFrameSpies = [
       vi
         .spyOn(window, "requestAnimationFrame")
@@ -397,7 +424,7 @@ describe("SessionPaneView composer delegation click-through", () => {
       screen.getByRole("option", { name: /\/review-code/ }),
     ).toBeInTheDocument();
 
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       await clickAndSettle(screen.getByRole("button", { name: "Delegate" }));
 
       await waitFor(() => {
@@ -483,7 +510,7 @@ describe("SessionPaneView composer delegation click-through", () => {
     expect(onDraftCommit).not.toHaveBeenCalled();
   });
 
-  it("hides composer controls for delegated child sessions while keeping transcript find available", () => {
+  it("hides composer controls for delegated child sessions while keeping transcript find available", async () => {
     const session = makeSession({
       id: "child-session-1",
       name: "Delegated reviewer",
@@ -504,6 +531,7 @@ describe("SessionPaneView composer delegation click-through", () => {
       draft: "This should not be editable here.",
       expectComposer: false,
     });
+    await settleAsyncUi();
 
     expect(screen.getByRole("button", { name: "Find" })).toBeInTheDocument();
     expect(screen.queryByLabelText(`Message ${session.name}`)).not.toBeInTheDocument();
@@ -512,7 +540,7 @@ describe("SessionPaneView composer delegation click-through", () => {
     expect(onDraftCommit).not.toHaveBeenCalled();
   });
 
-  it("keeps Stop and a running indicator for active delegated child sessions", () => {
+  it("keeps Stop and a running indicator for active delegated child sessions", async () => {
     const session = makeSession({
       id: "child-session-1",
       name: "Delegated reviewer",
@@ -535,6 +563,7 @@ describe("SessionPaneView composer delegation click-through", () => {
       draft: "This should not be editable here.",
       expectComposer: false,
     });
+    await settleAsyncUi();
 
     expect(screen.getByRole("button", { name: "Find" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Codex is running");
@@ -550,7 +579,7 @@ describe("SessionPaneView composer delegation click-through", () => {
     expect(onStopSession).toHaveBeenCalledWith("child-session-1");
   });
 
-  it("hides delegated child footer on non-session tabs", () => {
+  it("hides delegated child footer on non-session tabs", async () => {
     const session = makeSession({
       id: "child-session-1",
       name: "Delegated reviewer",
@@ -590,8 +619,21 @@ describe("SessionPaneView composer delegation click-through", () => {
       expectComposer: false,
       pane,
     });
+    await settleAsyncUi();
 
-    expect(screen.getByTestId("source-panel")).toBeInTheDocument();
+    expect(fetchFileMock).toHaveBeenCalledWith("src/main.rs", {
+      projectId: session.projectId,
+      sessionId: session.id,
+    });
+    expect(screen.getByTestId("source-panel")).toHaveAttribute(
+      "data-file-path",
+      "src/main.rs",
+    );
+    expect(screen.getByTestId("source-panel")).toHaveAttribute(
+      "data-file-status",
+      "ready",
+    );
+    expect(screen.getByTestId("source-panel")).toHaveTextContent("fn main() {}");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();

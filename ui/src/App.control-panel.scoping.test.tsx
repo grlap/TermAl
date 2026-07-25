@@ -76,7 +76,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -103,7 +103,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -238,7 +238,7 @@ describe("App control panel - scoping", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -279,7 +279,7 @@ describe("App control panel - scoping", () => {
   });
 
   it("removes projects from the context menu and resets project scopes", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const initialState = makeStateResponse({
         revision: 1,
         projects: [
@@ -496,7 +496,7 @@ describe("App control panel - scoping", () => {
     // silent no-ops. Pin the guard directly with a test-only hook placed
     // after the `isMountedRef` check but before the post-await state
     // update path.
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let deleteResolve!: (state: AppTestStateResponse) => void;
       const deletePromise = new Promise<AppTestStateResponse>((resolve) => {
         deleteResolve = resolve;
@@ -539,22 +539,6 @@ describe("App control panel - scoping", () => {
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
       const scrollIntoViewSpy = stubScrollIntoView();
-      const consoleErrorMessages: string[] = [];
-      const originalConsoleError = console.error;
-      const consoleErrorSpy = vi
-        .spyOn(console, "error")
-        .mockImplementation((message?: unknown, ...args: unknown[]) => {
-          if (
-            typeof message === "string" &&
-            message.includes("not wrapped in act")
-          ) {
-            return;
-          }
-          if (typeof message === "string") {
-            consoleErrorMessages.push(message);
-          }
-          originalConsoleError.call(console, message, ...args);
-        });
 
       try {
         let renderResult!: ReturnType<typeof render>;
@@ -604,15 +588,11 @@ describe("App control panel - scoping", () => {
           await flushUiWork();
         });
 
-        // No error messages should have been logged by the post-unmount
-        // resolution. A missing guard would land on `adoptState(...)`
-        // which calls `syncPreferencesFromState`, `adoptSessions`, and
-        // several setState functions â€” none of which should fire after
-        // unmount.
+        // A missing guard would land on `adoptState(...)`, which calls
+        // `syncPreferencesFromState`, `adoptSessions`, and several setState
+        // functions. The post-await hook pins that none fire after unmount.
         expect(postAwaitPathSpy).not.toHaveBeenCalled();
-        expect(consoleErrorMessages).toEqual([]);
       } finally {
-        consoleErrorSpy.mockRestore();
         scrollIntoViewSpy.mockRestore();
       }
     });
@@ -627,7 +607,7 @@ describe("App control panel - scoping", () => {
     // component. React 18 makes that a silent no-op, so pin the guard
     // directly with a test-only hook placed after the mounted check and
     // before `reportRequestError`.
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let deleteReject!: (error: unknown) => void;
       const deletePromise = new Promise<AppTestStateResponse>((_, reject) => {
         deleteReject = reject;
@@ -663,22 +643,6 @@ describe("App control panel - scoping", () => {
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
       const scrollIntoViewSpy = stubScrollIntoView();
-      const consoleErrorMessages: string[] = [];
-      const originalConsoleError = console.error;
-      const consoleErrorSpy = vi
-        .spyOn(console, "error")
-        .mockImplementation((message?: unknown, ...args: unknown[]) => {
-          if (
-            typeof message === "string" &&
-            message.includes("not wrapped in act")
-          ) {
-            return;
-          }
-          if (typeof message === "string") {
-            consoleErrorMessages.push(message);
-          }
-          originalConsoleError.call(console, message, ...args);
-        });
 
       try {
         let renderResult!: ReturnType<typeof render>;
@@ -725,20 +689,17 @@ describe("App control panel - scoping", () => {
           await flushUiWork();
         });
 
-        // Same invariant as the resolve test: no console errors from the
-        // post-unmount rejection path. The guard prevents
+        // Same invariant as the resolve test: the guard prevents
         // `reportRequestError` from firing after the unmount.
         expect(postAwaitPathSpy).not.toHaveBeenCalled();
-        expect(consoleErrorMessages).toEqual([]);
       } finally {
-        consoleErrorSpy.mockRestore();
         scrollIntoViewSpy.mockRestore();
       }
     });
   });
 
   it("keeps standalone project tabs independent from the docked control panel scope", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -842,7 +803,7 @@ describe("App control panel - scoping", () => {
   });
 
   it("keeps the control panel project aligned with the session when selecting a project-scoped tab", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1052,7 +1013,7 @@ describe("App control panel - scoping", () => {
     });
   });
   it("persists the nearest session context when selecting the control panel tab", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1227,7 +1188,7 @@ describe("App control panel - scoping", () => {
     });
   });
   it("re-scopes standalone Files and Git panes to the nearest session when selected", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1532,7 +1493,7 @@ describe("App control panel - scoping", () => {
     });
   });
   it("re-scopes a standalone Files pane to a projectless nearest session and resets the control panel filter", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;

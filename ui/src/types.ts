@@ -182,6 +182,8 @@ export type RemoteConfig = {
 
 export type AppPreferences = {
   defaultCodexModel: string;
+  defaultCodexSandboxMode?: SandboxMode;
+  defaultCodexApprovalPolicy?: ApprovalPolicy;
   defaultClaudeModel: string;
   defaultCursorModel: string;
   defaultGeminiModel: string;

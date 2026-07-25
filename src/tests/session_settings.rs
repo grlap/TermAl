@@ -163,6 +163,8 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
             default_cursor_model: Some("cursor-premium".to_owned()),
             default_gemini_model: Some("gemini-2.5-pro".to_owned()),
             default_codex_reasoning_effort: Some(CodexReasoningEffort::High),
+            default_codex_sandbox_mode: Some(CodexSandboxMode::DangerFullAccess),
+            default_codex_approval_policy: Some(CodexApprovalPolicy::OnRequest),
             default_claude_approval_mode: Some(ClaudeApprovalMode::AutoApprove),
             default_claude_effort: Some(ClaudeEffortLevel::Max),
             remotes: None,
@@ -172,6 +174,14 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     assert_eq!(
         updated.preferences.default_codex_reasoning_effort,
         CodexReasoningEffort::High
+    );
+    assert_eq!(
+        updated.preferences.default_codex_sandbox_mode,
+        CodexSandboxMode::DangerFullAccess
+    );
+    assert_eq!(
+        updated.preferences.default_codex_approval_policy,
+        CodexApprovalPolicy::OnRequest
     );
     assert_eq!(updated.preferences.default_codex_model, "gpt-5.5");
     assert_eq!(
@@ -196,6 +206,14 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     assert_eq!(
         reloaded_inner.preferences.default_codex_reasoning_effort,
         CodexReasoningEffort::High
+    );
+    assert_eq!(
+        reloaded_inner.preferences.default_codex_sandbox_mode,
+        CodexSandboxMode::DangerFullAccess
+    );
+    assert_eq!(
+        reloaded_inner.preferences.default_codex_approval_policy,
+        CodexApprovalPolicy::OnRequest
     );
     assert_eq!(reloaded_inner.preferences.default_codex_model, "gpt-5.5");
     assert_eq!(
@@ -282,7 +300,44 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         codex_session.reasoning_effort,
         Some(CodexReasoningEffort::High)
     );
+    assert_eq!(
+        codex_session.sandbox_mode,
+        Some(CodexSandboxMode::DangerFullAccess)
+    );
+    assert_eq!(
+        codex_session.approval_policy,
+        Some(CodexApprovalPolicy::OnRequest)
+    );
     assert_eq!(codex_session.model, "gpt-5.5");
+
+    let overridden_codex = reloaded_state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Explicit Codex".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: Some(CodexApprovalPolicy::Never),
+            reasoning_effort: Some(CodexReasoningEffort::Low),
+            sandbox_mode: Some(CodexSandboxMode::ReadOnly),
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    assert_eq!(
+        overridden_codex.session.approval_policy,
+        Some(CodexApprovalPolicy::Never)
+    );
+    assert_eq!(
+        overridden_codex.session.reasoning_effort,
+        Some(CodexReasoningEffort::Low)
+    );
+    assert_eq!(
+        overridden_codex.session.sandbox_mode,
+        Some(CodexSandboxMode::ReadOnly)
+    );
 
     let claude_created = reloaded_state
         .create_session(CreateSessionRequest {
@@ -358,6 +413,8 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
             default_cursor_model: None,
             default_gemini_model: None,
             default_codex_reasoning_effort: None,
+            default_codex_sandbox_mode: None,
+            default_codex_approval_policy: None,
             default_claude_approval_mode: None,
             default_claude_effort: None,
             remotes: None,
@@ -371,6 +428,8 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
             default_cursor_model: None,
             default_gemini_model: None,
             default_codex_reasoning_effort: None,
+            default_codex_sandbox_mode: None,
+            default_codex_approval_policy: None,
             default_claude_approval_mode: None,
             default_claude_effort: None,
             remotes: None,
@@ -502,6 +561,8 @@ fn update_app_settings_request_for_agent_model(
         default_cursor_model: (agent == Agent::Cursor).then(|| model.clone()),
         default_gemini_model: (agent == Agent::Gemini).then_some(model),
         default_codex_reasoning_effort: None,
+        default_codex_sandbox_mode: None,
+        default_codex_approval_policy: None,
         default_claude_approval_mode: None,
         default_claude_effort: None,
         remotes: None,

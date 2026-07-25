@@ -77,7 +77,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -104,7 +104,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -239,7 +239,7 @@ describe("App live state - visibility and wake recovery", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -280,7 +280,7 @@ describe("App live state - visibility and wake recovery", () => {
   });
 
   it("resyncs when the page becomes visible again after a live reply finishes while hidden", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -420,7 +420,7 @@ describe("App live state - visibility and wake recovery", () => {
   });
 
   it("recovers a replacement-instance snapshot returned by an approval action", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1098,40 +1098,36 @@ describe("App live state - visibility and wake recovery", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
-        eventSource.dispatchOpen();
-        eventSource.dispatchNamedEvent("state", {
-          revision: 1,
-          projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Codex Session",
-              status: "approval",
-              preview: "Approval pending.",
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "run the command",
-                },
-                {
-                  id: "message-approval-1",
-                  type: "approval",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  title: "Codex needs approval",
-                  command: "npm test",
-                  detail: "Need permission to run the test suite.",
-                  decision: "pending",
-                },
-              ],
-            }),
-          ],
-        });
+      await dispatchOpenedStateEvent(eventSource, {
+        revision: 1,
+        projects: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Codex Session",
+            status: "approval",
+            preview: "Approval pending.",
+            messages: [
+              {
+                id: "message-user-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "run the command",
+              },
+              {
+                id: "message-approval-1",
+                type: "approval",
+                timestamp: "10:01",
+                author: "assistant",
+                title: "Codex needs approval",
+                command: "npm test",
+                detail: "Need permission to run the test suite.",
+                decision: "pending",
+              },
+            ],
+          }),
+        ],
       });
-      await settleAsyncUi();
 
       await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
       const sessionList = document.querySelector(".session-list");
@@ -1265,53 +1261,49 @@ describe("App live state - visibility and wake recovery", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
-        eventSource.dispatchOpen();
-        // Intentionally no assistant message for session-1: the wake-gap path must
-        // stay armed even if unrelated sessions keep producing live traffic first.
-        eventSource.dispatchNamedEvent("state", {
-          revision: 1,
-          projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Quiet Session",
-              status: "active",
-              preview: "quiet prompt",
-              messages: [
-                {
-                  id: "message-user-quiet-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "quiet prompt",
-                },
-              ],
-            }),
-            makeSession("session-2", {
-              name: "Noisy Session",
-              status: "active",
-              preview: "Busy output 1",
-              messages: [
-                {
-                  id: "message-user-noisy-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "noisy prompt",
-                },
-                {
-                  id: "message-assistant-noisy-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Busy output 1",
-                },
-              ],
-            }),
-          ],
-        });
+      // Intentionally no assistant message for session-1: the wake-gap path must
+      // stay armed even if unrelated sessions keep producing live traffic first.
+      await dispatchOpenedStateEvent(eventSource, {
+        revision: 1,
+        projects: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Quiet Session",
+            status: "active",
+            preview: "quiet prompt",
+            messages: [
+              {
+                id: "message-user-quiet-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "quiet prompt",
+              },
+            ],
+          }),
+          makeSession("session-2", {
+            name: "Noisy Session",
+            status: "active",
+            preview: "Busy output 1",
+            messages: [
+              {
+                id: "message-user-noisy-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "noisy prompt",
+              },
+              {
+                id: "message-assistant-noisy-1",
+                type: "text",
+                timestamp: "10:01",
+                author: "assistant",
+                text: "Busy output 1",
+              },
+            ],
+          }),
+        ],
       });
-      await settleAsyncUi();
 
       await clickAndSettle(screen.getByRole("button", { name: "Sessions" }));
       const sessionList = document.querySelector(".session-list");

@@ -83,7 +83,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -110,7 +110,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -245,7 +245,7 @@ describe("App smoke", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -286,7 +286,7 @@ describe("App smoke", () => {
   });
 
   it("renders the app shell without crashing", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const requestUrl = new URL(String(input), "http://localhost");
         if (requestUrl.pathname === "/api/state") {
@@ -307,7 +307,7 @@ describe("App smoke", () => {
   });
 
   it("opens the control panel Sessions section via the toolbar button", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const context = await renderAppWithProjectAndSession();
       try {
         await clickAndSettle(
@@ -322,7 +322,7 @@ describe("App smoke", () => {
   });
 
   it("opens a session from the session list", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const context = await renderAppWithProjectAndSession();
       try {
         expect(await screen.findByLabelText("Message Session 1")).toBeInTheDocument();
@@ -333,7 +333,7 @@ describe("App smoke", () => {
   });
 
   it("restores helper setup globals when renderAppWithProjectAndSession fails", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -369,7 +369,7 @@ describe("App smoke", () => {
   });
 
   it("uses the freshly rendered EventSource when prior mock instances exist", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const staleDispatchError = vi.fn(() => {
         throw new Error("stale EventSource should not be reused");
       });
@@ -406,7 +406,7 @@ describe("App smoke", () => {
   });
 
   it("opens session find on Ctrl+F even when focused session controls stop propagation", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const context = await renderAppWithProjectAndSession();
       const composer = await screen.findByLabelText("Message Session 1");
       const stopPropagation = (event: KeyboardEvent) => {
@@ -436,7 +436,7 @@ describe("App smoke", () => {
   });
 
   it("cycles active session tabs on Alt+PageUp and Alt+PageDown", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const requestUrl = new URL(String(input), "http://localhost");
         if (requestUrl.pathname === "/api/state") {

@@ -6,8 +6,51 @@ import {
   areTelegramUiConfigsEqual,
   isDefaultModelPreference,
   normalizeTelegramUiConfig,
+  resolveAppPreferences,
   supportedClaudeEffortLevelsForModelOption,
 } from "./session-model-utils";
+import type { AppPreferences } from "./types";
+
+describe("resolveAppPreferences", () => {
+  it.each([
+    {
+      label: "omitted Codex prompt defaults",
+      preferences: null,
+      expectedSandboxMode: "workspace-write",
+      expectedApprovalPolicy: "never",
+    },
+    {
+      label: "persisted Codex prompt defaults",
+      preferences: {
+        defaultCodexModel: "default",
+        defaultCodexSandboxMode: "danger-full-access",
+        defaultCodexApprovalPolicy: "on-request",
+        defaultClaudeModel: "default",
+        defaultCursorModel: "default",
+        defaultGeminiModel: "default",
+        defaultCodexReasoningEffort: "xhigh",
+        defaultClaudeApprovalMode: "ask",
+        defaultClaudeEffort: "default",
+      } satisfies AppPreferences,
+      expectedSandboxMode: "danger-full-access",
+      expectedApprovalPolicy: "on-request",
+    },
+  ] as const)(
+    "resolves $label",
+    ({
+      preferences,
+      expectedSandboxMode,
+      expectedApprovalPolicy,
+    }) => {
+      const resolved = resolveAppPreferences(preferences);
+
+      expect(resolved.defaultCodexSandboxMode).toBe(expectedSandboxMode);
+      expect(resolved.defaultCodexApprovalPolicy).toBe(
+        expectedApprovalPolicy,
+      );
+    },
+  );
+});
 
 describe("isDefaultModelPreference", () => {
   it.each([

@@ -76,7 +76,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -103,7 +103,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -238,7 +238,7 @@ describe("App control panel - openers and canvas", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -387,10 +387,12 @@ describe("App control panel - openers and canvas", () => {
     }
   });
 
-  // This flow drives several panels; full-suite workers can push it past the
-  // default timeout even though it completes quickly in isolation.
-  it("opens standalone tabs for sessions, projects, and git from the control panel", async () => {
-    await withSuppressedActWarnings(async () => {
+  it.each([
+    { name: "Sessions tab", flow: "sessions" },
+    { name: "accumulating Projects and Git tabs", flow: "projects-git" },
+    { name: "orchestration canvas", flow: "orchestrator" },
+  ] as const)("opens a standalone $name from the control panel", async ({ flow }) => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -491,10 +493,10 @@ describe("App control panel - openers and canvas", () => {
       try {
         await renderApp();
         const eventSource = latestEventSource();
-        act(() => {
+        await act(async () => {
           eventSource.dispatchError();
+          await flushUiWork();
         });
-        await settleAsyncUi();
 
         const sessionList = document.querySelector(".session-list");
         if (!(sessionList instanceof HTMLDivElement)) {
@@ -510,58 +512,66 @@ describe("App control panel - openers and canvas", () => {
 
         await clickAndSettle(sessionRowButton);
 
-        await clickAndSettle(
-          await screen.findByRole("button", { name: "Open tab" }),
-        );
-        expect(
-          within(getSessionTablist()).getByText("Sessions"),
-        ).toBeInTheDocument();
+        if (flow === "sessions") {
+          await clickAndSettle(
+            await screen.findByRole("button", { name: "Open tab" }),
+          );
+          expect(
+            within(getSessionTablist()).getByText("Sessions"),
+          ).toBeInTheDocument();
+        }
 
-        await clickAndSettle(
-          await screen.findByRole("button", { name: "Projects" }),
-        );
-        await clickAndSettle(
-          await screen.findByRole("button", { name: "Open tab" }),
-        );
-        expect(
-          within(getSessionTablist()).getByText("Projects"),
-        ).toBeInTheDocument();
+        if (flow === "projects-git") {
+          await clickAndSettle(
+            await screen.findByRole("button", { name: "Projects" }),
+          );
+          await clickAndSettle(
+            await screen.findByRole("button", { name: "Open tab" }),
+          );
+          expect(
+            within(getSessionTablist()).getByText("Projects"),
+          ).toBeInTheDocument();
 
-        await clickAndSettle(
-          await screen.findByRole("button", { name: "Git status" }),
-        );
-        await clickAndSettle(
-          await screen.findByRole("button", { name: "Open tab" }),
-        );
-        expect(
-          within(getSessionTablist()).getByText(/^termal$/i),
-        ).toBeInTheDocument();
+          await clickAndSettle(
+            await screen.findByRole("button", { name: "Git status" }),
+          );
+          await clickAndSettle(
+            await screen.findByRole("button", { name: "Open tab" }),
+          );
+          expect(
+            within(getSessionTablist()).getByText(/^termal$/i),
+          ).toBeInTheDocument();
 
-        await clickAndSettle(
-          await screen.findByRole("button", { name: "Projects" }),
-        );
-        expect(
-          screen.getByRole("combobox", { name: "Project" }),
-        ).toHaveTextContent("TermAl");
-        expect(
-          screen.queryByRole("button", { name: /Load repo/i }),
-        ).not.toBeInTheDocument();
+          await clickAndSettle(
+            await screen.findByRole("button", { name: "Projects" }),
+          );
+          expect(
+            screen.getByRole("combobox", { name: "Project" }),
+          ).toHaveTextContent("TermAl");
+          expect(
+            screen.queryByRole("button", { name: /Load repo/i }),
+          ).not.toBeInTheDocument();
+        }
 
-        await clickAndSettle(
-          await screen.findByRole("button", { name: "Orchestrators" }),
-        );
-        await clickAndSettle(
-          await screen.findByRole("button", { name: "Edit canvas" }),
-        );
-        expect(
-          within(getSessionTablist()).getByText("Orchestration: delivery-flow"),
-        ).toBeInTheDocument();
-        expect(
-          await screen.findByRole("heading", {
-            level: 3,
-            name: "Edit template",
-          }),
-        ).toBeInTheDocument();
+        if (flow === "orchestrator") {
+          await clickAndSettle(
+            await screen.findByRole("button", { name: "Orchestrators" }),
+          );
+          await clickAndSettle(
+            await screen.findByRole("button", { name: "Edit canvas" }),
+          );
+          expect(
+            within(getSessionTablist()).getByText(
+              "Orchestration: delivery-flow",
+            ),
+          ).toBeInTheDocument();
+          expect(
+            await screen.findByRole("heading", {
+              level: 3,
+              name: "Edit template",
+            }),
+          ).toBeInTheDocument();
+        }
       } finally {
         window.localStorage.clear();
         scrollIntoViewSpy.mockRestore();
@@ -570,10 +580,10 @@ describe("App control panel - openers and canvas", () => {
         restoreGlobal("ResizeObserver", originalResizeObserver);
       }
     });
-  }, 20_000);
+  });
 
   it("opens canvas from the control panel using the pane-local session context", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -800,7 +810,7 @@ describe("App control panel - openers and canvas", () => {
     });
   });
   it("moves an existing shared canvas into the new launch context and syncs its pane state", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1082,7 +1092,7 @@ describe("App control panel - openers and canvas", () => {
     });
   });
   it("opens Files and Git status from the control panel using the pane-local project context", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;

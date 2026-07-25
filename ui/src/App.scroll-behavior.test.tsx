@@ -87,7 +87,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -114,7 +114,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -249,7 +249,7 @@ describe("App scroll behaviour", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -290,7 +290,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("cancels a pending settle-to-bottom frame when Ctrl+PageUp jumps to the top", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalPlatform = Object.getOwnPropertyDescriptor(
         window.navigator,
         "platform",
@@ -369,7 +369,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("jumps to the top on Ctrl+Shift+PageUp from the composer textarea", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalPlatform = Object.getOwnPropertyDescriptor(
         window.navigator,
         "platform",
@@ -430,7 +430,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("keeps plain PageDown inside the composer textarea when the caret is not at the start", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
         scrollHeight: 1000,
@@ -474,7 +474,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("uses the current session when the nested editable PageDown fallback fires after a tab switch", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
         scrollHeight: 1000,
@@ -647,7 +647,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("ignores nested editable PageDown targets outside the active pane", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
         scrollHeight: 1000,
@@ -699,7 +699,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("pages the session transcript by a fixed delta on plain PageDown", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
         scrollHeight: 1000,
@@ -768,7 +768,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("pages the session transcript upward by a fixed delta on plain PageUp", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
         scrollHeight: 1000,
@@ -837,7 +837,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("follows the latest user prompt immediately while a send is in flight", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
         scrollHeight: 1000,
@@ -940,7 +940,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("does not smooth-scroll to the old bottom while a near-bottom send is pending", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -1036,7 +1036,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("scrolls before paint to make room when the live turn appears at the bottom", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -1132,7 +1132,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("does not consume the live-turn bottom-follow edge while its pane is inactive", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -1332,7 +1332,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("does not repeat bottom-follow while the live waiting indicator remains visible", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -1450,7 +1450,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("does not bottom-follow the live waiting indicator when far from bottom", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -1545,7 +1545,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("bottom-follows the live waiting indicator through the virtualized transcript boundary", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -1636,7 +1636,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("smoothly follows new assistant messages while pinned to the bottom", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -1922,7 +1922,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("scrolls down when queued prompts append in transcript order above the live turn", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -2057,7 +2057,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("labels the bottom indicator as activity when only queued prompts append", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -2167,7 +2167,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("keeps a response indicator when queued prompts append after an unseen assistant response", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -2312,7 +2312,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("unpins the live turn tail on explicit upward scroll near bottom", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
         scrollHeight: 1000,
@@ -2415,7 +2415,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("keeps the live turn tail pinned when transcript growth opens a temporary bottom gap", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -2510,7 +2510,7 @@ describe("App scroll behaviour", () => {
   });
 
   it("jumps the new-response button to the virtualized bottom without settled-scroll spam", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
         scrollHeight: 1000,
@@ -2631,7 +2631,7 @@ describe("App scroll behaviour", () => {
     //    would surface via `cancelAnimationFrameMock`'s tracking map
     //    (verified implicitly — the test's own afterEach would throw
     //    under the unhandled error if the cleanup propagated one).
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalScrollHeight = Object.getOwnPropertyDescriptor(
         HTMLElement.prototype,
         "scrollHeight",

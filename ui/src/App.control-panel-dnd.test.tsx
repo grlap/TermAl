@@ -76,7 +76,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -103,7 +103,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -238,7 +238,7 @@ describe("App control panel DnD", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -286,7 +286,7 @@ describe("App control panel DnD", () => {
   ])(
     "drags the $buttonName control panel dock section into the workspace",
     async ({ buttonName, expectedTabName }) => {
-      await withSuppressedActWarnings(async () => {
+      await withVerifiedNoReactActWarnings(async () => {
         const context = await renderAppWithProjectAndSession({
           includeGitStatus: true,
           includeWorkspacePersistence: true,
@@ -344,7 +344,7 @@ describe("App control panel DnD", () => {
     },
   );
   it("accepts control panel launcher drags in the pane body when dragover only exposes text/plain", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const context = await renderAppWithProjectAndSession({
         includeWorkspacePersistence: true,
       });
@@ -410,7 +410,7 @@ describe("App control panel DnD", () => {
     });
   });
   it("drops control panel dock sections into the tab rail without splitting the pane", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;

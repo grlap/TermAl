@@ -11,6 +11,7 @@ import type {
 } from "./api";
 import type {
   AgentReadiness,
+  ApprovalPolicy,
   ClaudeApprovalMode,
   ClaudeEffortLevel,
   CodexReasoningEffort,
@@ -18,6 +19,7 @@ import type {
   OrchestratorInstance,
   Project,
   RemoteConfig,
+  SandboxMode,
   Session,
   TelegramUiConfig,
   WorkspaceFilesChangedEvent,
@@ -142,6 +144,8 @@ export type UseAppLiveStateStateSetters = {
 
 export type UseAppLiveStatePreferenceSetters = {
   setDefaultCodexModel: Dispatch<SetStateAction<string>>;
+  setDefaultCodexSandboxMode: Dispatch<SetStateAction<SandboxMode>>;
+  setDefaultCodexApprovalPolicy: Dispatch<SetStateAction<ApprovalPolicy>>;
   setDefaultClaudeModel: Dispatch<SetStateAction<string>>;
   setDefaultCursorModel: Dispatch<SetStateAction<string>>;
   setDefaultGeminiModel: Dispatch<SetStateAction<string>>;

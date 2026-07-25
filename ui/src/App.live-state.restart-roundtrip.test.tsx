@@ -58,7 +58,7 @@ import {
   EventSourceMock,
   ResizeObserverMock,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   dispatchOpenedStateEvent,
   flushUiWork,
   jsonResponse,
@@ -70,7 +70,7 @@ import {
   restoreGlobal,
   settleAsyncUi,
   stubScrollIntoView,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -141,7 +141,7 @@ describe("App live state — restart roundtrip (canonical)", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -229,7 +229,7 @@ describe("App live state — restart roundtrip (canonical)", () => {
     //     the lagged path directly but documents the dependency.
     //
     // ────────────────────────────────────────────────────────────────────
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalFetch = globalThis.fetch;

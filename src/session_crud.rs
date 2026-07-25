@@ -423,6 +423,18 @@ impl AppState {
             Agent::Codex,
             |preferences| &mut preferences.default_codex_model,
         )?;
+        if let Some(default_codex_sandbox_mode) = request.default_codex_sandbox_mode {
+            if inner.preferences.default_codex_sandbox_mode != default_codex_sandbox_mode {
+                inner.preferences.default_codex_sandbox_mode = default_codex_sandbox_mode;
+                changed = true;
+            }
+        }
+        if let Some(default_codex_approval_policy) = request.default_codex_approval_policy {
+            if inner.preferences.default_codex_approval_policy != default_codex_approval_policy {
+                inner.preferences.default_codex_approval_policy = default_codex_approval_policy;
+                changed = true;
+            }
+        }
         set_agent_default_model_if_present(
             &mut inner.preferences,
             &mut changed,

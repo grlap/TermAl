@@ -266,6 +266,8 @@ export function useAppLiveState(
   } = stateSetters;
   const {
     setDefaultCodexModel,
+    setDefaultCodexSandboxMode,
+    setDefaultCodexApprovalPolicy,
     setDefaultClaudeModel,
     setDefaultCursorModel,
     setDefaultGeminiModel,
@@ -1290,6 +1292,8 @@ export function useAppLiveState(
   function syncPreferencesFromState(nextState: StateResponse) {
     const preferences = resolveAppPreferences(nextState.preferences);
     setDefaultCodexModel(preferences.defaultCodexModel);
+    setDefaultCodexSandboxMode(preferences.defaultCodexSandboxMode);
+    setDefaultCodexApprovalPolicy(preferences.defaultCodexApprovalPolicy);
     setDefaultClaudeModel(preferences.defaultClaudeModel);
     setDefaultCursorModel(preferences.defaultCursorModel);
     setDefaultGeminiModel(preferences.defaultGeminiModel);

@@ -79,7 +79,7 @@ import {
   ResizeObserverMock,
   advanceTimers,
   clickAndSettle,
-  createActWrappedAnimationFrameMocks,
+  createScheduledAnimationFrameMocks,
   createDeferred,
   createDragDataTransfer,
   createReducedMimeDragDataTransfer,
@@ -106,7 +106,7 @@ import {
   stubScrollIntoView,
   submitButtonAndSettle,
   withFallbackStateHarness,
-  withSuppressedActWarnings,
+  withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
 vi.mock("./MonacoDiffEditor", () => ({
@@ -241,7 +241,7 @@ describe("App workspace layout", () => {
 
   beforeEach(() => {
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
-      createActWrappedAnimationFrameMocks();
+      createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
     vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
     HTMLElement.prototype.scrollTo =
@@ -293,7 +293,7 @@ describe("App workspace layout", () => {
   }
 
   it("opens the workspace switcher with one refresh under StrictMode", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -366,7 +366,7 @@ describe("App workspace layout", () => {
   });
 
   it("shows a workspace switcher with saved workspaces and can open a new workspace window", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -463,7 +463,7 @@ describe("App workspace layout", () => {
   });
 
   it("deletes a saved workspace from the workspace switcher", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -586,7 +586,7 @@ describe("App workspace layout", () => {
   });
 
   it("shows workspace delete errors and restores the delete button", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -703,7 +703,7 @@ describe("App workspace layout", () => {
   });
 
   it("disables the workspace delete button while the request is in flight", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -840,7 +840,7 @@ describe("App workspace layout", () => {
   });
 
   it("ignores stale workspace refresh results after a delete", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1000,7 +1000,7 @@ describe("App workspace layout", () => {
   });
 
   it("applies overlapping workspace deletes in completion order", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1183,7 +1183,7 @@ describe("App workspace layout", () => {
   });
 
   it("does not offer delete for the active workspace in the workspace switcher", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1275,7 +1275,7 @@ describe("App workspace layout", () => {
   });
 
   it("flushes a pending workspace layout save with keepalive on pagehide", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -1350,7 +1350,7 @@ describe("App workspace layout", () => {
   });
 
   it("does not resave workspace layout when SSE state preserves the same sessions", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       vi.useFakeTimers();
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
@@ -1531,7 +1531,7 @@ describe("App workspace layout", () => {
     const scrollIntoViewSpy = stubScrollIntoView();
 
     try {
-      await renderApp();
+      await renderApp({ waitForWorkspaceLayout: false });
       const divider = document.querySelector(".tile-divider-row");
       if (!(divider instanceof HTMLDivElement)) {
         throw new Error("Control panel divider not found");
@@ -1695,7 +1695,7 @@ describe("App workspace layout", () => {
     );
     stubScrollIntoView();
 
-    await renderApp();
+    await renderApp({ waitForWorkspaceLayout: false });
 
     await act(async () => {
       fetchWorkspaceLayoutDeferred.resolve(
@@ -1785,7 +1785,7 @@ describe("App workspace layout", () => {
   });
 
   it("prunes delegated child tabs from a locally restored workspace layout after state loads", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       const workspaceViewId = "test-local-delegated-child-prune";
       vi.stubGlobal(
@@ -1890,7 +1890,7 @@ describe("App workspace layout", () => {
   });
 
   it("prunes locally restored delegated child tabs after parent metadata arrives later", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       const workspaceViewId = "test-late-delegated-child-prune";
       vi.stubGlobal(
@@ -2000,7 +2000,7 @@ describe("App workspace layout", () => {
   });
 
   it("preserves current-session delegated child tabs opened after workspace readiness", async () => {
-    await withSuppressedActWarnings(async () => {
+    await withVerifiedNoReactActWarnings(async () => {
       vi.stubGlobal(
         "EventSource",
         EventSourceMock as unknown as typeof EventSource,
@@ -2088,7 +2088,7 @@ describe("App workspace layout", () => {
     );
 
     try {
-      await renderApp();
+      await renderApp({ waitForWorkspaceLayout: false });
 
       await act(async () => {
         fetchWorkspaceLayoutDeferred.resolve(

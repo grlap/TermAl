@@ -45,8 +45,11 @@ anything implied by my default behaviour or by the Claude-Code skills
   new imports beyond what the move requires. Feature changes land in
   their own commits.
 - Keep `cd ui && npx tsc --noEmit` clean. Keep `cd ui && npx vitest
-  run` green before any commit prompt. If a test was already flaky
-  before the change, note it explicitly.
+  run` green before any commit prompt. There is no acceptable "flaky
+  test" category: nondeterminism means the test is poorly written,
+  its assumptions are wrong, the runner violates its resource
+  contract, or the product has a defect. Diagnose and fix the cause;
+  do not hide it with retries, quarantine, or larger timeouts.
 
 ## Working on the Rust backend
 

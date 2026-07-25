@@ -345,6 +345,10 @@ impl RemoteConfig {
 struct AppPreferences {
     #[serde(default = "default_model_preference")]
     default_codex_model: String,
+    #[serde(default = "default_codex_sandbox_mode")]
+    default_codex_sandbox_mode: CodexSandboxMode,
+    #[serde(default = "default_codex_approval_policy")]
+    default_codex_approval_policy: CodexApprovalPolicy,
     #[serde(default = "default_model_preference")]
     default_claude_model: String,
     #[serde(default = "default_model_preference")]
@@ -368,6 +372,8 @@ impl Default for AppPreferences {
     fn default() -> Self {
         Self {
             default_codex_model: default_model_preference(),
+            default_codex_sandbox_mode: default_codex_sandbox_mode(),
+            default_codex_approval_policy: default_codex_approval_policy(),
             default_claude_model: default_model_preference(),
             default_cursor_model: default_model_preference(),
             default_gemini_model: default_model_preference(),

@@ -733,7 +733,10 @@ describe("VirtualizedConversationMessageList foundation", () => {
   });
 
   it("keeps the first upward wheel from a tail bottom near the hydrated bottom when hydrate also appends", async () => {
-    const messages = makeTextMessages(600);
+    // Twenty tail rows plus a multi-page hydrated prefix are sufficient to
+    // exercise the anchor correction. A 600-row fixture made this focused
+    // interaction test spend most of its budget building irrelevant layout.
+    const messages = makeTextMessages(200);
     const tailMessages = messages.slice(-20);
     const tailFirstMessageNumber = messages.length - tailMessages.length + 1;
     const afterLastTailMessageNumber = messages.length + 1;
@@ -794,7 +797,9 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
     try {
       await waitFor(() => {
-        expect(screen.getByText("message-600")).toBeInTheDocument();
+        expect(
+          screen.getByText(`message-${messages.length}`),
+        ).toBeInTheDocument();
       });
 
       act(() => {
@@ -807,9 +812,9 @@ describe("VirtualizedConversationMessageList foundation", () => {
           ...messages,
           {
             author: "assistant",
-            id: "message-601",
-            text: "Message 601",
-            timestamp: "10:601",
+            id: `message-${messages.length + 1}`,
+            text: `Message ${messages.length + 1}`,
+            timestamp: `10:${messages.length + 1}`,
             type: "text",
           },
         ]);

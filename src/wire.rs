@@ -1178,6 +1178,8 @@ struct CreateProjectRequest {
 #[serde(rename_all = "camelCase")]
 struct UpdateAppSettingsRequest {
     default_codex_model: Option<String>,
+    default_codex_sandbox_mode: Option<CodexSandboxMode>,
+    default_codex_approval_policy: Option<CodexApprovalPolicy>,
     default_claude_model: Option<String>,
     default_cursor_model: Option<String>,
     default_gemini_model: Option<String>,

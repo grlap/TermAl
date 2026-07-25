@@ -132,10 +132,7 @@ function makeSessionActionsParams(
     newProjectRemoteId: "local",
     newProjectUsesLocalRemote: true,
     defaults: {
-      defaultCodexApprovalPolicy: "never",
       defaultCodexModel: "default",
-      defaultCodexReasoningEffort: "medium",
-      defaultCodexSandboxMode: "workspace-write",
       defaultClaudeApprovalMode: "ask",
       defaultClaudeEffort: "default",
       defaultClaudeModel: "default",
@@ -289,6 +286,54 @@ describe("useAppSessionActions", () => {
       );
     },
   );
+
+  it("lets the target backend apply persisted Codex prompt defaults on ordinary create", async () => {
+    const createSessionSpy = vi.spyOn(api, "createSession").mockResolvedValue({
+      revision: 6,
+      serverInstanceId: "server-a",
+      session: makeSession("session-new"),
+    } as Awaited<ReturnType<typeof api.createSession>>);
+    const actions = useAppSessionActions(makeSessionActionsParams());
+
+    await expect(
+      actions.handleNewSession({ agent: "Codex", model: "default" }),
+    ).resolves.toBe(true);
+
+    const request = createSessionSpy.mock.calls[0]?.[0];
+    expect(request).toBeDefined();
+    expect(request).not.toHaveProperty("approvalPolicy");
+    expect(request).not.toHaveProperty("reasoningEffort");
+    expect(request).not.toHaveProperty("sandboxMode");
+  });
+
+  it("preserves explicit Codex prompt settings when cloning a session", async () => {
+    const source = makeSession("session-source", {
+      approvalPolicy: "on-request",
+      reasoningEffort: "high",
+      sandboxMode: "read-only",
+    });
+    const createSessionSpy = vi.spyOn(api, "createSession").mockResolvedValue({
+      revision: 6,
+      serverInstanceId: "server-a",
+      session: makeSession("session-clone"),
+    } as Awaited<ReturnType<typeof api.createSession>>);
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[source.id, source]]);
+    params.refs.sessionsRef.current = [source];
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleCloneSessionFromExisting(source.id),
+    ).resolves.toBe(true);
+
+    expect(createSessionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalPolicy: "on-request",
+        reasoningEffort: "high",
+        sandboxMode: "read-only",
+      }),
+    );
+  });
 
   it("clears the acted session hydration mismatch on stale same-instance action success", async () => {
     const state = {

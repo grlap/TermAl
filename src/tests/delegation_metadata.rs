@@ -80,6 +80,8 @@ fn delegation_default_model_uses_update_app_settings_normalized_value() {
             default_cursor_model: None,
             default_gemini_model: None,
             default_codex_reasoning_effort: None,
+            default_codex_sandbox_mode: None,
+            default_codex_approval_policy: None,
             default_claude_approval_mode: None,
             default_claude_effort: None,
             remotes: None,

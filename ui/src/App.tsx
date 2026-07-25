@@ -129,6 +129,7 @@ import {
 import type {
   AgentReadiness,
   AgentType,
+  ApprovalPolicy,
   ClaudeApprovalMode,
   ClaudeEffortLevel,
   CodexReasoningEffort,
@@ -852,6 +853,8 @@ export default function App() {
     },
     preferenceSetters: {
       setDefaultCodexModel,
+      setDefaultCodexSandboxMode,
+      setDefaultCodexApprovalPolicy,
       setDefaultClaudeModel,
       setDefaultCursorModel,
       setDefaultGeminiModel,
@@ -913,10 +916,7 @@ export default function App() {
     newProjectRemoteId,
     newProjectUsesLocalRemote,
     defaults: {
-      defaultCodexApprovalPolicy,
       defaultCodexModel,
-      defaultCodexReasoningEffort,
-      defaultCodexSandboxMode,
       defaultClaudeApprovalMode,
       defaultClaudeEffort,
       defaultClaudeModel,
@@ -1251,6 +1251,8 @@ export default function App() {
 
   async function persistAppPreferences(payload: {
     defaultCodexModel?: string;
+    defaultCodexSandboxMode?: SandboxMode;
+    defaultCodexApprovalPolicy?: ApprovalPolicy;
     defaultClaudeModel?: string;
     defaultCursorModel?: string;
     defaultGeminiModel?: string;
@@ -1300,6 +1302,26 @@ export default function App() {
 
     setDefaultCodexReasoningEffort(nextValue);
     void persistAppPreferences({ defaultCodexReasoningEffort: nextValue });
+  }
+
+  function handleDefaultCodexSandboxModeChange(nextValue: SandboxMode) {
+    if (nextValue === defaultCodexSandboxMode) {
+      return;
+    }
+
+    setDefaultCodexSandboxMode(nextValue);
+    void persistAppPreferences({ defaultCodexSandboxMode: nextValue });
+  }
+
+  function handleDefaultCodexApprovalPolicyChange(
+    nextValue: ApprovalPolicy,
+  ) {
+    if (nextValue === defaultCodexApprovalPolicy) {
+      return;
+    }
+
+    setDefaultCodexApprovalPolicy(nextValue);
+    void persistAppPreferences({ defaultCodexApprovalPolicy: nextValue });
   }
 
   function handleDefaultCodexModelChange(nextValue: string) {
@@ -2275,8 +2297,8 @@ export default function App() {
         handleOrchestratorStateUpdated={handleOrchestratorStateUpdated}
         defaultCodexApprovalPolicy={defaultCodexApprovalPolicy}
         defaultCodexSandboxMode={defaultCodexSandboxMode}
-        setDefaultCodexApprovalPolicy={setDefaultCodexApprovalPolicy}
-        setDefaultCodexSandboxMode={setDefaultCodexSandboxMode}
+        setDefaultCodexApprovalPolicy={handleDefaultCodexApprovalPolicyChange}
+        setDefaultCodexSandboxMode={handleDefaultCodexSandboxModeChange}
         defaultClaudeApprovalMode={defaultClaudeApprovalMode}
         setDefaultClaudeApprovalMode={handleDefaultClaudeApprovalModeChange}
       />

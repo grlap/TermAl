@@ -4,9 +4,9 @@ import react from "@vitejs/plugin-react";
 import { configDefaults } from "vitest/config";
 
 const SERIALIZED_REACT_TESTS = [
-  "src/App.control-panel.test.tsx",
-  "src/App.diff-preview.test.tsx",
-  "src/App.live-state.watchdog.test.tsx",
+  "src/App.*.test.tsx",
+  "src/backend-connection.test.tsx",
+  "src/SessionPaneView.delegation-composer.test.tsx",
   "src/SessionPaneView.retry-display.test.tsx",
 ];
 
@@ -136,11 +136,11 @@ export default defineConfig({
         test: {
           name: "serialized-react",
           include: SERIALIZED_REACT_TESTS,
-          // These integration suites are fast in isolation but can exceed
-          // their timeout when several heavyweight App/jsdom files compile
-          // and run beside them. Run them one at a time after the parallel
-          // default project so contention cannot cause false timeouts or
-          // poison later React `act()` state.
+          // These files either render the full App or exercise the same
+          // scheduler-sensitive SessionPaneView lifecycle. Run this
+          // behavior-based set one file at a time so the runner does not
+          // oversubscribe the lifecycle it is measuring or abandon an open
+          // `act()` scope.
           maxWorkers: 1,
           sequence: {
             groupOrder: 1,

@@ -118,6 +118,18 @@ StateInner {
 
 `AppState` is the live coordination shell: SSE broadcasters, the shared Codex app-server handle, and the SSH remote registry all live there. `StateInner` is the mutex-protected durable model that gets serialized to disk.
 
+`AppPreferences` is also the source of truth for new-session defaults. In
+particular, the Codex model, sandbox mode, approval policy, and reasoning effort
+are persisted through `POST /api/settings`, returned in state snapshots, and
+copied into newly created Codex sessions unless the create request supplies an
+explicit override.
+
+`TERMAL_CODEX_SANDBOX`, `TERMAL_CODEX_APPROVAL`, and
+`TERMAL_CODEX_REASONING_EFFORT` seed those preferences only when no persisted
+value exists. After a preference has been saved, the persisted setting remains
+authoritative across restarts; changing an environment seed does not overwrite
+an existing user choice.
+
 > The shared Codex app-server (one long-lived process hosting every local Codex
 > session in this backend) has its own identity model and failure modes. See
 > [features/shared-codex-app-server.md](./features/shared-codex-app-server.md) for

@@ -150,6 +150,8 @@ fn update_app_settings_refreshes_invalidated_agent_readiness_cache() {
             default_cursor_model: None,
             default_gemini_model: None,
             default_codex_reasoning_effort: Some(next_reasoning_effort),
+            default_codex_sandbox_mode: None,
+            default_codex_approval_policy: None,
             default_claude_approval_mode: None,
             default_claude_effort: None,
             remotes: None,
@@ -265,11 +267,21 @@ fn update_app_settings_sse_matches_api_response() {
             default_cursor_model: None,
             default_gemini_model: None,
             default_codex_reasoning_effort: Some(next_reasoning_effort),
+            default_codex_sandbox_mode: Some(CodexSandboxMode::ReadOnly),
+            default_codex_approval_policy: Some(CodexApprovalPolicy::OnFailure),
             default_claude_approval_mode: None,
             default_claude_effort: None,
             remotes: None,
         })
         .expect("app settings should update");
+    assert_eq!(
+        api_response.preferences.default_codex_sandbox_mode,
+        CodexSandboxMode::ReadOnly
+    );
+    assert_eq!(
+        api_response.preferences.default_codex_approval_policy,
+        CodexApprovalPolicy::OnFailure
+    );
 
     let published: StateResponse = serde_json::from_str(
         &state_events
