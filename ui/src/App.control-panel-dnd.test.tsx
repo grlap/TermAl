@@ -278,18 +278,21 @@ describe("App control panel DnD", () => {
     vi.unstubAllGlobals();
   });
 
-  it("drags control panel dock sections into the workspace", async () => {
-    await withSuppressedActWarnings(async () => {
-      const context = await renderAppWithProjectAndSession({
-        includeGitStatus: true,
-        includeWorkspacePersistence: true,
-      });
+  it.each([
+    { buttonName: "Sessions", expectedTabName: /^Sessions$/i },
+    { buttonName: "Orchestrators", expectedTabName: /^Orchestrators$/i },
+    { buttonName: "Files", expectedTabName: /Files: termal/i },
+    { buttonName: "Git status", expectedTabName: /Git status: termal/i },
+  ])(
+    "drags the $buttonName control panel dock section into the workspace",
+    async ({ buttonName, expectedTabName }) => {
+      await withSuppressedActWarnings(async () => {
+        const context = await renderAppWithProjectAndSession({
+          includeGitStatus: true,
+          includeWorkspacePersistence: true,
+        });
 
-      try {
-        async function dragDockSectionToWorkspace(
-          buttonName: string,
-          expectedTabName: RegExp,
-        ) {
+        try {
           const dock = await screen.findByRole("navigation", {
             name: "Control panel dock",
           });
@@ -323,22 +326,23 @@ describe("App control panel DnD", () => {
                 .getAllByRole("tab")
                 .some((tab) =>
                   expectedTabName.test(
-                    ((tab.getAttribute("aria-label") ?? tab.textContent ?? "").replace(/\u00d7/g, "").trim()),
+                    (
+                      tab.getAttribute("aria-label") ??
+                      tab.textContent ??
+                      ""
+                    )
+                      .replace(/\u00d7/g, "")
+                      .trim(),
                   ),
                 ),
             ).toBe(true);
           });
+        } finally {
+          context.cleanup();
         }
-
-        await dragDockSectionToWorkspace("Sessions", /^Sessions$/i);
-        await dragDockSectionToWorkspace("Orchestrators", /^Orchestrators$/i);
-        await dragDockSectionToWorkspace("Files", /Files: termal/i);
-        await dragDockSectionToWorkspace("Git status", /Git status: termal/i);
-      } finally {
-        context.cleanup();
-      }
-    });
-  });
+      });
+    },
+  );
   it("accepts control panel launcher drags in the pane body when dragover only exposes text/plain", async () => {
     await withSuppressedActWarnings(async () => {
       const context = await renderAppWithProjectAndSession({
@@ -574,4 +578,3 @@ describe("App control panel DnD", () => {
     });
   });
 });
-

@@ -22,6 +22,37 @@ const SQLITE_SCHEMA_VERSION: &str = "1";
 const SQLITE_METADATA_KEY: &str = "metadataState";
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Per-database writer locks shared by every in-process SQLite write path.
+///
+/// WAL lets readers coexist, but SQLite still permits only one writer. The
+/// state persist worker and durable mailbox store own separate connections, so
+/// relying on SQLite's busy timeout alone can surface ordinary in-process
+/// contention as `SQLITE_BUSY`. Serialize those writers before `BEGIN`; the
+/// timeout remains a boundary for external processes or OS-level locks.
+static SQLITE_STATE_WRITE_LOCKS: LazyLock<
+    Mutex<HashMap<PathBuf, std::sync::Weak<Mutex<()>>>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn sqlite_state_write_lock(path: &FsPath) -> Arc<Mutex<()>> {
+    let mut locks = SQLITE_STATE_WRITE_LOCKS
+        .lock()
+        .expect("SQLite state write-lock registry poisoned");
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(path).and_then(std::sync::Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(path.to_path_buf(), Arc::downgrade(&lock));
+    lock
+}
+
+fn lock_sqlite_state_writer(lock: &Mutex<()>) -> std::sync::MutexGuard<'_, ()> {
+    lock.lock().unwrap_or_else(|poisoned| {
+        eprintln!("[termal] warning: recovered a poisoned SQLite state writer lock");
+        poisoned.into_inner()
+    })
+}
+
 fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
     if let Some(parent) = path.parent() {
         harden_local_state_directory_permissions(parent)?;
@@ -35,19 +66,23 @@ fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
     // WAL lets readers coexist with the background persistence writer. NORMAL
     // sync is the common local-app tradeoff: durable enough for TermAl state,
     // with much lower fsync cost than FULL on every small create-session write.
-    connection
-        .execute_batch(
-            "
-            PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
-            ",
-        )
-        .with_context(|| {
-            format!(
-                "failed to configure SQLite pragmas for `{}`",
-                path.display()
+    {
+        let write_lock = sqlite_state_write_lock(path);
+        let _write_guard = lock_sqlite_state_writer(&write_lock);
+        connection
+            .execute_batch(
+                "
+                PRAGMA journal_mode = WAL;
+                PRAGMA synchronous = NORMAL;
+                ",
             )
-        })?;
+            .with_context(|| {
+                format!(
+                    "failed to configure SQLite pragmas for `{}`",
+                    path.display()
+                )
+            })?;
+    }
     harden_sqlite_state_file_permissions(path)?;
     Ok(connection)
 }
@@ -707,6 +742,15 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
     Ok(())
 }
 
+fn ensure_sqlite_state_schema_for_path(
+    connection: &rusqlite::Connection,
+    path: &FsPath,
+) -> Result<()> {
+    let write_lock = sqlite_state_write_lock(path);
+    let _write_guard = lock_sqlite_state_writer(&write_lock);
+    ensure_sqlite_state_schema(connection)
+}
+
 #[cfg(test)]
 mod sqlite_schema_tests {
     use super::*;
@@ -752,7 +796,7 @@ mod sqlite_schema_tests {
 
 fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
     let connection = open_sqlite_state_connection(path)?;
-    ensure_sqlite_state_schema(&connection)?;
+    ensure_sqlite_state_schema_for_path(&connection, path)?;
     // `open_sqlite_state_connection` already hardens the fresh handle, but
     // schema initialization can create or recreate SQLite sidecars, so the
     // startup read path deliberately re-runs the full main/sidecar pass.
@@ -900,7 +944,7 @@ fn persist_state_parts_to_sqlite(
     }
 
     let mut connection = open_sqlite_state_connection(path)?;
-    ensure_sqlite_state_schema(&connection)?;
+    ensure_sqlite_state_schema_for_path(&connection, path)?;
     persist_state_parts_via_connection(
         &mut connection,
         path,
@@ -929,6 +973,8 @@ fn persist_state_parts_via_connection(
 ) -> Result<()> {
     let metadata_json =
         serde_json::to_string(metadata).context("failed to serialize persisted state metadata")?;
+    let write_lock = sqlite_state_write_lock(path);
+    let _write_guard = lock_sqlite_state_writer(&write_lock);
     let tx = connection.transaction().with_context(|| {
         format!(
             "failed to start SQLite transaction for `{}`",
@@ -1018,7 +1064,7 @@ impl SqlitePersistConnectionCache {
                 create_local_state_directory(parent)?;
             }
             let connection = open_sqlite_state_connection(path)?;
-            ensure_sqlite_state_schema(&connection)?;
+            ensure_sqlite_state_schema_for_path(&connection, path)?;
             // Deliberately repeat the open-time hardening after schema
             // validation because SQLite may create sidecars between the two
             // points; cached reuses skip this until the next successful commit.
@@ -1110,6 +1156,8 @@ fn persist_delta_via_cache_inner(
     // intentionally repeats only symlink/reparse checks before each transaction
     // so path swaps are caught without chmoding the state directory every tick.
     reject_existing_sqlite_state_path_redirection(path)?;
+    let write_lock = sqlite_state_write_lock(path);
+    let _write_guard = lock_sqlite_state_writer(&write_lock);
     let tx = connection.transaction().with_context(|| {
         format!(
             "failed to start SQLite transaction for `{}`",

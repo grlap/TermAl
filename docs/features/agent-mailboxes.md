@@ -86,7 +86,13 @@ Mailboxes use normalized SQLite tables (`mailboxes`,
 `mailbox_participants`, and `mailbox_messages`) through one long-lived
 connection configured with WAL, `synchronous=NORMAL`, and the existing
 five-second busy timeout. Mailbox operations bypass the asynchronous AppState
-persist worker and remain usable after that worker shuts down.
+persist queue and remain usable after that worker shuts down, but mailbox and
+AppState writes share a per-database admission lock so TermAl's own connections
+cannot race each other for SQLite's single-writer slot. WAL still permits
+concurrent readers. If another process or an OS-level lock outlives the busy
+timeout, append and acknowledgement report a retryable `503 Service
+Unavailable` instead of an internal-error `500`; callers can safely retry the
+same idempotency key or acknowledgement cursor.
 
 See [Architecture](../architecture.md) for the system-level API and persistence
 overview.

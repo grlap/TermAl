@@ -102,6 +102,7 @@ enum MailboxStoreErrorKind {
     Validation,
     Conflict,
     NotFound,
+    Retryable,
 }
 
 #[derive(Debug)]
@@ -165,6 +166,7 @@ fn default_mailbox_read_limit() -> u64 {
 
 struct MailboxStore {
     connection: Mutex<Option<rusqlite::Connection>>,
+    write_lock: Arc<Mutex<()>>,
 }
 
 struct MailboxConnectionGuard<'a> {
@@ -881,6 +883,10 @@ fn mailbox_api_error(err: anyhow::Error) -> ApiError {
             MailboxStoreErrorKind::NotFound => {
                 ApiError::not_found(mailbox_error.message.clone())
             }
+            MailboxStoreErrorKind::Retryable => ApiError::from_status(
+                StatusCode::SERVICE_UNAVAILABLE,
+                mailbox_error.message.clone(),
+            ),
         };
     }
     ApiError::internal(format!("mailbox operation failed: {err:#}"))
@@ -889,7 +895,7 @@ fn mailbox_api_error(err: anyhow::Error) -> ApiError {
 impl MailboxStore {
     fn open(path: &FsPath) -> Result<Self> {
         let connection = open_sqlite_state_connection(path)?;
-        ensure_sqlite_state_schema(&connection)?;
+        ensure_sqlite_state_schema_for_path(&connection, path)?;
         connection
             .execute_batch("PRAGMA foreign_keys = ON;")
             .with_context(|| {
@@ -900,6 +906,7 @@ impl MailboxStore {
         })?;
         Ok(Self {
             connection: Mutex::new(Some(connection)),
+            write_lock: sqlite_state_write_lock(path),
         })
     }
 
@@ -907,6 +914,7 @@ impl MailboxStore {
     fn disabled_for_tests() -> Self {
         Self {
             connection: Mutex::new(None),
+            write_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -927,10 +935,10 @@ impl MailboxStore {
 
     fn append(&self, input: &MailboxAppendInput) -> Result<MailboxAppendReceipt> {
         validate_mailbox_append_input(input)?;
+        let write_guard = lock_sqlite_state_writer(&self.write_lock);
         let mut connection = self.connection()?;
-        let transaction = connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .context("failed to begin mailbox append transaction")?;
+        let transaction =
+            begin_mailbox_write(&mut connection, "beginning mailbox append")?;
 
         if let Some(existing) =
             mailbox_message_for_idempotency_key(&transaction, &input.sender_session_id, &input.idempotency_key)?
@@ -950,7 +958,9 @@ impl MailboxStore {
             }
             transaction
                 .commit()
-                .context("failed to finish duplicate mailbox lookup")?;
+                .map_err(|err| {
+                    mailbox_sqlite_write_error("finishing duplicate mailbox lookup", err)
+                })?;
             return Ok(MailboxAppendReceipt {
                 mailbox_id: existing.mailbox_id,
                 message_id: existing.id,
@@ -1069,7 +1079,8 @@ impl MailboxStore {
             .context("failed to append mailbox message")?;
         transaction
             .commit()
-            .context("failed to commit mailbox append")?;
+            .map_err(|err| mailbox_sqlite_write_error("committing mailbox append", err))?;
+        drop(write_guard);
 
         Ok(MailboxAppendReceipt {
             mailbox_id,
@@ -1086,6 +1097,7 @@ impl MailboxStore {
         message_id: &str,
         disposition: &str,
     ) -> Result<()> {
+        let _write_guard = lock_sqlite_state_writer(&self.write_lock);
         let connection = self.connection()?;
         let updated = connection
             .execute(
@@ -1107,6 +1119,7 @@ impl MailboxStore {
         mailbox_id: &str,
         through_sequence: u64,
     ) -> Result<()> {
+        let _write_guard = lock_sqlite_state_writer(&self.write_lock);
         let connection = self.connection()?;
         connection
             .execute(
@@ -1129,10 +1142,12 @@ impl MailboxStore {
         latest_message_id: &str,
         through_sequence: u64,
     ) -> Result<()> {
+        let _write_guard = lock_sqlite_state_writer(&self.write_lock);
         let mut connection = self.connection()?;
-        let transaction = connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .context("failed to begin mailbox recovery disposition update")?;
+        let transaction = begin_mailbox_write(
+            &mut connection,
+            "beginning mailbox recovery disposition update",
+        )?;
         transaction
             .execute(
                 "UPDATE mailbox_messages
@@ -1156,11 +1171,17 @@ impl MailboxStore {
             .context("failed to mark latest mailbox notification recovered")?;
         transaction
             .commit()
-            .context("failed to commit mailbox recovery disposition update")?;
+            .map_err(|err| {
+                mailbox_sqlite_write_error(
+                    "committing mailbox recovery disposition update",
+                    err,
+                )
+            })?;
         Ok(())
     }
 
     fn mark_session_left(&self, session_id: &str) -> Result<()> {
+        let _write_guard = lock_sqlite_state_writer(&self.write_lock);
         let Some(connection) = self.connection_if_enabled() else {
             return Ok(());
         };
@@ -1415,10 +1436,10 @@ impl MailboxStore {
                 "mailbox acknowledgement cannot move backwards",
             ));
         }
+        let write_guard = lock_sqlite_state_writer(&self.write_lock);
         let mut connection = self.connection()?;
-        let transaction = connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .context("failed to begin mailbox acknowledgement")?;
+        let transaction =
+            begin_mailbox_write(&mut connection, "beginning mailbox acknowledgement")?;
         require_mailbox_participant(&transaction, mailbox_id, session_id)?;
         let latest_sequence = transaction
             .query_row(
@@ -1468,8 +1489,11 @@ impl MailboxStore {
         }
         transaction
             .commit()
-            .context("failed to commit mailbox acknowledgement")?;
+            .map_err(|err| {
+                mailbox_sqlite_write_error("committing mailbox acknowledgement", err)
+            })?;
         drop(connection);
+        drop(write_guard);
         self.list_for_session(session_id)?
             .into_iter()
             .find(|summary| summary.id == mailbox_id)
@@ -1480,6 +1504,30 @@ impl MailboxStore {
                 )
             })
     }
+}
+
+fn begin_mailbox_write<'connection>(
+    connection: &'connection mut rusqlite::Connection,
+    operation: &str,
+) -> Result<rusqlite::Transaction<'connection>> {
+    connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|err| mailbox_sqlite_write_error(operation, err))
+}
+
+fn mailbox_sqlite_write_error(operation: &str, err: rusqlite::Error) -> anyhow::Error {
+    if matches!(
+        err.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+    ) {
+        return mailbox_store_error(
+            MailboxStoreErrorKind::Retryable,
+            format!(
+                "mailbox storage is temporarily busy while {operation}; retry the same request"
+            ),
+        );
+    }
+    anyhow!(err).context(format!("failed while {operation}"))
 }
 
 fn validate_mailbox_append_input(input: &MailboxAppendInput) -> Result<()> {
@@ -1732,6 +1780,91 @@ mod mailbox_store_tests {
             "mailbox input exceeds limit",
         ));
         assert_eq!(validation.status, StatusCode::BAD_REQUEST);
+        let retryable = mailbox_api_error(mailbox_sqlite_write_error(
+            "beginning mailbox acknowledgement",
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some("database is locked".to_owned()),
+            ),
+        ));
+        assert_eq!(retryable.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(retryable.message.contains("retry the same request"));
+    }
+
+    #[test]
+    fn mailbox_append_and_acknowledgement_wait_for_in_process_state_writer() {
+        let root = MailboxTestRoot::new();
+        let path = root.database_path();
+        let store = Arc::new(MailboxStore::open(&path).expect("mailbox store should open"));
+        let state_writer_lock = sqlite_state_write_lock(&path);
+        assert!(
+            Arc::ptr_eq(&state_writer_lock, &store.write_lock),
+            "state persistence and mailbox writes must share one admission lock"
+        );
+
+        let state_writer_guard = lock_sqlite_state_writer(&state_writer_lock);
+        let append_store = store.clone();
+        let (append_started_tx, append_started_rx) = mpsc::channel();
+        let (append_done_tx, append_done_rx) = mpsc::channel();
+        let append_thread = std::thread::spawn(move || {
+            append_started_tx
+                .send(())
+                .expect("append start signal should send");
+            append_done_tx
+                .send(append_store.append(&test_input()))
+                .expect("append result should send");
+        });
+        append_started_rx
+            .recv()
+            .expect("append thread should reach the writer boundary");
+        assert!(
+            matches!(
+                append_done_rx.try_recv(),
+                Err(mpsc::TryRecvError::Empty)
+            ),
+            "append must wait while the state writer owns the database"
+        );
+        drop(state_writer_guard);
+        let receipt = append_done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("append should finish after writer release")
+            .expect("append should succeed");
+        append_thread.join().expect("append thread should join");
+
+        let state_writer_guard = lock_sqlite_state_writer(&state_writer_lock);
+        let acknowledge_store = store.clone();
+        let mailbox_id = receipt.mailbox_id.clone();
+        let (ack_started_tx, ack_started_rx) = mpsc::channel();
+        let (ack_done_tx, ack_done_rx) = mpsc::channel();
+        let acknowledge_thread = std::thread::spawn(move || {
+            ack_started_tx
+                .send(())
+                .expect("acknowledgement start signal should send");
+            ack_done_tx
+                .send(acknowledge_store.acknowledge(
+                    "session-target",
+                    &mailbox_id,
+                    0,
+                    1,
+                ))
+                .expect("acknowledgement result should send");
+        });
+        ack_started_rx
+            .recv()
+            .expect("acknowledgement thread should reach the writer boundary");
+        assert!(
+            matches!(ack_done_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "acknowledgement must wait while the state writer owns the database"
+        );
+        drop(state_writer_guard);
+        let summary = ack_done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("acknowledgement should finish after writer release")
+            .expect("acknowledgement should succeed");
+        acknowledge_thread
+            .join()
+            .expect("acknowledgement thread should join");
+        assert_eq!(summary.unread_count, 0);
     }
 
     #[test]

@@ -61,6 +61,7 @@ const MAX_FILE_CONTENT_BYTES: usize = 10 * 1024 * 1024;
 /// Starts the backend entrypoint.
 #[tokio::main]
 async fn main() {
+    configure_process_open_file_limit();
     ignore_sigpipe();
     if let Err(err) = run().await {
         eprintln!("fatal: {err:#}");
@@ -569,6 +570,7 @@ impl Mode {
     }
 }
 
+include!("process_limits.rs");
 include!("remote.rs");
 include!("remote_ssh.rs");
 include!("remote_terminal.rs");

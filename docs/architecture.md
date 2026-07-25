@@ -725,6 +725,18 @@ The UI should still not evolve toward:
 
 ## Agent Integration
 
+### Process descriptor capacity
+
+On Unix, TermAl raises its process-wide soft `RLIMIT_NOFILE` toward 8192 at
+startup, capped by the current hard limit. This happens before any agent
+runtime is spawned, so the shared Codex app-server, Claude processes, and
+their tools inherit the effective limit without requiring a shell-level
+`ulimit`. Set `TERMAL_NOFILE_LIMIT` to a positive integer to override the
+default. The lift is best-effort and never lowers an existing higher limit;
+TermAl logs a warning and continues when the OS rejects it. Already-running
+children cannot inherit a later change, so changing the override requires a
+full TermAl restart.
+
 ### Claude Code
 
 **Invocation:**
@@ -1057,6 +1069,7 @@ termal/
 |   |-- main.rs              # process mode selection + router assembly;
 |   |                        # assembles the other *.rs files via include!()
 |   |                        # into a single flat crate
+|   |-- process_limits.rs    # early Unix RLIMIT_NOFILE lift inherited by agents
 |   |
 |   |-- # State: core types + sessions + persist + broadcast
 |   |-- state.rs             # AppState, StateInner, PersistRequest/Delta, core types

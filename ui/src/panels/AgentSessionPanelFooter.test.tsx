@@ -439,6 +439,12 @@ function deferredValue<T>() {
   return { promise, resolve, reject };
 }
 
+async function settleNextAnimationFrame() {
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
 function recordTextareaHeightWrites(
   textarea: HTMLTextAreaElement,
   writes: { value: string; transition: string }[],
@@ -1694,6 +1700,7 @@ describe("AgentSessionPanelFooter", () => {
       await Promise.resolve();
     });
     const sessionBTextarea = screen.getByLabelText("Message session-b");
+    await act(settleNextAnimationFrame);
     const focusSpy = vi.spyOn(sessionBTextarea, "focus");
 
     await act(async () => {
@@ -3295,6 +3302,7 @@ describe("AgentSessionPanelFooter", () => {
       await Promise.resolve();
     });
     const sessionBTextarea = screen.getByLabelText("Message session-b");
+    await act(settleNextAnimationFrame);
     const focusSpy = vi.spyOn(sessionBTextarea, "focus");
 
     await act(async () => {
