@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { cleanup } from "@testing-library/react";
+import { useEffect, useState } from "react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const appMock = vi.hoisted(() => vi.fn());
@@ -16,16 +16,17 @@ import {
 import {
   createDeferred,
   renderApp,
+  submitButtonWithoutSettling,
   withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
-describe("renderApp workspace-layout coordination", () => {
-  afterEach(() => {
-    cleanup();
-    appMock.mockReset();
-    setAppTestHooksForTests(null);
-  });
+afterEach(() => {
+  cleanup();
+  appMock.mockReset();
+  setAppTestHooksForTests(null);
+});
 
+describe("renderApp workspace-layout coordination", () => {
   it("restores the previous hooks when App throws during render", async () => {
     const previousHooks: AppTestHooks = {
       onDeleteProjectPostAwaitPath: vi.fn(),
@@ -118,5 +119,42 @@ describe("renderApp workspace-layout coordination", () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+});
+
+describe("submitButtonWithoutSettling", () => {
+  it("keeps an intentionally pending submit out of an async act scope", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const request = createDeferred<void>();
+
+      function PendingForm() {
+        const [status, setStatus] = useState("idle");
+        return (
+          <form
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setStatus("pending");
+              await request.promise;
+              setStatus("complete");
+            }}
+          >
+            <button type="submit">Submit</button>
+            <output>{status}</output>
+          </form>
+        );
+      }
+
+      render(<PendingForm />);
+      submitButtonWithoutSettling(
+        screen.getByRole("button", { name: "Submit" }),
+      );
+      expect(screen.getByText("pending")).toBeInTheDocument();
+
+      await act(async () => {
+        request.resolve();
+        await request.promise;
+      });
+      expect(screen.getByText("complete")).toBeInTheDocument();
+    });
   });
 });

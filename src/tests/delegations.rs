@@ -1109,6 +1109,17 @@ fn delegation_records_persist_and_reload_with_child_link() {
             created.child_session.parent_delegation_id.as_deref(),
             Some(delegation_id.as_str())
         );
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let parent = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == parent_session_id)
+            .expect("parent session should remain present");
+        assert!(
+            parent.session.parent_delegation_id.is_none(),
+            "creating a delegation must use a fresh child id rather than converting the root parent"
+        );
+        drop(inner);
         state.shutdown_persist_blocking();
     }
 

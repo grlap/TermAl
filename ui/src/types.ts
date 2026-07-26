@@ -490,7 +490,7 @@ export type MailboxMessage = {
   topic?: string | null;
   stateStamp?: string | null;
   body: string;
-  notificationDisposition: string;
+  notificationState: string;
 };
 
 export type PendingPrompt = {

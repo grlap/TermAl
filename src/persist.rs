@@ -30,10 +30,114 @@ const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// contention as `SQLITE_BUSY`. Serialize those writers before `BEGIN`; the
 /// timeout remains a boundary for external processes or OS-level locks.
 static SQLITE_STATE_WRITE_LOCKS: LazyLock<
-    Mutex<HashMap<PathBuf, std::sync::Weak<Mutex<()>>>>,
+    Mutex<HashMap<PathBuf, std::sync::Weak<SqliteStateWriterAdmission>>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-fn sqlite_state_write_lock(path: &FsPath) -> Arc<Mutex<()>> {
+#[derive(Default)]
+struct SqliteStateWriterAdmissionState {
+    next_ticket: u64,
+    serving_ticket: u64,
+    canceled_tickets: BTreeSet<u64>,
+}
+
+#[derive(Default)]
+struct SqliteStateWriterAdmission {
+    state: Mutex<SqliteStateWriterAdmissionState>,
+    changed: Condvar,
+}
+
+struct SqliteStateWriterGuard<'a> {
+    admission: &'a SqliteStateWriterAdmission,
+    ticket: u64,
+}
+
+static SQLITE_STATE_WRITER_POISON_WARNING_EMITTED: AtomicBool = AtomicBool::new(false);
+
+fn lock_sqlite_state_writer_admission(
+    admission: &SqliteStateWriterAdmission,
+) -> std::sync::MutexGuard<'_, SqliteStateWriterAdmissionState> {
+    admission.state.lock().unwrap_or_else(|poisoned| {
+        if !SQLITE_STATE_WRITER_POISON_WARNING_EMITTED.swap(true, Ordering::Relaxed) {
+            eprintln!("[termal] warning: recovered a poisoned SQLite state writer admission");
+        }
+        poisoned.into_inner()
+    })
+}
+
+fn wait_sqlite_state_writer_admission<'a>(
+    admission: &'a SqliteStateWriterAdmission,
+    state: std::sync::MutexGuard<'a, SqliteStateWriterAdmissionState>,
+) -> std::sync::MutexGuard<'a, SqliteStateWriterAdmissionState> {
+    admission.changed.wait(state).unwrap_or_else(|poisoned| {
+        if !SQLITE_STATE_WRITER_POISON_WARNING_EMITTED.swap(true, Ordering::Relaxed) {
+            eprintln!("[termal] warning: recovered a poisoned SQLite state writer admission");
+        }
+        poisoned.into_inner()
+    })
+}
+
+fn wait_timeout_sqlite_state_writer_admission<'a>(
+    admission: &'a SqliteStateWriterAdmission,
+    state: std::sync::MutexGuard<'a, SqliteStateWriterAdmissionState>,
+    timeout: Duration,
+) -> (
+    std::sync::MutexGuard<'a, SqliteStateWriterAdmissionState>,
+    std::sync::WaitTimeoutResult,
+) {
+    admission
+        .changed
+        .wait_timeout(state, timeout)
+        .unwrap_or_else(|poisoned| {
+            if !SQLITE_STATE_WRITER_POISON_WARNING_EMITTED.swap(true, Ordering::Relaxed) {
+                eprintln!(
+                    "[termal] warning: recovered a poisoned SQLite state writer admission"
+                );
+            }
+            poisoned.into_inner()
+        })
+}
+
+fn issue_sqlite_state_writer_ticket(
+    admission: &SqliteStateWriterAdmission,
+    state: &mut SqliteStateWriterAdmissionState,
+) -> u64 {
+    let ticket = state.next_ticket;
+    state.next_ticket = state
+        .next_ticket
+        .checked_add(1)
+        .expect("SQLite state writer ticket space exhausted");
+    admission.changed.notify_all();
+    ticket
+}
+
+fn advance_past_canceled_sqlite_state_writer_tickets(
+    state: &mut SqliteStateWriterAdmissionState,
+) {
+    while state.canceled_tickets.remove(&state.serving_ticket) {
+        state.serving_ticket = state
+            .serving_ticket
+            .checked_add(1)
+            .expect("SQLite state writer ticket space exhausted");
+    }
+}
+
+impl Drop for SqliteStateWriterGuard<'_> {
+    fn drop(&mut self) {
+        let mut state = lock_sqlite_state_writer_admission(self.admission);
+        debug_assert_eq!(
+            state.serving_ticket, self.ticket,
+            "SQLite state writer guard released out of FIFO order"
+        );
+        state.serving_ticket = state
+            .serving_ticket
+            .checked_add(1)
+            .expect("SQLite state writer ticket space exhausted");
+        advance_past_canceled_sqlite_state_writer_tickets(&mut state);
+        self.admission.changed.notify_all();
+    }
+}
+
+fn sqlite_state_write_lock(path: &FsPath) -> Arc<SqliteStateWriterAdmission> {
     let mut locks = SQLITE_STATE_WRITE_LOCKS
         .lock()
         .expect("SQLite state write-lock registry poisoned");
@@ -41,16 +145,79 @@ fn sqlite_state_write_lock(path: &FsPath) -> Arc<Mutex<()>> {
     if let Some(lock) = locks.get(path).and_then(std::sync::Weak::upgrade) {
         return lock;
     }
-    let lock = Arc::new(Mutex::new(()));
+    let lock = Arc::new(SqliteStateWriterAdmission::default());
     locks.insert(path.to_path_buf(), Arc::downgrade(&lock));
     lock
 }
 
-fn lock_sqlite_state_writer(lock: &Mutex<()>) -> std::sync::MutexGuard<'_, ()> {
-    lock.lock().unwrap_or_else(|poisoned| {
-        eprintln!("[termal] warning: recovered a poisoned SQLite state writer lock");
-        poisoned.into_inner()
+fn lock_sqlite_state_writer(lock: &SqliteStateWriterAdmission) -> SqliteStateWriterGuard<'_> {
+    let mut state = lock_sqlite_state_writer_admission(lock);
+    let ticket = issue_sqlite_state_writer_ticket(lock, &mut state);
+    while state.serving_ticket != ticket {
+        state = wait_sqlite_state_writer_admission(lock, state);
+    }
+    drop(state);
+    SqliteStateWriterGuard {
+        admission: lock,
+        ticket,
+    }
+}
+
+fn lock_sqlite_state_writer_for(
+    lock: &SqliteStateWriterAdmission,
+    timeout: Duration,
+) -> Option<SqliteStateWriterGuard<'_>> {
+    let deadline = std::time::Instant::now() + timeout;
+    let mut state = lock_sqlite_state_writer_admission(lock);
+    let ticket = issue_sqlite_state_writer_ticket(lock, &mut state);
+    while state.serving_ticket != ticket {
+        let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
+            state.canceled_tickets.insert(ticket);
+            advance_past_canceled_sqlite_state_writer_tickets(&mut state);
+            lock.changed.notify_all();
+            return None;
+        };
+        let (next_state, wait_result) =
+            wait_timeout_sqlite_state_writer_admission(lock, state, remaining);
+        state = next_state;
+        if wait_result.timed_out() && state.serving_ticket != ticket {
+            state.canceled_tickets.insert(ticket);
+            advance_past_canceled_sqlite_state_writer_tickets(&mut state);
+            lock.changed.notify_all();
+            return None;
+        }
+    }
+    drop(state);
+    Some(SqliteStateWriterGuard {
+        admission: lock,
+        ticket,
     })
+}
+
+#[cfg(test)]
+fn sqlite_state_writer_issued_tickets(lock: &SqliteStateWriterAdmission) -> u64 {
+    lock_sqlite_state_writer_admission(lock).next_ticket
+}
+
+#[cfg(test)]
+fn wait_for_sqlite_state_writer_issued_tickets(
+    lock: &SqliteStateWriterAdmission,
+    expected: u64,
+) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut state = lock_sqlite_state_writer_admission(lock);
+    while state.next_ticket < expected {
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .expect("SQLite writer ticket should be issued before diagnostic deadline");
+        let (next_state, wait_result) =
+            wait_timeout_sqlite_state_writer_admission(lock, state, remaining);
+        state = next_state;
+        assert!(
+            !wait_result.timed_out() || state.next_ticket >= expected,
+            "SQLite writer ticket should be issued before diagnostic deadline"
+        );
+    }
 }
 
 fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
@@ -722,6 +889,7 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
               idempotency_key TEXT NOT NULL,
               unread_depth_at_append INTEGER NOT NULL,
               notification_disposition TEXT NOT NULL,
+              dispatch_outcome TEXT,
               UNIQUE (mailbox_id, sequence),
               UNIQUE (sender_session_id, idempotency_key),
               FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
@@ -732,6 +900,15 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
             ",
         )
         .context("failed to initialize SQLite state schema")?;
+    if !mailbox_messages_table_has_column(connection, "dispatch_outcome")? {
+        connection
+            .execute(
+                "ALTER TABLE mailbox_messages ADD COLUMN dispatch_outcome TEXT",
+                [],
+            )
+            .context("failed to add immutable mailbox dispatch outcome")?;
+    }
+    ensure_mailbox_dispatch_outcome_backfill(connection)?;
     connection
         .execute(
             "INSERT INTO meta(key, value) VALUES('schema_version', ?1)
@@ -740,6 +917,102 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
         )
         .context("failed to record SQLite state schema version")?;
     Ok(())
+}
+
+fn mailbox_dispatch_outcome_backfill_complete(
+    connection: &rusqlite::Connection,
+) -> Result<bool> {
+    connection
+        .query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM meta
+               WHERE key = 'mailbox_dispatch_outcome_backfill_v1'
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .context("failed to inspect mailbox dispatch-outcome migration state")
+}
+
+fn ensure_mailbox_dispatch_outcome_backfill(
+    connection: &rusqlite::Connection,
+) -> Result<()> {
+    // The completed path is read-only. Avoid taking SQLite's writer slot on
+    // every connection schema check after this one-time migration has landed.
+    if mailbox_dispatch_outcome_backfill_complete(connection)? {
+        return Ok(());
+    }
+
+    // Re-check after acquiring IMMEDIATE: another connection may have completed
+    // the migration between the read-only probe above and this transaction.
+    // Check, backfill, and mark completion atomically. Production callers also
+    // hold the path-scoped SQLite writer lock in
+    // `ensure_sqlite_state_schema_for_path`, so separate connections cannot
+    // race this one-time migration. The transaction prevents a crash between
+    // the UPDATE and marker write from re-arming it on the next boot.
+    let migration = rusqlite::Transaction::new_unchecked(
+        connection,
+        rusqlite::TransactionBehavior::Immediate,
+    )
+        .context("failed to begin mailbox dispatch-outcome migration")?;
+    let dispatch_outcome_backfilled =
+        mailbox_dispatch_outcome_backfill_complete(&migration)?;
+    if !dispatch_outcome_backfilled {
+        // The legacy lifecycle column cannot distinguish a direct delivery from a
+        // delivery reached after recovery. Preserve deliveredToIdleSession as the
+        // pragmatic immutable approximation, but normalize recovered/unknown
+        // values to the accurate never-woken fallback. Pre-migration rows must not
+        // be mined for recovery statistics.
+        //
+        // This is deliberately a one-time migration. Fresh appends use NULL as an
+        // in-flight finalization marker, so repeating the backfill during ordinary
+        // schema checks would fabricate a provisional immutable receipt.
+        migration
+            .execute(
+                "UPDATE mailbox_messages
+                 SET dispatch_outcome = CASE
+                   WHEN notification_disposition = 'queuedBehindActiveTurn'
+                     THEN 'queuedBehindActiveTurn'
+                   WHEN notification_disposition = 'deliveredToIdleSession'
+                     THEN 'deliveredToIdleSession'
+                   ELSE 'durableButNotWoken'
+                 END
+                 WHERE dispatch_outcome IS NULL
+                    OR dispatch_outcome NOT IN (
+                      'durableButNotWoken',
+                      'queuedBehindActiveTurn',
+                      'deliveredToIdleSession'
+                    )",
+                [],
+            )
+            .context("failed to backfill immutable mailbox dispatch outcomes")?;
+        migration
+            .execute(
+                "INSERT INTO meta(key, value)
+                 VALUES('mailbox_dispatch_outcome_backfill_v1', 'complete')
+                 ON CONFLICT(key) DO NOTHING",
+                [],
+            )
+            .context("failed to record mailbox dispatch-outcome migration")?;
+    }
+    migration
+        .commit()
+        .context("failed to commit mailbox dispatch-outcome migration")?;
+    Ok(())
+}
+
+fn mailbox_messages_table_has_column(
+    connection: &rusqlite::Connection,
+    column_name: &str,
+) -> Result<bool> {
+    let mut statement = connection.prepare("PRAGMA table_info(mailbox_messages)")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for row in rows {
+        if row? == column_name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn ensure_sqlite_state_schema_for_path(
@@ -791,6 +1064,165 @@ mod sqlite_schema_tests {
             )
             .expect("state table count should be queryable");
         assert_eq!(state_table_count, 0);
+    }
+
+    #[test]
+    fn sqlite_schema_adds_and_backfills_immutable_mailbox_dispatch_outcome() {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE meta (
+                  key TEXT PRIMARY KEY,
+                  value TEXT NOT NULL
+                );
+                CREATE TABLE mailbox_messages (
+                  id TEXT PRIMARY KEY,
+                  notification_disposition TEXT NOT NULL
+                );
+                INSERT INTO mailbox_messages(id, notification_disposition)
+                VALUES
+                  ('mailbox-message-durable', 'durableButNotWoken'),
+                  ('mailbox-message-queued', 'queuedBehindActiveTurn'),
+                  ('mailbox-message-recovered', 'recoveredWake'),
+                  ('mailbox-message-delivered', 'deliveredToIdleSession'),
+                  ('mailbox-message-unknown', 'legacyUnknownState');
+                ",
+            )
+            .expect("seed pre-dispatch-outcome mailbox schema");
+        connection
+            .execute(
+                "INSERT INTO meta(key, value) VALUES('schema_version', ?1)",
+                rusqlite::params![SQLITE_SCHEMA_VERSION],
+            )
+            .expect("seed supported schema version");
+
+        ensure_sqlite_state_schema(&connection).expect("schema migration should succeed");
+
+        assert!(
+            mailbox_messages_table_has_column(&connection, "dispatch_outcome")
+                .expect("mailbox column should be inspectable")
+        );
+        let mut statement = connection
+            .prepare(
+                "SELECT id, dispatch_outcome
+                 FROM mailbox_messages
+                 ORDER BY id",
+            )
+            .expect("backfilled outcomes should prepare");
+        let outcomes = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .expect("backfilled outcomes should query")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("backfilled outcomes should decode");
+        assert_eq!(
+            outcomes,
+            vec![
+                (
+                    "mailbox-message-delivered".to_owned(),
+                    "deliveredToIdleSession".to_owned(),
+                ),
+                (
+                    "mailbox-message-durable".to_owned(),
+                    "durableButNotWoken".to_owned(),
+                ),
+                (
+                    "mailbox-message-queued".to_owned(),
+                    "queuedBehindActiveTurn".to_owned(),
+                ),
+                (
+                    "mailbox-message-recovered".to_owned(),
+                    "durableButNotWoken".to_owned(),
+                ),
+                (
+                    "mailbox-message-unknown".to_owned(),
+                    "durableButNotWoken".to_owned(),
+                ),
+            ]
+        );
+        drop(statement);
+
+        connection
+            .execute_batch(
+                "
+                UPDATE mailbox_messages
+                SET dispatch_outcome = NULL,
+                    notification_disposition = 'queuedBehindActiveTurn'
+                WHERE id = 'mailbox-message-durable';
+                ",
+            )
+            .expect("seed a fresh provisional outcome after migration");
+        ensure_sqlite_state_schema(&connection).expect("ordinary schema check should repeat");
+        let provisional_outcome: Option<String> = connection
+            .query_row(
+                "SELECT dispatch_outcome
+                 FROM mailbox_messages
+                 WHERE id = 'mailbox-message-durable'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("provisional outcome should read");
+        assert_eq!(
+            provisional_outcome, None,
+            "one-time migration must not rewrite a fresh in-flight receipt marker"
+        );
+    }
+
+    #[test]
+    fn completed_dispatch_outcome_backfill_fast_path_is_read_only() {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        ensure_sqlite_state_schema(&connection).expect("initial schema migration should succeed");
+        connection
+            .execute_batch("PRAGMA query_only = ON;")
+            .expect("test connection should enter query-only mode");
+
+        ensure_mailbox_dispatch_outcome_backfill(&connection)
+            .expect("completed migration should use the read-only fast path");
+    }
+
+    #[test]
+    fn sqlite_schema_dispatch_outcome_migration_is_safe_across_connections() {
+        let root = std::env::temp_dir().join(format!(
+            "termal-schema-concurrency-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).expect("test directory should exist");
+        let path = root.join("termal.sqlite");
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let threads = (0..2)
+            .map(|_| {
+                let path = path.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let connection = open_sqlite_state_connection(&path)
+                        .expect("concurrent SQLite connection should open");
+                    barrier.wait();
+                    ensure_sqlite_state_schema_for_path(&connection, &path)
+                        .expect("concurrent schema ensure should succeed");
+                })
+            })
+            .collect::<Vec<_>>();
+        for thread in threads {
+            thread.join().expect("schema ensure thread should join");
+        }
+
+        let connection =
+            rusqlite::Connection::open(&path).expect("schema database should reopen");
+        let marker_count: u32 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM meta
+                 WHERE key = 'mailbox_dispatch_outcome_backfill_v1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("migration marker should read");
+        assert_eq!(marker_count, 1);
+        drop(connection);
+        fs::remove_dir_all(root).expect("test directory should clean up");
     }
 }
 
@@ -974,7 +1406,7 @@ fn persist_state_parts_via_connection(
     let metadata_json =
         serde_json::to_string(metadata).context("failed to serialize persisted state metadata")?;
     let write_lock = sqlite_state_write_lock(path);
-    let _write_guard = lock_sqlite_state_writer(&write_lock);
+    let write_guard = lock_sqlite_state_writer(&write_lock);
     let tx = connection.transaction().with_context(|| {
         format!(
             "failed to start SQLite transaction for `{}`",
@@ -1023,6 +1455,7 @@ fn persist_state_parts_via_connection(
     }
     tx.commit()
         .with_context(|| format!("failed to commit persisted state to `{}`", path.display()))?;
+    drop(write_guard);
     // Keep post-commit redirection and owner-only permission verification
     // fatal. The chmod helper itself honors
     // TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS when the operator explicitly
@@ -1157,7 +1590,7 @@ fn persist_delta_via_cache_inner(
     // so path swaps are caught without chmoding the state directory every tick.
     reject_existing_sqlite_state_path_redirection(path)?;
     let write_lock = sqlite_state_write_lock(path);
-    let _write_guard = lock_sqlite_state_writer(&write_lock);
+    let write_guard = lock_sqlite_state_writer(&write_lock);
     let tx = connection.transaction().with_context(|| {
         format!(
             "failed to start SQLite transaction for `{}`",
@@ -1241,6 +1674,7 @@ fn persist_delta_via_cache_inner(
             path.display()
         )
     })?;
+    drop(write_guard);
     // Keep post-commit redirection and owner-only permission verification
     // fatal. The chmod helper itself honors
     // TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS when the operator explicitly

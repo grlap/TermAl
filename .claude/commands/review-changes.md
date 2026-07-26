@@ -40,6 +40,13 @@ Warnings are acceptable; report them and continue.
 Then run `cd ui && npx tsc --noEmit`.
 If it produces ANY errors, stop immediately and present the output.
 
+Then run `node --test scripts/review-freeze-fingerprint.test.mjs`.
+If it produces ANY failures or errors, stop immediately and present the
+output. The freeze helper is the integrity boundary for the delegated review,
+so its HEAD/index/worktree identity, path-safety, executable-mode, streaming,
+and concurrent-drift contracts must pass before the worktree is declared
+frozen.
+
 Then run `scripts/test-rust.sh` in the parent session. This wrapper raises the
 Unix file-descriptor soft limit where possible and bounds Rust test
 parallelism so FD-heavy fixtures do not exhaust the process descriptor budget.

@@ -113,8 +113,18 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    // Keep React/jsdom suites below machine-wide CPU saturation.
-    maxWorkers: 4,
+    // tm-g4z: Vitest 4 defaults to forked Node processes. Under sustained
+    // multi-agent load those workers can time out before startup and starve a
+    // 10-second test timer for minutes. This pure JS/jsdom suite uses worker
+    // threads instead, avoiding repeated process boot while retaining isolated
+    // worker contexts. Forks remain the fallback if a future native dependency
+    // needs process-level crash or process.exit isolation.
+    pool: "threads",
+    // Keep React/jsdom suites below machine-wide CPU saturation. Two threads
+    // preserve parallel coverage while leaving enough CPU for each test's
+    // unchanged 10-second diagnostic budget on developer machines that are
+    // also running long-lived agent sessions.
+    maxWorkers: 2,
     setupFiles: "./src/test-setup.ts",
     testTimeout: 10_000,
     projects: [

@@ -10,6 +10,7 @@ after that worker shuts down.
 
 const MAX_MAILBOX_BODY_BYTES: usize = 256 * 1024;
 const MAX_MAILBOX_METADATA_BYTES: usize = 4 * 1024;
+const MAILBOX_WRITER_ADMISSION_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -55,7 +56,7 @@ struct MailboxMessage {
     idempotency_key: String,
     #[serde(default, skip_serializing)]
     unread_depth_at_append: u64,
-    notification_disposition: String,
+    notification_state: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,6 +71,19 @@ struct MailboxAppendInput {
     state_stamp: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MailboxIdempotencyRecord {
+    mailbox_id: String,
+    message_id: String,
+    sequence: u64,
+    target_session_id: String,
+    body: String,
+    topic: Option<String>,
+    state_stamp: Option<String>,
+    unread_depth_at_append: u64,
+    dispatch_outcome: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct MailboxAppendReceipt {
@@ -79,6 +93,35 @@ struct MailboxAppendReceipt {
     unread_depth: u64,
     notification_disposition: String,
     duplicate: bool,
+}
+
+struct MailboxAppendResult {
+    receipt: MailboxAppendReceipt,
+    finalization: Option<MailboxDispatchFinalizationGuard>,
+}
+
+impl std::fmt::Debug for MailboxAppendResult {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("MailboxAppendResult")
+            .field("receipt", &self.receipt)
+            .field("requires_finalization", &self.finalization.is_some())
+            .finish()
+    }
+}
+
+impl std::ops::Deref for MailboxAppendResult {
+    type Target = MailboxAppendReceipt;
+
+    fn deref(&self) -> &Self::Target {
+        &self.receipt
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum MailboxDispatchOutcomeRecord {
+    Recorded { state_advanced: bool },
+    AlreadyFinalized { dispatch_outcome: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -164,13 +207,65 @@ fn default_mailbox_read_limit() -> u64 {
     50
 }
 
+#[derive(Default)]
+struct MailboxDispatchFinalizationState {
+    pending_message_ids: HashSet<String>,
+    #[cfg(test)]
+    waiters_by_message_id: HashMap<String, usize>,
+}
+
+#[derive(Default)]
+struct MailboxDispatchFinalization {
+    state: Mutex<MailboxDispatchFinalizationState>,
+    changed: Condvar,
+}
+
 struct MailboxStore {
     connection: Mutex<Option<rusqlite::Connection>>,
-    write_lock: Arc<Mutex<()>>,
+    write_lock: Arc<SqliteStateWriterAdmission>,
+    write_admission_timeout: Duration,
+    dispatch_finalization: Arc<MailboxDispatchFinalization>,
+    #[cfg(test)]
+    internal_writer_waiters: Mutex<usize>,
+    #[cfg(test)]
+    internal_writer_waiter_changed: Condvar,
 }
 
 struct MailboxConnectionGuard<'a> {
     guard: std::sync::MutexGuard<'a, Option<rusqlite::Connection>>,
+}
+
+struct MailboxDispatchFinalizationGuard {
+    dispatch_finalization: Arc<MailboxDispatchFinalization>,
+    message_id: String,
+}
+
+#[cfg(test)]
+fn decrement_dispatch_waiter(
+    state: &mut MailboxDispatchFinalizationState,
+    message_id: &str,
+) {
+    if let Some(waiters) = state.waiters_by_message_id.get_mut(message_id) {
+        *waiters -= 1;
+        if *waiters == 0 {
+            state.waiters_by_message_id.remove(message_id);
+        }
+    }
+}
+
+impl Drop for MailboxDispatchFinalizationGuard {
+    fn drop(&mut self) {
+        // Panic-safe release: if dispatch unwinds after the durable append,
+        // the NULL outcome remains the conservative durableButNotWoken
+        // fallback and no same-process duplicate can stay parked forever.
+        let mut state = self
+            .dispatch_finalization
+            .state
+            .lock()
+            .expect("mailbox dispatch finalization mutex poisoned");
+        state.pending_message_ids.remove(&self.message_id);
+        self.dispatch_finalization.changed.notify_all();
+    }
 }
 
 impl std::ops::Deref for MailboxConnectionGuard<'_> {
@@ -218,10 +313,14 @@ impl AppState {
             topic: request.topic,
             state_stamp: request.state_stamp,
         };
-        let mut receipt = self
+        let appended = self
             .mailbox_store
             .append(&input)
             .map_err(mailbox_api_error)?;
+        let MailboxAppendResult {
+            mut receipt,
+            finalization: _dispatch_finalization,
+        } = appended;
         if receipt.duplicate {
             return Ok(receipt);
         }
@@ -236,16 +335,27 @@ impl AppState {
             (input.target_session_id.as_str(), target_still_active),
         ] {
             if !still_active {
-                self.mailbox_store
-                    .mark_session_left(session_id)
-                    .map_err(|err| {
-                        ApiError::internal(format!(
-                            "mailbox message committed but failed to preserve deleted participant state: {err:#}"
-                        ))
-                    })?;
+                if let Err(err) = self.mailbox_store.mark_session_left(session_id) {
+                    eprintln!(
+                        "mailbox> message {} committed, but failed to mark departed participant `{session_id}`: {err:#}",
+                        receipt.message_id
+                    );
+                }
             }
         }
         if !target_still_active {
+            if let Err(err) = self
+                .mailbox_store
+                .record_initial_dispatch_outcome(
+                    &receipt.message_id,
+                    "durableButNotWoken",
+                )
+            {
+                eprintln!(
+                    "mailbox> message {} committed, but failed finalizing its durable receipt: {err:#}",
+                    receipt.message_id
+                );
+            }
             return Ok(receipt);
         }
 
@@ -314,20 +424,24 @@ impl AppState {
                 None
             }
         };
-        if let Some(disposition) = disposition {
-            match self
-                .mailbox_store
-                .set_notification_disposition(&receipt.message_id, disposition)
-            {
-                Ok(()) => {
-                    receipt.notification_disposition = disposition.to_owned();
-                }
-                Err(err) => {
-                    eprintln!(
-                        "mailbox> failed recording `{disposition}` for message `{}`: {err:#}",
-                        receipt.message_id
-                    );
-                }
+        let disposition = disposition.unwrap_or("durableButNotWoken");
+        match self
+            .mailbox_store
+            .record_initial_dispatch_outcome(&receipt.message_id, disposition)
+        {
+            Ok(MailboxDispatchOutcomeRecord::Recorded { .. }) => {
+                receipt.notification_disposition = disposition.to_owned();
+            }
+            Ok(MailboxDispatchOutcomeRecord::AlreadyFinalized {
+                dispatch_outcome,
+            }) => {
+                receipt.notification_disposition = dispatch_outcome;
+            }
+            Err(err) => {
+                eprintln!(
+                    "mailbox> failed recording `{disposition}` for message `{}`: {err:#}",
+                    receipt.message_id
+                );
             }
         }
         Ok(receipt)
@@ -420,11 +534,7 @@ impl AppState {
         let mut changed = false;
         let mut recovered_through = Vec::with_capacity(wakeups.len());
         for wakeup in wakeups {
-            recovered_through.push((
-                wakeup.mailbox_id.clone(),
-                wakeup.message_id.clone(),
-                wakeup.sequence,
-            ));
+            recovered_through.push((wakeup.mailbox_id.clone(), wakeup.sequence));
             let text = mailbox_notification_text(
                 &wakeup.mailbox_id,
                 wakeup.unread_count,
@@ -502,11 +612,10 @@ impl AppState {
             self.commit_locked(&mut inner)?;
         }
         drop(inner);
-        for (mailbox_id, message_id, sequence) in recovered_through {
+        for (mailbox_id, sequence) in recovered_through {
             self.mailbox_store.mark_notifications_recovered_through(
                 session_id,
                 &mailbox_id,
-                &message_id,
                 sequence,
             )?;
         }
@@ -894,6 +1003,13 @@ fn mailbox_api_error(err: anyhow::Error) -> ApiError {
 
 impl MailboxStore {
     fn open(path: &FsPath) -> Result<Self> {
+        Self::open_with_write_admission_timeout(path, MAILBOX_WRITER_ADMISSION_TIMEOUT)
+    }
+
+    fn open_with_write_admission_timeout(
+        path: &FsPath,
+        write_admission_timeout: Duration,
+    ) -> Result<Self> {
         let connection = open_sqlite_state_connection(path)?;
         ensure_sqlite_state_schema_for_path(&connection, path)?;
         connection
@@ -907,6 +1023,12 @@ impl MailboxStore {
         Ok(Self {
             connection: Mutex::new(Some(connection)),
             write_lock: sqlite_state_write_lock(path),
+            write_admission_timeout,
+            dispatch_finalization: Arc::new(MailboxDispatchFinalization::default()),
+            #[cfg(test)]
+            internal_writer_waiters: Mutex::new(0),
+            #[cfg(test)]
+            internal_writer_waiter_changed: Condvar::new(),
         })
     }
 
@@ -914,7 +1036,191 @@ impl MailboxStore {
     fn disabled_for_tests() -> Self {
         Self {
             connection: Mutex::new(None),
-            write_lock: Arc::new(Mutex::new(())),
+            write_lock: Arc::new(SqliteStateWriterAdmission::default()),
+            write_admission_timeout: MAILBOX_WRITER_ADMISSION_TIMEOUT,
+            dispatch_finalization: Arc::new(MailboxDispatchFinalization::default()),
+            internal_writer_waiters: Mutex::new(0),
+            internal_writer_waiter_changed: Condvar::new(),
+        }
+    }
+
+    fn lock_writer(&self, operation: &str) -> Result<SqliteStateWriterGuard<'_>> {
+        lock_sqlite_state_writer_for(&self.write_lock, self.write_admission_timeout).ok_or_else(
+            || {
+                mailbox_store_error(
+                    MailboxStoreErrorKind::Retryable,
+                    format!(
+                        "mailbox storage is temporarily busy while {operation}; no mailbox write \
+                         was committed by this operation, so retry the same request"
+                    ),
+                )
+            },
+        )
+    }
+
+    fn lock_internal_writer(&self) -> SqliteStateWriterGuard<'_> {
+        // Request-owned append/ack paths have a bounded admission deadline so
+        // they can return a retryable 503. These lifecycle writes run after a
+        // durable commit or runtime acceptance and have no caller that can
+        // safely retry them, so wait for the short in-process transaction
+        // boundary instead of silently abandoning the state transition.
+        #[cfg(test)]
+        {
+            let mut waiters = self
+                .internal_writer_waiters
+                .lock()
+                .expect("mailbox internal writer waiter mutex poisoned");
+            *waiters += 1;
+            self.internal_writer_waiter_changed.notify_all();
+        }
+        let guard = lock_sqlite_state_writer(&self.write_lock);
+        #[cfg(test)]
+        {
+            let mut waiters = self
+                .internal_writer_waiters
+                .lock()
+                .expect("mailbox internal writer waiter mutex poisoned");
+            *waiters -= 1;
+            self.internal_writer_waiter_changed.notify_all();
+        }
+        guard
+    }
+
+    fn register_pending_dispatch_outcome(&self, message_id: &str) {
+        self.dispatch_finalization
+            .state
+            .lock()
+            .expect("mailbox dispatch finalization mutex poisoned")
+            .pending_message_ids
+            .insert(message_id.to_owned());
+    }
+
+    fn finish_pending_dispatch_outcome(&self, message_id: &str) {
+        let mut state = self
+            .dispatch_finalization
+            .state
+            .lock()
+            .expect("mailbox dispatch finalization mutex poisoned");
+        state.pending_message_ids.remove(message_id);
+        self.dispatch_finalization.changed.notify_all();
+    }
+
+    fn wait_for_final_dispatch_outcome(&self, message_id: &str) -> Result<String> {
+        let mut state = self
+            .dispatch_finalization
+            .state
+            .lock()
+            .expect("mailbox dispatch finalization mutex poisoned");
+        if state.pending_message_ids.contains(message_id) {
+            #[cfg(test)]
+            {
+            *state
+                .waiters_by_message_id
+                .entry(message_id.to_owned())
+                .or_default() += 1;
+            self.dispatch_finalization.changed.notify_all();
+            }
+            let deadline = std::time::Instant::now() + self.write_admission_timeout;
+            while state.pending_message_ids.contains(message_id) {
+                let Some(remaining) =
+                    deadline.checked_duration_since(std::time::Instant::now())
+                else {
+                    #[cfg(test)]
+                    decrement_dispatch_waiter(&mut state, message_id);
+                    return Err(mailbox_store_error(
+                        MailboxStoreErrorKind::Retryable,
+                        "mailbox dispatch outcome is still finalizing; retry the same request",
+                    ));
+                };
+                let (next_state, timeout) = self
+                    .dispatch_finalization
+                    .changed
+                    .wait_timeout(state, remaining)
+                    .expect("mailbox dispatch finalization mutex poisoned");
+                state = next_state;
+                if timeout.timed_out() && state.pending_message_ids.contains(message_id) {
+                    #[cfg(test)]
+                    decrement_dispatch_waiter(&mut state, message_id);
+                    return Err(mailbox_store_error(
+                        MailboxStoreErrorKind::Retryable,
+                        "mailbox dispatch outcome is still finalizing; retry the same request",
+                    ));
+                }
+            }
+            #[cfg(test)]
+            decrement_dispatch_waiter(&mut state, message_id);
+        }
+        drop(state);
+
+        let connection = self.connection()?;
+        let dispatch_outcome = connection
+            .query_row(
+                "SELECT dispatch_outcome
+                 FROM mailbox_messages
+                 WHERE id = ?1",
+                rusqlite::params![message_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .map_err(|err| match err {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    anyhow!("mailbox message `{message_id}` disappeared during dispatch")
+                }
+                other => anyhow!(other).context("failed to read finalized mailbox dispatch outcome"),
+            })?;
+        Ok(dispatch_outcome.unwrap_or_else(|| "durableButNotWoken".to_owned()))
+    }
+
+    #[cfg(test)]
+    fn wait_for_dispatch_outcome_waiter(&self, message_id: &str) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut state = self
+            .dispatch_finalization
+            .state
+            .lock()
+            .expect("mailbox dispatch finalization mutex poisoned");
+        while state
+            .waiters_by_message_id
+            .get(message_id)
+            .copied()
+            .unwrap_or(0)
+            == 0
+        {
+            let remaining = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .expect("duplicate append did not reach the finalization wait boundary");
+            let (next_state, timeout) = self
+                .dispatch_finalization
+                .changed
+                .wait_timeout(state, remaining)
+                .expect("mailbox dispatch finalization mutex poisoned");
+            state = next_state;
+            assert!(
+                !timeout.timed_out(),
+                "duplicate append did not reach the finalization wait boundary"
+            );
+        }
+    }
+
+    #[cfg(test)]
+    fn wait_for_internal_writer_waiter(&self) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut waiters = self
+            .internal_writer_waiters
+            .lock()
+            .expect("mailbox internal writer waiter mutex poisoned");
+        while *waiters == 0 {
+            let remaining = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .expect("lifecycle writer did not reach the shared writer boundary");
+            let (next_waiters, timeout) = self
+                .internal_writer_waiter_changed
+                .wait_timeout(waiters, remaining)
+                .expect("mailbox internal writer waiter mutex poisoned");
+            waiters = next_waiters;
+            assert!(
+                !timeout.timed_out(),
+                "lifecycle writer did not reach the shared writer boundary"
+            );
         }
     }
 
@@ -933,9 +1239,9 @@ impl MailboxStore {
             .ok_or_else(|| anyhow!("mailbox storage is disabled in this test state"))
     }
 
-    fn append(&self, input: &MailboxAppendInput) -> Result<MailboxAppendReceipt> {
+    fn append(&self, input: &MailboxAppendInput) -> Result<MailboxAppendResult> {
         validate_mailbox_append_input(input)?;
-        let write_guard = lock_sqlite_state_writer(&self.write_lock);
+        let write_guard = self.lock_writer("waiting to begin mailbox append")?;
         let mut connection = self.connection()?;
         let transaction =
             begin_mailbox_write(&mut connection, "beginning mailbox append")?;
@@ -961,13 +1267,24 @@ impl MailboxStore {
                 .map_err(|err| {
                     mailbox_sqlite_write_error("finishing duplicate mailbox lookup", err)
                 })?;
-            return Ok(MailboxAppendReceipt {
-                mailbox_id: existing.mailbox_id,
-                message_id: existing.id,
-                sequence: existing.sequence,
-                unread_depth: existing.unread_depth_at_append,
-                notification_disposition: existing.notification_disposition,
-                duplicate: true,
+            // Lock order: a duplicate may wait on dispatch finalization only after
+            // releasing both SQLite resources and the shared writer-admission guard.
+            drop(connection);
+            drop(write_guard);
+            let notification_disposition = match existing.dispatch_outcome {
+                Some(dispatch_outcome) => dispatch_outcome,
+                None => self.wait_for_final_dispatch_outcome(&existing.message_id)?,
+            };
+            return Ok(MailboxAppendResult {
+                receipt: MailboxAppendReceipt {
+                    mailbox_id: existing.mailbox_id,
+                    message_id: existing.message_id,
+                    sequence: existing.sequence,
+                    unread_depth: existing.unread_depth_at_append,
+                    notification_disposition,
+                    duplicate: true,
+                },
+                finalization: None,
             });
         }
 
@@ -1057,8 +1374,8 @@ impl MailboxStore {
                    id, mailbox_id, sequence, sender_session_id, sender_name,
                    target_session_id, target_name, created_at, class, topic,
                    state_stamp, body, idempotency_key, unread_depth_at_append,
-                   notification_disposition
-                 ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'routine', ?9, ?10, ?11, ?12, ?13, ?14)",
+                   notification_disposition, dispatch_outcome
+                 ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'routine', ?9, ?10, ?11, ?12, ?13, ?14, NULL)",
                 rusqlite::params![
                     &message_id,
                     &mailbox_id,
@@ -1077,36 +1394,120 @@ impl MailboxStore {
                 ],
             )
             .context("failed to append mailbox message")?;
-        transaction
-            .commit()
-            .map_err(|err| mailbox_sqlite_write_error("committing mailbox append", err))?;
+        self.register_pending_dispatch_outcome(&message_id);
+        let finalization = MailboxDispatchFinalizationGuard {
+            dispatch_finalization: self.dispatch_finalization.clone(),
+            message_id: message_id.clone(),
+        };
+        if let Err(err) = transaction.commit() {
+            return Err(mailbox_sqlite_write_error(
+                "committing mailbox append",
+                err,
+            ));
+        }
         drop(write_guard);
 
-        Ok(MailboxAppendReceipt {
-            mailbox_id,
-            message_id,
-            sequence,
-            unread_depth,
-            notification_disposition: notification_disposition.to_owned(),
-            duplicate: false,
+        Ok(MailboxAppendResult {
+            receipt: MailboxAppendReceipt {
+                mailbox_id,
+                message_id,
+                sequence,
+                unread_depth,
+                notification_disposition: notification_disposition.to_owned(),
+                duplicate: false,
+            },
+            finalization: Some(finalization),
         })
     }
 
-    fn set_notification_disposition(
+    fn record_initial_dispatch_outcome(
         &self,
         message_id: &str,
-        disposition: &str,
-    ) -> Result<()> {
-        let _write_guard = lock_sqlite_state_writer(&self.write_lock);
+        dispatch_outcome: &str,
+    ) -> Result<MailboxDispatchOutcomeRecord> {
+        let result = (|| {
+            let _write_guard = self.lock_internal_writer();
+            let mut connection = self.connection()?;
+            let transaction = begin_mailbox_write(
+                &mut connection,
+                "beginning initial mailbox dispatch outcome update",
+            )?;
+            let outcome_updated = transaction
+                .execute(
+                    "UPDATE mailbox_messages
+                     SET dispatch_outcome = ?2
+                     WHERE id = ?1
+                       AND dispatch_outcome IS NULL",
+                    rusqlite::params![message_id, dispatch_outcome],
+                )
+                .context("failed to record initial mailbox dispatch outcome")?;
+            if outcome_updated == 0 {
+                let existing_outcome = transaction
+                    .query_row(
+                        "SELECT dispatch_outcome
+                         FROM mailbox_messages
+                         WHERE id = ?1",
+                        rusqlite::params![message_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .map_err(|err| match err {
+                        rusqlite::Error::QueryReturnedNoRows => {
+                            anyhow!("mailbox message `{message_id}` does not exist")
+                        }
+                        other => anyhow!(other).context("failed to read finalized mailbox outcome"),
+                    })?
+                    .context("finalized mailbox outcome should not be NULL")?;
+                transaction
+                    .commit()
+                    .map_err(|err| {
+                        mailbox_sqlite_write_error(
+                            "committing duplicate mailbox dispatch finalization",
+                            err,
+                        )
+                    })?;
+                return Ok(MailboxDispatchOutcomeRecord::AlreadyFinalized {
+                    dispatch_outcome: existing_outcome,
+                });
+            }
+            let state_advanced = transaction
+                .execute(
+                    "UPDATE mailbox_messages
+                     SET notification_disposition = ?2
+                     WHERE id = ?1
+                       AND notification_disposition = 'durableButNotWoken'",
+                    rusqlite::params![message_id, dispatch_outcome],
+                )
+                .context("failed to advance initial mailbox notification state")?;
+            transaction
+                .commit()
+                .map_err(|err| {
+                    mailbox_sqlite_write_error(
+                        "committing initial mailbox dispatch outcome update",
+                        err,
+                    )
+                })?;
+            Ok(MailboxDispatchOutcomeRecord::Recorded {
+                state_advanced: state_advanced > 0,
+            })
+        })();
+        // Finalizers persist while holding the writer boundary, release it when the
+        // closure returns, and only then wake duplicate-receipt waiters.
+        self.finish_pending_dispatch_outcome(message_id);
+        result
+    }
+
+    #[cfg(test)]
+    fn set_notification_state(&self, message_id: &str, notification_state: &str) -> Result<()> {
+        let _write_guard = self.lock_writer("updating mailbox notification state")?;
         let connection = self.connection()?;
         let updated = connection
             .execute(
                 "UPDATE mailbox_messages
                  SET notification_disposition = ?2
                  WHERE id = ?1",
-                rusqlite::params![message_id, disposition],
+                rusqlite::params![message_id, notification_state],
             )
-            .context("failed to update mailbox notification disposition")?;
+            .context("failed to update mailbox notification state")?;
         if updated == 0 {
             bail!("mailbox message `{message_id}` does not exist");
         }
@@ -1118,10 +1519,10 @@ impl MailboxStore {
         session_id: &str,
         mailbox_id: &str,
         through_sequence: u64,
-    ) -> Result<()> {
-        let _write_guard = lock_sqlite_state_writer(&self.write_lock);
+    ) -> Result<usize> {
+        let _write_guard = self.lock_internal_writer();
         let connection = self.connection()?;
-        connection
+        let updated = connection
             .execute(
                 "UPDATE mailbox_messages
                  SET notification_disposition = 'deliveredToIdleSession'
@@ -1132,23 +1533,18 @@ impl MailboxStore {
                 rusqlite::params![mailbox_id, session_id, through_sequence],
             )
             .context("failed to mark mailbox notifications delivered")?;
-        Ok(())
+        Ok(updated)
     }
 
     fn mark_notifications_recovered_through(
         &self,
         session_id: &str,
         mailbox_id: &str,
-        latest_message_id: &str,
         through_sequence: u64,
-    ) -> Result<()> {
-        let _write_guard = lock_sqlite_state_writer(&self.write_lock);
-        let mut connection = self.connection()?;
-        let transaction = begin_mailbox_write(
-            &mut connection,
-            "beginning mailbox recovery disposition update",
-        )?;
-        transaction
+    ) -> Result<usize> {
+        let _write_guard = self.lock_internal_writer();
+        let connection = self.connection()?;
+        let updated = connection
             .execute(
                 "UPDATE mailbox_messages
                  SET notification_disposition = 'recoveredWake'
@@ -1159,29 +1555,11 @@ impl MailboxStore {
                 rusqlite::params![mailbox_id, session_id, through_sequence],
             )
             .context("failed to mark never-woken mailbox notifications recovered")?;
-        transaction
-            .execute(
-                "UPDATE mailbox_messages
-                 SET notification_disposition = 'recoveredWake'
-                 WHERE id = ?1
-                   AND mailbox_id = ?2
-                   AND target_session_id = ?3",
-                rusqlite::params![latest_message_id, mailbox_id, session_id],
-            )
-            .context("failed to mark latest mailbox notification recovered")?;
-        transaction
-            .commit()
-            .map_err(|err| {
-                mailbox_sqlite_write_error(
-                    "committing mailbox recovery disposition update",
-                    err,
-                )
-            })?;
-        Ok(())
+        Ok(updated)
     }
 
     fn mark_session_left(&self, session_id: &str) -> Result<()> {
-        let _write_guard = lock_sqlite_state_writer(&self.write_lock);
+        let _write_guard = self.lock_internal_writer();
         let Some(connection) = self.connection_if_enabled() else {
             return Ok(());
         };
@@ -1200,52 +1578,7 @@ impl MailboxStore {
         let Some(connection) = self.connection_if_enabled() else {
             return Ok(Vec::new());
         };
-        let mut statement = connection
-            .prepare(
-                "SELECT m.id, m.next_sequence - 1,
-                        (
-                          SELECT COUNT(*)
-                          FROM mailbox_messages unread
-                          WHERE unread.mailbox_id = m.id
-                            AND unread.target_session_id = ?1
-                            AND unread.sequence > mine.processed_through
-                        ),
-                        latest.body, latest.created_at
-                 FROM mailboxes m
-                 JOIN mailbox_participants mine
-                   ON mine.mailbox_id = m.id AND mine.session_id = ?1
-                 LEFT JOIN mailbox_messages latest
-                   ON latest.mailbox_id = m.id
-                  AND latest.sequence = m.next_sequence - 1
-                 WHERE mine.left_at IS NULL
-                 ORDER BY COALESCE(latest.created_at, m.created_at) DESC, m.id",
-            )
-            .context("failed to prepare mailbox summary query")?;
-        let rows = statement
-            .query_map(rusqlite::params![session_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, u64>(1)?,
-                    row.get::<_, u64>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                ))
-            })
-            .context("failed to query mailbox summaries")?;
-        let mut summaries = Vec::new();
-        for row in rows {
-            let (id, latest_sequence, unread_count, latest_body, latest_message_at) =
-                row.context("failed to decode mailbox summary")?;
-            summaries.push(MailboxSummary {
-                participants: mailbox_participants(&connection, &id)?,
-                id,
-                latest_sequence,
-                unread_count,
-                latest_message_preview: latest_body.map(|body| mailbox_preview(&body)),
-                latest_message_at,
-            });
-        }
-        Ok(summaries)
+        mailbox_summaries_for_session(&connection, session_id)
     }
 
     fn unread_wakeup_for_mailbox(
@@ -1436,7 +1769,7 @@ impl MailboxStore {
                 "mailbox acknowledgement cannot move backwards",
             ));
         }
-        let write_guard = lock_sqlite_state_writer(&self.write_lock);
+        let write_guard = self.lock_writer("waiting to begin mailbox acknowledgement")?;
         let mut connection = self.connection()?;
         let transaction =
             begin_mailbox_write(&mut connection, "beginning mailbox acknowledgement")?;
@@ -1479,14 +1812,42 @@ impl MailboxStore {
             )
             .context("failed to update mailbox acknowledgement")?;
         if updated == 0 {
-            return Err(mailbox_store_error(
-                MailboxStoreErrorKind::Conflict,
-                format!(
-                    "mailbox acknowledgement conflict: processedThrough no longer equals {}",
-                    expected_processed_through
-                ),
-            ));
+            let current_processed_through = transaction
+                .query_row(
+                    "SELECT processed_through
+                     FROM mailbox_participants
+                     WHERE mailbox_id = ?1
+                       AND session_id = ?2
+                       AND left_at IS NULL",
+                    rusqlite::params![mailbox_id, session_id],
+                    |row| row.get::<_, u64>(0),
+                )
+                .map_err(|err| match err {
+                    rusqlite::Error::QueryReturnedNoRows => mailbox_store_error(
+                        MailboxStoreErrorKind::NotFound,
+                        "mailbox participant not found",
+                    ),
+                    other => anyhow!(other),
+                })?;
+            if current_processed_through < processed_through {
+                return Err(mailbox_store_error(
+                    MailboxStoreErrorKind::Conflict,
+                    format!(
+                        "mailbox acknowledgement conflict: processedThrough no longer equals {}",
+                        expected_processed_through
+                    ),
+                ));
+            }
         }
+        let summary = mailbox_summaries_for_session(&transaction, session_id)?
+            .into_iter()
+            .find(|summary| summary.id == mailbox_id)
+            .ok_or_else(|| {
+                mailbox_store_error(
+                    MailboxStoreErrorKind::NotFound,
+                    "mailbox not found while acknowledging",
+                )
+            })?;
         transaction
             .commit()
             .map_err(|err| {
@@ -1494,15 +1855,7 @@ impl MailboxStore {
             })?;
         drop(connection);
         drop(write_guard);
-        self.list_for_session(session_id)?
-            .into_iter()
-            .find(|summary| summary.id == mailbox_id)
-            .ok_or_else(|| {
-                mailbox_store_error(
-                    MailboxStoreErrorKind::NotFound,
-                    "mailbox not found after acknowledgement",
-                )
-            })
+        Ok(summary)
     }
 }
 
@@ -1617,16 +1970,26 @@ fn mailbox_message_for_idempotency_key(
     transaction: &rusqlite::Transaction<'_>,
     sender_session_id: &str,
     idempotency_key: &str,
-) -> Result<Option<MailboxMessage>> {
+) -> Result<Option<MailboxIdempotencyRecord>> {
     match transaction.query_row(
-        "SELECT id, mailbox_id, sequence, sender_session_id, sender_name,
-                target_session_id, target_name, created_at, class, topic,
-                state_stamp, body, idempotency_key, unread_depth_at_append,
-                notification_disposition
+        "SELECT mailbox_id, id, sequence, target_session_id, body, topic,
+                state_stamp, unread_depth_at_append, dispatch_outcome
          FROM mailbox_messages
          WHERE sender_session_id = ?1 AND idempotency_key = ?2",
         rusqlite::params![sender_session_id, idempotency_key],
-        mailbox_message_from_row,
+        |row| {
+            Ok(MailboxIdempotencyRecord {
+                mailbox_id: row.get(0)?,
+                message_id: row.get(1)?,
+                sequence: row.get(2)?,
+                target_session_id: row.get(3)?,
+                body: row.get(4)?,
+                topic: row.get(5)?,
+                state_stamp: row.get(6)?,
+                unread_depth_at_append: row.get(7)?,
+                dispatch_outcome: row.get(8)?,
+            })
+        },
     ) {
         Ok(message) => Ok(Some(message)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -1650,8 +2013,60 @@ fn mailbox_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Mailbox
         body: row.get(11)?,
         idempotency_key: row.get(12)?,
         unread_depth_at_append: row.get(13)?,
-        notification_disposition: row.get(14)?,
+        notification_state: row.get(14)?,
     })
+}
+
+fn mailbox_summaries_for_session(
+    connection: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<Vec<MailboxSummary>> {
+    let mut statement = connection
+        .prepare(
+            "SELECT m.id, m.next_sequence - 1,
+                    (
+                      SELECT COUNT(*)
+                      FROM mailbox_messages unread
+                      WHERE unread.mailbox_id = m.id
+                        AND unread.target_session_id = ?1
+                        AND unread.sequence > mine.processed_through
+                    ),
+                    latest.body, latest.created_at
+             FROM mailboxes m
+             JOIN mailbox_participants mine
+               ON mine.mailbox_id = m.id AND mine.session_id = ?1
+             LEFT JOIN mailbox_messages latest
+               ON latest.mailbox_id = m.id
+              AND latest.sequence = m.next_sequence - 1
+             WHERE mine.left_at IS NULL
+             ORDER BY COALESCE(latest.created_at, m.created_at) DESC, m.id",
+        )
+        .context("failed to prepare mailbox summary query")?;
+    let rows = statement
+        .query_map(rusqlite::params![session_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, u64>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })
+        .context("failed to query mailbox summaries")?;
+    let mut summaries = Vec::new();
+    for row in rows {
+        let (id, latest_sequence, unread_count, latest_body, latest_message_at) =
+            row.context("failed to decode mailbox summary")?;
+        summaries.push(MailboxSummary {
+            participants: mailbox_participants(connection, &id)?,
+            id,
+            latest_sequence,
+            unread_count,
+            latest_message_preview: latest_body.map(|body| mailbox_preview(&body)),
+            latest_message_at,
+        });
+    }
+    Ok(summaries)
 }
 
 fn mailbox_participants(
@@ -1717,382 +2132,5 @@ fn mailbox_preview(body: &str) -> String {
 }
 
 #[cfg(test)]
-mod mailbox_store_tests {
-    use super::*;
-
-    struct MailboxTestRoot(PathBuf);
-
-    impl MailboxTestRoot {
-        fn new() -> Self {
-            let path =
-                std::env::temp_dir().join(format!("termal-mailbox-test-{}", Uuid::new_v4()));
-            fs::create_dir_all(&path).expect("mailbox test root should exist");
-            Self(path)
-        }
-
-        fn database_path(&self) -> PathBuf {
-            self.0.join("termal.sqlite")
-        }
-    }
-
-    impl Drop for MailboxTestRoot {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn test_input() -> MailboxAppendInput {
-        MailboxAppendInput {
-            sender_session_id: "session-sender".to_owned(),
-            sender_name: "Sender".to_owned(),
-            target_session_id: "session-target".to_owned(),
-            target_name: "Target".to_owned(),
-            body: "Durable hello".to_owned(),
-            idempotency_key: "send-1".to_owned(),
-            topic: Some("coordination".to_owned()),
-            state_stamp: Some("rev-7".to_owned()),
-        }
-    }
-
-    #[test]
-    fn mailbox_api_status_uses_typed_error_kind_instead_of_message_text() {
-        let internal = mailbox_api_error(anyhow!(
-            "internal database lookup reported not found and exceeds retry budget"
-        ));
-        assert_eq!(
-            internal.status,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal wording must never be mistaken for a client classification"
-        );
-
-        let not_found = mailbox_api_error(mailbox_store_error(
-            MailboxStoreErrorKind::NotFound,
-            "mailbox not found",
-        ));
-        assert_eq!(not_found.status, StatusCode::NOT_FOUND);
-        let conflict = mailbox_api_error(mailbox_store_error(
-            MailboxStoreErrorKind::Conflict,
-            "mailbox cursor conflict",
-        ));
-        assert_eq!(conflict.status, StatusCode::CONFLICT);
-        let validation = mailbox_api_error(mailbox_store_error(
-            MailboxStoreErrorKind::Validation,
-            "mailbox input exceeds limit",
-        ));
-        assert_eq!(validation.status, StatusCode::BAD_REQUEST);
-        let retryable = mailbox_api_error(mailbox_sqlite_write_error(
-            "beginning mailbox acknowledgement",
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("database is locked".to_owned()),
-            ),
-        ));
-        assert_eq!(retryable.status, StatusCode::SERVICE_UNAVAILABLE);
-        assert!(retryable.message.contains("retry the same request"));
-    }
-
-    #[test]
-    fn mailbox_append_and_acknowledgement_wait_for_in_process_state_writer() {
-        let root = MailboxTestRoot::new();
-        let path = root.database_path();
-        let store = Arc::new(MailboxStore::open(&path).expect("mailbox store should open"));
-        let state_writer_lock = sqlite_state_write_lock(&path);
-        assert!(
-            Arc::ptr_eq(&state_writer_lock, &store.write_lock),
-            "state persistence and mailbox writes must share one admission lock"
-        );
-
-        let state_writer_guard = lock_sqlite_state_writer(&state_writer_lock);
-        let append_store = store.clone();
-        let (append_started_tx, append_started_rx) = mpsc::channel();
-        let (append_done_tx, append_done_rx) = mpsc::channel();
-        let append_thread = std::thread::spawn(move || {
-            append_started_tx
-                .send(())
-                .expect("append start signal should send");
-            append_done_tx
-                .send(append_store.append(&test_input()))
-                .expect("append result should send");
-        });
-        append_started_rx
-            .recv()
-            .expect("append thread should reach the writer boundary");
-        assert!(
-            matches!(
-                append_done_rx.try_recv(),
-                Err(mpsc::TryRecvError::Empty)
-            ),
-            "append must wait while the state writer owns the database"
-        );
-        drop(state_writer_guard);
-        let receipt = append_done_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("append should finish after writer release")
-            .expect("append should succeed");
-        append_thread.join().expect("append thread should join");
-
-        let state_writer_guard = lock_sqlite_state_writer(&state_writer_lock);
-        let acknowledge_store = store.clone();
-        let mailbox_id = receipt.mailbox_id.clone();
-        let (ack_started_tx, ack_started_rx) = mpsc::channel();
-        let (ack_done_tx, ack_done_rx) = mpsc::channel();
-        let acknowledge_thread = std::thread::spawn(move || {
-            ack_started_tx
-                .send(())
-                .expect("acknowledgement start signal should send");
-            ack_done_tx
-                .send(acknowledge_store.acknowledge(
-                    "session-target",
-                    &mailbox_id,
-                    0,
-                    1,
-                ))
-                .expect("acknowledgement result should send");
-        });
-        ack_started_rx
-            .recv()
-            .expect("acknowledgement thread should reach the writer boundary");
-        assert!(
-            matches!(ack_done_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
-            "acknowledgement must wait while the state writer owns the database"
-        );
-        drop(state_writer_guard);
-        let summary = ack_done_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("acknowledgement should finish after writer release")
-            .expect("acknowledgement should succeed");
-        acknowledge_thread
-            .join()
-            .expect("acknowledgement thread should join");
-        assert_eq!(summary.unread_count, 0);
-    }
-
-    #[test]
-    fn append_retry_after_reopen_returns_original_durable_receipt() {
-        let root = MailboxTestRoot::new();
-        let path = root.database_path();
-
-        let first = {
-            let store = MailboxStore::open(&path).expect("mailbox store should open");
-            store.append(&test_input()).expect("append should succeed")
-        };
-        assert!(!first.duplicate);
-        assert_eq!(first.notification_disposition, "durableButNotWoken");
-
-        let store = MailboxStore::open(&path).expect("mailbox store should reopen");
-        store
-            .acknowledge("session-target", &first.mailbox_id, 0, 1)
-            .expect("target cursor should advance before retry");
-        let duplicate = store
-            .append(&test_input())
-            .expect("idempotent retry should succeed");
-        assert!(duplicate.duplicate);
-        assert_eq!(duplicate.mailbox_id, first.mailbox_id);
-        assert_eq!(duplicate.message_id, first.message_id);
-        assert_eq!(duplicate.sequence, first.sequence);
-        assert_eq!(
-            duplicate.unread_depth, first.unread_depth,
-            "duplicate must return the original receipt, not recompute depth from the current cursor"
-        );
-        assert_eq!(duplicate.notification_disposition, "durableButNotWoken");
-        assert_eq!(
-            store
-                .read_range("session-target", &first.mailbox_id, 0, 20)
-                .expect("messages should read")
-                .len(),
-            1
-        );
-    }
-
-    #[test]
-    fn idempotent_retry_ignores_mutable_participant_display_names() {
-        let root = MailboxTestRoot::new();
-        let path = root.database_path();
-        let store = MailboxStore::open(&path).expect("mailbox store should open");
-        let first = store.append(&test_input()).expect("append should succeed");
-
-        let mut renamed = test_input();
-        renamed.sender_name = "Renamed Sender".to_owned();
-        renamed.target_name = "Renamed Target".to_owned();
-        let duplicate = store
-            .append(&renamed)
-            .expect("renaming either participant must not change message intent");
-        assert!(duplicate.duplicate);
-        assert_eq!(duplicate.message_id, first.message_id);
-
-        let stored = store
-            .read_message("session-target", &first.message_id)
-            .expect("original durable message should read");
-        assert_eq!(stored.sender_name, "Sender");
-        assert_eq!(stored.target_name, "Target");
-    }
-
-    #[test]
-    fn reused_idempotency_key_with_different_intent_is_rejected() {
-        let root = MailboxTestRoot::new();
-        let path = root.database_path();
-        let store = MailboxStore::open(&path).expect("mailbox store should open");
-        store.append(&test_input()).expect("append should succeed");
-        let mut conflicting = test_input();
-        conflicting.body = "Different message".to_owned();
-        let error = store
-            .append(&conflicting)
-            .expect_err("conflicting retry should fail");
-        assert!(error.to_string().contains("different mailbox message"));
-    }
-
-    #[test]
-    fn acknowledgement_is_forward_only_compare_and_swap() {
-        let root = MailboxTestRoot::new();
-        let path = root.database_path();
-        let store = MailboxStore::open(&path).expect("mailbox store should open");
-        let receipt = store.append(&test_input()).expect("append should succeed");
-
-        let summary = store
-            .acknowledge("session-target", &receipt.mailbox_id, 0, 1)
-            .expect("matching cursor should advance");
-        assert_eq!(summary.unread_count, 0);
-        let error = store
-            .acknowledge("session-target", &receipt.mailbox_id, 0, 1)
-            .expect_err("stale cursor should conflict");
-        assert!(error.to_string().contains("conflict"));
-    }
-
-    #[test]
-    fn unread_count_includes_only_inbound_messages_above_the_cursor() {
-        let root = MailboxTestRoot::new();
-        let path = root.database_path();
-        let store = MailboxStore::open(&path).expect("mailbox store should open");
-        let first = store.append(&test_input()).expect("append should succeed");
-
-        let mut reply = test_input();
-        reply.sender_session_id = "session-target".to_owned();
-        reply.sender_name = "Target".to_owned();
-        reply.target_session_id = "session-sender".to_owned();
-        reply.target_name = "Sender".to_owned();
-        reply.idempotency_key = "reply-1".to_owned();
-        reply.body = "Outbound from the original target".to_owned();
-        store.append(&reply).expect("reply should append");
-
-        let target_summary = store
-            .list_for_session("session-target")
-            .expect("target summary should read")
-            .into_iter()
-            .find(|summary| summary.id == first.mailbox_id)
-            .expect("target mailbox should exist");
-        assert_eq!(
-            target_summary.unread_count, 1,
-            "the target's own outbound reply must not inflate inbound unread"
-        );
-        assert_eq!(
-            store
-                .unread_wakeups_for_session("session-target")
-                .expect("wake state should read")[0]
-                .unread_count,
-            1
-        );
-    }
-
-    #[test]
-    fn mailbox_append_caps_body_and_optional_metadata() {
-        let mutations: [fn(&mut MailboxAppendInput); 3] = [
-            |input: &mut MailboxAppendInput| {
-                input.body = "x".repeat(MAX_MAILBOX_BODY_BYTES + 1);
-            },
-            |input: &mut MailboxAppendInput| {
-                input.topic = Some("x".repeat(MAX_MAILBOX_METADATA_BYTES + 1));
-            },
-            |input: &mut MailboxAppendInput| {
-                input.state_stamp = Some("x".repeat(MAX_MAILBOX_METADATA_BYTES + 1));
-            },
-        ];
-        for mutate in mutations {
-            let mut input = test_input();
-            mutate(&mut input);
-            assert!(
-                validate_mailbox_append_input(&input)
-                    .expect_err("oversized mailbox input should fail")
-                    .to_string()
-                    .contains("exceeds")
-            );
-        }
-    }
-
-    #[test]
-    fn concurrent_appends_allocate_one_dense_mailbox_sequence() {
-        let root = MailboxTestRoot::new();
-        let path = root.database_path();
-        let store = Arc::new(MailboxStore::open(&path).expect("mailbox store should open"));
-        let barrier = Arc::new(std::sync::Barrier::new(5));
-        let mut handles = Vec::new();
-        for index in 0..4 {
-            let store = store.clone();
-            let barrier = barrier.clone();
-            handles.push(std::thread::spawn(move || {
-                let mut input = test_input();
-                input.idempotency_key = format!("send-{index}");
-                input.body = format!("message {index}");
-                barrier.wait();
-                store.append(&input).expect("concurrent append should succeed")
-            }));
-        }
-        barrier.wait();
-        let mut receipts = handles
-            .into_iter()
-            .map(|handle| handle.join().expect("append thread should join"))
-            .collect::<Vec<_>>();
-        receipts.sort_by_key(|receipt| receipt.sequence);
-        assert_eq!(
-            receipts
-                .iter()
-                .map(|receipt| receipt.sequence)
-                .collect::<Vec<_>>(),
-            vec![1, 2, 3, 4]
-        );
-        assert!(
-            receipts
-                .windows(2)
-                .all(|pair| pair[0].mailbox_id == pair[1].mailbox_id)
-        );
-    }
-
-    #[test]
-    fn appending_again_does_not_resurrect_a_departed_participant() {
-        let root = MailboxTestRoot::new();
-        let path = root.database_path();
-        let store = MailboxStore::open(&path).expect("mailbox store should open");
-        let first = store.append(&test_input()).expect("append should succeed");
-        store
-            .mark_session_left("session-target")
-            .expect("participant should be marked left");
-
-        let mut second_input = test_input();
-        second_input.idempotency_key = "send-2".to_owned();
-        second_input.body = "second body".to_owned();
-        let error = store
-            .append(&second_input)
-            .expect_err("append to a departed participant should be rejected");
-        assert!(error.to_string().contains("departed mailbox participant"));
-
-        assert!(
-            store
-                .list_for_session("session-target")
-                .expect("departed participant list should read")
-                .is_empty(),
-            "append upsert must not clear a deletion's left marker"
-        );
-        let sender_summary = store
-            .list_for_session("session-sender")
-            .expect("sender mailbox list should read")
-            .into_iter()
-            .find(|summary| summary.id == first.mailbox_id)
-            .expect("sender should retain mailbox history");
-        assert!(sender_summary
-            .participants
-            .iter()
-            .find(|participant| participant.session_id == "session-target")
-            .expect("target snapshot should remain")
-            .left_at
-            .is_some());
-    }
-}
+#[path = "mailboxes_store_tests.rs"]
+mod mailbox_store_tests;

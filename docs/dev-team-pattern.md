@@ -248,11 +248,12 @@ termal_send_to_session   {sessionId (id or name), message,
                           idempotencyKey, topic?, stateStamp?, class?}
                          → durable receipt {mailboxId, messageId,
                            sequence, unreadDepth, duplicate,
-                           notificationDisposition}
+                           notificationDisposition (immutable dispatch outcome)}
 termal_list_mailboxes    {} → your mailboxes, participants, YOUR
                          processedThrough cursor, unread counts
 termal_read_mailbox      {mailboxId, afterSequence?, limit?} → ordered
-                         messages; reading never advances the cursor
+                         messages with mutable notificationState;
+                         reading never advances the cursor
 termal_acknowledge_mailbox {mailboxId, expectedProcessedThrough,
                           processedThrough} → forward-only CAS after
                           processing
@@ -266,27 +267,39 @@ condition→action table. `class` is `routine` only until tm-uwx.3.
 ### 7.2 Rules earned from incidents
 
 1. **Freeze fingerprints** (binds both agents). Every freeze declaration
-   carries three digests, computed with EXACTLY these commands so
-   declarer and auditor cannot diverge:
+   carries the complete labeled packet emitted by EXACTLY this repository
+   helper so declarer and auditor cannot diverge:
 
    ```
-   git status --short | shasum -a 256
-   git diff --binary | shasum -a 256
-   git ls-files --others --exclude-standard | sort \
-     | xargs shasum -a 256 | shasum -a 256
+   node scripts/review-freeze-fingerprint.mjs
    ```
 
-   Scope is the product tree only — coordination artifacts are excluded
-   by gitignore, because any digest covering the channel is invalidated
-   by the declaration itself. The auditor recomputes at audit start AND
-   end; any mismatch voids the audit, and the implementer re-declares
-   with fresh digests plus a note naming what changed. Placeholder
-   values are an invalid declaration (bounce, don't audit). A worked
-   declaration is one mailbox message: stamp line naming the frozen
-   scope, `Type: freeze`, the change summary, and the three full-value
-   digests. Paid for by: a frozen tree that drifted mid-audit and was
-   caught only by reading the same region twice, and a declaration that
-   raced its own template substitution.
+   The helper emits the exact `HEAD` commit plus labeled SHA-256 values for
+   the index-relative-to-`HEAD`, the complete worktree-relative-to-`HEAD`,
+   the exact short status, and a NUL-safe path/content stream for untracked
+   files. Git output and regular-file content are hashed incrementally with
+   bounded memory. Untracked regular files also include normalized Git
+   executable semantics: any Unix execute bit is executable; Windows records
+   them as non-executable because worktree execute bits are not meaningful
+   there. Before/after filesystem metadata must match; removal or mutation
+   during hashing fails with an explicit instruction to rerun instead of
+   declaring an incoherent tree. All patch/status/untracked scopes use
+   the same Git pathspec exclusion for `.beads`, because tracker-export
+   churn is a coordination side effect in the same class as retired
+   `.collab` artifacts. Every declaration includes the exact helper command
+   beside its full output; bare hashes are invalid because verification
+   must be mechanical. The auditor recomputes at audit start AND end; any
+   mismatch voids the audit, and ANY post-declaration edit — including an
+   approved cleanup — requires an immediate fresh declaration before
+   downstream work consumes the freeze. A worked declaration is one mailbox
+   message: stamp line naming the frozen scope, `Type: freeze`, the change
+   summary, and the helper command/output block. Paid for by: a frozen tree
+   that drifted mid-audit, index-only changes hidden behind unchanged
+   worktree bytes, a moved `HEAD`, whitespace-bearing untracked paths,
+   executable-mode changes, Git output larger than a child-process capture
+   buffer, a declaration that raced its own template substitution, and
+   tracker export writes that invalidated otherwise unchanged product-tree
+   hashes.
 2. **Atomic placement** (binds anyone writing files a reader watches).
    Compose outside the watched directory, move in with one rename, then
    signal. Paid for by: two read-races (a half-written audit file; a

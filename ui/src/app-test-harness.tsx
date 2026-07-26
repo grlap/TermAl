@@ -458,16 +458,31 @@ export async function clickAndSettle(target: HTMLElement) {
   await settleAsyncUi();
 }
 
-export async function submitButtonAndSettle(target: HTMLElement) {
+function submitFormForTarget(target: HTMLElement) {
   const form = target.closest("form");
   if (!form) {
     throw new Error("Submit target is not inside a form.");
   }
+  return form;
+}
 
+export async function submitButtonAndSettle(target: HTMLElement) {
+  const form = submitFormForTarget(target);
   await act(async () => {
     fireEvent.submit(form);
   });
   await settleAsyncUi();
+}
+
+export function submitButtonWithoutSettling(target: HTMLElement) {
+  const form = submitFormForTarget(target);
+  // Some tests intentionally keep the submit handler's request unresolved so
+  // they can inspect the pending UI. A synchronous act boundary commits the
+  // submit event without leaving an async act scope open across that deferred
+  // request; the test that owns the deferred must resolve it in a later act().
+  void act(() => {
+    fireEvent.submit(form);
+  });
 }
 
 export async function withVerifiedNoReactActWarnings<T>(run: () => Promise<T>) {

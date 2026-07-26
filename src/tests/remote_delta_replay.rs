@@ -725,6 +725,10 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         localized_session.remote_id.is_none(),
         "localized OrchestratorsUpdated sessions must strip untrusted inbound remote_id before local emission"
     );
+    assert!(
+        localized_session.parent_delegation_id.is_none(),
+        "remote localization cannot convert a local root id into a delegation child"
+    );
 
     let codex_updated = |title: &str| DeltaEvent::CodexUpdated {
         revision: 9,

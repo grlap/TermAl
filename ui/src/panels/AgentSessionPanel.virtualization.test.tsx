@@ -2051,7 +2051,14 @@ describe("AgentSessionPanel virtualization", () => {
 
       await act(async () => {
         rerender(<Harness restoreToTop />);
-        await Promise.resolve();
+        // The programmatic-scroll seam deliberately reconciles through one
+        // queueMicrotask so a layout-effect write never flushes React from
+        // inside that layout effect. Own that exact deferred update here;
+        // waitFor would wrap arbitrary late work in act and could mask the
+        // warning this regression test exists to detect.
+        await new Promise<void>((resolve) => {
+          queueMicrotask(resolve);
+        });
       });
 
       expect(screen.queryByText("message-1")).toBeInTheDocument();

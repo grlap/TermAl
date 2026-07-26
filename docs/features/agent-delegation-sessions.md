@@ -663,6 +663,17 @@ or an unresolvable caller is treated as a child and denied the peer tools
 (tm-r0y). Only a root-session caller ever sees or invokes them, so the note above
 that `termal_list_sessions` lists the caller is itself scoped to a root caller.
 
+The bridge caches a successful caller classification for its lifetime. That is
+safe because root eligibility is conjunctive: the session must have no
+`parentDelegationId` **and** its id must be absent from the durable delegation
+child index. A session that is root by both sources is never converted into a
+child under the same id by any production lifecycle path. Startup repair may
+restore a missing parent marker only for a session that the durable index
+already classified as a child, so it cannot follow a cached root grant. Hidden
+Claude spares and transient lookup failures remain uncached and fail closed.
+Any future root-to-child adoption, conversion, or id-reuse feature must replace
+the lifetime cache with revalidation before it ships (tm-487).
+
 This containment is a tool-layer guardrail, not process isolation. TermAl's
 loopback HTTP API is unauthenticated under the single-user, local-only trust
 model — `GET /api/state` and `POST /api/sessions/{id}/messages` answer any local
@@ -725,17 +736,30 @@ placing the message body directly into the receiver's turn queue:
 - `termal_list_sessions` discovers eligible root peers by id or name.
 - `termal_send_to_session` commits a routine message with a required,
   sender-scoped `idempotencyKey`, returns the durable receipt, and then
-  best-effort wakes the receiver with metadata only.
+  best-effort wakes the receiver with metadata only. Exact session ids bypass
+  per-message full-state name resolution and are preferred for sustained
+  traffic after the caller appears in state and the bridge caches its
+  eligibility classification; a hidden pre-promotion caller fails closed
+  without caching. The backend still enforces root-peer eligibility.
 - `termal_list_mailboxes`, `termal_read_mailbox`, and
   `termal_read_mailbox_message` let the receiver pull durable bodies without
   advancing its cursor.
-- `termal_acknowledge_mailbox` advances that cursor through a forward-only
-  compare-and-swap.
+- `termal_acknowledge_mailbox` uses a forward-only compare-and-swap for new
+  progress. Replaying a `processedThrough` value at or below the durable cursor
+  succeeds idempotently after a lost response; only a stale request that tries
+  to advance past the durable cursor conflicts.
 
-`notificationDisposition` is `deliveredToIdleSession`,
-`queuedBehindActiveTurn`, `recoveredWake`, or `durableButNotWoken`; durability
-does not depend on successful wake delivery. A duplicate retry with the same
-stable intent returns the original receipt with `duplicate: true`. See
+Receipt `notificationDisposition` is the immutable original dispatch outcome:
+`deliveredToIdleSession`, `queuedBehindActiveTurn`, or
+`durableButNotWoken`; durability does not depend on successful wake delivery.
+Mailbox reads expose the evolving wake lifecycle separately as
+`notificationState`, which can additionally be `recoveredWake` and can advance
+to `deliveredToIdleSession`. A duplicate retry with the same stable intent
+returns the original receipt with `duplicate: true`, regardless of the current
+notification state. If a transport failure prevents the receipt from arriving,
+the append outcome is explicitly reported as unknown and the same stable intent
+and idempotency key are the recovery path. Backend `409` and `503` responses
+retain their status and error detail. See
 [Durable agent mailboxes](agent-mailboxes.md) for the complete storage,
 recovery, and acknowledgement contract, plus the shipped-vs-proposed note under
 *Peer Session Connections* below.

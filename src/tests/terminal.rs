@@ -1705,8 +1705,9 @@ fn run_terminal_shell_command_timeout_kills_process_tree() {
 // Pins `run_terminal_shell_command_with_timeout` succeeding on a
 // normal shell exit and — on Windows — still reaping a backgrounded
 // grandchild via `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Unix deliberately
-// skips `killpg` on clean exit (PID-reuse race), so the marker is
-// allowed on Unix; the Windows guarantee is the load-bearing assertion.
+// skips `killpg` on clean exit (PID-reuse race), so there is no Unix cleanup
+// contract to test here; ordinary Unix shell exit is covered separately.
+#[cfg(windows)]
 #[test]
 fn run_terminal_shell_command_cleans_up_background_children_after_shell_exit() {
     let root = std::env::temp_dir().join(format!("termal-terminal-background-{}", Uuid::new_v4()));
@@ -1725,31 +1726,60 @@ fn run_terminal_shell_command_cleans_up_background_children_after_shell_exit() {
         response.stdout
     );
 
-    // Windows: the Job Object terminates every process assigned to it when
-    // the shell exits (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE), so the
-    // background grandchild must be gone by the time we reach the marker
-    // check. Unix: we deliberately skip `killpg` on the clean-exit path to
-    // avoid racing with PID reuse (see `TerminalProcessTree::cleanup_after_shell_exit`),
-    // so a backgrounded grandchild is allowed to re-parent to init and
-    // finish on its own schedule. Assert the Windows guarantee, and simply
-    // accept that the marker may exist on Unix.
-    #[cfg(windows)]
+    // The Job Object terminates every assigned process when the shell exits
+    // (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`), so the background grandchild
+    // must remain absent throughout its scheduled write window.
     assert_path_absent_throughout(
         &marker,
         Duration::from_millis(2_500),
         "background grandchild process should not survive terminal command completion on Windows",
     );
 
-    // Best-effort cleanup: on Unix the backgrounded subshell may still be
-    // holding the temp directory open. Retry a few times so we don't flake
-    // when the grandchild is slow to finish writing the marker.
-    for attempt in 0..10 {
-        match fs::remove_dir_all(&root) {
-            Ok(()) => break,
-            Err(err) if attempt == 9 => panic!("failed to remove temp dir {root:?}: {err}"),
-            Err(_) => std::thread::sleep(Duration::from_millis(100)),
-        }
+    fs::remove_dir_all(root).unwrap();
+}
+
+// Pins the configured-timeout success path on Unix P0 platforms while a
+// backgrounded grandchild is still alive. Unix clean exit deliberately skips
+// killpg to avoid a PID-reuse race, so the child is released explicitly after
+// the parent response proves the live-grandchild path returned pre-deadline.
+#[cfg(not(windows))]
+#[test]
+fn run_terminal_shell_command_with_timeout_succeeds_with_live_unix_grandchild() {
+    let root = std::env::temp_dir().join(format!(
+        "termal-terminal-timeout-success-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let started = root.join("background-started.txt");
+    let release = root.join("background-release.txt");
+    let finished = root.join("background-finished.txt");
+    let command = terminal_live_background_success_command(&started, &release, &finished);
+
+    let response = run_terminal_shell_command_with_timeout(&command, &root, Duration::from_secs(3));
+    let started_before_release = started.exists();
+    let finished_before_release = finished.exists();
+    fs::write(&release, b"release").expect("background grandchild should be released");
+    if started_before_release {
+        wait_for_path_to_exist(
+            &finished,
+            Duration::from_secs(2),
+            "released background grandchild should finish",
+        );
     }
+    fs::remove_dir_all(root).unwrap();
+
+    let response = response.expect("pre-deadline Unix command should return a response");
+    assert!(!response.timed_out);
+    assert!(response.success);
+    assert!(response.stdout.contains("done"));
+    assert!(
+        started_before_release,
+        "parent shell must observe the grandchild before exiting"
+    );
+    assert!(
+        !finished_before_release,
+        "grandchild should still be live when the parent response returns"
+    );
 }
 
 /// Polls `path` every 50ms for the entire `timeout` window, asserting that
@@ -1783,6 +1813,18 @@ fn assert_path_absent_throughout(path: &FsPath, timeout: Duration, message: &str
     assert!(!path.exists(), "{message}");
 }
 
+#[cfg(not(windows))]
+fn wait_for_path_to_exist(path: &FsPath, timeout: Duration, message: &str) {
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if path.exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert!(path.exists(), "{message}");
+}
+
 #[cfg(windows)]
 fn terminal_timeout_process_tree_command(marker: &FsPath) -> String {
     let marker = marker.to_string_lossy().replace('\'', "''");
@@ -1808,10 +1850,17 @@ fn terminal_background_process_tree_command(marker: &FsPath) -> String {
 }
 
 #[cfg(not(windows))]
-fn terminal_background_process_tree_command(marker: &FsPath) -> String {
+fn terminal_live_background_success_command(
+    started: &FsPath,
+    release: &FsPath,
+    finished: &FsPath,
+) -> String {
     format!(
-        "(sleep 1.5; touch {}) & echo done",
-        shell_single_quote(marker.to_string_lossy().as_ref())
+        "(touch {started}; while [ ! -f {release} ]; do sleep 0.05; done; touch {finished}) \
+         >/dev/null 2>&1 & while [ ! -f {started} ]; do sleep 0.05; done; echo done",
+        started = shell_single_quote(started.to_string_lossy().as_ref()),
+        release = shell_single_quote(release.to_string_lossy().as_ref()),
+        finished = shell_single_quote(finished.to_string_lossy().as_ref()),
     )
 }
 

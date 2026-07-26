@@ -54,6 +54,33 @@ fn lightweight_test_state_does_not_hold_a_mailbox_database_descriptor() {
 }
 
 #[test]
+fn mailbox_backend_rejects_exact_delegation_child_target_before_append() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        inner.sessions[target_index].session.parent_delegation_id =
+            Some("delegation-child-boundary".to_owned());
+    }
+
+    let err = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect_err("delegation children must not be mailbox peers");
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert_eq!(err.message, "target must be a local root session");
+    assert!(
+        state
+            .mailbox_store
+            .list_for_session(&sender_id)
+            .expect("sender mailboxes should list")
+            .is_empty(),
+        "backend eligibility validation must happen before durable append"
+    );
+}
+
+#[test]
 fn mailbox_send_commits_body_before_metadata_only_wake_and_retry_does_not_rewake() {
     let (state, sender_id, target_id) = mailbox_test_state();
     let first = state
@@ -203,8 +230,8 @@ fn direct_mailbox_dispatch_marks_every_covered_notification_delivered() {
             state
                 .mailbox_store
                 .read_message(&target_id, message_id)
-                .expect("notification disposition should read")
-                .notification_disposition,
+                .expect("notification state should read")
+                .notification_state,
             "deliveredToIdleSession",
             "direct dispatch must mark every covered inbound row delivered"
         );
@@ -248,7 +275,7 @@ fn mailbox_send_runtime_channel_failure_keeps_notification_recoverable() {
             .mailbox_store
             .read_message(&target_id, &receipt.message_id)
             .expect("notification state should remain readable")
-            .notification_disposition,
+            .notification_state,
         "recoveredWake",
         "the failure lifecycle should immediately queue a durable recovery wake"
     );
@@ -414,7 +441,7 @@ fn idle_receiver_dispatches_the_coalesced_mailbox_wake_it_started() {
                 .mailbox_store
                 .read_message(&target_id, message_id)
                 .expect("covered notification state should read")
-                .notification_disposition,
+                .notification_state,
             "deliveredToIdleSession"
         );
     }
@@ -434,7 +461,7 @@ fn recovery_never_regresses_an_existing_wake_to_an_older_sequence() {
         .expect("second mailbox wake should coalesce");
     state
         .mailbox_store
-        .set_notification_disposition(&first.message_id, "durableButNotWoken")
+        .set_notification_state(&first.message_id, "durableButNotWoken")
         .expect("test should simulate an older lost wake");
 
     state
@@ -626,7 +653,7 @@ fn delivered_unacknowledged_notification_does_not_loop_or_starve_user_prompt() {
             .mailbox_store
             .read_message(&target_id, &receipt.message_id)
             .expect("notification state should read")
-            .notification_disposition,
+            .notification_state,
         "deliveredToIdleSession"
     );
     assert!(
@@ -801,7 +828,7 @@ fn boot_recovers_a_delivered_notification_after_its_turn_dies_exactly_once() {
         .expect("mailbox body should commit");
     state
         .mailbox_store
-        .set_notification_disposition(&committed.message_id, "deliveredToIdleSession")
+        .set_notification_state(&committed.message_id, "deliveredToIdleSession")
         .expect("the pre-crash wake should be recorded as delivered");
     let input_rx = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -845,8 +872,9 @@ fn boot_recovers_a_delivered_notification_after_its_turn_dies_exactly_once() {
             .mailbox_store
             .read_message(&target_id, &committed.message_id)
             .expect("recovery disposition should read")
-            .notification_disposition,
-        "recoveredWake"
+            .notification_state,
+        "deliveredToIdleSession",
+        "boot recovery must not regress the terminal delivery state while recreating its wake"
     );
 
     let recovered = restarted
@@ -966,6 +994,16 @@ async fn mailbox_http_routes_append_read_and_acknowledge_without_implicit_read_a
     let read_body = to_bytes(read_response.into_body(), usize::MAX)
         .await
         .expect("read response body should read");
+    let read_json: Value =
+        serde_json::from_slice(&read_body).expect("message JSON should deserialize");
+    assert_eq!(
+        read_json[0]["notificationState"], "queuedBehindActiveTurn",
+        "read responses expose the current mutable notification lifecycle"
+    );
+    assert!(
+        read_json[0].get("notificationDisposition").is_none(),
+        "read responses must not reuse the immutable receipt field name"
+    );
     let messages: Vec<MailboxMessage> =
         serde_json::from_slice(&read_body).expect("messages should deserialize");
     assert_eq!(messages.len(), 1);
@@ -1108,9 +1146,35 @@ async fn mailbox_http_routes_append_read_and_acknowledge_without_implicit_read_a
         assert_eq!(response.status(), expected_status);
     }
 
+    let second_send_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{sender_id}/mailboxes/send"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "targetSessionId": target_id,
+                        "message": "second message",
+                        "idempotencyKey": "mailbox-http-second",
+                        "class": "routine"
+                    }))
+                    .expect("second send should serialize"),
+                ))
+                .expect("second send request should build"),
+        )
+        .await
+        .expect("second send route should respond");
+    assert_eq!(second_send_response.status(), StatusCode::ACCEPTED);
+
     for (body, expected_status) in [
         (
             r#"{"expectedProcessedThrough":0,"processedThrough":1}"#,
+            StatusCode::OK,
+        ),
+        (
+            r#"{"expectedProcessedThrough":0,"processedThrough":2}"#,
             StatusCode::CONFLICT,
         ),
         (
@@ -1118,7 +1182,7 @@ async fn mailbox_http_routes_append_read_and_acknowledge_without_implicit_read_a
             StatusCode::BAD_REQUEST,
         ),
         (
-            r#"{"expectedProcessedThrough":1,"processedThrough":2}"#,
+            r#"{"expectedProcessedThrough":1,"processedThrough":3}"#,
             StatusCode::BAD_REQUEST,
         ),
     ] {
@@ -1139,4 +1203,71 @@ async fn mailbox_http_routes_append_read_and_acknowledge_without_implicit_read_a
             .expect("invalid ack route should respond");
         assert_eq!(response.status(), expected_status);
     }
+}
+
+#[tokio::test]
+async fn mailbox_http_send_surfaces_writer_admission_exhaustion_as_retryable_503() {
+    let (base_state, sender_id, target_id) = mailbox_test_state();
+    let persistence_path = base_state.persistence_path.clone();
+    let state = AppState {
+        mailbox_store: Arc::new(
+            MailboxStore::open_with_write_admission_timeout(
+                persistence_path.as_ref(),
+                Duration::ZERO,
+            )
+            .expect("zero-deadline mailbox store should open"),
+        ),
+        ..base_state
+    };
+    let writer_lock = sqlite_state_write_lock(persistence_path.as_ref());
+    let (locked_tx, locked_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        let _guard = lock_sqlite_state_writer(&writer_lock);
+        locked_tx
+            .send(())
+            .expect("writer-lock observer should remain connected");
+        release_rx
+            .recv()
+            .expect("writer-lock holder should be released");
+    });
+    locked_rx
+        .recv()
+        .expect("test should hold the shared writer boundary");
+
+    let response = app_router(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{sender_id}/mailboxes/send"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "targetSessionId": target_id,
+                        "message": "HTTP admission test",
+                        "idempotencyKey": "http-busy-1",
+                        "class": "routine"
+                    }))
+                    .expect("send request should serialize"),
+                ))
+                .expect("send request should build"),
+        )
+        .await
+        .expect("send route should respond");
+    release_tx
+        .send(())
+        .expect("writer-lock holder should release");
+    holder.join().expect("writer-lock holder should join");
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("503 response body should read");
+    let body: Value = serde_json::from_slice(&body).expect("503 body should decode");
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("retry the same request")),
+        "writer admission response should preserve retry guidance: {body}"
+    );
 }

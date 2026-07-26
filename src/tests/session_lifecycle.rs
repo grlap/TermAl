@@ -330,6 +330,10 @@ fn create_session_promotes_matching_hidden_claude_spare_and_replenishes_pool() {
         .find(|record| record.session.id == hidden_session_id)
         .expect("promoted session record should exist");
     assert!(!promoted.hidden);
+    assert!(
+        promoted.session.parent_delegation_id.is_none(),
+        "promoting a hidden spare into a root session must not attach it to a delegation"
+    );
 
     let hidden_spares = inner
         .sessions

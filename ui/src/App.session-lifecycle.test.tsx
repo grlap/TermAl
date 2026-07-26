@@ -107,6 +107,7 @@ import {
   stubElementScrollGeometry,
   stubScrollIntoView,
   submitButtonAndSettle,
+  submitButtonWithoutSettling,
   withFallbackStateHarness,
   withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
@@ -1618,7 +1619,7 @@ describe("App session lifecycle", () => {
 
         await openCreateSessionDialog();
         await settleAsyncUi();
-        await submitButtonAndSettle(
+        submitButtonWithoutSettling(
           screen.getByRole("button", { name: "Create session" }),
         );
 
@@ -2744,7 +2745,7 @@ describe("App session lifecycle", () => {
           throw new Error("Current workspace option not found");
         }
         await clickAndSettle(currentWorkspaceOption);
-        await submitButtonAndSettle(
+        submitButtonWithoutSettling(
           screen.getByRole("button", { name: "Create session" }),
         );
 
@@ -2865,7 +2866,7 @@ describe("App session lifecycle", () => {
 
         await openCreateSessionDialog();
         await settleAsyncUi();
-        await submitButtonAndSettle(
+        submitButtonWithoutSettling(
           screen.getByRole("button", { name: "Create session" }),
         );
 

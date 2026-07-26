@@ -3,6 +3,7 @@ const TERMAL_DELEGATION_MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 const TERMAL_DELEGATION_MCP_DEFAULT_WAIT_INTERVAL_MS: u64 = 1000;
 const TERMAL_DELEGATION_MCP_DEFAULT_WAIT_TIMEOUT_MS: u64 = 300_000;
 const TERMAL_DELEGATION_MCP_MAX_WAIT_TIMEOUT_MS: u64 = 1_800_000;
+const TERMAL_DELEGATION_MCP_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn parse_delegation_mcp_mode_args(
     args: impl Iterator<Item = String>,
@@ -188,6 +189,16 @@ struct TermalDelegationMcpBridge {
     parent_session_id: String,
     base_url: String,
     client: reqwest::blocking::Client,
+    request_timeout: Duration,
+    // A caller classified as a root by both `is_root_peer_session` link
+    // sources cannot become a delegation child under the same session id.
+    // Repair may restore a missing parent marker only for a session already
+    // present in the durable delegation-child index. The conjunctive rule is
+    // pinned by
+    // `delegation_mcp_indexed_child_with_null_marker_is_not_a_root_peer`.
+    // Revisit this lifetime cache before introducing root-to-child adoption,
+    // conversion, or id reuse (tm-487).
+    caller_is_delegation_child: OnceLock<bool>,
 }
 
 fn delegation_child_session_ids(state: &Value) -> HashSet<&str> {
@@ -213,6 +224,18 @@ fn is_root_peer_session(session: &Value, delegation_child_ids: &HashSet<&str>) -
 
 impl TermalDelegationMcpBridge {
     fn new(parent_session_id: String, base_url: String) -> Result<Self> {
+        Self::new_with_timeout(
+            parent_session_id,
+            base_url,
+            TERMAL_DELEGATION_MCP_HTTP_TIMEOUT,
+        )
+    }
+
+    fn new_with_timeout(
+        parent_session_id: String,
+        base_url: String,
+        request_timeout: Duration,
+    ) -> Result<Self> {
         let parent_session_id = required_path_identifier(
             Some(&Value::String(parent_session_id)),
             "delegation MCP parent session id",
@@ -221,9 +244,11 @@ impl TermalDelegationMcpBridge {
             parent_session_id,
             base_url: normalize_termal_http_base_url(base_url),
             client: reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(30))
+                .timeout(request_timeout)
                 .build()
                 .context("failed to build delegation MCP HTTP client")?,
+            request_timeout,
+            caller_is_delegation_child: OnceLock::new(),
         })
     }
 
@@ -506,8 +531,7 @@ impl TermalDelegationMcpBridge {
     }
 
     fn tool_send_to_session(&self, arguments: Value) -> Result<Value> {
-        // `sessionId` is interpolated into the request path once resolved, so it gets the
-        // same path-identifier validation every `delegationId` in this file already uses.
+        // Keep both id and name forms within the same conservative identifier grammar.
         // A session NAME containing `/`, `\`, `?`, `#` or `%` is rejected here rather than
         // resolved; callers target such a session by its id (termal_list_sessions shows it).
         let session_ref = required_path_identifier(arguments.get("sessionId"), "sessionId")?;
@@ -535,16 +559,28 @@ impl TermalDelegationMcpBridge {
         if let Some(class) = optional_string(arguments.get("class")) {
             body.insert("class".to_owned(), Value::String(class));
         }
-        let mut response = self.post_json(
-            &format!(
-                "/api/sessions/{}/mailboxes/send",
-                self.parent_session_id
-            ),
-            &Value::Object(body),
-        )?;
+        let path = format!(
+            "/api/sessions/{}/mailboxes/send",
+            self.parent_session_id
+        );
+        let response = self
+            .post_json(&path, &Value::Object(body))
+            .map_err(mailbox_send_bridge_error)?;
+        let receipt = serde_json::from_value::<MailboxAppendReceipt>(response).map_err(|source| {
+            mailbox_send_bridge_error(
+                TermalDelegationResponseError {
+                    method: "POST",
+                    path: path.clone(),
+                    message: format!("mailbox send response shape was invalid: {source}"),
+                }
+                .into(),
+            )
+        })?;
+        let mut response = serde_json::to_value(receipt)
+            .context("failed to encode validated mailbox send receipt")?;
         let object = response
             .as_object_mut()
-            .context("mailbox send response must be an object")?;
+            .expect("serialized mailbox receipt should be an object");
         object.insert("sessionId".to_owned(), Value::String(session_id));
         object.insert("resolvedFrom".to_owned(), Value::String(session_ref));
         Ok(response)
@@ -599,16 +635,32 @@ impl TermalDelegationMcpBridge {
         )?;
         let processed_through =
             required_u64(arguments.get("processedThrough"), "processedThrough")?;
-        self.post_json(
-            &format!(
-                "/api/sessions/{}/mailboxes/{}/acknowledge",
-                self.parent_session_id, mailbox_id
-            ),
-            &json!({
-                "expectedProcessedThrough": expected_processed_through,
-                "processedThrough": processed_through
-            }),
-        )
+        let path = format!(
+            "/api/sessions/{}/mailboxes/{}/acknowledge",
+            self.parent_session_id, mailbox_id
+        );
+        let response = self
+            .post_json(
+                &path,
+                &json!({
+                    "expectedProcessedThrough": expected_processed_through,
+                    "processedThrough": processed_through
+                }),
+            )
+            .map_err(mailbox_acknowledgement_bridge_error)?;
+        let summary = serde_json::from_value::<MailboxSummary>(response).map_err(|source| {
+            mailbox_acknowledgement_bridge_error(
+                TermalDelegationResponseError {
+                    method: "POST",
+                    path,
+                    message: format!(
+                        "mailbox acknowledgement response shape was invalid: {source}"
+                    ),
+                }
+                .into(),
+            )
+        })?;
+        serde_json::to_value(summary).context("failed to encode validated mailbox summary")
     }
 
     /// Resolves a peer session reference (an id or a name) to a VALIDATED target id.
@@ -619,17 +671,24 @@ impl TermalDelegationMcpBridge {
     /// shown in the UI — 404 without it. Ambiguous names and no match both return a guiding
     /// error.
     ///
-    /// BOTH paths resolve against the live session list and land in the SAME filter: the
-    /// target must exist, be a ROOT session (never a delegation child), and never be the
-    /// caller itself. An earlier revision returned any `session-`-prefixed input verbatim,
-    /// which (a) skipped the root-only filter this comment promises — letting an id target a
-    /// delegation child or the sender — and (b) fed unvalidated text into the request path,
-    /// where the `url` crate resolves dot segments, so `session-x/../../sessions/victim/stop#`
-    /// normalised to a different POST route. Resolving every reference through the session
-    /// list closes both; the `required_path_identifier` check in the caller is the
-    /// belt-and-braces half, and it is load-bearing because tm-36l proposes skipping this
-    /// fetch for id-shaped arguments.
+    /// Exact ids skip target discovery through `/api/state`. The peer-tool gate performs one
+    /// fail-safe caller-eligibility lookup and caches that immutable classification for the
+    /// bridge lifetime, so sustained exact-id traffic does not serialize full state per
+    /// message. The sender id remains path-validated by bridge construction, the target id is
+    /// sent only as JSON, and the mailbox backend authoritatively rejects self,
+    /// delegation-child, hidden, remote-proxy, and nonexistent targets. Names still require
+    /// the live root-session inventory for case-insensitive and ambiguity-aware resolution.
     fn resolve_session_reference(&self, reference: &str) -> Result<String> {
+        if reference.starts_with("session-") {
+            if reference == self.parent_session_id {
+                bail!(
+                    "`{reference}` is this session — termal_send_to_session delivers to a PEER \
+                     session, not to yourself"
+                );
+            }
+            return Ok(reference.to_owned());
+        }
+
         let state = self.get_json("/api/state")?;
         let delegation_child_ids = delegation_child_session_ids(&state);
         let sessions = state
@@ -637,7 +696,6 @@ impl TermalDelegationMcpBridge {
             .and_then(Value::as_array)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        let reference_is_id = reference.starts_with("session-");
         let mut matches = sessions
             .iter()
             // Root sessions only — use both the direct parent link and the
@@ -645,14 +703,10 @@ impl TermalDelegationMcpBridge {
             // link cannot turn a child into a peer target.
             .filter(|session| is_root_peer_session(session, &delegation_child_ids))
             .filter(|session| {
-                if reference_is_id {
-                    session.get("id").and_then(Value::as_str) == Some(reference)
-                } else {
-                    session
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .is_some_and(|name| name.eq_ignore_ascii_case(reference))
-                }
+                session
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| name.eq_ignore_ascii_case(reference))
             })
             .filter_map(|session| {
                 let id = session.get("id").and_then(Value::as_str)?.to_owned();
@@ -812,22 +866,37 @@ impl TermalDelegationMcpBridge {
 
     /// Whether the session this bridge serves is a delegation CHILD (a spawned reviewer /
     /// explorer / worker) rather than a root session. Peer tools are root-only, so a child
-    /// must not enumerate or message arbitrary sessions (tm-r0y). Fail SAFE: if the backend
-    /// can't be reached or the caller can't be found, treat it as a child (deny peer tools).
+    /// must not enumerate or message arbitrary sessions (tm-r0y). Root classification is
+    /// conjunctive: both the session's parent marker and the durable delegation-child index
+    /// must be clear. A repair can therefore restore a missing marker only after the index
+    /// already classified that session as a child; a root grant cannot precede that repair.
+    /// Fail SAFE: if the backend can't be reached or the caller can't be found, treat it as
+    /// a child (deny peer tools).
     fn caller_is_delegation_child(&self) -> bool {
+        if let Some(is_child) = self.caller_is_delegation_child.get() {
+            return *is_child;
+        }
         let Ok(state) = self.get_json("/api/state") else {
+            // Fail safe without caching a transient backend failure. A later
+            // call may retry the eligibility lookup after the backend recovers.
             return true;
         };
         let delegation_child_ids = delegation_child_session_ids(&state);
         let Some(sessions) = state.get("sessions").and_then(Value::as_array) else {
             return true;
         };
-        match sessions.iter().find(|session| {
+        let Some(session) = sessions.iter().find(|session| {
             session.get("id").and_then(Value::as_str) == Some(self.parent_session_id.as_str())
-        }) {
-            Some(session) => !is_root_peer_session(session, &delegation_child_ids),
-            None => true,
-        }
+        }) else {
+            // Hidden Claude spares are intentionally omitted from `/api/state`.
+            // Their MCP bridge can be queried before the same session record is
+            // promoted visible, so fail closed for this call without turning a
+            // routine pre-promotion snapshot into a lifetime denial.
+            return true;
+        };
+        let is_child = !is_root_peer_session(session, &delegation_child_ids);
+        let _ = self.caller_is_delegation_child.set(is_child);
+        is_child
     }
 
     /// The advertised tool list for this bridge's caller: the full set for a root session, or
@@ -848,11 +917,15 @@ impl TermalDelegationMcpBridge {
     }
 
     fn get_json(&self, path: &str) -> Result<Value> {
-        self.decode_response(self.client.get(self.url(path)).send())
+        self.decode_response("GET", path, self.client.get(self.url(path)).send())
     }
 
     fn post_json(&self, path: &str, body: &Value) -> Result<Value> {
-        self.decode_response(self.client.post(self.url(path)).json(body).send())
+        self.decode_response(
+            "POST",
+            path,
+            self.client.post(self.url(path)).json(body).send(),
+        )
     }
 
     fn url(&self, path: &str) -> String {
@@ -861,16 +934,36 @@ impl TermalDelegationMcpBridge {
 
     fn decode_response(
         &self,
+        method: &'static str,
+        path: &str,
         response: std::result::Result<reqwest::blocking::Response, reqwest::Error>,
     ) -> Result<Value> {
-        let response = response.context("failed to call TermAl delegation API")?;
+        let response = response.map_err(|source| TermalDelegationTransportError {
+            method,
+            path: path.to_owned(),
+            phase: "sending request",
+            timeout: self.request_timeout,
+            source,
+        })?;
         let status = response.status();
         let text = response
             .text()
-            .context("failed to read TermAl delegation API response")?;
+            .map_err(|source| TermalDelegationTransportError {
+                method,
+                path: path.to_owned(),
+                phase: "reading response body",
+                timeout: self.request_timeout,
+                source,
+            })?;
         if status.is_success() {
-            return serde_json::from_str(&text)
-                .with_context(|| format!("failed to parse TermAl API response JSON: {text}"));
+            return serde_json::from_str(&text).map_err(|source| {
+                TermalDelegationResponseError {
+                    method,
+                    path: path.to_owned(),
+                    message: format!("failed to parse successful response JSON: {source}"),
+                }
+                .into()
+            });
         }
         let message = serde_json::from_str::<Value>(&text)
             .ok()
@@ -882,6 +975,82 @@ impl TermalDelegationMcpBridge {
             })
             .unwrap_or(text);
         Err(TermalDelegationApiError { status, message }.into())
+    }
+}
+
+fn mailbox_send_bridge_error(err: anyhow::Error) -> anyhow::Error {
+    if err.downcast_ref::<TermalDelegationTransportError>().is_some()
+        || err.downcast_ref::<TermalDelegationResponseError>().is_some()
+    {
+        return anyhow!(
+            "mailbox send receipt was not received; the append outcome is unknown. Retry with the \
+             same idempotencyKey to recover the original receipt safely: {err}"
+        );
+    }
+    err
+}
+
+fn mailbox_acknowledgement_bridge_error(err: anyhow::Error) -> anyhow::Error {
+    if err.downcast_ref::<TermalDelegationTransportError>().is_some()
+        || err.downcast_ref::<TermalDelegationResponseError>().is_some()
+    {
+        return anyhow!(
+            "mailbox acknowledgement response was not received; the cursor outcome is unknown. \
+             Call termal_list_mailboxes before retrying, then use its processedThrough as \
+             expectedProcessedThrough: {err}"
+        );
+    }
+    err
+}
+
+#[derive(Debug)]
+struct TermalDelegationResponseError {
+    method: &'static str,
+    path: String,
+    message: String,
+}
+
+impl std::fmt::Display for TermalDelegationResponseError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "TermAl delegation API {} {} returned an unusable successful response: {}",
+            self.method, self.path, self.message
+        )
+    }
+}
+
+impl std::error::Error for TermalDelegationResponseError {}
+
+#[derive(Debug)]
+struct TermalDelegationTransportError {
+    method: &'static str,
+    path: String,
+    phase: &'static str,
+    timeout: Duration,
+    source: reqwest::Error,
+}
+
+impl std::fmt::Display for TermalDelegationTransportError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let classification = if self.source.is_timeout() {
+            format!("timed out after {:?}", self.timeout)
+        } else if self.source.is_connect() {
+            "could not connect".to_owned()
+        } else {
+            "transport failed".to_owned()
+        };
+        write!(
+            formatter,
+            "TermAl delegation API {} {} {} while {}: {}",
+            self.method, self.path, classification, self.phase, self.source
+        )
+    }
+}
+
+impl std::error::Error for TermalDelegationTransportError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
     }
 }
 
@@ -1067,7 +1236,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_send_to_session",
-                "description": "Durably append a routine message to the neutral mailbox shared with another root-level TermAl session, then best-effort wake that peer with metadata only. `sessionId` accepts a TermAl id or case-insensitive session name. `idempotencyKey` is required and sender-scoped: retrying the same intent returns the original receipt with duplicate=true; reusing it for different content conflicts. The durable body is fetched through termal_read_mailbox. FIRE-AND-FORGET — there is no reply to await.",
+                "description": "Durably append a routine message to the neutral mailbox shared with another root-level TermAl session, then best-effort wake that peer with metadata only. `sessionId` accepts a TermAl id or case-insensitive session name; prefer an exact id for sustained traffic because names require peer discovery. `idempotencyKey` is required and sender-scoped: retrying the same intent returns the original receipt with duplicate=true; reusing it for different content conflicts. If transport fails before a receipt arrives, the append outcome is unknown: retry the exact same intent and key. Receipt `notificationDisposition` is the immutable point-in-time dispatch outcome; mailbox reads expose the evolving row lifecycle as `notificationState`. The durable body is fetched through termal_read_mailbox. FIRE-AND-FORGET — there is no reply to await.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["sessionId", "message", "idempotencyKey"],
@@ -1103,7 +1272,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_read_mailbox",
-                "description": "Fetch a FIFO range of durable mailbox messages. Reading never advances the processed cursor; acknowledge separately after processing.",
+                "description": "Fetch a FIFO range of durable mailbox messages. Each message's `notificationState` is the current mutable wake lifecycle state, not the sender receipt's immutable `notificationDisposition`. Reading never advances the processed cursor; acknowledge separately after processing.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["mailboxId"],
@@ -1116,7 +1285,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_read_mailbox_message",
-                "description": "Fetch one exact durable mailbox message by receipt messageId. The caller must be a current participant.",
+                "description": "Fetch one exact durable mailbox message by receipt messageId. Its `notificationState` is the current mutable wake lifecycle state, not the sender receipt's immutable `notificationDisposition`. The caller must be a current participant.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["messageId"],
@@ -1127,7 +1296,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_acknowledge_mailbox",
-                "description": "Advance this session's mailbox processed cursor with a forward-only compare-and-swap. Supply the cursor value you observed and the sequence processed through.",
+                "description": "Advance this session's mailbox processed cursor with a forward-only compare-and-swap. Supply the cursor value you observed and the sequence processed through. New progress requires the observed cursor to match; replay at or below the durable cursor succeeds idempotently after a lost response; only a stale attempt to advance past the durable cursor conflicts.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["mailboxId", "expectedProcessedThrough", "processedThrough"],
@@ -1352,1593 +1521,5 @@ fn is_terminal_delegation_status(status: &str) -> bool {
 }
 
 #[cfg(test)]
-mod delegation_mcp_tests {
-    use super::*;
-    use std::sync::atomic::AtomicUsize;
-    use std::thread;
-
-    #[derive(Clone, Debug)]
-    struct TestMcpHttpRequest {
-        method: String,
-        path: String,
-        body: String,
-    }
-
-    fn read_test_mcp_http_request(stream: &mut std::net::TcpStream) -> TestMcpHttpRequest {
-        let mut buffer = Vec::new();
-        let mut chunk = [0u8; 4096];
-        let header_end = loop {
-            let bytes_read = stream.read(&mut chunk).expect("request should read");
-            assert!(bytes_read > 0, "request closed before headers completed");
-            buffer.extend_from_slice(&chunk[..bytes_read]);
-            if let Some(end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
-                break end;
-            }
-        };
-        let headers = String::from_utf8_lossy(&buffer[..header_end]);
-        let request_line = headers
-            .lines()
-            .next()
-            .expect("request line should be present");
-        let mut request_parts = request_line.split_whitespace();
-        let method = request_parts
-            .next()
-            .expect("request method should be present")
-            .to_owned();
-        let path = request_parts
-            .next()
-            .expect("request path should be present")
-            .to_owned();
-        let content_length = headers
-            .lines()
-            .find_map(|line| {
-                let (name, value) = line.split_once(':')?;
-                name.trim()
-                    .eq_ignore_ascii_case("content-length")
-                    .then_some(value.trim())
-                    .and_then(|value| value.parse::<usize>().ok())
-            })
-            .unwrap_or(0);
-        let body_start = header_end + 4;
-        while buffer.len() < body_start + content_length {
-            let bytes_read = stream.read(&mut chunk).expect("request body should read");
-            if bytes_read == 0 {
-                break;
-            }
-            buffer.extend_from_slice(&chunk[..bytes_read]);
-        }
-        let body =
-            String::from_utf8_lossy(&buffer[body_start..body_start + content_length]).to_string();
-        TestMcpHttpRequest { method, path, body }
-    }
-
-    fn write_test_mcp_http_json_response(
-        stream: &mut std::net::TcpStream,
-        status: u16,
-        body: Value,
-    ) {
-        let body = body.to_string();
-        stream
-            .write_all(
-                format!(
-                    "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-                    body.len(),
-                    body
-                )
-                .as_bytes(),
-            )
-            .expect("response should write");
-    }
-
-    fn spawn_test_mcp_http_server(
-        expected_requests: usize,
-        handler: impl Fn(TestMcpHttpRequest) -> (u16, Value) + Send + Sync + 'static,
-    ) -> (
-        String,
-        Arc<Mutex<Vec<TestMcpHttpRequest>>>,
-        thread::JoinHandle<()>,
-    ) {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test server should bind");
-        let base_url = format!(
-            "http://{}",
-            listener
-                .local_addr()
-                .expect("test server address should be readable")
-        );
-        let handler = Arc::new(handler);
-        let requests = Arc::new(Mutex::new(Vec::new()));
-        let thread_requests = requests.clone();
-        let server = thread::spawn(move || {
-            for _ in 0..expected_requests {
-                let (mut stream, _) = listener.accept().expect("test request should connect");
-                let request = read_test_mcp_http_request(&mut stream);
-                thread_requests
-                    .lock()
-                    .expect("request log mutex poisoned")
-                    .push(request.clone());
-                let (status, body) = handler(request);
-                write_test_mcp_http_json_response(&mut stream, status, body);
-            }
-        });
-        (base_url, requests, server)
-    }
-
-    #[test]
-    fn delegation_mcp_tools_list_exposes_parent_scoped_tools_only() {
-        let tools = mcp_tools_list_result();
-        let names = tools
-            .get("tools")
-            .and_then(Value::as_array)
-            .expect("tools list should be an array")
-            .iter()
-            .filter_map(|tool| tool.get("name").and_then(Value::as_str))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            names,
-            vec![
-                "termal_spawn_session",
-                "termal_list_delegations",
-                "termal_get_session_status",
-                "termal_get_session_result",
-                "termal_cancel_session",
-                "termal_wait_delegations",
-                "termal_resume_after_delegations",
-                "termal_followup_session",
-                "termal_send_to_session",
-                "termal_list_sessions",
-                "termal_list_mailboxes",
-                "termal_read_mailbox",
-                "termal_read_mailbox_message",
-                "termal_acknowledge_mailbox",
-            ]
-        );
-        // The delegation inventory is parent-scoped; termal_list_sessions is the one
-        // intentionally broad peer-discovery tool.
-        assert_eq!(
-            names
-                .iter()
-                .copied()
-                .filter(|name| name.contains("list"))
-                .collect::<Vec<_>>(),
-            vec![
-                "termal_list_delegations",
-                "termal_list_sessions",
-                "termal_list_mailboxes"
-            ]
-        );
-    }
-
-    #[test]
-    fn delegation_mcp_initialize_reports_tool_capability() {
-        let result = mcp_initialize_result();
-        assert_eq!(
-            result.get("protocolVersion").and_then(Value::as_str),
-            Some(TERMAL_DELEGATION_MCP_PROTOCOL_VERSION)
-        );
-        assert!(result.pointer("/capabilities/tools").is_some());
-        assert_eq!(
-            result.pointer("/serverInfo/name").and_then(Value::as_str),
-            Some(TERMAL_DELEGATION_MCP_SERVER_NAME)
-        );
-    }
-
-    #[test]
-    fn delegation_mcp_configs_bind_parent_session_and_base_url() {
-        let command = "C:\\termal\\termal.exe";
-        let parent = "session-parent";
-        let base_url = "http://127.0.0.1:9999/";
-
-        let claude =
-            termal_delegation_mcp_claude_config_json_with_command(command, parent, base_url);
-        let claude: Value = serde_json::from_str(&claude).expect("Claude config should be JSON");
-        assert_eq!(
-            claude.pointer("/mcpServers/termal-delegation/command"),
-            Some(&Value::String(command.to_owned()))
-        );
-        assert_eq!(
-            claude.pointer("/mcpServers/termal-delegation/args/2"),
-            Some(&Value::String(parent.to_owned()))
-        );
-        assert_eq!(
-            claude.pointer("/mcpServers/termal-delegation/args/4"),
-            Some(&Value::String("http://127.0.0.1:9999".to_owned()))
-        );
-
-        let acp = termal_delegation_mcp_acp_servers_with_command(command, parent, base_url);
-        assert_eq!(
-            acp.pointer("/0/name").and_then(Value::as_str),
-            Some(TERMAL_DELEGATION_MCP_SERVER_NAME)
-        );
-        assert_eq!(
-            acp.pointer("/0/args/2"),
-            Some(&Value::String(parent.to_owned()))
-        );
-
-        let codex = termal_delegation_mcp_codex_config_with_command(command, parent, base_url);
-        assert_eq!(
-            codex.pointer("/mcp_servers/termal-delegation/args/2"),
-            Some(&Value::String(parent.to_owned()))
-        );
-    }
-
-    #[test]
-    fn delegation_mcp_rejects_path_unsafe_parent_and_delegation_ids() {
-        let err = match TermalDelegationMcpBridge::new(
-            "session-parent/other".to_owned(),
-            "http://127.0.0.1:9999".to_owned(),
-        ) {
-            Ok(_) => panic!("path-unsafe parent id should be rejected"),
-            Err(err) => err,
-        };
-        assert!(err
-            .to_string()
-            .contains("delegation MCP parent session id must not contain"));
-
-        let bridge = TermalDelegationMcpBridge::new(
-            "session-parent".to_owned(),
-            "http://127.0.0.1:9999".to_owned(),
-        )
-        .expect("path-safe parent id should be accepted");
-
-        let err = bridge
-            .tool_get_session_status(json!({ "delegationId": "delegation-bad/result" }))
-            .expect_err("path-unsafe status delegation id should be rejected");
-        assert!(err
-            .to_string()
-            .contains("delegationId must not contain /, \\, ?, #, %, or control characters"));
-
-        let err = bridge
-            .tool_wait_delegations(json!({
-                "delegationIds": ["delegation-good", "delegation-bad?x"],
-                "timeoutMs": 1
-            }))
-            .expect_err("path-unsafe wait delegation id should be rejected before polling");
-        assert!(err
-            .to_string()
-            .contains("delegationIds must not contain /, \\, ?, #, %, or control characters"));
-
-        let err = bridge
-            .tool_get_session_status(json!({ "delegationId": "delegation%2Fbad" }))
-            .expect_err("encoded slash delegation id should be rejected");
-        assert!(err
-            .to_string()
-            .contains("delegationId must not contain /, \\, ?, #, %, or control characters"));
-
-        let err = bridge
-            .tool_get_session_status(json!({ "delegationId": ".." }))
-            .expect_err("navigation-only delegation id should be rejected");
-        assert!(err.to_string().contains("delegationId must not be . or .."));
-    }
-
-    #[test]
-    fn parse_mcp_slash_command_prompt_pins_ui_compatible_shape() {
-        let parsed = parse_mcp_slash_command_prompt("/review-code staged -- include tests")
-            .expect("valid slash command should parse");
-        assert_eq!(parsed.command_name, "review-code");
-        assert_eq!(parsed.arguments.as_deref(), Some("staged"));
-        assert_eq!(parsed.note.as_deref(), Some("include tests"));
-
-        let parsed = parse_mcp_slash_command_prompt("/review-code   ")
-            .expect("trailing whitespace should not prevent parsing");
-        assert_eq!(parsed.command_name, "review-code");
-        assert_eq!(parsed.arguments, None);
-        assert_eq!(parsed.note, None);
-
-        let parsed = parse_mcp_slash_command_prompt("/review-code staged -- include tests\r")
-            .expect("trailing carriage return should be trimmed like other trailing whitespace");
-        assert_eq!(parsed.command_name, "review-code");
-        assert_eq!(parsed.arguments.as_deref(), Some("staged"));
-        assert_eq!(parsed.note.as_deref(), Some("include tests"));
-
-        for prompt in [
-            " /review-code",
-            "/ review-code",
-            "/",
-            "/review/local",
-            "/review-code\nextra",
-            "/review-code\rextra",
-            "review-code",
-        ] {
-            assert!(
-                parse_mcp_slash_command_prompt(prompt).is_none(),
-                "`{prompt}` should not be treated as an MCP slash command"
-            );
-        }
-    }
-
-    #[test]
-    fn split_mcp_agent_command_tail_pins_note_separator_edges() {
-        let cases = [
-            ("", None, None),
-            ("staged", Some("staged"), None),
-            ("staged -- include tests", Some("staged"), Some("include tests")),
-            ("--", None, None),
-            ("  --  ", None, None),
-            ("-- include tests", None, Some("include tests")),
-            ("staged --", Some("staged"), None),
-            ("staged -- -- second", Some("staged"), Some("-- second")),
-            ("staged ---x", Some("staged ---x"), None),
-            ("staged-- include tests", Some("staged-- include tests"), None),
-            ("  staged   --   include tests  ", Some("staged"), Some("include tests")),
-            ("\tstaged\t--\tinclude tests\t", Some("staged"), Some("include tests")),
-            ("\u{2003}staged\u{2003}", Some("staged"), None),
-            (
-                "staged\u{2003}--\u{2003}include tests",
-                Some("staged\u{2003}--\u{2003}include tests"),
-                None,
-            ),
-        ];
-
-        for (tail, expected_arguments, expected_note) in cases {
-            let (arguments, note) = split_mcp_agent_command_tail(tail);
-            assert_eq!(
-                arguments.as_deref(),
-                expected_arguments,
-                "arguments mismatch for `{tail}`"
-            );
-            assert_eq!(
-                note.as_deref(),
-                expected_note,
-                "note mismatch for `{tail}`"
-            );
-        }
-    }
-
-    #[test]
-    fn delegation_mcp_list_sessions_returns_root_sessions_only() {
-        let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |request| {
-            assert_eq!(request.method, "GET");
-            assert_eq!(request.path, "/api/state");
-            (
-                200,
-                json!({
-                    "sessions": [
-                        { "id": "session-root-a", "name": "HelloMe", "agent": "Codex", "status": "idle", "workdir": "C:/a", "preview": "hi" },
-                        { "id": "session-root-b", "name": "HelloMe2", "agent": "Codex", "status": "active", "workdir": "C:/b", "preview": "yo" },
-                        { "id": "session-child", "name": "Codex /review-code", "agent": "Codex", "status": "idle", "parentDelegationId": "delegation-x" },
-                        { "id": "session-child-unlinked", "name": "Leaked child", "agent": "Codex", "status": "idle" }
-                    ],
-                    "delegations": [
-                        { "id": "delegation-y", "childSessionId": "session-child-unlinked" }
-                    ]
-                }),
-            )
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let response = bridge
-            .tool_list_sessions(json!({}))
-            .expect("list should succeed");
-        let sessions = response
-            .get("sessions")
-            .and_then(Value::as_array)
-            .expect("sessions should be an array");
-        let ids = sessions
-            .iter()
-            .filter_map(|session| session.get("sessionId").and_then(Value::as_str))
-            .collect::<Vec<_>>();
-        assert_eq!(ids, vec!["session-root-a", "session-root-b"]);
-        assert_eq!(sessions[1]["name"], "HelloMe2");
-        server.join().expect("test server should join");
-    }
-
-    #[test]
-    fn delegation_mcp_hides_and_rejects_peer_tools_for_delegation_child() {
-        let (base_url, _requests, server) = spawn_test_mcp_http_server(2, move |request| {
-            assert_eq!(request.method, "GET");
-            assert_eq!(request.path, "/api/state");
-            (
-                200,
-                json!({
-                    "sessions": [
-                        { "id": "session-parent", "name": "Reviewer", "parentDelegationId": "delegation-x" }
-                    ]
-                }),
-            )
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        // tools/list omits the peer tools for a delegation-child caller...
-        let names = bridge
-            .tools_list_for_caller()
-            .get("tools")
-            .and_then(Value::as_array)
-            .expect("tools array")
-            .iter()
-            .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_owned))
-            .collect::<Vec<_>>();
-        assert!(!names.iter().any(|name| name == "termal_send_to_session"));
-        assert!(!names.iter().any(|name| name == "termal_list_sessions"));
-        assert!(
-            names.iter().any(|name| name == "termal_spawn_session"),
-            "delegation tools stay available to children"
-        );
-        assert!(
-            names.iter().any(|name| name == "termal_list_delegations"),
-            "parent-scoped delegation recovery stays available to children"
-        );
-
-        // ...and invoking one through the dispatch is rejected.
-        let err = bridge
-            .handle_tool_call(json!({
-                "name": "termal_send_to_session",
-                "arguments": { "sessionId": "session-x", "message": "hi" }
-            }))
-            .expect_err("a delegation child must not invoke a peer tool");
-        assert!(
-            err.to_string().contains("root sessions"),
-            "error should explain the root-only restriction: {err}"
-        );
-        server.join().expect("test server should join");
-    }
-
-    #[test]
-    fn delegation_mcp_hides_and_rejects_peer_tools_for_unlinked_durable_child() {
-        let (base_url, _requests, server) = spawn_test_mcp_http_server(2, move |request| {
-            assert_eq!(request.method, "GET");
-            assert_eq!(request.path, "/api/state");
-            (
-                200,
-                json!({
-                    "sessions": [
-                        { "id": "session-parent", "name": "Reattached reviewer" }
-                    ],
-                    "delegations": [
-                        { "id": "delegation-x", "childSessionId": "session-parent" }
-                    ]
-                }),
-            )
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let names = bridge
-            .tools_list_for_caller()
-            .get("tools")
-            .and_then(Value::as_array)
-            .expect("tools array")
-            .iter()
-            .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_owned))
-            .collect::<Vec<_>>();
-        assert!(!names.iter().any(|name| name == "termal_send_to_session"));
-        assert!(!names.iter().any(|name| name == "termal_list_sessions"));
-
-        let err = bridge
-            .handle_tool_call(json!({
-                "name": "termal_send_to_session",
-                "arguments": { "sessionId": "session-x", "message": "hi" }
-            }))
-            .expect_err("a durable delegation child must not invoke a peer tool");
-        assert!(
-            err.to_string().contains("root sessions"),
-            "error should explain the root-only restriction: {err}"
-        );
-        server.join().expect("test server should join");
-    }
-
-    #[test]
-    fn delegation_mcp_send_to_session_resolves_name_across_projects() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
-            match (request.method.as_str(), request.path.as_str()) {
-                ("GET", "/api/state") => (
-                    200,
-                    json!({
-                        "sessions": [
-                            { "id": "session-kadry", "name": "Kadry", "projectId": "project-kadry" },
-                            { "id": "session-legal", "name": "LegalCodex", "projectId": "project-rincon" }
-                        ]
-                    }),
-                ),
-                ("POST", "/api/sessions/session-parent/mailboxes/send") => {
-                    let body: Value =
-                        serde_json::from_str(&request.body).expect("send body should be JSON");
-                    assert_eq!(body["targetSessionId"], "session-legal");
-                    assert_eq!(body["message"], "hi legal");
-                    assert_eq!(body["idempotencyKey"], "legal-1");
-                    (
-                        202,
-                        json!({
-                            "mailboxId": "mailbox-1",
-                            "messageId": "mailbox-message-1",
-                            "sequence": 1,
-                            "unreadDepth": 1,
-                            "notificationDisposition": "deliveredToIdleSession",
-                            "duplicate": false
-                        }),
-                    )
-                }
-                _ => (
-                    404,
-                    json!({ "error": format!("unexpected {} {}", request.method, request.path) }),
-                ),
-            }
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let response = bridge
-            .tool_send_to_session(json!({
-                "sessionId": "LegalCodex",
-                "message": "hi legal",
-                "idempotencyKey": "legal-1"
-            }))
-            .expect("send by name should resolve + deliver");
-        assert_eq!(response["sessionId"], "session-legal");
-        assert_eq!(response["resolvedFrom"], "LegalCodex");
-        assert_eq!(response["mailboxId"], "mailbox-1");
-        assert_eq!(
-            response["notificationDisposition"],
-            "deliveredToIdleSession"
-        );
-        assert_eq!(response["duplicate"], false);
-        server.join().expect("test server should join");
-        let requests = requests.lock().expect("request log mutex poisoned");
-        assert_eq!(requests.len(), 2);
-    }
-
-    #[test]
-    fn delegation_mcp_send_to_session_unknown_name_errors() {
-        let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |request| {
-            assert_eq!(request.path, "/api/state");
-            (
-                200,
-                json!({ "sessions": [ { "id": "session-a", "name": "Alpha", "projectId": "p" } ] }),
-            )
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let err = bridge
-            .tool_send_to_session(json!({
-                "sessionId": "Nonexistent",
-                "message": "hi",
-                "idempotencyKey": "unknown-1"
-            }))
-            .expect_err("unknown name should error");
-        assert!(
-            err.to_string().contains("termal_list_sessions"),
-            "error should guide to termal_list_sessions: {err}"
-        );
-        server.join().expect("test server should join");
-    }
-
-    // An id-shaped reference now resolves through /api/state like a name does, so that the
-    // root-only/non-self filter applies to BOTH paths (tm-88r). That is why this exercises
-    // two requests: the resolve, then the delivery.
-    #[test]
-    fn delegation_mcp_send_to_session_posts_message_to_target() {
-        let idempotency_key = r"peer/1?#%\stable";
-        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
-            match (request.method.as_str(), request.path.as_str()) {
-                ("GET", "/api/state") => (
-                    200,
-                    json!({
-                        "sessions": [
-                            { "id": "session-peer", "name": "Peer", "projectId": "p" }
-                        ]
-                    }),
-                ),
-                ("POST", "/api/sessions/session-parent/mailboxes/send") => {
-                    let body: Value =
-                        serde_json::from_str(&request.body).expect("send body should be JSON");
-                    assert_eq!(body["targetSessionId"], "session-peer");
-                    assert_eq!(body["message"], "hello peer");
-                    assert_eq!(body["idempotencyKey"], idempotency_key);
-                    (
-                        202,
-                        json!({
-                            "mailboxId": "mailbox-1",
-                            "messageId": "mailbox-message-1",
-                            "sequence": 1,
-                            "unreadDepth": 1,
-                            "notificationDisposition": "queuedBehindActiveTurn",
-                            "duplicate": false
-                        }),
-                    )
-                }
-                _ => (
-                    404,
-                    json!({ "error": format!("unexpected {} {}", request.method, request.path) }),
-                ),
-            }
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let response = bridge
-            .tool_send_to_session(json!({
-                "sessionId": "session-peer",
-                "message": "hello peer",
-                "idempotencyKey": idempotency_key
-            }))
-            .expect("send-to-session should succeed");
-
-        assert_eq!(response["sessionId"], "session-peer");
-        assert_eq!(response["mailboxId"], "mailbox-1");
-        assert_eq!(
-            response["notificationDisposition"],
-            "queuedBehindActiveTurn"
-        );
-        server.join().expect("test server should join");
-        let requests = requests.lock().expect("request log mutex poisoned");
-        assert_eq!(requests.len(), 2);
-    }
-
-    // tm-88r: `sessionId` is interpolated into the request path, and the `url` crate
-    // resolves dot segments — so an unvalidated `session-`-prefixed reference turned
-    // termal_send_to_session into a POST primitive against arbitrary routes. The path
-    // validator must reject the traversal shape BEFORE any request is issued.
-    // Neuter-verified: swapping `required_path_identifier` back to `required_string` makes
-    // this fail (the reference reaches the resolver instead of being rejected outright).
-    #[test]
-    fn delegation_mcp_send_to_session_rejects_path_traversal_reference() {
-        // Zero expected requests: rejection must happen before any HTTP call.
-        let (base_url, requests, server) = spawn_test_mcp_http_server(0, move |request| {
-            (
-                500,
-                json!({ "error": format!("no request expected: {} {}", request.method, request.path) }),
-            )
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        for reference in [
-            "session-x/../../sessions/victim/stop#",
-            "session-x/../../sessions/victim/stop",
-            "session-a%2f..%2fvictim",
-            "../session-victim",
-            "session-x\\..\\victim",
-        ] {
-            let err = bridge
-                .tool_send_to_session(json!({
-                    "sessionId": reference,
-                    "message": "hi",
-                    "idempotencyKey": "traversal-1"
-                }))
-                .expect_err("a path-traversal reference must be rejected");
-            assert!(
-                err.to_string().contains("sessionId must not contain"),
-                "reference `{reference}` should be rejected by the path validator: {err}"
-            );
-        }
-
-        server.join().expect("test server should join");
-        let requests = requests.lock().expect("request log mutex poisoned");
-        assert!(
-            requests.is_empty(),
-            "a rejected reference must not reach the backend: {requests:?}"
-        );
-    }
-
-    // tm-88r: the id path used to return any `session-`-prefixed value verbatim, skipping
-    // the root-only filter its own comment promised. A delegation child is not a peer.
-    #[test]
-    fn delegation_mcp_send_to_session_rejects_delegation_child_and_self_targets() {
-        let (base_url, _requests, server) = spawn_test_mcp_http_server(3, move |request| {
-            assert_eq!(request.path, "/api/state", "no delivery should be attempted");
-            (
-                200,
-                json!({
-                    "sessions": [
-                        { "id": "session-parent", "name": "Me", "projectId": "p" },
-                        {
-                            "id": "session-child",
-                            "name": "Child",
-                            "projectId": "p",
-                            "parentDelegationId": "delegation-1"
-                        },
-                        {
-                            "id": "session-child-unlinked",
-                            "name": "Unlinked child",
-                            "projectId": "p"
-                        }
-                    ],
-                    "delegations": [
-                        { "id": "delegation-2", "childSessionId": "session-child-unlinked" }
-                    ]
-                }),
-            )
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let child_err = bridge
-            .tool_send_to_session(json!({
-                "sessionId": "session-child",
-                "message": "hi",
-                "idempotencyKey": "child-1"
-            }))
-            .expect_err("a delegation child must not be a peer target");
-        assert!(
-            child_err.to_string().contains("no root session"),
-            "child target should be filtered out by the root-only filter: {child_err}"
-        );
-
-        let unlinked_child_err = bridge
-            .tool_send_to_session(json!({
-                "sessionId": "session-child-unlinked",
-                "message": "hi",
-                "idempotencyKey": "unlinked-child-1"
-            }))
-            .expect_err("a child named only by the durable delegation row must not be a peer target");
-        assert!(
-            unlinked_child_err.to_string().contains("no root session"),
-            "the delegation inventory must close a stale parent-link gap: {unlinked_child_err}"
-        );
-
-        let self_err = bridge
-            .tool_send_to_session(json!({
-                "sessionId": "session-parent",
-                "message": "hi",
-                "idempotencyKey": "self-1"
-            }))
-            .expect_err("a session must not peer-message itself");
-        assert!(
-            self_err.to_string().contains("is this session"),
-            "self target should be rejected explicitly: {self_err}"
-        );
-
-        server.join().expect("test server should join");
-    }
-
-    #[test]
-    fn delegation_mcp_mailbox_tools_list_read_exact_and_acknowledge() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(4, move |request| {
-            match (request.method.as_str(), request.path.as_str()) {
-                ("GET", "/api/sessions/session-parent/mailboxes") => (
-                    200,
-                    json!([{
-                        "id": "mailbox-1",
-                        "participants": [],
-                        "latestSequence": 3,
-                        "unreadCount": 2
-                    }]),
-                ),
-                ("POST", "/api/sessions/session-parent/mailboxes/mailbox-1/read") => {
-                    let body: Value =
-                        serde_json::from_str(&request.body).expect("read body should be JSON");
-                    assert_eq!(body["afterSequence"], 1);
-                    assert_eq!(body["limit"], 25);
-                    (200, json!([{ "id": "mailbox-message-2", "sequence": 2 }]))
-                }
-                ("GET", "/api/sessions/session-parent/mailbox-messages/mailbox-message-2") => {
-                    (200, json!({ "id": "mailbox-message-2", "sequence": 2 }))
-                }
-                (
-                    "POST",
-                    "/api/sessions/session-parent/mailboxes/mailbox-1/acknowledge",
-                ) => {
-                    let body: Value =
-                        serde_json::from_str(&request.body).expect("ack body should be JSON");
-                    assert_eq!(body["expectedProcessedThrough"], 1);
-                    assert_eq!(body["processedThrough"], 3);
-                    (200, json!({ "id": "mailbox-1", "unreadCount": 0 }))
-                }
-                _ => (
-                    404,
-                    json!({ "error": format!("unexpected {} {}", request.method, request.path) }),
-                ),
-            }
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let listed = bridge
-            .tool_list_mailboxes(json!({}))
-            .expect("mailboxes should list");
-        assert_eq!(listed["mailboxes"][0]["id"], "mailbox-1");
-        let range = bridge
-            .tool_read_mailbox(json!({
-                "mailboxId": "mailbox-1",
-                "afterSequence": 1,
-                "limit": 25
-            }))
-            .expect("mailbox range should read");
-        assert_eq!(range["messages"][0]["sequence"], 2);
-        let exact = bridge
-            .tool_read_mailbox_message(json!({
-                "messageId": "mailbox-message-2"
-            }))
-            .expect("exact mailbox message should read");
-        assert_eq!(exact["sequence"], 2);
-        let ack = bridge
-            .tool_acknowledge_mailbox(json!({
-                "mailboxId": "mailbox-1",
-                "expectedProcessedThrough": 1,
-                "processedThrough": 3
-            }))
-            .expect("mailbox acknowledgement should succeed");
-        assert_eq!(ack["unreadCount"], 0);
-
-        server.join().expect("test server should join");
-        assert_eq!(
-            requests.lock().expect("request log mutex poisoned").len(),
-            4
-        );
-    }
-
-    #[test]
-    fn delegation_mcp_spawn_session_posts_parent_scoped_request() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
-            assert_eq!(request.method, "POST");
-            assert_eq!(request.path, "/api/sessions/session-parent/delegations");
-            let body: Value =
-                serde_json::from_str(&request.body).expect("spawn body should be JSON");
-            assert_eq!(body["prompt"], "Review this patch");
-            assert_eq!(body["title"], "Codex review");
-            assert_eq!(body["cwd"], "C:\\repo");
-            assert_eq!(body["agent"], "Codex");
-            assert_eq!(body["model"], "gpt-5.4");
-            assert_eq!(body["mode"], "reviewer");
-            assert_eq!(body.pointer("/writePolicy/kind"), Some(&json!("readOnly")));
-            (
-                200,
-                json!({
-                    "delegation": {
-                        "id": "delegation-one",
-                        "status": "running"
-                    },
-                    "childSessionId": "session-child"
-                }),
-            )
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let response = bridge
-            .tool_spawn_session(json!({
-                "prompt": "Review this patch",
-                "title": "Codex review",
-                "cwd": "C:\\repo",
-                "agent": "Codex",
-                "model": "gpt-5.4",
-                "mode": "reviewer",
-                "writePolicy": "readOnly"
-            }))
-            .expect("spawn should post delegation request");
-
-        assert_eq!(response.pointer("/delegation/id"), Some(&json!("delegation-one")));
-        assert_eq!(response["childSessionId"], "session-child");
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
-    }
-
-    #[test]
-    fn delegation_mcp_list_recovers_ids_for_resume_without_respawning() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
-            match (request.method.as_str(), request.path.as_str()) {
-                ("GET", "/api/sessions/session-parent/delegations") => (
-                    200,
-                    json!({
-                        "revision": 7,
-                        "delegations": [
-                            {
-                                "id": "delegation-running",
-                                "parentSessionId": "session-parent",
-                                "childSessionId": "session-child-running",
-                                "mode": "reviewer",
-                                "status": "running",
-                                "title": "Same review",
-                                "agent": "Codex",
-                                "writePolicy": { "kind": "readOnly" },
-                                "createdAt": "2026-07-22T10:00:00Z"
-                            },
-                            {
-                                "id": "delegation-completed",
-                                "parentSessionId": "session-parent",
-                                "childSessionId": "session-child-completed",
-                                "mode": "reviewer",
-                                "status": "completed",
-                                "title": "Same review",
-                                "agent": "Claude",
-                                "writePolicy": { "kind": "readOnly" },
-                                "createdAt": "2026-07-22T10:00:01Z"
-                            }
-                        ],
-                        "serverInstanceId": "server-test"
-                    }),
-                ),
-                ("POST", "/api/sessions/session-parent/delegation-waits") => {
-                    let body: Value = serde_json::from_str(&request.body)
-                        .expect("resume wait body should be JSON");
-                    assert_eq!(
-                        body["delegationIds"],
-                        json!(["delegation-running", "delegation-completed"])
-                    );
-                    assert_eq!(body["mode"], "all");
-                    (201, json!({ "wait": { "id": "wait-recovered" } }))
-                }
-                other => panic!("unexpected request: {other:?}"),
-            }
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let listed = bridge
-            .tool_list_delegations(json!({}))
-            .expect("delegation inventory should be recoverable");
-        let delegations = listed["delegations"]
-            .as_array()
-            .expect("delegations should be an array");
-        assert_eq!(delegations.len(), 2);
-        assert_eq!(delegations[0]["id"], "delegation-running");
-        assert_eq!(delegations[0]["childSessionId"], "session-child-running");
-        assert_eq!(delegations[0]["status"], "running");
-        assert_eq!(delegations[1]["id"], "delegation-completed");
-        assert_eq!(delegations[1]["childSessionId"], "session-child-completed");
-        assert_eq!(delegations[1]["status"], "completed");
-        assert_eq!(delegations[0]["title"], delegations[1]["title"]);
-
-        let recovered_ids = delegations
-            .iter()
-            .map(|delegation| delegation["id"].clone())
-            .collect::<Vec<_>>();
-        let resumed = bridge
-            .tool_resume_after_delegations(json!({
-                "delegationIds": recovered_ids,
-                "mode": "all"
-            }))
-            .expect("recovered ids should schedule a resume wait");
-        assert_eq!(resumed.pointer("/wait/id"), Some(&json!("wait-recovered")));
-
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
-    }
-
-    #[test]
-    fn delegation_mcp_spawn_session_resolves_known_slash_command_prompt() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
-            match (request.method.as_str(), request.path.as_str()) {
-                ("POST", "/api/sessions/session-parent/agent-commands/review-code/resolve") => {
-                    let body: Value =
-                        serde_json::from_str(&request.body).expect("resolve body should be JSON");
-                    assert_eq!(body["arguments"], "staged");
-                    assert_eq!(body["note"], "include tests");
-                    assert_eq!(body["cwd"], "C:\\repo\\child");
-                    assert_eq!(body["intent"], "delegate");
-                    (
-                        200,
-                        json!({
-                            "name": "review-code",
-                            "visiblePrompt": "/review-code staged",
-                            "expandedPrompt": "Expanded review-code command body",
-                            "title": "Review local changes",
-                            "delegation": {
-                                "mode": "explorer",
-                                "writePolicy": { "kind": "isolatedWorktree", "ownedPaths": [] }
-                            }
-                        }),
-                    )
-                }
-                ("POST", "/api/sessions/session-parent/delegations") => {
-                    let body: Value = serde_json::from_str(&request.body)
-                        .expect("delegation body should be JSON");
-                    assert_eq!(body["prompt"], "Expanded review-code command body");
-                    assert_eq!(body["title"], "Review local changes");
-                    assert_eq!(body["cwd"], "C:\\repo\\child");
-                    assert_eq!(body["mode"], "explorer");
-                    assert_eq!(
-                        body.pointer("/writePolicy/kind"),
-                        Some(&json!("isolatedWorktree"))
-                    );
-                    (
-                        200,
-                        json!({
-                            "delegation": {
-                                "id": "delegation-one",
-                                "status": "running"
-                            },
-                            "childSessionId": "session-child"
-                        }),
-                    )
-                }
-                other => panic!("unexpected request: {other:?}"),
-            }
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let response = bridge
-            .tool_spawn_session(json!({
-                "prompt": "/review-code staged -- include tests",
-                "agent": "Codex",
-                "cwd": "C:\\repo\\child"
-            }))
-            .expect("spawn should resolve the slash command then post delegation request");
-
-        assert_eq!(response.pointer("/delegation/id"), Some(&json!("delegation-one")));
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
-    }
-
-    #[test]
-    fn delegation_mcp_spawn_session_preserves_literal_prompt_for_unknown_slash_command() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
-            match (request.method.as_str(), request.path.as_str()) {
-                ("POST", "/api/sessions/session-parent/agent-commands/unknown/resolve") => {
-                    (
-                        404,
-                        json!({
-                            "error": "agent command not found"
-                        }),
-                    )
-                }
-                ("POST", "/api/sessions/session-parent/delegations") => {
-                    let body: Value = serde_json::from_str(&request.body)
-                        .expect("delegation body should be JSON");
-                    assert_eq!(body["prompt"], "/unknown keep literal");
-                    (
-                        200,
-                        json!({
-                            "delegation": {
-                                "id": "delegation-one",
-                                "status": "running"
-                            },
-                            "childSessionId": "session-child"
-                        }),
-                    )
-                }
-                other => panic!("unexpected request: {other:?}"),
-            }
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        bridge
-            .tool_spawn_session(json!({
-                "prompt": "/unknown keep literal"
-            }))
-            .expect("unknown slash-like prompts should remain literal");
-
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
-    }
-
-    #[test]
-    fn delegation_mcp_spawn_session_surfaces_non_command_not_found_resolve_errors() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
-            assert_eq!(request.method, "POST");
-            assert_eq!(
-                request.path,
-                "/api/sessions/session-parent/agent-commands/review-code/resolve"
-            );
-            (
-                404,
-                json!({
-                    "error": "session not found"
-                }),
-            )
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let err = bridge
-            .tool_spawn_session(json!({
-                "prompt": "/review-code"
-            }))
-            .expect_err("non-command 404 should surface");
-
-        assert!(err
-            .to_string()
-            .contains("TermAl delegation API returned 404 Not Found: session not found"));
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
-    }
-
-    #[test]
-    fn delegation_mcp_spawn_session_encodes_slash_command_path_segment() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
-            match (request.method.as_str(), request.path.as_str()) {
-                ("POST", "/api/sessions/session-parent/agent-commands/review%3Alocal/resolve") => {
-                    (
-                        200,
-                        json!({
-                            "name": "review:local",
-                            "visiblePrompt": "/review:local",
-                            "expandedPrompt": "Expanded colon command"
-                        }),
-                    )
-                }
-                ("POST", "/api/sessions/session-parent/delegations") => {
-                    let body: Value = serde_json::from_str(&request.body)
-                        .expect("delegation body should be JSON");
-                    assert_eq!(body["prompt"], "Expanded colon command");
-                    (
-                        200,
-                        json!({
-                            "delegation": {
-                                "id": "delegation-one",
-                                "status": "running"
-                            },
-                            "childSessionId": "session-child"
-                        }),
-                    )
-                }
-                other => panic!("unexpected request: {other:?}"),
-            }
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        bridge
-            .tool_spawn_session(json!({
-                "prompt": "/review:local"
-            }))
-            .expect("command names should be encoded as a path segment");
-
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
-    }
-
-    #[test]
-    fn delegation_mcp_spawn_session_allows_percent_in_encoded_command_name() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
-            match (request.method.as_str(), request.path.as_str()) {
-                ("POST", "/api/sessions/session-parent/agent-commands/review%25local/resolve") => {
-                    (
-                        200,
-                        json!({
-                            "name": "review%local",
-                            "visiblePrompt": "/review%local",
-                            "expandedPrompt": "Expanded percent command"
-                        }),
-                    )
-                }
-                ("POST", "/api/sessions/session-parent/delegations") => {
-                    let body: Value = serde_json::from_str(&request.body)
-                        .expect("delegation body should be JSON");
-                    assert_eq!(body["prompt"], "Expanded percent command");
-                    (
-                        200,
-                        json!({
-                            "delegation": {
-                                "id": "delegation-one",
-                                "status": "running"
-                            },
-                            "childSessionId": "session-child"
-                        }),
-                    )
-                }
-                other => panic!("unexpected request: {other:?}"),
-            }
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        bridge
-            .tool_spawn_session(json!({
-                "prompt": "/review%local"
-            }))
-            .expect("literal percent command names should be encoded as a path segment");
-
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
-    }
-
-    #[test]
-    fn delegation_mcp_spawn_session_rejects_parent_known_command_missing_from_requested_cwd() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
-            assert_eq!(request.method, "POST");
-            assert_eq!(
-                request.path,
-                "/api/sessions/session-parent/agent-commands/review-code/resolve"
-            );
-            let body: Value =
-                serde_json::from_str(&request.body).expect("resolve body should be JSON");
-            if body.get("cwd").is_some() {
-                return (
-                    404,
-                    json!({
-                        "error": "agent command not found"
-                    }),
-                );
-            }
-            (
-                200,
-                json!({
-                    "name": "review-code",
-                    "visiblePrompt": "/review-code",
-                    "expandedPrompt": "Parent-scope review command"
-                }),
-            )
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let err = bridge
-            .tool_spawn_session(json!({
-                "prompt": "/review-code",
-                "cwd": "C:\\repo\\child"
-            }))
-            .expect_err("parent-known command missing from requested cwd should fail");
-
-        assert!(err
-            .to_string()
-            .contains("agent command `review-code` was not found in requested cwd"));
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
-    }
-
-    #[test]
-    fn delegation_mcp_spawn_session_preserves_multiline_slash_like_prompt() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
-            assert_eq!(request.method, "POST");
-            assert_eq!(request.path, "/api/sessions/session-parent/delegations");
-            let body: Value =
-                serde_json::from_str(&request.body).expect("delegation body should be JSON");
-            assert_eq!(body["prompt"], "/review-code\nleave this literal");
-            (
-                200,
-                json!({
-                    "delegation": {
-                        "id": "delegation-one",
-                        "status": "running"
-                    },
-                    "childSessionId": "session-child"
-                }),
-            )
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        bridge
-            .tool_spawn_session(json!({
-                "prompt": "/review-code\nleave this literal"
-            }))
-            .expect("multiline prompts should not be slash-expanded");
-
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
-    }
-
-    #[test]
-    fn delegation_mcp_spawn_session_preserves_spaced_slash_like_prompt() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
-            assert_eq!(request.method, "POST");
-            assert_eq!(request.path, "/api/sessions/session-parent/delegations");
-            let body: Value =
-                serde_json::from_str(&request.body).expect("delegation body should be JSON");
-            assert_eq!(body["prompt"], "/ review-code");
-            (
-                200,
-                json!({
-                    "delegation": {
-                        "id": "delegation-one",
-                        "status": "running"
-                    },
-                    "childSessionId": "session-child"
-                }),
-            )
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        bridge
-            .tool_spawn_session(json!({
-                "prompt": "/ review-code"
-            }))
-            .expect("slash followed by whitespace should stay literal like the UI parser");
-
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
-    }
-
-    #[test]
-    fn delegation_mcp_spawn_session_explicit_options_override_resolved_defaults() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
-            match (request.method.as_str(), request.path.as_str()) {
-                ("POST", "/api/sessions/session-parent/agent-commands/review-code/resolve") => {
-                    let body: Value =
-                        serde_json::from_str(&request.body).expect("resolve body should be JSON");
-                    assert!(body.get("arguments").is_none());
-                    assert!(body.get("note").is_none());
-                    assert_eq!(body["intent"], "delegate");
-                    (
-                        200,
-                        json!({
-                            "name": "review-code",
-                            "visiblePrompt": "/review-code",
-                            "expandedPrompt": "Expanded review-code command body",
-                            "title": "Resolved title",
-                            "delegation": {
-                                "mode": "explorer",
-                                "writePolicy": { "kind": "isolatedWorktree", "ownedPaths": [] }
-                            }
-                        }),
-                    )
-                }
-                ("POST", "/api/sessions/session-parent/delegations") => {
-                    let body: Value = serde_json::from_str(&request.body)
-                        .expect("delegation body should be JSON");
-                    assert_eq!(body["prompt"], "Expanded review-code command body");
-                    assert_eq!(body["title"], "Explicit title");
-                    assert_eq!(body["mode"], "reviewer");
-                    assert_eq!(body.pointer("/writePolicy/kind"), Some(&json!("readOnly")));
-                    (
-                        200,
-                        json!({
-                            "delegation": {
-                                "id": "delegation-one",
-                                "status": "running"
-                            },
-                            "childSessionId": "session-child"
-                        }),
-                    )
-                }
-                other => panic!("unexpected request: {other:?}"),
-            }
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        bridge
-            .tool_spawn_session(json!({
-                "prompt": "/review-code",
-                "title": "Explicit title",
-                "mode": "reviewer",
-                "writePolicy": "readOnly"
-            }))
-            .expect("explicit spawn options should override resolved defaults");
-
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
-    }
-
-    #[test]
-    fn delegation_mcp_spawn_session_rejects_empty_resolved_prompt() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
-            assert_eq!(request.method, "POST");
-            assert_eq!(
-                request.path,
-                "/api/sessions/session-parent/agent-commands/review-code/resolve"
-            );
-            (
-                200,
-                json!({
-                    "name": "review-code",
-                    "visiblePrompt": " ",
-                    "expandedPrompt": ""
-                }),
-            )
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let err = bridge
-            .tool_spawn_session(json!({
-                "prompt": "/review-code"
-            }))
-            .expect_err("empty resolved prompts should be rejected before spawning");
-
-        assert!(err
-            .to_string()
-            .contains("agent command `review-code` resolved without prompt content"));
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
-    }
-
-    #[test]
-    fn delegation_mcp_resume_after_delegations_posts_backend_wait() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
-            assert_eq!(request.method, "POST");
-            assert_eq!(request.path, "/api/sessions/session-parent/delegation-waits");
-            let body: Value =
-                serde_json::from_str(&request.body).expect("resume wait body should be JSON");
-            assert_eq!(
-                body["delegationIds"],
-                json!(["delegation-codex", "delegation-claude"])
-            );
-            assert_eq!(body["mode"], "all");
-            assert_eq!(body["title"], "Delegated review fan-in");
-            (
-                200,
-                json!({
-                    "waitId": "delegation-wait-one",
-                    "mode": "all",
-                    "queued": true
-                }),
-            )
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let response = bridge
-            .tool_resume_after_delegations(json!({
-                "delegationIds": ["delegation-codex", "delegation-claude"],
-                "mode": "all",
-                "title": "Delegated review fan-in"
-            }))
-            .expect("resume wait should post request");
-
-        assert_eq!(response["waitId"], "delegation-wait-one");
-        assert_eq!(response["queued"], true);
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
-    }
-
-    #[test]
-    fn delegation_mcp_tools_call_wraps_api_result_as_text_content() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
-            assert_eq!(request.method, "GET");
-            assert_eq!(
-                request.path,
-                "/api/sessions/session-parent/delegations/delegation-one"
-            );
-            (200, json!({ "delegation": { "status": "completed" } }))
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let response = bridge
-            .handle_single_message(json!({
-                "jsonrpc": "2.0",
-                "id": 7,
-                "method": "tools/call",
-                "params": {
-                    "name": "termal_get_session_status",
-                    "arguments": {
-                        "delegationId": "delegation-one"
-                    }
-                }
-            }))
-            .expect("tools/call should handle request")
-            .expect("tools/call should return a response");
-
-        assert_eq!(response["id"], 7);
-        assert_eq!(response.pointer("/result/isError"), Some(&json!(false)));
-        let text = response
-            .pointer("/result/content/0/text")
-            .and_then(Value::as_str)
-            .expect("tool response should contain JSON text");
-        let payload: Value = serde_json::from_str(text).expect("tool text should be JSON");
-        assert_eq!(payload.pointer("/delegation/status"), Some(&json!("completed")));
-        server.join().expect("test server should join");
-        assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
-    }
-
-    #[test]
-    fn delegation_mcp_wait_polls_until_terminal_then_fetches_result() {
-        let status_calls = Arc::new(AtomicUsize::new(0));
-        let handler_status_calls = status_calls.clone();
-        let (base_url, requests, server) = spawn_test_mcp_http_server(3, move |request| {
-            assert_eq!(request.method, "GET");
-            assert!(request.body.is_empty());
-            match request.path.as_str() {
-                "/api/sessions/session-parent/delegations/delegation-done" => {
-                    let call = handler_status_calls.fetch_add(1, Ordering::SeqCst);
-                    let status = if call == 0 { "running" } else { "completed" };
-                    (200, json!({ "delegation": { "status": status } }))
-                }
-                "/api/sessions/session-parent/delegations/delegation-done/result" => (
-                    200,
-                    json!({
-                        "result": {
-                            "status": "completed",
-                            "summary": "MCP wait observed completion."
-                        }
-                    }),
-                ),
-                _ => (
-                    404,
-                    json!({ "error": format!("unexpected path {}", request.path) }),
-                ),
-            }
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let response = bridge
-            .tool_wait_delegations(json!({
-                "delegationIds": ["delegation-done"],
-                "mode": "all",
-                "pollIntervalMs": 100,
-                "timeoutMs": 2_000
-            }))
-            .expect("wait should complete");
-
-        assert_eq!(response["timedOut"], false);
-        assert_eq!(
-            response.pointer("/statuses/0/delegation/status"),
-            Some(&Value::String("completed".to_owned()))
-        );
-        assert_eq!(
-            response.pointer("/results/0/result/result/summary"),
-            Some(&Value::String("MCP wait observed completion.".to_owned()))
-        );
-        assert_eq!(status_calls.load(Ordering::SeqCst), 2);
-        server.join().expect("test server should join");
-        let requests = requests.lock().expect("request log mutex poisoned");
-        assert_eq!(requests.len(), 3);
-        assert!(
-            requests
-                .iter()
-                .any(|request| request.path.ends_with("/delegation-done/result")),
-            "terminal wait must fetch the result packet after status turns terminal"
-        );
-    }
-
-    #[test]
-    fn delegation_mcp_wait_treats_completed_failed_and_canceled_as_terminal() {
-        let (base_url, requests, server) = spawn_test_mcp_http_server(6, move |request| {
-            assert_eq!(request.method, "GET");
-            assert!(request.body.is_empty());
-            match request.path.as_str() {
-                "/api/sessions/session-parent/delegations/delegation-completed" => {
-                    (200, json!({ "delegation": { "status": "completed" } }))
-                }
-                "/api/sessions/session-parent/delegations/delegation-failed" => {
-                    (200, json!({ "delegation": { "status": "failed" } }))
-                }
-                "/api/sessions/session-parent/delegations/delegation-canceled" => {
-                    (200, json!({ "delegation": { "status": "canceled" } }))
-                }
-                "/api/sessions/session-parent/delegations/delegation-completed/result" => (
-                    200,
-                    json!({ "result": { "status": "completed", "summary": "completed" } }),
-                ),
-                "/api/sessions/session-parent/delegations/delegation-failed/result" => (
-                    200,
-                    json!({ "result": { "status": "failed", "summary": "failed" } }),
-                ),
-                "/api/sessions/session-parent/delegations/delegation-canceled/result" => (
-                    200,
-                    json!({ "result": { "status": "canceled", "summary": "canceled" } }),
-                ),
-                _ => (
-                    404,
-                    json!({ "error": format!("unexpected path {}", request.path) }),
-                ),
-            }
-        });
-        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
-            .expect("bridge should initialize");
-
-        let response = bridge
-            .tool_wait_delegations(json!({
-                "delegationIds": [
-                    "delegation-completed",
-                    "delegation-failed",
-                    "delegation-canceled"
-                ],
-                "mode": "all",
-                "pollIntervalMs": 100,
-                "timeoutMs": 2_000
-            }))
-            .expect("wait should complete");
-
-        assert_eq!(response["timedOut"], false);
-        assert_eq!(
-            response.pointer("/statuses/0/delegation/status"),
-            Some(&Value::String("completed".to_owned()))
-        );
-        assert_eq!(
-            response.pointer("/statuses/1/delegation/status"),
-            Some(&Value::String("failed".to_owned()))
-        );
-        assert_eq!(
-            response.pointer("/statuses/2/delegation/status"),
-            Some(&Value::String("canceled".to_owned()))
-        );
-        let results = response
-            .get("results")
-            .and_then(Value::as_array)
-            .expect("results should be an array");
-        assert_eq!(results.len(), 3);
-        assert!(
-            results.iter().all(|result| result.get("error").is_none()),
-            "all terminal statuses should get result fetch attempts without synthetic errors"
-        );
-        server.join().expect("test server should join");
-        let requests = requests.lock().expect("request log mutex poisoned");
-        assert_eq!(requests.len(), 6);
-        assert_eq!(
-            requests
-                .iter()
-                .filter(|request| request.path.ends_with("/result"))
-                .count(),
-            3
-        );
-    }
-}
+#[path = "delegation_mcp_tests.rs"]
+mod delegation_mcp_tests;

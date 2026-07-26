@@ -82,7 +82,12 @@ describe("GitStatusPanel", () => {
     expect(screen.getByText("ControlPanelSurface.tsx")).toBeInTheDocument();
 
     const fileButton = screen.getByRole("button", { name: /^ControlPanelSurface\.tsx$/i });
-    await clickAndSettle(fileButton);
+    // Keep the open request pending so the disabled row state is observable.
+    // An async act boundary would remain open until `deferredOpen` resolves and
+    // overlap the later resolution boundary.
+    act(() => {
+      fireEvent.click(fileButton);
+    });
 
     expect(onOpenDiff).toHaveBeenCalledWith(
       {
@@ -98,10 +103,11 @@ describe("GitStatusPanel", () => {
     );
     expect(fileButton).toBeDisabled();
 
-    deferredOpen.resolve();
-    await waitFor(() => {
-      expect(fileButton).not.toBeDisabled();
+    await act(async () => {
+      deferredOpen.resolve();
+      await Promise.resolve();
     });
+    expect(fileButton).not.toBeDisabled();
 
     await clickAndSettle(screen.getByRole("button", { name: /^Staged\b/i }));
 

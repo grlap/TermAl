@@ -37,7 +37,7 @@ function mailboxMessage(id: string, body: string): MailboxMessage {
     class: "routine",
     topic: null,
     body,
-    notificationDisposition: "queuedBehindActiveTurn",
+    notificationState: "queuedBehindActiveTurn",
   };
 }
 
@@ -69,7 +69,7 @@ describe("MailboxMessageLink", () => {
         class: "routine",
         topic: "architecture",
         body: "Committed mailbox body",
-        notificationDisposition: "queuedBehindActiveTurn",
+        notificationState: "queuedBehindActiveTurn",
       },
     ]);
 
