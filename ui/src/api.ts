@@ -1377,6 +1377,7 @@ export function fetchCoordinationBoard(
     afterKey?: string;
     snapshotGeneration?: number;
     limit?: number;
+    signal?: AbortSignal;
   },
 ) {
   const parameters = new URLSearchParams();
@@ -1396,7 +1397,7 @@ export function fetchCoordinationBoard(
   const query = queryString ? `?${queryString}` : "";
   return request<BoardListPage>(
     `/api/sessions/${encodeURIComponent(sessionId)}/board${query}`,
-    undefined,
+    { signal: options?.signal },
     { preserveGatewayErrorBody: true },
   );
 }

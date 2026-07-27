@@ -35,7 +35,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App from "./App";
-import { RECONNECT_STATE_RESYNC_MAX_DELAY_MS } from "./app-shell-internals";
+import {
+  LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,
+  RECONNECT_STATE_RESYNC_MAX_DELAY_MS,
+} from "./app-shell-internals";
 import { ThemedCombobox } from "./preferences-panels";
 import {
   describeCodexModelAdjustmentNotice,
@@ -232,6 +235,20 @@ vi.mock("./MonacoCodeEditor", () => ({
     );
   }),
 }));
+
+async function crossStaleTransportWindowAndRunOneWatchdogTick() {
+  // Advancing the full 16 s with fake timers executes every unrelated recurring
+  // App interval along the way. Under full-suite load that made these watchdog
+  // assertions depend on wall-clock CPU time. The product condition is a Date
+  // threshold observed by one watchdog tick, so jump the clock and run only
+  // that next scheduled tick.
+  vi.setSystemTime(
+    new Date(
+      Date.now() + LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
+    ),
+  );
+  await advanceTimers(LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS);
+}
 
 describe("App live state - watchdog follow-up and cooldown paths", () => {
   const originalScrollTo = HTMLElement.prototype.scrollTo;
@@ -434,7 +451,10 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
         screen.getByRole("button", { name: "Approve" }),
       ).toBeInTheDocument();
 
-      await advanceTimers(LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 1000);
+      await advanceTimers(
+        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS +
+          LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,
+      );
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(0);
@@ -447,7 +467,10 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
-      await advanceTimers(LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 1000);
+      await advanceTimers(
+        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS +
+          LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,
+      );
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(0);
@@ -615,9 +638,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
-      await advanceTimers(
-        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 1000,
-      );
+      await crossStaleTransportWindowAndRunOneWatchdogTick();
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBeGreaterThanOrEqual(1);
@@ -797,7 +818,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
-      await advanceTimers(LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 1000);
+      await crossStaleTransportWindowAndRunOneWatchdogTick();
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(1);

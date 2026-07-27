@@ -59,9 +59,14 @@ describe("createOrchestratorInstance", () => {
       }),
     );
     const [, init] = fetchMock.mock.calls[0] ?? [];
-    const parsedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    const parsedBody = JSON.parse(String(init?.body)) as Record<
+      string,
+      unknown
+    >;
     expect(parsedBody).toEqual({ templateId: "template-run" });
-    expect(Object.prototype.hasOwnProperty.call(parsedBody, "projectId")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(parsedBody, "projectId")).toBe(
+      false,
+    );
   });
 
   it("includes inline template drafts when provided", async () => {
@@ -84,7 +89,10 @@ describe("createOrchestratorInstance", () => {
     });
 
     const [, init] = fetchMock.mock.calls[0] ?? [];
-    const parsedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    const parsedBody = JSON.parse(String(init?.body)) as Record<
+      string,
+      unknown
+    >;
     expect(parsedBody).toEqual({
       templateId: "template-run",
       projectId: "project-a",
@@ -112,13 +120,14 @@ describe("delegation API helpers", () => {
   });
 
   function stubJsonFetch() {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response("{}", {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }),
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response("{}", {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }),
     );
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
@@ -200,21 +209,22 @@ describe("coordination board API helpers", () => {
   });
 
   function stubBoardFetch() {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(
-        JSON.stringify({
-          generation: 0,
-          entries: [],
-          nextAfterKey: null,
-          unchanged: false,
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            generation: 0,
+            entries: [],
+            nextAfterKey: null,
+            unchanged: false,
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
           },
-        },
-      ),
+        ),
     );
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
@@ -255,16 +265,33 @@ describe("coordination board API helpers", () => {
     );
   });
 
+  it("forwards an abort signal to the board request", async () => {
+    const fetchMock = stubBoardFetch();
+    const controller = new AbortController();
+
+    await fetchCoordinationBoard("session/root", {
+      signal: controller.signal,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/session%2Froot/board",
+      expect.objectContaining({
+        signal: controller.signal,
+      }),
+    );
+  });
+
   it("preserves retry-safe board 503 detail instead of reporting the backend unavailable", async () => {
     const retryMessage =
       "coordination board storage is temporarily busy; no mutation was attempted by this read operation, so retry the same request";
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(JSON.stringify({ error: retryMessage }), {
-        status: 503,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }),
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ error: retryMessage }), {
+          status: 503,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -289,13 +316,14 @@ describe("session API helpers", () => {
   });
 
   it("clamps session tail fetches to at least one message", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(JSON.stringify({ session: {}, revision: 1 }), {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }),
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ session: {}, revision: 1 }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -325,23 +353,24 @@ describe("telegram API helpers", () => {
   });
 
   function stubJsonFetch() {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(
-        JSON.stringify({
-          configured: false,
-          enabled: false,
-          forwardAssistantReplies: false,
-          running: false,
-          lifecycle: "inProcess",
-          subscribedProjectIds: [],
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            configured: false,
+            enabled: false,
+            forwardAssistantReplies: false,
+            running: false,
+            lifecycle: "inProcess",
+            subscribedProjectIds: [],
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
           },
-        },
-      ),
+        ),
     );
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
@@ -433,19 +462,20 @@ describe("telegram API helpers", () => {
   });
 
   it("posts Telegram connection tests to the test route", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(
-        JSON.stringify({
-          botName: "TermAl Bot",
-          botUsername: "termal_bot",
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            botName: "TermAl Bot",
+            botUsername: "termal_bot",
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
           },
-        },
-      ),
+        ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -467,19 +497,20 @@ describe("telegram API helpers", () => {
   });
 
   it("posts explicit Telegram bot tokens to the test route", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(
-        JSON.stringify({
-          botName: "TermAl Bot",
-          botUsername: "termal_bot",
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            botName: "TermAl Bot",
+            botUsername: "termal_bot",
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
           },
-        },
-      ),
+        ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -498,7 +529,8 @@ describe("telegram API helpers", () => {
       vi.fn().mockResolvedValue(
         new Response(
           JSON.stringify({
-            error: "Telegram connection test failed: failed to call Telegram `getMe`",
+            error:
+              "Telegram connection test failed: failed to call Telegram `getMe`",
           }),
           {
             status: 502,
@@ -573,13 +605,14 @@ describe("conversation marker API helpers", () => {
   });
 
   function stubJsonFetch() {
-    const fetchMock = vi.fn<typeof fetch>(async (_input, _init) =>
-      new Response("{}", {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }),
+    const fetchMock = vi.fn<typeof fetch>(
+      async (_input, _init) =>
+        new Response("{}", {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }),
     );
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
@@ -687,13 +720,18 @@ describe("saveFile", () => {
     });
 
     const [, init] = fetchMock.mock.calls[0] ?? [];
-    const parsedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    const parsedBody = JSON.parse(String(init?.body)) as Record<
+      string,
+      unknown
+    >;
     expect(parsedBody).toEqual({
       path: "/repo/src/app.ts",
       content: "updated",
       baseHash: "sha256:base",
     });
-    expect(Object.prototype.hasOwnProperty.call(parsedBody, "sessionId")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(parsedBody, "sessionId")).toBe(
+      false,
+    );
   });
 
   it("omits empty base hashes from the request body", async () => {
@@ -718,7 +756,10 @@ describe("saveFile", () => {
     });
 
     const [, init] = fetchMock.mock.calls[0] ?? [];
-    const parsedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    const parsedBody = JSON.parse(String(init?.body)) as Record<
+      string,
+      unknown
+    >;
     expect(parsedBody).toEqual({
       path: "/repo/src/app.ts",
       content: "updated",
@@ -804,7 +845,8 @@ describe("runTerminalCommand", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          error: "too many local terminal commands are already running; limit is 4",
+          error:
+            "too many local terminal commands are already running; limit is 4",
         }),
         {
           status: 429,
@@ -909,9 +951,7 @@ describe("runTerminalCommandStream", () => {
       ),
     ).resolves.toEqual(terminalResponseBody);
 
-    expect(outputEvents).toEqual([
-      { stream: "stdout", text: "building...\n" },
-    ]);
+    expect(outputEvents).toEqual([{ stream: "stdout", text: "building...\n" }]);
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/terminal/run/stream",
@@ -951,9 +991,7 @@ describe("runTerminalCommandStream", () => {
       ),
     ).resolves.toEqual(terminalResponseBody);
 
-    expect(outputEvents).toEqual([
-      { stream: "stdout", text: "building...\n" },
-    ]);
+    expect(outputEvents).toEqual([{ stream: "stdout", text: "building...\n" }]);
   });
 
   it("drains multiple output frames from one buffered chunk", async () => {
@@ -1118,8 +1156,14 @@ describe("runTerminalCommandStream", () => {
       ["command wrong type", { ...terminalResponseBody, command: 123 }],
       ["durationMs missing", missingDuration],
       ["durationMs null", { ...terminalResponseBody, durationMs: null }],
-      ["exitCode wrong type (string)", { ...terminalResponseBody, exitCode: "0" }],
-      ["exitCode wrong type (boolean)", { ...terminalResponseBody, exitCode: true }],
+      [
+        "exitCode wrong type (string)",
+        { ...terminalResponseBody, exitCode: "0" },
+      ],
+      [
+        "exitCode wrong type (boolean)",
+        { ...terminalResponseBody, exitCode: true },
+      ],
       [
         "outputTruncated wrong type",
         { ...terminalResponseBody, outputTruncated: "false" },
@@ -1408,9 +1452,7 @@ describe("runTerminalCommandStream", () => {
         { onOutput: (event) => outputEvents.push(event) },
       ),
     ).resolves.toEqual(completionResponse);
-    expect(outputEvents).toEqual([
-      { stream: "stdout", text: outputFill },
-    ]);
+    expect(outputEvents).toEqual([{ stream: "stdout", text: outputFill }]);
   });
 
   it("rejects a single complete frame whose length exceeds the SSE buffer cap", async () => {
@@ -1532,8 +1574,7 @@ describe("runTerminalCommandStream", () => {
     const completionFrame = `event: complete\ndata: ${JSON.stringify(
       terminalResponseBody,
     )}\n\n`;
-    const coalesced =
-      validOutputFrame + oversizedOutputFrame + completionFrame;
+    const coalesced = validOutputFrame + oversizedOutputFrame + completionFrame;
     stubTerminalStream([coalesced]);
 
     const outputEvents: Array<{ stream: string; text: string }> = [];
@@ -1742,15 +1783,12 @@ describe("fetchState", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(
-          "<!DOCTYPE html><html><body>Old backend</body></html>",
-          {
-            status: 200,
-            headers: {
-              "Content-Type": "text/html",
-            },
+        new Response("<!DOCTYPE html><html><body>Old backend</body></html>", {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html",
           },
-        ),
+        }),
       ),
     );
 
@@ -1998,10 +2036,7 @@ describe("remote lifecycle API helpers", () => {
           message: "remote `SSH Lab` upgrade failed: build failed",
           status: 502,
         });
-        expect(fetchMock).toHaveBeenCalledWith(
-          expectedUrl,
-          expect.any(Object),
-        );
+        expect(fetchMock).toHaveBeenCalledWith(expectedUrl, expect.any(Object));
         expect(error).toBeInstanceOf(ApiRequestError);
       }
     }
@@ -2066,7 +2101,9 @@ describe("fetchWorkspaceLayout", () => {
       expect((error as Error).message).toContain(
         "/api/workspaces/workspace%2Fone%20two (HTTP 404)",
       );
-      expect((error as Error).message).not.toContain("/api/workspaces/workspace/one two");
+      expect((error as Error).message).not.toContain(
+        "/api/workspaces/workspace/one two",
+      );
     }
   });
 });

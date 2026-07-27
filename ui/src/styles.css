@@ -6246,7 +6246,7 @@ textarea {
   left: -0.45rem;
   width: 2px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 68%, transparent);
+  background: color-mix(in srgb, var(--signal-blue) 68%, transparent);
 }
 
 .markdown-diff-editable-section .syntax-copy-button {
@@ -9791,8 +9791,8 @@ textarea {
   border-radius: 999px;
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--accent) 45%, transparent),
-    color-mix(in srgb, var(--accent) 10%, var(--border-muted))
+    color-mix(in srgb, var(--signal-blue) 45%, transparent),
+    color-mix(in srgb, var(--signal-blue) 10%, var(--border-muted))
   );
 }
 
@@ -9813,7 +9813,7 @@ textarea {
   width: 1.7rem;
   height: 1.7rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 88%, white);
+  background: color-mix(in srgb, var(--signal-blue) 88%, white);
   color: white;
   font-size: 0.82rem;
   font-weight: 800;
@@ -9844,7 +9844,7 @@ textarea {
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--signal-amber) 9%, var(--panel-elevated)),
+      color-mix(in srgb, var(--signal-gold) 9%, var(--panel-elevated)),
       color-mix(in srgb, var(--panel-elevated) 86%, transparent)
     );
 }
@@ -9853,15 +9853,15 @@ textarea {
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--accent) 16%, var(--panel-elevated)),
+      color-mix(in srgb, var(--signal-green) 16%, var(--panel-elevated)),
       color-mix(in srgb, var(--panel-elevated) 88%, transparent)
     );
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-muted));
+  border-color: color-mix(in srgb, var(--signal-green) 45%, var(--border-muted));
 }
 
 .instruction-trace-card-hop {
   background: color-mix(in srgb, var(--panel-elevated) 65%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-muted));
+  border-color: color-mix(in srgb, var(--signal-blue) 28%, var(--border-muted));
 }
 
 .instruction-trace-card-top {
@@ -9962,7 +9962,7 @@ textarea {
   padding: 0;
   border: none;
   background: none;
-  color: var(--accent);
+  color: var(--signal-blue);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -10809,6 +10809,10 @@ textarea {
   font-size: 0.75em;
 }
 
+.board-panel-refresh-mode-stale {
+  color: var(--signal-gold);
+}
+
 .board-panel-refresh {
   margin-left: auto;
 }
@@ -10839,6 +10843,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 8px;
+  transition: border-color 0.3s ease;
 }
 
 .board-panel-entry-head {
@@ -10879,4 +10884,29 @@ textarea {
 .board-panel-entry-stamp {
   font-style: italic;
   overflow-wrap: anywhere;
+}
+
+/* Board visibility upgrade (2026-07-27): live poll + change highlighting. */
+.board-panel-last-write {
+  color: var(--muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.board-panel-entry-changed {
+  /* --signal-blue is defined by every theme; the previous --accent token was
+     a phantom that fell back to the base border color, leaving the highlight
+     invisible (review 2026-07-27, High). */
+  border-color: var(--signal-blue);
+}
+
+.board-panel-entry-changed-badge {
+  background: var(--accent-blue-bg);
+  border: 1px solid var(--accent-blue-border);
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 0.7em;
+  padding: 1px 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }

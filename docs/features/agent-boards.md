@@ -130,9 +130,37 @@ Every write carries `expectedRevision` and an author-scoped `idempotencyKey`.
   deleted project. Newly created projects use UUID-backed ids, so a future
   project cannot inherit either the deleted scope's fence or its former
   facts after the primary database is restored or reset.
-- The read-only UI is deliberately manual-refresh in v1 and labels itself as
-  such. The rendered generation is only the generation observed by the last
-  successful refresh; the board never emits SSE wake-ups.
+- The read-only UI polls live while visible: every 8 s it issues the cheap
+  `knownGeneration` unchanged probe (zero rows returned when quiet), skips
+  ticks while the tab is hidden, and highlights entries whose
+  `updatedAtGeneration` moved past the previously rendered generation for a
+  few seconds after a change lands. A failed automatic probe keeps the last
+  good facts visible, changes the live indicator to a non-assertive `stale`
+  state, and retries with bounded exponential backoff; a manual Refresh still
+  reports an actionable error immediately. Returning to a visible tab also
+  bypasses any outstanding background delay because that focus transition is
+  itself a freshness signal. Background multi-page reads use a smaller
+  snapshot-conflict restart budget than manual reads so a continuously written
+  board cannot consume the full foreground retry cost every poll.
+  Completed pages renew the in-flight claim, while a request that makes no
+  progress for the stale window is aborted before its replacement starts.
+  Consecutive stale-claim replacements receive exponentially longer
+  no-progress windows, capped at 128 s, so a slow finite first response gets
+  substantially more room without letting a long chain of hung fetches suspend
+  recovery indefinitely. Ordinary terminal network errors affect retry
+  backoff but do not inflate that stale window, and idle-probe backoff never
+  suppresses inspection of an already-active claim's no-progress deadline.
+  Truly hung requests are still reclaimed, with decreasing retry pressure.
+  Returning to a visible tab replaces a pending background probe as well as
+  bypassing backoff. If live
+  polling takes over a stalled manual Refresh, the foreground action reports
+  that timeout instead of silently degrading to background-only status. The
+  header uses the newest surviving fact's exact write time when available; for
+  a deletion-only generation, whose deleted row has no timestamp in the list
+  response, it labels the local observation time as `last change`. The rendered
+  generation is still only the generation observed by the last successful
+  probe, and the board never emits SSE wake-ups — polling on the unchanged
+  short-circuit is the sanctioned liveness mechanism.
 - Newly created projects use collision-resistant `project-<uuid>` ids.
   Existing persisted ids remain valid, but a restored/reset `termal.sqlite`
   cannot reuse the rewindable legacy counter and accidentally inherit a live

@@ -1019,6 +1019,19 @@ fn coordination_board_persists_across_store_reopen() {
     assert_eq!(head.scope_generation, 1);
     assert_eq!(head.value, json!({"digest": "abc"}));
     assert!(!head.deleted);
+
+    // The frontend finds the newest visible write with a string comparison, so
+    // keep the persisted wire timestamp fixed-width, UTC, and millisecond exact.
+    let parsed_updated_at = chrono::DateTime::parse_from_rfc3339(&head.updated_at)
+        .expect("board timestamps should remain valid RFC 3339");
+    assert!(
+        head.updated_at.ends_with('Z'),
+        "board timestamps must stay in UTC for lexical ordering"
+    );
+    assert_eq!(
+        head.updated_at,
+        parsed_updated_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+    );
 }
 
 #[test]
