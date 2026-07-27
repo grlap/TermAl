@@ -64,6 +64,7 @@ mod session_settings;
 mod session_stop;
 mod session_stop_runtime;
 mod shared_codex;
+mod shared_codex_events;
 mod telegram;
 mod telegram_forwarding;
 mod telegram_relay_lifecycle;

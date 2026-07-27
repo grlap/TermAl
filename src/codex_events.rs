@@ -659,18 +659,18 @@ fn handle_shared_codex_app_server_notification(
         | "thread/realtime/error"
         | "thread/realtime/closed" => {}
         "error" => {
-            *turn_id = None;
-            *completed_turn_id = None;
-            *turn_started = false;
-            *pending_turn_start_request_id = None;
-            clear_codex_turn_state(turn_state);
-            recorder.reset_turn_state()?;
             let payload = message.get("params").unwrap_or(message);
             let detail = summarize_error(payload);
 
             if is_retryable_connectivity_error(payload) {
                 state.note_turn_retry_if_runtime_matches(session_id, runtime_token, &detail)?;
             } else {
+                *turn_id = None;
+                *completed_turn_id = None;
+                *turn_started = false;
+                *pending_turn_start_request_id = None;
+                clear_codex_turn_state(turn_state);
+                recorder.reset_turn_state()?;
                 state.fail_turn_if_runtime_matches(session_id, runtime_token, &detail)?;
             }
         }
