@@ -299,6 +299,7 @@ function makeLiveStateParams(
       setProjects: noopSetter,
       setOrchestrators: noopSetter,
       setDelegationWaits: noopSetter,
+      setDelegationChildSessionIds: noopSetter,
       setWorkspaceSummaries: noopSetter,
       setDraftsBySessionId: noopSetter,
       setDraftAttachmentsBySessionId: noopSetter,

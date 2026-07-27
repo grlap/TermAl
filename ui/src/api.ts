@@ -6,6 +6,7 @@ import type {
   AgentCommandKind,
   ApprovalPolicy,
   AppPreferences,
+  BoardListPage,
   ClaudeApprovalMode,
   ClaudeEffortLevel,
   CodexReasoningEffort,
@@ -552,7 +553,8 @@ export function saveWorkspaceLayout(
     markdownStyleId?: string;
     diagramThemeOverrideMode?: "on" | "off";
     diagramLook?: "classic" | "handDrawn" | "neo";
-    diagramPalette?: "match" | "default" | "dark" | "forest" | "neutral" | "base";
+    diagramPalette?:
+      "match" | "default" | "dark" | "forest" | "neutral" | "base";
     fontSizePx?: number;
     editorFontSizePx?: number;
     densityPercent?: number;
@@ -612,7 +614,10 @@ export type RemoteActionResponse = {
   stderr?: string;
 };
 
-export function registerRemoteTermal(remoteId: string, payload: { sourcePath: string }) {
+export function registerRemoteTermal(
+  remoteId: string,
+  payload: { sourcePath: string },
+) {
   return request<RemoteActionResponse>(
     `/api/remotes/${encodeURIComponent(remoteId)}/register`,
     {
@@ -733,7 +738,10 @@ export function fetchDelegationResult(
   );
 }
 
-export function cancelDelegation(parentSessionId: string, delegationId: string) {
+export function cancelDelegation(
+  parentSessionId: string,
+  delegationId: string,
+) {
   const parent = encodeURIComponent(parentSessionId);
   const delegation = encodeURIComponent(delegationId);
   return request<DelegationStatusResponse>(
@@ -1360,4 +1368,35 @@ export function syncGitChanges(payload: {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function fetchCoordinationBoard(
+  sessionId: string,
+  options?: {
+    knownGeneration?: number;
+    afterKey?: string;
+    snapshotGeneration?: number;
+    limit?: number;
+  },
+) {
+  const parameters = new URLSearchParams();
+  if (options?.knownGeneration !== undefined) {
+    parameters.set("knownGeneration", String(options.knownGeneration));
+  }
+  if (options?.afterKey !== undefined) {
+    parameters.set("afterKey", options.afterKey);
+  }
+  if (options?.snapshotGeneration !== undefined) {
+    parameters.set("snapshotGeneration", String(options.snapshotGeneration));
+  }
+  if (options?.limit !== undefined) {
+    parameters.set("limit", String(options.limit));
+  }
+  const queryString = parameters.toString();
+  const query = queryString ? `?${queryString}` : "";
+  return request<BoardListPage>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/board${query}`,
+    undefined,
+    { preserveGatewayErrorBody: true },
+  );
 }

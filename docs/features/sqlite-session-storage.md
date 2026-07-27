@@ -4,7 +4,8 @@
 > ignore set (the serialized camelCase key; not exposed via `/api/state`); see
 > [shared-codex-app-server.md](./shared-codex-app-server.md).
 
-TermAl persists application state in `~/.termal/termal.sqlite`. Earlier builds
+TermAl persists application/session state in `~/.termal/termal.sqlite` and
+durable agent coordination in `~/.termal/coordination.sqlite`. Earlier builds
 used one large JSON document, but the current code no longer carries a
 `sessions.json` import path.
 
@@ -28,12 +29,20 @@ and lazy session/message loading.
 
 ## Storage Layout
 
-Use a single SQLite database under the TermAl data directory:
+Use two SQLite writer domains under the TermAl data directory:
 
 ```text
 ~/.termal/
-  termal.sqlite
+  termal.sqlite       # app metadata, projects, sessions, delegations
+  coordination.sqlite # durable mailboxes and coordination boards
 ```
+
+The split keeps mailbox and board deadlines independent from large transcript
+serialization and session-state writes. Mailboxes and boards share the small
+coordination database and its FIFO writer admission because their discovery,
+lifecycles, and bounded file-descriptor budget remain one domain. See
+[durable agent mailboxes](agent-mailboxes.md) and the
+[coordination board](agent-boards.md) for their surface contracts.
 
 ## Restartable Slice Schema
 
@@ -204,11 +213,43 @@ state and preview.
 
 On startup:
 
-1. Open `termal.sqlite` when it exists.
-2. Create the SQLite schema when the database is new.
-3. Load metadata, session rows, and delegation rows from SQLite.
-4. Start TermAl from SQLite state, or bootstrap an empty local state when the
-   database has no app metadata yet.
+1. Open `termal.sqlite` when it exists and load metadata, session rows, and
+   delegation rows, or bootstrap an empty local state when it has no app
+   metadata yet.
+2. Bootstrap `coordination.sqlite` before any coordination stores, background
+   persistence worker, or HTTP listener.
+3. On first split-database boot, attach `termal.sqlite` read-only and copy the
+   legacy mailbox/board rows. Copy, invariant verification, and the
+   destination-owned migration marker commit atomically.
+4. Open the long-lived mailbox and board connections and start a dedicated
+   coordination-cleanup worker alongside the primary-state persist worker.
+5. Queue the boot-state persistence tick. Once it confirms any durable
+   project-deletion outbox in `termal.sqlite`, it signals the cleanup worker;
+   completed cleanup wakes primary persistence again to clear the outbox.
+   Failed or interrupted cleanup remains durable for retry. Because the
+   deleted project cannot authorize new board traffic, the HTTP listener can
+   open without waiting for a large cascade or a backlog of scopes.
+
+That first-boot attachment assumes one TermAl process owns the data directory.
+Do not start a second instance against the same `~/.termal` (even on another
+port) while migration is pending: its read-only attachment would still open
+the first process's live WAL database. Stop the existing process before
+repairing or retrying a marker-absent migration.
+
+If legacy verification fails, the destination copy and migration marker roll
+back together and TermAl refuses to start; the HTTP listener has not opened,
+so no live coordination traffic can race recovery. Stop TermAl and preserve
+both database files. Repair or restore the legacy `termal.sqlite`, or install
+a build that understands the reported legacy schema, then restart: the absent
+marker makes the import retry from the beginning. Do not insert the marker by
+hand. A marker-absent destination must contain no mailbox, board, or deleted-
+scope rows: TermAl refuses to merge an independently populated destination
+because same-key payload conflicts cannot be resolved safely. If
+`coordination.sqlite` was created solely by that failed first boot and it is
+certain no earlier split-database build ever served traffic from it, moving
+that unopened destination aside is safe and lets TermAl create a fresh
+destination; otherwise retain it for diagnosis rather than discarding durable
+mailbox or board data.
 
 ## Frontend Changes
 

@@ -11,7 +11,7 @@ const JSON_HTML_FALLBACK_TEXT_LIMIT_BYTES = 64 * 1024;
  * Do not treat `"request-failed"` as a non-5xx guarantee. Routes that opt into
  * `preserveGatewayErrorBody` intentionally keep parseable 502/503/504 JSON
  * error bodies as `"request-failed"` so callers can surface actionable
- * upstream diagnostics.
+ * upstream or typed retry-safe diagnostics.
  * Branch on `status` and `restartRequired` when status-class behavior matters.
  */
 export type ApiRequestErrorKind = "backend-unavailable" | "request-failed";
@@ -58,8 +58,8 @@ export async function request<T>(
     /**
      * Keep parseable 502/503/504 JSON error bodies as request-failed details
      * instead of mapping them to the generic backend-unavailable UI path. Use
-     * this only for routes that deliberately proxy a third-party service and
-     * return actionable JSON errors for upstream failures.
+     * this only for routes that deliberately return actionable JSON gateway
+     * or retry-safe errors and whose callers handle the status explicitly.
      */
     preserveGatewayErrorBody?: boolean;
   },

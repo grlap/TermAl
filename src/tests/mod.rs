@@ -25,6 +25,7 @@ mod codex_discovery;
 mod codex_protocol;
 mod codex_threads;
 mod conversation_markers;
+mod coordination_board_routes;
 mod cursor;
 mod delegation_child_links;
 mod delegation_lifecycle;
@@ -674,6 +675,10 @@ fn test_app_state() -> AppState {
     // exhausts macOS's default 256-fd limit before the full suite completes.
     // Mailbox tests opt into a real isolated store explicitly.
     let mailbox_store = Arc::new(MailboxStore::disabled_for_tests());
+    // Same fd-cascade rule for the board store: no real SQLite connection in
+    // retained test AppStates (tm-drd); board tests opt into a real isolated
+    // store explicitly, exactly like mailbox tests.
+    let coordination_board_store = Arc::new(CoordinationBoardStore::disabled_for_tests());
 
     AppState {
         server_instance_id: Uuid::new_v4().to_string(),
@@ -681,6 +686,7 @@ fn test_app_state() -> AppState {
         local_http_base_url: Arc::new(Mutex::new(None)),
         persistence_path: Arc::new(persistence_path),
         mailbox_store,
+        coordination_board_store,
         orchestrator_templates_path: Arc::new(
             std::env::temp_dir().join(format!("termal-orchestrators-test-{}.json", Uuid::new_v4())),
         ),

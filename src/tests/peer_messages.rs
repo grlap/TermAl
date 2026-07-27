@@ -516,10 +516,10 @@ async fn peer_message_route_reports_idle_and_queued_dispositions() {
 #[tokio::test]
 async fn peer_message_route_ignores_forged_mailbox_provenance() {
     let base = test_app_state();
+    let coordination_path = resolve_coordination_persistence_path(base.persistence_path.as_ref());
     let state = AppState {
         mailbox_store: Arc::new(
-            MailboxStore::open(base.persistence_path.as_ref())
-                .expect("mailbox test store should open"),
+            MailboxStore::open(&coordination_path).expect("mailbox test store should open"),
         ),
         ..base
     };

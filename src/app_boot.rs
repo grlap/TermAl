@@ -14,16 +14,19 @@
 //    `normalize_local_paths` (canonicalize workdirs),
 //    `recover_interrupted_sessions` (reset Active/Approval sessions
 //    back to Idle with runtime_reset_required).
-// 4. Spawns the background persist thread (which drains
+// 4. Spawns the dedicated coordination-cleanup worker. Durable project
+//    deletion outbox entries are handed to it only after their primary-state
+//    commit, so large board cascades never block boot or termal.sqlite writes.
+// 5. Spawns the background persist thread (which drains
 //    `collect_persist_delta` in a loop and writes to SQLite).
-// 5. Spawns the SSE broadcaster thread (JSON-serialize state snapshots
+// 6. Spawns the SSE broadcaster thread (JSON-serialize state snapshots
 //    off the state-mutex critical path — see `sse_broadcast.rs`).
-// 6. Persists any boot-time fixups so the first mutation after
+// 7. Persists any boot-time fixups so the first mutation after
 //    startup doesn't churn the whole file.
-// 7. Restores remote SSE event bridges (`remote_sync.rs`).
-// 8. (Non-test only) Spawns the workspace file watcher and
+// 8. Restores remote SSE event bridges (`remote_sync.rs`).
+// 9. (Non-test only) Spawns the workspace file watcher and
 //    orchestrator transition resumer.
-// 9. Performs the one-time broad recovery of durable unread mailbox wake-ups,
+// 10. Performs the one-time broad recovery of durable unread mailbox wake-ups,
 //    then calls `dispatch_orphaned_queued_prompts` so mailbox notifications and
 //    other queued prompts stranded at shutdown fire their next turn immediately.
 //
@@ -36,6 +39,8 @@
 
 const PERSIST_RETRY_SEED_DELAY: Duration = Duration::from_millis(250);
 const PERSIST_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
+const COORDINATION_CLEANUP_RETRY_SEED_DELAY: Duration = Duration::from_millis(250);
+const COORDINATION_CLEANUP_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct PersistWorkerRetryState {
@@ -63,6 +68,88 @@ enum PersistWorkerWaitOutcome {
     Process,
     Shutdown,
     Exit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CoordinationCleanupRequest {
+    Process,
+    Shutdown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CoordinationCleanupWaitOutcome {
+    Process,
+    Shutdown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CoordinationCleanupRetryState {
+    retry_pending: bool,
+    retry_delay: Duration,
+}
+
+impl Default for CoordinationCleanupRetryState {
+    fn default() -> Self {
+        Self {
+            retry_pending: false,
+            retry_delay: COORDINATION_CLEANUP_RETRY_SEED_DELAY,
+        }
+    }
+}
+
+impl CoordinationCleanupRetryState {
+    fn wait_for_next_tick(
+        &self,
+        cleanup_rx: &mpsc::Receiver<CoordinationCleanupRequest>,
+    ) -> CoordinationCleanupWaitOutcome {
+        if self.retry_pending {
+            let deadline = std::time::Instant::now()
+                .checked_add(self.retry_delay)
+                .unwrap_or_else(std::time::Instant::now);
+            loop {
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining.is_zero() {
+                    return CoordinationCleanupWaitOutcome::Process;
+                }
+                match cleanup_rx.recv_timeout(remaining) {
+                    Ok(CoordinationCleanupRequest::Shutdown) => {
+                        return CoordinationCleanupWaitOutcome::Shutdown;
+                    }
+                    Ok(CoordinationCleanupRequest::Process) => {
+                        // The durable outbox remains level-triggered. Persist
+                        // commits can therefore emit redundant Process wakes
+                        // while a failed scope is backing off; consume those
+                        // wakes without shortening the current retry window.
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        return CoordinationCleanupWaitOutcome::Process;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        return CoordinationCleanupWaitOutcome::Shutdown;
+                    }
+                }
+            }
+        }
+        match cleanup_rx.recv() {
+            Ok(CoordinationCleanupRequest::Process) => CoordinationCleanupWaitOutcome::Process,
+            Ok(CoordinationCleanupRequest::Shutdown) | Err(_) => {
+                CoordinationCleanupWaitOutcome::Shutdown
+            }
+        }
+    }
+
+    fn record_pending(&mut self, pending: bool) {
+        if pending {
+            self.retry_pending = true;
+            self.retry_delay = std::cmp::min(
+                self.retry_delay * 2,
+                COORDINATION_CLEANUP_RETRY_MAX_DELAY,
+            );
+        } else {
+            self.retry_pending = false;
+            self.retry_delay = COORDINATION_CLEANUP_RETRY_SEED_DELAY;
+        }
+    }
 }
 
 impl PersistWorkerRetryState {
@@ -100,7 +187,112 @@ impl PersistWorkerRetryState {
     }
 
     fn should_exit_after_tick(&self, shutdown_requested: bool) -> bool {
+        // A failed primary-state write must keep shutdown blocked so the last
+        // mutation is not lost. Coordination cleanup runs on its own worker;
+        // its unfinished outbox entries remain durable and never affect this
+        // primary-state exit decision.
         shutdown_requested && !self.retry_after_failure
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct CoordinationCleanupPass {
+    completed: usize,
+    pending: bool,
+}
+
+fn process_pending_coordination_scope_deletions<F>(
+    inner: &Arc<Mutex<StateInner>>,
+    mut delete_scope: F,
+) -> CoordinationCleanupPass
+where
+    F: FnMut(&str) -> Result<bool>,
+{
+    let pending_scope_deletions = {
+        inner
+            .lock()
+            .expect("state mutex poisoned")
+            .pending_coordination_scope_deletions
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let mut completed = Vec::new();
+    for scope_project_id in pending_scope_deletions {
+        match delete_scope(&scope_project_id) {
+            Ok(_) => completed.push(scope_project_id),
+            Err(err) => {
+                let retryable = err
+                    .downcast_ref::<CoordinationBoardStoreError>()
+                    .is_some_and(|store_error| {
+                        store_error.kind == CoordinationBoardStoreErrorKind::Retryable
+                    });
+                eprintln!(
+                    "[termal] coordination cleanup for deleted project \
+                     `{scope_project_id}` {} leaving its durable outbox item queued for a \
+                     later cleanup pass: {err:#}",
+                    if retryable {
+                        "is temporarily busy;"
+                    } else {
+                        "failed;"
+                    }
+                );
+            }
+        }
+    }
+    let mut inner = inner.lock().expect("state mutex poisoned");
+    let mut completed_count = 0;
+    for scope_project_id in completed {
+        if inner
+            .pending_coordination_scope_deletions
+            .remove(&scope_project_id)
+        {
+            completed_count += 1;
+        }
+    }
+    CoordinationCleanupPass {
+        completed: completed_count,
+        pending: !inner.pending_coordination_scope_deletions.is_empty(),
+    }
+}
+
+fn run_coordination_cleanup_worker(
+    cleanup_rx: mpsc::Receiver<CoordinationCleanupRequest>,
+    inner: Arc<Mutex<StateInner>>,
+    coordination_board_store: Arc<CoordinationBoardStore>,
+    persist_tx: mpsc::Sender<PersistRequest>,
+) {
+    let mut retry_state = CoordinationCleanupRetryState::default();
+    loop {
+        if matches!(
+            retry_state.wait_for_next_tick(&cleanup_rx),
+            CoordinationCleanupWaitOutcome::Shutdown
+        ) {
+            break;
+        }
+        // Coalesce redundant wake signals. Shutdown wins before any new
+        // cleanup starts, so graceful shutdown never begins another possibly
+        // large cascade while it is trying to join this worker.
+        let mut shutdown_requested = false;
+        while let Ok(request) = cleanup_rx.try_recv() {
+            if matches!(request, CoordinationCleanupRequest::Shutdown) {
+                shutdown_requested = true;
+            }
+        }
+        if shutdown_requested {
+            break;
+        }
+
+        let pass = process_pending_coordination_scope_deletions(&inner, |scope_project_id| {
+            coordination_board_store.delete_scope_for_project_lifecycle(scope_project_id)
+        });
+        if pass.completed > 0 && persist_tx.send(PersistRequest::Delta).is_err() {
+            // The primary worker has stopped. The on-disk outbox deliberately
+            // still contains these idempotently completed scopes, so the next
+            // boot can replay them and durably clear the bookkeeping.
+            break;
+        }
+        retry_state.record_pending(pass.pending);
     }
 }
 
@@ -167,15 +359,52 @@ impl AppState {
             Arc::new(RwLock::new(fresh_agent_readiness_cache(&default_workdir)));
         let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
 
+        let persist_path_for_persist = Arc::new(persistence_path.clone());
+        let persist_path_for_state = Arc::clone(&persist_path_for_persist);
+        let coordination_path = resolve_coordination_persistence_path(&persistence_path);
+        // Coordination bootstrap is a hard boot barrier: the destination schema
+        // and any legacy import commit before either store exists, before the
+        // persist worker starts, and therefore before run_server can expose an
+        // HTTP listener. No append may mint sequences in an empty destination
+        // ahead of legacy history (tm-0qe).
+        bootstrap_coordination_database(&persistence_path, &coordination_path)?;
+        let mailbox_store = Arc::new(MailboxStore::open(&coordination_path)?);
+        // Mailboxes and the level-triggered board deliberately share the small
+        // coordination database and its FIFO writer admission, while session
+        // and transcript persistence remain isolated in termal.sqlite.
+        let coordination_board_store =
+            Arc::new(CoordinationBoardStore::open(&coordination_path)?);
         // `AppState::inner` is built here (rather than inside the struct
         // literal further below) so we can share an `Arc` clone with the
         // background persist thread. The thread briefly re-locks it on
         // each tick to collect the diff; see `StateInner::collect_persist_delta`.
         let inner_arc = Arc::new(Mutex::new(inner));
         let inner_for_persist = Arc::clone(&inner_arc);
-        let persist_path_for_persist = Arc::new(persistence_path.clone());
-        let persist_path_for_state = Arc::clone(&persist_path_for_persist);
-        let mailbox_store = Arc::new(MailboxStore::open(&persistence_path)?);
+        let inner_for_coordination_cleanup = Arc::clone(&inner_arc);
+        let coordination_board_store_for_persist = Arc::clone(&coordination_board_store);
+        let coordination_board_store_for_cleanup = Arc::clone(&coordination_board_store);
+        let persist_tx_for_coordination_cleanup = persist_tx.clone();
+        let (coordination_cleanup_tx, coordination_cleanup_rx) =
+            mpsc::channel::<CoordinationCleanupRequest>();
+        let (coordination_cleanup_done_tx, coordination_cleanup_done_rx) = mpsc::channel::<()>();
+        // Scope cascades run outside both boot and the primary persistence
+        // worker. The project-removal outbox is already durable before this
+        // worker is signaled, and a missing project cannot authorize new board
+        // access while cleanup is pending. A large scope or a backlog of
+        // scopes therefore cannot delay termal.sqlite persistence or opening
+        // the HTTP listener.
+        let coordination_cleanup_thread_handle = std::thread::Builder::new()
+            .name("termal-coordination-cleanup".to_owned())
+            .spawn(move || {
+                run_coordination_cleanup_worker(
+                    coordination_cleanup_rx,
+                    inner_for_coordination_cleanup,
+                    coordination_board_store_for_cleanup,
+                    persist_tx_for_coordination_cleanup,
+                );
+                let _ = coordination_cleanup_done_tx.send(());
+            })
+            .expect("failed to spawn coordination cleanup thread");
 
         // Background persist thread: drains `PersistRequest::Delta`
         // wake signals and writes the accumulated diff to SQLite.
@@ -230,6 +459,12 @@ impl AppState {
                             inner.collect_persist_delta(watermark)
                         };
                         let next_watermark = delta.watermark;
+                        let pending_scope_deletions = delta
+                            .metadata
+                            .pending_coordination_scope_deletions
+                            .iter()
+                            .cloned()
+                            .collect::<Vec<_>>();
                         // Always upsert metadata (revision, preferences,
                         // projects, orchestrators, workspace_layouts).
                         // Mutation stamps only cover per-session changes,
@@ -275,6 +510,14 @@ impl AppState {
                             return Err(err);
                         }
                         watermark = next_watermark;
+                        if !pending_scope_deletions.is_empty() {
+                            // Only a successful primary commit authorizes
+                            // secondary cleanup. The dedicated worker removes
+                            // completed outbox items in memory and wakes this
+                            // worker again to persist that bookkeeping.
+                            let _ = coordination_cleanup_tx
+                                .send(CoordinationCleanupRequest::Process);
+                        }
                         Ok(())
                     })();
 
@@ -285,6 +528,26 @@ impl AppState {
                     if retry_state.should_exit_after_tick(should_exit_after_tick) {
                         break;
                     }
+                }
+                let _ = coordination_cleanup_tx.send(CoordinationCleanupRequest::Shutdown);
+                // A scope cascade already in progress must not make graceful
+                // shutdown wait indefinitely. Keep interrupting until the
+                // worker reports completion (or its completion sender drops
+                // after a panic); the short repeated check also closes the
+                // race where the first interrupt lands immediately before a
+                // SQLite statement starts. Then join so no cleanup thread
+                // outlives its temp paths or AppState on Windows.
+                loop {
+                    coordination_board_store_for_persist.interrupt_current_operation();
+                    match coordination_cleanup_done_rx.recv_timeout(Duration::from_millis(5)) {
+                        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    }
+                }
+                if let Err(err) = coordination_cleanup_thread_handle.join() {
+                    eprintln!(
+                        "[termal] coordination cleanup worker join failed during shutdown: {err:?}"
+                    );
                 }
             })
             .expect("failed to spawn persist thread");
@@ -331,6 +594,7 @@ impl AppState {
             local_http_base_url: Arc::new(Mutex::new(None)),
             persistence_path: persist_path_for_state,
             mailbox_store,
+            coordination_board_store,
             orchestrator_templates_path: Arc::new(orchestrator_templates_path),
             orchestrator_templates_lock: Arc::new(Mutex::new(())),
             review_documents_lock: Arc::new(Mutex::new(())),

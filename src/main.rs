@@ -420,6 +420,15 @@ fn app_router(state: AppState) -> Router {
             "/api/sessions/{id}/mailbox-messages/{message_id}",
             get(read_mailbox_message),
         )
+        .route("/api/sessions/{id}/board", get(list_coordination_board))
+        .route(
+            "/api/sessions/{id}/board/keys/{key}",
+            get(get_coordination_board_key),
+        )
+        .route(
+            "/api/sessions/{id}/board/set",
+            post(set_coordination_board_key),
+        )
         .route(
             "/api/sessions/{id}/queued-prompts/{prompt_id}/cancel",
             post(cancel_queued_prompt),
@@ -589,7 +598,10 @@ include!("codex_discovery.rs");
 include!("codex_validation.rs");
 include!("persisted_state.rs");
 include!("persist.rs");
+include!("coordination_persist.rs");
 include!("mailboxes.rs");
+include!("coordination_board.rs");
+include!("board_routes.rs");
 include!("runtime.rs");
 include!("claude_spawn.rs");
 include!("codex_home.rs");

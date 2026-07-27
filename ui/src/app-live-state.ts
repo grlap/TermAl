@@ -244,6 +244,7 @@ export function useAppLiveState(
     setProjects,
     setOrchestrators,
     setDelegationWaits,
+    setDelegationChildSessionIds,
     setWorkspaceSummaries,
     setDraftsBySessionId,
     setDraftAttachmentsBySessionId,
@@ -1426,6 +1427,17 @@ export function useAppLiveState(
       delegationWaitsRef.current = nextDelegationWaits;
       setDelegationWaits(nextDelegationWaits);
     }
+    const nextDelegationChildSessionIds = new Set(
+      (nextState.delegations ?? []).map(
+        (delegation) => delegation.childSessionId,
+      ),
+    );
+    setDelegationChildSessionIds((current) =>
+      current.size === nextDelegationChildSessionIds.size &&
+      setContainsOnlyValuesFrom(current, nextDelegationChildSessionIds)
+        ? current
+        : nextDelegationChildSessionIds,
+    );
     if (adoptedStateSlices.workspaces !== currentWorkspaceSummaries) {
       workspaceSummariesRef.current = adoptedStateSlices.workspaces;
       setWorkspaceSummaries(adoptedStateSlices.workspaces);

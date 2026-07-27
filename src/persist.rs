@@ -25,10 +25,12 @@ const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// Per-database writer locks shared by every in-process SQLite write path.
 ///
 /// WAL lets readers coexist, but SQLite still permits only one writer. The
-/// state persist worker and durable mailbox store own separate connections, so
-/// relying on SQLite's busy timeout alone can surface ordinary in-process
-/// contention as `SQLITE_BUSY`. Serialize those writers before `BEGIN`; the
-/// timeout remains a boundary for external processes or OS-level locks.
+/// The state persist worker has its own database domain. Within the separate
+/// coordination database, mailbox and board stores own independent
+/// connections, so relying on SQLite's busy timeout alone can surface ordinary
+/// in-process contention as `SQLITE_BUSY`. Serialize writers targeting the same
+/// path before `BEGIN`; the timeout remains a boundary for external processes
+/// or OS-level locks.
 static SQLITE_STATE_WRITE_LOCKS: LazyLock<
     Mutex<HashMap<PathBuf, std::sync::Weak<SqliteStateWriterAdmission>>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -854,61 +856,9 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
               id TEXT PRIMARY KEY,
               value_json TEXT NOT NULL
             );
-
-            CREATE TABLE IF NOT EXISTS mailboxes (
-              id TEXT PRIMARY KEY,
-              participant_key TEXT NOT NULL UNIQUE,
-              created_at TEXT NOT NULL,
-              next_sequence INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS mailbox_participants (
-              mailbox_id TEXT NOT NULL,
-              session_id TEXT NOT NULL,
-              display_name TEXT NOT NULL,
-              processed_through INTEGER NOT NULL DEFAULT 0,
-              joined_at TEXT NOT NULL,
-              left_at TEXT,
-              PRIMARY KEY (mailbox_id, session_id),
-              FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS mailbox_messages (
-              id TEXT PRIMARY KEY,
-              mailbox_id TEXT NOT NULL,
-              sequence INTEGER NOT NULL,
-              sender_session_id TEXT NOT NULL,
-              sender_name TEXT NOT NULL,
-              target_session_id TEXT NOT NULL,
-              target_name TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              class TEXT NOT NULL CHECK (class = 'routine'),
-              topic TEXT,
-              state_stamp TEXT,
-              body TEXT NOT NULL,
-              idempotency_key TEXT NOT NULL,
-              unread_depth_at_append INTEGER NOT NULL,
-              notification_disposition TEXT NOT NULL,
-              dispatch_outcome TEXT,
-              UNIQUE (mailbox_id, sequence),
-              UNIQUE (sender_session_id, idempotency_key),
-              FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
-            );
-
-            CREATE INDEX IF NOT EXISTS mailbox_participants_session
-              ON mailbox_participants(session_id, left_at);
             ",
         )
         .context("failed to initialize SQLite state schema")?;
-    if !mailbox_messages_table_has_column(connection, "dispatch_outcome")? {
-        connection
-            .execute(
-                "ALTER TABLE mailbox_messages ADD COLUMN dispatch_outcome TEXT",
-                [],
-            )
-            .context("failed to add immutable mailbox dispatch outcome")?;
-    }
-    ensure_mailbox_dispatch_outcome_backfill(connection)?;
     connection
         .execute(
             "INSERT INTO meta(key, value) VALUES('schema_version', ?1)
@@ -917,102 +867,6 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
         )
         .context("failed to record SQLite state schema version")?;
     Ok(())
-}
-
-fn mailbox_dispatch_outcome_backfill_complete(
-    connection: &rusqlite::Connection,
-) -> Result<bool> {
-    connection
-        .query_row(
-            "SELECT EXISTS(
-               SELECT 1 FROM meta
-               WHERE key = 'mailbox_dispatch_outcome_backfill_v1'
-             )",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
-        .context("failed to inspect mailbox dispatch-outcome migration state")
-}
-
-fn ensure_mailbox_dispatch_outcome_backfill(
-    connection: &rusqlite::Connection,
-) -> Result<()> {
-    // The completed path is read-only. Avoid taking SQLite's writer slot on
-    // every connection schema check after this one-time migration has landed.
-    if mailbox_dispatch_outcome_backfill_complete(connection)? {
-        return Ok(());
-    }
-
-    // Re-check after acquiring IMMEDIATE: another connection may have completed
-    // the migration between the read-only probe above and this transaction.
-    // Check, backfill, and mark completion atomically. Production callers also
-    // hold the path-scoped SQLite writer lock in
-    // `ensure_sqlite_state_schema_for_path`, so separate connections cannot
-    // race this one-time migration. The transaction prevents a crash between
-    // the UPDATE and marker write from re-arming it on the next boot.
-    let migration = rusqlite::Transaction::new_unchecked(
-        connection,
-        rusqlite::TransactionBehavior::Immediate,
-    )
-        .context("failed to begin mailbox dispatch-outcome migration")?;
-    let dispatch_outcome_backfilled =
-        mailbox_dispatch_outcome_backfill_complete(&migration)?;
-    if !dispatch_outcome_backfilled {
-        // The legacy lifecycle column cannot distinguish a direct delivery from a
-        // delivery reached after recovery. Preserve deliveredToIdleSession as the
-        // pragmatic immutable approximation, but normalize recovered/unknown
-        // values to the accurate never-woken fallback. Pre-migration rows must not
-        // be mined for recovery statistics.
-        //
-        // This is deliberately a one-time migration. Fresh appends use NULL as an
-        // in-flight finalization marker, so repeating the backfill during ordinary
-        // schema checks would fabricate a provisional immutable receipt.
-        migration
-            .execute(
-                "UPDATE mailbox_messages
-                 SET dispatch_outcome = CASE
-                   WHEN notification_disposition = 'queuedBehindActiveTurn'
-                     THEN 'queuedBehindActiveTurn'
-                   WHEN notification_disposition = 'deliveredToIdleSession'
-                     THEN 'deliveredToIdleSession'
-                   ELSE 'durableButNotWoken'
-                 END
-                 WHERE dispatch_outcome IS NULL
-                    OR dispatch_outcome NOT IN (
-                      'durableButNotWoken',
-                      'queuedBehindActiveTurn',
-                      'deliveredToIdleSession'
-                    )",
-                [],
-            )
-            .context("failed to backfill immutable mailbox dispatch outcomes")?;
-        migration
-            .execute(
-                "INSERT INTO meta(key, value)
-                 VALUES('mailbox_dispatch_outcome_backfill_v1', 'complete')
-                 ON CONFLICT(key) DO NOTHING",
-                [],
-            )
-            .context("failed to record mailbox dispatch-outcome migration")?;
-    }
-    migration
-        .commit()
-        .context("failed to commit mailbox dispatch-outcome migration")?;
-    Ok(())
-}
-
-fn mailbox_messages_table_has_column(
-    connection: &rusqlite::Connection,
-    column_name: &str,
-) -> Result<bool> {
-    let mut statement = connection.prepare("PRAGMA table_info(mailbox_messages)")?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-    for row in rows {
-        if row? == column_name {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 fn ensure_sqlite_state_schema_for_path(
@@ -1067,162 +921,27 @@ mod sqlite_schema_tests {
     }
 
     #[test]
-    fn sqlite_schema_adds_and_backfills_immutable_mailbox_dispatch_outcome() {
+    fn fresh_state_schema_does_not_create_coordination_tables() {
         let connection =
             rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
-        connection
-            .execute_batch(
-                "
-                CREATE TABLE meta (
-                  key TEXT PRIMARY KEY,
-                  value TEXT NOT NULL
-                );
-                CREATE TABLE mailbox_messages (
-                  id TEXT PRIMARY KEY,
-                  notification_disposition TEXT NOT NULL
-                );
-                INSERT INTO mailbox_messages(id, notification_disposition)
-                VALUES
-                  ('mailbox-message-durable', 'durableButNotWoken'),
-                  ('mailbox-message-queued', 'queuedBehindActiveTurn'),
-                  ('mailbox-message-recovered', 'recoveredWake'),
-                  ('mailbox-message-delivered', 'deliveredToIdleSession'),
-                  ('mailbox-message-unknown', 'legacyUnknownState');
-                ",
-            )
-            .expect("seed pre-dispatch-outcome mailbox schema");
-        connection
-            .execute(
-                "INSERT INTO meta(key, value) VALUES('schema_version', ?1)",
-                rusqlite::params![SQLITE_SCHEMA_VERSION],
-            )
-            .expect("seed supported schema version");
+        ensure_sqlite_state_schema(&connection).expect("state schema should initialize");
 
-        ensure_sqlite_state_schema(&connection).expect("schema migration should succeed");
-
-        assert!(
-            mailbox_messages_table_has_column(&connection, "dispatch_outcome")
-                .expect("mailbox column should be inspectable")
-        );
-        let mut statement = connection
-            .prepare(
-                "SELECT id, dispatch_outcome
-                 FROM mailbox_messages
-                 ORDER BY id",
-            )
-            .expect("backfilled outcomes should prepare");
-        let outcomes = statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .expect("backfilled outcomes should query")
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .expect("backfilled outcomes should decode");
-        assert_eq!(
-            outcomes,
-            vec![
-                (
-                    "mailbox-message-delivered".to_owned(),
-                    "deliveredToIdleSession".to_owned(),
-                ),
-                (
-                    "mailbox-message-durable".to_owned(),
-                    "durableButNotWoken".to_owned(),
-                ),
-                (
-                    "mailbox-message-queued".to_owned(),
-                    "queuedBehindActiveTurn".to_owned(),
-                ),
-                (
-                    "mailbox-message-recovered".to_owned(),
-                    "durableButNotWoken".to_owned(),
-                ),
-                (
-                    "mailbox-message-unknown".to_owned(),
-                    "durableButNotWoken".to_owned(),
-                ),
-            ]
-        );
-        drop(statement);
-
-        connection
-            .execute_batch(
-                "
-                UPDATE mailbox_messages
-                SET dispatch_outcome = NULL,
-                    notification_disposition = 'queuedBehindActiveTurn'
-                WHERE id = 'mailbox-message-durable';
-                ",
-            )
-            .expect("seed a fresh provisional outcome after migration");
-        ensure_sqlite_state_schema(&connection).expect("ordinary schema check should repeat");
-        let provisional_outcome: Option<String> = connection
+        let coordination_table_count: u32 = connection
             .query_row(
-                "SELECT dispatch_outcome
-                 FROM mailbox_messages
-                 WHERE id = 'mailbox-message-durable'",
+                "
+                SELECT COUNT(*)
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND (
+                    name LIKE 'mailbox%'
+                    OR name LIKE 'coordination_board_%'
+                  )
+                ",
                 [],
                 |row| row.get(0),
             )
-            .expect("provisional outcome should read");
-        assert_eq!(
-            provisional_outcome, None,
-            "one-time migration must not rewrite a fresh in-flight receipt marker"
-        );
-    }
-
-    #[test]
-    fn completed_dispatch_outcome_backfill_fast_path_is_read_only() {
-        let connection =
-            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
-        ensure_sqlite_state_schema(&connection).expect("initial schema migration should succeed");
-        connection
-            .execute_batch("PRAGMA query_only = ON;")
-            .expect("test connection should enter query-only mode");
-
-        ensure_mailbox_dispatch_outcome_backfill(&connection)
-            .expect("completed migration should use the read-only fast path");
-    }
-
-    #[test]
-    fn sqlite_schema_dispatch_outcome_migration_is_safe_across_connections() {
-        let root = std::env::temp_dir().join(format!(
-            "termal-schema-concurrency-{}",
-            Uuid::new_v4()
-        ));
-        fs::create_dir_all(&root).expect("test directory should exist");
-        let path = root.join("termal.sqlite");
-        let barrier = Arc::new(std::sync::Barrier::new(2));
-        let threads = (0..2)
-            .map(|_| {
-                let path = path.clone();
-                let barrier = barrier.clone();
-                std::thread::spawn(move || {
-                    let connection = open_sqlite_state_connection(&path)
-                        .expect("concurrent SQLite connection should open");
-                    barrier.wait();
-                    ensure_sqlite_state_schema_for_path(&connection, &path)
-                        .expect("concurrent schema ensure should succeed");
-                })
-            })
-            .collect::<Vec<_>>();
-        for thread in threads {
-            thread.join().expect("schema ensure thread should join");
-        }
-
-        let connection =
-            rusqlite::Connection::open(&path).expect("schema database should reopen");
-        let marker_count: u32 = connection
-            .query_row(
-                "SELECT COUNT(*) FROM meta
-                 WHERE key = 'mailbox_dispatch_outcome_backfill_v1'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("migration marker should read");
-        assert_eq!(marker_count, 1);
-        drop(connection);
-        fs::remove_dir_all(root).expect("test directory should clean up");
+            .expect("coordination table count should be queryable");
+        assert_eq!(coordination_table_count, 0);
     }
 }
 
@@ -1405,6 +1124,22 @@ fn persist_state_parts_via_connection(
 ) -> Result<()> {
     let metadata_json =
         serde_json::to_string(metadata).context("failed to serialize persisted state metadata")?;
+    let serialized_sessions = sessions
+        .iter()
+        .map(|session| {
+            serde_json::to_string(session)
+                .context("failed to serialize persisted session")
+                .map(|json| (session.session.id.as_str(), json))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let serialized_delegations = delegations
+        .iter()
+        .map(|delegation| {
+            serde_json::to_string(delegation)
+                .context("failed to serialize persisted delegation")
+                .map(|json| (delegation.id.as_str(), json))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let write_lock = sqlite_state_write_lock(path);
     let write_guard = lock_sqlite_state_writer(&write_lock);
     let tx = connection.transaction().with_context(|| {
@@ -1423,13 +1158,11 @@ fn persist_state_parts_via_connection(
         tx.execute("DELETE FROM sessions", [])
             .with_context(|| format!("failed to replace sessions in `{}`", path.display()))?;
     }
-    for session in sessions {
-        let session_json =
-            serde_json::to_string(session).context("failed to serialize persisted session")?;
+    for (session_id, session_json) in serialized_sessions {
         tx.execute(
             "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)
              ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json",
-            rusqlite::params![&session.session.id, session_json],
+            rusqlite::params![session_id, session_json],
         )
         .with_context(|| format!("failed to write persisted session to `{}`", path.display()))?;
     }
@@ -1437,18 +1170,16 @@ fn persist_state_parts_via_connection(
         tx.execute("DELETE FROM delegations", [])
             .with_context(|| format!("failed to replace delegations in `{}`", path.display()))?;
     }
-    for delegation in delegations {
-        let delegation_json = serde_json::to_string(delegation)
-            .context("failed to serialize persisted delegation")?;
+    for (delegation_id, delegation_json) in serialized_delegations {
         tx.execute(
             "INSERT INTO delegations(id, value_json) VALUES(?1, ?2)
              ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json",
-            rusqlite::params![&delegation.id, delegation_json],
+            rusqlite::params![delegation_id, delegation_json],
         )
         .with_context(|| {
             format!(
                 "failed to write persisted delegation `{}` to `{}`",
-                delegation.id,
+                delegation_id,
                 path.display()
             )
         })?;
@@ -1583,6 +1314,26 @@ fn persist_delta_via_cache_inner(
 ) -> Result<()> {
     let metadata_json = serde_json::to_string(&delta.metadata)
         .context("failed to serialize persisted state metadata")?;
+    let serialized_sessions = delta
+        .changed_sessions
+        .iter()
+        .map(|session| {
+            serde_json::to_string(session)
+                .context("failed to serialize persisted session")
+                .map(|json| (session.session.id.as_str(), json))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let serialized_delegations = delta
+        .changed_delegations
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|delegation| {
+            serde_json::to_string(delegation)
+                .context("failed to serialize persisted delegation")
+                .map(|json| (delegation.id.as_str(), json))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let connection = cache.connection_for(path)?;
     // Keep state-path redirection failures fatal on cached writes too. Directory
     // chmod hardening runs when the cached connection is opened; the hot path
@@ -1621,18 +1372,16 @@ fn persist_delta_via_cache_inner(
             )
         })?;
     }
-    for session in &delta.changed_sessions {
-        let session_json =
-            serde_json::to_string(session).context("failed to serialize persisted session")?;
+    for (session_id, session_json) in serialized_sessions {
         tx.execute(
             "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)
              ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json",
-            rusqlite::params![&session.session.id, session_json],
+            rusqlite::params![session_id, session_json],
         )
         .with_context(|| {
             format!(
                 "failed to write persisted session `{}` to `{}`",
-                session.session.id,
+                session_id,
                 path.display()
             )
         })?;
@@ -1650,23 +1399,19 @@ fn persist_delta_via_cache_inner(
             )
         })?;
     }
-    if let Some(delegations) = &delta.changed_delegations {
-        for delegation in delegations {
-            let delegation_json = serde_json::to_string(delegation)
-                .context("failed to serialize persisted delegation")?;
-            tx.execute(
-                "INSERT INTO delegations(id, value_json) VALUES(?1, ?2)
-                 ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json",
-                rusqlite::params![&delegation.id, delegation_json],
+    for (delegation_id, delegation_json) in serialized_delegations {
+        tx.execute(
+            "INSERT INTO delegations(id, value_json) VALUES(?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json",
+            rusqlite::params![delegation_id, delegation_json],
+        )
+        .with_context(|| {
+            format!(
+                "failed to write persisted delegation `{}` to `{}`",
+                delegation_id,
+                path.display()
             )
-            .with_context(|| {
-                format!(
-                    "failed to write persisted delegation `{}` to `{}`",
-                    delegation.id,
-                    path.display()
-                )
-            })?;
-        }
+        })?;
     }
     tx.commit().with_context(|| {
         format!(

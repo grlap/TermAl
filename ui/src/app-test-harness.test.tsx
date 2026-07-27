@@ -145,7 +145,7 @@ describe("submitButtonWithoutSettling", () => {
       }
 
       render(<PendingForm />);
-      submitButtonWithoutSettling(
+      await submitButtonWithoutSettling(
         screen.getByRole("button", { name: "Submit" }),
       );
       expect(screen.getByText("pending")).toBeInTheDocument();

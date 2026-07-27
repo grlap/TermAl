@@ -262,6 +262,9 @@ export default function App() {
   const [delegationWaits, setDelegationWaits] = useState<
     DelegationWaitRecord[]
   >([]);
+  const [delegationChildSessionIds, setDelegationChildSessionIds] = useState<
+    Set<string>
+  >(() => new Set());
   const [codexState, setCodexState] = useState<CodexState>({});
   const [agentReadiness, setAgentReadiness] = useState<AgentReadiness[]>([]);
   const initialWorkspaceBootstrapRef = useRef<ReturnType<
@@ -831,6 +834,7 @@ export default function App() {
       setProjects,
       setOrchestrators,
       setDelegationWaits,
+      setDelegationChildSessionIds,
       setWorkspaceSummaries,
       setDraftsBySessionId,
       setDraftAttachmentsBySessionId,
@@ -1920,6 +1924,7 @@ export default function App() {
         selectedProjectId={selectedProjectId}
         activeSession={activeSession}
         sessions={sessions}
+        delegationChildSessionIds={delegationChildSessionIds}
         orchestrators={orchestrators}
         openSessionIds={openSessionIds}
         sessionListFilter={sessionListFilter}

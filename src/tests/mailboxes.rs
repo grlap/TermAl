@@ -7,10 +7,10 @@ use super::*;
 
 fn mailbox_test_state() -> (AppState, String, String) {
     let base = test_app_state();
+    let coordination_path = resolve_coordination_persistence_path(base.persistence_path.as_ref());
     let state = AppState {
         mailbox_store: Arc::new(
-            MailboxStore::open(base.persistence_path.as_ref())
-                .expect("mailbox test store should open"),
+            MailboxStore::open(&coordination_path).expect("mailbox test store should open"),
         ),
         ..base
     };
@@ -729,7 +729,7 @@ fn mailbox_remains_available_after_state_persist_worker_shutdown() {
 #[test]
 fn reopened_mailbox_store_recovers_lost_wake_before_receivers_next_turn() {
     let (state, sender_id, target_id) = mailbox_test_state();
-    let persistence_path = state.persistence_path.as_ref().clone();
+    let coordination_path = resolve_coordination_persistence_path(state.persistence_path.as_ref());
     let committed = state
         .mailbox_store
         .append(&MailboxAppendInput {
@@ -759,7 +759,7 @@ fn reopened_mailbox_store_recovers_lost_wake_before_receivers_next_turn() {
 
     let restarted = AppState {
         mailbox_store: Arc::new(
-            MailboxStore::open(&persistence_path).expect("mailbox store should reopen"),
+            MailboxStore::open(&coordination_path).expect("mailbox store should reopen"),
         ),
         ..state.clone()
     };
@@ -812,7 +812,7 @@ fn reopened_mailbox_store_recovers_lost_wake_before_receivers_next_turn() {
 #[test]
 fn boot_recovers_a_delivered_notification_after_its_turn_dies_exactly_once() {
     let (state, sender_id, target_id) = mailbox_test_state();
-    let persistence_path = state.persistence_path.as_ref().clone();
+    let coordination_path = resolve_coordination_persistence_path(state.persistence_path.as_ref());
     let committed = state
         .mailbox_store
         .append(&MailboxAppendInput {
@@ -848,7 +848,7 @@ fn boot_recovers_a_delivered_notification_after_its_turn_dies_exactly_once() {
 
     let restarted = AppState {
         mailbox_store: Arc::new(
-            MailboxStore::open(&persistence_path).expect("mailbox store should reopen"),
+            MailboxStore::open(&coordination_path).expect("mailbox store should reopen"),
         ),
         ..state.clone()
     };
@@ -1208,18 +1208,16 @@ async fn mailbox_http_routes_append_read_and_acknowledge_without_implicit_read_a
 #[tokio::test]
 async fn mailbox_http_send_surfaces_writer_admission_exhaustion_as_retryable_503() {
     let (base_state, sender_id, target_id) = mailbox_test_state();
-    let persistence_path = base_state.persistence_path.clone();
+    let coordination_path =
+        resolve_coordination_persistence_path(base_state.persistence_path.as_ref());
     let state = AppState {
         mailbox_store: Arc::new(
-            MailboxStore::open_with_write_admission_timeout(
-                persistence_path.as_ref(),
-                Duration::ZERO,
-            )
-            .expect("zero-deadline mailbox store should open"),
+            MailboxStore::open_with_write_admission_timeout(&coordination_path, Duration::ZERO)
+                .expect("zero-deadline mailbox store should open"),
         ),
         ..base_state
     };
-    let writer_lock = sqlite_state_write_lock(persistence_path.as_ref());
+    let writer_lock = sqlite_state_write_lock(&coordination_path);
     let (locked_tx, locked_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let holder = std::thread::spawn(move || {

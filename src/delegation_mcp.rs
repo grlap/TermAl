@@ -4,6 +4,49 @@ const TERMAL_DELEGATION_MCP_DEFAULT_WAIT_INTERVAL_MS: u64 = 1000;
 const TERMAL_DELEGATION_MCP_DEFAULT_WAIT_TIMEOUT_MS: u64 = 300_000;
 const TERMAL_DELEGATION_MCP_MAX_WAIT_TIMEOUT_MS: u64 = 1_800_000;
 const TERMAL_DELEGATION_MCP_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+/// Clause shape of the typed storage-busy rejection the backend emits before
+/// a write transaction begins or after a failed SQLite commit that remains
+/// rollback-safe. A message carries the structural no-commit guarantee only
+/// when one of its `;`-separated clauses, trimmed, BOTH starts with `no ` and
+/// ends with the suffix below — i.e. "no mailbox write was committed by this
+/// operation, so retry the same request" or the board-store analog. Matching
+/// the negation structurally (not just the instruction tail) keeps a
+/// hypothetical positive phrasing like "a mailbox write was committed by
+/// this operation, so retry the same request" from ever being classified
+/// retryable; a machine-readable error code is the eventual replacement
+/// (tm-uwx.7.4 cross-review finding 1).
+const TERMAL_DELEGATION_NO_COMMIT_CLAUSE_PREFIX: &str = "no ";
+const TERMAL_DELEGATION_NO_COMMIT_CLAUSE_SUFFIX: &str =
+    " write was committed by this operation, so retry the same request";
+/// Pure reads use a distinct exact clause: their pre-transaction rejection
+/// attempted no mutation at all. Keep this machine-matched and fail-closed
+/// alongside the structural no-commit write clause until typed error codes
+/// replace both prose contracts.
+const TERMAL_DELEGATION_SAFE_READ_RETRY_CLAUSE: &str =
+    "no mutation was attempted by this read operation, so retry the same request";
+/// Duplicate mailbox append requests can arrive while the original durable
+/// row is waiting for its notification outcome to finalize. Replaying the
+/// same idempotency-keyed request is safe even though the append itself
+/// already committed, so this needs its own exact clause rather than the
+/// structurally false no-commit wording.
+const TERMAL_DELEGATION_DURABLE_APPEND_RETRY_CLAUSE: &str =
+    "the original mailbox append is durable and replaying the same idempotency key is safe";
+/// Total attempts for an explicitly opted-in safe-replay rejection: one
+/// initial try plus up to four replays. Base delays double from 200ms
+/// (200/400/800/1600) and are
+/// then dephased per session by deterministic jitter (see
+/// `safe_replay_retry_jitter_percent`) so peers released by the same
+/// saturation event do not re-collide in lockstep. The WHOLE helper honors a
+/// single `request_timeout` budget: each attempt's HTTP timeout shrinks to
+/// the remaining budget, and no replay is attempted unless the remaining
+/// budget can fund its delay plus
+/// `TERMAL_DELEGATION_SAFE_REPLAY_MIN_REPLAY_BUDGET` of useful request time —
+/// the caller then sees the last typed rejection rather than a
+/// budget-starved transport error. A cumulative end-to-end deadline across a
+/// whole multi-request operation remains tm-p0u territory.
+const TERMAL_DELEGATION_SAFE_REPLAY_RETRY_ATTEMPTS: u32 = 5;
+const TERMAL_DELEGATION_SAFE_REPLAY_RETRY_BASE_DELAY: Duration = Duration::from_millis(200);
+const TERMAL_DELEGATION_SAFE_REPLAY_MIN_REPLAY_BUDGET: Duration = Duration::from_secs(2);
 
 fn parse_delegation_mcp_mode_args(
     args: impl Iterator<Item = String>,
@@ -199,6 +242,11 @@ struct TermalDelegationMcpBridge {
     // Revisit this lifetime cache before introducing root-to-child adoption,
     // conversion, or id reuse (tm-487).
     caller_is_delegation_child: OnceLock<bool>,
+    // Sleep hook for explicit safe-replay retries. Production uses
+    // `std::thread::sleep`; tests inject a recording no-op so retry cadence is
+    // asserted without real waiting (no-flaky-tests law: no timing
+    // assumptions, no wall-clock dependence).
+    safe_replay_retry_sleeper: fn(Duration),
 }
 
 fn delegation_child_session_ids(state: &Value) -> HashSet<&str> {
@@ -249,7 +297,17 @@ impl TermalDelegationMcpBridge {
                 .context("failed to build delegation MCP HTTP client")?,
             request_timeout,
             caller_is_delegation_child: OnceLock::new(),
+            safe_replay_retry_sleeper: std::thread::sleep,
         })
+    }
+
+    /// Test-only injection point for the safe-replay sleep hook; keeps the
+    /// production constructors byte-identical while letting tests assert exact
+    /// backoff cadence without real waiting.
+    #[cfg(test)]
+    fn with_safe_replay_retry_sleeper(mut self, sleeper: fn(Duration)) -> Self {
+        self.safe_replay_retry_sleeper = sleeper;
+        self
     }
 
     fn handle_message(&self, message: Value) -> Result<Option<Value>> {
@@ -310,13 +368,15 @@ impl TermalDelegationMcpBridge {
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
-        // Peer tools (message/enumerate arbitrary sessions) are root-session only. A
-        // delegation child (e.g. a read-only reviewer chewing on untrusted code) must not
-        // reach them, so reject here as well as hiding them from tools/list (tm-r0y).
-        if tool_is_peer_scoped(&name) && self.caller_is_delegation_child() {
+        // Peer/coordination tools (messaging, enumerating arbitrary sessions,
+        // the project coordination board) are root-session only. A delegation
+        // child (e.g. a read-only reviewer chewing on untrusted code) must not
+        // reach them, so reject here as well as hiding them from tools/list
+        // (tm-r0y; board scoping additionally enforced by the backend).
+        if tool_requires_root_session(&name) && self.caller_is_delegation_child() {
             bail!(
-                "`{name}` is not available to delegation-child sessions; peer messaging is \
-                 restricted to root sessions"
+                "`{name}` is not available to delegation-child sessions; peer and \
+                 coordination tools are restricted to root sessions"
             );
         }
         let result = match name.as_str() {
@@ -332,6 +392,9 @@ impl TermalDelegationMcpBridge {
             "termal_read_mailbox" => self.tool_read_mailbox(arguments),
             "termal_read_mailbox_message" => self.tool_read_mailbox_message(arguments),
             "termal_acknowledge_mailbox" => self.tool_acknowledge_mailbox(arguments),
+            "termal_board_list" => self.tool_board_list(arguments),
+            "termal_board_get" => self.tool_board_get(arguments),
+            "termal_board_set" => self.tool_board_set(arguments),
             "termal_wait_delegations" => self.tool_wait_delegations(arguments),
             "termal_resume_after_delegations" => self.tool_resume_after_delegations(arguments),
             other => Err(anyhow!("unknown TermAl delegation MCP tool `{other}`")),
@@ -564,7 +627,7 @@ impl TermalDelegationMcpBridge {
             self.parent_session_id
         );
         let response = self
-            .post_json(&path, &Value::Object(body))
+            .post_json_with_safe_replay(&path, &Value::Object(body))
             .map_err(mailbox_send_bridge_error)?;
         let receipt = serde_json::from_value::<MailboxAppendReceipt>(response).map_err(|source| {
             mailbox_send_bridge_error(
@@ -587,11 +650,116 @@ impl TermalDelegationMcpBridge {
     }
 
     fn tool_list_mailboxes(&self, _arguments: Value) -> Result<Value> {
-        let mailboxes = self.get_json(&format!(
+        let mailboxes = self.get_json_with_safe_replay(&format!(
             "/api/sessions/{}/mailboxes",
             self.parent_session_id
         ))?;
         Ok(json!({ "mailboxes": mailboxes }))
+    }
+
+    fn tool_board_list(&self, arguments: Value) -> Result<Value> {
+        let mut query_pairs = Vec::new();
+        if let Some(after_key) = arguments.get("afterKey") {
+            let after_key = required_board_key_shaped(Some(after_key), "afterKey")?;
+            query_pairs.push(format!("afterKey={after_key}"));
+        }
+        for field in ["limit", "snapshotGeneration", "knownGeneration"] {
+            if let Some(value) = arguments.get(field) {
+                let value = required_u64(Some(value), field)?;
+                query_pairs.push(format!("{field}={value}"));
+            }
+        }
+        let query = if query_pairs.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", query_pairs.join("&"))
+        };
+        self.get_json_with_safe_replay(&format!(
+            "/api/sessions/{}/board{query}",
+            self.parent_session_id
+        ))
+    }
+
+    fn tool_board_get(&self, arguments: Value) -> Result<Value> {
+        let key = required_board_key_shaped(arguments.get("key"), "key")?;
+        self.get_json_with_safe_replay(&format!(
+            "/api/sessions/{}/board/keys/{key}",
+            self.parent_session_id
+        ))
+    }
+
+    fn tool_board_set(&self, arguments: Value) -> Result<Value> {
+        let key = required_board_key_shaped(arguments.get("key"), "key")?;
+        let expected_revision = required_u64(arguments.get("expectedRevision"), "expectedRevision")?;
+        let idempotency_key = required_string(arguments.get("idempotencyKey"), "idempotencyKey")?;
+        let state_stamp =
+            optional_nonempty_string(arguments.get("stateStamp"), "stateStamp")?;
+        let correlation = BoardSetCorrelation {
+            key: key.clone(),
+            expected_revision,
+            author_session_id: self.parent_session_id.clone(),
+            value: arguments.get("value").cloned(),
+            delete: arguments
+                .get("delete")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            state_stamp: state_stamp.clone(),
+        };
+        let mut body = serde_json::Map::new();
+        body.insert("key".to_owned(), Value::String(key));
+        body.insert("expectedRevision".to_owned(), json!(expected_revision));
+        body.insert("idempotencyKey".to_owned(), Value::String(idempotency_key));
+        // The value/delete discriminator is forwarded verbatim; the backend
+        // owns the mutual-exclusion rule and the store owns all content
+        // validation, so their error messages surface unaltered.
+        if let Some(value) = arguments.get("value") {
+            body.insert("value".to_owned(), value.clone());
+        }
+        if let Some(delete) = arguments.get("delete") {
+            body.insert("delete".to_owned(), delete.clone());
+        }
+        if let Some(state_stamp) = state_stamp {
+            body.insert("stateStamp".to_owned(), Value::String(state_stamp));
+        }
+        let response = self
+            .post_json_with_safe_replay(
+                &format!("/api/sessions/{}/board/set", self.parent_session_id),
+                &Value::Object(body),
+            )
+            .map_err(board_set_bridge_error)?;
+        // Validate the receipt shape AND correlate it with the request: a
+        // structurally valid 2xx for the wrong key/intent proves nothing
+        // about the requested mutation, so a mismatch is treated exactly
+        // like a malformed body — outcome unknown, retry same key (review,
+        // mailbox #236-3).
+        let path = format!("/api/sessions/{}/board/set", self.parent_session_id);
+        let receipt = serde_json::from_value::<CoordinationBoardSetReceipt>(response).map_err(
+            |source| {
+                board_set_bridge_error(
+                    TermalDelegationResponseError {
+                        method: "POST",
+                        path: path.clone(),
+                        message: format!(
+                            "failed to decode coordination board receipt: {source}"
+                        ),
+                    }
+                    .into(),
+                )
+            },
+        )?;
+        if let Err(mismatch) = correlate_board_receipt(&receipt, &correlation) {
+            return Err(board_set_bridge_error(
+                TermalDelegationResponseError {
+                    method: "POST",
+                    path,
+                    message: format!(
+                        "coordination board receipt does not correlate with the request ({mismatch})"
+                    ),
+                }
+                .into(),
+            ));
+        }
+        serde_json::to_value(&receipt).context("failed to re-encode coordination board receipt")
     }
 
     fn tool_read_mailbox(&self, arguments: Value) -> Result<Value> {
@@ -607,7 +775,7 @@ impl TermalDelegationMcpBridge {
             .map(|value| required_u64(Some(value), "limit"))
             .transpose()?
             .unwrap_or(50);
-        let messages = self.post_json(
+        let messages = self.post_json_with_safe_replay(
             &format!(
                 "/api/sessions/{}/mailboxes/{}/read",
                 self.parent_session_id, mailbox_id
@@ -620,7 +788,7 @@ impl TermalDelegationMcpBridge {
     fn tool_read_mailbox_message(&self, arguments: Value) -> Result<Value> {
         let message_id =
             required_path_identifier(arguments.get("messageId"), "messageId")?;
-        self.get_json(&format!(
+        self.get_json_with_safe_replay(&format!(
             "/api/sessions/{}/mailbox-messages/{}",
             self.parent_session_id, message_id
         ))
@@ -640,7 +808,7 @@ impl TermalDelegationMcpBridge {
             self.parent_session_id, mailbox_id
         );
         let response = self
-            .post_json(
+            .post_json_with_safe_replay(
                 &path,
                 &json!({
                     "expectedProcessedThrough": expected_processed_through,
@@ -909,7 +1077,7 @@ impl TermalDelegationMcpBridge {
                     !tool
                         .get("name")
                         .and_then(Value::as_str)
-                        .is_some_and(tool_is_peer_scoped)
+                        .is_some_and(tool_requires_root_session)
                 });
             }
         }
@@ -917,15 +1085,98 @@ impl TermalDelegationMcpBridge {
     }
 
     fn get_json(&self, path: &str) -> Result<Value> {
-        self.decode_response("GET", path, self.client.get(self.url(path)).send())
+        self.decode_response(
+            "GET",
+            path,
+            self.client
+                .get(self.url(path))
+                .timeout(self.request_timeout)
+                .send(),
+        )
     }
 
     fn post_json(&self, path: &str, body: &Value) -> Result<Value> {
         self.decode_response(
             "POST",
             path,
-            self.client.post(self.url(path)).json(body).send(),
+            self.client
+                .post(self.url(path))
+                .timeout(self.request_timeout)
+                .json(body)
+                .send(),
         )
+    }
+
+    /// Explicit retry opt-in for operations whose callers have proved replay
+    /// safe: pure reads, CAS acknowledgements/board writes, and
+    /// idempotency-keyed mailbox appends. Generic bridge GET/POST helpers are
+    /// deliberately single-attempt so future endpoints cannot inherit replay
+    /// merely by returning matching prose.
+    fn get_json_with_safe_replay(&self, path: &str) -> Result<Value> {
+        self.request_json_with_safe_replay_retry("GET", path, |remaining| {
+            self.client.get(self.url(path)).timeout(remaining).send()
+        })
+    }
+
+    fn post_json_with_safe_replay(&self, path: &str, body: &Value) -> Result<Value> {
+        self.request_json_with_safe_replay_retry("POST", path, |remaining| {
+            self.client
+                .post(self.url(path))
+                .timeout(remaining)
+                .json(body)
+                .send()
+        })
+    }
+
+    /// Replays a request while the backend answers with a typed safe-replay
+    /// storage-busy rejection (see the clause constants above for why replay
+    /// is provably safe). The closure rebuilds the request from scratch on every
+    /// attempt — with a per-attempt HTTP timeout shrunk to the remaining
+    /// overall budget — so GET and POST share one bounded policy and the
+    /// whole helper can never exceed one `request_timeout` of wall time
+    /// (apart from scheduler overhead; the jittered sleeps burn down the same
+    /// deadline). Anything else — transport failures, other
+    /// statuses, even other 503s — returns on the first attempt untouched:
+    /// without a recognized write or read safety clause there is no
+    /// structural guarantee that replay is safe, and blind replay would be
+    /// wrong.
+    fn request_json_with_safe_replay_retry(
+        &self,
+        method: &'static str,
+        path: &str,
+        send: impl Fn(Duration) -> std::result::Result<reqwest::blocking::Response, reqwest::Error>,
+    ) -> Result<Value> {
+        let deadline = std::time::Instant::now() + self.request_timeout;
+        let mut completed_attempts = 0u32;
+        loop {
+            completed_attempts += 1;
+            let remaining = deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .max(Duration::from_millis(1));
+            let result = self.decode_response(method, path, send(remaining));
+            let retry = completed_attempts < TERMAL_DELEGATION_SAFE_REPLAY_RETRY_ATTEMPTS
+                && result
+                    .as_ref()
+                    .err()
+                    .is_some_and(error_is_safe_replay_service_unavailable);
+            if !retry {
+                return result;
+            }
+            let delay =
+                safe_replay_retry_delay(&self.parent_session_id, completed_attempts);
+            // Only sleep-and-replay when the remaining budget can fund the
+            // delay AND leave a minimally useful request window; otherwise
+            // surface the last typed rejection now. The comparison is
+            // one-sided on purpose: elapsed time can only turn a would-be
+            // replay into an immediate return, never the reverse, which keeps
+            // short-budget behavior deterministic under arbitrary scheduling
+            // stalls.
+            let budget_left = deadline.saturating_duration_since(std::time::Instant::now());
+            if budget_left <= delay + TERMAL_DELEGATION_SAFE_REPLAY_MIN_REPLAY_BUDGET {
+                return result;
+            }
+            (self.safe_replay_retry_sleeper)(delay);
+        }
     }
 
     fn url(&self, path: &str) -> String {
@@ -985,6 +1236,102 @@ fn mailbox_send_bridge_error(err: anyhow::Error) -> anyhow::Error {
         return anyhow!(
             "mailbox send receipt was not received; the append outcome is unknown. Retry with the \
              same idempotencyKey to recover the original receipt safely: {err}"
+        );
+    }
+    err
+}
+
+/// Request-side snapshot used to correlate a board set receipt with the
+/// intent that produced it (review, mailbox #236-3).
+struct BoardSetCorrelation {
+    key: String,
+    expected_revision: u64,
+    author_session_id: String,
+    value: Option<Value>,
+    delete: bool,
+    state_stamp: Option<String>,
+}
+
+/// A receipt confirms the requested mutation only when every request-visible
+/// field lines up. Duplicate replays still correlate: the durable original
+/// was the identical request. Returns the first mismatch as text.
+fn correlate_board_receipt(
+    receipt: &CoordinationBoardSetReceipt,
+    correlation: &BoardSetCorrelation,
+) -> std::result::Result<(), String> {
+    if receipt.key != correlation.key {
+        return Err(format!(
+            "receipt key `{}` != requested `{}`",
+            receipt.key, correlation.key
+        ));
+    }
+    if receipt.author_session_id != correlation.author_session_id {
+        return Err(format!(
+            "receipt author `{}` != caller `{}`",
+            receipt.author_session_id, correlation.author_session_id
+        ));
+    }
+    if receipt.prior_revision != correlation.expected_revision {
+        return Err(format!(
+            "receipt priorRevision {} != expectedRevision {}",
+            receipt.prior_revision, correlation.expected_revision
+        ));
+    }
+    // The 2xx body is untrusted input: checked_add keeps a hostile
+    // priorRevision of u64::MAX a correlation mismatch instead of a
+    // debug-build overflow panic (review, mailbox #239).
+    if receipt
+        .prior_revision
+        .checked_add(1)
+        .is_none_or(|successor| receipt.revision != successor)
+    {
+        return Err(format!(
+            "receipt revision {} is not priorRevision {} + 1",
+            receipt.revision, receipt.prior_revision
+        ));
+    }
+    if receipt.deleted != correlation.delete {
+        return Err(format!(
+            "receipt deleted={} != requested delete={}",
+            receipt.deleted, correlation.delete
+        ));
+    }
+    if correlation.delete {
+        // A tombstone receipt must carry the structurally null value; a
+        // deleted:true receipt with a non-null value is not OUR delete
+        // (review, mailbox #239).
+        if receipt.value != Value::Null {
+            return Err("receipt claims deletion but carries a non-null value".to_owned());
+        }
+    } else {
+        let requested_value = correlation.value.as_ref().cloned().unwrap_or(Value::Null);
+        if receipt.value != requested_value {
+            return Err("receipt value differs from the requested value".to_owned());
+        }
+    }
+    if receipt.state_stamp != correlation.state_stamp {
+        return Err(format!(
+            "receipt stateStamp {:?} != requested {:?}",
+            receipt.state_stamp, correlation.state_stamp
+        ));
+    }
+    Ok(())
+}
+
+/// Board mutations mirror mailbox sends' unknown-outcome discipline: when
+/// transport fails or a 2xx body cannot be decoded, the write may or may not
+/// have committed, so the caller must retry the EXACT same intent with the
+/// SAME idempotencyKey — a committed original then replays as
+/// `duplicate: true`, an uncommitted one applies fresh. Typed non-2xx API
+/// errors (400/404/409/503) pass through unchanged: their outcome is known.
+fn board_set_bridge_error(err: anyhow::Error) -> anyhow::Error {
+    if err.downcast_ref::<TermalDelegationTransportError>().is_some()
+        || err.downcast_ref::<TermalDelegationResponseError>().is_some()
+    {
+        return anyhow!(
+            "board update receipt was not received; the write outcome is unknown. Retry the \
+             exact same request with the SAME idempotencyKey: a committed write replays as \
+             duplicate=true, an uncommitted one applies cleanly: {err}"
         );
     }
     err
@@ -1066,6 +1413,56 @@ impl TermalDelegationApiError {
     }
 }
 
+/// True only for a typed safe-replay rejection whose body contains an exact
+/// read/durable-append clause or a structural no-commit write clause. This
+/// classifier is consulted only by explicit safe-replay call sites; generic
+/// bridge requests remain single-attempt regardless of response prose.
+fn error_is_safe_replay_service_unavailable(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<TermalDelegationApiError>()
+        .is_some_and(|api_error| {
+            api_error.status == StatusCode::SERVICE_UNAVAILABLE
+                && message_carries_safe_replay_clause(&api_error.message)
+        })
+}
+
+fn message_carries_safe_replay_clause(message: &str) -> bool {
+    message.split(';').any(|clause| {
+        let clause = clause.trim();
+        clause == TERMAL_DELEGATION_SAFE_READ_RETRY_CLAUSE
+            || clause == TERMAL_DELEGATION_DURABLE_APPEND_RETRY_CLAUSE
+            || (clause.starts_with(TERMAL_DELEGATION_NO_COMMIT_CLAUSE_PREFIX)
+                && clause.ends_with(TERMAL_DELEGATION_NO_COMMIT_CLAUSE_SUFFIX))
+    })
+}
+
+/// Deterministic, session-stable jitter percentage in `75..=125`. Peers
+/// released by the same saturation event dephase because their session ids
+/// hash to different schedules, while any single bridge's schedule is exact
+/// and test-assertable — no randomness, no clock reads (FNV-1a over the
+/// session id and attempt number).
+fn safe_replay_retry_jitter_percent(session_id: &str, completed_attempts: u32) -> u32 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in session_id
+        .bytes()
+        .chain(completed_attempts.to_le_bytes())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    75 + u32::try_from(hash % 51).expect("modulo 51 fits in u32")
+}
+
+/// Backoff after the Nth failed attempt: base 200ms doubling per failure
+/// (200/400/800/1600 across the four replays permitted by
+/// `TERMAL_DELEGATION_SAFE_REPLAY_RETRY_ATTEMPTS`), scaled by the session's
+/// deterministic jitter percentage.
+fn safe_replay_retry_delay(session_id: &str, completed_attempts: u32) -> Duration {
+    let base = TERMAL_DELEGATION_SAFE_REPLAY_RETRY_BASE_DELAY
+        * 2u32.saturating_pow(completed_attempts.saturating_sub(1));
+    base * safe_replay_retry_jitter_percent(session_id, completed_attempts) / 100
+}
+
 impl std::fmt::Display for TermalDelegationApiError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -1115,9 +1512,39 @@ fn mcp_initialize_result() -> Value {
     })
 }
 
-/// Peer tools operate on ARBITRARY root sessions (message / enumerate), so they are
-/// restricted to root callers and hidden from / rejected for delegation children (tm-r0y).
-fn tool_is_peer_scoped(name: &str) -> bool {
+/// Transport-safety shape check for board keys crossing the bridge into URL
+/// paths and query strings: ASCII lowercase alphanumerics plus `.`/`_`/`-`,
+/// bounded by the store's shared byte limit. Deliberately LOOSER than the
+/// store's segment grammar — the store remains the single validation
+/// authority for structure; this only guarantees the characters cannot alter
+/// the request's path or query framing (no `/`, `%`, `&`, `?`, `#`,
+/// whitespace are possible). Exact `.` and `..` are rejected because URL
+/// clients normalize those path segments before sending the request.
+fn required_board_key_shaped(value: Option<&Value>, field: &str) -> Result<String> {
+    let key = required_string(value, field)?;
+    if matches!(key.as_str(), "." | "..")
+        || key.len() > COORDINATION_BOARD_MAX_KEY_BYTES
+        || !key
+            .bytes()
+            .all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'.' | b'_' | b'-')
+            })
+    {
+        return Err(anyhow!(
+            "{field} must be 1-{} bytes of lowercase alphanumerics, `.`, `_`, or `-`, and must \
+             not be `.` or `..`",
+            COORDINATION_BOARD_MAX_KEY_BYTES
+        ));
+    }
+    Ok(key)
+}
+
+/// Peer and board tools operate on arbitrary root-session coordination state,
+/// so they are restricted to root callers and hidden from / rejected for
+/// delegation children (tm-r0y).
+fn tool_requires_root_session(name: &str) -> bool {
     matches!(
         name,
         "termal_send_to_session"
@@ -1126,6 +1553,9 @@ fn tool_is_peer_scoped(name: &str) -> bool {
             | "termal_read_mailbox"
             | "termal_read_mailbox_message"
             | "termal_acknowledge_mailbox"
+            | "termal_board_list"
+            | "termal_board_get"
+            | "termal_board_set"
     )
 }
 
@@ -1306,6 +1736,46 @@ fn mcp_tools_list_result() -> Value {
                         "processedThrough": { "type": "integer", "minimum": 0 }
                     }
                 }
+            },
+            {
+                "name": "termal_board_list",
+                "description": "List this project's coordination board: small versioned JSON facts (LEVEL state — durable truth peers read at their own pace), the complement of mailbox messages (EDGE events that wake sessions). Board writes never wake anyone. Response carries the scope `generation` (bumps on every successful write); pass it back as `knownGeneration` on a later first-page call for a cheap unchanged short-circuit, or as `snapshotGeneration` with `afterKey` to continue pagination (a mutation between pages returns 409 — restart). Entries are sorted by key; deleted keys never appear.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "afterKey": { "type": "string" },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 200 },
+                        "snapshotGeneration": { "type": "integer", "minimum": 0 },
+                        "knownGeneration": { "type": "integer", "minimum": 0 }
+                    }
+                }
+            },
+            {
+                "name": "termal_board_get",
+                "description": "Fetch one coordination board key's current head: value, per-key `revision` (CAS token for termal_board_set), `updatedAtGeneration` (scope generation when this key was last written), current whole-scope `scopeGeneration`, author, and `stateStamp`. Pass only `scopeGeneration` as knownGeneration for a later first-page list probe. Deleted or never-created keys return 404; a 404/409 `detail` may include the tombstone's revision, which is the deliberate-restore CAS token.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["key"],
+                    "properties": {
+                        "key": { "type": "string" }
+                    }
+                }
+            },
+            {
+                "name": "termal_board_set",
+                "description": "Create, update, or delete one coordination board key with compare-and-swap. `expectedRevision` 0 = create-only (key must never have existed; a tombstoned key 409s with its revision in `detail` — re-set AT that revision to consciously restore). Otherwise pass the exact current revision from get/list. Provide `value` (any JSON <=4KiB canonical, `null` is a real value) to set, or `delete: true` with NO value to delete (deletes need expectedRevision >= 1). `idempotencyKey` is required and author-scoped: retrying the same intent returns the original receipt with `duplicate: true`; reusing it for different content 409s. Writes NEVER wake peers — send a mailbox message if the change needs someone's attention now. Keys: 1-8 dotted segments, lowercase alphanumeric start, `_`/`-` allowed after (e.g. `activity.rust-suite`).",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["key", "expectedRevision", "idempotencyKey"],
+                    "properties": {
+                        "key": { "type": "string" },
+                        "value": {},
+                        "delete": { "type": "boolean" },
+                        "expectedRevision": { "type": "integer", "minimum": 0 },
+                        "idempotencyKey": { "type": "string" },
+                        "stateStamp": { "type": "string" }
+                    }
+                }
             }
         ]
     })
@@ -1358,6 +1828,22 @@ fn required_u64(value: Option<&Value>, label: &str) -> Result<u64> {
     value
         .and_then(Value::as_u64)
         .with_context(|| format!("{label} must be a non-negative integer"))
+}
+
+fn optional_nonempty_string(value: Option<&Value>, label: &str) -> Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value
+        .as_str()
+        .with_context(|| format!("{label} must be a non-empty string"))?;
+    if value.trim().is_empty() {
+        bail!("{label} must be a non-empty string");
+    }
+    // Preserve the exact caller value. The board store includes stateStamp in
+    // its idempotency request hash, so trimming here would make an MCP retry
+    // disagree with the equivalent raw-HTTP request.
+    Ok(Some(value.to_owned()))
 }
 
 fn required_path_identifier(value: Option<&Value>, label: &str) -> Result<String> {

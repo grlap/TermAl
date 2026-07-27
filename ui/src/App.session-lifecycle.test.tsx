@@ -1619,7 +1619,7 @@ describe("App session lifecycle", () => {
 
         await openCreateSessionDialog();
         await settleAsyncUi();
-        submitButtonWithoutSettling(
+        await submitButtonWithoutSettling(
           screen.getByRole("button", { name: "Create session" }),
         );
 
@@ -2745,7 +2745,7 @@ describe("App session lifecycle", () => {
           throw new Error("Current workspace option not found");
         }
         await clickAndSettle(currentWorkspaceOption);
-        submitButtonWithoutSettling(
+        await submitButtonWithoutSettling(
           screen.getByRole("button", { name: "Create session" }),
         );
 
@@ -2866,7 +2866,7 @@ describe("App session lifecycle", () => {
 
         await openCreateSessionDialog();
         await settleAsyncUi();
-        submitButtonWithoutSettling(
+        await submitButtonWithoutSettling(
           screen.getByRole("button", { name: "Create session" }),
         );
 

@@ -218,7 +218,11 @@ export type AppTestStateResponseOverrides = Pick<
   Partial<
     Pick<
       AppTestStateResponse,
-      "codex" | "agentReadiness" | "serverInstanceId" | "delegationWaits"
+      | "codex"
+      | "agentReadiness"
+      | "serverInstanceId"
+      | "delegations"
+      | "delegationWaits"
     > & {
       preferences: Partial<AppTestStateResponse["preferences"]>;
     }
@@ -246,6 +250,7 @@ export function makeStateResponse(overrides: AppTestStateResponseOverrides): App
     orchestrators: overrides.orchestrators,
     workspaces: overrides.workspaces,
     sessions: overrides.sessions,
+    delegations: overrides.delegations ?? [],
     delegationWaits: overrides.delegationWaits ?? [],
   };
 }
@@ -474,13 +479,13 @@ export async function submitButtonAndSettle(target: HTMLElement) {
   await settleAsyncUi();
 }
 
-export function submitButtonWithoutSettling(target: HTMLElement) {
+export async function submitButtonWithoutSettling(target: HTMLElement) {
   const form = submitFormForTarget(target);
   // Some tests intentionally keep the submit handler's request unresolved so
-  // they can inspect the pending UI. A synchronous act boundary commits the
-  // submit event without leaving an async act scope open across that deferred
-  // request; the test that owns the deferred must resolve it in a later act().
-  void act(() => {
+  // they can inspect the pending UI. The callback stays synchronous, so act
+  // does not await that deferred request; awaiting act's own thenable still
+  // closes React's scope before the test starts its next wait or act block.
+  await act(() => {
     fireEvent.submit(form);
   });
 }

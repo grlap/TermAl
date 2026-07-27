@@ -7,6 +7,7 @@ import {
   createOrchestratorInstance,
   deleteConversationMarker,
   fetchConversationMarkers,
+  fetchCoordinationBoard,
   deleteWorkspaceLayout,
   fetchDelegationResult,
   fetchDelegationStatus,
@@ -183,6 +184,95 @@ describe("delegation API helpers", () => {
         method: "POST",
       }),
     );
+  });
+});
+
+describe("coordination board API helpers", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  function stubBoardFetch() {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(
+        JSON.stringify({
+          generation: 0,
+          entries: [],
+          nextAfterKey: null,
+          unchanged: false,
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("omits the query marker when no board pagination options are present", async () => {
+    const fetchMock = stubBoardFetch();
+
+    await fetchCoordinationBoard("session/root");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/session%2Froot/board",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("encodes every generation and pagination option in stable order", async () => {
+    const fetchMock = stubBoardFetch();
+
+    await fetchCoordinationBoard("session/root", {
+      knownGeneration: 7,
+      afterKey: "review/round one",
+      snapshotGeneration: 8,
+      limit: 25,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/session%2Froot/board?knownGeneration=7&afterKey=review%2Fround+one&snapshotGeneration=8&limit=25",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("preserves retry-safe board 503 detail instead of reporting the backend unavailable", async () => {
+    const retryMessage =
+      "coordination board storage is temporarily busy; no mutation was attempted by this read operation, so retry the same request";
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({ error: retryMessage }), {
+        status: 503,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchCoordinationBoard("session-root")).rejects.toMatchObject({
+      kind: "request-failed",
+      message: retryMessage,
+      status: 503,
+    });
   });
 });
 

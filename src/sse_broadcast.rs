@@ -55,6 +55,12 @@
 // broadcaster thread) we fall back to synchronous serialize + broadcast so tests
 // can still assert SSE behaviour.
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PersistDispatch {
+    BackgroundQueued,
+    Synchronous,
+}
+
 impl AppState {
     /// Central commit path: bumps the revision, wakes the persist
     /// thread, and broadcasts a metadata-first state snapshot over SSE.
@@ -67,9 +73,24 @@ impl AppState {
     /// [`Self::commit_delta_locked`] to avoid re-serializing the
     /// whole state.
     fn commit_locked(&self, inner: &mut StateInner) -> Result<u64> {
-        let revision = self.bump_revision_and_persist_locked(inner)?;
-        self.publish_state_locked(inner);
+        let (revision, _) = self.commit_locked_with_persist_dispatch(inner)?;
         Ok(revision)
+    }
+
+    /// Central commit path with an explicit persistence disposition.
+    ///
+    /// Most callers only need [`Self::commit_locked`]. Project deletion also
+    /// needs to know whether the primary-state mutation was queued for the
+    /// background worker or synchronously persisted after a disconnected
+    /// channel, because destructive cleanup in `coordination.sqlite` is safe
+    /// only after `termal.sqlite` is durable.
+    fn commit_locked_with_persist_dispatch(
+        &self,
+        inner: &mut StateInner,
+    ) -> Result<(u64, PersistDispatch)> {
+        let (revision, dispatch) = self.bump_revision_and_persist_locked_with_dispatch(inner)?;
+        self.publish_state_locked(inner);
+        Ok((revision, dispatch))
     }
 
     /// Commits a newly visible session and wakes the background persist
@@ -144,6 +165,13 @@ impl AppState {
     /// and we fall back to the old synchronous JSON persist so
     /// existing test infrastructure keeps working.
     fn persist_internal_locked(&self, inner: &StateInner) -> Result<()> {
+        self.persist_internal_locked_with_dispatch(inner).map(|_| ())
+    }
+
+    fn persist_internal_locked_with_dispatch(
+        &self,
+        inner: &StateInner,
+    ) -> Result<PersistDispatch> {
         if self.persist_tx.send(PersistRequest::Delta).is_err() {
             // Channel disconnected — synchronous fallback for tests
             // and any shutdown path where the persist thread has
@@ -151,8 +179,9 @@ impl AppState {
             // because we have no background worker to do it.
             let persisted = PersistedState::from_inner(inner);
             persist_state_from_persisted(&self.persistence_path, &persisted)?;
+            return Ok(PersistDispatch::Synchronous);
         }
-        Ok(())
+        Ok(PersistDispatch::BackgroundQueued)
     }
 
     /// Drains any pending persist work and joins the background persist
@@ -311,9 +340,17 @@ impl AppState {
     /// stamped by this commit. Does not broadcast — the caller
     /// (`commit_locked` or the delta variants) publishes separately.
     fn bump_revision_and_persist_locked(&self, inner: &mut StateInner) -> Result<u64> {
+        let (revision, _) = self.bump_revision_and_persist_locked_with_dispatch(inner)?;
+        Ok(revision)
+    }
+
+    fn bump_revision_and_persist_locked_with_dispatch(
+        &self,
+        inner: &mut StateInner,
+    ) -> Result<(u64, PersistDispatch)> {
         inner.revision += 1;
-        self.persist_internal_locked(inner)?;
-        Ok(inner.revision)
+        let dispatch = self.persist_internal_locked_with_dispatch(inner)?;
+        Ok((inner.revision, dispatch))
     }
 
     /// Returns a receiver on the `state_events` broadcast channel

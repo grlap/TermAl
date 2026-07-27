@@ -14,6 +14,37 @@
 
 use super::*;
 
+#[test]
+fn newly_created_project_ids_do_not_reuse_a_rewound_legacy_counter() {
+    let mut inner = StateInner::new();
+    let first = inner.create_project(
+        Some("First".to_owned()),
+        "/tmp/first".to_owned(),
+        default_local_remote_id(),
+    );
+    let first_suffix = first
+        .id
+        .strip_prefix("project-")
+        .expect("project id should retain the public prefix");
+    Uuid::parse_str(first_suffix).expect("new project id suffix should be a UUID");
+
+    // Simulate restoring an older termal.sqlite whose legacy allocator
+    // counter predates coordination.sqlite. The next project must still get a
+    // fresh identity rather than inheriting the first project's board scope.
+    inner.next_project_number = 1;
+    let second = inner.create_project(
+        Some("Second".to_owned()),
+        "/tmp/second".to_owned(),
+        default_local_remote_id(),
+    );
+    let second_suffix = second
+        .id
+        .strip_prefix("project-")
+        .expect("project id should retain the public prefix");
+    Uuid::parse_str(second_suffix).expect("second project id suffix should be a UUID");
+    assert_ne!(first.id, second.id);
+}
+
 // pins the remote_id validation path in `create_project`: a project that
 // references a remote not registered in `app_settings.remotes` must be
 // rejected with BAD_REQUEST before any session plumbing is attempted.
@@ -226,6 +257,35 @@ fn deletes_projects_and_unassigns_existing_sessions() {
     assert_eq!(deleted_orchestrator.project_id, "");
 
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn deleting_a_remote_project_does_not_enqueue_local_board_cleanup() {
+    let state = test_app_state();
+    let project_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .create_project(
+                Some("Remote Project".to_owned()),
+                "/remote/workspace".to_owned(),
+                "ssh-lab".to_owned(),
+            )
+            .id
+    };
+
+    state
+        .delete_project(&project_id)
+        .expect("remote project reference should delete locally");
+
+    assert!(
+        !state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .pending_coordination_scope_deletions
+            .contains(&project_id),
+        "remote projects cannot own a local board scope and need no deletion fence"
+    );
 }
 
 // pins the session-workdir containment check in `create_session`: an explicit

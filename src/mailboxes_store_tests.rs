@@ -75,22 +75,27 @@ fn mailbox_api_status_uses_typed_error_kind_instead_of_message_text() {
         ),
     ));
     assert_eq!(retryable.status, StatusCode::SERVICE_UNAVAILABLE);
-    assert!(retryable.message.contains("retry the same request"));
+    assert!(
+        retryable
+            .message
+            .contains("no mailbox write was committed by this operation"),
+        "rollback-safe SQLite errors must carry the structural MCP replay clause"
+    );
 }
 
 #[test]
-fn mailbox_append_and_acknowledgement_bound_in_process_writer_contention() {
+fn mailbox_append_and_acknowledgement_bound_same_file_writer_contention() {
     let root = MailboxTestRoot::new();
     let path = root.database_path();
     let store = MailboxStore::open_with_write_admission_timeout(&path, Duration::ZERO)
         .expect("mailbox store should open");
-    let state_writer_lock = sqlite_state_write_lock(&path);
+    let coordination_writer_lock = sqlite_state_write_lock(&path);
     assert!(
-        Arc::ptr_eq(&state_writer_lock, &store.write_lock),
-        "state persistence and mailbox writes must share one admission lock"
+        Arc::ptr_eq(&coordination_writer_lock, &store.write_lock),
+        "writers targeting the same coordination file must share one admission lock"
     );
 
-    let state_writer_guard = lock_sqlite_state_writer(&state_writer_lock);
+    let coordination_writer_guard = lock_sqlite_state_writer(&coordination_writer_lock);
     let append_err = store
         .append(&test_input())
         .expect_err("append must fail within its admission deadline");
@@ -106,12 +111,12 @@ fn mailbox_append_and_acknowledgement_bound_in_process_writer_contention() {
             .contains("no mailbox write was committed"),
         "pre-transaction rejection must make the safe retry contract explicit: {append_err:#}"
     );
-    drop(state_writer_guard);
+    drop(coordination_writer_guard);
     let receipt = store
         .append(&test_input())
         .expect("append should succeed after writer release");
 
-    let state_writer_guard = lock_sqlite_state_writer(&state_writer_lock);
+    let coordination_writer_guard = lock_sqlite_state_writer(&coordination_writer_lock);
     let acknowledge_err = store
         .acknowledge("session-target", &receipt.mailbox_id, 0, 1)
         .expect_err("acknowledgement must fail within its admission deadline");
@@ -121,7 +126,7 @@ fn mailbox_append_and_acknowledgement_bound_in_process_writer_contention() {
             .is_some_and(|err| err.kind == MailboxStoreErrorKind::Retryable),
         "acknowledgement admission exhaustion must be retryable: {acknowledge_err:#}"
     );
-    drop(state_writer_guard);
+    drop(coordination_writer_guard);
     let summary = store
         .acknowledge("session-target", &receipt.mailbox_id, 0, 1)
         .expect("acknowledgement should succeed after writer release");
@@ -453,6 +458,12 @@ fn duplicate_finalization_wait_returns_retryable_error_at_admission_deadline() {
     assert!(
         error.to_string().contains("still finalizing"),
         "duplicate error should identify the pending receipt: {error:#}"
+    );
+    assert!(
+        error.to_string().contains(
+            "the original mailbox append is durable and replaying the same idempotency key is safe"
+        ),
+        "duplicate finalization must carry the exact truthful bridge replay clause: {error:#}"
     );
 
     drop(committed);

@@ -10774,3 +10774,109 @@ textarea {
   color: var(--muted);
   font-size: 11px;
 }
+
+/* Coordination board panel (tm-uwx.7.3) — read-only control-panel section. */
+.control-panel-section-board {
+  overflow: hidden;
+}
+
+.board-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden auto;
+  padding: 8px;
+}
+
+.board-panel-header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.board-panel-title {
+  font-weight: 600;
+}
+
+.board-panel-generation {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.board-panel-refresh-mode {
+  color: var(--muted);
+  font-size: 0.75em;
+}
+
+.board-panel-refresh {
+  margin-left: auto;
+}
+
+.board-panel-error {
+  color: var(--danger-text, var(--danger));
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+
+.board-panel-loading,
+.board-panel-empty {
+  color: var(--muted);
+  font-size: 0.9em;
+  padding: 8px 0;
+}
+
+.board-panel-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.board-panel-entry {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.board-panel-entry-head {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+}
+
+.board-panel-entry-key {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.board-panel-entry-revision {
+  color: var(--muted);
+  font-size: 0.85em;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.board-panel-entry-value {
+  margin: 6px 0;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.85em;
+}
+
+.board-panel-entry-meta {
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.8em;
+}
+
+.board-panel-entry-stamp {
+  font-style: italic;
+  overflow-wrap: anywhere;
+}

@@ -17,7 +17,7 @@ import {
 } from "../tab-drag";
 import type { WorkspaceTab } from "../workspace";
 
-export type ControlPanelSectionId = "files" | "sessions" | "projects" | "orchestrators" | "git";
+export type ControlPanelSectionId = "files" | "sessions" | "projects" | "orchestrators" | "git" | "board";
 
 const DEFAULT_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSectionId[] = [
   "projects",
@@ -25,6 +25,7 @@ const DEFAULT_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSectionId[] = [
   "orchestrators",
   "files",
   "git",
+  "board",
 ];
 const CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY = "termal-control-panel-section-order-v2";
 
@@ -87,6 +88,8 @@ export function ControlPanelSectionIcon({ sectionId }: { sectionId: ControlPanel
       return <OrchestratorsIcon />;
     case "git":
       return <GitStatusIcon />;
+    case "board":
+      return <BoardIcon />;
   }
 }
 
@@ -138,6 +141,11 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
       id: "git",
       label: "Git status",
       icon: <ControlPanelSectionIcon sectionId="git" />,
+    },
+    board: {
+      id: "board",
+      label: "Board",
+      icon: <ControlPanelSectionIcon sectionId="board" />,
     },
   };
   const sectionDefinitions = fixedSection
@@ -321,7 +329,11 @@ function ControlPanelActivityButton({
       draggable
       aria-label={definition.label}
       aria-pressed={isActive}
-      title={`${definition.label} (drag to open as tab, Shift+drag to reorder)`}
+      title={
+        launcherTab
+          ? `${definition.label} (drag to open as tab, Shift+drag to reorder)`
+          : `${definition.label} (drag to reorder)`
+      }
       onClick={() => onSelect(definition.id)}
       onDragEnd={() => {
         onDragEnd();
@@ -329,7 +341,10 @@ function ControlPanelActivityButton({
       }}
       onDragOver={(event) => onDragOver(event, definition.id)}
       onDragStart={(event) => {
-        if (event.shiftKey || !onExternalDragStart) {
+        // Sections without a launcher tab (e.g. the control-panel-only board,
+        // tm-uwx.7.3) always drag as an internal reorder — an external drag
+        // would build a null tab and die silently (review, mailbox #238-2).
+        if (event.shiftKey || !onExternalDragStart || !launcherTab) {
           onDragStart(event, definition.id);
         } else {
           // Attach drag data directly on the dataTransfer as a guarantee — the
@@ -558,6 +573,18 @@ function OrchestratorsIcon() {
 
 function GitStatusIcon() {
   return <GitHubMark className="control-panel-activity-symbol-github" />;
+}
+
+function BoardIcon() {
+  // Tile grid: the coordination board's key/value facts (tm-uwx.7.3).
+  return (
+    <svg viewBox="0 0 20 20" focusable="false" aria-hidden="true">
+      <rect x="3.25" y="3.25" width="5.5" height="5.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="11.25" y="3.25" width="5.5" height="5.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="3.25" y="11.25" width="5.5" height="5.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="11.25" y="11.25" width="5.5" height="5.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
 }
 
 function SettingsIcon() {

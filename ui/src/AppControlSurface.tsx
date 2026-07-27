@@ -28,6 +28,7 @@ import {
   type ControlPanelSurfaceHandle,
 } from "./panels/ControlPanelSurface";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
+import { BoardPanel } from "./panels/BoardPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { OrchestratorTemplateLibraryPanel } from "./panels/OrchestratorTemplateLibraryPanel";
 import { ThemedCombobox } from "./preferences-panels";
@@ -58,6 +59,7 @@ import {
   filterSessionListVisibleSessions,
   type SessionListFilter,
 } from "./session-list-filter";
+import { isLocalRemoteId } from "./remotes";
 import type { SessionListSearchResult } from "./session-find";
 import type {
   OrchestratorRuntimeAction,
@@ -77,6 +79,7 @@ type AppControlSurfaceProps = {
   selectedProjectId: string;
   activeSession: Session | null;
   sessions: Session[];
+  delegationChildSessionIds: ReadonlySet<string>;
   orchestrators: OrchestratorInstance[];
   openSessionIds: Set<string>;
   sessionListFilter: SessionListFilter;
@@ -165,6 +168,7 @@ export function AppControlSurface({
   selectedProjectId,
   activeSession,
   sessions,
+  delegationChildSessionIds,
   orchestrators,
   openSessionIds,
   sessionListFilter,
@@ -956,6 +960,51 @@ export function AppControlSurface({
               />
             </section>
           );
+
+        case "board": {
+          // Read-only coordination board (tm-uwx.7.3): the board is strictly
+          // single-project, so it keys off the EXPLICIT project selection —
+          // never the launcher-origin fallback, which under "All projects"
+          // silently resolves to a nearby session's project and would show
+          // one project's board behind an "All projects" label (review,
+          // mailbox #238-1). The backend re-validates root standing and
+          // project locality; this pick only needs to be plausible, not
+          // authoritative.
+          const boardScopeProjectId = controlSurfaceSelectedProject?.id ?? null;
+          const boardScopeIsRemote =
+            controlSurfaceSelectedProject != null &&
+            !isLocalRemoteId(controlSurfaceSelectedProject.remoteId);
+          const boardSession = boardScopeProjectId
+            ? sessions
+                .filter(
+                  (session) =>
+                    (session.projectId ?? null) === boardScopeProjectId &&
+                    !session.remoteId &&
+                    !session.parentDelegationId &&
+                    !delegationChildSessionIds.has(session.id),
+                )
+                .sort((left, right) => left.id.localeCompare(right.id))[0]
+            : undefined;
+          return (
+            <section
+              className="control-panel-section-stack control-panel-section-board"
+              aria-label="Coordination board"
+            >
+              {renderControlPanelProjectScope()}
+              {boardSession ? (
+                <BoardPanel sessionId={boardSession.id} />
+              ) : (
+                <div className="board-panel-empty">
+                  {boardScopeIsRemote
+                    ? "Coordination boards are local-only in v1; remote projects are not supported."
+                    : boardScopeProjectId
+                    ? "This project has no local root session to read the board through."
+                    : "Select one project to view its coordination board."}
+                </div>
+              )}
+            </section>
+          );
+        }
 
         case "projects":
           return (

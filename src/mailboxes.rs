@@ -1011,7 +1011,7 @@ impl MailboxStore {
         write_admission_timeout: Duration,
     ) -> Result<Self> {
         let connection = open_sqlite_state_connection(path)?;
-        ensure_sqlite_state_schema_for_path(&connection, path)?;
+        ensure_sqlite_coordination_schema_for_path(&connection, path)?;
         connection
             .execute_batch("PRAGMA foreign_keys = ON;")
             .with_context(|| {
@@ -1129,7 +1129,8 @@ impl MailboxStore {
                     decrement_dispatch_waiter(&mut state, message_id);
                     return Err(mailbox_store_error(
                         MailboxStoreErrorKind::Retryable,
-                        "mailbox dispatch outcome is still finalizing; retry the same request",
+                        "mailbox dispatch outcome is still finalizing; the original mailbox append \
+                         is durable and replaying the same idempotency key is safe",
                     ));
                 };
                 let (next_state, timeout) = self
@@ -1143,7 +1144,8 @@ impl MailboxStore {
                     decrement_dispatch_waiter(&mut state, message_id);
                     return Err(mailbox_store_error(
                         MailboxStoreErrorKind::Retryable,
-                        "mailbox dispatch outcome is still finalizing; retry the same request",
+                        "mailbox dispatch outcome is still finalizing; the original mailbox append \
+                         is durable and replaying the same idempotency key is safe",
                     ));
                 }
             }
@@ -1876,7 +1878,8 @@ fn mailbox_sqlite_write_error(operation: &str, err: rusqlite::Error) -> anyhow::
         return mailbox_store_error(
             MailboxStoreErrorKind::Retryable,
             format!(
-                "mailbox storage is temporarily busy while {operation}; retry the same request"
+                "mailbox storage is temporarily busy while {operation}; no mailbox write was \
+                 committed by this operation, so retry the same request"
             ),
         );
     }

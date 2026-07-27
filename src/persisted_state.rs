@@ -31,6 +31,8 @@ struct PersistedState {
     next_message_number: u64,
     projects: Vec<Project>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pending_coordination_scope_deletions: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     orchestrator_instances: Vec<OrchestratorInstance>,
@@ -62,6 +64,9 @@ impl PersistedState {
             next_session_number: inner.next_session_number,
             next_message_number: inner.next_message_number,
             projects: inner.projects.clone(),
+            pending_coordination_scope_deletions: inner
+                .pending_coordination_scope_deletions
+                .clone(),
             ignored_discovered_codex_thread_ids: inner.ignored_discovered_codex_thread_ids.clone(),
             orchestrator_instances: inner.orchestrator_instances.clone(),
             delegations: Vec::new(),
@@ -98,6 +103,9 @@ impl PersistedState {
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
             projects: self.projects.clone(),
+            pending_coordination_scope_deletions: self
+                .pending_coordination_scope_deletions
+                .clone(),
             ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids.clone(),
             orchestrator_instances: self.orchestrator_instances.clone(),
             delegations: Vec::new(),
@@ -133,6 +141,8 @@ impl PersistedState {
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
             projects: self.projects,
+            pending_coordination_scope_deletions: self
+                .pending_coordination_scope_deletions,
             ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids,
             remote_applied_revisions: HashMap::new(),
             remote_snapshot_applied_revisions: HashMap::new(),

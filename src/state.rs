@@ -524,6 +524,12 @@ struct AppState {
     /// shutdown, and committed messages must be visible before any receiver
     /// wake-up is attempted.
     mailbox_store: Arc<MailboxStore>,
+    /// Level-triggered sibling of the mailbox store (tm-uwx.7): versioned
+    /// per-repository coordination facts. Mailbox and board each keep one
+    /// long-lived connection to coordination.sqlite and share that file's FIFO
+    /// writer admission, isolated from termal.sqlite session/transcript writes.
+    /// Board writes never wake a session — activation stays mailbox-only.
+    coordination_board_store: Arc<CoordinationBoardStore>,
     orchestrator_templates_path: Arc<PathBuf>,
     /// Must not be held at the same time as `self.inner`; template file I/O happens
     /// outside the main state mutex so we never invert lock ordering.
@@ -863,6 +869,12 @@ struct StateInner {
     next_message_number: u64,
     /// Stable project records used by local and remote session routing.
     projects: Vec<Project>,
+    /// Durable outbox of project scopes whose coordination-board data must be
+    /// fenced and removed after the project deletion reaches termal.sqlite.
+    /// The dedicated cleanup worker removes an item in memory only after the
+    /// fence/cascade succeeds, then wakes primary persistence to durably clear
+    /// it; a crash leaves the on-disk item for the next boot.
+    pending_coordination_scope_deletions: BTreeSet<String>,
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
     /// Remote revision watermarks are ordered from weakest to strongest:
     /// `remote_applied_revisions`, `remote_snapshot_applied_revisions`, then
@@ -937,6 +949,7 @@ impl StateInner {
             next_session_number: 1,
             next_message_number: 1,
             projects: Vec::new(),
+            pending_coordination_scope_deletions: BTreeSet::new(),
             ignored_discovered_codex_thread_ids: BTreeSet::new(),
             remote_applied_revisions: HashMap::new(),
             remote_snapshot_applied_revisions: HashMap::new(),

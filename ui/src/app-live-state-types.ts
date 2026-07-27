@@ -117,6 +117,7 @@ export type UseAppLiveStateStateSetters = {
   setProjects: Dispatch<SetStateAction<Project[]>>;
   setOrchestrators: Dispatch<SetStateAction<OrchestratorInstance[]>>;
   setDelegationWaits: Dispatch<SetStateAction<DelegationWaitRecord[]>>;
+  setDelegationChildSessionIds: Dispatch<SetStateAction<Set<string>>>;
   setWorkspaceSummaries: Dispatch<SetStateAction<WorkspaceLayoutSummary[]>>;
   setDraftsBySessionId: Dispatch<SetStateAction<Record<string, string>>>;
   setDraftAttachmentsBySessionId: Dispatch<

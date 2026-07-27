@@ -23,7 +23,7 @@ Optional sidecar:
 
 **Frontend:** React 18 + TypeScript, served on `:4173` in dev with a Vite proxy to the backend.
 **Backend:** Rust + axum + tokio, bound to `127.0.0.1:8787` by default, overridable with `TERMAL_PORT`.
-**Persistence:** `~/.termal/termal.sqlite` stores sessions, projects, preferences, remote config, workspace layouts, and orchestrator instances. `~/.termal/orchestrators.json` stores reusable orchestrator templates.
+**Persistence:** `~/.termal/termal.sqlite` stores sessions, projects, preferences, remote config, workspace layouts, and orchestrator instances. `~/.termal/coordination.sqlite` stores durable mailboxes and coordination boards in a separate SQLite writer domain. `~/.termal/orchestrators.json` stores reusable orchestrator templates.
 **Real-time:** Server-Sent Events with a monotonic revision counter for ordering.
 
 **Current status:** The current implementation includes server-backed workspace layouts, project-scoped SSH remotes, orchestrator templates and runtime instances, session-scoped model controls, workspace terminal tabs, file-change awareness, and the Telegram relay.
@@ -105,10 +105,11 @@ StateInner {
     codex: CodexState,
     preferences: AppPreferences,
     revision: u64,
-    next_project_number: usize,
+    next_project_number: usize, // retained for persisted legacy-id validation
     next_session_number: usize,
     next_message_number: u64,
     projects: Vec<Project>,
+    pending_coordination_scope_deletions: BTreeSet<String>,
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
     sessions: Vec<SessionRecord>,
     orchestrator_instances: Vec<OrchestratorInstance>,
@@ -117,6 +118,17 @@ StateInner {
 ```
 
 `AppState` is the live coordination shell: SSE broadcasters, the shared Codex app-server handle, and the SSH remote registry all live there. `StateInner` is the mutex-protected durable model that gets serialized to disk.
+
+`pending_coordination_scope_deletions` is the crash-consistency outbox for
+project removal across the two SQLite writer domains. The primary project
+deletion and outbox item become durable in `termal.sqlite` first; only then
+does a dedicated cleanup worker fence and cascade that project's board scope
+in `coordination.sqlite`. A failed secondary cleanup remains in the durable
+outbox and is retried after startup and on the next boot. Because the project
+is already absent, no HTTP caller can authorize new work for that scope while
+cleanup is pending. Large cascades and multiple pending scopes never execute
+on the primary persist worker or the boot thread, so they cannot delay
+`termal.sqlite` durability or opening the listener.
 
 `AppPreferences` is also the source of truth for new-session defaults. In
 particular, the Codex model, sandbox mode, approval policy, and reasoning effort
@@ -262,6 +274,9 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/mailboxes/{mailbox_id}/read` | Read a FIFO mailbox range without advancing the participant cursor. Each message exposes mutable `notificationState`; the send receipt's immutable point-in-time outcome remains `notificationDisposition`. This intentionally uses POST because the bounded range request is a JSON body; it remains read-only. |
 | POST | `/api/sessions/{id}/mailboxes/{mailbox_id}/acknowledge` | Advance `{id}`'s processed cursor with a forward-only compare-and-swap. Replaying an acknowledgement whose requested cursor is already satisfied succeeds idempotently; a stale expected cursor that requests additional progress returns a typed `409` whose detail survives the MCP bridge. The response summary is prepared inside the cursor transaction, leaving no fallible post-commit lookup. |
 | GET | `/api/sessions/{id}/mailbox-messages/{message_id}` | Read one exact durable mailbox message after participant authorization, including its current mutable `notificationState`. |
+| GET | `/api/sessions/{id}/board` | List one local project's coordination-board entries through a local root session. Supports generation-aware pagination and an unchanged fast path. |
+| GET | `/api/sessions/{id}/board/keys/{key}` | Read one active coordination-board head, including its CAS revision, `updatedAtGeneration` (when the key last changed), and current `scopeGeneration`. Missing and tombstoned keys return `404` with reconciliation detail when available. |
+| POST | `/api/sessions/{id}/board/set` | Create, update, deliberately restore, or delete one coordination-board key with revision CAS and a sender-scoped idempotency key. A successful first create returns `201`; duplicate replays and later mutations return `200`; conflicts return `409`. |
 | POST | `/api/sessions/{id}/delegations` | Create a Phase 1 local child delegation session with `readOnly` or `isolatedWorktree` write policy. Returns `201` with `DelegationResponse`; unsupported worker/`sharedWorktree`/remote-backed variants return `501`, active-limit conflicts return `409`, handler-level prompt/scope validation returns `400`, and JSON schema/deserialization failures return `422`. |
 | GET | `/api/sessions/{id}/delegations` | List compact summaries for delegations owned by this parent -> `DelegationListResponse`. This recovery endpoint returns exact delegation/child-session ids, title, agent, and fresh lifecycle status without prompts or transcripts; same-title delegations remain distinct. Unknown parent ids return `404`. Backs `termal_list_delegations`. |
 | POST | `/api/sessions/{id}/delegation-waits` | Create a parent-scoped backend resume wait for one or more delegations. Returns `201` with `DelegationWaitResponse`; terminal targets may consume the wait immediately and queue/resume the parent in the same response cycle. |
@@ -460,6 +475,7 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 ```
 ~/.termal/
 |-- termal.sqlite          # primary store: app_state + sessions + delegations tables (+ WAL/-shm sidecars)
+|-- coordination.sqlite    # mailbox + coordination-board tables, isolated writer/WAL
 |-- orchestrators.json     # reusable orchestrator templates
 `-- telegram-bot.json      # optional Telegram relay runtime metadata/state; UI config is mirrored from app_state
 ```
@@ -487,6 +503,14 @@ On startup, the backend loads state from `termal.sqlite` when it exists and
 otherwise boots a fresh local state. Template definitions live in
 `orchestrators.json` so reusable workflow designs can be managed separately
 from running instances.
+
+Coordination bootstrap runs before the persist worker, coordination stores,
+and HTTP listener. When upgrading from the former single-database layout, it
+attaches `termal.sqlite` read-only and copies all mailbox/board rows into
+`coordination.sqlite`; copy, invariant verification, and the destination
+migration marker commit atomically in one destination transaction. The old
+tables remain inert so an interrupted or rolled-back migration never destroys
+the only copy.
 
 ---
 
@@ -1094,6 +1118,13 @@ termal/
 |   |-- persisted_state.rs   # disk-projection types (PersistedState / PersistedSessionRecord)
 |   |-- paths.rs             # path resolution, canonicalization, project-scoped guards
 |   |
+|   |-- # Durable coordination
+|   |-- coordination_persist.rs # coordination.sqlite schema + atomic legacy migration
+|   |-- mailboxes.rs         # durable edge-triggered peer messages + cursors
+|   |-- coordination_board.rs # level-triggered project facts + CAS/idempotency
+|   |-- board_routes.rs      # authorized board list/get/set HTTP handlers
+|   |-- delegation_mcp.rs    # parent-scoped delegation, mailbox, and board MCP bridge
+|   |
 |   |-- # Sessions + turns + messages
 |   |-- session_crud.rs       # create_session, create/delete_project, update_app_settings
 |   |-- session_lifecycle.rs  # kill/stop/cancel session
@@ -1190,7 +1221,9 @@ termal/
 |       |-- orchestrator.rs, persist.rs, project_digest.rs, projects.rs,
 |       |-- remote.rs, review.rs, runtime_rpc.rs, session_lifecycle.rs,
 |       |-- session_settings.rs, session_stop.rs, session_stop_runtime.rs,
-|       |-- shared_codex.rs, telegram.rs, terminal.rs, workspace.rs
+|       |-- shared_codex.rs, shared_codex_events.rs,
+|       |-- coordination_board_routes.rs, telegram.rs,
+|       |-- terminal.rs, workspace.rs
 |-- ui/
 |   |-- src/
 |   |   |-- App.tsx

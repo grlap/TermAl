@@ -74,11 +74,25 @@ impl StateInner {
             return existing;
         }
 
-        let number = self.next_project_number;
+        // Project ids cross the termal.sqlite / coordination.sqlite boundary:
+        // the latter can outlive a restored or freshly recreated primary
+        // database. A rewindable `project-{number}` id can therefore inherit an
+        // unrelated live board scope or permanent deletion fence. Keep the
+        // legacy counter for persisted-state compatibility and validation,
+        // but give every newly created project a collision-resistant identity
+        // (tm-uwx.7.7).
+        let project_id = loop {
+            let candidate = format!("project-{}", Uuid::new_v4());
+            if self.projects.iter().all(|project| project.id != candidate) {
+                break candidate;
+            }
+        };
+        // Persist the legacy allocation watermark even though UUIDs now own
+        // identity; load-time validation still checks this counter.
         self.next_project_number += 1;
         let base_name = name.unwrap_or_else(|| default_project_name(&root_path));
         let project = Project {
-            id: format!("project-{number}"),
+            id: project_id,
             name: dedupe_project_name(&self.projects, &base_name),
             root_path,
             remote_id,

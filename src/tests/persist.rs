@@ -21,6 +21,26 @@
 
 use super::*;
 
+struct PersistTestRoot(PathBuf);
+
+impl PersistTestRoot {
+    fn new(label: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("termal-persist-{label}-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).expect("persist test root should exist");
+        Self(path)
+    }
+
+    fn path(&self) -> &FsPath {
+        &self.0
+    }
+}
+
+impl Drop for PersistTestRoot {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 fn persisted_state_load_error_after_mutation<F>(inner: StateInner, mutate: F) -> String
 where
     F: FnOnce(&mut Value),
@@ -46,6 +66,592 @@ fn state_inner_from_persisted_value(encoded: Value) -> Result<StateInner> {
     persisted
         .into_inner()
         .context("failed to validate state from in-memory persisted state")
+}
+
+#[test]
+fn app_state_boot_migrates_coordination_before_stores_can_append() {
+    let state_root = PersistTestRoot::new("boot-coordination-migration");
+    let persistence_path = state_root.path().join("termal.sqlite");
+    let coordination_path = resolve_coordination_persistence_path(&persistence_path);
+    let templates_path = state_root.path().join("orchestrators.json");
+    persist_state(&persistence_path, &StateInner::new())
+        .expect("empty legacy application state should persist");
+    {
+        // Reproduce the actual pre-board upgrade shape directly. Opening this
+        // fixture through MailboxStore would create every current board table
+        // and leave the production "mailboxes only" branch untested.
+        let connection = rusqlite::Connection::open(&persistence_path)
+            .expect("legacy state database should reopen");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE mailboxes (
+                  id TEXT PRIMARY KEY,
+                  participant_key TEXT NOT NULL UNIQUE,
+                  created_at TEXT NOT NULL,
+                  next_sequence INTEGER NOT NULL
+                );
+                CREATE TABLE mailbox_participants (
+                  mailbox_id TEXT NOT NULL,
+                  session_id TEXT NOT NULL,
+                  display_name TEXT NOT NULL,
+                  processed_through INTEGER NOT NULL DEFAULT 0,
+                  joined_at TEXT NOT NULL,
+                  left_at TEXT,
+                  PRIMARY KEY (mailbox_id, session_id),
+                  FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+                );
+                CREATE TABLE mailbox_messages (
+                  id TEXT PRIMARY KEY,
+                  mailbox_id TEXT NOT NULL,
+                  sequence INTEGER NOT NULL,
+                  sender_session_id TEXT NOT NULL,
+                  sender_name TEXT NOT NULL,
+                  target_session_id TEXT NOT NULL,
+                  target_name TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  class TEXT NOT NULL CHECK (class = 'routine'),
+                  topic TEXT,
+                  state_stamp TEXT,
+                  body TEXT NOT NULL,
+                  idempotency_key TEXT NOT NULL,
+                  unread_depth_at_append INTEGER NOT NULL,
+                  notification_disposition TEXT NOT NULL,
+                  UNIQUE (mailbox_id, sequence),
+                  UNIQUE (sender_session_id, idempotency_key),
+                  FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+                );
+                ",
+            )
+            .expect("pre-board mailbox schema should initialize");
+        let participant_key = mailbox_participant_key("session-boot-sender", "session-boot-target");
+        connection
+            .execute(
+                "INSERT INTO mailboxes(id, participant_key, created_at, next_sequence)
+                 VALUES('mailbox-legacy-boot', ?1, '2026-07-26T00:00:00Z', 2)",
+                rusqlite::params![participant_key],
+            )
+            .expect("legacy mailbox head should insert");
+        for (session_id, display_name) in [
+            ("session-boot-sender", "Sender"),
+            ("session-boot-target", "Target"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO mailbox_participants(
+                       mailbox_id, session_id, display_name, processed_through,
+                       joined_at, left_at
+                     )
+                     VALUES('mailbox-legacy-boot', ?1, ?2, 0,
+                            '2026-07-26T00:00:00Z', NULL)",
+                    rusqlite::params![session_id, display_name],
+                )
+                .expect("legacy mailbox participant should insert");
+        }
+        connection
+            .execute(
+                "INSERT INTO mailbox_messages(
+                   id, mailbox_id, sequence, sender_session_id, sender_name,
+                   target_session_id, target_name, created_at, class, topic,
+                   state_stamp, body, idempotency_key, unread_depth_at_append,
+                   notification_disposition
+                 )
+                 VALUES(
+                   'mailbox-message-legacy-boot', 'mailbox-legacy-boot', 1,
+                   'session-boot-sender', 'Sender',
+                   'session-boot-target', 'Target',
+                   '2026-07-26T00:00:00Z', 'routine', 'boot-order',
+                   NULL, 'Legacy sequence one', 'boot-legacy-1', 1,
+                   'durableButNotWoken'
+                 )",
+                [],
+            )
+            .expect("legacy mailbox message should insert");
+        let board_table_count: u32 = connection
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM sqlite_master
+                 WHERE type = 'table' AND name LIKE 'coordination_board_%'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("legacy table inventory should query");
+        assert_eq!(
+            board_table_count, 0,
+            "pre-board installations must not be upgraded through a current-schema fixture"
+        );
+    }
+
+    let state = AppState::new_with_paths(
+        state_root.path().to_string_lossy().into_owned(),
+        persistence_path.clone(),
+        templates_path,
+    )
+    .expect("AppState boot should migrate before opening coordination stores");
+    assert!(
+        coordination_path.exists(),
+        "boot should create the sibling coordination database"
+    );
+    let migrated = state
+        .mailbox_store
+        .list_for_session("session-boot-target")
+        .expect("migrated mailbox should list");
+    assert_eq!(migrated.len(), 1);
+    assert_eq!(migrated[0].latest_sequence, 1);
+    assert_eq!(
+        migrated[0].unread_count, 1,
+        "missing target sessions must not make boot consume or lose the never-woken row"
+    );
+    let migration_marker_count: u32 = state
+        .mailbox_store
+        .connection()
+        .expect("migrated mailbox connection should be available")
+        .query_row(
+            "SELECT COUNT(*) FROM meta WHERE key = ?1",
+            rusqlite::params![COORDINATION_LEGACY_IMPORT_KEY],
+            |row| row.get(0),
+        )
+        .expect("completed migration marker should query");
+    assert_eq!(migration_marker_count, 1);
+
+    let next = state
+        .mailbox_store
+        .append(&MailboxAppendInput {
+            sender_session_id: "session-boot-sender".to_owned(),
+            sender_name: "Sender".to_owned(),
+            target_session_id: "session-boot-target".to_owned(),
+            target_name: "Target".to_owned(),
+            body: "Post-cutover sequence two".to_owned(),
+            idempotency_key: "boot-cutover-2".to_owned(),
+            topic: Some("boot-order".to_owned()),
+            state_stamp: None,
+        })
+        .expect("first post-cutover append should continue the legacy sequence");
+    assert_eq!(
+        next.sequence, 2,
+        "no coordination write may mint a fresh sequence before migration"
+    );
+    drop(next);
+    state.shutdown_persist_blocking();
+}
+
+#[test]
+fn app_state_boot_hands_durable_project_board_cleanup_to_the_dedicated_worker() {
+    let state_root = PersistTestRoot::new("board-cleanup-replay");
+    let persistence_path = state_root.path().join("termal.sqlite");
+    let coordination_path = resolve_coordination_persistence_path(&persistence_path);
+    let templates_path = state_root.path().join("orchestrators.json");
+    let scope_project_id = "project-deleted-before-crash";
+    let mut inner = StateInner::new();
+    inner
+        .pending_coordination_scope_deletions
+        .insert(scope_project_id.to_owned());
+    persist_state(&persistence_path, &inner).expect("pending cleanup outbox should persist");
+    bootstrap_coordination_database(&persistence_path, &coordination_path)
+        .expect("coordination database should complete its legacy bootstrap before writes");
+    {
+        let board_store =
+            CoordinationBoardStore::open(&coordination_path).expect("board store should open");
+        let mut input = CoordinationBoardSetInput {
+            scope_project_id: scope_project_id.to_owned(),
+            key: "status.before-crash".to_owned(),
+            value: Some(json!("present")),
+            expected_revision: 0,
+            author_session_id: "session-before-crash".to_owned(),
+            author_name: "Before Crash".to_owned(),
+            idempotency_key: "before-crash-write".to_owned(),
+            state_stamp: None,
+        };
+        board_store
+            .set(&input)
+            .expect("pre-crash board row should persist");
+        input.key = "status.second".to_owned();
+        input.idempotency_key = "before-crash-write-2".to_owned();
+        board_store
+            .set(&input)
+            .expect("second pre-crash board row should persist");
+    }
+
+    let state = AppState::new_with_paths(
+        state_root.path().to_string_lossy().into_owned(),
+        persistence_path.clone(),
+        templates_path,
+    )
+    .expect("boot should schedule the durable cleanup outbox");
+    // Stop both background workers before asserting the cleanup result. If the
+    // dedicated worker already won the race this pass is an idempotent no-op;
+    // otherwise it deterministically completes the same durable work without
+    // any wall-clock polling.
+    state.shutdown_persist_blocking();
+    let pass = process_pending_coordination_scope_deletions(&state.inner, |scope_project_id| {
+        state
+            .coordination_board_store
+            .delete_scope_for_project_lifecycle(scope_project_id)
+    });
+    assert!(!pass.pending);
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        state
+            .persist_internal_locked(&inner)
+            .expect("completed cleanup should clear the durable outbox");
+    }
+    let error = state
+        .coordination_board_store
+        .set(&CoordinationBoardSetInput {
+            scope_project_id: scope_project_id.to_owned(),
+            key: "status.stale-writer".to_owned(),
+            value: Some(json!("must-not-reappear")),
+            expected_revision: 0,
+            author_session_id: "session-stale".to_owned(),
+            author_name: "Stale".to_owned(),
+            idempotency_key: "stale-after-restart".to_owned(),
+            state_stamp: None,
+        })
+        .expect_err("dedicated cleanup must install a durable deletion fence");
+    assert_eq!(
+        error
+            .downcast_ref::<CoordinationBoardStoreError>()
+            .expect("stale write should return a typed board error")
+            .kind,
+        CoordinationBoardStoreErrorKind::NotFound
+    );
+    assert!(
+        state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .pending_coordination_scope_deletions
+            .is_empty(),
+        "cleanup should clear the in-memory outbox only after board cleanup"
+    );
+    drop(state);
+
+    let reloaded = load_state(&persistence_path)
+        .expect("primary state should reload")
+        .expect("primary state should exist");
+    assert!(
+        reloaded.pending_coordination_scope_deletions.is_empty(),
+        "cleanup persist should durably clear the completed cleanup outbox"
+    );
+}
+
+#[test]
+fn coordination_cleanup_pass_completes_available_scopes_and_retains_retryable_failures() {
+    let retryable_scope = "project-retryable-cleanup";
+    let completed_scope = "project-completed-cleanup";
+    let mut inner = StateInner::new();
+    inner
+        .pending_coordination_scope_deletions
+        .insert(retryable_scope.to_owned());
+    inner
+        .pending_coordination_scope_deletions
+        .insert(completed_scope.to_owned());
+    let inner = Arc::new(Mutex::new(inner));
+
+    let pass = process_pending_coordination_scope_deletions(&inner, |scope_project_id| {
+        if scope_project_id == retryable_scope {
+            Err(coordination_board_store_error(
+                CoordinationBoardStoreErrorKind::Retryable,
+                "coordination storage is temporarily busy; no write was committed",
+            ))
+        } else {
+            Ok(true)
+        }
+    });
+
+    assert_eq!(pass.completed, 1);
+    assert!(pass.pending);
+    let inner = inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .pending_coordination_scope_deletions
+            .contains(retryable_scope),
+        "retryable cleanup must remain durably queued for the cleanup worker"
+    );
+    assert!(
+        !inner
+            .pending_coordination_scope_deletions
+            .contains(completed_scope),
+        "completed cleanup should leave the outbox"
+    );
+}
+
+#[test]
+fn coordination_cleanup_pass_retains_non_retryable_failures_without_blocking_primary_work() {
+    let scope_project_id = "project-permanent-cleanup-failure";
+    let mut inner = StateInner::new();
+    inner
+        .pending_coordination_scope_deletions
+        .insert(scope_project_id.to_owned());
+    let inner = Arc::new(Mutex::new(inner));
+
+    let pass = process_pending_coordination_scope_deletions(&inner, |_| {
+        Err(anyhow!("coordination database is corrupt"))
+    });
+
+    assert_eq!(pass.completed, 0);
+    assert!(pass.pending);
+    assert!(
+        inner
+            .lock()
+            .expect("state mutex poisoned")
+            .pending_coordination_scope_deletions
+            .contains(scope_project_id),
+        "a failed cleanup must never be removed from the durable outbox"
+    );
+}
+
+#[test]
+fn coordination_cleanup_pass_handles_multiple_scopes_and_a_large_cascade_outside_primary_worker() {
+    let state_root = PersistTestRoot::new("coordination-cleanup-large-cascade");
+    let coordination_path = state_root.path().join("coordination.sqlite");
+    let store = CoordinationBoardStore::open(&coordination_path).expect("board store should open");
+    {
+        let connection = store
+            .connection()
+            .expect("test should access the board connection");
+        connection
+            .execute_batch(
+                "
+                INSERT INTO coordination_board_scopes(scope_id, generation)
+                VALUES('project-large-cleanup', 5000),
+                      ('project-second-cleanup', 0);
+                WITH RECURSIVE revisions(value) AS (
+                  VALUES(1)
+                  UNION ALL
+                  SELECT value + 1 FROM revisions WHERE value < 5000
+                )
+                INSERT INTO coordination_board_history(
+                  scope_id, key, revision, generation, value_json,
+                  author_session_id, author_name, updated_at, state_stamp
+                )
+                SELECT
+                  'project-large-cleanup', 'history.large', value, value, '\"retained\"',
+                  'session-history', 'History', '2026-07-27T00:00:00.000Z', NULL
+                FROM revisions;
+                ",
+            )
+            .expect("large retained-history fixture should persist");
+    }
+    let mut inner = StateInner::new();
+    inner
+        .pending_coordination_scope_deletions
+        .insert("project-large-cleanup".to_owned());
+    inner
+        .pending_coordination_scope_deletions
+        .insert("project-second-cleanup".to_owned());
+    let inner = Arc::new(Mutex::new(inner));
+
+    let pass = process_pending_coordination_scope_deletions(&inner, |scope_project_id| {
+        store.delete_scope_for_project_lifecycle(scope_project_id)
+    });
+
+    assert_eq!(pass.completed, 2);
+    assert!(!pass.pending);
+    assert!(
+        inner
+            .lock()
+            .expect("state mutex poisoned")
+            .pending_coordination_scope_deletions
+            .is_empty()
+    );
+    let connection = store
+        .connection()
+        .expect("test should access the board connection");
+    let retained_rows: u64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM coordination_board_history",
+            [],
+            |row| row.get(0),
+        )
+        .expect("history count should query");
+    assert_eq!(retained_rows, 0, "large scope cascade should be complete");
+}
+
+#[test]
+fn project_deletion_outbox_survives_deferred_worker_cleanup_and_fences_across_restart() {
+    let state_root = PersistTestRoot::new("board-cleanup-worker");
+    let persistence_path = state_root.path().join("termal.sqlite");
+    let templates_path = state_root.path().join("orchestrators.json");
+    let project_id;
+    {
+        let state = AppState::new_with_paths(
+            state_root.path().to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+        )
+        .expect("initial AppState should boot");
+        project_id = create_test_project(&state, state_root.path(), "Durable Delete Project");
+        state
+            .coordination_board_store
+            .set(&CoordinationBoardSetInput {
+                scope_project_id: project_id.clone(),
+                key: "status.before-delete".to_owned(),
+                value: Some(json!("present")),
+                expected_revision: 0,
+                author_session_id: "session-before-delete".to_owned(),
+                author_name: "Before Delete".to_owned(),
+                idempotency_key: "worker-delete-seed".to_owned(),
+                state_stamp: None,
+            })
+            .expect("board fixture should persist");
+        let connection_blocker = state
+            .coordination_board_store
+            .connection()
+            .expect("test should hold cleanup behind the private connection");
+
+        state
+            .delete_project(&project_id)
+            .expect("project deletion should enqueue durable cleanup");
+        state.shutdown_persist_blocking();
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert!(
+            inner
+                .projects
+                .iter()
+                .all(|project| project.id != project_id),
+            "the deleted project must remain absent after the persist drain"
+        );
+        assert!(
+            inner
+                .pending_coordination_scope_deletions
+                .contains(&project_id),
+            "shutdown must leave blocked cleanup durable for a later worker"
+        );
+        drop(inner);
+        drop(connection_blocker);
+
+        let durable = load_state(&persistence_path)
+            .expect("primary state should reload")
+            .expect("primary state should exist");
+        assert!(
+            durable
+                .pending_coordination_scope_deletions
+                .contains(&project_id),
+            "the outbox must reach termal.sqlite before deferred cleanup"
+        );
+        let pass = process_pending_coordination_scope_deletions(&state.inner, |scope_project_id| {
+            state
+                .coordination_board_store
+                .delete_scope_for_project_lifecycle(scope_project_id)
+        });
+        assert_eq!(pass.completed, 1);
+        assert!(!pass.pending);
+        {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            state
+                .persist_internal_locked(&inner)
+                .expect("completed cleanup should durably clear the outbox");
+        }
+        let error = state
+            .coordination_board_store
+            .get(&project_id, "status.before-delete")
+            .expect_err("cleanup must fence and delete the board scope");
+        assert_eq!(
+            error
+                .downcast_ref::<CoordinationBoardStoreError>()
+                .expect("deleted scope should return a typed board error")
+                .kind,
+            CoordinationBoardStoreErrorKind::NotFound
+        );
+    }
+
+    let restarted = AppState::new_with_paths(
+        state_root.path().to_string_lossy().into_owned(),
+        persistence_path,
+        templates_path,
+    )
+    .expect("restarted AppState should boot");
+    let inner = restarted.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .projects
+            .iter()
+            .all(|project| project.id != project_id),
+        "the primary project deletion must survive restart"
+    );
+    assert!(
+        inner.pending_coordination_scope_deletions.is_empty(),
+        "completed cleanup must not reappear in the durable outbox"
+    );
+    drop(inner);
+    let stale_write = restarted
+        .coordination_board_store
+        .set(&CoordinationBoardSetInput {
+            scope_project_id: project_id,
+            key: "status.after-restart".to_owned(),
+            value: Some(json!("must-not-reappear")),
+            expected_revision: 0,
+            author_session_id: "session-stale-after-restart".to_owned(),
+            author_name: "Stale".to_owned(),
+            idempotency_key: "worker-delete-stale".to_owned(),
+            state_stamp: None,
+        })
+        .expect_err("the coordination-side fence must survive restart");
+    assert_eq!(
+        stale_write
+            .downcast_ref::<CoordinationBoardStoreError>()
+            .expect("stale write should return a typed board error")
+            .kind,
+        CoordinationBoardStoreErrorKind::NotFound
+    );
+    restarted.shutdown_persist_blocking();
+}
+
+#[test]
+fn project_deletion_does_not_cleanup_board_before_a_queued_persist_is_durable() {
+    let state_root = PersistTestRoot::new("board-cleanup-queued");
+    let (base, persist_rx) = test_app_state_with_live_persist_channel();
+    let board_store = Arc::new(
+        CoordinationBoardStore::open(&state_root.path().join("coordination.sqlite"))
+            .expect("board cleanup test store should open"),
+    );
+    let state = AppState {
+        persistence_path: Arc::new(state_root.path().join("termal.sqlite")),
+        coordination_board_store: board_store.clone(),
+        ..base
+    };
+
+    let project_id = create_test_project(&state, state_root.path(), "Queued Delete Project");
+    board_store
+        .set(&CoordinationBoardSetInput {
+            scope_project_id: project_id.clone(),
+            key: "status.before-delete".to_owned(),
+            value: Some(json!("present")),
+            expected_revision: 0,
+            author_session_id: "session-before-delete".to_owned(),
+            author_name: "Before Delete".to_owned(),
+            idempotency_key: "queued-delete-seed".to_owned(),
+            state_stamp: None,
+        })
+        .expect("board fixture should persist");
+
+    state
+        .delete_project(&project_id)
+        .expect("project deletion should queue primary persistence");
+
+    assert_eq!(
+        persist_rx.try_iter().count(),
+        2,
+        "project creation and deletion should each queue one persist wake"
+    );
+    assert!(
+        state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .pending_coordination_scope_deletions
+            .contains(&project_id),
+        "cleanup must stay queued until the primary persist worker makes deletion durable"
+    );
+    assert_eq!(
+        board_store
+            .get(&project_id, "status.before-delete")
+            .expect("board data must survive until queued primary persistence completes")
+            .value,
+        json!("present")
+    );
 }
 
 // Pins that legacy Windows `\\?\` verbatim prefixes on a project
@@ -916,12 +1522,16 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
     fs::create_dir_all(&state_root).expect("state root should exist");
     let persistence_path = state_root.join("termal.sqlite");
     let mailbox_store = Arc::new(MailboxStore::disabled_for_tests());
+    // Same fd-cascade rule as the mailbox store: retained test AppStates must
+    // not hold real SQLite connections (tm-drd).
+    let coordination_board_store = Arc::new(CoordinationBoardStore::disabled_for_tests());
     let state = AppState {
         server_instance_id: Uuid::new_v4().to_string(),
         default_workdir: "/tmp".to_owned(),
         local_http_base_url: Arc::new(Mutex::new(None)),
         persistence_path: Arc::new(persistence_path),
         mailbox_store,
+        coordination_board_store,
         orchestrator_templates_path: Arc::new(
             std::env::temp_dir().join(format!("termal-orchestrators-test-{}.json", Uuid::new_v4())),
         ),
@@ -985,7 +1595,7 @@ fn persist_worker_retry_state_doubles_and_resets_backoff() {
 }
 
 #[test]
-fn persist_worker_shutdown_exits_only_after_successful_final_tick() {
+fn persist_worker_shutdown_waits_for_primary_durability_but_can_defer_cleanup() {
     let mut retry_state = PersistWorkerRetryState::default();
 
     let failure: Result<()> = Err(anyhow!("injected shutdown persist failure"));
@@ -1090,6 +1700,25 @@ fn persist_worker_wait_observes_shutdown_during_retry_backoff() {
         retry_state.wait_for_next_tick(&persist_rx),
         PersistWorkerWaitOutcome::Shutdown,
         "shutdown during a retry backoff should still drain one final tick before exit",
+    );
+}
+
+#[test]
+fn coordination_cleanup_retry_backoff_ignores_process_wakes_but_observes_shutdown() {
+    let (cleanup_tx, cleanup_rx) = mpsc::channel::<CoordinationCleanupRequest>();
+    let mut retry_state = CoordinationCleanupRetryState::default();
+    retry_state.record_pending(true);
+    cleanup_tx
+        .send(CoordinationCleanupRequest::Process)
+        .expect("redundant cleanup wake should send");
+    cleanup_tx
+        .send(CoordinationCleanupRequest::Shutdown)
+        .expect("cleanup shutdown should send");
+
+    assert_eq!(
+        retry_state.wait_for_next_tick(&cleanup_rx),
+        CoordinationCleanupWaitOutcome::Shutdown,
+        "ordinary Process wakes must not shorten cleanup backoff, while shutdown must interrupt it"
     );
 }
 

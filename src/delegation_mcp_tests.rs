@@ -287,6 +287,9 @@ fn delegation_mcp_tools_list_exposes_parent_scoped_tools_only() {
             "termal_read_mailbox",
             "termal_read_mailbox_message",
             "termal_acknowledge_mailbox",
+            "termal_board_list",
+            "termal_board_get",
+            "termal_board_set",
         ]
     );
     // The delegation inventory is parent-scoped; termal_list_sessions is the one
@@ -300,7 +303,8 @@ fn delegation_mcp_tools_list_exposes_parent_scoped_tools_only() {
         vec![
             "termal_list_delegations",
             "termal_list_sessions",
-            "termal_list_mailboxes"
+            "termal_list_mailboxes",
+            "termal_board_list"
         ]
     );
 }
@@ -2213,4 +2217,867 @@ fn delegation_mcp_wait_treats_completed_failed_and_canceled_as_terminal() {
             .count(),
         3
     );
+}
+
+thread_local! {
+    // Per-test-thread record of retry sleeps; the Rust test harness gives each
+    // #[test] its own thread, so recordings never bleed between tests.
+    static RECORDED_SAFE_REPLAY_RETRY_SLEEPS: std::cell::RefCell<Vec<Duration>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn recording_safe_replay_retry_sleeper(delay: Duration) {
+    RECORDED_SAFE_REPLAY_RETRY_SLEEPS.with(|sleeps| sleeps.borrow_mut().push(delay));
+}
+
+fn take_recorded_safe_replay_retry_sleeps() -> Vec<Duration> {
+    RECORDED_SAFE_REPLAY_RETRY_SLEEPS
+        .with(|sleeps| std::mem::take(&mut *sleeps.borrow_mut()))
+}
+
+// The exact jittered schedule the production bridge derives for a session:
+// tests assert recorded sleeps against this so cadence stays pinned while the
+// jitter keeps peers dephased.
+fn expected_safe_replay_retry_sleeps(session_id: &str, replays: u32) -> Vec<Duration> {
+    (1..=replays)
+        .map(|attempt| safe_replay_retry_delay(session_id, attempt))
+        .collect()
+}
+
+// Keep the bridge replay fixture coupled to the production SQLite mapper so
+// BEGIN/COMMIT contention cannot silently drift away from the classifier.
+fn test_no_commit_busy_error() -> String {
+    mailbox_sqlite_write_error(
+        "waiting to begin mailbox append",
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            Some("database is locked".to_owned()),
+        ),
+    )
+    .to_string()
+}
+const TEST_SAFE_READ_BUSY_ERROR: &str = "coordination board storage is temporarily busy while \
+     waiting for the coordination board connection; no mutation was attempted by this read \
+     operation, so retry the same request";
+
+#[test]
+fn delegation_mcp_bridge_replays_no_commit_storage_busy_rejections_until_success() {
+    let handler_attempts = Arc::new(AtomicUsize::new(0));
+    let attempts = handler_attempts.clone();
+    let (base_url, requests, server) = spawn_test_mcp_http_server(3, move |_request| {
+        if attempts.fetch_add(1, Ordering::SeqCst) < 2 {
+            (503, json!({ "error": test_no_commit_busy_error() }))
+        } else {
+            (200, json!({ "ok": true }))
+        }
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should build")
+        .with_safe_replay_retry_sleeper(recording_safe_replay_retry_sleeper);
+    let value = bridge
+        .post_json_with_safe_replay("/api/mailboxes/append", &json!({ "payload": 1 }))
+        .expect("a no-commit rejection cleared by a later attempt should succeed");
+    assert_eq!(value, json!({ "ok": true }));
+    assert_eq!(
+        take_recorded_safe_replay_retry_sleeps(),
+        expected_safe_replay_retry_sleeps("session-parent", 2),
+        "sleeps must follow the session's exact jittered doubling schedule"
+    );
+    server.join().expect("test server should join");
+    let requests = requests.lock().expect("request log mutex poisoned");
+    assert_eq!(requests.len(), 3, "two rejected attempts plus the success");
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.method == "POST"
+                && request.path == "/api/mailboxes/append"
+                && request.body == requests[0].body),
+        "every replay must be byte-identical to the original request"
+    );
+}
+
+#[test]
+fn delegation_mcp_bridge_generic_requests_never_inherit_replay_from_prose() {
+    let (base_url, requests, server) = spawn_test_mcp_http_server(1, |_request| {
+        (503, json!({ "error": test_no_commit_busy_error() }))
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should build")
+        .with_safe_replay_retry_sleeper(recording_safe_replay_retry_sleeper);
+    let error = bridge
+        .post_json("/api/future-non-idempotent-route", &json!({ "payload": 1 }))
+        .expect_err("generic requests must remain single-attempt even with matching prose");
+    assert_eq!(
+        error
+            .downcast_ref::<TermalDelegationApiError>()
+            .expect("failure should surface the API error")
+            .status,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert!(
+        take_recorded_safe_replay_retry_sleeps().is_empty(),
+        "generic requests must not enter the safe-replay policy"
+    );
+    server.join().expect("test server should join");
+    assert_eq!(
+        requests.lock().expect("request log mutex poisoned").len(),
+        1
+    );
+}
+
+#[test]
+fn delegation_mcp_bridge_fails_fast_on_a_503_without_the_no_commit_marker() {
+    let (base_url, requests, server) = spawn_test_mcp_http_server(1, |_request| {
+        (
+            503,
+            json!({ "error": "service unavailable while restarting; write outcome unknown" }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should build")
+        .with_safe_replay_retry_sleeper(recording_safe_replay_retry_sleeper);
+    let error = bridge
+        .post_json_with_safe_replay("/api/mailboxes/append", &json!({ "payload": 1 }))
+        .expect_err("an unmarked 503 offers no replay guarantee and must fail fast");
+    let api_error = error
+        .downcast_ref::<TermalDelegationApiError>()
+        .expect("failure should surface the API error");
+    assert_eq!(api_error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        take_recorded_safe_replay_retry_sleeps().is_empty(),
+        "no sleeps: unmarked rejections must not be retried"
+    );
+    server.join().expect("test server should join");
+    assert_eq!(
+        requests.lock().expect("request log mutex poisoned").len(),
+        1
+    );
+}
+
+#[test]
+fn delegation_mcp_bridge_bounds_no_commit_replays_and_surfaces_the_final_rejection() {
+    let (base_url, requests, server) = spawn_test_mcp_http_server(5, |_request| {
+        (503, json!({ "error": test_no_commit_busy_error() }))
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should build")
+        .with_safe_replay_retry_sleeper(recording_safe_replay_retry_sleeper);
+    let error = bridge
+        .post_json_with_safe_replay("/api/mailboxes/append", &json!({ "payload": 1 }))
+        .expect_err("a persistently saturated writer must surface the typed rejection");
+    let api_error = error
+        .downcast_ref::<TermalDelegationApiError>()
+        .expect("failure should surface the API error");
+    assert_eq!(api_error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        message_carries_safe_replay_clause(&api_error.message),
+        "the caller must still see the typed no-commit message after exhaustion"
+    );
+    assert_eq!(
+        take_recorded_safe_replay_retry_sleeps(),
+        expected_safe_replay_retry_sleeps("session-parent", 4),
+        "exactly four bounded jittered replays follow the initial attempt"
+    );
+    server.join().expect("test server should join");
+    assert_eq!(
+        requests.lock().expect("request log mutex poisoned").len(),
+        5
+    );
+}
+
+#[test]
+fn delegation_mcp_bridge_applies_no_commit_replay_to_get_requests_too() {
+    let handler_attempts = Arc::new(AtomicUsize::new(0));
+    let attempts = handler_attempts.clone();
+    let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |_request| {
+        if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+            (503, json!({ "error": TEST_SAFE_READ_BUSY_ERROR }))
+        } else {
+            (200, json!({ "mailboxes": [] }))
+        }
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should build")
+        .with_safe_replay_retry_sleeper(recording_safe_replay_retry_sleeper);
+    let value = bridge
+        .get_json_with_safe_replay("/api/mailboxes")
+        .expect("a safe-read rejection on GET should replay and succeed");
+    assert_eq!(value, json!({ "mailboxes": [] }));
+    assert_eq!(
+        take_recorded_safe_replay_retry_sleeps(),
+        expected_safe_replay_retry_sleeps("session-parent", 1)
+    );
+    server.join().expect("test server should join");
+    let requests = requests.lock().expect("request log mutex poisoned");
+    assert_eq!(requests.len(), 2);
+    assert!(requests.iter().all(|request| request.method == "GET"));
+}
+
+#[test]
+fn delegation_mcp_bridge_replays_a_durable_append_while_dispatch_finalizes() {
+    let handler_attempts = Arc::new(AtomicUsize::new(0));
+    let attempts = handler_attempts.clone();
+    let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |_request| {
+        if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+            (
+                503,
+                json!({
+                    "error": format!(
+                        "mailbox dispatch outcome is still finalizing; {}",
+                        TERMAL_DELEGATION_DURABLE_APPEND_RETRY_CLAUSE
+                    )
+                }),
+            )
+        } else {
+            (200, json!({ "ok": true }))
+        }
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should build")
+        .with_safe_replay_retry_sleeper(recording_safe_replay_retry_sleeper);
+    let value = bridge
+        .post_json_with_safe_replay("/api/mailboxes/append", &json!({ "payload": 1 }))
+        .expect("durable same-key append replay should wait through finalization");
+    assert_eq!(value, json!({ "ok": true }));
+    assert_eq!(
+        take_recorded_safe_replay_retry_sleeps(),
+        expected_safe_replay_retry_sleeps("session-parent", 1)
+    );
+    server.join().expect("test server should join");
+    assert_eq!(
+        requests.lock().expect("request log mutex poisoned").len(),
+        2
+    );
+}
+
+#[test]
+fn delegation_mcp_bridge_fails_fast_when_a_write_was_actually_committed() {
+    // Cross-review finding: the instruction tail alone must never classify a
+    // POSITIVE commit statement as replayable — only a clause carrying the
+    // `no …` negation does.
+    let (base_url, requests, server) = spawn_test_mcp_http_server(1, |_request| {
+        (
+            503,
+            json!({
+                "error": "a mailbox write was committed by this operation, so retry the same request"
+            }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should build")
+        .with_safe_replay_retry_sleeper(recording_safe_replay_retry_sleeper);
+    let error = bridge
+        .post_json_with_safe_replay("/api/mailboxes/append", &json!({ "payload": 1 }))
+        .expect_err("a positive commit statement must never be replayed");
+    let api_error = error
+        .downcast_ref::<TermalDelegationApiError>()
+        .expect("failure should surface the API error");
+    assert_eq!(api_error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        take_recorded_safe_replay_retry_sleeps().is_empty(),
+        "no sleeps: positive phrasing carries no structural no-commit guarantee"
+    );
+    server.join().expect("test server should join");
+    assert_eq!(
+        requests.lock().expect("request log mutex poisoned").len(),
+        1
+    );
+}
+
+#[test]
+fn delegation_mcp_bridge_stops_replaying_when_the_overall_budget_cannot_fund_a_retry() {
+    // With a 1s total budget, even the smallest possible first jittered delay
+    // (150ms) plus the 2s minimum replay window exceeds what remains, so the
+    // bridge must surface the typed rejection after ONE attempt and zero
+    // sleeps. The stop decision is one-sided: any additional elapsed time only
+    // strengthens it, so this holds under arbitrary scheduler stalls.
+    let (base_url, requests, server) = spawn_test_mcp_http_server(1, |_request| {
+        (503, json!({ "error": test_no_commit_busy_error() }))
+    });
+    let bridge = TermalDelegationMcpBridge::new_with_timeout(
+        "session-parent".to_owned(),
+        base_url,
+        Duration::from_secs(1),
+    )
+    .expect("bridge should build")
+    .with_safe_replay_retry_sleeper(recording_safe_replay_retry_sleeper);
+    let error = bridge
+        .post_json_with_safe_replay("/api/mailboxes/append", &json!({ "payload": 1 }))
+        .expect_err("budget-starved replay must surface the typed rejection");
+    let api_error = error
+        .downcast_ref::<TermalDelegationApiError>()
+        .expect("failure should surface the API error, not a transport timeout");
+    assert_eq!(api_error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        take_recorded_safe_replay_retry_sleeps().is_empty(),
+        "no sleep may start when the budget cannot fund delay plus a useful attempt"
+    );
+    server.join().expect("test server should join");
+    assert_eq!(
+        requests.lock().expect("request log mutex poisoned").len(),
+        1
+    );
+}
+
+#[test]
+fn delegation_mcp_no_commit_jitter_is_bounded_stable_and_session_dephased() {
+    for session_id in ["session-parent", "session-a", "session-b", "session-2098"] {
+        for attempt in 1..=4u32 {
+            let percent = safe_replay_retry_jitter_percent(session_id, attempt);
+            assert!(
+                (75..=125).contains(&percent),
+                "jitter percent {percent} out of range for {session_id} attempt {attempt}"
+            );
+            assert_eq!(
+                percent,
+                safe_replay_retry_jitter_percent(session_id, attempt),
+                "jitter must be deterministic for a fixed session and attempt"
+            );
+        }
+    }
+    assert_ne!(
+        expected_safe_replay_retry_sleeps("session-a", 4),
+        expected_safe_replay_retry_sleeps("session-b", 4),
+        "distinct sessions must dephase onto distinct replay schedules"
+    );
+}
+
+fn test_board_receipt_for(
+    key: &str,
+    prior_revision: u64,
+    value: Value,
+    deleted: bool,
+    duplicate: bool,
+) -> Value {
+    json!({
+        "key": key,
+        "revision": prior_revision + 1,
+        "priorRevision": prior_revision,
+        "generation": 7,
+        "value": value,
+        "deleted": deleted,
+        "authorSessionId": "session-parent",
+        "authorName": "Fable",
+        "updatedAt": "2026-07-26T00:00:00.000Z",
+        "duplicate": duplicate
+    })
+}
+
+#[test]
+fn delegation_mcp_board_tools_are_advertised_to_roots_and_hidden_from_children() {
+    let advertised = mcp_tools_list_result();
+    let names = advertised
+        .get("tools")
+        .and_then(Value::as_array)
+        .expect("tools array")
+        .iter()
+        .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_owned))
+        .collect::<Vec<_>>();
+    for tool in ["termal_board_list", "termal_board_get", "termal_board_set"] {
+        assert!(
+            names.iter().any(|name| name == tool),
+            "{tool} must be advertised to root sessions"
+        );
+    }
+
+    let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |request| {
+        assert_eq!(request.path, "/api/state");
+        (
+            200,
+            json!({
+                "sessions": [
+                    { "id": "session-parent", "name": "Reviewer", "parentDelegationId": "delegation-x" }
+                ]
+            }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+    let child_names = bridge
+        .tools_list_for_caller()
+        .get("tools")
+        .and_then(Value::as_array)
+        .expect("tools array")
+        .iter()
+        .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_owned))
+        .collect::<Vec<_>>();
+    for tool in ["termal_board_list", "termal_board_get", "termal_board_set"] {
+        assert!(
+            !child_names.iter().any(|name| name == tool),
+            "{tool} must be hidden from delegation children"
+        );
+    }
+    server.join().expect("test server should join");
+}
+
+#[test]
+fn delegation_mcp_board_set_forwards_null_value_and_delete_distinctly() {
+    let handler_calls = Arc::new(AtomicUsize::new(0));
+    let calls = handler_calls.clone();
+    let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/api/sessions/session-parent/board/set");
+        let body: Value =
+            serde_json::from_str(&request.body).expect("board set body should parse");
+        if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            // Explicit JSON null must arrive as a PRESENT null value, not a
+            // delete.
+            assert!(body.get("value").is_some_and(Value::is_null));
+            assert!(body.get("delete").is_none());
+            (200, test_board_receipt_for("status.gate", 1, Value::Null, false, false))
+        } else {
+            assert!(body.get("value").is_none());
+            assert_eq!(body.get("delete"), Some(&Value::Bool(true)));
+            (200, test_board_receipt_for("status.gate", 2, Value::Null, true, false))
+        }
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+
+    bridge
+        .tool_board_set(json!({
+            "key": "status.gate",
+            "value": null,
+            "expectedRevision": 1,
+            "idempotencyKey": "set-null-1"
+        }))
+        .expect("null-value set should succeed");
+    bridge
+        .tool_board_set(json!({
+            "key": "status.gate",
+            "delete": true,
+            "expectedRevision": 2,
+            "idempotencyKey": "delete-1"
+        }))
+        .expect("delete should succeed");
+    server.join().expect("test server should join");
+    assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
+}
+
+#[test]
+fn delegation_mcp_board_get_routes_to_the_key_path() {
+    let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |request| {
+        assert_eq!(request.method, "GET");
+        assert_eq!(
+            request.path,
+            "/api/sessions/session-parent/board/keys/activity.rust-suite"
+        );
+        (
+            200,
+            json!({
+                "key": "activity.rust-suite",
+                "revision": 2,
+                "updatedAtGeneration": 3,
+                "scopeGeneration": 7,
+                "value": { "holder": "Fable" },
+                "deleted": false,
+                "authorSessionId": "session-parent",
+                "authorName": "Fable",
+                "updatedAt": "2026-07-26T00:00:00.000Z"
+            }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+    let head = bridge
+        .tool_board_get(json!({ "key": "activity.rust-suite" }))
+        .expect("get should succeed");
+    assert_eq!(
+        head.get("key").and_then(Value::as_str),
+        Some("activity.rust-suite")
+    );
+    assert_eq!(head.get("updatedAtGeneration"), Some(&json!(3)));
+    assert_eq!(head.get("scopeGeneration"), Some(&json!(7)));
+    server.join().expect("test server should join");
+}
+
+#[test]
+fn delegation_mcp_board_tools_reject_transport_unsafe_keys_client_side() {
+    // No server: validation must fail before any request is attempted.
+    let bridge = TermalDelegationMcpBridge::new(
+        "session-parent".to_owned(),
+        "http://127.0.0.1:9".to_owned(),
+    )
+    .expect("bridge should initialize");
+    for unsafe_key in [
+        ".",
+        "..",
+        "../evil",
+        "a/b",
+        "Upper.case",
+        "a b",
+        "k&e=y",
+    ] {
+        let err = bridge
+            .tool_board_get(json!({ "key": unsafe_key }))
+            .expect_err("transport-unsafe key must be rejected client-side");
+        assert!(
+            err.to_string().contains("lowercase alphanumerics"),
+            "unexpected rejection for {unsafe_key:?}: {err}"
+        );
+    }
+    // Empty keys are caught one layer earlier by the required-string check —
+    // still client-side, different message.
+    let err = bridge
+        .tool_board_get(json!({ "key": "" }))
+        .expect_err("empty key must be rejected client-side");
+    assert!(err.to_string().contains("required"));
+}
+
+#[test]
+fn delegation_mcp_board_set_preserves_state_stamp_bytes_for_idempotency() {
+    let state_stamp = "  repo@abc123  ";
+    let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |request| {
+        assert_eq!(request.path, "/api/sessions/session-parent/board/set");
+        let body: Value =
+            serde_json::from_str(&request.body).expect("board set body should be JSON");
+        assert_eq!(body.get("stateStamp"), Some(&json!(state_stamp)));
+        let mut receipt =
+            test_board_receipt_for("status.gate", 0, json!(true), false, false);
+        receipt
+            .as_object_mut()
+            .expect("test receipt should be an object")
+            .insert("stateStamp".to_owned(), json!(state_stamp));
+        (201, receipt)
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+
+    let receipt = bridge
+        .tool_board_set(json!({
+            "key": "status.gate",
+            "value": true,
+            "expectedRevision": 0,
+            "idempotencyKey": "state-stamp-preservation",
+            "stateStamp": state_stamp
+        }))
+        .expect("board set should preserve the exact optional state stamp");
+
+    assert_eq!(receipt.get("stateStamp"), Some(&json!(state_stamp)));
+    server.join().expect("test server should join");
+}
+
+#[test]
+fn delegation_mcp_board_set_rejects_invalid_state_stamp_instead_of_dropping_it() {
+    // No server: validation must fail before any request is attempted.
+    let bridge = TermalDelegationMcpBridge::new(
+        "session-parent".to_owned(),
+        "http://127.0.0.1:9".to_owned(),
+    )
+    .expect("bridge should initialize");
+    for state_stamp in [json!(42), json!(null), json!("   ")] {
+        let error = bridge
+            .tool_board_set(json!({
+                "key": "status.gate",
+                "value": true,
+                "expectedRevision": 0,
+                "idempotencyKey": "invalid-state-stamp",
+                "stateStamp": state_stamp
+            }))
+            .expect_err("present invalid stateStamp must be rejected client-side");
+        assert!(
+            error
+                .to_string()
+                .contains("stateStamp must be a non-empty string"),
+            "unexpected validation error: {error:#}"
+        );
+    }
+}
+
+#[test]
+fn delegation_mcp_board_child_direct_call_is_denied() {
+    let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |request| {
+        assert_eq!(request.path, "/api/state");
+        (
+            200,
+            json!({
+                "sessions": [
+                    { "id": "session-parent", "name": "Reviewer", "parentDelegationId": "delegation-x" }
+                ]
+            }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+    let err = bridge
+        .handle_tool_call(json!({
+            "name": "termal_board_set",
+            "arguments": {
+                "key": "status.gate",
+                "value": 1,
+                "expectedRevision": 0,
+                "idempotencyKey": "child-attempt"
+            }
+        }))
+        .expect_err("a delegation child must not invoke board tools");
+    assert!(
+        err.to_string().contains("coordination tools are restricted"),
+        "denial should name the coordination restriction: {err}"
+    );
+    server.join().expect("test server should join");
+}
+
+#[test]
+fn delegation_mcp_board_set_passes_typed_conflict_through_unchanged() {
+    let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |_request| {
+        (
+            409,
+            json!({
+                "error": "coordination board revision conflict for `status.gate`: expected 3, current revision is 5; detail: {\"currentGeneration\":9}"
+            }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+    let err = bridge
+        .tool_board_set(json!({
+            "key": "status.gate",
+            "value": { "x": 1 },
+            "expectedRevision": 3,
+            "idempotencyKey": "cas-1"
+        }))
+        .expect_err("a typed conflict must fail");
+    let message = err.to_string();
+    assert!(
+        message.contains("revision conflict") && message.contains("current revision is 5"),
+        "typed conflict must pass through unchanged: {message}"
+    );
+    assert!(
+        !message.contains("outcome is unknown"),
+        "a typed 409 has a KNOWN outcome and must not carry the unknown-outcome diagnostic"
+    );
+    server.join().expect("test server should join");
+}
+
+#[test]
+fn delegation_mcp_board_set_marks_unknown_outcome_on_malformed_success() {
+    let (base_url, server) =
+        spawn_test_mcp_http_server_with_raw_response(200, "not-json!".to_owned());
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+    let err = bridge
+        .tool_board_set(json!({
+            "key": "status.gate",
+            "value": 1,
+            "expectedRevision": 0,
+            "idempotencyKey": "unknown-1"
+        }))
+        .expect_err("malformed success body means the outcome is unknown");
+    let message = err.to_string();
+    assert!(
+        message.contains("outcome is unknown") && message.contains("SAME idempotencyKey"),
+        "unknown-outcome diagnostic must teach same-key retry: {message}"
+    );
+    server.join().expect("test server should join");
+}
+
+#[test]
+fn delegation_mcp_board_set_inherits_no_commit_replay_and_validates_duplicate_receipts() {
+    let handler_calls = Arc::new(AtomicUsize::new(0));
+    let calls = handler_calls.clone();
+    let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |_request| {
+        if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            (
+                503,
+                json!({
+                    "error": "coordination board storage is temporarily busy while beginning coordination board update; no coordination board write was committed by this operation, so retry the same request"
+                }),
+            )
+        } else {
+            (
+                200,
+                test_board_receipt_for(
+                    "activity.rust-suite",
+                    1,
+                    json!({ "holder": "Fable" }),
+                    false,
+                    true,
+                ),
+            )
+        }
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize")
+        .with_safe_replay_retry_sleeper(recording_safe_replay_retry_sleeper);
+    let receipt = bridge
+        .tool_board_set(json!({
+            "key": "activity.rust-suite",
+            "value": { "holder": "Fable" },
+            "expectedRevision": 1,
+            "idempotencyKey": "replay-1"
+        }))
+        .expect("marked 503 then success should replay and succeed");
+    assert_eq!(receipt.get("duplicate"), Some(&Value::Bool(true)));
+    assert_eq!(
+        take_recorded_safe_replay_retry_sleeps(),
+        expected_safe_replay_retry_sleeps("session-parent", 1),
+        "board tools must inherit the bridge no-commit replay policy"
+    );
+    server.join().expect("test server should join");
+    assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 2);
+}
+
+#[test]
+fn delegation_mcp_board_list_routes_first_page_and_continuation_queries() {
+    let handler_calls = Arc::new(AtomicUsize::new(0));
+    let calls = handler_calls.clone();
+    let (base_url, _requests, server) = spawn_test_mcp_http_server(2, move |request| {
+        assert_eq!(request.method, "GET");
+        if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            assert_eq!(
+                request.path,
+                "/api/sessions/session-parent/board?knownGeneration=5"
+            );
+        } else {
+            assert_eq!(
+                request.path,
+                "/api/sessions/session-parent/board?afterKey=alpha.key&limit=50&snapshotGeneration=7"
+            );
+        }
+        (
+            200,
+            json!({ "generation": 7, "entries": [], "unchanged": false }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+    bridge
+        .tool_board_list(json!({ "knownGeneration": 5 }))
+        .expect("first-page list should succeed");
+    bridge
+        .tool_board_list(json!({
+            "afterKey": "alpha.key",
+            "limit": 50,
+            "snapshotGeneration": 7
+        }))
+        .expect("continuation list should succeed");
+    server.join().expect("test server should join");
+}
+
+#[test]
+fn delegation_mcp_board_set_transport_timeout_is_unknown_outcome() {
+    let (base_url, _request_rx, release_tx, server) =
+        spawn_test_mcp_http_server_without_response();
+    let bridge = TermalDelegationMcpBridge::new_with_timeout(
+        "session-parent".to_owned(),
+        base_url,
+        Duration::from_millis(300),
+    )
+    .expect("bridge should initialize");
+    let err = bridge
+        .tool_board_set(json!({
+            "key": "status.gate",
+            "value": 1,
+            "expectedRevision": 0,
+            "idempotencyKey": "timeout-1"
+        }))
+        .expect_err("a transport timeout leaves the write outcome unknown");
+    let message = err.to_string();
+    assert!(
+        message.contains("outcome is unknown") && message.contains("SAME idempotencyKey"),
+        "transport timeout must teach same-key retry: {message}"
+    );
+    let _ = release_tx.send(());
+    let _ = server.join();
+}
+
+#[test]
+fn delegation_mcp_board_set_rejects_a_receipt_for_the_wrong_key_as_unknown_outcome() {
+    let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |_request| {
+        // Structurally valid receipt — for a DIFFERENT key than requested.
+        (
+            200,
+            test_board_receipt_for("other.key", 0, json!(1), false, false),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+    let err = bridge
+        .tool_board_set(json!({
+            "key": "status.gate",
+            "value": 1,
+            "expectedRevision": 0,
+            "idempotencyKey": "wrong-key-1"
+        }))
+        .expect_err("a receipt for the wrong key must not confirm the mutation");
+    let message = err.to_string();
+    assert!(
+        message.contains("does not correlate") && message.contains("outcome is unknown"),
+        "mismatched receipt must map to unknown-outcome guidance: {message}"
+    );
+    server.join().expect("test server should join");
+}
+
+#[test]
+fn delegation_mcp_board_set_rejects_a_delete_receipt_carrying_a_non_null_value() {
+    let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |_request| {
+        (
+            200,
+            json!({
+                "key": "status.gate",
+                "revision": 3,
+                "priorRevision": 2,
+                "generation": 9,
+                "value": { "ghost": true },
+                "deleted": true,
+                "authorSessionId": "session-parent",
+                "authorName": "Fable",
+                "updatedAt": "2026-07-26T00:00:00.000Z",
+                "duplicate": false
+            }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+    let err = bridge
+        .tool_board_set(json!({
+            "key": "status.gate",
+            "delete": true,
+            "expectedRevision": 2,
+            "idempotencyKey": "ghost-delete-1"
+        }))
+        .expect_err("a deleted receipt with a non-null value is not our delete");
+    let message = err.to_string();
+    assert!(
+        message.contains("non-null value") && message.contains("outcome is unknown"),
+        "unexpected: {message}"
+    );
+    server.join().expect("test server should join");
+}
+
+#[test]
+fn delegation_mcp_board_set_treats_a_max_prior_revision_receipt_as_mismatch_not_panic() {
+    let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |_request| {
+        (
+            200,
+            json!({
+                "key": "status.gate",
+                "revision": 0,
+                "priorRevision": u64::MAX,
+                "generation": 9,
+                "value": 1,
+                "deleted": false,
+                "authorSessionId": "session-parent",
+                "authorName": "Fable",
+                "updatedAt": "2026-07-26T00:00:00.000Z",
+                "duplicate": false
+            }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+    let err = bridge
+        .tool_board_set(json!({
+            "key": "status.gate",
+            "value": 1,
+            "expectedRevision": u64::MAX,
+            "idempotencyKey": "max-prior-1"
+        }))
+        .expect_err("an untrusted MAX priorRevision must be a mismatch, never an overflow");
+    let message = err.to_string();
+    assert!(
+        message.contains("does not correlate") && message.contains("outcome is unknown"),
+        "unexpected: {message}"
+    );
+    server.join().expect("test server should join");
 }

@@ -107,6 +107,10 @@ export function createControlPanelSectionLauncherTab(
       return createSessionListTab(originSessionId, originProjectId);
     case "orchestrators":
       return createOrchestratorListTab(originSessionId, originProjectId);
+    case "board":
+      // The board section is control-panel-only in v1: no detachable
+      // workspace tab (tm-uwx.7.3; tm-d09 owns future tab work).
+      return null;
   }
 }
 

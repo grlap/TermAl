@@ -994,3 +994,24 @@ export type SessionSettingsValue =
   | ClaudeApprovalMode
   | CursorMode
   | GeminiApprovalMode;
+
+// Coordination board (tm-uwx.7): level-triggered per-project facts. Read-only
+// in the UI per Greg's v1 ruling — agents write via MCP/HTTP, humans observe.
+export type BoardEntry = {
+  key: string;
+  revision: number;
+  updatedAtGeneration: number;
+  value: unknown;
+  deleted: boolean;
+  authorSessionId: string;
+  authorName: string;
+  updatedAt: string;
+  stateStamp?: string | null;
+};
+
+export type BoardListPage = {
+  generation: number;
+  entries: BoardEntry[];
+  nextAfterKey?: string | null;
+  unchanged: boolean;
+};

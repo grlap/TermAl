@@ -592,7 +592,7 @@ impl AppState {
             return Err(ApiError::not_found("project not found"));
         };
 
-        inner.projects.remove(project_index);
+        let removed_project = inner.projects.remove(project_index);
         // Collect affected indices first so the mutating pass can go
         // through `session_mut_by_index` (which bumps `mutation_stamp`).
         // Iterating `&mut inner.sessions` directly would clear the
@@ -621,13 +621,64 @@ impl AppState {
                 instance.project_id.clear();
             }
         }
+        // Boards are local-authoritative in v1. Remote projects can never own
+        // a local coordination scope, so fencing their ids would only grow the
+        // permanent deleted-scope table and couple remote deletion to an
+        // irrelevant coordination.sqlite write.
+        if removed_project.remote_id == default_local_remote_id() {
+            inner
+                .pending_coordination_scope_deletions
+                .insert(project_id.to_owned());
+        }
 
-        self.commit_locked(&mut inner)
+        let (_, persist_dispatch) = self
+            .commit_locked_with_persist_dispatch(&mut inner)
             .map_err(|err| ApiError::internal(format!("failed to remove project: {err:#}")))?;
         drop(inner);
+
+        // A queued mutation is owned by the persist worker: it first commits
+        // the project removal plus the outbox item to termal.sqlite, then
+        // signals the dedicated cleanup worker to atomically fence/delete the
+        // board scope in coordination.sqlite and queue persistence of the
+        // cleared outbox. A disconnected channel makes
+        // commit_locked_with_persist_dispatch synchronously persist the
+        // primary deletion; only that explicit outcome authorizes synchronous
+        // cleanup here. Thread-handle presence is not a durability signal
+        // (test and shutdown states can keep a connected sender without a
+        // running handle).
+        if persist_dispatch == PersistDispatch::Synchronous {
+            self.replay_pending_coordination_scope_deletions()
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to finish project coordination cleanup: {err:#}"
+                    ))
+                })?;
+        }
 
         self.prune_telegram_config_for_deleted_project(&project_id)?;
 
         Ok(self.snapshot())
+    }
+
+    fn replay_pending_coordination_scope_deletions(&self) -> Result<()> {
+        // This path is used only after the primary persist worker has stopped
+        // (or by worker-less test AppStates). Match the dedicated cleanup
+        // worker's semantics exactly: every cleanup failure remains in the
+        // durable outbox, successful scopes are removed, and an already-durable
+        // project deletion is never turned into an HTTP 500 by secondary
+        // coordination storage. A later synchronous call or process boot can
+        // retry any retained item.
+        let pass = process_pending_coordination_scope_deletions(
+            &self.inner,
+            |scope_project_id| {
+                self.coordination_board_store
+                    .delete_scope_for_project_lifecycle(scope_project_id)
+            },
+        );
+        if pass.completed == 0 {
+            return Ok(());
+        }
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        self.persist_internal_locked(&inner)
     }
 }

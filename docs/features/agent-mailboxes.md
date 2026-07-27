@@ -5,7 +5,12 @@ agent session: it has no assigned agent, runtime, model, workdir, composer, or
 turn lifecycle. It is an ordered conversation record shared by root sessions.
 See [Agent delegation sessions](agent-delegation-sessions.md#peer-session-connections)
 for root-peer eligibility and the boundary between this shipped mailbox flow
-and the older connection-oriented proposal.
+and the older connection-oriented proposal. Mailboxes are the EDGE half of
+peer coordination — messages that activate sessions; the LEVEL half —
+persistent versioned facts that never wake anyone — lives on the
+[coordination board](agent-boards.md).
+Both durable coordination surfaces live in the isolated database described by
+[SQLite session storage](sqlite-session-storage.md).
 
 ## Delivery contract
 
@@ -124,14 +129,15 @@ metadata while every body remains independently ordered and durable in SQLite.
 
 Mailboxes use normalized SQLite tables (`mailboxes`,
 `mailbox_participants`, and `mailbox_messages`) through one long-lived
-connection configured with WAL, `synchronous=NORMAL`, and the existing
-five-second busy timeout. Mailbox operations bypass the asynchronous AppState
-persist queue and remain usable after that worker shuts down, but mailbox and
-AppState writes share a per-database FIFO admission queue so TermAl's own
-connections cannot race each other for SQLite's single-writer slot or starve a
-deadline-bound request behind repeated internal lifecycle writes. The persist worker
-releases that admission lock immediately after SQLite commit, before
-post-commit permission and redirection checks. Request-owned append,
+connection to `~/.termal/coordination.sqlite`, configured with WAL,
+`synchronous=NORMAL`, and the existing five-second busy timeout. The
+coordination board uses a second long-lived connection to the same small
+database and shares its per-file FIFO writer admission. Session and transcript
+persistence stays in `termal.sqlite` with a different admission domain, so a
+large active transcript cannot block mailbox or board writes.
+
+Mailbox operations bypass the asynchronous AppState persist queue and remain
+usable after that worker shuts down. Request-owned append,
 acknowledgement, and duplicate-finalization waits use a five-second deadline;
 if it expires, the backend returns `503 Service Unavailable`. Append and
 acknowledgement admission failures explicitly confirm that the attempted
@@ -141,9 +147,18 @@ caller can safely replay them. WAL still permits concurrent readers.
 External-process or OS-level lock exhaustion uses the same retryable
 classification instead of an internal-error `500`.
 
+On the first boot of this layout, TermAl attaches the legacy `termal.sqlite`
+read-only and copies mailbox plus board rows into `coordination.sqlite`. Copy,
+verification, and the destination-owned completion marker commit in one
+destination transaction before either coordination store or the HTTP listener
+is available. Legacy coordination tables remain inert and are not deleted.
+
 While an original dispatch is still finalizing, duplicate requests may receive
 repeated retryable `503` responses; retrying the same idempotency key remains
-safe throughout and eventually recovers the original immutable receipt.
+safe throughout and eventually recovers the original immutable receipt. The
+MCP bridge opts mailbox send/list/read/acknowledgement calls into bounded
+safe-replay handling; generic bridge requests remain single-attempt, so future
+non-idempotent endpoints cannot inherit replay from error wording alone.
 
 The MCP bridge sends an exact `session-*` target directly to the mailbox
 endpoint; backend target validation remains authoritative. The bridge performs
