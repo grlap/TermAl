@@ -16,11 +16,13 @@
 // to the queue and drain it one turn at a time as the session
 // transitions back to `Idle`. `dispatch_next_queued_turn` is the drain
 // callback invoked by `finish_turn_ok` / `mark_turn_error` / similar
-// from `turn_lifecycle.rs`. `dispatch_orphaned_queued_prompts` is the
-// recovery path: after an abnormal exit or startup where a session
-// landed back at `Idle` while still carrying queued prompts, we scan
-// for that mismatch and re-kick the queue. Without it a crashed turn
-// could leave queued prompts stranded forever.
+// from `turn_lifecycle.rs`. Persisted mailbox and user queues deliberately
+// remain dormant after process restart: the next user prompt, explicit resume,
+// or new inbound wake is the activation event that drains them. Workflow-owned
+// queue heads are different: delegation waits and orchestrator transitions
+// already consumed their durable trigger before committing the queued prompt,
+// so startup re-kicks those queue heads to preserve crash recovery. A user
+// prompt ahead of a workflow prompt remains a strict FIFO barrier.
 //
 // Runtime reset. `record.runtime_reset_required` signals that the
 // session's long-lived runtime handle must be torn down and respawned
@@ -43,6 +45,11 @@ struct StartedTurnMessageDelta {
     preview: String,
     status: SessionStatus,
     session_mutation_stamp: u64,
+}
+
+struct OrphanedWorkflowDispatch {
+    dispatch: TurnDispatch,
+    queued: QueuedPromptRecord,
 }
 
 /// Adds transport context that a receiving agent cannot infer from its own
@@ -467,25 +474,21 @@ impl AppState {
         })
     }
 
-    /// Re-kicks queued prompts whose owning session landed back at
-    /// `SessionStatus::Idle` without draining the queue.
+    /// Re-kicks committed workflow prompts whose owning session landed back at
+    /// [`SessionStatus::Idle`] before delivery, or retained
+    /// [`SessionStatus::Error`] after a previous boot handoff was rejected.
     ///
-    /// This is the recovery path for the "stranded queue" failure mode:
-    /// the normal flow is that `finish_turn_ok` / `mark_turn_error`
-    /// transitions the session to `Idle` and immediately calls
-    /// [`Self::dispatch_next_queued_turn`] to start the next prompt. If
-    /// that flow is interrupted — a runtime exit handler fires mid-
-    /// transition, a `stop_session` lands between them, or state is
-    /// restored from disk mid-queue — the session can wind up idle with
-    /// prompts still queued and no pending dispatch. This scans for
-    /// that mismatch and re-invokes the dispatcher for every matching
-    /// session. Safe to call speculatively: the dispatcher bails if
-    /// the session is no longer idle or the queue has been drained by
-    /// a concurrent call.
-    ///
-    /// Called at startup (after `recover_interrupted_sessions`) and
-    /// defensively from a handful of error paths.
-    fn dispatch_orphaned_queued_prompts(&self) {
+    /// Delegation-wait resumes and orchestrator transitions both queue prompts
+    /// with [`QueuedPromptSource::Orchestrator`] after consuming their durable
+    /// trigger. A crash between that commit and runtime delivery would otherwise
+    /// strand the workflow permanently. Ordinary user prompts remain a strict
+    /// barrier because restart is not their activation event. Boot-recovered
+    /// mailbox wakes may precede the workflow prompt because recovery inserts
+    /// them at the queue front; in that mixed case the already-committed workflow
+    /// activation drains the mailbox wake first without overtaking it.
+    /// A user prompt before the workflow entry remains a strict FIFO barrier,
+    /// so restart leaves the entire queue dormant until a genuine activation.
+    fn dispatch_orphaned_workflow_prompts(&self) {
         let session_ids: Vec<String> = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
@@ -493,8 +496,17 @@ impl AppState {
                 .iter()
                 .filter(|record| {
                     !record.is_remote_proxy()
-                        && record.session.status == SessionStatus::Idle
-                        && !record.queued_prompts.is_empty()
+                        && matches!(
+                            record.session.status,
+                            SessionStatus::Idle | SessionStatus::Error
+                        )
+                        && record
+                            .queued_prompts
+                            .iter()
+                            .find(|queued| queued.source != QueuedPromptSource::Mailbox)
+                            .is_some_and(|queued| {
+                                queued.source == QueuedPromptSource::Orchestrator
+                            })
                         && !record.orchestrator_auto_dispatch_blocked
                         && matches!(record.runtime, SessionRuntime::None)
                 })
@@ -503,21 +515,169 @@ impl AppState {
         };
 
         for session_id in session_ids {
-            match self.dispatch_next_queued_turn(&session_id, false) {
-                Ok(Some(dispatch)) => {
-                    if let Err(err) = deliver_turn_dispatch(self, dispatch) {
+            match self.start_orphaned_workflow_turn(&session_id) {
+                Ok(Some(started)) => {
+                    if let Err(err) = deliver_turn_dispatch(self, started.dispatch) {
                         eprintln!(
-                            "startup> failed dispatching orphaned queued prompt for `{session_id}`: {}",
+                            "startup> failed dispatching orphaned workflow prompt for `{session_id}`: {}",
                             err.message
                         );
+                        match started.queued.source {
+                            QueuedPromptSource::Mailbox => {
+                                self.retry_orphaned_workflow_after_rejected_mailbox_wake(
+                                    &session_id,
+                                );
+                            }
+                            QueuedPromptSource::Orchestrator => {
+                                if let Err(requeue_err) = self
+                                    .requeue_rejected_orphaned_workflow_prompt(
+                                        &session_id,
+                                        started.queued,
+                                    )
+                                {
+                                    eprintln!(
+                                        "startup> failed restoring rejected orphaned workflow prompt for `{session_id}`: {requeue_err:#}"
+                                    );
+                                }
+                            }
+                            QueuedPromptSource::User => {}
+                        }
                     }
                 }
                 Ok(None) => {}
                 Err(err) => {
                     eprintln!(
-                        "startup> failed dispatching orphaned queued prompt for `{session_id}`: {err:#}"
+                        "startup> failed dispatching orphaned workflow prompt for `{session_id}`: {err:#}"
                     );
                 }
+            }
+        }
+    }
+
+    /// Atomically revalidates and promotes one queue head that is owned by a
+    /// committed workflow activation.
+    ///
+    /// The preliminary scan in [`Self::dispatch_orphaned_workflow_prompts`] is
+    /// only an optimization. Queue shape, status, runtime ownership, and prompt
+    /// promotion are checked together under the state lock here so a concurrent
+    /// activation cannot turn the startup pass into a second live dispatch.
+    fn start_orphaned_workflow_turn(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<OrphanedWorkflowDispatch>> {
+        if let Err(err) =
+            self.reconcile_never_woken_mailbox_notifications_for_session(session_id)
+        {
+            eprintln!(
+                "mailbox> failed reconciling notifications before workflow recovery for `{session_id}`: {err:#}"
+            );
+        }
+        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return Ok(None);
+        };
+        let eligible = {
+            let record = &inner.sessions[index];
+            !record.is_remote_proxy()
+                && matches!(
+                    record.session.status,
+                    SessionStatus::Idle | SessionStatus::Error
+                )
+                && matches!(record.runtime, SessionRuntime::None)
+                && !record.orchestrator_auto_dispatch_blocked
+                && record
+                    .queued_prompts
+                    .iter()
+                    .find(|queued| queued.source != QueuedPromptSource::Mailbox)
+                    .is_some_and(|queued| queued.source == QueuedPromptSource::Orchestrator)
+        };
+        if !eligible {
+            return Ok(None);
+        }
+
+        let queued = inner.sessions[index]
+            .queued_prompts
+            .front()
+            .cloned()
+            .expect("eligible workflow recovery queue should have a head");
+        let Some(started) = self.start_next_queued_turn_locked(&mut inner, index, false)? else {
+            return Ok(None);
+        };
+        let revision = self.commit_persisted_delta_locked(&mut inner)?;
+        drop(inner);
+        self.publish_started_turn_message_delta(revision, started.message_delta);
+        Ok(Some(OrphanedWorkflowDispatch {
+            dispatch: started.dispatch,
+            queued,
+        }))
+    }
+
+    /// Restores a workflow prompt whose runtime channel rejected the boot
+    /// handoff. The new message id prevents the eventual retry from duplicating
+    /// the failed turn's transcript id, while `push_front` preserves the
+    /// workflow's original ordering ahead of prompts queued concurrently.
+    fn requeue_rejected_orphaned_workflow_prompt(
+        &self,
+        session_id: &str,
+        mut queued: QueuedPromptRecord,
+    ) -> Result<()> {
+        if queued.source != QueuedPromptSource::Orchestrator {
+            return Ok(());
+        }
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        queued.pending_prompt.id = inner.next_message_id();
+        queued.pending_prompt.timestamp = stamp_now();
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        record.queued_prompts.push_front(queued);
+        sync_pending_prompts(record);
+        self.commit_locked(&mut inner)?;
+        Ok(())
+    }
+
+    /// Makes one bounded retry when a stale runtime rejects a boot-recovered
+    /// mailbox wake that is gating an already-committed workflow activation.
+    ///
+    /// Rejection clears the dead runtime, records the failed turn, and restores
+    /// the exact mailbox wake at the queue front. Without a retry, the session
+    /// remains `Error` and the durable workflow prompt behind that wake has no
+    /// remaining activation event. This helper deliberately retries only this
+    /// mixed Mailbox -> Orchestrator shape and only once; another rejection
+    /// remains visible for a user or later restart instead of recursively
+    /// respawning a broken runtime.
+    fn retry_orphaned_workflow_after_rejected_mailbox_wake(&self, session_id: &str) {
+        match self.start_orphaned_workflow_turn(session_id) {
+            Ok(Some(started)) => {
+                if let Err(err) = deliver_turn_dispatch(self, started.dispatch) {
+                    eprintln!(
+                        "startup> failed retrying recovered mailbox wake before orphaned workflow for `{session_id}`: {}",
+                        err.message
+                    );
+                    if started.queued.source == QueuedPromptSource::Orchestrator {
+                        if let Err(requeue_err) = self
+                            .requeue_rejected_orphaned_workflow_prompt(
+                                session_id,
+                                started.queued,
+                            )
+                        {
+                            eprintln!(
+                                "startup> failed restoring workflow prompt rejected during mailbox recovery retry for `{session_id}`: {requeue_err:#}"
+                            );
+                        }
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(err) => {
+                eprintln!(
+                    "startup> failed preparing recovered mailbox wake retry before orphaned workflow for `{session_id}`: {err:#}"
+                );
             }
         }
     }
@@ -526,12 +686,11 @@ impl AppState {
     /// dispatches it when the session is idle.
     ///
     /// Called from every path that transitions a session to `Idle`:
-    /// `finish_turn_ok`, `mark_turn_error`, `handle_runtime_exit`, the
-    /// approval-submission paths that unblock a turn, and the orphan
-    /// recovery [`Self::dispatch_orphaned_queued_prompts`]. Guards:
+    /// `finish_turn_ok`, `mark_turn_error`, `handle_runtime_exit`, and
+    /// the approval-submission paths that unblock a turn. It is also
+    /// used by explicit post-restart activation paths and selective
+    /// workflow crash recovery. Guards:
     ///
-    /// - Does nothing if the session is not `Idle` (an in-flight turn
-    ///   will call us again on completion).
     /// - Does nothing if the queue is empty.
     /// - Respects `orchestrator_auto_dispatch_blocked` so orchestrator
     ///   parents can manually gate when queued turns run.

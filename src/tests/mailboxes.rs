@@ -297,6 +297,45 @@ fn mailbox_send_runtime_channel_failure_keeps_notification_recoverable() {
         })
         .expect("failed delivery should remain queued for recovery");
     assert_eq!(recovered.message_id, receipt.message_id);
+    drop(inner);
+
+    let (runtime, input_rx) = test_claude_runtime_handle("accepted-fresh-recovery-runtime");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        inner.sessions[target_index].runtime = SessionRuntime::Claude(runtime);
+    }
+    let retry = state
+        .dispatch_turn(
+            &target_id,
+            SendMessageRequest {
+                text: "ordinary activation retries the rejected fresh wake".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
+        .expect("a later activation should retry the rejected fresh wake");
+    let retry = match retry {
+        DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        _ => panic!("the restored wake must remain ahead of the later activation"),
+    };
+    deliver_turn_dispatch(&state, retry).expect("the replacement runtime should accept the wake");
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_secs(1)),
+        Ok(ClaudeRuntimeCommand::Prompt(command)) if command.text.contains(&receipt.mailbox_id)
+    ));
+    assert_eq!(
+        state
+            .mailbox_store
+            .read_message(&target_id, &receipt.message_id)
+            .expect("accepted retry state should remain readable")
+            .notification_state,
+        "deliveredToIdleSession"
+    );
 }
 
 #[test]
@@ -401,11 +440,15 @@ fn dispatch_coalescing_never_regresses_to_an_older_sequence() {
 }
 
 #[test]
-fn idle_receiver_dispatches_the_coalesced_mailbox_wake_it_started() {
+fn fresh_inbound_wake_coalesces_and_dispatches_recovered_mailbox_prompt_once() {
     let (state, sender_id, target_id) = mailbox_test_state();
     let first = state
         .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
         .expect("first mailbox wake should queue while the target is busy");
+    state
+        .mailbox_store
+        .set_notification_state(&first.message_id, "recoveredWake")
+        .expect("test should model the queued state produced by boot recovery");
     let input_rx = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let target_index = inner
@@ -435,6 +478,22 @@ fn idle_receiver_dispatches_the_coalesced_mailbox_wake_it_started() {
         input_rx.recv_timeout(Duration::from_secs(1)),
         Ok(ClaudeRuntimeCommand::Prompt(_))
     ));
+    assert!(
+        matches!(input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "the fresh wake must update and dispatch the recovered prompt, not add a second turn"
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let target = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == target_id)
+            .expect("target should exist");
+        assert!(
+            target.queued_prompts.is_empty(),
+            "the coalesced mailbox prompt should be promoted exactly once"
+        );
+    }
     for message_id in [&first.message_id, &second.message_id] {
         assert_eq!(
             state
@@ -835,12 +894,15 @@ fn boot_recovers_a_delivered_notification_after_its_turn_dies_exactly_once() {
         let target_index = inner
             .find_session_index(&target_id)
             .expect("target should exist");
-        let (runtime, input_rx) = test_claude_runtime_handle("mailbox-boot-recovery-runtime");
+        let (runtime, input_rx) =
+            test_acp_runtime_handle(AcpAgent::Cursor, "mailbox-boot-recovery-runtime");
+        state.install_test_acp_runtime_override(AcpAgent::Cursor, runtime);
         let target = inner
             .session_mut_by_index(target_index)
             .expect("target should exist");
+        target.session.agent = Agent::Cursor;
         target.session.status = SessionStatus::Idle;
-        target.runtime = SessionRuntime::Claude(runtime);
+        target.runtime = SessionRuntime::None;
         target.queued_prompts.clear();
         sync_pending_prompts(target);
         input_rx
@@ -852,7 +914,7 @@ fn boot_recovers_a_delivered_notification_after_its_turn_dies_exactly_once() {
         ),
         ..state.clone()
     };
-    restarted.reconcile_unread_mailbox_wakeups_after_boot();
+    restarted.run_post_listen_boot();
     {
         let inner = restarted.inner.lock().expect("state mutex poisoned");
         let target = inner
@@ -866,46 +928,96 @@ fn boot_recovers_a_delivered_notification_after_its_turn_dies_exactly_once() {
             "boot should recreate the wake for an unread delivered message"
         );
         assert_eq!(target.queued_prompts[0].source, QueuedPromptSource::Mailbox);
+        assert_eq!(target.session.pending_prompts.len(), 1);
+        assert_eq!(
+            target.session.status,
+            SessionStatus::Idle,
+            "boot recovery must not activate the receiving session"
+        );
+        assert!(
+            matches!(target.runtime, SessionRuntime::None),
+            "boot recovery must not spawn or attach an agent runtime"
+        );
     }
+    assert!(
+        matches!(input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "boot recovery must not deliver the recovered wake"
+    );
     assert_eq!(
         restarted
             .mailbox_store
             .read_message(&target_id, &committed.message_id)
             .expect("recovery disposition should read")
             .notification_state,
-        "deliveredToIdleSession",
-        "boot recovery must not regress the terminal delivery state while recreating its wake"
+        "recoveredWake",
+        "boot recovery should record that the unread wake is queued again"
     );
 
     let recovered = restarted
-        .dispatch_next_queued_turn(&target_id, true)
-        .expect("boot recovery wake should dispatch")
-        .expect("boot recovery wake should exist");
+        .dispatch_turn(
+            &target_id,
+            SendMessageRequest {
+                text: "ordinary next-turn prompt".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
+        .expect("a genuine activation should drain the recovered wake first");
+    let recovered = match recovered {
+        DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Dispatched(_) => {
+            panic!("the ordinary prompt must not overtake the recovered wake")
+        }
+        DispatchTurnResult::Queued => {
+            panic!("an idle receiver should dispatch the recovered wake")
+        }
+    };
     let recovered_prompt = match &recovered {
-        TurnDispatch::PersistentClaude { command, .. } => command.text.clone(),
-        _ => panic!("expected Claude recovery wake"),
+        TurnDispatch::PersistentAcp { command, .. } => command.prompt.clone(),
+        _ => panic!("expected Cursor recovery wake"),
     };
     assert!(recovered_prompt.contains(&committed.mailbox_id));
     deliver_turn_dispatch(&restarted, recovered)
         .expect("runtime should accept the boot recovery wake");
     assert!(matches!(
         input_rx.recv_timeout(Duration::from_secs(1)),
-        Ok(ClaudeRuntimeCommand::Prompt(_))
+        Ok(AcpRuntimeCommand::Prompt(_))
     ));
 
     {
-        let mut inner = restarted.inner.lock().expect("state mutex poisoned");
-        let target_index = inner
-            .find_session_index(&target_id)
+        let inner = restarted.inner.lock().expect("state mutex poisoned");
+        let target = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == target_id)
             .expect("target should exist");
-        inner.sessions[target_index].session.status = SessionStatus::Idle;
+        assert_eq!(
+            target.queued_prompts.len(),
+            1,
+            "the activating prompt should remain queued behind the recovered wake"
+        );
+        assert_eq!(
+            target.queued_prompts[0].pending_prompt.text,
+            "ordinary next-turn prompt"
+        );
+        assert!(
+            target
+                .queued_prompts
+                .iter()
+                .all(|queued| queued.source != QueuedPromptSource::Mailbox),
+            "the recovered mailbox wake should be promoted exactly once"
+        );
     }
-    assert!(
+    assert_eq!(
         restarted
-            .dispatch_next_queued_turn(&target_id, true)
-            .expect("post-recovery queue drain should succeed")
-            .is_none(),
-        "an unacknowledged boot-recovery wake must not recreate itself"
+            .mailbox_store
+            .read_message(&target_id, &committed.message_id)
+            .expect("delivered recovery state should read")
+            .notification_state,
+        "deliveredToIdleSession",
+        "runtime acceptance should advance the recovered wake to delivered"
     );
     assert_eq!(
         restarted
@@ -916,6 +1028,505 @@ fn boot_recovers_a_delivered_notification_after_its_turn_dies_exactly_once() {
         1,
         "delivery recovery must not acknowledge the durable message"
     );
+}
+
+#[test]
+fn rejected_boot_recovery_wake_is_immediately_requeued() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let committed = state
+        .mailbox_store
+        .append(&MailboxAppendInput {
+            sender_session_id: sender_id,
+            sender_name: "Sol".to_owned(),
+            target_session_id: target_id.clone(),
+            target_name: "Fable".to_owned(),
+            body: "The recovered wake must survive runtime rejection.".to_owned(),
+            idempotency_key: "rejected-boot-recovery-wake".to_owned(),
+            topic: Some("recovery".to_owned()),
+            state_stamp: None,
+        })
+        .expect("mailbox body should commit");
+    state
+        .mailbox_store
+        .set_notification_state(&committed.message_id, "deliveredToIdleSession")
+        .expect("the pre-crash wake should be recorded as delivered");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        let (runtime, input_rx) =
+            test_acp_runtime_handle(AcpAgent::Cursor, "rejected-boot-recovery-runtime");
+        drop(input_rx);
+        state.install_test_acp_runtime_override(AcpAgent::Cursor, runtime);
+        let target = inner
+            .session_mut_by_index(target_index)
+            .expect("target should exist");
+        target.session.agent = Agent::Cursor;
+        target.session.status = SessionStatus::Idle;
+        target.runtime = SessionRuntime::None;
+        target.queued_prompts.clear();
+        sync_pending_prompts(target);
+    }
+
+    state.run_post_listen_boot();
+    let dispatch = state
+        .dispatch_turn(
+            &target_id,
+            SendMessageRequest {
+                text: "ordinary activation after restart".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
+        .expect("the genuine activation should promote the recovery wake");
+    let dispatch = match dispatch {
+        DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        _ => panic!("the recovered wake must stay ahead of the ordinary activation"),
+    };
+    deliver_turn_dispatch(&state, dispatch)
+        .expect_err("the closed runtime channel should reject the recovered wake");
+
+    assert_eq!(
+        state
+            .mailbox_store
+            .read_message(&target_id, &committed.message_id)
+            .expect("recovery state should remain readable")
+            .notification_state,
+        "recoveredWake"
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let target = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == target_id)
+            .expect("target should exist");
+        assert_eq!(
+            target.queued_prompts.front().map(|queued| queued.source),
+            Some(QueuedPromptSource::Mailbox),
+            "runtime rejection must immediately recreate the durable recovery wake"
+        );
+        assert!(
+            target
+                .queued_prompts
+                .iter()
+                .any(|queued| queued.pending_prompt.text == "ordinary activation after restart"),
+            "the activation that exposed the failed channel must remain queued behind the wake"
+        );
+    }
+
+    let (runtime, input_rx) =
+        test_acp_runtime_handle(AcpAgent::Cursor, "accepted-recovery-retry-runtime");
+    state.install_test_acp_runtime_override(AcpAgent::Cursor, runtime);
+    let retry = state
+        .dispatch_turn(
+            &target_id,
+            SendMessageRequest {
+                text: "second genuine activation".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
+        .expect("a later activation should retry the restored wake");
+    let retry = match retry {
+        DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        _ => panic!("the restored wake must remain ahead of later activations"),
+    };
+    deliver_turn_dispatch(&state, retry).expect("the replacement runtime should accept the wake");
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_secs(1)),
+        Ok(AcpRuntimeCommand::Prompt(command)) if command.prompt.contains(&committed.mailbox_id)
+    ));
+    assert_eq!(
+        state
+            .mailbox_store
+            .read_message(&target_id, &committed.message_id)
+            .expect("accepted retry state should remain readable")
+            .notification_state,
+        "deliveredToIdleSession"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should exist");
+    assert!(
+        target
+            .queued_prompts
+            .iter()
+            .all(|queued| queued.source != QueuedPromptSource::Mailbox),
+        "successful retry must remove the recovery wake exactly once"
+    );
+}
+
+#[test]
+fn boot_dispatches_committed_workflow_queue_heads() {
+    let (state, _sender_id, target_id) = mailbox_test_state();
+    let input_rx = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        let (runtime, input_rx) =
+            test_acp_runtime_handle(AcpAgent::Cursor, "workflow-boot-recovery-runtime");
+        state.install_test_acp_runtime_override(AcpAgent::Cursor, runtime);
+        let target = inner
+            .session_mut_by_index(target_index)
+            .expect("target should exist");
+        target.session.agent = Agent::Cursor;
+        target.session.status = SessionStatus::Idle;
+        target.runtime = SessionRuntime::None;
+        target.queued_prompts.clear();
+        queue_orchestrator_prompt_on_record(
+            target,
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: "committed-workflow-resume".to_owned(),
+                timestamp: stamp_now(),
+                text: "resume committed delegation or orchestrator workflow".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+            Vec::new(),
+        );
+        input_rx
+    };
+
+    state.run_post_listen_boot();
+
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_secs(1)),
+        Ok(AcpRuntimeCommand::Prompt(command))
+            if command.prompt == "resume committed delegation or orchestrator workflow"
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should exist");
+    assert!(target.queued_prompts.is_empty());
+    assert_eq!(target.session.status, SessionStatus::Active);
+}
+
+#[test]
+fn boot_keeps_a_user_queue_barrier_and_workflow_behind_it_dormant() {
+    let (state, _sender_id, target_id) = mailbox_test_state();
+    let input_rx = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        let (runtime, input_rx) =
+            test_acp_runtime_handle(AcpAgent::Cursor, "user-boot-dormancy-runtime");
+        state.install_test_acp_runtime_override(AcpAgent::Cursor, runtime);
+        let target = inner
+            .session_mut_by_index(target_index)
+            .expect("target should exist");
+        target.session.agent = Agent::Cursor;
+        target.session.status = SessionStatus::Idle;
+        target.runtime = SessionRuntime::None;
+        target.queued_prompts.clear();
+        queue_prompt_on_record(
+            target,
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: "committed-user-prompt".to_owned(),
+                timestamp: stamp_now(),
+                text: "remain dormant until genuine activation".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+            Vec::new(),
+        );
+        queue_orchestrator_prompt_on_record(
+            target,
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: "workflow-behind-user-barrier".to_owned(),
+                timestamp: stamp_now(),
+                text: "remain behind the committed user prompt".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+            Vec::new(),
+        );
+        input_rx
+    };
+
+    state.run_post_listen_boot();
+
+    assert!(
+        matches!(input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "boot must not deliver an ordinary user queue head"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should exist");
+    assert_eq!(target.queued_prompts.len(), 2);
+    assert_eq!(target.queued_prompts[0].source, QueuedPromptSource::User);
+    assert_eq!(
+        target.queued_prompts[1].source,
+        QueuedPromptSource::Orchestrator
+    );
+    assert_eq!(target.session.status, SessionStatus::Idle);
+    assert!(matches!(target.runtime, SessionRuntime::None));
+}
+
+#[test]
+fn boot_workflow_activation_drains_a_recovered_mailbox_wake_first() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let committed = state
+        .mailbox_store
+        .append(&MailboxAppendInput {
+            sender_session_id: sender_id,
+            sender_name: "Sol".to_owned(),
+            target_session_id: target_id.clone(),
+            target_name: "Fable".to_owned(),
+            body: "Unread mailbox body before workflow crash recovery.".to_owned(),
+            idempotency_key: "mixed-mailbox-workflow-boot".to_owned(),
+            topic: Some("recovery".to_owned()),
+            state_stamp: None,
+        })
+        .expect("mailbox body should commit");
+    state
+        .mailbox_store
+        .set_notification_state(&committed.message_id, "deliveredToIdleSession")
+        .expect("the pre-crash wake should be recorded as delivered");
+
+    let input_rx = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        let (runtime, input_rx) =
+            test_acp_runtime_handle(AcpAgent::Cursor, "mixed-boot-recovery-runtime");
+        state.install_test_acp_runtime_override(AcpAgent::Cursor, runtime);
+        let target = inner
+            .session_mut_by_index(target_index)
+            .expect("target should exist");
+        target.session.agent = Agent::Cursor;
+        target.session.status = SessionStatus::Idle;
+        target.runtime = SessionRuntime::None;
+        target.queued_prompts.clear();
+        queue_orchestrator_prompt_on_record(
+            target,
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: "committed-workflow-behind-mailbox".to_owned(),
+                timestamp: stamp_now(),
+                text: "resume workflow after recovered mailbox wake".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+            Vec::new(),
+        );
+        input_rx
+    };
+
+    state.run_post_listen_boot();
+
+    let runtime_prompt = match input_rx.recv_timeout(Duration::from_secs(1)) {
+        Ok(AcpRuntimeCommand::Prompt(command)) => command.prompt,
+        Ok(_) => panic!("expected recovered mailbox wake prompt dispatch"),
+        Err(err) => panic!("expected recovered mailbox wake dispatch: {err}"),
+    };
+    assert!(runtime_prompt.contains(&committed.mailbox_id));
+    assert!(
+        !runtime_prompt.contains("resume workflow after recovered mailbox wake"),
+        "the workflow activation must not overtake the recovered mailbox wake"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should exist");
+    assert_eq!(target.queued_prompts.len(), 1);
+    assert_eq!(
+        target.queued_prompts[0].source,
+        QueuedPromptSource::Orchestrator
+    );
+    assert_eq!(
+        target.queued_prompts[0].pending_prompt.text,
+        "resume workflow after recovered mailbox wake"
+    );
+    assert_eq!(target.session.status, SessionStatus::Active);
+}
+
+#[test]
+fn boot_workflow_activation_retries_a_rejected_recovered_wake_once() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let committed = state
+        .mailbox_store
+        .append(&MailboxAppendInput {
+            sender_session_id: sender_id,
+            sender_name: "Sol".to_owned(),
+            target_session_id: target_id.clone(),
+            target_name: "Fable".to_owned(),
+            body: "Recovered wake survives one stale runtime before workflow recovery.".to_owned(),
+            idempotency_key: "mixed-mailbox-workflow-rejected-boot".to_owned(),
+            topic: Some("recovery".to_owned()),
+            state_stamp: None,
+        })
+        .expect("mailbox body should commit");
+    state
+        .mailbox_store
+        .set_notification_state(&committed.message_id, "deliveredToIdleSession")
+        .expect("the pre-crash wake should be recorded as delivered");
+
+    let (rejected_runtime, rejected_rx) =
+        test_acp_runtime_handle(AcpAgent::Cursor, "rejected-mixed-boot-runtime");
+    drop(rejected_rx);
+    state.install_test_acp_runtime_override(AcpAgent::Cursor, rejected_runtime);
+    let (accepted_runtime, accepted_rx) =
+        test_acp_runtime_handle(AcpAgent::Cursor, "accepted-mixed-boot-retry-runtime");
+    state.install_test_acp_runtime_override(AcpAgent::Cursor, accepted_runtime);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        let target = inner
+            .session_mut_by_index(target_index)
+            .expect("target should exist");
+        target.session.agent = Agent::Cursor;
+        target.session.status = SessionStatus::Idle;
+        target.runtime = SessionRuntime::None;
+        target.queued_prompts.clear();
+        queue_orchestrator_prompt_on_record(
+            target,
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: "workflow-behind-rejected-recovery-wake".to_owned(),
+                timestamp: stamp_now(),
+                text: "resume workflow after the recovered wake retry".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+            Vec::new(),
+        );
+    }
+
+    state.run_post_listen_boot();
+
+    assert!(matches!(
+        accepted_rx.recv_timeout(Duration::from_secs(1)),
+        Ok(AcpRuntimeCommand::Prompt(command)) if command.prompt.contains(&committed.mailbox_id)
+    ));
+    assert_eq!(
+        state
+            .mailbox_store
+            .read_message(&target_id, &committed.message_id)
+            .expect("accepted retry state should remain readable")
+            .notification_state,
+        "deliveredToIdleSession"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should exist");
+    assert_eq!(target.session.status, SessionStatus::Active);
+    assert_eq!(target.queued_prompts.len(), 1);
+    assert_eq!(
+        target.queued_prompts[0].source,
+        QueuedPromptSource::Orchestrator
+    );
+    assert_eq!(
+        target.queued_prompts[0].pending_prompt.text,
+        "resume workflow after the recovered wake retry"
+    );
+}
+
+#[test]
+fn boot_requeues_a_rejected_workflow_head_for_a_later_recovery_pass() {
+    let (state, _sender_id, target_id) = mailbox_test_state();
+    let (rejected_runtime, rejected_rx) =
+        test_acp_runtime_handle(AcpAgent::Cursor, "rejected-workflow-head-runtime");
+    drop(rejected_rx);
+    state.install_test_acp_runtime_override(AcpAgent::Cursor, rejected_runtime);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        let target = inner
+            .session_mut_by_index(target_index)
+            .expect("target should exist");
+        target.session.agent = Agent::Cursor;
+        target.session.status = SessionStatus::Idle;
+        target.runtime = SessionRuntime::None;
+        target.queued_prompts.clear();
+        queue_orchestrator_prompt_on_record(
+            target,
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: "rejected-workflow-head".to_owned(),
+                timestamp: stamp_now(),
+                text: "retry this committed workflow on the next recovery pass".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+            Vec::new(),
+        );
+    }
+
+    state.run_post_listen_boot();
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let target = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == target_id)
+            .expect("target should exist");
+        assert_eq!(target.session.status, SessionStatus::Error);
+        assert!(matches!(target.runtime, SessionRuntime::None));
+        assert_eq!(target.queued_prompts.len(), 1);
+        assert_eq!(
+            target.queued_prompts[0].source,
+            QueuedPromptSource::Orchestrator
+        );
+        assert_eq!(
+            target.queued_prompts[0].pending_prompt.text,
+            "retry this committed workflow on the next recovery pass"
+        );
+        assert_ne!(
+            target.queued_prompts[0].pending_prompt.id, "rejected-workflow-head",
+            "a retry needs a fresh transcript message id"
+        );
+    }
+
+    let (accepted_runtime, accepted_rx) =
+        test_acp_runtime_handle(AcpAgent::Cursor, "accepted-workflow-head-retry-runtime");
+    state.install_test_acp_runtime_override(AcpAgent::Cursor, accepted_runtime);
+    state.dispatch_orphaned_workflow_prompts();
+
+    assert!(matches!(
+        accepted_rx.recv_timeout(Duration::from_secs(1)),
+        Ok(AcpRuntimeCommand::Prompt(command))
+            if command.prompt.contains("retry this committed workflow on the next recovery pass")
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should exist");
+    assert_eq!(target.session.status, SessionStatus::Active);
+    assert!(target.queued_prompts.is_empty());
 }
 
 #[test]

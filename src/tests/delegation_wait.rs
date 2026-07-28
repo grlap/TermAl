@@ -28,6 +28,53 @@ fn assert_delegation_wait_response_serializes_queue_flags(
 }
 
 #[test]
+fn delegation_wait_resume_respects_a_preexisting_user_queue_barrier() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let parent_index = inner
+        .find_session_index(&parent_session_id)
+        .expect("parent should exist");
+    queue_prompt_on_record(
+        inner
+            .session_mut_by_index(parent_index)
+            .expect("parent should exist"),
+        PendingPrompt {
+            attachments: Vec::new(),
+            id: "preexisting-user-barrier".to_owned(),
+            timestamp: stamp_now(),
+            text: "user prompt committed before restart".to_owned(),
+            expanded_text: None,
+            source: None,
+        },
+        Vec::new(),
+    );
+
+    let result = queue_delegation_wait_resume_locked(
+        &mut inner,
+        &parent_session_id,
+        "workflow resume queued during boot".to_owned(),
+    );
+
+    assert!(result.prompt_queued);
+    assert!(
+        !result.dispatch_requested,
+        "a workflow resume must not turn restart into activation for an older user prompt"
+    );
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_session_id)
+        .expect("parent should exist");
+    assert_eq!(parent.queued_prompts.len(), 2);
+    assert_eq!(parent.queued_prompts[0].source, QueuedPromptSource::User);
+    assert_eq!(
+        parent.queued_prompts[1].source,
+        QueuedPromptSource::Orchestrator
+    );
+}
+
+#[test]
 fn delegation_wait_all_queues_consolidated_parent_resume_after_children_finish() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);
@@ -972,6 +1019,7 @@ fn delegation_wait_reconciles_after_restart_recovery() {
     let (project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let parent_session_id;
     let delegation_id;
+    let mailbox_id;
     {
         let state = AppState::new_with_paths(
             project_root.to_string_lossy().into_owned(),
@@ -1006,6 +1054,24 @@ fn delegation_wait_reconciles_after_restart_recovery() {
                 },
             )
             .expect("wait should be scheduled");
+        let committed = state
+            .mailbox_store
+            .append(&MailboxAppendInput {
+                sender_session_id: "session-restart-mailbox-sender".to_owned(),
+                sender_name: "Restart sender".to_owned(),
+                target_session_id: parent_session_id.clone(),
+                target_name: "Delegation parent".to_owned(),
+                body: "Unread mailbox work must precede the recovered wait.".to_owned(),
+                idempotency_key: "delegation-wait-restart-mailbox".to_owned(),
+                topic: Some("restart ordering".to_owned()),
+                state_stamp: None,
+            })
+            .expect("mailbox body should commit before restart");
+        mailbox_id = committed.mailbox_id.clone();
+        state
+            .mailbox_store
+            .set_notification_state(&committed.message_id, "deliveredToIdleSession")
+            .expect("the pre-crash wake should be recorded as delivered");
         {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
             let parent_index = inner
@@ -1023,32 +1089,72 @@ fn delegation_wait_reconciles_after_restart_recovery() {
         templates_path.clone(),
     )
     .expect("state should reload");
-    let inner = restarted.inner.lock().expect("state mutex poisoned");
-    assert!(inner.delegation_waits.is_empty());
-    let delegation = inner
-        .delegations
-        .iter()
-        .find(|delegation| delegation.id == delegation_id)
-        .expect("delegation should reload");
-    assert_eq!(delegation.status, DelegationStatus::Failed);
-    let parent = inner
-        .sessions
-        .iter()
-        .find(|record| record.session.id == parent_session_id)
-        .expect("parent should reload");
-    let resume_prompt = parent
-        .queued_prompts
-        .front()
-        .expect("blocked parent should keep queued resume prompt");
-    assert!(resume_prompt.pending_prompt.text.contains("Restart fan-in"));
-    assert!(resume_prompt.pending_prompt.text.contains(&delegation_id));
-    assert!(
-        resume_prompt
-            .pending_prompt
-            .text
-            .contains("failed - Restart Recovery Review")
-    );
-    drop(inner);
+    {
+        let inner = restarted.inner.lock().expect("state mutex poisoned");
+        assert!(inner.delegation_waits.is_empty());
+        let delegation = inner
+            .delegations
+            .iter()
+            .find(|delegation| delegation.id == delegation_id)
+            .expect("delegation should reload");
+        assert_eq!(delegation.status, DelegationStatus::Failed);
+        let parent = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == parent_session_id)
+            .expect("parent should reload");
+        assert_eq!(parent.queued_prompts.len(), 2);
+        assert_eq!(parent.queued_prompts[0].source, QueuedPromptSource::Mailbox);
+        let resume_prompt = &parent.queued_prompts[1];
+        assert_eq!(resume_prompt.source, QueuedPromptSource::Orchestrator);
+        assert!(resume_prompt.pending_prompt.text.contains("Restart fan-in"));
+        assert!(resume_prompt.pending_prompt.text.contains(&delegation_id));
+        assert!(
+            resume_prompt
+                .pending_prompt
+                .text
+                .contains("failed - Restart Recovery Review")
+        );
+    }
+
+    let (runtime, input_rx, _process) =
+        test_shared_codex_runtime("delegation-wait-mailbox-order-runtime");
+    *restarted
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    {
+        let mut inner = restarted.inner.lock().expect("state mutex poisoned");
+        let parent_index = inner
+            .find_session_index(&parent_session_id)
+            .expect("parent should exist");
+        inner.sessions[parent_index].orchestrator_auto_dispatch_blocked = false;
+        restarted.commit_locked(&mut inner).unwrap();
+    }
+    restarted.dispatch_orphaned_workflow_prompts();
+    match input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("workflow recovery should dispatch the mailbox wake first")
+    {
+        CodexRuntimeCommand::Prompt { command, .. } => {
+            assert!(command.prompt.contains(&mailbox_id));
+            assert!(!command.prompt.contains("Restart fan-in"));
+        }
+        _ => panic!("expected a Codex mailbox wake"),
+    }
+    {
+        let inner = restarted.inner.lock().expect("state mutex poisoned");
+        let parent = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == parent_session_id)
+            .expect("parent should reload");
+        assert_eq!(parent.queued_prompts.len(), 1);
+        assert_eq!(
+            parent.queued_prompts[0].source,
+            QueuedPromptSource::Orchestrator
+        );
+    }
     restarted.shutdown_persist_blocking();
 
     let state_root = persistence_path

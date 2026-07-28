@@ -619,6 +619,7 @@ fn recovery_cannot_regress_delivered_notification_state() {
             "session-target",
             &committed.mailbox_id,
             committed.sequence,
+            MailboxWakeupRecovery::NeverWoken,
         )
             .expect("recovery bookkeeping should succeed"),
         0,
@@ -631,6 +632,125 @@ fn recovery_cannot_regress_delivered_notification_state() {
             .expect("message should read")
             .notification_state,
         "deliveredToIdleSession"
+    );
+}
+
+#[test]
+fn boot_recovery_marks_only_unread_active_participant_notifications() {
+    let root = MailboxTestRoot::new();
+    let store =
+        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+    let first = store.append(&test_input()).expect("append should succeed");
+    store
+        .record_initial_dispatch_outcome(&first.message_id, "deliveredToIdleSession")
+        .expect("delivery should finalize");
+
+    assert_eq!(
+        store
+            .mark_notifications_recovered_through(
+                "session-target",
+                &first.mailbox_id,
+                first.sequence,
+                MailboxWakeupRecovery::AllUnreadAfterBoot,
+            )
+            .expect("boot recovery bookkeeping should succeed"),
+        1,
+        "an unread active participant's delivered notification should be recovered"
+    );
+    assert_eq!(
+        store
+            .mark_notifications_recovered_through(
+                "session-target",
+                &first.mailbox_id,
+                first.sequence,
+                MailboxWakeupRecovery::AllUnreadAfterBoot,
+            )
+            .expect("repeating boot recovery should succeed"),
+        0,
+        "boot recovery must be idempotent"
+    );
+
+    store
+        .acknowledge(
+            "session-target",
+            &first.mailbox_id,
+            0,
+            first.sequence,
+        )
+        .expect("acknowledgement should advance the cursor");
+    store
+        .set_notification_state(&first.message_id, "deliveredToIdleSession")
+        .expect("test should isolate the processed-through guard");
+    assert_eq!(
+        store
+            .mark_notifications_recovered_through(
+                "session-target",
+                &first.mailbox_id,
+                first.sequence,
+                MailboxWakeupRecovery::AllUnreadAfterBoot,
+            )
+            .expect("acknowledged recovery check should succeed"),
+        0,
+        "acknowledged rows must not be recovered"
+    );
+
+    let mut second_input = test_input();
+    second_input.idempotency_key = "send-2".to_owned();
+    second_input.body = "Second durable hello".to_owned();
+    let second = store
+        .append(&second_input)
+        .expect("second append should succeed");
+    store
+        .record_initial_dispatch_outcome(&second.message_id, "deliveredToIdleSession")
+        .expect("second delivery should finalize");
+    store
+        .mark_session_left("session-target")
+        .expect("participant should be marked left");
+    assert_eq!(
+        store
+            .mark_notifications_recovered_through(
+                "session-target",
+                &second.mailbox_id,
+                second.sequence,
+                MailboxWakeupRecovery::AllUnreadAfterBoot,
+            )
+            .expect("departed participant recovery check should succeed"),
+        0,
+        "departed participants must not receive recovered notifications"
+    );
+}
+
+#[test]
+fn boot_recovery_lists_every_unread_mailbox_beyond_the_live_pass_cap() {
+    let root = MailboxTestRoot::new();
+    let store =
+        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+
+    for index in 0..17 {
+        let mut input = test_input();
+        input.sender_session_id = format!("session-sender-{index}");
+        input.sender_name = format!("Sender {index}");
+        input.idempotency_key = format!("send-{index}");
+        input.body = format!("Durable hello {index}");
+        let committed = store.append(&input).expect("append should succeed");
+        store
+            .record_initial_dispatch_outcome(
+                &committed.message_id,
+                "deliveredToIdleSession",
+            )
+            .expect("delivery should finalize");
+    }
+
+    assert_eq!(
+        store
+            .wakeups_for_session(
+                "session-target",
+                MailboxWakeupRecovery::AllUnreadAfterBoot,
+            )
+            .expect("boot wake-up query should succeed")
+            .len(),
+        17,
+        "the one-time boot pass must not strand mailboxes beyond the live recovery cap"
     );
 }
 

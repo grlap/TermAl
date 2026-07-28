@@ -647,13 +647,16 @@ impl AppState {
     }
 
     /// Transitions the session to `SessionStatus::Error` with an
-    /// error message and dispatches the next queued prompt. Distinct
+    /// error message. Distinct
     /// from `fail_turn_if_runtime_matches` in `src/turn_lifecycle.rs`:
     /// this variant fires regardless of any `RuntimeToken`, because
     /// the error source is outside a specific runtime context (e.g.,
     /// the submission itself failed — the runtime command channel
     /// rejected our send, or the runtime handle was cleared before
-    /// delivery). The runtime-token-guarded variant is used from the
+    /// delivery). A rejected runtime command does not recursively drain the
+    /// queue through the same failed delivery path; a later genuine activation
+    /// or lifecycle callback starts the next queued turn. The
+    /// runtime-token-guarded variant is used from the
     /// runtime event handlers where stale tokens must silently no-op.
     fn fail_turn(&self, session_id: &str, error_message: &str) -> Result<()> {
         let cleaned = error_message.trim();
@@ -691,11 +694,6 @@ impl AppState {
             self.commit_locked(&mut inner)?;
         }
 
-        if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
-            deliver_turn_dispatch(self, dispatch).map_err(|err| {
-                anyhow!("failed to deliver queued turn dispatch: {}", err.message)
-            })?;
-        }
         Ok(())
     }
 }
@@ -760,5 +758,4 @@ fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -
         }
     }
 }
-
 

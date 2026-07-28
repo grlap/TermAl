@@ -27,8 +27,9 @@
 // 9. (Non-test only) Spawns the workspace file watcher and
 //    orchestrator transition resumer.
 // 10. Performs the one-time broad recovery of durable unread mailbox wake-ups,
-//    then calls `dispatch_orphaned_queued_prompts` so mailbox notifications and
-//    other queued prompts stranded at shutdown fire their next turn immediately.
+//    then re-kicks only committed workflow-owned queue heads. Mailbox and
+//    ordinary user prompts remain visible but dormant: a process restart is not
+//    an activation event for either source.
 //
 // Returns the `AppState` owning all of the above. The caller (in
 // `main.rs`) then hands it to Axum + the HTTP server.
@@ -662,13 +663,16 @@ impl AppState {
     /// deferring them past the boot persist above is safe.
     fn run_post_listen_boot(&self) {
         self.seed_hidden_claude_spares();
+        // Materialize unread mailbox wakes before either workflow reconciler can
+        // queue and dispatch a durable resume. That preserves FIFO ordering:
+        // the workflow activation drains the recovered mailbox wake first.
+        self.reconcile_unread_mailbox_wakeups_after_boot();
         if let Err(err) = self.reconcile_delegation_waits_after_boot() {
             eprintln!("delegation wait> failed reconciling pending waits after boot: {err:#}");
         }
         if let Err(err) = self.resume_pending_orchestrator_transitions() {
             eprintln!("orchestrator> failed resuming pending transitions: {err:#}");
         }
-        self.reconcile_unread_mailbox_wakeups_after_boot();
-        self.dispatch_orphaned_queued_prompts();
+        self.dispatch_orphaned_workflow_prompts();
     }
 }

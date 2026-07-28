@@ -28,22 +28,36 @@ a required sender-supplied `idempotencyKey`.
 
 The wake-up prompt is not the message. If wake-up fails, the committed message
 remains available and its receipt reports `durableButNotWoken`. Before ordinary
-local dispatch, TermAl restores only these never-woken notifications. At boot,
-it performs one broader pass over every unread inbound mailbox so a previously
-delivered notification whose agent turn died in the crash is not stranded.
+local dispatch, TermAl restores never-woken notifications. If a materialized
+recovery wake is rejected by a runtime command channel, that exact mailbox wake
+is requeued without recursively draining the failed session's prompt queue. At
+boot, TermAl performs one broader pass over every unread inbound mailbox so a
+previously delivered notification whose agent turn died in the crash is not
+stranded.
 When recovery queues a never-woken row it advances from
 `durableButNotWoken` to `recoveredWake`. A boot pass may also recreate a wake
-for an unread row already marked `deliveredToIdleSession`; that terminal state
-does not regress merely because TermAl recreated the wake. Starting a recovery
-wake and having its runtime command channel accept it marks all nonterminal
-covered notifications delivered. A rejected runtime send leaves them
+for an unread row already marked `deliveredToIdleSession`; its mutable
+`notificationState` returns to `recoveredWake` while the immutable original
+receipt outcome remains `deliveredToIdleSession`. Boot recovery only
+materializes the visible queued prompt: restart itself never dispatches a
+mailbox-only queue. The next genuine activation of that session drains the
+recovery wake first. A committed delegation-wait or orchestrator resume is
+itself a durable activation; if one is already queued behind a boot-recovered
+mailbox wake, startup drains the mailbox wake first and then continues the
+workflow normally. An ordinary user prompt already at the queue head remains an
+activation barrier: restart does not skip it merely because a workflow prompt
+is queued behind it.
+Starting a recovery wake and having its runtime command channel accept it marks
+all covered notifications delivered. A rejected runtime send leaves them
 recoverable.
 Completion without acknowledgement does not create another autonomous turn,
 while the message remains unread until the participant explicitly advances its
 cursor.
 
-Recovery is bounded to 16 mailboxes per pass; the complete authoritative list
-remains available through `termal_list_mailboxes`.
+Ordinary pre-dispatch recovery is bounded to 16 mailboxes per pass. The
+one-time boot pass covers every unread inbound mailbox because delivered turns
+that died in the crash have no narrower recovery path. The complete
+authoritative list remains available through `termal_list_mailboxes`.
 
 ### Dispatch outcome versus notification state
 

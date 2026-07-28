@@ -29,6 +29,30 @@ fn file_metadata_mtime_ms(metadata: &fs::Metadata) -> Option<u64> {
     Some(millis.min(u128::from(u64::MAX)) as u64)
 }
 
+fn record_rejected_turn_dispatch(
+    state: &AppState,
+    session_id: &str,
+    error_message: &str,
+    mailbox_notification: Option<&MailboxNotificationDelivery>,
+) {
+    if let Err(err) = state.clear_runtime(session_id) {
+        eprintln!(
+            "turn dispatch> failed clearing rejected runtime for `{session_id}`: {err:#}"
+        );
+    }
+    if let Err(err) = state.fail_turn(session_id, error_message) {
+        eprintln!("turn dispatch> failed recording rejection for `{session_id}`: {err:#}");
+    }
+    if let Some(notification) = mailbox_notification {
+        if let Err(err) = state.requeue_rejected_mailbox_notification(notification) {
+            eprintln!(
+                "mailbox> failed restoring rejected wake for `{}` / `{}`: {err:#}",
+                notification.session_id, notification.mailbox_id
+            );
+        }
+    }
+}
+
 /// Delivers turn dispatch.
 fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(), ApiError> {
     let mailbox_notification = match dispatch {
@@ -39,10 +63,11 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
             session_id,
         } => {
             if let Err(err) = sender.send(ClaudeRuntimeCommand::Prompt(command)) {
-                let _ = state.clear_runtime(&session_id);
-                let _ = state.fail_turn(
+                record_rejected_turn_dispatch(
+                    state,
                     &session_id,
                     &format!("failed to queue prompt for Claude session: {err}"),
+                    mailbox_notification.as_ref(),
                 );
                 return Err(ApiError::internal(
                     "failed to queue prompt for Claude session",
@@ -60,10 +85,11 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
                 session_id: session_id.clone(),
                 command,
             }) {
-                let _ = state.clear_runtime(&session_id);
-                let _ = state.fail_turn(
+                record_rejected_turn_dispatch(
+                    state,
                     &session_id,
                     &format!("failed to queue prompt for Codex session: {err}"),
+                    mailbox_notification.as_ref(),
                 );
                 return Err(ApiError::internal(
                     "failed to queue prompt for Codex session",
@@ -78,10 +104,11 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
             session_id,
         } => {
             if let Err(err) = sender.send(AcpRuntimeCommand::Prompt(command)) {
-                let _ = state.clear_runtime(&session_id);
-                let _ = state.fail_turn(
+                record_rejected_turn_dispatch(
+                    state,
                     &session_id,
                     &format!("failed to queue prompt for ACP session: {err}"),
+                    mailbox_notification.as_ref(),
                 );
                 return Err(ApiError::internal(
                     "failed to queue prompt for agent session",

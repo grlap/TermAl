@@ -514,6 +514,32 @@ impl AppState {
         let wakeups = self
             .mailbox_store
             .wakeups_for_session(session_id, recovery)?;
+        self.queue_mailbox_wakeups_for_session(session_id, wakeups, recovery)
+    }
+
+    fn requeue_rejected_mailbox_notification(
+        &self,
+        notification: &MailboxNotificationDelivery,
+    ) -> Result<bool> {
+        let Some(wakeup) = self.mailbox_store.unread_wakeup_for_mailbox(
+            &notification.session_id,
+            &notification.mailbox_id,
+        )? else {
+            return Ok(false);
+        };
+        self.queue_mailbox_wakeups_for_session(
+            &notification.session_id,
+            vec![wakeup],
+            MailboxWakeupRecovery::NeverWoken,
+        )
+    }
+
+    fn queue_mailbox_wakeups_for_session(
+        &self,
+        session_id: &str,
+        wakeups: Vec<MailboxUnreadWakeup>,
+        recovery: MailboxWakeupRecovery,
+    ) -> Result<bool> {
         if wakeups.is_empty() {
             return Ok(false);
         }
@@ -617,6 +643,7 @@ impl AppState {
                 session_id,
                 &mailbox_id,
                 sequence,
+                recovery,
             )?;
         }
         Ok(changed)
@@ -1543,11 +1570,12 @@ impl MailboxStore {
         session_id: &str,
         mailbox_id: &str,
         through_sequence: u64,
+        recovery: MailboxWakeupRecovery,
     ) -> Result<usize> {
         let _write_guard = self.lock_internal_writer();
         let connection = self.connection()?;
-        let updated = connection
-            .execute(
+        let updated = match recovery {
+            MailboxWakeupRecovery::NeverWoken => connection.execute(
                 "UPDATE mailbox_messages
                  SET notification_disposition = 'recoveredWake'
                  WHERE mailbox_id = ?1
@@ -1555,8 +1583,28 @@ impl MailboxStore {
                    AND sequence <= ?3
                    AND notification_disposition = 'durableButNotWoken'",
                 rusqlite::params![mailbox_id, session_id, through_sequence],
-            )
-            .context("failed to mark never-woken mailbox notifications recovered")?;
+            ),
+            MailboxWakeupRecovery::AllUnreadAfterBoot => connection.execute(
+                "UPDATE mailbox_messages
+                 SET notification_disposition = 'recoveredWake'
+                 WHERE mailbox_id = ?1
+                   AND target_session_id = ?2
+                   AND EXISTS (
+                     SELECT 1
+                     FROM mailbox_participants participant
+                     WHERE participant.mailbox_id = mailbox_messages.mailbox_id
+                       AND participant.session_id = mailbox_messages.target_session_id
+                       AND participant.left_at IS NULL
+                       AND mailbox_messages.sequence > participant.processed_through
+                   )
+                   AND sequence <= ?3
+                   AND notification_disposition != 'recoveredWake'",
+                rusqlite::params![mailbox_id, session_id, through_sequence],
+            ),
+        }
+        .with_context(|| {
+            format!("failed to mark mailbox notifications recovered during {recovery:?}")
+        })?;
         Ok(updated)
     }
 
@@ -1674,7 +1722,7 @@ impl MailboxStore {
                  )
                  WHERE message.sequence IS NOT NULL
                  ORDER BY message.created_at DESC, m.id
-                 LIMIT 16",
+                 LIMIT CASE WHEN ?2 = 1 THEN -1 ELSE 16 END",
             )
             .context("failed to prepare unread mailbox wake-up query")?;
         let rows = statement
