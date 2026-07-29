@@ -196,6 +196,7 @@ enum Agent {
     Claude,
     Cursor,
     Gemini,
+    OpenCode,
 }
 
 impl Agent {
@@ -215,6 +216,7 @@ impl Agent {
                 "claude" => return Ok(Self::Claude),
                 "cursor" | "cursor-agent" => return Ok(Self::Cursor),
                 "gemini" | "gemini-cli" => return Ok(Self::Gemini),
+                "opencode" | "open-code" => return Ok(Self::OpenCode),
                 other => bail!("unknown argument `{other}`"),
             }
         }
@@ -229,8 +231,11 @@ impl Agent {
             "claude" => Ok(Self::Claude),
             "cursor" | "cursor-agent" => Ok(Self::Cursor),
             "gemini" | "gemini-cli" => Ok(Self::Gemini),
+            "opencode" | "open-code" => Ok(Self::OpenCode),
             other => {
-                bail!("unknown agent `{other}`; expected `codex`, `claude`, `cursor`, or `gemini`")
+                bail!(
+                    "unknown agent `{other}`; expected `codex`, `claude`, `cursor`, `gemini`, or `opencode`"
+                )
             }
         }
     }
@@ -241,6 +246,7 @@ impl Agent {
             Self::Claude => "Claude",
             Self::Cursor => "Cursor",
             Self::Gemini => "Gemini",
+            Self::OpenCode => "OpenCode",
         }
     }
 
@@ -250,6 +256,7 @@ impl Agent {
             Self::Claude => "CL",
             Self::Cursor => "CR",
             Self::Gemini => "GM",
+            Self::OpenCode => "OC",
         }
     }
 
@@ -258,8 +265,7 @@ impl Agent {
         match self {
             Self::Codex => "gpt-5.4",
             Self::Claude => "default",
-            Self::Cursor => "auto",
-            Self::Gemini => "auto",
+            Self::Cursor | Self::Gemini | Self::OpenCode => "auto",
         }
     }
 
@@ -283,11 +289,17 @@ impl Agent {
         matches!(self, Self::Gemini)
     }
 
+    /// Returns whether dynamic OpenCode model/mode settings are supported.
+    fn supports_opencode_settings(self) -> bool {
+        matches!(self, Self::OpenCode)
+    }
+
     /// Handles ACP runtime.
     fn acp_runtime(self) -> Option<AcpAgent> {
         match self {
             Self::Cursor => Some(AcpAgent::Cursor),
             Self::Gemini => Some(AcpAgent::Gemini),
+            Self::OpenCode => Some(AcpAgent::OpenCode),
             _ => None,
         }
     }
@@ -503,6 +515,21 @@ struct Session {
     claude_approval_mode: Option<ClaudeApprovalMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     gemini_approval_mode: Option<GeminiApprovalMode>,
+    /// Persisted OpenCode model selection. `auto` means the agent owns the
+    /// effective model, while any explicit provider/model id is reapplied
+    /// after session new/resume/load before the next prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opencode_model: Option<String>,
+    /// Persisted OpenCode primary-agent selection (`auto` or a live dynamic
+    /// mode value).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opencode_mode: Option<String>,
+    /// Effective live OpenCode primary agent reported by ACP configOptions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opencode_current_mode: Option<String>,
+    /// Dynamic OpenCode primary-agent options reported by ACP.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    opencode_mode_options: Vec<SessionModelOption>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     external_session_id: Option<String>,
     #[serde(default)]
@@ -1183,6 +1210,8 @@ struct UpdateAppSettingsRequest {
     default_claude_model: Option<String>,
     default_cursor_model: Option<String>,
     default_gemini_model: Option<String>,
+    #[serde(rename = "defaultOpenCodeModel")]
+    default_opencode_model: Option<String>,
     default_codex_reasoning_effort: Option<CodexReasoningEffort>,
     default_claude_approval_mode: Option<ClaudeApprovalMode>,
     default_claude_effort: Option<ClaudeEffortLevel>,
@@ -1472,6 +1501,7 @@ struct UpdateSessionSettingsRequest {
     claude_approval_mode: Option<ClaudeApprovalMode>,
     claude_effort: Option<ClaudeEffortLevel>,
     gemini_approval_mode: Option<GeminiApprovalMode>,
+    opencode_mode: Option<String>,
 }
 
 /// Represents session model option.

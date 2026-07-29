@@ -102,4 +102,24 @@ describe("app session settings payload helpers", () => {
     });
     expect(buildSessionSettingsPayload(session, "claudeApprovalMode", "ask")).toBeNull();
   });
+
+  it("builds OpenCode model and dynamic-mode payloads only", () => {
+    const session = makeSession({
+      agent: "OpenCode",
+      model: "opencode/big-pickle",
+      opencodeModel: "auto",
+      opencodeMode: "auto",
+    });
+
+    expect(buildSessionSettingsPayload(session, "model", "openai/gpt-5.6-sol")).toEqual({
+      model: "openai/gpt-5.6-sol",
+    });
+    expect(buildSessionSettingsPayload(session, "model", "auto")).toEqual({
+      model: "auto",
+    });
+    expect(buildSessionSettingsPayload(session, "opencodeMode", "plan")).toEqual({
+      opencodeMode: "plan",
+    });
+    expect(buildSessionSettingsPayload(session, "cursorMode", "ask")).toBeNull();
+  });
 });

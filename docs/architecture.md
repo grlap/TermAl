@@ -13,7 +13,7 @@ Browser UI
        -> AppState / StateInner / persistence
        -> shared Codex app-server
        -> per-session Claude runtime
-       -> per-session ACP runtimes (Cursor / Gemini)
+       -> per-session ACP runtimes (Cursor / Gemini / OpenCode)
        -> RemoteRegistry (SSH tunnels + remote event bridges)
        -> in-process Telegram relay (optional)
 
@@ -48,6 +48,10 @@ project/workdir scope from any session, not just from the child session, so
 parent/sibling `sessionId` routing cannot bypass the read-only policy.
 `isolatedWorktree` requests may omit `worktreePath`; the backend generates a
 TermAl-owned path before persisting the delegation record.
+OpenCode is an explicit exception to the `readOnly` agent matrix: the backend
+rejects OpenCode + `readOnly` before child/runtime creation because OpenCode
+cannot currently enforce the shared-worktree read-only contract. OpenCode
+delegations may use `isolatedWorktree`.
 
 **Delegation MCP bridge:** Agent-facing delegation access is a TermAl-owned
 local MCP bridge spawned per parent agent session with
@@ -66,9 +70,10 @@ tool-layer guardrail, not process isolation: the loopback HTTP API is
 unauthenticated under the single-user, local-only trust model (`GET /api/state`,
 the mailbox endpoints), so a child able to issue raw HTTP could
 bypass the bridge — caller-scoped REST auth is deferred with capability tokens.
-Claude receives it through `--mcp-config`, ACP/Cursor/Gemini
-receive it through `mcpServers` on `session/new` and `session/load`, and Codex
-receives it through `config.mcp_servers` on `thread/start` and `thread/resume`.
+Claude receives it through `--mcp-config`, ACP/Cursor/Gemini/OpenCode
+receive it through `mcpServers` on `session/new`, `session/resume`, and
+`session/load`, and Codex receives it through `config.mcp_servers` on
+`thread/start` and `thread/resume`.
 
 ---
 
@@ -849,6 +854,29 @@ gemini --acp [--approval-mode <mode>]
 
 **Behavior:** Gemini uses the same ACP normalization layer as Cursor, but its launch command can include the configured Gemini approval mode. TermAl also performs local readiness checks so missing CLI auth or missing `gemini` installation is surfaced before a session starts.
 
+### OpenCode
+
+**Invocation:**
+```bash
+opencode acp
+```
+
+**Protocol:** ACP over stdio. One process per session.
+
+**Behavior:** OpenCode advertises dynamic model and mode config. Auto keeps the
+agent authoritative; explicit TermAl selections are re-applied in
+model-then-mode order and acknowledged after new/resume/load before prompt
+dispatch. Every handshake or live update reconciles only option lists actually
+present in that payload. User settings share one 40-second scheduling and
+acknowledgement deadline, and expired writer-queued changes are discarded
+before execution.
+All OpenCode resume/load failures surface and preserve the exact stored
+continuity id; TermAl never invents a replacement session from an unverified
+error shape. User stop sends a bounded OpenCode-only `session/cancel` grace
+before local process termination.
+Permission requests use the ordered ACP approval queue. See
+[OpenCode ACP Integration](features/opencode-acp-integration.md).
+
 ### Message Types
 
 All agent integrations normalize into the same TermAl message model. Some variants are common across all agents, while others are only emitted by specific backends such as Codex or ACP.
@@ -1163,8 +1191,9 @@ termal/
 |   |-- codex_validation.rs  # validation helpers for Codex payloads
 |   |-- shared_codex_mgr.rs  # shared Codex app-server lifecycle + exit cascade
 |   |-- repl_codex.rs        # REPL-mode Codex driver
-|   |-- acp.rs               # ACP (Claude / Cursor / Gemini) protocol driver
+|   |-- acp.rs               # ACP (Cursor / Gemini / OpenCode) protocol driver
 |   |-- gemini.rs            # Gemini-specific dotenv + GEMINI_CLI_SYSTEM_SETTINGS setup
+|   |-- opencode.rs          # OpenCode executable resolution + bounded readiness diagnostics
 |   |
 |   |-- # HTTP API
 |   |-- api.rs               # thin Axum handlers + shared helpers (router is in main.rs)
@@ -1258,6 +1287,6 @@ The backend is still compiled as one crate-level module through `include!`, but 
 
 **Include-split backend.** The backend still shares one crate namespace but is split across many focused files (see the Project Structure listing above) assembled via `include!()` in `main.rs`. Each file owns a specific concern — agent protocol driver, HTTP route group, wire DTO cluster, state sub-area, remote proxy family — so day-to-day edits touch one or two files instead of navigating a monolith. Rust's multiple-impl-blocks rule lets `AppState` / `StateInner` method clusters live in whichever file matches their domain, and the flat namespace means types and helpers are visible across every file without any `pub use` boilerplate.
 
-**Agent-agnostic UI message model.** Claude, Codex, Cursor, and Gemini are normalized into the same `Message` enum. Adding a new agent is mostly a runtime and normalization task rather than a frontend rewrite.
+**Agent-agnostic UI message model.** Claude, Codex, Cursor, Gemini, and OpenCode are normalized into the same `Message` enum. Adding a new agent is mostly a runtime and normalization task rather than a frontend rewrite.
 
 **Custom CSS over Tailwind.** The frontend uses CSS custom properties and standalone theme files for theming, keeping runtime theme switching simple and avoiding build-time CSS machinery.

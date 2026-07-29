@@ -84,6 +84,8 @@ function createBaseProps(
     handleDefaultGeminiModelChange: vi.fn(),
     defaultGeminiApprovalMode: GEMINI_APPROVAL_OPTIONS[0].value,
     onChangeDefaultGeminiApprovalMode: vi.fn(),
+    defaultOpenCodeModel: "default",
+    handleDefaultOpenCodeModelChange: vi.fn(),
     createSessionProjectId: "",
     createSessionProjectOptions: [{ label: "Current workspace", value: "" }],
     onChangeCreateSessionProjectId: vi.fn(),
@@ -270,6 +272,16 @@ describe("AppDialogs create-dialog backdrop dismissal", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("offers OpenCode as a first-class session agent", () => {
+    const onChangeNewSessionAgent = vi.fn();
+    renderCreateSessionDialog({ onChangeNewSessionAgent });
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Assistant" }));
+    fireEvent.click(screen.getByRole("option", { name: "OpenCode" }));
+
+    expect(onChangeNewSessionAgent).toHaveBeenCalledWith("OpenCode");
+  });
+
   it("closes the create-project dialog on primary-button backdrop mousedown when idle", () => {
     const onClose = renderCreateProjectDialog();
 
@@ -375,6 +387,23 @@ describe("AppDialogs settings agent defaults", () => {
     );
     expect(screen.getByLabelText("Default Gemini approvals")).toBeInTheDocument();
     expect(screen.queryByLabelText("Default Cursor mode")).toBeNull();
+  });
+
+  it("renders the OpenCode settings tab", () => {
+    renderSettingsDialog("opencode");
+
+    expect(
+      screen.getByRole("heading", { name: "OpenCode startup settings" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Default model")).toHaveAttribute(
+      "id",
+      "default-opencode-model",
+    );
+    expect(
+      screen.getByText(/Auto leaves the agent authoritative\./u),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Default Cursor mode")).toBeNull();
+    expect(screen.queryByLabelText("Default Gemini approvals")).toBeNull();
   });
 
   it("renders the Telegram settings tab and fetches initial status", async () => {

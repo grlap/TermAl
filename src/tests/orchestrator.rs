@@ -2734,6 +2734,39 @@ fn orchestrator_template_draft_round_trips_through_template_helpers() {
     assert_eq!(round_tripped, draft);
 }
 
+#[test]
+fn opencode_orchestrator_nodes_reject_misleading_automation_and_unsafe_models() {
+    let base = OrchestratorSessionTemplate {
+        id: "opencode".to_owned(),
+        name: "OpenCode".to_owned(),
+        agent: Agent::OpenCode,
+        model: Some("auto".to_owned()),
+        instructions: String::new(),
+        auto_approve: true,
+        input_mode: OrchestratorSessionInputMode::Queue,
+        position: OrchestratorNodePosition { x: 0.0, y: 0.0 },
+    };
+    let automation_error = normalize_orchestrator_session_template(base.clone())
+        .expect_err("OpenCode auto-approve should be rejected");
+    assert!(
+        automation_error
+            .message
+            .contains("cannot auto-approve tool calls")
+    );
+
+    let model_error = normalize_orchestrator_session_template(OrchestratorSessionTemplate {
+        auto_approve: false,
+        model: Some("openai/gpt\nshadow".to_owned()),
+        ..base
+    })
+    .expect_err("unsafe OpenCode orchestrator model should be rejected");
+    assert!(
+        model_error
+            .message
+            .contains("cannot contain control characters")
+    );
+}
+
 pub fn sample_orchestrator_template_draft() -> OrchestratorTemplateDraft {
     OrchestratorTemplateDraft {
         name: "Feature Delivery Flow".to_owned(),

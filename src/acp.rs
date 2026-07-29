@@ -1,8 +1,11 @@
 // ACP (Agent Client Protocol) runtime implementation.
 //
-// Covers spawning, session configuration, prompt dispatch, message/notification
-// handling, and JSON-RPC request wiring for ACP-protocol agents (Claude Code,
-// Gemini CLI, Cursor). The ACP-specific protocol types (`AcpRuntimeCommand`,
+// Covers spawning, session configuration (including agent-specific authority
+// reconciliation that must gate prompt dispatch), prompt dispatch,
+// message/notification handling, and JSON-RPC request wiring for ACP-protocol
+// agents (Gemini CLI, Cursor, OpenCode). Executable discovery and launch
+// construction stay in the small agent boundary files. The ACP-specific
+// protocol types (`AcpRuntimeCommand`,
 // `AcpPromptCommand`, `AcpPendingApproval`, `AcpRuntimeState`, `AcpTurnState`,
 // `AcpJsonRpcError`, `AcpResponseError`, `PendingAcpJsonRpcRequest`) stay in
 // runtime.rs next to the Codex + Claude types — this file owns only the
@@ -27,11 +30,12 @@
 //    method, send `authenticate` and wait for success before
 //    proceeding. Gemini is the typical caller; Claude Code usually
 //    skips this phase.
-// 3. **session/load or session/new** — first try `session/load` if we
-//    have a persisted `external_session_id` (ACP's conversation id)
-//    from an earlier run; on load failure (session not found,
-//    version mismatch, etc.) fall back to `session/new` so the user
-//    gets a fresh conversation rather than a dead end.
+// 3. **session/resume, session/load, or session/new** — use resume when
+//    explicitly advertised, otherwise use the legacy load capability when
+//    supported. A typed method-not-found can downgrade optimistic legacy load
+//    probing for non-OpenCode agents. OpenCode load/resume failures always
+//    surface and preserve continuity; the user starts a separate session if
+//    recovery is impossible.
 // 4. **session/set_mode** + **session/set_model** — apply the user's
 //    saved approval-mode / model preferences before the first prompt
 //    so the agent doesn't default to something the user didn't pick.
@@ -62,13 +66,17 @@
 // Fallback rules for session load
 // -------------------------------
 //
-// `session/load` can fail for several reasons (agent was upgraded
-// and conversation format changed, session id was revoked, agent
-// keeps only recent sessions). Rather than surfacing the error to
-// the user we fall back to `session/new` and clear the stored
-// `external_session_id`, so the next turn starts on a fresh
-// conversation transparently. This mirrors the behaviour in
-// `claude.rs` for the Claude-specific resume path.
+// OpenCode 1.18.8 has no typed invalid-session discriminator on load/resume,
+// so it never participates in an automatic fallback that would silently
+// replace conversation memory. Gemini retains its documented typed
+// invalid-session compatibility fallback; legacy non-OpenCode agents may also
+// fall back after a typed JSON-RPC method-not-found proves `session/load`
+// unsupported.
+
+const ACP_CANCEL_GRACE: Duration = Duration::from_secs(2);
+const MAX_ACP_OPTION_LABEL_CHARS: usize = 200;
+const MAX_ACP_OPTION_DESCRIPTION_CHARS: usize = 1_000;
+const MAX_OPENCODE_RECONCILE_FINGERPRINTS: usize = 8;
 
 /// Spawns ACP runtime.
 fn spawn_acp_runtime(
@@ -124,12 +132,14 @@ fn spawn_acp_runtime(
     let (input_tx, input_rx) = mpsc::channel::<AcpRuntimeCommand>();
     let pending_requests: AcpPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState::default()));
+    let turn_lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(false), Condvar::new()));
 
     {
         let writer_session_id = session_id.clone();
         let writer_state = state.clone();
         let writer_pending_requests = pending_requests.clone();
         let writer_runtime_state = runtime_state.clone();
+        let writer_turn_lifecycle = turn_lifecycle.clone();
         let writer_runtime_token = RuntimeToken::Acp(runtime_id.clone());
         let writer_cwd = cwd.clone();
         std::thread::spawn(move || {
@@ -180,6 +190,7 @@ fn spawn_acp_runtime(
                         &writer_state,
                         &writer_session_id,
                         &writer_runtime_state,
+                        &writer_turn_lifecycle,
                         &writer_runtime_token,
                         agent,
                         prompt,
@@ -187,6 +198,11 @@ fn spawn_acp_runtime(
                     AcpRuntimeCommand::JsonRpcMessage(message) => {
                         write_acp_json_rpc_message(&mut stdin, &message, agent)
                     }
+                    AcpRuntimeCommand::Cancel => handle_acp_cancel_command(
+                        &mut stdin,
+                        &writer_runtime_state,
+                        agent,
+                    ),
                     AcpRuntimeCommand::RefreshSessionConfig {
                         command,
                         response_tx,
@@ -211,6 +227,36 @@ fn spawn_acp_runtime(
                                 Err(anyhow!(detail))
                             }
                         }
+                    }
+                    AcpRuntimeCommand::ApplyOpenCodeConfig {
+                        model_selection,
+                        mode_selection,
+                        started_tx,
+                        proceed_rx,
+                        response_tx,
+                    } => handle_opencode_config_apply_command(
+                        &mut stdin,
+                        &writer_pending_requests,
+                        &writer_state,
+                        &writer_session_id,
+                        &writer_runtime_state,
+                        agent,
+                        model_selection,
+                        mode_selection,
+                        started_tx,
+                        proceed_rx,
+                        response_tx,
+                    ),
+                    AcpRuntimeCommand::ReconcileOpenCodeConfig { config_result } => {
+                        handle_opencode_config_reconcile_command(
+                        &mut stdin,
+                        &writer_pending_requests,
+                        &writer_state,
+                        &writer_session_id,
+                        &writer_runtime_state,
+                        agent,
+                        &config_result,
+                        )
                     }
                 };
 
@@ -368,6 +414,7 @@ fn spawn_acp_runtime(
         runtime_id,
         input_tx,
         process,
+        turn_lifecycle,
     })
 }
 
@@ -409,6 +456,19 @@ fn note_acp_session_load_supported(runtime_state: &Arc<Mutex<AcpRuntimeState>>) 
         .supports_session_load = Some(true);
 }
 
+/// Downgrades legacy optimistic `session/load` probing after a typed
+/// method-not-found response. Future prompts start a fresh session directly
+/// instead of repeatedly exercising an unsupported method.
+fn note_acp_session_load_unsupported(runtime_state: &Arc<Mutex<AcpRuntimeState>>) {
+    let mut state = runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned");
+    state
+        .capabilities
+        .get_or_insert_with(AcpCapabilities::default)
+        .supports_session_load = Some(false);
+}
+
 /// Records ACP runtime capabilities from initialize.
 ///
 /// Installs an `AcpCapabilities` bundle on the runtime state the first
@@ -421,12 +481,16 @@ fn update_acp_runtime_capabilities(
     initialize_result: &Value,
 ) {
     let supports_session_load = acp_supports_session_load(initialize_result);
+    let supports_session_resume = acp_supports_session_resume(initialize_result);
     let mut state = runtime_state
         .lock()
         .expect("ACP runtime state mutex poisoned");
     let capabilities = state.capabilities.get_or_insert_with(AcpCapabilities::default);
     if supports_session_load.is_some() {
         capabilities.supports_session_load = supports_session_load;
+    }
+    if supports_session_resume.is_some() {
+        capabilities.supports_session_resume = supports_session_resume;
     }
 }
 
@@ -440,6 +504,18 @@ fn acp_supports_session_load(initialize_result: &Value) -> Option<bool> {
                 .pointer("/capabilities/loadSession")
                 .and_then(Value::as_bool)
         })
+}
+
+/// Returns whether ACP initialize explicitly advertised session/resume.
+///
+/// ACP v1 represents session capabilities as objects (`"resume": {}`), while
+/// a few implementations use booleans. Presence of a non-null object is
+/// therefore affirmative; explicit `false` remains authoritative.
+fn acp_supports_session_resume(initialize_result: &Value) -> Option<bool> {
+    initialize_result
+        .pointer("/agentCapabilities/sessionCapabilities/resume")
+        .or_else(|| initialize_result.pointer("/capabilities/sessionCapabilities/resume"))
+        .map(|value| value.as_bool().unwrap_or(!value.is_null()))
 }
 
 /// Handles select ACP auth method.
@@ -473,6 +549,7 @@ fn select_acp_auth_method(
                 None
             }
         }
+        AcpAgent::OpenCode => None,
     }
 }
 
@@ -483,11 +560,12 @@ fn handle_acp_prompt_command(
     state: &AppState,
     session_id: &str,
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    turn_lifecycle: &AcpTurnLifecycle,
     runtime_token: &RuntimeToken,
     agent: AcpAgent,
     command: AcpPromptCommand,
 ) -> Result<()> {
-    let external_session_id = ensure_acp_session_ready(
+    let external_session_id = match ensure_acp_session_ready(
         writer,
         pending_requests,
         state,
@@ -495,9 +573,19 @@ fn handle_acp_prompt_command(
         runtime_state,
         agent,
         &command,
-    )?;
+    ) {
+        Ok(external_session_id) => external_session_id,
+        Err(err) => {
+            set_acp_turn_active(turn_lifecycle, false);
+            return Err(err);
+        }
+    };
 
-    let pending_prompt_request = start_acp_json_rpc_request(
+    // Direct test/runtime callers may not pass through `deliver_turn_dispatch`;
+    // publishing here is idempotent. Production publishes before channel
+    // enqueue so stop cannot race this writer-side activation point.
+    set_acp_turn_active(turn_lifecycle, true);
+    let pending_prompt_request = match start_acp_json_rpc_request(
         writer,
         pending_requests,
         "session/prompt",
@@ -511,9 +599,16 @@ fn handle_acp_prompt_command(
             ],
         }),
         agent,
-    )?;
+    ) {
+        Ok(pending) => pending,
+        Err(err) => {
+            set_acp_turn_active(turn_lifecycle, false);
+            return Err(err);
+        }
+    };
 
     let pending_requests = pending_requests.clone();
+    let wait_turn_lifecycle = turn_lifecycle.clone();
     let wait_state = state.clone();
     let wait_session_id = session_id.to_owned();
     let wait_runtime_token = runtime_token.clone();
@@ -525,6 +620,7 @@ fn handle_acp_prompt_command(
             None,
             agent,
         );
+        set_acp_turn_active(&wait_turn_lifecycle, false);
 
         match result {
             Ok(_) => {
@@ -553,6 +649,61 @@ fn handle_acp_prompt_command(
     Ok(())
 }
 
+/// Sends the ACP `session/cancel` notification for the active external session.
+/// The protocol does not acknowledge this notification; TermAl proves a clean
+/// stop by observing the in-flight prompt settle before the grace deadline.
+fn handle_acp_cancel_command(
+    writer: &mut impl Write,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    agent: AcpAgent,
+) -> Result<()> {
+    let Some(external_session_id) = runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned")
+        .current_session_id
+        .clone()
+    else {
+        // A stop can race initialization or a naturally completed turn. With
+        // no active external session there is nothing on the wire to cancel,
+        // and failing the writer loop here would unnecessarily discard a
+        // persisted session id that remains safe to resume.
+        return Ok(());
+    };
+    write_acp_json_rpc_message(
+        writer,
+        &json!({
+            "jsonrpc": JSON_RPC_VERSION,
+            "method": "session/cancel",
+            "params": { "sessionId": external_session_id },
+        }),
+        agent,
+    )
+}
+
+/// Publishes the in-flight prompt state used by graceful cancellation.
+fn set_acp_turn_active(turn_lifecycle: &AcpTurnLifecycle, active: bool) {
+    let (active_lock, condvar) = &**turn_lifecycle;
+    *active_lock
+        .lock()
+        .expect("ACP turn lifecycle mutex poisoned") = active;
+    condvar.notify_all();
+}
+
+/// Waits for the current ACP prompt response to settle within a bounded grace.
+fn wait_for_acp_turn_settle(turn_lifecycle: &AcpTurnLifecycle, timeout: Duration) -> bool {
+    let (active_lock, condvar) = &**turn_lifecycle;
+    let active = active_lock
+        .lock()
+        .expect("ACP turn lifecycle mutex poisoned");
+    if !*active {
+        return true;
+    }
+    let (active, _) = condvar
+        .wait_timeout_while(active, timeout, |active| *active)
+        .expect("ACP turn lifecycle mutex poisoned while waiting");
+    !*active
+}
+
 /// Handles ACP session config refresh.
 fn handle_acp_session_config_refresh(
     writer: &mut impl Write,
@@ -563,6 +714,23 @@ fn handle_acp_session_config_refresh(
     agent: AcpAgent,
     command: AcpPromptCommand,
 ) -> Result<()> {
+    if runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned")
+        .current_session_id
+        .is_some()
+    {
+        if agent != AcpAgent::OpenCode {
+            // Cursor and Gemini do not expose a live config-query method.
+            // Preserve their historical successful no-op; OpenCode uses the
+            // controlled restart path in `refresh_session_model_options`.
+            return Ok(());
+        }
+        bail!(
+            "{} ACP config refresh requires a fresh runtime handshake",
+            agent.label()
+        );
+    }
     ensure_acp_session_ready(
         writer,
         pending_requests,
@@ -585,30 +753,66 @@ fn ensure_acp_session_ready(
     agent: AcpAgent,
     command: &AcpPromptCommand,
 ) -> Result<String> {
-    let (existing_session_id, session_load_allowed) = {
+    let (existing_session_id, session_load_allowed, session_resume_allowed) = {
         let state = runtime_state
             .lock()
             .expect("ACP runtime state mutex poisoned");
-        let session_load_allowed = state
-            .capabilities
-            .as_ref()
+        let capabilities = state.capabilities.as_ref();
+        let session_load_allowed = capabilities
             .map(AcpCapabilities::session_load_supported_or_unknown)
             // No capabilities bundle yet means initialize has not
             // reported either way — fall back to the optimistic
             // "try anyway" rule, matching the previous
             // `supports_session_load != Some(false)` semantics.
             .unwrap_or(true);
-        (state.current_session_id.clone(), session_load_allowed)
+        let session_resume_allowed = capabilities
+            .is_some_and(AcpCapabilities::session_resume_supported);
+        (
+            state.current_session_id.clone(),
+            session_load_allowed,
+            session_resume_allowed,
+        )
     };
     if let Some(existing_session_id) = existing_session_id {
         return Ok(existing_session_id);
     }
     let mcp_servers = state.termal_delegation_mcp_acp_servers(session_id)?;
 
-    let session_result = if let Some(resume_session_id) = command
-        .resume_session_id
-        .as_deref()
-        .filter(|_| session_load_allowed)
+    let resume_session_id = command.resume_session_id.as_deref();
+    let session_result = if let Some(resume_session_id) =
+        resume_session_id.filter(|_| session_resume_allowed)
+    {
+        let result = send_acp_json_rpc_request(
+            writer,
+            pending_requests,
+            "session/resume",
+            json!({
+                "sessionId": resume_session_id,
+                "cwd": command.cwd,
+                "mcpServers": mcp_servers.clone(),
+            }),
+            Duration::from_secs(30),
+            agent,
+        );
+        match result {
+            Ok(value) => (resume_session_id.to_owned(), value),
+            Err(err)
+                if agent != AcpAgent::OpenCode
+                    && acp_json_rpc_response_error(&err)
+                        .is_some_and(AcpJsonRpcError::is_invalid_session_identifier) =>
+            {
+                start_acp_session(
+                    writer,
+                    pending_requests,
+                    agent,
+                    &command.cwd,
+                    mcp_servers.clone(),
+                )?
+            }
+            Err(err) => return Err(opencode_continuity_error(agent, err)),
+        }
+    } else if let Some(resume_session_id) =
+        resume_session_id.filter(|_| session_load_allowed)
     {
         {
             let mut state = runtime_state
@@ -653,7 +857,21 @@ fn ensure_acp_session_ready(
                     mcp_servers.clone(),
                 )?
             }
-            Err(err) => return Err(err),
+            Err(err)
+                if agent != AcpAgent::OpenCode
+                    && acp_json_rpc_response_error(&err)
+                        .is_some_and(|error| error.code == Some(-32601)) =>
+            {
+                note_acp_session_load_unsupported(runtime_state);
+                start_acp_session(
+                    writer,
+                    pending_requests,
+                    agent,
+                    &command.cwd,
+                    mcp_servers.clone(),
+                )?
+            }
+            Err(err) => return Err(opencode_continuity_error(agent, err)),
         }
     } else {
         start_acp_session(
@@ -666,29 +884,63 @@ fn ensure_acp_session_ready(
     };
 
     let (external_session_id, session_config) = session_result;
-    configure_acp_session(
-        writer,
-        pending_requests,
-        agent,
-        &external_session_id,
-        &command.model,
-        command.cursor_mode,
-        &session_config,
-    )?;
-    state.sync_session_model_options(
-        session_id,
-        current_acp_config_option_value(&session_config, "model").or_else(|| {
-            let requested = command.model.trim();
-            (!requested.is_empty()).then(|| requested.to_owned())
-        }),
-        acp_model_options(&session_config),
-    )?;
+    // Publish continuity as soon as the agent allocates or resumes it.
+    // Configuration reconciliation may block or fail independently; stop
+    // must still be able to cancel the live session, and a later runtime must
+    // be able to resume the conversation rather than orphaning it.
     state.set_external_session_id(session_id, external_session_id.clone())?;
     runtime_state
         .lock()
         .expect("ACP runtime state mutex poisoned")
         .current_session_id = Some(external_session_id.clone());
+    if agent == AcpAgent::OpenCode {
+        reconcile_opencode_config(
+            writer,
+            pending_requests,
+            state,
+            session_id,
+            agent,
+            &external_session_id,
+            command,
+            &session_config,
+        )?;
+    } else {
+        configure_acp_session(
+            writer,
+            pending_requests,
+            agent,
+            &external_session_id,
+            &command.model,
+            command.cursor_mode,
+            &session_config,
+        )?;
+        state.sync_session_model_options(
+            session_id,
+            current_acp_config_option_value(&session_config, "model").or_else(|| {
+                let requested = command.model.trim();
+                (!requested.is_empty()).then(|| requested.to_owned())
+            }),
+            acp_model_options(&session_config, agent),
+        )?;
+    }
     Ok(external_session_id)
+}
+
+/// Keeps OpenCode continuity failures visible and non-destructive.
+///
+/// OpenCode 1.18.8 does not expose a typed invalid-session discriminator for
+/// `session/load` or `session/resume`; clearing the stored id from prose or
+/// generic service metadata would silently replace the conversation. The
+/// failed transcript therefore remains an archive and points at the existing
+/// agent-scoped recovery path.
+fn opencode_continuity_error(agent: AcpAgent, err: anyhow::Error) -> anyhow::Error {
+    if agent == AcpAgent::OpenCode {
+        err.context(
+            "OpenCode could not resume this conversation. Create a new OpenCode session to start fresh",
+        )
+    } else {
+        err
+    }
 }
 
 /// Starts a new ACP session.
@@ -778,6 +1030,450 @@ fn configure_acp_session(
     Ok(())
 }
 
+/// Reconciles OpenCode's dynamic model/mode choices before prompt dispatch.
+///
+/// `auto` is agent-authoritative and therefore never emits a set request.
+/// Explicit TermAl choices are re-applied in deterministic model-then-mode
+/// order. If a previously selected value disappeared, TermAl visibly resets
+/// that one selection to `auto` and adopts the agent's current value.
+fn reconcile_opencode_config(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    state: &AppState,
+    termal_session_id: &str,
+    agent: AcpAgent,
+    external_session_id: &str,
+    command: &AcpPromptCommand,
+    config_result: &Value,
+) -> Result<()> {
+    let requested_model = normalize_opencode_model(&command.model)?;
+    let requested_mode = normalize_opencode_mode(
+        command
+            .opencode_mode
+            .as_deref()
+            .unwrap_or(OPENCODE_CONFIG_AUTO),
+    )?;
+    let mut notices = Vec::new();
+
+    let model_update =
+        has_acp_config_option_list(config_result, "model").then(|| {
+            let model_options = acp_model_options(config_result, agent);
+            reconcile_opencode_config_option(
+                writer,
+                pending_requests,
+                agent,
+                external_session_id,
+                "model",
+                &requested_model,
+                current_opencode_config_option_value(config_result, "model", &mut notices),
+                &model_options,
+                &mut notices,
+            )
+            .map(|(selection, current)| (selection, current, model_options))
+        });
+    let model_update = model_update.transpose()?;
+    let mode_update = has_acp_config_option_list(config_result, "mode").then(|| {
+        let mode_options = acp_opencode_mode_options(config_result);
+        reconcile_opencode_config_option(
+            writer,
+            pending_requests,
+            agent,
+            external_session_id,
+            "mode",
+            &requested_mode,
+            current_opencode_config_option_value(config_result, "mode", &mut notices),
+            &mode_options,
+            &mut notices,
+        )
+        .map(|(selection, current)| (selection, current, mode_options))
+    });
+    let mode_update = mode_update.transpose()?;
+
+    if model_update.is_none() && mode_update.is_none() && notices.is_empty() {
+        return Ok(());
+    }
+    state.sync_session_opencode_config(
+        termal_session_id,
+        model_update,
+        mode_update,
+        notices,
+    )
+}
+
+/// Applies one OpenCode config selection and returns persisted/effective state.
+fn reconcile_opencode_config_option(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    agent: AcpAgent,
+    external_session_id: &str,
+    option_id: &str,
+    requested_selection: &str,
+    current_value: Option<String>,
+    options: &[SessionModelOption],
+    notices: &mut Vec<String>,
+) -> Result<(String, Option<String>)> {
+    if requested_selection == OPENCODE_CONFIG_AUTO {
+        return Ok((OPENCODE_CONFIG_AUTO.to_owned(), current_value));
+    }
+
+    let requested_normalized = requested_selection.to_ascii_lowercase();
+    let matching_value = options.iter().find_map(|option| {
+        let value_matches = option.value.to_ascii_lowercase() == requested_normalized;
+        let label_matches = option.label.to_ascii_lowercase() == requested_normalized;
+        (value_matches || label_matches).then(|| option.value.clone())
+    });
+    let Some(matching_value) = matching_value else {
+        let adopted = current_value
+            .as_deref()
+            .map(|value| format!(" and adopted OpenCode's current value `{value}`"))
+            .unwrap_or_default();
+        notices.push(format!(
+            "OpenCode no longer offers {option_id} `{requested_selection}`. TermAl switched this session's {option_id} selection to `auto`{adopted}."
+        ));
+        return Ok((OPENCODE_CONFIG_AUTO.to_owned(), current_value));
+    };
+
+    if current_value.as_deref() != Some(matching_value.as_str()) {
+        let set_result = send_acp_json_rpc_request(
+            writer,
+            pending_requests,
+            "session/set_config_option",
+            json!({
+                "sessionId": external_session_id,
+                "optionId": option_id,
+                "value": matching_value,
+            }),
+            Duration::from_secs(15),
+            agent,
+        );
+        if let Err(err) = set_result {
+            if acp_json_rpc_response_error(&err).is_none() {
+                return Err(err);
+            }
+            let fallback_selection = current_value
+                .clone()
+                .unwrap_or_else(|| OPENCODE_CONFIG_AUTO.to_owned());
+            let fallback_display = current_value.as_deref().unwrap_or(OPENCODE_CONFIG_AUTO);
+            notices.push(format!(
+                "OpenCode rejected {option_id} `{requested_selection}`: {err}. \
+                 The session continues on `{fallback_display}`."
+            ));
+            return Ok((fallback_selection, current_value));
+        }
+    }
+    Ok((matching_value.clone(), Some(matching_value)))
+}
+
+/// Applies a live OpenCode config-options update on the ACP writer thread.
+fn reconcile_opencode_session_config(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    state: &AppState,
+    session_id: &str,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    agent: AcpAgent,
+    command: &AcpPromptCommand,
+    config_result: &Value,
+) -> Result<()> {
+    if agent != AcpAgent::OpenCode {
+        bail!("only OpenCode supports dynamic ACP config reconciliation");
+    }
+    let external_session_id = runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned")
+        .current_session_id
+        .clone()
+        .ok_or_else(|| anyhow!("OpenCode ACP session is not ready for config reconciliation"))?;
+    reconcile_opencode_config(
+        writer,
+        pending_requests,
+        state,
+        session_id,
+        agent,
+        &external_session_id,
+        command,
+        config_result,
+    )
+}
+
+/// Applies an unsolicited OpenCode config update without making the auxiliary
+/// reconciliation path runtime-fatal. A late update, rejected saved selection,
+/// or transient config request must remain visible and recoverable while the
+/// active ACP prompt and process continue independently.
+fn handle_opencode_config_reconcile_command(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    state: &AppState,
+    session_id: &str,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    agent: AcpAgent,
+    config_result: &Value,
+) -> Result<()> {
+    let command = match state.opencode_config_command(session_id) {
+        Ok(command) => command,
+        Err(err) => {
+            // Config notifications are auxiliary to the active prompt. A
+            // deletion/teardown race must not make the ACP writer fatal.
+            eprintln!(
+                "runtime state warning> ignored late OpenCode config update for \
+                 session `{session_id}`: {err:#}"
+            );
+            return Ok(());
+        }
+    };
+    let reconcile_fingerprint = json!({
+        "requestedModel": command.model.clone(),
+        "requestedMode": command.opencode_mode.clone(),
+        "config": config_result.clone(),
+    });
+    if runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned")
+        .opencode_reconcile_fingerprints
+        .contains(&reconcile_fingerprint)
+    {
+        return Ok(());
+    }
+    let reconcile_result = reconcile_opencode_session_config(
+        writer,
+        pending_requests,
+        state,
+        session_id,
+        runtime_state,
+        agent,
+        &command,
+        config_result,
+    );
+    if reconcile_result.is_ok() {
+        let mut runtime = runtime_state
+            .lock()
+            .expect("ACP runtime state mutex poisoned");
+        if runtime.current_session_id.is_some() {
+            runtime
+                .opencode_reconcile_fingerprints
+                .push_back(reconcile_fingerprint);
+            while runtime.opencode_reconcile_fingerprints.len()
+                > MAX_OPENCODE_RECONCILE_FINGERPRINTS
+            {
+                runtime.opencode_reconcile_fingerprints.pop_front();
+            }
+        }
+        return Ok(());
+    }
+    let err = reconcile_result.expect_err("failed OpenCode reconciliation should carry an error");
+
+    if acp_error_is_transport_failure(&err) {
+        return Err(err);
+    }
+    let detail = format!("{err:#}");
+    eprintln!(
+        "runtime state warning> failed to reconcile OpenCode config for session \
+         `{session_id}` without stopping the runtime: {detail}"
+    );
+    if let Err(notice_err) =
+        push_opencode_config_reconciliation_failure_notice(state, session_id, &detail)
+    {
+        eprintln!(
+            "runtime state warning> failed to surface OpenCode config reconciliation \
+             warning for session `{session_id}`: {notice_err:#}"
+        );
+    }
+    Ok(())
+}
+
+/// Applies a user-requested OpenCode config change on the serialized ACP
+/// writer and reports protocol rejection without tearing down a healthy
+/// runtime. Transport failures still terminate the runtime so the next prompt
+/// must re-establish and reconcile authority before dispatch.
+#[allow(clippy::too_many_arguments)]
+fn handle_opencode_config_apply_command(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    state: &AppState,
+    session_id: &str,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    agent: AcpAgent,
+    model_selection: Option<String>,
+    mode_selection: Option<String>,
+    started_tx: Sender<()>,
+    proceed_rx: mpsc::Receiver<()>,
+    response_tx: Sender<std::result::Result<(), String>>,
+) -> Result<()> {
+    // The API owns the scheduling deadline. The return acknowledgement closes
+    // the edge race where `started_tx.send` succeeds just as `recv_timeout`
+    // expires: the writer applies only after the API has observed the start
+    // signal and explicitly authorized execution.
+    if started_tx.send(()).is_err() || proceed_rx.recv().is_err() {
+        return Ok(());
+    }
+    let result = apply_opencode_config_update(
+        writer,
+        pending_requests,
+        state,
+        session_id,
+        runtime_state,
+        agent,
+        model_selection,
+        mode_selection,
+    );
+    match result {
+        Ok(()) => {
+            // A user-authority change starts a new deduplication generation.
+            // Old A/B notification cycles remain suppressed within their
+            // generation, while a legitimate later A selection can recur.
+            runtime_state
+                .lock()
+                .expect("ACP runtime state mutex poisoned")
+                .opencode_reconcile_fingerprints
+                .clear();
+            let _ = response_tx.send(Ok(()));
+            Ok(())
+        }
+        Err(err) => {
+            let detail = format!("{err:#}");
+            let _ = response_tx.send(Err(detail));
+            if acp_error_is_transport_failure(&err) {
+                Err(err)
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Sends acknowledged OpenCode model/mode changes in deterministic order and
+/// commits each selection only after the agent accepts it.
+fn apply_opencode_config_update(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    state: &AppState,
+    session_id: &str,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    agent: AcpAgent,
+    model_selection: Option<String>,
+    mode_selection: Option<String>,
+) -> Result<()> {
+    if agent != AcpAgent::OpenCode {
+        bail!("only OpenCode supports acknowledged dynamic config updates");
+    }
+    let external_session_id = runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned")
+        .current_session_id
+        .clone()
+        .ok_or_else(|| anyhow!("OpenCode ACP session is not ready for config updates"))?;
+
+    for (option_id, requested_selection) in [
+        ("model", model_selection),
+        ("mode", mode_selection),
+    ] {
+        let Some(requested_selection) = requested_selection else {
+            continue;
+        };
+        let snapshot = state.opencode_config_snapshot(session_id)?;
+        let (current_selection, current_value, options) = match option_id {
+            "model" => (
+                snapshot.model_selection,
+                Some(snapshot.effective_model),
+                snapshot.model_options,
+            ),
+            "mode" => (
+                snapshot.mode_selection,
+                snapshot.current_mode,
+                snapshot.mode_options,
+            ),
+            _ => unreachable!("OpenCode config update option is fixed"),
+        };
+        if current_selection == requested_selection {
+            continue;
+        }
+
+        let applied_selection = if requested_selection == OPENCODE_CONFIG_AUTO {
+            OPENCODE_CONFIG_AUTO.to_owned()
+        } else {
+            let matching_value =
+                matching_session_model_option_value(&requested_selection, &options).ok_or_else(
+                    || {
+                        anyhow!(
+                            "OpenCode no longer offers {option_id} `{requested_selection}`; refresh the options and choose again"
+                        )
+                    },
+                )?;
+            if current_value.as_deref() != Some(matching_value.as_str()) {
+                send_acp_json_rpc_request(
+                    writer,
+                    pending_requests,
+                    "session/set_config_option",
+                    json!({
+                        "sessionId": external_session_id,
+                        "optionId": option_id,
+                        "value": matching_value,
+                    }),
+                    Duration::from_secs(15),
+                    agent,
+                )?;
+            }
+            matching_value
+        };
+        state.sync_session_opencode_selection(session_id, option_id, applied_selection)?;
+    }
+    Ok(())
+}
+
+/// Appends a bounded, actionable transcript notice for a non-fatal OpenCode
+/// config reconciliation failure.
+fn push_opencode_config_reconciliation_failure_notice(
+    state: &AppState,
+    session_id: &str,
+    detail: &str,
+) -> Result<()> {
+    const MAX_DETAIL_CHARS: usize = 2_000;
+    let trimmed = detail.trim();
+    let mut chars = trimmed.chars();
+    let bounded = chars.by_ref().take(MAX_DETAIL_CHARS).collect::<String>();
+    let bounded = if chars.next().is_some() {
+        format!("{bounded}…")
+    } else {
+        bounded
+    };
+    let suffix = if bounded.is_empty() {
+        String::new()
+    } else {
+        format!("\n\nDetails: {bounded}")
+    };
+    state.push_message(
+        session_id,
+        Message::Text {
+            attachments: Vec::new(),
+            id: state.allocate_message_id(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: format!(
+                "OpenCode config update warning: TermAl could not reconcile the latest \
+                 model and mode options. The current session remains available; refresh \
+                 the options or choose the setting again.{suffix}"
+            ),
+            expanded_text: None,
+            source: None,
+        },
+    )
+}
+
+/// Returns whether this config payload contains a usable list for one option.
+///
+/// Some handshakes and notifications carry only the options that changed, or
+/// include a current value without the selectable list. Absence is not proof
+/// that a previously saved explicit selection disappeared; only a present list
+/// can support that conclusion.
+fn has_acp_config_option_list(config_result: &Value, option_id: &str) -> bool {
+    acp_config_options(config_result).is_some_and(|options| {
+        options.iter().any(|entry| {
+            entry.get("id").and_then(Value::as_str) == Some(option_id)
+                && entry.get("options").and_then(Value::as_array).is_some()
+        })
+    })
+}
+
 /// Returns the current ACP config option value.
 fn current_acp_config_option_value(config_result: &Value, option_id: &str) -> Option<String> {
     acp_config_options(config_result)?
@@ -785,6 +1481,40 @@ fn current_acp_config_option_value(config_result: &Value, option_id: &str) -> Op
         .find(|entry| entry.get("id").and_then(Value::as_str) == Some(option_id))
         .and_then(|entry| entry.get("currentValue").and_then(Value::as_str))
         .map(str::to_owned)
+}
+
+/// Returns a bounded, single-line OpenCode effective config value.
+///
+/// OpenCode owns `currentValue`, but the value still crosses persistence, API,
+/// SSE, and UI boundaries. Treat malformed agent output like an absent current
+/// value and surface a bounded notice instead of persisting it.
+fn current_opencode_config_option_value(
+    config_result: &Value,
+    option_id: &str,
+    notices: &mut Vec<String>,
+) -> Option<String> {
+    let value = current_acp_config_option_value(config_result, option_id)?;
+    let normalized = match option_id {
+        "model" => normalize_opencode_model(&value),
+        "mode" => normalize_opencode_mode(&value),
+        _ => {
+            notices.push(format!(
+                "OpenCode reported an unsupported current config option `{option_id}`. \
+                 TermAl ignored it."
+            ));
+            return None;
+        }
+    };
+    match normalized {
+        Ok(value) => Some(value),
+        Err(_) => {
+            notices.push(format!(
+                "OpenCode reported an invalid current {option_id}. TermAl ignored it \
+                 to keep persisted session state bounded and single-line."
+            ));
+            None
+        }
+    }
 }
 
 /// Returns the matching ACP config option value.
@@ -819,16 +1549,30 @@ fn matching_acp_config_option_value(
     })
 }
 
-/// Handles ACP model options.
-fn acp_model_options(config_result: &Value) -> Vec<SessionModelOption> {
+/// Handles ACP model options without imposing one agent's ingress contract on
+/// the others.
+fn acp_model_options(config_result: &Value, agent: AcpAgent) -> Vec<SessionModelOption> {
+    let max_value_chars = (agent == AcpAgent::OpenCode).then_some(MAX_OPENCODE_MODEL_CHARS);
+    acp_session_config_options(config_result, "model", max_value_chars)
+}
+
+/// Handles bounded OpenCode primary-agent mode options.
+fn acp_opencode_mode_options(config_result: &Value) -> Vec<SessionModelOption> {
+    acp_session_config_options(config_result, "mode", Some(MAX_OPENCODE_MODE_CHARS))
+}
+
+fn acp_session_config_options(
+    config_result: &Value,
+    option_id: &str,
+    max_value_chars: Option<usize>,
+) -> Vec<SessionModelOption> {
     let Some(option) = acp_config_options(config_result).and_then(|entries| {
         entries
             .iter()
-            .find(|entry| entry.get("id").and_then(Value::as_str) == Some("model"))
+            .find(|entry| entry.get("id").and_then(Value::as_str) == Some(option_id))
     }) else {
         return Vec::new();
     };
-
     option
         .get("options")
         .and_then(Value::as_array)
@@ -837,26 +1581,35 @@ fn acp_model_options(config_result: &Value) -> Vec<SessionModelOption> {
                 .iter()
                 .filter_map(|entry| {
                     let value = entry.get("value").and_then(Value::as_str)?.trim();
-                    if value.is_empty() {
+                    if value.is_empty()
+                        || max_value_chars.is_some_and(|max| {
+                            value.chars().count() > max
+                                || value.chars().any(char::is_control)
+                        })
+                    {
                         return None;
                     }
                     let label = entry
                         .get("name")
                         .or_else(|| entry.get("label"))
                         .and_then(Value::as_str)
-                        .map(str::trim)
-                        .filter(|label| !label.is_empty())
+                        .and_then(|label| {
+                            bounded_acp_option_text(label, MAX_ACP_OPTION_LABEL_CHARS)
+                        })
                         .unwrap_or(value);
                     let description = entry
                         .get("description")
                         .and_then(Value::as_str)
-                        .map(str::trim)
-                        .filter(|description| !description.is_empty())
-                        .map(str::to_owned);
+                        .and_then(|description| {
+                            bounded_acp_option_text(
+                                description,
+                                MAX_ACP_OPTION_DESCRIPTION_CHARS,
+                            )
+                        });
                     Some(SessionModelOption {
                         label: label.to_owned(),
                         value: value.to_owned(),
-                        description,
+                        description: description.map(str::to_owned),
                         badges: Vec::new(),
                         supported_claude_effort_levels: Vec::new(),
                         default_reasoning_effort: None,
@@ -866,6 +1619,14 @@ fn acp_model_options(config_result: &Value) -> Vec<SessionModelOption> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn bounded_acp_option_text(value: &str, max_chars: usize) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()
+        && value.chars().count() <= max_chars
+        && !value.chars().any(char::is_control))
+    .then_some(value)
 }
 
 /// Handles ACP config options.
@@ -926,6 +1687,7 @@ fn handle_acp_message(
         session_id,
         runtime_token,
         runtime_state,
+        input_tx,
         turn_state,
         recorder,
         agent,
@@ -953,14 +1715,7 @@ fn handle_acp_request(
 
     match method {
         "session/request_permission" => {
-            let tool_name = params
-                .get("toolName")
-                .and_then(Value::as_str)
-                .unwrap_or("Tool");
-            let description = params
-                .get("description")
-                .and_then(Value::as_str)
-                .unwrap_or(tool_name);
+            let (description, detail) = summarize_acp_permission_request(params, agent);
             let options = params
                 .get("options")
                 .and_then(Value::as_array)
@@ -1007,8 +1762,8 @@ fn handle_acp_request(
             } else {
                 recorder.push_acp_approval(
                     &format!("{} needs approval", agent.label()),
-                    description,
-                    &format!("{} requested approval for `{tool_name}`.", agent.label()),
+                    &description,
+                    &detail,
                     approval,
                 )?;
             }
@@ -1047,7 +1802,7 @@ fn acp_permission_response_option_id(
                 CursorMode::Plan => approval.reject_option_id.clone(),
             })
         }
-        AcpAgent::Gemini => Ok(None),
+        AcpAgent::Gemini | AcpAgent::OpenCode => Ok(None),
     }
 }
 
@@ -1059,6 +1814,7 @@ fn handle_acp_notification(
     session_id: &str,
     runtime_token: &RuntimeToken,
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    input_tx: &Sender<AcpRuntimeCommand>,
     turn_state: &mut AcpTurnState,
     recorder: &mut SessionRecorder,
     agent: AcpAgent,
@@ -1077,7 +1833,15 @@ fn handle_acp_notification(
                 log_unhandled_acp_event(agent, "ACP session/update missing params.update", message);
                 return Ok(());
             };
-            handle_acp_session_update(update, state, session_id, turn_state, recorder, agent)?;
+            handle_acp_session_update(
+                update,
+                state,
+                session_id,
+                input_tx,
+                turn_state,
+                recorder,
+                agent,
+            )?;
         }
         "error" => {
             let payload = message.get("params").unwrap_or(message);
@@ -1101,6 +1865,7 @@ fn handle_acp_session_update(
     update: &Value,
     state: &AppState,
     session_id: &str,
+    input_tx: &Sender<AcpRuntimeCommand>,
     turn_state: &mut AcpTurnState,
     recorder: &mut SessionRecorder,
     agent: AcpAgent,
@@ -1156,13 +1921,23 @@ fn handle_acp_session_update(
             }
         }
         "config_options_update" | "config_update" => {
-            state.sync_session_model_options(
-                session_id,
-                current_acp_config_option_value(update, "model"),
-                acp_model_options(update),
-            )?;
-            if agent == AcpAgent::Cursor {
-                state.sync_session_cursor_mode(session_id, acp_cursor_mode(update))?;
+            if agent == AcpAgent::OpenCode {
+                input_tx
+                    .send(AcpRuntimeCommand::ReconcileOpenCodeConfig {
+                        config_result: update.clone(),
+                    })
+                    .map_err(|err| {
+                        anyhow!("failed to queue OpenCode config reconciliation: {err}")
+                    })?;
+            } else {
+                state.sync_session_model_options(
+                    session_id,
+                    current_acp_config_option_value(update, "model"),
+                    acp_model_options(update, agent),
+                )?;
+                if agent == AcpAgent::Cursor {
+                    state.sync_session_cursor_mode(session_id, acp_cursor_mode(update))?;
+                }
             }
         }
         "available_commands_update" => {}
@@ -1313,17 +2088,132 @@ fn acp_cursor_mode(update: &Value) -> Option<CursorMode> {
 
 /// Finds ACP permission option.
 fn find_acp_permission_option(options: &[Value], hints: &[&str]) -> Option<String> {
-    options.iter().find_map(|option| {
-        let option_id = option
-            .get("optionId")
-            .or_else(|| option.get("id"))
-            .and_then(Value::as_str)?;
-        let normalized = option_id.to_ascii_lowercase();
-        hints
+    let normalized_hints = hints
+        .iter()
+        .map(|hint| normalize_acp_permission_hint(hint))
+        .collect::<Vec<_>>();
+    let normalized_options = options
+        .iter()
+        .filter_map(|option| {
+            let option_id = option
+                .get("optionId")
+                .or_else(|| option.get("id"))
+                .and_then(Value::as_str)?;
+            let candidates = [
+                Some(option_id),
+                option.get("kind").and_then(Value::as_str),
+                option.get("name").and_then(Value::as_str),
+            ]
+            .into_iter()
+            .flatten()
+            .map(normalize_acp_permission_hint)
+            .collect::<Vec<_>>();
+            Some((option_id, candidates))
+        })
+        .collect::<Vec<_>>();
+
+    // ACP's typed `kind` is authoritative. Search each hint across every
+    // option before falling back to fuzzy names so a generic legacy hint such
+    // as `allow` cannot bind an earlier `allow_always` option when
+    // `allow_once` is present later in the array.
+    for hint in &normalized_hints {
+        if let Some((option_id, _)) = normalized_options
             .iter()
-            .any(|hint| normalized.contains(&hint.to_ascii_lowercase()))
-            .then_some(option_id.to_owned())
-    })
+            .find(|(_, candidates)| candidates.iter().any(|candidate| candidate == hint))
+        {
+            return Some((*option_id).to_owned());
+        }
+    }
+    None
+}
+
+/// Normalizes ACP permission option identifiers across agents.
+fn normalize_acp_permission_hint(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['-', ' '], "_")
+}
+
+/// Summarizes a permission request without losing OpenCode's structured tool
+/// context. Cursor and Gemini historically send flat `toolName` +
+/// `description` fields; ACP v1 agents such as OpenCode send a nested
+/// `toolCall` carrying the title, kind, content, and locations instead.
+fn summarize_acp_permission_request(
+    params: &Value,
+    agent: AcpAgent,
+) -> (String, String) {
+    const MAX_TITLE_CHARS: usize = 1_000;
+    const MAX_TOOL_NAME_CHARS: usize = 200;
+    let tool_call = params.get("toolCall").unwrap_or(&Value::Null);
+    let raw_tool_name = params
+        .get("toolName")
+        .and_then(Value::as_str)
+        .or_else(|| tool_call.get("title").and_then(Value::as_str))
+        .or_else(|| tool_call.get("kind").and_then(Value::as_str))
+        .unwrap_or("Tool");
+    let tool_name = bounded_acp_approval_text(raw_tool_name, MAX_TOOL_NAME_CHARS, "Tool");
+    let raw_description = params
+        .get("description")
+        .and_then(Value::as_str)
+        .or_else(|| tool_call.get("title").and_then(Value::as_str))
+        .unwrap_or(&tool_name);
+    let description =
+        bounded_acp_approval_text(raw_description, MAX_TITLE_CHARS, &tool_name);
+
+    let mut details = vec![format!(
+        "{} requested approval for `{tool_name}`.",
+        agent.label()
+    )];
+    if let Some(kind) = tool_call.get("kind").and_then(Value::as_str) {
+        let kind = bounded_acp_approval_text(kind, MAX_TOOL_NAME_CHARS, "tool");
+        if !kind.eq_ignore_ascii_case(&tool_name) {
+            details.push(format!("Kind: `{kind}`"));
+        }
+    }
+    for (label, value) in [
+        ("Content", tool_call.get("content")),
+        ("Locations", tool_call.get("locations")),
+    ] {
+        let Some(value) = value.filter(|value| !value.is_null()) else {
+            continue;
+        };
+        let rendered =
+            serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
+        details.push(format!("{label}:\n{}", truncate_acp_approval_detail(&rendered)));
+    }
+
+    (
+        description,
+        truncate_acp_approval_detail(&details.join("\n\n")),
+    )
+}
+
+/// Bounds single-line approval metadata before transcript persistence.
+fn bounded_acp_approval_text(value: &str, max_chars: usize, fallback: &str) -> String {
+    let bounded = value
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(max_chars)
+        .collect::<String>();
+    let bounded = bounded.trim();
+    if bounded.is_empty() {
+        fallback.to_owned()
+    } else {
+        bounded.to_owned()
+    }
+}
+
+/// Bounds agent-provided approval detail before storing it in the transcript.
+fn truncate_acp_approval_detail(value: &str) -> String {
+    const MAX_DETAIL_CHARS: usize = 8_000;
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(MAX_DETAIL_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}\n…")
+    } else {
+        truncated
+    }
 }
 
 /// Handles send ACP JSON RPC request.
@@ -1381,7 +2271,7 @@ fn start_acp_json_rpc_request(
             .lock()
             .expect("ACP pending requests mutex poisoned")
             .remove(&request_id);
-        return Err(err);
+        return Err(anyhow!(AcpResponseError::Transport(format!("{err:#}"))));
     }
 
     Ok(PendingAcpJsonRpcRequest {
@@ -1402,6 +2292,26 @@ fn send_acp_json_rpc_request_inner(
     let pending_request =
         start_acp_json_rpc_request(writer, pending_requests, method, params, agent)?;
     wait_for_acp_json_rpc_response(pending_requests, pending_request, method, timeout, agent)
+}
+
+/// Returns a typed ACP JSON-RPC rejection from an error chain.
+fn acp_json_rpc_response_error(err: &anyhow::Error) -> Option<&AcpJsonRpcError> {
+    err.chain().find_map(|source| {
+        source
+            .downcast_ref::<AcpResponseError>()
+            .and_then(AcpResponseError::as_json_rpc)
+    })
+}
+
+/// Returns whether an ACP request failed at the transport boundary rather than
+/// receiving a protocol-level JSON-RPC rejection.
+fn acp_error_is_transport_failure(err: &anyhow::Error) -> bool {
+    err.chain().any(|source| {
+        matches!(
+            source.downcast_ref::<AcpResponseError>(),
+            Some(AcpResponseError::Transport(_))
+        )
+    })
 }
 
 /// Handles wait for ACP JSON RPC response.
@@ -1425,10 +2335,10 @@ fn wait_for_acp_json_rpc_response(
                     .lock()
                     .expect("ACP pending requests mutex poisoned")
                     .remove(&request_id);
-                return Err(anyhow!(
+                return Err(anyhow!(AcpResponseError::Transport(format!(
                     "timed out waiting for {} ACP response to `{method}`: {err}",
                     agent.label()
-                ));
+                ))));
             }
         },
         None => match response_rx.recv() {
@@ -1438,10 +2348,10 @@ fn wait_for_acp_json_rpc_response(
                     .lock()
                     .expect("ACP pending requests mutex poisoned")
                     .remove(&request_id);
-                return Err(anyhow!(
+                return Err(anyhow!(AcpResponseError::Transport(format!(
                     "failed waiting for {} ACP response to `{method}`: {err}",
                     agent.label()
-                ));
+                ))));
             }
         },
     };
@@ -1547,6 +2457,10 @@ fn acp_error_data_indicates_invalid_session_identifier_with_depth(
 
 /// Normalizes reason strings used for invalid-session identifiers across ACP agents.
 fn acp_reason_indicates_invalid_session_identifier(reason: &str) -> bool {
+    // Gemini uses these typed reason values in its invalid-session envelopes.
+    // OpenCode deliberately does not use this classifier: 1.18.8 exposes no
+    // typed invalid-session discriminator safe enough to authorize clearing
+    // persisted conversation continuity.
     let normalized = reason
         .chars()
         .filter(|character| character.is_ascii_alphanumeric())

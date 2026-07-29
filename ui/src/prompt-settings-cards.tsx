@@ -823,3 +823,109 @@ export function GeminiPromptSettingsCard({
     </article>
   );
 }
+
+export function OpenCodePromptSettingsCard({
+  paneId,
+  session,
+  isUpdating,
+  isRefreshingModelOptions,
+  modelOptionsError,
+  onRequestModelOptions,
+  onSessionSettingsChange,
+}: {
+  paneId: string;
+  session: Session;
+  isUpdating: boolean;
+  isRefreshingModelOptions: boolean;
+  modelOptionsError: string | null;
+  onRequestModelOptions: (sessionId: string) => void;
+  onSessionSettingsChange: (
+    sessionId: string,
+    field: SessionSettingsField,
+    value: SessionSettingsValue,
+  ) => void;
+}) {
+  useSessionModelOptionsAutoRefresh({
+    isRefreshingModelOptions,
+    onRequestModelOptions,
+    session,
+  });
+
+  const modelOptions: ComboboxOption[] = [
+    { label: "Auto", value: "auto", description: "Let OpenCode choose the model" },
+    ...sessionModelComboboxOptions(session.modelOptions, session.model).filter(
+      (option) => option.value !== "auto",
+    ),
+  ];
+  const modeOptions: ComboboxOption[] = [
+    { label: "Auto", value: "auto", description: "Let OpenCode choose the session mode" },
+    ...(session.opencodeModeOptions ?? [])
+      .filter((option) => option.value !== "auto")
+      .map((option) => ({
+        label: option.label,
+        value: option.value,
+        description: option.description ?? undefined,
+      })),
+  ];
+
+  return (
+    <article className="message-card prompt-settings-card">
+      <div className="card-label">Session Settings</div>
+      <h3>OpenCode session</h3>
+      <div className="prompt-settings-grid">
+        <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`opencode-model-${paneId}`}>
+            OpenCode model
+          </label>
+          <ThemedCombobox
+            id={`opencode-model-${paneId}`}
+            className="prompt-settings-select"
+            value={session.opencodeModel ?? "auto"}
+            options={modelOptions}
+            disabled={isUpdating}
+            onChange={(nextValue) =>
+              void onSessionSettingsChange(session.id, "model", nextValue)
+            }
+          />
+          <SessionModelRefreshAction
+            disabled={isUpdating || isRefreshingModelOptions}
+            isRefreshing={isRefreshingModelOptions}
+            sessionId={session.id}
+            onRequestModelOptions={onRequestModelOptions}
+          />
+          <SessionModelRefreshFeedback
+            agent={session.agent}
+            isRefreshing={isRefreshingModelOptions}
+            modelOptionsError={modelOptionsError}
+          />
+          <p className="session-model-description">
+            Effective model: <code>{session.model}</code>
+          </p>
+        </div>
+        <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`opencode-mode-${paneId}`}>
+            OpenCode mode
+          </label>
+          <ThemedCombobox
+            id={`opencode-mode-${paneId}`}
+            className="prompt-settings-select"
+            value={session.opencodeMode ?? "auto"}
+            options={modeOptions}
+            disabled={isUpdating}
+            onChange={(nextValue) =>
+              void onSessionSettingsChange(session.id, "opencodeMode", nextValue)
+            }
+          />
+          <p className="session-model-description">
+            Effective mode: <code>{session.opencodeCurrentMode ?? "not reported"}</code>
+          </p>
+        </div>
+        <p className="session-control-hint">
+          Auto follows OpenCode. Explicit TermAl choices are re-applied after session new,
+          resume, or load before the next prompt. OpenCode permission requests always appear as
+          ordered approval cards.
+        </p>
+      </div>
+    </article>
+  );
+}

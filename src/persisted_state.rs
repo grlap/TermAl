@@ -261,6 +261,8 @@ impl PersistedSessionRecord {
         session.external_session_id = self.external_session_id.clone();
         if session.agent.acp_runtime().is_none() {
             session.model_options.clear();
+            session.opencode_mode_options.clear();
+            session.opencode_current_mode = None;
         }
         if self.remote_id.is_none() {
             session.pending_prompts.clear();
@@ -284,6 +286,7 @@ impl PersistedSessionRecord {
             pending_codex_mcp_elicitations: HashMap::new(),
             pending_codex_app_requests: HashMap::new(),
             pending_acp_approvals: HashMap::new(),
+            pending_acp_approval_order: VecDeque::new(),
             queued_prompts: self.queued_prompts,
             queued_peer_messages: self.queued_peer_messages,
             message_positions: build_message_positions(&session.messages),
@@ -412,6 +415,55 @@ fn validate_persisted_session_fields(
         return Err(anyhow!(
             "persisted session `{}` should not define codexThreadState without an active Codex thread",
             session.id
+        ));
+    }
+
+    if session.agent.supports_opencode_settings() {
+        let model = session
+            .opencode_model
+            .as_deref()
+            .ok_or_else(|| {
+                anyhow!(
+                    "persisted session `{}` is missing opencodeModel",
+                    session.id
+                )
+            })
+            .and_then(normalize_opencode_model)?;
+        let mode = session
+            .opencode_mode
+            .as_deref()
+            .ok_or_else(|| {
+                anyhow!(
+                    "persisted session `{}` is missing opencodeMode",
+                    session.id
+                )
+            })
+            .and_then(normalize_opencode_mode)?;
+        let effective_model = normalize_opencode_model(&session.model)?;
+        let current_mode = session
+            .opencode_current_mode
+            .as_deref()
+            .map(normalize_opencode_mode)
+            .transpose()?;
+        if model != session.opencode_model.as_deref().unwrap_or_default()
+            || mode != session.opencode_mode.as_deref().unwrap_or_default()
+            || effective_model != session.model
+            || current_mode.as_deref() != session.opencode_current_mode.as_deref()
+        {
+            return Err(anyhow!(
+                "persisted session `{}` has unnormalized OpenCode settings",
+                session.id
+            ));
+        }
+    } else if session.opencode_model.is_some()
+        || session.opencode_mode.is_some()
+        || session.opencode_current_mode.is_some()
+        || !session.opencode_mode_options.is_empty()
+    {
+        return Err(anyhow!(
+            "persisted session `{}` should not define OpenCode settings for {} sessions",
+            session.id,
+            session.agent.name()
         ));
     }
 

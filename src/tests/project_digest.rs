@@ -58,6 +58,7 @@ fn project_digest_surfaces_pending_approval_actions() {
                 command_language: Some(shell_language().to_owned()),
                 detail: "Approval required.".to_owned(),
                 decision: ApprovalDecision::Pending,
+                supported_decisions: None,
             },
         )
         .unwrap();
@@ -526,6 +527,7 @@ fn project_action_approve_routes_to_the_live_project_approval() {
                 command_language: Some(shell_language().to_owned()),
                 detail: "Approval required.".to_owned(),
                 decision: ApprovalDecision::Pending,
+                supported_decisions: None,
             },
         )
         .unwrap();

@@ -115,6 +115,7 @@ export function useAppPreferencesState(
   const [defaultClaudeModel, setDefaultClaudeModel] = useState("default");
   const [defaultCursorModel, setDefaultCursorModel] = useState("default");
   const [defaultGeminiModel, setDefaultGeminiModel] = useState("default");
+  const [defaultOpenCodeModel, setDefaultOpenCodeModel] = useState("default");
   const [defaultCodexReasoningEffort, setDefaultCodexReasoningEffort] =
     useState<CodexReasoningEffort>(DEFAULT_CODEX_REASONING_EFFORT);
   const [defaultClaudeApprovalMode, setDefaultClaudeApprovalMode] =
@@ -215,6 +216,8 @@ export function useAppPreferencesState(
     setDefaultCursorModel,
     defaultGeminiModel,
     setDefaultGeminiModel,
+    defaultOpenCodeModel,
+    setDefaultOpenCodeModel,
     defaultCodexReasoningEffort,
     setDefaultCodexReasoningEffort,
     defaultClaudeApprovalMode,

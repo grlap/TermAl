@@ -16,8 +16,8 @@ scoped to the active session and uses the same settings APIs as the Prompt tab.
 
 Supported commands:
 
-- `/model` for `Claude`, `Codex`, `Cursor`, and `Gemini`
-- `/mode` for `Claude`, `Cursor`, and `Gemini`
+- `/model` for `Claude`, `Codex`, `Cursor`, `Gemini`, and `OpenCode`
+- `/mode` for `Claude`, `Cursor`, `Gemini`, and `OpenCode`
 - `/sandbox` for `Codex`
 - `/approvals` for `Codex`
 - `/effort` for `Claude` and `Codex`
@@ -29,14 +29,15 @@ Supported commands:
 - `Space` applies the highlighted choice and keeps the palette open.
 - The active choice stays aligned with the real selected session setting after
   live refreshes and setting changes.
-- `/model` supports manual model-id entry as well as choosing from the live
-  list.
+- `/model` supports manual model-id entry for Claude, Codex, Cursor, and
+  Gemini. OpenCode accepts only its live ACP model options plus Auto; see
+  [OpenCode ACP Integration](./opencode-acp-integration.md).
 - For live model lists, labels resolve to canonical ids before TermAl stores
   the selection.
 
 ## Live model integration
 
-For Claude, Codex, Cursor, and Gemini, the slash palette can:
+For Claude, Codex, Cursor, Gemini, and OpenCode, the slash palette can:
 
 - trigger live model refresh when the model list is missing
 - show inline loading state
@@ -48,7 +49,7 @@ For Claude, Codex, Cursor, and Gemini, the slash palette can:
 This is not full cross-agent slash-command parity. TermAl now discovers
 Claude's native slash commands from the live runtime when available and falls
 back to `.claude/commands` prompt templates, but it still does not have
-equivalent native-command discovery for Codex, Cursor, or Gemini.
+equivalent native-command discovery for Codex, Cursor, Gemini, or OpenCode.
 
 Project command templates and future Claude skills are owned by the backend
 agent-command resolver, not by this session-control layer. See

@@ -492,6 +492,7 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
                 command_language: None,
                 detail: "Need to update the route tests.".to_owned(),
                 decision: ApprovalDecision::Pending,
+                supported_decisions: None,
             },
         )
         .expect("approval message should be recorded");

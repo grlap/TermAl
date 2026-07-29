@@ -1,12 +1,11 @@
 // Agent readiness cache behavior.
 //
 // "Agent readiness" is TermAl's per-agent availability snapshot: for each
-// supported agent (Claude, Codex, Gemini, Cursor) it reports whether the
-// local CLI is installed, reachable on PATH, and correctly versioned, plus
-// any soft warnings (e.g. Codex on Windows asking the user to route shell
-// commands through WSL). Determining readiness requires spawning `which
-// claude` / `which codex` / etc. to probe the filesystem, which is
-// measurably slow on Windows — so the result is cached on `AppState` and
+// locally probed agent (Codex, Cursor, Gemini, OpenCode) it reports whether the
+// local CLI is installed and reachable on PATH, plus any soft warnings (e.g.
+// Codex on Windows asking the user to route shell commands through WSL).
+// Determining readiness requires filesystem/PATH discovery, which is measurably
+// slow on Windows — so the result is cached on `AppState` and
 // reused across hot-path snapshots rather than recomputed on every
 // `/api/state` call. The cache is refreshed lazily via TTL expiry and
 // eagerly via explicit invalidation whenever app settings change or a new
@@ -53,6 +52,46 @@ fn codex_agent_readiness_matches_runtime_resolution() {
             assert_eq!(readiness.warning_detail, None);
         }
     }
+}
+
+// Pins OpenCode readiness to the same executable resolver used by its ACP
+// runtime. Installed OpenCode is non-blocking because provider auth can only
+// be proven by a real prompt; a missing executable remains a creation blocker.
+#[test]
+fn opencode_agent_readiness_matches_runtime_resolution() {
+    let readiness = opencode_agent_readiness();
+
+    assert!(matches!(readiness.agent, Agent::OpenCode));
+    match readiness.command_path.as_deref() {
+        Some(command_path) => {
+            assert!(matches!(readiness.status, AgentReadinessStatus::Ready));
+            assert!(!readiness.blocking);
+            assert!(readiness.detail.contains(command_path));
+            assert!(readiness.detail.contains("opencode auth login"));
+            assert!(readiness.detail.contains("first prompt"));
+            assert_eq!(readiness.warning_detail, None);
+        }
+        None => {
+            assert!(matches!(readiness.status, AgentReadinessStatus::Missing));
+            assert!(readiness.blocking);
+            assert!(readiness.detail.contains("Install the `opencode` CLI"));
+            assert_eq!(readiness.warning_detail, None);
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn opencode_command_wraps_batch_shims_with_cmd_exe() {
+    let command = opencode_command(FsPath::new(r"C:\npm\opencode.cmd"));
+    assert_eq!(command.get_program(), "cmd.exe");
+    assert_eq!(
+        command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>(),
+        vec!["/C", r"C:\npm\opencode.cmd"]
+    );
 }
 
 fn sentinel_agent_readiness_snapshot() -> Vec<AgentReadiness> {
@@ -149,6 +188,7 @@ fn update_app_settings_refreshes_invalidated_agent_readiness_cache() {
             default_claude_model: None,
             default_cursor_model: None,
             default_gemini_model: None,
+            default_opencode_model: None,
             default_codex_reasoning_effort: Some(next_reasoning_effort),
             default_codex_sandbox_mode: None,
             default_codex_approval_policy: None,
@@ -266,6 +306,7 @@ fn update_app_settings_sse_matches_api_response() {
             default_claude_model: None,
             default_cursor_model: None,
             default_gemini_model: None,
+            default_opencode_model: None,
             default_codex_reasoning_effort: Some(next_reasoning_effort),
             default_codex_sandbox_mode: Some(CodexSandboxMode::ReadOnly),
             default_codex_approval_policy: Some(CodexApprovalPolicy::OnFailure),

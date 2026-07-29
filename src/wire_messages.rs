@@ -376,6 +376,12 @@ enum Message {
         command_language: Option<String>,
         detail: String,
         decision: ApprovalDecision,
+        #[serde(
+            default,
+            rename = "supportedDecisions",
+            skip_serializing_if = "Option::is_none"
+        )]
+        supported_decisions: Option<Vec<ApprovalDecision>>,
     },
     #[serde(rename = "userInputRequest")]
     UserInputRequest {

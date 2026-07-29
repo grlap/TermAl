@@ -77,6 +77,7 @@ fn clear_all_pending_requests(record: &mut SessionRecord) {
     record.pending_codex_mcp_elicitations.clear();
     record.pending_codex_app_requests.clear();
     record.pending_acp_approvals.clear();
+    record.pending_acp_approval_order.clear();
 }
 
 /// Merges agent commands.

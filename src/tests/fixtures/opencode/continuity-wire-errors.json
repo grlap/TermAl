@@ -1,0 +1,26 @@
+{
+  "opencodeVersion": "1.18.8",
+  "capturedAt": "2026-07-29",
+  "unknownSessionLoad": {
+    "jsonrpc": "2.0",
+    "id": 3,
+    "error": {
+      "code": -32603,
+      "message": "Internal error: OpenCode service failure",
+      "data": {
+        "service": "session"
+      }
+    }
+  },
+  "unknownSessionPrompt": {
+    "jsonrpc": "2.0",
+    "id": 4,
+    "error": {
+      "code": -32602,
+      "message": "Invalid params: session not found: opencode-session-missing",
+      "data": {
+        "sessionId": "opencode-session-missing"
+      }
+    }
+  }
+}

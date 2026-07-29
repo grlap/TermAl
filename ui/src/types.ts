@@ -1,4 +1,4 @@
-export type AgentType = "Claude" | "Codex" | "Cursor" | "Gemini";
+export type AgentType = "Claude" | "Codex" | "Cursor" | "Gemini" | "OpenCode";
 export type ExhaustiveValueCoverage<
   Union extends string,
   Options extends ReadonlyArray<{ value: Union }>,
@@ -187,6 +187,7 @@ export type AppPreferences = {
   defaultClaudeModel: string;
   defaultCursorModel: string;
   defaultGeminiModel: string;
+  defaultOpenCodeModel?: string;
   defaultCodexReasoningEffort: CodexReasoningEffort;
   defaultClaudeApprovalMode: ClaudeApprovalMode;
   defaultClaudeEffort: ClaudeEffortLevel;
@@ -319,6 +320,10 @@ export type Session = {
   cursorMode?: CursorMode | null;
   claudeApprovalMode?: ClaudeApprovalMode | null;
   geminiApprovalMode?: GeminiApprovalMode | null;
+  opencodeModel?: string | null;
+  opencodeMode?: string | null;
+  opencodeCurrentMode?: string | null;
+  opencodeModeOptions?: SessionModelOption[];
   externalSessionId?: string | null;
   agentCommandsRevision?: number;
   codexThreadState?: CodexThreadState | null;
@@ -609,6 +614,7 @@ export type ApprovalMessage = BaseMessage & {
   commandLanguage?: string | null;
   detail: string;
   decision: ApprovalDecision;
+  supportedDecisions?: ApprovalDecision[] | null;
 };
 
 export type UserInputQuestionOption = {
@@ -984,7 +990,8 @@ export type SessionSettingsField =
   | "claudeApprovalMode"
   | "claudeEffort"
   | "cursorMode"
-  | "geminiApprovalMode";
+  | "geminiApprovalMode"
+  | "opencodeMode";
 export type SessionSettingsValue =
   | string
   | SandboxMode

@@ -120,6 +120,7 @@ export const NEW_SESSION_AGENT_OPTIONS = [
   { label: "Codex", value: "Codex" },
   { label: "Cursor", value: "Cursor" },
   { label: "Gemini", value: "Gemini" },
+  { label: "OpenCode", value: "OpenCode" },
 ] as const satisfies ReadonlyArray<{ label: string; value: AgentType }>;
 // Compile-time exhaustiveness check: adding an `AgentType` variant without
 // extending `NEW_SESSION_AGENT_OPTIONS` must fail the build.

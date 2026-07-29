@@ -361,10 +361,10 @@ describe("App control panel - openers and canvas", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
+      await act(async () => {
         eventSource.dispatchError();
+        await flushUiWork();
       });
-      await settleAsyncUi();
 
       await selectComboboxOption("Project", /^API$/i);
       await clickAndSettle(
@@ -762,10 +762,10 @@ describe("App control panel - openers and canvas", () => {
       try {
         await renderApp();
         const eventSource = latestEventSource();
-        act(() => {
+        await act(async () => {
           eventSource.dispatchError();
+          await flushUiWork();
         });
-        await settleAsyncUi();
 
         const controlPanelShell = document.querySelector(
           ".control-panel-shell",
@@ -1006,10 +1006,10 @@ describe("App control panel - openers and canvas", () => {
       try {
         await renderApp();
         const eventSource = latestEventSource();
-        act(() => {
+        await act(async () => {
           eventSource.dispatchError();
+          await flushUiWork();
         });
-        await settleAsyncUi();
 
         const controlPanelShell = document.querySelector(
           ".control-panel-shell",
@@ -1293,10 +1293,10 @@ describe("App control panel - openers and canvas", () => {
       try {
         await renderApp();
         const eventSource = latestEventSource();
-        act(() => {
+        await act(async () => {
           eventSource.dispatchError();
+          await flushUiWork();
         });
-        await settleAsyncUi();
 
         const controlPanelShell = getControlPanelShell();
 

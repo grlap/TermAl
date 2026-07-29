@@ -577,8 +577,8 @@ Current direction:
 - Prefer backend resume waits for review fan-in. A parent turn that schedules a
   resume wait must yield instead of shell-polling, raw-HTTP polling, or scraping
   session logs, otherwise the queued fan-in prompt cannot run.
-- Expose the same TermAl-owned MCP bridge to Codex, Claude, Cursor, and Gemini
-  startup/resume hooks. Agent commands such as `/review-changes` should
+- Expose the same TermAl-owned MCP bridge to Codex, Claude, Cursor, Gemini, and
+  OpenCode startup/resume hooks. Agent commands such as `/review-changes` should
   use only those tools and fail fast when the bridge is absent.
 
 Delegation tools are parent-scoped. The first local implementation injects the
@@ -825,9 +825,9 @@ Agent integration hooks:
 - Codex sessions: pass a `config.mcp_servers.termal-delegation` descriptor in
   `thread/start` and `thread/resume`, using the same local executable and
   parent-scoped bridge arguments as the stdio bridge.
-- ACP sessions: populate `mcpServers` in both `session/new` and `session/load`
-  with the TermAl MCP bridge configuration.
-- Cursor and Gemini sessions: use the same ACP `mcpServers` path as long as
+- ACP sessions: populate `mcpServers` in `session/new`, `session/resume`, and
+  `session/load` with the TermAl MCP bridge configuration.
+- Cursor, Gemini, and OpenCode sessions: use the same ACP `mcpServers` path as long as
   those ACP backends accept it; if a backend rejects inline `mcpServers`, fall
   back to a backend-specific generated local config from the same descriptor.
 - Claude sessions: pass the bridge through Claude's `--mcp-config` process
@@ -850,8 +850,8 @@ Implementation order:
    status/result refresh and backend resume wait behavior after restart.
 2. Finish the local MCP bridge contract and regression coverage around
    parent-scoped spawn/status/result/cancel/wait tools.
-3. Wire the same bridge descriptor into Codex, Claude, Cursor, and Gemini
-   startup/resume hooks.
+3. Wire the same bridge descriptor into Codex, Claude, Cursor, Gemini, and
+   OpenCode startup/resume hooks.
 4. Rewrite `/review-changes` to use only the TermAl MCP tools. The command
    must not fall back to raw HTTP, shell polling, Claude Task agents, Codex
    platform subagents, or manual session-log scraping.
@@ -1245,6 +1245,12 @@ be explicit about which guarantees are enforced and which are advisory.
 ### Enforcement Model
 
 `readOnly`:
+- OpenCode is rejected at the backend for this policy before child-session or
+  runtime creation because its current ACP integration cannot enforce the
+  shared-worktree read-only boundary. Use `isolatedWorktree` for OpenCode
+  delegation, or choose another reviewer agent when exact read-only semantics
+  are required. See
+  [OpenCode ACP Integration](./opencode-acp-integration.md#delegation-boundary).
 - TermAl keeps the child's configured agent permission mode. This lets reviewer
   delegations run normal inspection commands when the user's default allows it.
 - TermAl-mediated write/file/edit commands are disabled for the child.

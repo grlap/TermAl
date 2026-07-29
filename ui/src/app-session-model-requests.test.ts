@@ -10,6 +10,7 @@ const defaultModels: AppSessionDefaultModels = {
   Codex: "gpt-5.5",
   Cursor: "cursor-fast",
   Gemini: "gemini-2.5-pro",
+  OpenCode: "openai/gpt-5.6-sol",
 };
 
 describe("app session model request helpers", () => {
@@ -26,6 +27,9 @@ describe("app session model request helpers", () => {
     expect(configuredDefaultModelForAgent("Gemini", defaultModels)).toBe(
       "gemini-2.5-pro",
     );
+    expect(configuredDefaultModelForAgent("OpenCode", defaultModels)).toBe(
+      "openai/gpt-5.6-sol",
+    );
   });
 
   it("uses dialog model text for agents without the session model picker", () => {
@@ -39,13 +43,16 @@ describe("app session model request helpers", () => {
     ).toBeUndefined();
   });
 
-  it("uses configured app defaults for Cursor and Gemini sessions", () => {
+  it("uses configured app defaults for Cursor, Gemini, and OpenCode sessions", () => {
     expect(
       requestedModelForNewSession("Cursor", "  cursor-dialog  ", defaultModels),
     ).toBe("cursor-fast");
     expect(
       requestedModelForNewSession("Gemini", "  gemini-dialog  ", defaultModels),
     ).toBe("gemini-2.5-pro");
+    expect(
+      requestedModelForNewSession("OpenCode", "  opencode-dialog  ", defaultModels),
+    ).toBe("openai/gpt-5.6-sol");
   });
 
   it("omits default sentinel model values for picker-backed agents", () => {
@@ -73,6 +80,12 @@ describe("app session model request helpers", () => {
         Gemini: " default ",
       }),
     ).toBeUndefined();
+    expect(
+      requestedModelForNewSession("OpenCode", "ignored", {
+        ...defaultModels,
+        OpenCode: " default ",
+      }),
+    ).toBeUndefined();
   });
 
   it("sends configured default models for picker-backed agents", () => {
@@ -88,5 +101,17 @@ describe("app session model request helpers", () => {
     expect(requestedModelForNewSession("Gemini", "ignored", defaultModels)).toBe(
       "gemini-2.5-pro",
     );
+    expect(
+      requestedModelForNewSession("OpenCode", "ignored", defaultModels),
+    ).toBe("openai/gpt-5.6-sol");
+  });
+
+  it("uses Auto when legacy app state omitted the OpenCode default", () => {
+    const { OpenCode: _omitted, ...legacyDefaults } = defaultModels;
+
+    expect(configuredDefaultModelForAgent("OpenCode", legacyDefaults)).toBe("default");
+    expect(
+      requestedModelForNewSession("OpenCode", "ignored", legacyDefaults),
+    ).toBeUndefined();
   });
 });

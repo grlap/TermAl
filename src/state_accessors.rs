@@ -243,6 +243,10 @@ mod visible_session_hydration_error_tests {
             claude_effort: None,
             claude_approval_mode: None,
             gemini_approval_mode: None,
+            opencode_model: None,
+            opencode_mode: None,
+            opencode_current_mode: None,
+            opencode_mode_options: Vec::new(),
             external_session_id: None,
             agent_commands_revision: 0,
             codex_thread_state: None,
@@ -427,6 +431,10 @@ impl AppState {
             claude_effort: session.claude_effort,
             claude_approval_mode: session.claude_approval_mode,
             gemini_approval_mode: session.gemini_approval_mode,
+            opencode_model: session.opencode_model.clone(),
+            opencode_mode: session.opencode_mode.clone(),
+            opencode_current_mode: session.opencode_current_mode.clone(),
+            opencode_mode_options: session.opencode_mode_options.clone(),
             external_session_id: session.external_session_id.clone(),
             agent_commands_revision: session.agent_commands_revision,
             codex_thread_state: session.codex_thread_state,
@@ -469,6 +477,16 @@ impl AppState {
         debug_assert_eq!(summary.claude_effort, full.claude_effort);
         debug_assert_eq!(summary.claude_approval_mode, full.claude_approval_mode);
         debug_assert_eq!(summary.gemini_approval_mode, full.gemini_approval_mode);
+        debug_assert_eq!(summary.opencode_model, full.opencode_model);
+        debug_assert_eq!(summary.opencode_mode, full.opencode_mode);
+        debug_assert_eq!(
+            summary.opencode_current_mode,
+            full.opencode_current_mode
+        );
+        debug_assert_eq!(
+            summary.opencode_mode_options,
+            full.opencode_mode_options
+        );
         debug_assert_eq!(summary.external_session_id, full.external_session_id);
         debug_assert_eq!(
             summary.agent_commands_revision,

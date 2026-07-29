@@ -231,7 +231,10 @@ impl AppState {
                 }
             };
             codex_runtime_action = Some((handle, pending));
-        } else if matches!(record.session.agent, Agent::Cursor | Agent::Gemini)
+        } else if matches!(
+            record.session.agent,
+            Agent::Cursor | Agent::Gemini | Agent::OpenCode
+        )
             && matches!(
                 decision,
                 ApprovalDecision::Accepted
@@ -239,6 +242,17 @@ impl AppState {
                     | ApprovalDecision::Rejected
             )
         {
+            if record.session.agent == Agent::OpenCode {
+                let next_message_id = record
+                    .pending_acp_approval_order
+                    .front()
+                    .ok_or_else(|| ApiError::conflict("approval request is no longer live"))?;
+                if next_message_id != message_id {
+                    return Err(ApiError::conflict(
+                        "an earlier agent approval request must be resolved first",
+                    ));
+                }
+            }
             let pending = record
                 .pending_acp_approvals
                 .get(message_id)
@@ -315,28 +329,10 @@ impl AppState {
                 })?;
         }
         if let Some((handle, pending)) = acp_runtime_action {
-            let option_id = match decision {
-                ApprovalDecision::Accepted => pending
-                    .allow_once_option_id
-                    .clone()
-                    .or_else(|| pending.allow_always_option_id.clone())
-                    .or_else(|| pending.reject_option_id.clone()),
-                ApprovalDecision::AcceptedForSession => pending
-                    .allow_always_option_id
-                    .clone()
-                    .or_else(|| pending.allow_once_option_id.clone())
-                    .or_else(|| pending.reject_option_id.clone()),
-                ApprovalDecision::Rejected => pending
-                    .reject_option_id
-                    .clone()
-                    .or_else(|| pending.allow_once_option_id.clone())
-                    .or_else(|| pending.allow_always_option_id.clone()),
-                ApprovalDecision::Pending
-                | ApprovalDecision::Interrupted
-                | ApprovalDecision::Canceled => None,
-            }
-            .ok_or_else(|| {
-                ApiError::conflict("no approval option is available for this request")
+            let option_id = acp_approval_option_id(&pending, decision).ok_or_else(|| {
+                ApiError::conflict(
+                    "the agent did not offer an option matching this approval decision",
+                )
             })?;
 
             handle
@@ -367,6 +363,9 @@ impl AppState {
                 record.pending_claude_approvals.remove(message_id);
                 record.pending_codex_approvals.remove(message_id);
                 record.pending_acp_approvals.remove(message_id);
+                record
+                    .pending_acp_approval_order
+                    .retain(|pending_message_id| pending_message_id != message_id);
             }
             sync_session_interaction_state(
                 record,
@@ -698,6 +697,24 @@ impl AppState {
     }
 }
 
+/// Maps a user decision only to an ACP option with the same authorization
+/// semantics. Missing protocol options fail closed at the API boundary:
+/// rejection must never select an allow option, and approval must never select
+/// a reject option.
+fn acp_approval_option_id(
+    pending: &AcpPendingApproval,
+    decision: ApprovalDecision,
+) -> Option<String> {
+    match decision {
+        ApprovalDecision::Accepted => pending.allow_once_option_id.clone(),
+        ApprovalDecision::AcceptedForSession => pending.allow_always_option_id.clone(),
+        ApprovalDecision::Rejected => pending.reject_option_id.clone(),
+        ApprovalDecision::Pending
+        | ApprovalDecision::Interrupted
+        | ApprovalDecision::Canceled => None,
+    }
+}
+
 /// Builds the Codex-shaped approval `result` payload for each
 /// `CodexApprovalKind`. `CommandExecution` and `FileChange` produce
 /// `{ "decision": "accept" | "acceptForSession" | "decline" }`.
@@ -758,4 +775,3 @@ fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -
         }
     }
 }
-

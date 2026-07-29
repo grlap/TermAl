@@ -203,6 +203,7 @@ impl SessionRecorder {
             title,
             command,
             detail,
+            None,
             approval,
             |state, session_id, message_id, approval| {
                 state.register_claude_pending_approval(session_id, message_id, approval)
@@ -220,11 +221,13 @@ impl SessionRecorder {
         detail: &str,
         approval: AcpPendingApproval,
     ) -> Result<()> {
+        let supported_decisions = Some(approval.supported_decisions());
         recorder_push_pending_approval(
             self,
             title,
             command,
             detail,
+            supported_decisions,
             approval,
             |state, session_id, message_id, approval| {
                 state.register_acp_pending_approval(session_id, message_id, approval)
@@ -272,6 +275,7 @@ fn recorder_push_pending_approval<R, T, F>(
     title: &str,
     command: &str,
     detail: &str,
+    supported_decisions: Option<Vec<ApprovalDecision>>,
     pending: T,
     register: F,
 ) -> Result<()>
@@ -294,6 +298,7 @@ where
             command_language: Some(shell_language().to_owned()),
             detail: detail.to_owned(),
             decision: ApprovalDecision::Pending,
+            supported_decisions,
         },
     )?;
     register(&state, &session_id, message_id, pending)
@@ -429,6 +434,7 @@ fn recorder_push_approval<R: SessionRecorderAccess>(
             command_language: Some(shell_language().to_owned()),
             detail: detail.to_owned(),
             decision: ApprovalDecision::Pending,
+            supported_decisions: None,
         },
     )
 }
@@ -772,6 +778,7 @@ impl CodexTurnRecorder for SessionRecorder {
             title,
             command,
             detail,
+            None,
             approval,
             |state, session_id, message_id, approval| {
                 state.register_codex_pending_approval(session_id, message_id, approval)
@@ -875,6 +882,7 @@ impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
             title,
             command,
             detail,
+            None,
             approval,
             |state, session_id, message_id, approval| {
                 state.register_codex_pending_approval(session_id, message_id, approval)

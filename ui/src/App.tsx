@@ -294,6 +294,7 @@ export default function App() {
     Codex: defaultNewSessionModel("Codex"),
     Cursor: defaultNewSessionModel("Cursor"),
     Gemini: defaultNewSessionModel("Gemini"),
+    OpenCode: defaultNewSessionModel("OpenCode"),
   }));
   const [isLoading, setIsLoading] = useState(true);
   const [hasAdoptedStateSnapshot, setHasAdoptedStateSnapshot] = useState(false);
@@ -405,6 +406,8 @@ export default function App() {
     setDefaultCursorModel,
     defaultGeminiModel,
     setDefaultGeminiModel,
+    defaultOpenCodeModel,
+    setDefaultOpenCodeModel,
     defaultCodexReasoningEffort,
     setDefaultCodexReasoningEffort,
     defaultClaudeApprovalMode,
@@ -862,6 +865,7 @@ export default function App() {
       setDefaultClaudeModel,
       setDefaultCursorModel,
       setDefaultGeminiModel,
+      setDefaultOpenCodeModel,
       setDefaultCodexReasoningEffort,
       setDefaultClaudeApprovalMode,
       setDefaultClaudeEffort,
@@ -928,6 +932,7 @@ export default function App() {
       defaultCursorMode,
       defaultGeminiApprovalMode,
       defaultGeminiModel,
+      defaultOpenCodeModel,
     },
     refs: {
       isMountedRef,
@@ -1260,6 +1265,7 @@ export default function App() {
     defaultClaudeModel?: string;
     defaultCursorModel?: string;
     defaultGeminiModel?: string;
+    defaultOpenCodeModel?: string;
     defaultCodexReasoningEffort?: CodexReasoningEffort;
     defaultClaudeApprovalMode?: ClaudeApprovalMode;
     defaultClaudeEffort?: ClaudeEffortLevel;
@@ -1362,6 +1368,15 @@ export default function App() {
 
     setDefaultGeminiModel(nextValue);
     void persistAppPreferences({ defaultGeminiModel: nextValue });
+  }
+
+  function handleDefaultOpenCodeModelChange(nextValue: string) {
+    if (nextValue === defaultOpenCodeModel) {
+      return;
+    }
+
+    setDefaultOpenCodeModel(nextValue);
+    void persistAppPreferences({ defaultOpenCodeModel: nextValue });
   }
 
   function handleDefaultClaudeApprovalModeChange(
@@ -2242,6 +2257,8 @@ export default function App() {
         handleDefaultGeminiModelChange={handleDefaultGeminiModelChange}
         defaultGeminiApprovalMode={defaultGeminiApprovalMode}
         onChangeDefaultGeminiApprovalMode={setDefaultGeminiApprovalMode}
+        defaultOpenCodeModel={defaultOpenCodeModel}
+        handleDefaultOpenCodeModelChange={handleDefaultOpenCodeModelChange}
         createSessionProjectId={createSessionProjectId}
         createSessionProjectOptions={createSessionProjectOptions}
         onChangeCreateSessionProjectId={setCreateSessionProjectId}

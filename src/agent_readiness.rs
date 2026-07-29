@@ -1,6 +1,6 @@
-// Agent readiness probing — for each supported agent (Claude, Codex, Cursor,
-// Gemini) asks: is the CLI installed, reachable on PATH, and configured
-// correctly for the current workdir? Produces an `AgentReadiness` record
+// Agent readiness probing — for each locally probed agent (Codex, Cursor,
+// Gemini, OpenCode) asks: is the CLI installed, reachable on PATH, and
+// configured correctly for the current workdir? Produces an `AgentReadiness` record
 // carrying a Ready/Warning/Unavailable status plus an optional
 // warning-detail string surfaced in the UI.
 //
@@ -18,6 +18,7 @@ fn collect_agent_readiness(default_workdir: &str) -> Vec<AgentReadiness> {
         agent_readiness_for(Agent::Codex, default_workdir),
         agent_readiness_for(Agent::Cursor, default_workdir),
         agent_readiness_for(Agent::Gemini, default_workdir),
+        agent_readiness_for(Agent::OpenCode, default_workdir),
     ]
 }
 
@@ -36,6 +37,7 @@ fn agent_readiness_for(agent: Agent, workdir: &str) -> AgentReadiness {
         Agent::Codex => codex_agent_readiness(),
         Agent::Cursor => cursor_agent_readiness(),
         Agent::Gemini => gemini_agent_readiness(workdir),
+        Agent::OpenCode => opencode_agent_readiness(),
         _ => AgentReadiness {
             agent,
             status: AgentReadinessStatus::Ready,

@@ -123,6 +123,7 @@ export const MessageCard = memo(
     onInsertParallelAgentResult,
     onCancelParallelAgent,
     parallelAgentActionsEnabled = true,
+    approvalActionsEnabled = true,
     searchQuery = "",
     searchHighlightTone = "match",
     isLatestAssistantMessage = true,
@@ -151,6 +152,7 @@ export const MessageCard = memo(
     onInsertParallelAgentResult?: (agentId: string) => Promise<void> | void;
     onCancelParallelAgent?: (agentId: string) => Promise<void> | void;
     parallelAgentActionsEnabled?: boolean;
+    approvalActionsEnabled?: boolean;
     searchQuery?: string;
     searchHighlightTone?: SearchHighlightTone;
     // When false, `ConnectionRetryCard` renders the resolved (static, past-tense)
@@ -405,6 +407,7 @@ export const MessageCard = memo(
           <ApprovalCard
             message={message}
             onApprovalDecision={onApprovalDecision}
+            actionsEnabled={approvalActionsEnabled}
             preferImmediateHeavyRender={preferImmediateHeavyRender}
             searchQuery={searchQuery}
             searchHighlightTone={searchHighlightTone}
@@ -464,6 +467,7 @@ export const MessageCard = memo(
       previous.isStreamingAssistantTextMessage ===
         next.isStreamingAssistantTextMessage &&
       previous.onApprovalDecision === next.onApprovalDecision &&
+      previous.approvalActionsEnabled === next.approvalActionsEnabled &&
       previous.onUserInputSubmit === next.onUserInputSubmit &&
       previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
       previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
@@ -873,12 +877,14 @@ function SubagentResultCard({
 function ApprovalCard({
   message,
   onApprovalDecision,
+  actionsEnabled = true,
   preferImmediateHeavyRender = false,
   searchQuery = "",
   searchHighlightTone = "match",
 }: {
   message: ApprovalMessage;
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
+  actionsEnabled?: boolean;
   preferImmediateHeavyRender?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
@@ -888,6 +894,9 @@ function ApprovalCard({
     message.decision === d ? " chosen" : "";
   const resolvedDecision =
     message.decision === "pending" ? null : message.decision;
+  const supportsDecision = (decision: ApprovalDecision) =>
+    message.supportedDecisions == null ||
+    message.supportedDecisions.includes(decision);
 
   return (
     <article
@@ -914,31 +923,44 @@ function ApprovalCard({
         )}
       </p>
       <div className="approval-actions">
-        <button
-          className={`approval-button${chosen("accepted")}`}
-          type="button"
-          onClick={() => onApprovalDecision(message.id, "accepted")}
-          disabled={decided}
-        >
-          Approve
-        </button>
-        <button
-          className={`approval-button${chosen("acceptedForSession")}`}
-          type="button"
-          onClick={() => onApprovalDecision(message.id, "acceptedForSession")}
-          disabled={decided}
-        >
-          Approve for session
-        </button>
-        <button
-          className={`approval-button approval-button-reject${chosen("rejected")}`}
-          type="button"
-          onClick={() => onApprovalDecision(message.id, "rejected")}
-          disabled={decided}
-        >
-          Reject
-        </button>
+        {supportsDecision("accepted") ? (
+          <button
+            className={`approval-button${chosen("accepted")}`}
+            type="button"
+            onClick={() => onApprovalDecision(message.id, "accepted")}
+            disabled={decided || !actionsEnabled}
+          >
+            Approve
+          </button>
+        ) : null}
+        {supportsDecision("acceptedForSession") ? (
+          <button
+            className={`approval-button${chosen("acceptedForSession")}`}
+            type="button"
+            onClick={() =>
+              onApprovalDecision(message.id, "acceptedForSession")
+            }
+            disabled={decided || !actionsEnabled}
+          >
+            Approve for session
+          </button>
+        ) : null}
+        {supportsDecision("rejected") ? (
+          <button
+            className={`approval-button approval-button-reject${chosen("rejected")}`}
+            type="button"
+            onClick={() => onApprovalDecision(message.id, "rejected")}
+            disabled={decided || !actionsEnabled}
+          >
+            Reject
+          </button>
+        ) : null}
       </div>
+      {!decided && !actionsEnabled ? (
+        <p className="support-copy" role="status">
+          Resolve the earlier approval before responding to this request.
+        </p>
+      ) : null}
       {resolvedDecision ? (
         <p className="approval-result">
           Decision: {renderDecision(resolvedDecision)}

@@ -1045,6 +1045,14 @@ fn sample_remote_orchestrator_state(
                 gemini_approval_mode: agent
                     .supports_gemini_approval_mode()
                     .then_some(default_gemini_approval_mode()),
+                opencode_model: agent
+                    .supports_opencode_settings()
+                    .then(|| OPENCODE_CONFIG_AUTO.to_owned()),
+                opencode_mode: agent
+                    .supports_opencode_settings()
+                    .then(|| OPENCODE_CONFIG_AUTO.to_owned()),
+                opencode_current_mode: None,
+                opencode_mode_options: Vec::new(),
                 external_session_id: None,
                 agent_commands_revision: 0,
                 codex_thread_state: None,
@@ -1265,6 +1273,7 @@ fn test_acp_runtime_handle(
             runtime_id: runtime_id.to_owned(),
             input_tx,
             process: Arc::new(SharedChild::new(child).unwrap()),
+            turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
         },
         input_rx,
     )
@@ -1686,8 +1695,10 @@ fn gemini_invalid_session_load_falls_back_to_session_new() {
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: None,
         is_loading_history: false,
+        opencode_reconcile_fingerprints: VecDeque::new(),
         capabilities: Some(AcpCapabilities {
             supports_session_load: Some(true),
+            supports_session_resume: None,
         }),
     }));
     let writer = SharedBufferWriter::default();
@@ -1709,6 +1720,7 @@ fn gemini_invalid_session_load_falls_back_to_session_new() {
                 cwd: "/tmp".to_owned(),
                 cursor_mode: None,
                 model: "gemini-pro".to_owned(),
+                opencode_mode: None,
                 prompt: "Resume the prior session".to_owned(),
                 resume_session_id: Some("gemini-session-stale".to_owned()),
             },
@@ -2264,6 +2276,7 @@ fn canonicalizes_session_model_updates_from_live_model_labels() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_mode: None,
             },
         )
         .unwrap();
@@ -2312,6 +2325,7 @@ fn revisions_increase_for_visible_state_changes() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_mode: None,
             },
         )
         .unwrap();
@@ -2330,6 +2344,7 @@ fn revisions_increase_for_visible_state_changes() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_mode: None,
             },
         )
         .unwrap();
@@ -2371,6 +2386,7 @@ fn renames_sessions_via_settings_updates() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_mode: None,
             },
         )
         .unwrap();

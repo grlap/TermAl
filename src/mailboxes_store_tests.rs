@@ -972,3 +972,127 @@ fn appending_again_does_not_resurrect_a_departed_participant() {
         .left_at
         .is_some());
 }
+
+#[test]
+fn explicit_live_session_reactivation_restores_departed_mailbox_access() {
+    let root = MailboxTestRoot::new();
+    let store =
+        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+    let committed = store.append(&test_input()).expect("append should succeed");
+    store
+        .mark_session_left("session-target")
+        .expect("participant should be marked left");
+    assert!(
+        store
+            .list_for_session("session-target")
+            .expect("departed participant list should read")
+            .is_empty()
+    );
+
+    assert_eq!(
+        store
+            .reactivate_session("session-target")
+            .expect("eligible live participant should reactivate"),
+        1
+    );
+    let summaries = store
+        .list_for_session("session-target")
+        .expect("reactivated participant should list mailboxes");
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].id, committed.mailbox_id);
+    let messages = store
+        .read_range("session-target", &committed.mailbox_id, 0, 10)
+        .expect("reactivated participant should read");
+    assert_eq!(messages.len(), 1);
+    let acknowledged = store
+        .acknowledge(
+            "session-target",
+            &committed.mailbox_id,
+            0,
+            committed.sequence,
+        )
+        .expect("reactivated participant should acknowledge");
+    assert_eq!(
+        acknowledged
+            .participants
+            .iter()
+            .find(|participant| participant.session_id == "session-target")
+            .expect("target participant should remain present")
+            .processed_through,
+        committed.sequence
+    );
+}
+
+#[test]
+fn reactivation_rollback_restores_only_rows_cleared_by_that_attempt() {
+    let root = MailboxTestRoot::new();
+    let store =
+        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+    let first = store.append(&test_input()).expect("append should succeed");
+    store
+        .mark_session_left("session-target")
+        .expect("participant should be marked left");
+
+    let reactivated = store
+        .reactivate_session_rows("session-target")
+        .expect("stale participant rows should reactivate");
+    assert_eq!(reactivated.len(), 1);
+
+    let mut fresh_input = test_input();
+    fresh_input.sender_session_id = "session-other".to_owned();
+    fresh_input.sender_name = "Other".to_owned();
+    fresh_input.idempotency_key = "other-send".to_owned();
+    let fresh = store
+        .append(&fresh_input)
+        .expect("a fresh mailbox should append after reactivation");
+
+    store
+        .restore_reactivated_session_rows("session-target", &reactivated)
+        .expect("rollback should restore only the rows it changed");
+
+    assert!(
+        store
+            .read_range("session-target", &first.mailbox_id, 0, 10)
+            .is_err(),
+        "the originally departed mailbox should be restored to departed"
+    );
+    assert_eq!(
+        store
+            .read_range("session-target", &fresh.mailbox_id, 0, 10)
+            .expect("the newly-created mailbox must remain active")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn live_session_reactivation_uses_bounded_request_writer_admission() {
+    let root = MailboxTestRoot::new();
+    let path = root.database_path();
+    let store =
+        MailboxStore::open_with_write_admission_timeout(&path, Duration::ZERO)
+            .expect("mailbox store should open");
+    store.append(&test_input()).expect("append should succeed");
+    store
+        .mark_session_left("session-target")
+        .expect("participant should be marked left");
+
+    let writer_guard = lock_sqlite_state_writer(&store.write_lock);
+    let error = store
+        .reactivate_session("session-target")
+        .expect_err("request-owned reactivation must not wait indefinitely");
+    drop(writer_guard);
+
+    assert!(
+        error
+            .downcast_ref::<MailboxStoreError>()
+            .is_some_and(|error| error.kind == MailboxStoreErrorKind::Retryable),
+        "writer admission exhaustion must remain safely retryable: {error:#}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("reactivating a mailbox participant"),
+        "error should identify the contended request operation: {error:#}"
+    );
+}

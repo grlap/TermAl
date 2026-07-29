@@ -36,6 +36,7 @@ function makeStateResponse(revision: number): StateResponse {
       defaultClaudeModel: "default",
       defaultCursorModel: "default",
       defaultGeminiModel: "default",
+      defaultOpenCodeModel: "default",
       defaultCodexReasoningEffort: "medium",
       defaultClaudeApprovalMode: "ask",
       defaultClaudeEffort: "default",
@@ -140,6 +141,7 @@ function makeSessionActionsParams(
       defaultCursorMode: "agent",
       defaultGeminiApprovalMode: "default",
       defaultGeminiModel: "default",
+      defaultOpenCodeModel: "default",
     },
     refs,
     setters: {
@@ -201,7 +203,8 @@ type DefaultModelKey =
   | "defaultClaudeModel"
   | "defaultCodexModel"
   | "defaultCursorModel"
-  | "defaultGeminiModel";
+  | "defaultGeminiModel"
+  | "defaultOpenCodeModel";
 
 const MODEL_PICKER_AGENT_CASES = [
   {
@@ -223,6 +226,11 @@ const MODEL_PICKER_AGENT_CASES = [
     agent: "Gemini",
     defaultModelKey: "defaultGeminiModel",
     customModel: "gemini-2.5-pro",
+  },
+  {
+    agent: "OpenCode",
+    defaultModelKey: "defaultOpenCodeModel",
+    customModel: "openai/gpt-5.6-sol",
   },
 ] satisfies ReadonlyArray<{
   agent: AgentType;
@@ -333,6 +341,55 @@ describe("useAppSessionActions", () => {
         sandboxMode: "read-only",
       }),
     );
+  });
+
+  it("preserves OpenCode authority and mode when cloning a session", async () => {
+    const source = makeSession("session-opencode-source", {
+      agent: "OpenCode",
+      model: "openai/gpt-5.6-sol",
+      opencodeModel: "auto",
+      opencodeMode: "plan",
+    });
+    const clone = makeSession("session-opencode-clone", {
+      agent: "OpenCode",
+      model: "default",
+      opencodeModel: "auto",
+      opencodeMode: "plan",
+    });
+    const createSessionSpy = vi.spyOn(api, "createSession").mockResolvedValue({
+      revision: 6,
+      serverInstanceId: "server-a",
+      session: clone,
+      sessionId: clone.id,
+    });
+    const updateSessionSettingsSpy = vi
+      .spyOn(api, "updateSessionSettings")
+      .mockResolvedValue({
+        ...makeStateResponse(7),
+        sessions: [clone],
+      });
+    vi.spyOn(api, "refreshSessionModelOptions").mockResolvedValue({
+      ...makeStateResponse(8),
+      sessions: [clone],
+    });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[source.id, source]]);
+    params.refs.sessionsRef.current = [source];
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleCloneSessionFromExisting(source.id),
+    ).resolves.toBe(true);
+
+    expect(createSessionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent: "OpenCode",
+        model: "auto",
+      }),
+    );
+    expect(updateSessionSettingsSpy).toHaveBeenCalledWith(clone.id, {
+      opencodeMode: "plan",
+    });
   });
 
   it("clears the acted session hydration mismatch on stale same-instance action success", async () => {

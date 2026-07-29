@@ -30,6 +30,7 @@ import {
   CodexPromptPreferencesPanel,
   CursorPreferencesPanel,
   GeminiPreferencesPanel,
+  OpenCodePreferencesPanel,
   ThemedCombobox,
   CURSOR_MODE_OPTIONS,
   GEMINI_APPROVAL_OPTIONS,
@@ -121,6 +122,8 @@ type AppDialogsProps = {
   handleDefaultGeminiModelChange: (nextValue: string) => void;
   defaultGeminiApprovalMode: GeminiApprovalMode;
   onChangeDefaultGeminiApprovalMode: (nextValue: GeminiApprovalMode) => void;
+  defaultOpenCodeModel: string;
+  handleDefaultOpenCodeModelChange: (nextValue: string) => void;
   createSessionProjectId: string;
   createSessionProjectOptions: readonly ComboboxOption[];
   onChangeCreateSessionProjectId: (nextValue: string) => void;
@@ -400,6 +403,8 @@ export function AppDialogs({
   handleDefaultGeminiModelChange,
   defaultGeminiApprovalMode,
   onChangeDefaultGeminiApprovalMode,
+  defaultOpenCodeModel,
+  handleDefaultOpenCodeModelChange,
   createSessionProjectId,
   createSessionProjectOptions,
   onChangeCreateSessionProjectId,
@@ -1165,6 +1170,12 @@ export function AppDialogs({
                   defaultGeminiModel={defaultGeminiModel}
                   onSelectApprovalMode={onChangeDefaultGeminiApprovalMode}
                   onSelectModel={handleDefaultGeminiModelChange}
+                  sessions={sessions}
+                />
+              ) : settingsTab === "opencode" ? (
+                <OpenCodePreferencesPanel
+                  defaultOpenCodeModel={defaultOpenCodeModel}
+                  onSelectModel={handleDefaultOpenCodeModelChange}
                   sessions={sessions}
                 />
               ) : (

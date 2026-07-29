@@ -143,6 +143,10 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.cursorMode === next.cursorMode &&
     previous.claudeApprovalMode === next.claudeApprovalMode &&
     previous.geminiApprovalMode === next.geminiApprovalMode &&
+    previous.opencodeModel === next.opencodeModel &&
+    previous.opencodeMode === next.opencodeMode &&
+    previous.opencodeCurrentMode === next.opencodeCurrentMode &&
+    sameModelOptions(previous.opencodeModeOptions, next.opencodeModeOptions) &&
     previous.externalSessionId === next.externalSessionId &&
     previous.agentCommandsRevision === next.agentCommandsRevision &&
     previous.codexThreadState === next.codexThreadState &&

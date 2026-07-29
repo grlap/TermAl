@@ -658,9 +658,11 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        inner.sessions[index]
+        let record = &mut inner.sessions[index];
+        record
             .pending_acp_approvals
-            .insert(message_id, approval);
+            .insert(message_id.clone(), approval);
+        record.pending_acp_approval_order.push_back(message_id);
         Ok(())
     }
 

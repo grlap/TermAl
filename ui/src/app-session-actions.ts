@@ -158,6 +158,7 @@ export function useAppSessionActions(
       defaultCursorMode,
       defaultGeminiApprovalMode,
       defaultGeminiModel,
+      defaultOpenCodeModel = "default",
     },
     refs: {
       isMountedRef,
@@ -732,6 +733,7 @@ export function useAppSessionActions(
         Codex: defaultCodexModel,
         Cursor: defaultCursorModel,
         Gemini: defaultGeminiModel,
+        OpenCode: defaultOpenCodeModel,
       });
       const created = await createSession({
         agent,
@@ -786,7 +788,10 @@ export function useAppSessionActions(
         workspace.activePaneId;
       const created = await createSession({
         agent: session.agent,
-        model: session.model,
+        model:
+          session.agent === "OpenCode"
+            ? (session.opencodeModel ?? "auto")
+            : session.model,
         approvalPolicy:
           session.agent === "Codex"
             ? (session.approvalPolicy ?? undefined)
@@ -826,6 +831,19 @@ export function useAppSessionActions(
       }
 
       await openCreatedSession(created, targetPaneId, session.agent);
+      if (
+        session.agent === "OpenCode" &&
+        session.opencodeMode &&
+        session.opencodeMode !== "auto"
+      ) {
+        const state = await updateSessionSettings(created.sessionId, {
+          opencodeMode: session.opencodeMode,
+        });
+        if (!isMountedRef.current) {
+          return false;
+        }
+        adoptSessionActionState(created.sessionId, state);
+      }
       setRequestError(null);
       return true;
     } catch (error) {

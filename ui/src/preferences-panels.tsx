@@ -1551,3 +1551,49 @@ export function GeminiPreferencesPanel({
     </section>
   );
 }
+
+export function OpenCodePreferencesPanel({
+  defaultOpenCodeModel,
+  onSelectModel,
+  sessions = [],
+}: {
+  defaultOpenCodeModel: string;
+  onSelectModel: (model: string) => void;
+  sessions?: readonly Session[];
+}) {
+  const defaultModelOptions = useMemo(
+    () => defaultModelOptionsFromSessions("OpenCode", sessions, defaultOpenCodeModel),
+    [defaultOpenCodeModel, sessions],
+  );
+
+  return (
+    <section className="settings-panel-stack">
+      <div className="settings-panel-intro">
+        <div>
+          <p className="session-control-label">New OpenCode sessions</p>
+          <p className="settings-panel-copy">
+            Choose the initial OpenCode model selection. Auto leaves the agent authoritative.
+          </p>
+        </div>
+      </div>
+      <article className="message-card prompt-settings-card">
+        <div className="card-label">Session Default</div>
+        <h3>OpenCode startup settings</h3>
+        <div className="prompt-settings-grid">
+          <AgentDefaultModelControl
+            agent="OpenCode"
+            id="default-opencode-model"
+            modelOptions={defaultModelOptions.options}
+            value={defaultOpenCodeModel}
+            onChange={onSelectModel}
+          />
+          <p className="session-control-hint">
+            OpenCode discovers its available models and modes after the session starts. Explicit
+            TermAl selections are re-applied before prompts; unavailable saved values visibly
+            fall back to Auto.
+          </p>
+        </div>
+      </article>
+    </section>
+  );
+}

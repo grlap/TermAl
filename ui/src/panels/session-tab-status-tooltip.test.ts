@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import { createBuiltinLocalRemote } from "../remotes";
 import type { SessionSummarySnapshot } from "../session-store";
 import type { Project, RemoteConfig } from "../types";
-import { formatSessionTooltipLocationLabel } from "./session-tab-status-tooltip";
+import {
+  buildSessionTooltipRows,
+  formatSessionTooltipLocationLabel,
+} from "./session-tab-status-tooltip";
 
 function createSessionSummary(
   overrides: Partial<SessionSummarySnapshot> = {},
@@ -122,5 +125,20 @@ describe("session tab status tooltip location", () => {
     expect(formatSessionTooltipLocationLabel(session, projectLookup, remoteLookup)).toBe(
       "Build Box (builder@lab.internal:2222)",
     );
+  });
+
+  it("shows OpenCode Auto mode together with its effective live mode", () => {
+    const session = createSessionSummary({
+      agent: "OpenCode",
+      model: "opencode/big-pickle",
+      opencodeModel: "auto",
+      opencodeMode: "auto",
+      opencodeCurrentMode: "build",
+    });
+
+    expect(buildSessionTooltipRows(session, new Map(), remoteLookup)).toContainEqual({
+      key: "Mode",
+      value: "Auto (Build)",
+    });
   });
 });

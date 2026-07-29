@@ -7,7 +7,7 @@
 //
 // Split out of: ui/src/SessionPaneView.tsx.
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { type OpenPathOptions } from "./api";
 import { getErrorMessage } from "./app-utils";
 import {
@@ -19,6 +19,7 @@ import {
   ClaudePromptSettingsCard,
   CursorPromptSettingsCard,
   GeminiPromptSettingsCard,
+  OpenCodePromptSettingsCard,
 } from "./prompt-settings-cards";
 import { CommandCard, DiffCard, MessageCard } from "./message-cards";
 import type { MonacoAppearance } from "./monaco";
@@ -436,6 +437,17 @@ export function useSessionRenderCallbacks({
         onInsertReviewIntoPrompt &&
         onComposerError,
     );
+  const approvalRequiresHeadGating = activeSession?.agent === "OpenCode";
+  const pendingApprovalHeadId = useMemo(
+    () =>
+      approvalRequiresHeadGating
+        ? (activeSession?.messages.find(
+            (message) =>
+              message.type === "approval" && message.decision === "pending",
+          )?.id ?? null)
+        : null,
+    [activeSession?.messages, approvalRequiresHeadGating],
+  );
   const renderSessionMessageCard = useCallback<RenderMessageCard>(
     (
       message,
@@ -478,6 +490,12 @@ export function useSessionRenderCallbacks({
         onInsertParallelAgentResult={handleInsertParallelAgentResult}
         onCancelParallelAgent={handleCancelParallelAgent}
         parallelAgentActionsEnabled={canExposeLocalDelegationActions}
+        approvalActionsEnabled={
+          !approvalRequiresHeadGating ||
+          message.type !== "approval" ||
+          message.decision !== "pending" ||
+          message.id === pendingApprovalHeadId
+        }
         searchQuery={
           activeSessionSearchMatchItemKey === `message:${message.id}`
             ? sessionFindQuery
@@ -502,6 +520,8 @@ export function useSessionRenderCallbacks({
     ),
     [
       activeSession?.id,
+      approvalRequiresHeadGating,
+      pendingApprovalHeadId,
       activeSession?.projectId,
       activeSession?.status,
       activeSession?.workdir,
@@ -587,6 +607,20 @@ export function useSessionRenderCallbacks({
       if (session.agent === "Gemini") {
         return (
           <GeminiPromptSettingsCard
+            paneId={panelPaneId}
+            session={session}
+            isUpdating={panelIsUpdating}
+            isRefreshingModelOptions={isRefreshingModelOptions}
+            modelOptionsError={modelOptionsError}
+            onRequestModelOptions={onRefreshSessionModelOptions}
+            onSessionSettingsChange={handleSettingsChange}
+          />
+        );
+      }
+
+      if (session.agent === "OpenCode") {
+        return (
+          <OpenCodePromptSettingsCard
             paneId={panelPaneId}
             session={session}
             isUpdating={panelIsUpdating}

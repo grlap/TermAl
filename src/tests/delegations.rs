@@ -627,6 +627,7 @@ fn test_approval_message(message_id: &str) -> Message {
         command_language: None,
         detail: "Allow editing src/main.rs?".to_owned(),
         decision: ApprovalDecision::Pending,
+        supported_decisions: None,
     }
 }
 
@@ -1300,6 +1301,174 @@ async fn delegation_routes_create_status_and_unavailable_result() {
             .contains("result is not available yet")
     );
 
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins R5 at the shared backend boundary used by both raw HTTP callers and
+// the TermAl MCP bridge. OpenCode cannot enforce a shared-worktree read-only
+// sandbox, so rejection must happen before a child session or runtime exists.
+#[tokio::test]
+async fn opencode_read_only_delegation_is_rejected_before_child_creation() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let session_count_before = state
+        .inner
+        .lock()
+        .expect("state mutex poisoned")
+        .sessions
+        .len();
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "prompt": "Review with OpenCode",
+        "title": "OpenCode read-only rejection",
+        "agent": "OpenCode",
+        "mode": "reviewer",
+        "writePolicy": { "kind": "readOnly" }
+    }))
+    .expect("delegation request should serialize");
+
+    let (status, response): (StatusCode, ErrorResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{parent_session_id}/delegations"))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(response.error, OPENCODE_READ_ONLY_DELEGATION_ERROR);
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(
+        inner.sessions.len(),
+        session_count_before,
+        "rejected OpenCode read-only delegation must not create a child"
+    );
+    assert!(
+        inner.delegations.is_empty(),
+        "rejected OpenCode read-only delegation must not create metadata"
+    );
+}
+
+// Pins the OpenCode model-ingress contract at the delegation boundary. The
+// generic delegation length check runs before `agent` is resolved, so before
+// this gate a delegation could create and persist a child carrying a model
+// string that `create_session`, app defaults, and session settings would all
+// reject — an ingress asymmetry, not a cosmetic one, because the value then
+// survives restart through the persisted child record.
+#[tokio::test]
+async fn opencode_delegation_rejects_an_invalid_model_before_child_creation() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let session_count_before = state
+        .inner
+        .lock()
+        .expect("state mutex poisoned")
+        .sessions
+        .len();
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "prompt": "Review with OpenCode",
+        "title": "OpenCode invalid model",
+        "agent": "OpenCode",
+        "mode": "reviewer",
+        "writePolicy": { "kind": "isolatedWorktree", "ownedPaths": [] },
+        "model": "openai/gpt-5.4\u{7}malformed"
+    }))
+    .expect("delegation request should serialize");
+
+    let (status, response): (StatusCode, ErrorResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{parent_session_id}/delegations"))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        response.error.contains("control characters"),
+        "rejection must name the model contract violation: {}",
+        response.error
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(
+        inner.sessions.len(),
+        session_count_before,
+        "an invalid OpenCode model must not create a child session"
+    );
+    assert!(
+        inner.delegations.is_empty(),
+        "an invalid OpenCode model must not create delegation metadata"
+    );
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins the positive half: a valid but untrimmed OpenCode model is normalized
+// on the delegation path exactly as it would be through create_session, so a
+// persisted child record cannot diverge by ingress route.
+#[tokio::test]
+async fn opencode_delegation_normalizes_a_valid_model_on_the_child_record() {
+    let (state, _input_rx) =
+        test_app_state_with_delegation_codex_runtime("opencode-model-normalization-runtime");
+    let unique = Uuid::new_v4();
+    let repo_root = std::env::temp_dir().join(format!("termal-opencode-model-{unique}"));
+    fs::create_dir_all(&repo_root).expect("source repo root should be created");
+    fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
+    run_git_test_command(&repo_root, &["init"]);
+    run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "init"]);
+
+    let parent_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner.create_session(
+            Agent::Codex,
+            Some("OpenCode Model Parent".to_owned()),
+            repo_root.to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let session_id = record.session.id.clone();
+        state.commit_locked(&mut inner).unwrap();
+        session_id
+    };
+
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "prompt": "Review with OpenCode",
+        "title": "OpenCode model normalization",
+        "agent": "OpenCode",
+        "mode": "reviewer",
+        "writePolicy": { "kind": "isolatedWorktree", "ownedPaths": [] },
+        "model": "  openai/gpt-5.4  "
+    }))
+    .expect("delegation request should serialize");
+    let (status, created): (StatusCode, DelegationResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{parent_session_id}/delegations"))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(
+        created.child_session.model, "openai/gpt-5.4",
+        "the delegation path must persist the normalized model"
+    );
+
+    let _ = fs::remove_dir_all(&repo_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -5177,6 +5346,7 @@ fn terminal_read_only_delegations_do_not_keep_child_session_write_blocked() {
                     claude_approval_mode: None,
                     claude_effort: None,
                     gemini_approval_mode: None,
+                    opencode_mode: None,
                 },
             )
             .expect("terminal child session settings should update");

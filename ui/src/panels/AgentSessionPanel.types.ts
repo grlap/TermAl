@@ -68,7 +68,8 @@ export type SessionSettingsField =
   | "claudeApprovalMode"
   | "claudeEffort"
   | "cursorMode"
-  | "geminiApprovalMode";
+  | "geminiApprovalMode"
+  | "opencodeMode";
 
 export type SessionSettingsValue =
   | string

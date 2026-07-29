@@ -28,7 +28,8 @@ export type PreferencesTabId =
   | "codex-prompts"
   | "claude-approvals"
   | "cursor"
-  | "gemini";
+  | "gemini"
+  | "opencode";
 
 export const PREFERENCES_TABS: ReadonlyArray<{
   id: PreferencesTabId;
@@ -44,4 +45,5 @@ export const PREFERENCES_TABS: ReadonlyArray<{
   { id: "claude-approvals", label: "Claude" },
   { id: "cursor", label: "Cursor" },
   { id: "gemini", label: "Gemini" },
+  { id: "opencode", label: "OpenCode" },
 ];

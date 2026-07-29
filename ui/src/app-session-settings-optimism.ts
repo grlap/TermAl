@@ -125,6 +125,27 @@ export function buildOptimisticSessionSettingsUpdate(
         geminiApprovalMode: nextGeminiApprovalMode,
       };
     }
+    case "OpenCode": {
+      const nextModelSelection =
+        field === "model"
+          ? (normalizedModelValue ?? (value as string))
+          : (session.opencodeModel ?? "auto");
+      const nextMode =
+        field === "opencodeMode" ? (value as string) : (session.opencodeMode ?? "auto");
+      if (
+        nextModelSelection === (session.opencodeModel ?? "auto") &&
+        nextMode === (session.opencodeMode ?? "auto")
+      ) {
+        return session;
+      }
+      return {
+        ...session,
+        opencodeModel: nextModelSelection,
+        opencodeMode: nextMode,
+        ...(nextModelSelection === "auto" ? {} : { model: nextModelSelection }),
+        ...(nextMode === "auto" ? {} : { opencodeCurrentMode: nextMode }),
+      };
+    }
   }
 }
 
@@ -141,6 +162,27 @@ export function rollbackOptimisticSessionSettingsUpdate(
     currentSession.model !== previousSession.model
   ) {
     nextSession.model = previousSession.model;
+    changed = true;
+  }
+  if (
+    currentSession.opencodeModel === optimisticSession.opencodeModel &&
+    currentSession.opencodeModel !== previousSession.opencodeModel
+  ) {
+    nextSession.opencodeModel = previousSession.opencodeModel;
+    changed = true;
+  }
+  if (
+    currentSession.opencodeMode === optimisticSession.opencodeMode &&
+    currentSession.opencodeMode !== previousSession.opencodeMode
+  ) {
+    nextSession.opencodeMode = previousSession.opencodeMode;
+    changed = true;
+  }
+  if (
+    currentSession.opencodeCurrentMode === optimisticSession.opencodeCurrentMode &&
+    currentSession.opencodeCurrentMode !== previousSession.opencodeCurrentMode
+  ) {
+    nextSession.opencodeCurrentMode = previousSession.opencodeCurrentMode;
     changed = true;
   }
   if (
@@ -201,6 +243,7 @@ export function sessionSupportsModelRefresh(agent: AgentType) {
     agent === "Claude" ||
     agent === "Codex" ||
     agent === "Cursor" ||
-    agent === "Gemini"
+    agent === "Gemini" ||
+    agent === "OpenCode"
   );
 }

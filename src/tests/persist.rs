@@ -1220,6 +1220,78 @@ fn persisted_state_requires_gemini_approval_mode() {
     );
 }
 
+// Pins that stripping the explicit OpenCode model/mode authority from an
+// OpenCode session fails load. Guards against a persisted explicit choice
+// silently reloading as agent-authoritative Auto after restart.
+#[test]
+fn persisted_state_requires_opencode_settings() {
+    let mut inner = StateInner::new();
+    inner.create_session(
+        Agent::OpenCode,
+        Some("OpenCode".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
+    );
+
+    let err_text = persisted_state_load_error_after_mutation(inner, |encoded| {
+        let session = encoded["sessions"]
+            .as_array_mut()
+            .expect("persisted sessions should be an array")[0]["session"]
+            .as_object_mut()
+            .expect("persisted session should be an object");
+        session.remove("opencodeModel");
+        session.remove("opencodeMode");
+    });
+
+    assert!(
+        err_text.contains("failed to validate state from")
+            && err_text.contains("missing opencodeModel"),
+        "unexpected load_state error: {err_text}"
+    );
+}
+
+#[test]
+fn persisted_state_rejects_unbounded_opencode_effective_values() {
+    let mut inner = StateInner::new();
+    inner.create_session(
+        Agent::OpenCode,
+        Some("OpenCode".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
+    );
+    let invalid_model = persisted_state_load_error_after_mutation(inner, |encoded| {
+        encoded["sessions"]
+            .as_array_mut()
+            .expect("persisted sessions should be an array")[0]["session"]["model"] =
+            json!("malicious\nmodel");
+    });
+    assert!(
+        invalid_model.contains("OpenCode model cannot contain control characters"),
+        "unexpected load_state error: {invalid_model}"
+    );
+
+    let mut inner = StateInner::new();
+    inner.create_session(
+        Agent::OpenCode,
+        Some("OpenCode".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
+    );
+    let invalid_mode = persisted_state_load_error_after_mutation(inner, |encoded| {
+        encoded["sessions"]
+            .as_array_mut()
+            .expect("persisted sessions should be an array")[0]["session"]["opencodeCurrentMode"] =
+            json!("build\u{7}");
+    });
+    assert!(
+        invalid_mode.contains("OpenCode mode cannot contain control characters"),
+        "unexpected load_state error: {invalid_mode}"
+    );
+}
+
 // Pins that stripping `approvalPolicy`, `reasoningEffort`, and
 // `sandboxMode` from a Codex session fails load with `missing
 // approvalPolicy`. Guards against Codex sessions reloading without

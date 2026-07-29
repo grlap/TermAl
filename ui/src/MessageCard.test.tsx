@@ -24,6 +24,65 @@ import type {
 } from "./types";
 
 describe("MessageCard", () => {
+  it("disables non-head pending approval actions", () => {
+    const message: ApprovalMessage = {
+      id: "approval-later",
+      type: "approval",
+      author: "assistant",
+      timestamp: "10:00",
+      title: "Later approval",
+      command: "touch later",
+      detail: "Wait for the earlier approval.",
+      decision: "pending",
+    };
+
+    render(
+      <MessageCard
+        message={message}
+        approvalActionsEnabled={false}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Approve for session" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Resolve the earlier approval before responding to this request.",
+    );
+  });
+
+  it("shows only approval decisions offered by the agent", () => {
+    const message: ApprovalMessage = {
+      id: "approval-capabilities",
+      type: "approval",
+      author: "assistant",
+      timestamp: "10:00",
+      title: "Scoped approval",
+      command: "touch scoped",
+      detail: "The agent offered turn approval or rejection.",
+      decision: "pending",
+      supportedDecisions: ["accepted", "rejected"],
+    };
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "Approve for session" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
+  });
+
   it("shows a command badge for slash-expanded prompts", () => {
     const message: TextMessage = {
       id: "message-1",

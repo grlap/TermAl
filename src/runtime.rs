@@ -218,13 +218,23 @@ enum ClaudeControlRequestAction {
 }
 
 /// Represents a ACP runtime command.
-#[derive(Clone)]
 enum AcpRuntimeCommand {
     Prompt(AcpPromptCommand),
     JsonRpcMessage(Value),
+    Cancel,
     RefreshSessionConfig {
         command: AcpPromptCommand,
         response_tx: Sender<std::result::Result<(), String>>,
+    },
+    ApplyOpenCodeConfig {
+        model_selection: Option<String>,
+        mode_selection: Option<String>,
+        started_tx: Sender<()>,
+        proceed_rx: mpsc::Receiver<()>,
+        response_tx: Sender<std::result::Result<(), String>>,
+    },
+    ReconcileOpenCodeConfig {
+        config_result: Value,
     },
 }
 
@@ -240,8 +250,20 @@ struct AcpPromptCommand {
     cwd: String,
     cursor_mode: Option<CursorMode>,
     model: String,
+    opencode_mode: Option<String>,
     prompt: String,
     resume_session_id: Option<String>,
+}
+
+/// Snapshots the OpenCode authority and live option state at writer execution.
+#[derive(Clone)]
+struct OpenCodeConfigSnapshot {
+    model_selection: String,
+    effective_model: String,
+    model_options: Vec<SessionModelOption>,
+    mode_selection: String,
+    current_mode: Option<String>,
+    mode_options: Vec<SessionModelOption>,
 }
 
 /// Represents ACP pending approval.
@@ -251,6 +273,25 @@ struct AcpPendingApproval {
     allow_always_option_id: Option<String>,
     reject_option_id: Option<String>,
     request_id: Value,
+}
+
+impl AcpPendingApproval {
+    /// Returns only the user decisions represented by this request's exact
+    /// protocol options. The UI uses this to avoid offering actions that the
+    /// fail-closed backend cannot honor.
+    fn supported_decisions(&self) -> Vec<ApprovalDecision> {
+        let mut decisions = Vec::new();
+        if self.allow_once_option_id.is_some() {
+            decisions.push(ApprovalDecision::Accepted);
+        }
+        if self.allow_always_option_id.is_some() {
+            decisions.push(ApprovalDecision::AcceptedForSession);
+        }
+        if self.reject_option_id.is_some() {
+            decisions.push(ApprovalDecision::Rejected);
+        }
+        decisions
+    }
 }
 
 /// Tracks ACP runtime state.
@@ -270,6 +311,11 @@ struct AcpRuntimeState {
     capabilities: Option<AcpCapabilities>,
     current_session_id: Option<String>,
     is_loading_history: bool,
+    /// Recent OpenCode authority/config snapshots reconciled from unsolicited
+    /// updates. A bounded history breaks both exact duplicate and alternating
+    /// A/B/A notification cycles without permanently suppressing a later
+    /// legitimate selection after the window rolls forward.
+    opencode_reconcile_fingerprints: VecDeque<Value>,
 }
 
 /// Capability bundle learned from the `initialize` response. `None`
@@ -287,6 +333,12 @@ struct AcpCapabilities {
     /// The tri-state is intentional — see `ensure_acp_session_ready`
     /// for the "not known to be unsupported; try anyway" rule.
     supports_session_load: Option<bool>,
+    /// `Some(true)` means the agent explicitly advertised ACP
+    /// `session/resume`, which restores a session without replaying its
+    /// transcript. Unlike `session/load`, an omitted resume capability is
+    /// treated as unsupported: resume is newer and there is no safe legacy
+    /// probe because an unknown-method failure must not disturb continuity.
+    supports_session_resume: Option<bool>,
 }
 
 impl AcpCapabilities {
@@ -296,6 +348,11 @@ impl AcpCapabilities {
     /// repeat the negated Option comparison.
     fn session_load_supported_or_unknown(&self) -> bool {
         self.supports_session_load != Some(false)
+    }
+
+    /// Returns whether the runtime explicitly advertised `session/resume`.
+    fn session_resume_supported(&self) -> bool {
+        self.supports_session_resume == Some(true)
     }
 }
 
@@ -347,6 +404,7 @@ enum TurnDispatch {
         mailbox_notification: Option<MailboxNotificationDelivery>,
         sender: Sender<AcpRuntimeCommand>,
         session_id: String,
+        turn_lifecycle: AcpTurnLifecycle,
     },
 }
 
@@ -363,6 +421,7 @@ type CodexPendingRequestMap =
     Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, CodexResponseError>>>>>;
 type AcpPendingRequestMap =
     Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, AcpResponseError>>>>>;
+type AcpTurnLifecycle = Arc<(Mutex<bool>, Condvar)>;
 
 /// Represents the pending ACP JSON RPC request payload.
 struct PendingAcpJsonRpcRequest {

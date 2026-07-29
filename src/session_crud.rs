@@ -61,8 +61,13 @@ fn normalize_default_model_preference(model: String, agent: Agent) -> Result<Str
             MAX_DEFAULT_MODEL_CHARS
         )));
     }
-    if agent == Agent::Claude {
-        validate_claude_default_model_preference(trimmed)?;
+    match agent {
+        Agent::Claude => validate_claude_default_model_preference(trimmed)?,
+        Agent::OpenCode => {
+            return normalize_opencode_model(trimmed)
+                .map_err(|err| ApiError::bad_request(err.to_string()));
+        }
+        _ => {}
     }
 
     Ok(trimmed.to_owned())
@@ -151,7 +156,15 @@ impl AppState {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .map(str::to_owned);
+            .map(|value| {
+                if agent.supports_opencode_settings() {
+                    normalize_opencode_model(value)
+                        .map_err(|err| ApiError::bad_request(err.to_string()))
+                } else {
+                    Ok(value.to_owned())
+                }
+            })
+            .transpose()?;
         let requested_name = request
             .name
             .as_deref()
@@ -199,6 +212,20 @@ impl AppState {
         self.invalidate_agent_readiness_cache();
         let _ = self.agent_readiness_snapshot();
         match agent {
+            agent if agent.supports_opencode_settings() => {
+                if request.sandbox_mode.is_some()
+                    || request.approval_policy.is_some()
+                    || request.reasoning_effort.is_some()
+                    || request.claude_approval_mode.is_some()
+                    || request.claude_effort.is_some()
+                    || request.cursor_mode.is_some()
+                    || request.gemini_approval_mode.is_some()
+                {
+                    return Err(ApiError::bad_request(
+                        "OpenCode sessions only support model settings at creation; choose the dynamic mode after OpenCode reports its live options",
+                    ));
+                }
+            }
             agent if agent.supports_codex_prompt_settings() => {
                 if request.claude_approval_mode.is_some()
                     || request.claude_effort.is_some()
@@ -455,6 +482,13 @@ impl AppState {
             request.default_gemini_model,
             Agent::Gemini,
             |preferences| &mut preferences.default_gemini_model,
+        )?;
+        set_agent_default_model_if_present(
+            &mut inner.preferences,
+            &mut changed,
+            request.default_opencode_model,
+            Agent::OpenCode,
+            |preferences| &mut preferences.default_opencode_model,
         )?;
 
         if let Some(default_codex_reasoning_effort) = request.default_codex_reasoning_effort {

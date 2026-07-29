@@ -47,6 +47,7 @@ export type UseAppSessionActionsDefaults = {
   defaultCursorMode: CursorMode;
   defaultGeminiApprovalMode: GeminiApprovalMode;
   defaultGeminiModel: string;
+  defaultOpenCodeModel: string;
 };
 
 export type ActionStateClassifierContext = {

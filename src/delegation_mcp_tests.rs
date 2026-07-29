@@ -1483,6 +1483,32 @@ fn delegation_mcp_spawn_session_posts_parent_scoped_request() {
 }
 
 #[test]
+fn delegation_mcp_spawn_schema_documents_opencode_read_only_rejection() {
+    let tools = mcp_tools_list_result();
+    let spawn = tools["tools"]
+        .as_array()
+        .expect("tools should be an array")
+        .iter()
+        .find(|tool| tool["name"] == "termal_spawn_session")
+        .expect("spawn tool should be advertised");
+    assert!(
+        spawn["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("OpenCode")
+                && description.contains("readOnly")
+                && description.contains("isolatedWorktree")),
+        "spawn description must explain the OpenCode write-policy boundary"
+    );
+    assert!(
+        spawn
+            .pointer("/inputSchema/properties/agent/enum")
+            .and_then(Value::as_array)
+            .is_some_and(|agents| agents.contains(&json!("OpenCode"))),
+        "OpenCode must be offered as a first-class delegated agent"
+    );
+}
+
+#[test]
 fn delegation_mcp_list_recovers_ids_for_resume_without_respawning() {
     let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
         match (request.method.as_str(), request.path.as_str()) {

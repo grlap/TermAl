@@ -181,12 +181,416 @@ fn cursor_ask_mode_queues_acp_permission_requests() {
             title,
             command,
             decision,
+            supported_decisions,
             ..
         }) if title == "Cursor needs approval"
             && command == "Edit src/main.rs"
             && *decision == ApprovalDecision::Pending
+            && supported_decisions.as_deref() == Some(&[
+                ApprovalDecision::Accepted,
+                ApprovalDecision::AcceptedForSession,
+                ApprovalDecision::Rejected,
+            ])
     ));
     assert_eq!(record.session.status, SessionStatus::Approval);
+}
+
+#[test]
+fn acp_permission_matching_prefers_typed_kind_over_generic_hint_order() {
+    let options = vec![
+        json!({ "optionId": "always", "kind": "allow_always", "name": "Always allow" }),
+        json!({ "optionId": "once", "kind": "allow_once", "name": "Allow once" }),
+    ];
+
+    assert_eq!(
+        find_acp_permission_option(&options, &["allow-once", "allow_once", "allow"]),
+        Some("once".to_owned()),
+        "the generic `allow` fallback must not capture an earlier allow-always option"
+    );
+    assert_eq!(
+        find_acp_permission_option(
+            &options,
+            &["allow-always", "allow_always", "always", "acceptForSession"],
+        ),
+        Some("always".to_owned())
+    );
+    let allow_always_only =
+        vec![json!({ "optionId": "always", "kind": "allow_always", "name": "Always allow" })];
+    assert_eq!(
+        find_acp_permission_option(&allow_always_only, &["allow-once", "allow_once", "allow"]),
+        None,
+        "a generic allow hint must not escalate one-turn approval to allow-always"
+    );
+}
+
+#[test]
+fn acp_permission_summary_bounds_all_agent_metadata() {
+    let oversized = "x".repeat(10_000);
+    let (title, detail) = summarize_acp_permission_request(
+        &json!({
+            "toolName": oversized,
+            "description": "y".repeat(10_000),
+            "toolCall": {
+                "kind": "z".repeat(10_000),
+                "content": {"body": "q".repeat(20_000)}
+            }
+        }),
+        AcpAgent::OpenCode,
+    );
+
+    assert!(title.chars().count() <= 1_000);
+    assert!(detail.chars().count() <= 8_002);
+}
+
+// Pins ACP v1's OpenCode-shaped nested tool call and option-kind mapping, plus
+// the ordered multiple-request contract. Two approvals must survive
+// interleaved tool updates, later requests cannot overtake the queue head, and
+// resolving the first keeps the session in Approval until the second drains.
+#[test]
+fn acp_structured_permission_requests_queue_and_resolve_in_arrival_order() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::OpenCode),
+            name: Some("Structured ACP permissions".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("auto".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .unwrap();
+    let (runtime, input_rx) = test_acp_runtime_handle(AcpAgent::OpenCode, "structured-permissions");
+    let input_tx = runtime.input_tx.clone();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&created.session_id)
+            .expect("OpenCode session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
+    }
+    let mut recorder = SessionRecorder::new(state.clone(), created.session_id.clone());
+
+    let request = |id: &str, tool_call_id: &str, title: &str| {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "session/request_permission",
+            "params": {
+                "sessionId": "opencode-session",
+                "toolCall": {
+                    "toolCallId": tool_call_id,
+                    "title": title,
+                    "kind": "edit",
+                    "content": [{
+                        "type": "diff",
+                        "path": "src/main.rs",
+                        "oldText": "old",
+                        "newText": "new"
+                    }],
+                    "locations": [{
+                        "path": "src/main.rs",
+                        "line": 12
+                    }]
+                },
+                "options": [
+                    { "optionId": "once", "kind": "allow_once", "name": "Allow once" },
+                    { "optionId": "always", "kind": "allow_always", "name": "Always allow" },
+                    { "optionId": "reject", "kind": "reject_once", "name": "Reject" }
+                ]
+            }
+        })
+    };
+
+    handle_acp_request(
+        &request("permission-1", "tool-1", "Edit first file"),
+        &state,
+        &created.session_id,
+        &input_tx,
+        &mut recorder,
+        AcpAgent::OpenCode,
+    )
+    .unwrap();
+    handle_acp_request(
+        &request("permission-2", "tool-2", "Edit second file"),
+        &state,
+        &created.session_id,
+        &input_tx,
+        &mut recorder,
+        AcpAgent::OpenCode,
+    )
+    .unwrap();
+
+    let mut turn_state = AcpTurnState::default();
+    handle_acp_session_update(
+        &json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-1",
+            "title": "Edit first file",
+            "kind": "edit",
+            "status": "in_progress"
+        }),
+        &state,
+        &created.session_id,
+        &input_tx,
+        &mut turn_state,
+        &mut recorder,
+        AcpAgent::OpenCode,
+    )
+    .unwrap();
+
+    let (first_message_id, second_message_id) = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == created.session_id)
+            .expect("OpenCode session should exist");
+        assert_eq!(record.pending_acp_approvals.len(), 2);
+        assert_eq!(record.pending_acp_approval_order.len(), 2);
+        assert_eq!(record.session.status, SessionStatus::Approval);
+        let approval_messages = record
+            .session
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::Approval {
+                    id,
+                    command,
+                    detail,
+                    decision: ApprovalDecision::Pending,
+                    ..
+                } => Some((id.clone(), command.clone(), detail.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(approval_messages.len(), 2);
+        assert_eq!(approval_messages[0].1, "Edit first file");
+        assert!(
+            approval_messages[0].2.contains("\"type\": \"diff\"")
+                && approval_messages[0].2.contains("\"path\": \"src/main.rs\""),
+            "structured content and locations should remain visible in approval detail"
+        );
+        (
+            approval_messages[0].0.clone(),
+            approval_messages[1].0.clone(),
+        )
+    };
+
+    let out_of_order = match state.update_approval(
+        &created.session_id,
+        &second_message_id,
+        ApprovalDecision::Rejected,
+    ) {
+        Ok(_) => panic!("later permission must not overtake the queue head"),
+        Err(err) => err,
+    };
+    assert!(
+        out_of_order
+            .message
+            .contains("earlier agent approval request"),
+        "out-of-order rejection should explain the queue contract: {}",
+        out_of_order.message
+    );
+
+    state
+        .update_approval(
+            &created.session_id,
+            &first_message_id,
+            ApprovalDecision::Accepted,
+        )
+        .unwrap();
+    match input_rx
+        .recv_timeout(Duration::from_millis(100))
+        .expect("first approval response should be delivered")
+    {
+        AcpRuntimeCommand::JsonRpcMessage(message) => {
+            assert_eq!(message.get("id"), Some(&json!("permission-1")));
+            assert_eq!(
+                message.pointer("/result/outcome/optionId"),
+                Some(&json!("once")),
+                "option kind selects the exact OpenCode option id"
+            );
+        }
+        _ => panic!("expected first ACP approval response"),
+    }
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == created.session_id)
+            .expect("OpenCode session should exist");
+        assert_eq!(record.pending_acp_approvals.len(), 1);
+        assert_eq!(
+            record.pending_acp_approval_order.front(),
+            Some(&second_message_id)
+        );
+        assert_eq!(record.session.status, SessionStatus::Approval);
+    }
+
+    state
+        .update_approval(
+            &created.session_id,
+            &second_message_id,
+            ApprovalDecision::Rejected,
+        )
+        .unwrap();
+    match input_rx
+        .recv_timeout(Duration::from_millis(100))
+        .expect("second approval response should be delivered")
+    {
+        AcpRuntimeCommand::JsonRpcMessage(message) => {
+            assert_eq!(message.get("id"), Some(&json!("permission-2")));
+            assert_eq!(
+                message.pointer("/result/outcome/optionId"),
+                Some(&json!("reject"))
+            );
+        }
+        _ => panic!("expected second ACP approval response"),
+    }
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == created.session_id)
+            .expect("OpenCode session should exist");
+        assert!(record.pending_acp_approvals.is_empty());
+        assert!(record.pending_acp_approval_order.is_empty());
+        assert_eq!(record.session.status, SessionStatus::Active);
+    }
+}
+
+#[test]
+fn cursor_permissions_remain_resolvable_out_of_arrival_order() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Cursor),
+            name: Some("Cursor independent permissions".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("auto".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: Some(CursorMode::Ask),
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("Cursor session should be created");
+    let (runtime, input_rx) =
+        test_acp_runtime_handle(AcpAgent::Cursor, "cursor-independent-permissions");
+    let input_tx = runtime.input_tx.clone();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&created.session_id)
+            .expect("Cursor session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
+    }
+    let mut recorder = SessionRecorder::new(state.clone(), created.session_id.clone());
+    let request = |id: &str, description: &str| {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "session/request_permission",
+            "params": {
+                "sessionId": "cursor-session",
+                "toolName": "edit",
+                "description": description,
+                "options": [
+                    { "optionId": "once", "kind": "allow_once", "name": "Allow once" },
+                    { "optionId": "reject", "kind": "reject_once", "name": "Reject" }
+                ]
+            }
+        })
+    };
+
+    handle_acp_request(
+        &request("cursor-permission-1", "Edit first file"),
+        &state,
+        &created.session_id,
+        &input_tx,
+        &mut recorder,
+        AcpAgent::Cursor,
+    )
+    .expect("first Cursor permission should queue");
+    handle_acp_request(
+        &request("cursor-permission-2", "Edit second file"),
+        &state,
+        &created.session_id,
+        &input_tx,
+        &mut recorder,
+        AcpAgent::Cursor,
+    )
+    .expect("second Cursor permission should queue");
+
+    let (first_message_id, second_message_id) = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == created.session_id)
+            .expect("Cursor session should exist");
+        let pending = record
+            .session
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::Approval {
+                    id,
+                    decision: ApprovalDecision::Pending,
+                    ..
+                } => Some(id.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(pending.len(), 2);
+        (pending[0].clone(), pending[1].clone())
+    };
+
+    state
+        .update_approval(
+            &created.session_id,
+            &second_message_id,
+            ApprovalDecision::Accepted,
+        )
+        .expect("Cursor permissions should remain independently resolvable");
+    match input_rx
+        .recv_timeout(Duration::from_millis(100))
+        .expect("second Cursor response should be delivered first")
+    {
+        AcpRuntimeCommand::JsonRpcMessage(message) => {
+            assert_eq!(message.get("id"), Some(&json!("cursor-permission-2")));
+        }
+        _ => panic!("expected Cursor ACP approval response"),
+    }
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == created.session_id)
+            .expect("Cursor session should exist");
+        assert_eq!(record.pending_acp_approvals.len(), 1);
+        assert_eq!(record.session.status, SessionStatus::Approval);
+    }
+
+    state
+        .update_approval(
+            &created.session_id,
+            &first_message_id,
+            ApprovalDecision::Rejected,
+        )
+        .expect("remaining Cursor permission should resolve");
 }
 
 // pins that Cursor in plan mode auto-rejects every ACP permission request
@@ -275,6 +679,7 @@ fn syncs_cursor_mode_from_acp_config_updates() {
         .unwrap();
     let mut recorder = SessionRecorder::new(state.clone(), created.session_id.clone());
     let mut turn_state = AcpTurnState::default();
+    let (input_tx, _input_rx) = mpsc::channel();
 
     handle_acp_session_update(
         &json!({
@@ -298,6 +703,7 @@ fn syncs_cursor_mode_from_acp_config_updates() {
         }),
         &state,
         &created.session_id,
+        &input_tx,
         &mut turn_state,
         &mut recorder,
         AcpAgent::Cursor,
@@ -338,6 +744,7 @@ fn syncs_cursor_mode_from_mode_updates() {
         .unwrap();
     let mut recorder = SessionRecorder::new(state.clone(), created.session_id.clone());
     let mut turn_state = AcpTurnState::default();
+    let (input_tx, _input_rx) = mpsc::channel();
 
     handle_acp_session_update(
         &json!({
@@ -346,6 +753,7 @@ fn syncs_cursor_mode_from_mode_updates() {
         }),
         &state,
         &created.session_id,
+        &input_tx,
         &mut turn_state,
         &mut recorder,
         AcpAgent::Cursor,
@@ -488,6 +896,7 @@ fn updates_live_cursor_mode_on_active_acp_sessions() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_mode: None,
             },
         )
         .unwrap();
@@ -555,5 +964,36 @@ fn matches_acp_model_options_by_name_or_label() {
     assert_eq!(
         matching_acp_config_option_value(&config, "model", "Missing Model"),
         None
+    );
+}
+#[test]
+fn acp_approval_option_mapping_fails_closed_across_semantic_classes() {
+    let allow_only = AcpPendingApproval {
+        allow_once_option_id: Some("allow-once".to_owned()),
+        allow_always_option_id: Some("allow-always".to_owned()),
+        reject_option_id: None,
+        request_id: json!("permission-allow-only"),
+    };
+    assert_eq!(
+        acp_approval_option_id(&allow_only, ApprovalDecision::Rejected),
+        None,
+        "an explicit rejection must never fall back to an allow option"
+    );
+
+    let reject_only = AcpPendingApproval {
+        allow_once_option_id: None,
+        allow_always_option_id: None,
+        reject_option_id: Some("reject-once".to_owned()),
+        request_id: json!("permission-reject-only"),
+    };
+    assert_eq!(
+        acp_approval_option_id(&reject_only, ApprovalDecision::Accepted),
+        None,
+        "turn approval must never fall back to a reject option"
+    );
+    assert_eq!(
+        acp_approval_option_id(&reject_only, ApprovalDecision::AcceptedForSession),
+        None,
+        "session approval must never fall back to a reject option"
     );
 }

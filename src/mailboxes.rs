@@ -287,6 +287,58 @@ impl std::ops::DerefMut for MailboxConnectionGuard<'_> {
 }
 
 impl AppState {
+    /// Rejoins stale mailbox participant rows for a live local root session.
+    ///
+    /// `left_at` is deletion-owned state. Older send-time liveness probes
+    /// could set it after a transient classification miss, so every ordinary
+    /// mailbox interaction repairs those historical rows after validating
+    /// the current in-memory session. The second validation closes the race
+    /// with deletion or any other transition that makes the session ineligible;
+    /// every failed revalidation restores `left_at`.
+    fn ensure_mailbox_session_active(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<(), ApiError> {
+        let validate = || {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let record = &inner.sessions[index];
+            if record.hidden
+                || record.is_remote_proxy()
+                || record.session.parent_delegation_id.is_some()
+                || inner
+                    .find_delegation_index_by_child_session_id(session_id)
+                    .is_some()
+            {
+                return Err(ApiError::bad_request(
+                    "mailbox participant must be a local root session",
+                ));
+            }
+            Ok(())
+        };
+
+        validate()?;
+        let reactivated_rows = self
+            .mailbox_store
+            .reactivate_session_rows(session_id)
+            .map_err(mailbox_api_error)?;
+        if let Err(err) = validate() {
+            if let Err(mark_err) = self
+                .mailbox_store
+                .restore_reactivated_session_rows(session_id, &reactivated_rows)
+            {
+                eprintln!(
+                    "mailbox cleanup> failed restoring reactivated participant markers for \
+                     `{session_id}` after concurrent recovery: {mark_err:#}"
+                );
+            }
+            return Err(err);
+        }
+        Ok(())
+    }
+
     fn append_mailbox_message_and_notify(
         &self,
         sender_session_id: &str,
@@ -303,6 +355,8 @@ impl AppState {
         }
         let (sender_name, target_name) =
             self.mailbox_peer_names(sender_session_id, &request.target_session_id)?;
+        self.ensure_mailbox_session_active(sender_session_id)?;
+        self.ensure_mailbox_session_active(&request.target_session_id)?;
         let input = MailboxAppendInput {
             sender_session_id: sender_session_id.to_owned(),
             sender_name: sender_name.clone(),
@@ -325,24 +379,13 @@ impl AppState {
             return Ok(receipt);
         }
 
-        let (sender_still_active, target_still_active) =
-            self.mailbox_participants_still_active(
-                sender_session_id,
-                &input.target_session_id,
-            );
-        for (session_id, still_active) in [
-            (sender_session_id, sender_still_active),
-            (input.target_session_id.as_str(), target_still_active),
-        ] {
-            if !still_active {
-                if let Err(err) = self.mailbox_store.mark_session_left(session_id) {
-                    eprintln!(
-                        "mailbox> message {} committed, but failed to mark departed participant `{session_id}`: {err:#}",
-                        receipt.message_id
-                    );
-                }
-            }
-        }
+        // This post-commit probe controls wake delivery only. It must never
+        // mutate participant authorization: only deliberate session deletion
+        // owns `left_at`.
+        let (_, target_still_active) = self.mailbox_participants_still_active(
+            sender_session_id,
+            &input.target_session_id,
+        );
         if !target_still_active {
             if let Err(err) = self
                 .mailbox_store
@@ -939,12 +982,7 @@ async fn list_mailboxes(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<MailboxSummary>>, ApiError> {
     let summaries = run_blocking_api(move || {
-        {
-            let inner = state.inner.lock().expect("state mutex poisoned");
-            if inner.find_visible_session_index(&session_id).is_none() {
-                return Err(ApiError::not_found("session not found"));
-            }
-        }
+        state.ensure_mailbox_session_active(&session_id)?;
         state
             .mailbox_store
             .list_for_session(&session_id)
@@ -960,6 +998,7 @@ async fn read_mailbox(
     Json(request): Json<ReadMailboxRequest>,
 ) -> Result<Json<Vec<MailboxMessage>>, ApiError> {
     let messages = run_blocking_api(move || {
+        state.ensure_mailbox_session_active(&session_id)?;
         state
             .mailbox_store
             .read_range(
@@ -979,6 +1018,7 @@ async fn read_mailbox_message(
     State(state): State<AppState>,
 ) -> Result<Json<MailboxMessage>, ApiError> {
     let message = run_blocking_api(move || {
+        state.ensure_mailbox_session_active(&session_id)?;
         state
             .mailbox_store
             .read_message(&session_id, &message_id)
@@ -994,6 +1034,7 @@ async fn acknowledge_mailbox(
     Json(request): Json<AcknowledgeMailboxRequest>,
 ) -> Result<Json<MailboxSummary>, ApiError> {
     let summary = run_blocking_api(move || {
+        state.ensure_mailbox_session_active(&session_id)?;
         state
             .acknowledge_mailbox_and_remove_covered_wakeups(
                 &session_id,
@@ -1572,7 +1613,10 @@ impl MailboxStore {
         through_sequence: u64,
         recovery: MailboxWakeupRecovery,
     ) -> Result<usize> {
-        let _write_guard = self.lock_internal_writer();
+        // Reactivation is initiated by HTTP/MCP mailbox requests. Use the
+        // bounded request admission path so contention returns the existing
+        // retryable 503 instead of pinning a request thread indefinitely.
+        let _write_guard = self.lock_writer("reactivating a mailbox participant")?;
         let connection = self.connection()?;
         let updated = match recovery {
             MailboxWakeupRecovery::NeverWoken => connection.execute(
@@ -1621,6 +1665,104 @@ impl MailboxStore {
                 rusqlite::params![session_id, chrono::Utc::now().to_rfc3339()],
             )
             .context("failed to mark deleted mailbox participant as left")?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn reactivate_session(&self, session_id: &str) -> Result<usize> {
+        self.reactivate_session_rows(session_id)
+            .map(|rows| rows.len())
+    }
+
+    /// Clears stale departure markers and returns exactly the rows changed so
+    /// a concurrent eligibility failure can restore only those markers.
+    fn reactivate_session_rows(&self, session_id: &str) -> Result<Vec<(String, String)>> {
+        let has_departed_rows = {
+            let Some(connection) = self.connection_if_enabled() else {
+                return Ok(Vec::new());
+            };
+            connection
+                .query_row(
+                    "SELECT EXISTS(
+                       SELECT 1
+                       FROM mailbox_participants
+                       WHERE session_id = ?1
+                         AND left_at IS NOT NULL
+                     )",
+                    rusqlite::params![session_id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .context("failed to inspect stale mailbox participant rows")?
+        };
+        if !has_departed_rows {
+            return Ok(Vec::new());
+        }
+
+        // Reactivation is initiated by HTTP/MCP mailbox requests. Use the
+        // bounded request admission path so contention returns the existing
+        // retryable 503 instead of pinning a request thread indefinitely.
+        let _write_guard = self.lock_writer("reactivating a mailbox participant")?;
+        let Some(connection) = self.connection_if_enabled() else {
+            return Ok(Vec::new());
+        };
+        let departed_rows = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT mailbox_id, left_at
+                     FROM mailbox_participants
+                     WHERE session_id = ?1
+                       AND left_at IS NOT NULL",
+                )
+                .context("failed to prepare stale mailbox participant lookup")?;
+            statement
+                .query_map(rusqlite::params![session_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .context("failed to inspect stale mailbox participant rows")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("failed to read stale mailbox participant rows")?
+        };
+        connection
+            .execute(
+                "UPDATE mailbox_participants
+                 SET left_at = NULL
+                 WHERE session_id = ?1
+                   AND left_at IS NOT NULL",
+                rusqlite::params![session_id],
+            )
+            .context("failed to reactivate stale mailbox participant rows")?;
+        Ok(departed_rows)
+    }
+
+    /// Restores only participant rows cleared by one reactivation attempt.
+    fn restore_reactivated_session_rows(
+        &self,
+        session_id: &str,
+        rows: &[(String, String)],
+    ) -> Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let _write_guard = self.lock_writer("restoring mailbox participant markers")?;
+        let Some(connection) = self.connection_if_enabled() else {
+            return Ok(());
+        };
+        for (mailbox_id, left_at) in rows {
+            connection
+                .execute(
+                    "UPDATE mailbox_participants
+                     SET left_at = ?3
+                     WHERE mailbox_id = ?1
+                       AND session_id = ?2
+                       AND left_at IS NULL",
+                    rusqlite::params![mailbox_id, session_id, left_at],
+                )
+                .with_context(|| {
+                    format!(
+                        "failed to restore mailbox participant marker for `{session_id}` in `{mailbox_id}`"
+                    )
+                })?;
+        }
         Ok(())
     }
 

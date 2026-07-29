@@ -399,7 +399,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -571,7 +571,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -744,7 +744,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -912,7 +912,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -1064,7 +1064,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         // Intentionally no assistant message: the drift-gap path must recover any
         // active session after wake, even before the current turn has output.
@@ -1191,7 +1191,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -1282,7 +1282,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -1333,7 +1333,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
-      act(() => {
+      await act(async () => {
         eventSource.dispatchError();
       });
       await advanceTimers(400);
@@ -1385,7 +1385,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
         );
         await flushUiWork();
       });
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 2,
@@ -1477,7 +1477,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -1527,7 +1527,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
-      act(() => {
+      await act(async () => {
         eventSource.dispatchError();
       });
       await advanceTimers(400);
@@ -1545,7 +1545,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(1);
 
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 2,
@@ -1671,7 +1671,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -1721,7 +1721,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
-      act(() => {
+      await act(async () => {
         eventSource.dispatchError();
       });
       await advanceTimers(400);
@@ -1739,7 +1739,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(1);
 
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("delta", {
           type: "textReplace",
@@ -1877,7 +1877,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -2054,7 +2054,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -2233,7 +2233,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
+      await act(async () => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
@@ -2295,7 +2295,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       // A fresh SSE state payload should clear the residual watchdog cooldown and
       // reset the stale-transport timer from this newer live activity.
-      act(() => {
+      await act(async () => {
         eventSource.dispatchNamedEvent("state", {
           revision: 3,
           projects: [],
@@ -2386,7 +2386,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       try {
         await renderApp();
         const eventSource = latestEventSource();
-        act(() => {
+        await act(async () => {
           eventSource.dispatchOpen();
           eventSource.dispatchNamedEvent("state", {
             revision: 1,

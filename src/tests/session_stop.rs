@@ -37,6 +37,7 @@ fn push_pending_approval_message(state: &AppState, session_id: &str) -> String {
             command_language: None,
             detail: "Waiting for approval".to_owned(),
             decision: ApprovalDecision::Pending,
+            supported_decisions: None,
         },
     );
     message_id

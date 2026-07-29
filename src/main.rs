@@ -639,6 +639,7 @@ include!("app_boot.rs");
 include!("telegram_settings.rs");
 include!("agent_readiness.rs");
 include!("gemini.rs");
+include!("opencode.rs");
 include!("turns.rs");
 include!("recorders.rs");
 include!("claude.rs");

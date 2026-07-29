@@ -51,6 +51,10 @@ export type ComposerSessionSnapshot = Readonly<{
   cursorMode?: CursorMode | null;
   draftAttachments: readonly ComposerDraftAttachment[];
   geminiApprovalMode?: GeminiApprovalMode | null;
+  opencodeModel?: string | null;
+  opencodeMode?: string | null;
+  opencodeCurrentMode?: string | null;
+  opencodeModeOptions?: readonly SessionModelOption[];
   id: string;
   model: string;
   modelOptions?: readonly SessionModelOption[];
@@ -71,6 +75,10 @@ export type SessionSummarySnapshot = Readonly<{
   cursorMode?: CursorMode | null;
   externalSessionId?: string | null;
   geminiApprovalMode?: GeminiApprovalMode | null;
+  opencodeModel?: string | null;
+  opencodeMode?: string | null;
+  opencodeCurrentMode?: string | null;
+  opencodeModeOptions?: readonly SessionModelOption[];
   id: string;
   lastResponseTimestamp?: string | null;
   model: string;
@@ -380,6 +388,11 @@ function buildComposerSessionSnapshot(
     previous && sameSessionModelOptions(previous.modelOptions, session.modelOptions)
       ? previous.modelOptions
       : session.modelOptions;
+  const nextOpenCodeModeOptions =
+    previous &&
+    sameSessionModelOptions(previous.opencodeModeOptions, session.opencodeModeOptions)
+      ? previous.opencodeModeOptions
+      : session.opencodeModeOptions;
   const nextDraftAttachments = buildDraftAttachmentsSnapshot(
     draftAttachments,
     previous?.draftAttachments,
@@ -400,6 +413,10 @@ function buildComposerSessionSnapshot(
     previous.cursorMode === session.cursorMode &&
     previous.claudeApprovalMode === session.claudeApprovalMode &&
     previous.geminiApprovalMode === session.geminiApprovalMode &&
+    previous.opencodeModel === session.opencodeModel &&
+    previous.opencodeMode === session.opencodeMode &&
+    previous.opencodeCurrentMode === session.opencodeCurrentMode &&
+    previous.opencodeModeOptions === nextOpenCodeModeOptions &&
     previous.agentCommandsRevision === session.agentCommandsRevision &&
     previous.committedDraft === committedDraft &&
     previous.draftAttachments === nextDraftAttachments &&
@@ -418,6 +435,10 @@ function buildComposerSessionSnapshot(
     cursorMode: session.cursorMode,
     draftAttachments: nextDraftAttachments,
     geminiApprovalMode: session.geminiApprovalMode,
+    opencodeModel: session.opencodeModel,
+    opencodeMode: session.opencodeMode,
+    opencodeCurrentMode: session.opencodeCurrentMode,
+    opencodeModeOptions: nextOpenCodeModeOptions,
     id: session.id,
     model: session.model,
     modelOptions: nextModelOptions,
@@ -500,6 +521,11 @@ function buildSessionSummarySnapshot(
     previous && sameSessionModelOptions(previous.modelOptions, session.modelOptions)
       ? previous.modelOptions
       : session.modelOptions;
+  const nextOpenCodeModeOptions =
+    previous &&
+    sameSessionModelOptions(previous.opencodeModeOptions, session.opencodeModeOptions)
+      ? previous.opencodeModeOptions
+      : session.opencodeModeOptions;
 
   if (
     previous &&
@@ -519,6 +545,10 @@ function buildSessionSummarySnapshot(
     previous.cursorMode === session.cursorMode &&
     previous.claudeApprovalMode === session.claudeApprovalMode &&
     previous.geminiApprovalMode === session.geminiApprovalMode &&
+    previous.opencodeModel === session.opencodeModel &&
+    previous.opencodeMode === session.opencodeMode &&
+    previous.opencodeCurrentMode === session.opencodeCurrentMode &&
+    previous.opencodeModeOptions === nextOpenCodeModeOptions &&
     previous.externalSessionId === session.externalSessionId &&
     previous.agentCommandsRevision === session.agentCommandsRevision &&
     previous.codexThreadState === session.codexThreadState &&
@@ -537,6 +567,10 @@ function buildSessionSummarySnapshot(
     cursorMode: session.cursorMode,
     externalSessionId: session.externalSessionId,
     geminiApprovalMode: session.geminiApprovalMode,
+    opencodeModel: session.opencodeModel,
+    opencodeMode: session.opencodeMode,
+    opencodeCurrentMode: session.opencodeCurrentMode,
+    opencodeModeOptions: nextOpenCodeModeOptions,
     id: session.id,
     lastResponseTimestamp,
     model: session.model,

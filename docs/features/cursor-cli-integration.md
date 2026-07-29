@@ -168,12 +168,12 @@ Sends a user message. Returns when the turn completes.
 
 #### `session/cancel`
 
-Interrupts the current turn.
+Interrupts the current turn. This is a JSON-RPC notification, so it has no
+request `id` and Cursor does not send a response.
 
 ```jsonc
 {
   "jsonrpc": "2.0",
-  "id": 5,
   "method": "session/cancel",
   "params": { "sessionId": "<session-id>" }
 }

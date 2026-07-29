@@ -28,6 +28,150 @@
 
 use super::*;
 
+// Pins the cross-language app-preference key. `OpenCode` contains an internal
+// capital letter, so serde's generic camelCase conversion would otherwise
+// produce `defaultOpencodeModel` while the TypeScript contract uses
+// `defaultOpenCodeModel`.
+#[test]
+fn opencode_default_model_uses_explicit_wire_key() {
+    let serialized =
+        serde_json::to_value(AppPreferences::default()).expect("preferences should serialize");
+    assert_eq!(
+        serialized
+            .get("defaultOpenCodeModel")
+            .and_then(Value::as_str),
+        Some("default")
+    );
+    assert!(
+        serialized.get("defaultOpencodeModel").is_none(),
+        "the accidental serde-derived spelling must not leak onto the wire"
+    );
+
+    let request: UpdateAppSettingsRequest = serde_json::from_value(json!({
+        "defaultOpenCodeModel": "openai/gpt-5.6-sol"
+    }))
+    .expect("OpenCode preference request should deserialize");
+    assert_eq!(
+        request.default_opencode_model.as_deref(),
+        Some("openai/gpt-5.6-sol")
+    );
+}
+
+#[test]
+fn opencode_model_refresh_restarts_ready_runtime_before_handshake() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::OpenCode);
+    let (stale_runtime, _stale_input_rx) =
+        test_acp_runtime_handle(AcpAgent::OpenCode, "opencode-stale-refresh");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("OpenCode session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("OpenCode session index should be valid");
+        record.session.status = SessionStatus::Idle;
+        record.external_session_id = Some("opencode-external-refresh".to_owned());
+        record.runtime = SessionRuntime::Acp(stale_runtime);
+    }
+
+    let (fresh_runtime, fresh_input_rx) =
+        test_acp_runtime_handle(AcpAgent::OpenCode, "opencode-fresh-refresh");
+    state.install_test_acp_runtime_override(AcpAgent::OpenCode, fresh_runtime);
+    let responder = std::thread::spawn(move || {
+        match fresh_input_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("fresh runtime should receive config refresh")
+        {
+            AcpRuntimeCommand::RefreshSessionConfig {
+                command,
+                response_tx,
+            } => {
+                assert_eq!(
+                    command.resume_session_id.as_deref(),
+                    Some("opencode-external-refresh"),
+                    "refresh must preserve and resume the external conversation"
+                );
+                response_tx
+                    .send(Ok(()))
+                    .expect("refresh result receiver should remain live");
+            }
+            _ => panic!("expected ACP config refresh command"),
+        }
+    });
+
+    state
+        .refresh_session_model_options(&session_id)
+        .expect("OpenCode refresh should use the fresh runtime handshake");
+    responder.join().expect("refresh responder should finish");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("OpenCode session should remain present");
+    assert!(
+        matches!(
+            &record.runtime,
+            SessionRuntime::Acp(handle)
+                if handle.runtime_id == "opencode-fresh-refresh"
+        ),
+        "the stale ready runtime must be replaced before refresh"
+    );
+}
+
+#[test]
+fn offline_opencode_mode_change_does_not_claim_agent_effective_state() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::OpenCode);
+    state
+        .sync_session_opencode_config(
+            &session_id,
+            None,
+            Some((
+                OPENCODE_CONFIG_AUTO.to_owned(),
+                Some("build".to_owned()),
+                vec![
+                    SessionModelOption::plain("Build", "build"),
+                    SessionModelOption::plain("Plan", "plan"),
+                ],
+            )),
+            Vec::new(),
+        )
+        .expect("initial agent-reported mode should sync");
+
+    let updated = state
+        .update_session_settings(
+            &session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: None,
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_mode: Some("plan".to_owned()),
+            },
+        )
+        .expect("offline OpenCode authority should update");
+    let session = updated
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("OpenCode session should remain visible");
+    assert_eq!(session.opencode_mode.as_deref(), Some("plan"));
+    assert_eq!(
+        session.opencode_current_mode.as_deref(),
+        Some("build"),
+        "offline authority changes must not impersonate agent acknowledgement"
+    );
+}
+
 // pins that attaching a shared thread ID to a non-Codex (Cursor) session
 // leaves the Codex-ignored-thread entry untouched. guards against
 // set_external_session_id cross-contaminating the ignored-threads list
@@ -162,6 +306,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
             default_claude_model: Some("claude-sonnet-4-5".to_owned()),
             default_cursor_model: Some("cursor-premium".to_owned()),
             default_gemini_model: Some("gemini-2.5-pro".to_owned()),
+            default_opencode_model: None,
             default_codex_reasoning_effort: Some(CodexReasoningEffort::High),
             default_codex_sandbox_mode: Some(CodexSandboxMode::DangerFullAccess),
             default_codex_approval_policy: Some(CodexApprovalPolicy::OnRequest),
@@ -413,6 +558,7 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
             default_claude_model: None,
             default_cursor_model: None,
             default_gemini_model: None,
+            default_opencode_model: None,
             default_codex_reasoning_effort: None,
             default_codex_sandbox_mode: None,
             default_codex_approval_policy: None,
@@ -428,6 +574,7 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
             default_claude_model: None,
             default_cursor_model: None,
             default_gemini_model: None,
+            default_opencode_model: None,
             default_codex_reasoning_effort: None,
             default_codex_sandbox_mode: None,
             default_codex_approval_policy: None,
@@ -552,6 +699,42 @@ fn claude_default_model_preference_rejects_cli_option_like_values() {
     }
 }
 
+#[test]
+fn opencode_model_ingress_rejects_values_that_cannot_round_trip_persistence() {
+    for model in [
+        "openai/gpt-5.6-sol\nshadow".to_owned(),
+        "x".repeat(MAX_OPENCODE_MODEL_CHARS + 1),
+    ] {
+        let state = test_app_state();
+        let create_error = match state.create_session(CreateSessionRequest {
+            agent: Some(Agent::OpenCode),
+            name: Some("Unsafe OpenCode model".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some(model.clone()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        }) {
+            Ok(_) => panic!("unsafe OpenCode create model should be rejected"),
+            Err(error) => error,
+        };
+        assert_eq!(create_error.status, StatusCode::BAD_REQUEST);
+
+        let default_error = match state.update_app_settings(
+            update_app_settings_request_for_agent_model(Agent::OpenCode, model),
+        ) {
+            Ok(_) => panic!("unsafe OpenCode default model should be rejected"),
+            Err(error) => error,
+        };
+        assert_eq!(default_error.status, StatusCode::BAD_REQUEST);
+    }
+}
+
 fn update_app_settings_request_for_agent_model(
     agent: Agent,
     model: String,
@@ -560,7 +743,8 @@ fn update_app_settings_request_for_agent_model(
         default_codex_model: (agent == Agent::Codex).then(|| model.clone()),
         default_claude_model: (agent == Agent::Claude).then(|| model.clone()),
         default_cursor_model: (agent == Agent::Cursor).then(|| model.clone()),
-        default_gemini_model: (agent == Agent::Gemini).then_some(model),
+        default_gemini_model: (agent == Agent::Gemini).then(|| model.clone()),
+        default_opencode_model: (agent == Agent::OpenCode).then_some(model),
         default_codex_reasoning_effort: None,
         default_codex_sandbox_mode: None,
         default_codex_approval_policy: None,
@@ -576,12 +760,19 @@ fn default_model_preference_for_agent(preferences: &AppPreferences, agent: Agent
         Agent::Claude => &preferences.default_claude_model,
         Agent::Cursor => &preferences.default_cursor_model,
         Agent::Gemini => &preferences.default_gemini_model,
+        Agent::OpenCode => &preferences.default_opencode_model,
     }
 }
 
 #[test]
 fn oversized_persisted_default_model_falls_back_to_agent_default() {
-    for agent in [Agent::Codex, Agent::Claude, Agent::Cursor, Agent::Gemini] {
+    for agent in [
+        Agent::Codex,
+        Agent::Claude,
+        Agent::Cursor,
+        Agent::Gemini,
+        Agent::OpenCode,
+    ] {
         let state = test_app_state();
         {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -599,6 +790,10 @@ fn oversized_persisted_default_model_falls_back_to_agent_default() {
                 }
                 Agent::Gemini => {
                     inner.preferences.default_gemini_model =
+                        "x".repeat(MAX_DEFAULT_MODEL_CHARS + 1);
+                }
+                Agent::OpenCode => {
+                    inner.preferences.default_opencode_model =
                         "x".repeat(MAX_DEFAULT_MODEL_CHARS + 1);
                 }
             }
@@ -734,6 +929,7 @@ fn updates_cursor_session_model_settings() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_mode: None,
             },
         )
         .unwrap();
@@ -784,6 +980,7 @@ fn updates_codex_session_model_settings_without_restarting_runtime() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_mode: None,
             },
         )
         .unwrap();
@@ -842,6 +1039,7 @@ fn updates_codex_reasoning_effort_without_restarting_runtime() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_mode: None,
             },
         )
         .unwrap();
@@ -939,6 +1137,7 @@ fn normalizes_codex_reasoning_effort_when_switching_models() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_mode: None,
             },
         )
         .unwrap();
@@ -1019,6 +1218,7 @@ fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
             claude_approval_mode: None,
             claude_effort: None,
             gemini_approval_mode: None,
+            opencode_mode: None,
         },
     ) {
         Ok(_) => panic!("unsupported Codex effort should be rejected"),
@@ -1095,6 +1295,7 @@ fn accepts_codex_max_and_ultra_reasoning_efforts_for_supporting_model() {
                     claude_approval_mode: None,
                     claude_effort: None,
                     gemini_approval_mode: None,
+                    opencode_mode: None,
                 },
             )
             .unwrap_or_else(|error| panic!("{effort:?} should be accepted: {}", error.message));
@@ -1212,6 +1413,7 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_mode: None,
             },
         )
         .unwrap();
@@ -1295,6 +1497,7 @@ fn updating_running_claude_session_to_default_model_requires_restart() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_mode: None,
             },
         )
         .unwrap();
@@ -1377,6 +1580,7 @@ fn updates_claude_effort_and_marks_runtime_for_restart() {
                 claude_approval_mode: None,
                 claude_effort: Some(ClaudeEffortLevel::High),
                 gemini_approval_mode: None,
+                opencode_mode: None,
             },
         )
         .unwrap();

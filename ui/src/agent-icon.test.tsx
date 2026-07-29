@@ -11,6 +11,7 @@ describe("AgentIcon", () => {
         <AgentIcon agent="Claude" />
         <AgentIcon agent="Cursor" />
         <AgentIcon agent="Gemini" />
+        <AgentIcon agent="OpenCode" />
       </>,
     );
 
@@ -26,11 +27,15 @@ describe("AgentIcon", () => {
     const geminiMonogram = container.querySelector(
       '.agent-icon[data-agent="gemini"] .agent-icon-monogram',
     );
+    const openCodeMonogram = container.querySelector(
+      '.agent-icon[data-agent="opencode"] .agent-icon-monogram',
+    );
 
     expect(codexMark?.tagName.toLowerCase()).toBe("svg");
     expect(claudeMark?.tagName.toLowerCase()).toBe("svg");
     expect(cursorMonogram?.textContent).toBe("C");
     expect(geminiMonogram?.textContent).toBe("G");
+    expect(openCodeMonogram?.textContent).toBe("OC");
     expect(codexMark).not.toHaveAttribute("style");
     expect(claudeMark).not.toHaveAttribute("style");
     expect(container.innerHTML).not.toContain("upload.wikimedia.org");

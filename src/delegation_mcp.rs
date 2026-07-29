@@ -1564,7 +1564,7 @@ fn mcp_tools_list_result() -> Value {
         "tools": [
             {
                 "name": "termal_spawn_session",
-                "description": "Create a TermAl child delegation under the current parent session. Single-line prompts matching a known slash command are resolved before spawning.",
+                "description": "Create a TermAl child delegation under the current parent session. Single-line prompts matching a known slash command are resolved before spawning. OpenCode does not support writePolicy readOnly; use isolatedWorktree for bounded writable OpenCode work.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["prompt"],
@@ -1578,10 +1578,11 @@ fn mcp_tools_list_result() -> Value {
                             "type": "string",
                             "description": "Working directory for the spawned session. For single-line known slash-command prompts, cwd also scopes command resolution."
                         },
-                        "agent": { "type": "string", "enum": ["Codex", "Claude", "Cursor", "Gemini"] },
+                        "agent": { "type": "string", "enum": ["Codex", "Claude", "Cursor", "Gemini", "OpenCode"] },
                         "model": { "type": "string" },
                         "mode": { "type": "string", "enum": ["reviewer", "explorer", "worker"] },
                         "writePolicy": {
+                            "description": "OpenCode rejects readOnly. Use isolatedWorktree for OpenCode delegation sessions.",
                             "oneOf": [
                                 { "type": "string", "enum": ["readOnly", "isolatedWorktree", "sharedWorktree"] },
                                 { "type": "object" }

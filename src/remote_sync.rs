@@ -482,6 +482,7 @@ fn upsert_remote_proxy_session_record(
         pending_codex_mcp_elicitations: HashMap::new(),
         pending_codex_app_requests: HashMap::new(),
         pending_acp_approvals: HashMap::new(),
+        pending_acp_approval_order: VecDeque::new(),
         queued_prompts: VecDeque::new(),
         queued_peer_messages: HashMap::new(),
         message_positions: build_message_positions(&session.messages),

@@ -1958,6 +1958,10 @@ fn remote_session_create_forwards_configured_default_model() {
         claude_effort: None,
         claude_approval_mode: None,
         gemini_approval_mode: None,
+        opencode_model: None,
+        opencode_mode: None,
+        opencode_current_mode: None,
+        opencode_mode_options: Vec::new(),
         external_session_id: None,
         agent_commands_revision: 0,
         codex_thread_state: None,
@@ -1978,6 +1982,39 @@ fn remote_session_create_forwards_configured_default_model() {
         server_instance_id: "remote-server".to_owned(),
     })
     .expect("remote create response should encode");
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-default-model".to_owned(),
+        name: "SSH Default Model".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: Some("gpt-5.5".to_owned()),
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
+            default_opencode_model: None,
+            default_codex_reasoning_effort: None,
+            default_codex_sandbox_mode: None,
+            default_codex_approval_policy: None,
+            default_claude_approval_mode: None,
+            default_claude_effort: None,
+            remotes: Some(vec![RemoteConfig::local(), remote.clone()]),
+        })
+        .unwrap();
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Default Model",
+        "remote-project-default-model",
+    );
+    insert_test_remote_connection(&state, &remote, port);
     let server = std::thread::spawn(move || {
         loop {
             let mut stream = accept_test_connection(&listener, "remote session create listener");
@@ -2009,39 +2046,6 @@ fn remote_session_create_forwards_configured_default_model() {
             panic!("unexpected request: {}", request.request_line);
         }
     });
-
-    let state = test_app_state();
-    let remote = RemoteConfig {
-        id: "ssh-default-model".to_owned(),
-        name: "SSH Default Model".to_owned(),
-        transport: RemoteTransport::Ssh,
-        enabled: true,
-        host: Some("example.com".to_owned()),
-        port: Some(22),
-        user: Some("alice".to_owned()),
-    };
-    state
-        .update_app_settings(UpdateAppSettingsRequest {
-            default_codex_model: Some("gpt-5.5".to_owned()),
-            default_claude_model: None,
-            default_cursor_model: None,
-            default_gemini_model: None,
-            default_codex_reasoning_effort: None,
-            default_codex_sandbox_mode: None,
-            default_codex_approval_policy: None,
-            default_claude_approval_mode: None,
-            default_claude_effort: None,
-            remotes: Some(vec![RemoteConfig::local(), remote.clone()]),
-        })
-        .unwrap();
-    let local_project_id = create_test_remote_project(
-        &state,
-        &remote,
-        "/remote/repo",
-        "Remote Default Model",
-        "remote-project-default-model",
-    );
-    insert_test_remote_connection(&state, &remote, port);
 
     let created = state
         .create_session(CreateSessionRequest {

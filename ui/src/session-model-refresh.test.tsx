@@ -6,6 +6,7 @@ import {
   CodexPromptSettingsCard,
   CursorPromptSettingsCard,
   GeminiPromptSettingsCard,
+  OpenCodePromptSettingsCard,
 } from "./prompt-settings-cards";
 import type { Session } from "./types";
 
@@ -479,5 +480,85 @@ describe("session model refresh controls", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Could not refresh Gemini's live model list for this session. Gemini CLI is not authenticated.",
     );
+  });
+
+  it("renders OpenCode's live model and mode choices with explicit Auto authority", () => {
+    const onSessionSettingsChange = vi.fn();
+
+    render(
+      <OpenCodePromptSettingsCard
+        paneId="pane-opencode"
+        session={makeSession("opencode-session", {
+          agent: "OpenCode",
+          model: "opencode/big-pickle",
+          opencodeModel: "auto",
+          opencodeMode: "auto",
+          opencodeCurrentMode: "build",
+          modelOptions: [
+            { label: "Big Pickle", value: "opencode/big-pickle" },
+            { label: "GPT-5.6 Sol", value: "openai/gpt-5.6-sol" },
+          ],
+          opencodeModeOptions: [
+            { label: "Build", value: "build" },
+            { label: "Plan", value: "plan" },
+          ],
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        onRequestModelOptions={() => {}}
+        onSessionSettingsChange={onSessionSettingsChange}
+      />,
+    );
+
+    expect(screen.getByText(/Effective model:/u)).toHaveTextContent(
+      "Effective model: opencode/big-pickle",
+    );
+    expect(screen.getByText(/Effective mode:/u)).toHaveTextContent(
+      "Effective mode: build",
+    );
+
+    fireEvent.click(screen.getByRole("combobox", { name: "OpenCode model" }));
+    expect(screen.getByRole("option", { name: /Auto/u })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: /GPT-5.6 Sol/u }));
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "opencode-session",
+      "model",
+      "openai/gpt-5.6-sol",
+    );
+
+    fireEvent.click(screen.getByRole("combobox", { name: "OpenCode mode" }));
+    fireEvent.click(screen.getByRole("option", { name: /Plan/u }));
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "opencode-session",
+      "opencodeMode",
+      "plan",
+    );
+  });
+
+  it("auto-requests OpenCode config options when the session card has no live list", async () => {
+    const onRequestModelOptions = vi.fn();
+
+    render(
+      <OpenCodePromptSettingsCard
+        paneId="pane-opencode"
+        session={makeSession("opencode-session", {
+          agent: "OpenCode",
+          model: "auto",
+          opencodeModel: "auto",
+          opencodeMode: "auto",
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        onRequestModelOptions={onRequestModelOptions}
+        onSessionSettingsChange={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onRequestModelOptions).toHaveBeenCalledWith("opencode-session");
+    });
+    expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
   });
 });

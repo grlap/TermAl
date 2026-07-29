@@ -102,8 +102,15 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
             mailbox_notification,
             sender,
             session_id,
+            turn_lifecycle,
         } => {
+            // Publish the queued/starting state before the prompt enters the
+            // writer channel. A concurrent OpenCode stop can now observe the
+            // turn and wait for its cancellation grace instead of sampling
+            // the old idle state immediately before the writer starts it.
+            set_acp_turn_active(&turn_lifecycle, true);
             if let Err(err) = sender.send(AcpRuntimeCommand::Prompt(command)) {
+                set_acp_turn_active(&turn_lifecycle, false);
                 record_rejected_turn_dispatch(
                     state,
                     &session_id,

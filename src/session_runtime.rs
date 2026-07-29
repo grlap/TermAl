@@ -260,6 +260,7 @@ impl SharedCodexSessionHandle {
 enum AcpAgent {
     Cursor,
     Gemini,
+    OpenCode,
 }
 
 impl AcpAgent {
@@ -267,6 +268,7 @@ impl AcpAgent {
         match self {
             Self::Cursor => Agent::Cursor,
             Self::Gemini => Agent::Gemini,
+            Self::OpenCode => Agent::OpenCode,
         }
     }
 
@@ -294,6 +296,13 @@ impl AcpAgent {
                 }
                 Ok(command)
             }
+            Self::OpenCode => {
+                let exe = resolve_opencode_executable()
+                    .ok_or_else(|| anyhow!("`opencode` was not found on PATH"))?;
+                let mut command = opencode_command(&exe);
+                command.arg("acp");
+                Ok(command)
+            }
         }
     }
 
@@ -309,6 +318,7 @@ struct AcpRuntimeHandle {
     runtime_id: String,
     input_tx: Sender<AcpRuntimeCommand>,
     process: Arc<SharedChild>,
+    turn_lifecycle: AcpTurnLifecycle,
 }
 
 #[cfg(test)]
@@ -321,6 +331,35 @@ struct TestAcpRuntimeOverride {
 impl AcpRuntimeHandle {
     fn kill(&self) -> Result<()> {
         kill_child_process(&self.process, self.agent.label())
+    }
+
+    /// Queues cancellation for the active ACP turn, waits for its prompt
+    /// response to settle, then terminates the now-detached subprocess.
+    ///
+    /// Local process termination never proves that the agent-side session is
+    /// invalid, so this path always preserves the external session id. The
+    /// typed resume classifier owns any later continuity invalidation.
+    fn stop(&self) -> Result<()> {
+        self.stop_with_grace(ACP_CANCEL_GRACE)
+    }
+
+    fn stop_with_grace(&self, grace: Duration) -> Result<()> {
+        if let Err(err) = self.input_tx.send(AcpRuntimeCommand::Cancel) {
+            eprintln!(
+                "session cleanup warning> failed to queue {} ACP cancellation; \
+                 falling back to process termination: {err}",
+                self.agent.label()
+            );
+        } else if !wait_for_acp_turn_settle(&self.turn_lifecycle, grace) {
+            eprintln!(
+                "session cleanup warning> {} ACP prompt did not settle within the \
+                 cancellation grace; terminating the process while preserving its \
+                 external session id",
+                self.agent.label()
+            );
+        }
+        self.kill()?;
+        Ok(())
     }
 }
 
@@ -373,6 +412,23 @@ fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<(
                 handle.agent.label()
             )
         }),
+    }
+}
+
+/// Stops a user-visible runtime. OpenCode gets a bounded graceful ACP cancel
+/// so its resumable session can settle before local process teardown; the
+/// existing Cursor and Gemini stop contract remains immediate termination.
+fn shutdown_stopped_runtime(runtime: KillableRuntime, context: &str) -> Result<()> {
+    match runtime {
+        KillableRuntime::Acp(handle) if handle.agent == AcpAgent::OpenCode => {
+            handle.stop().with_context(|| {
+                format!(
+                    "failed to stop {} runtime for {context}",
+                    handle.agent.label()
+                )
+            })
+        }
+        runtime => shutdown_removed_runtime(runtime, context),
     }
 }
 

@@ -61,6 +61,10 @@ export type SlashPaletteSession = Pick<
   | "claudeEffort"
   | "cursorMode"
   | "geminiApprovalMode"
+  | "opencodeCurrentMode"
+  | "opencodeMode"
+  | "opencodeModeOptions"
+  | "opencodeModel"
   | "id"
   | "model"
   | "modelOptions"
@@ -74,6 +78,7 @@ export const STATIC_MODEL_OPTIONS: Readonly<Record<Session["agent"], readonly Se
   Codex: [],
   Cursor: [{ detail: "Auto", label: "Auto", value: "auto" }],
   Gemini: [{ detail: "Auto", label: "Auto", value: "auto" }],
+  OpenCode: [{ detail: "Auto", label: "Auto", value: "auto" }],
 };
 export const SANDBOX_SLASH_OPTIONS = [
   { detail: "Write inside the workspace", label: "workspace-write", value: "workspace-write" },
@@ -135,14 +140,14 @@ export const SLASH_COMMANDS: ReadonlyArray<{
     detail: "Change the model for this session",
     id: "model",
     label: "/model",
-    supports: ["Claude", "Codex", "Cursor", "Gemini"],
+    supports: ["Claude", "Codex", "Cursor", "Gemini", "OpenCode"],
   },
   {
     command: "/mode",
     detail: "Change the session mode for this agent",
     id: "mode",
     label: "/mode",
-    supports: ["Claude", "Cursor", "Gemini"],
+    supports: ["Claude", "Cursor", "Gemini", "OpenCode"],
   },
   {
     command: "/sandbox",
@@ -448,7 +453,8 @@ export function supportsLiveSessionModelOptions(session: SlashPaletteSession): b
     session.agent === "Claude" ||
     session.agent === "Codex" ||
     session.agent === "Cursor" ||
-    session.agent === "Gemini"
+    session.agent === "Gemini" ||
+    session.agent === "OpenCode"
   );
 }
 
@@ -475,7 +481,8 @@ export function sessionModelChoicesForSlashCommand(session: SlashPaletteSession)
     session.agent === "Claude" ||
     session.agent === "Codex" ||
     session.agent === "Cursor" ||
-    session.agent === "Gemini"
+    session.agent === "Gemini" ||
+    session.agent === "OpenCode"
       ? session.modelOptions?.length
         ? session.modelOptions.map((option) => ({
             detail: sessionModelChoiceDetail(option),
@@ -485,7 +492,13 @@ export function sessionModelChoicesForSlashCommand(session: SlashPaletteSession)
         : STATIC_MODEL_OPTIONS[session.agent]
       : STATIC_MODEL_OPTIONS[session.agent];
 
-  return ensureCurrentSessionModelChoice(baseOptions, session.model);
+  const currentModel =
+    session.agent === "OpenCode" ? (session.opencodeModel ?? "auto") : session.model;
+  const options =
+    session.agent === "OpenCode" && !baseOptions.some((option) => option.value === "auto")
+      ? [{ detail: "Let OpenCode choose", label: "Auto", value: "auto" }, ...baseOptions]
+      : baseOptions;
+  return ensureCurrentSessionModelChoice(options, currentModel);
 }
 
 export function manualSessionModelSlashItem(
@@ -493,6 +506,9 @@ export function manualSessionModelSlashItem(
   session: SlashPaletteSession,
   rawQuery: string,
 ): SlashPaletteItem | null {
+  if (session.agent === "OpenCode") {
+    return null;
+  }
   const trimmedQuery = rawQuery.trim();
   if (!trimmedQuery) {
     return null;
@@ -598,6 +614,25 @@ export function sessionModeSlashState(session: SlashPaletteSession, query: strin
         title: "Gemini modes",
       };
     }
+    case "OpenCode": {
+      const currentMode = session.opencodeMode ?? "auto";
+      const definitions: SlashChoiceDefinition[] = [
+        { detail: "Let OpenCode choose", label: "Auto", value: "auto" },
+        ...(session.opencodeModeOptions ?? [])
+          .filter((option) => option.value !== "auto")
+          .map((option) => ({
+            detail: option.description ?? option.label,
+            label: option.label,
+            value: option.value,
+          })),
+      ];
+      return {
+        emptyMessage: `No OpenCode modes match "${query}".`,
+        hint: "Enter to select an OpenCode session mode.",
+        items: makeSlashChoices(definitions, "opencodeMode", currentMode, query),
+        title: "OpenCode modes",
+      };
+    }
     case "Codex":
       return null;
   }
@@ -660,6 +695,8 @@ export function sessionModelSlashState(
   const supportsLiveRefresh = supportsLiveSessionModelOptions(session);
   const hasLiveModelList = (session.modelOptions?.length ?? 0) > 0;
   const sessionModelChoices = sessionModelChoicesForSlashCommand(session);
+  const selectedModel =
+    session.agent === "OpenCode" ? (session.opencodeModel ?? "auto") : session.model;
   const items = sessionModelChoices
     .filter((option) =>
       query.length === 0
@@ -671,7 +708,7 @@ export function sessionModelSlashState(
     .map<SlashPaletteItem>((option) => ({
       detail: option.detail,
       field: "model",
-      isCurrent: option.value === session.model,
+      isCurrent: option.value === selectedModel,
       key: `model:${option.value}`,
       kind: "choice",
       label: option.label,
@@ -682,13 +719,18 @@ export function sessionModelSlashState(
     items.unshift(manualItem);
   }
 
-  let hint = "Enter to apply a model. Type a full model id to apply it manually. Esc clears the command line.";
+  let hint =
+    session.agent === "OpenCode"
+      ? "Enter to select one of OpenCode's live model options. Esc clears the command line."
+      : "Enter to apply a model. Type a full model id to apply it manually. Esc clears the command line.";
   if (supportsLiveRefresh && !hasLiveModelList) {
     hint = isRefreshingModelOptions
       ? `Loading ${session.agent}'s live model list for this session.`
       : modelOptionsError
         ? `Could not load ${session.agent}'s live model list. Retry to fetch the full list.`
-        : `Fetching ${session.agent}'s live model list for this session. You can still type a full model id manually.`;
+        : session.agent === "OpenCode"
+          ? "Fetching OpenCode's live model list for this session."
+          : `Fetching ${session.agent}'s live model list for this session. You can still type a full model id manually.`;
   }
 
   return {

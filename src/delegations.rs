@@ -311,6 +311,9 @@ fn running_read_only_delegation_index_entry(
         .then_some(index)
 }
 
+const OPENCODE_READ_ONLY_DELEGATION_ERROR: &str =
+    "OpenCode delegations do not support writePolicy `readOnly`; use `isolatedWorktree` for bounded writable work";
+
 fn find_parent_delegation_index_locked(
     inner: &StateInner,
     parent_session_id: &str,
@@ -455,6 +458,27 @@ impl AppState {
         }
 
         let agent = request.agent.unwrap_or(parent_agent);
+        if agent == Agent::OpenCode
+            && requested_write_policy == DelegationWritePolicy::ReadOnly
+        {
+            return Err(ApiError::bad_request(
+                OPENCODE_READ_ONLY_DELEGATION_ERROR,
+            ));
+        }
+        // OpenCode model ingress: the generic delegation length check above
+        // runs before `agent` is known, so it cannot apply the agent-specific
+        // contract. Normalize here — the only point where both the requested
+        // model and the resolved agent are in scope — so a delegation child
+        // can never be created or persisted with a model string that
+        // `create_session`, app defaults, and session settings would all
+        // reject. Inherited parent models flow through the same gate.
+        let model = match model {
+            Some(model) if agent.supports_opencode_settings() => Some(
+                normalize_opencode_model(&model)
+                    .map_err(|err| ApiError::bad_request(err.to_string()))?,
+            ),
+            model => model,
+        };
         let has_test_runtime_override = {
             #[cfg(test)]
             {

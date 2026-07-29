@@ -36,6 +36,7 @@ export const NEW_SESSION_MODEL_OPTIONS: Readonly<Record<AgentType, readonly Comb
   Codex: [{ label: "GPT-5.4", value: "gpt-5.4" }],
   Cursor: [{ label: "Auto", value: "auto" }],
   Gemini: [{ label: "Auto", value: "auto" }],
+  OpenCode: [{ label: "Auto", value: "auto" }],
 };
 
 export const CODEX_REASONING_EFFORT_OPTIONS = [
@@ -62,7 +63,13 @@ export const CLAUDE_EFFORT_OPTIONS = [
   { label: "max", value: "max", description: "Use the highest available effort" },
 ] as const;
 
-export const SESSION_SCOPED_MODEL_AGENTS = new Set<AgentType>(["Claude", "Codex", "Cursor", "Gemini"]);
+export const SESSION_SCOPED_MODEL_AGENTS = new Set<AgentType>([
+  "Claude",
+  "Codex",
+  "Cursor",
+  "Gemini",
+  "OpenCode",
+]);
 
 export const ALL_CODEX_REASONING_EFFORTS = CODEX_REASONING_EFFORT_OPTIONS.map(
   (option) => option.value,
@@ -99,6 +106,8 @@ export function createSessionModelHint(agent: AgentType): string {
       return "Cursor model selection lives on the session itself, like Cursor Agent's /model flow. TermAl asks Cursor for its live model list after the session opens, and you can still enter a full model id manually. New Cursor sessions use the configured app default model; set it to default to leave Cursor on Auto.";
     case "Gemini":
       return "Gemini model selection lives on the session itself. TermAl asks Gemini for its live model list after the session opens, and you can still enter a full Gemini model id manually. New Gemini sessions use the configured app default model; set it to default to leave Gemini on Auto.";
+    case "OpenCode":
+      return "OpenCode model selection lives on the session itself. Auto leaves OpenCode authoritative; an explicit TermAl selection is re-applied after new, resume, and load before a prompt runs.";
   }
 }
 
@@ -165,6 +174,7 @@ export function resolveAppPreferences(preferences?: AppPreferences | null) {
     defaultClaudeModel: preferences?.defaultClaudeModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultCursorModel: preferences?.defaultCursorModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultGeminiModel: preferences?.defaultGeminiModel ?? DEFAULT_MODEL_PREFERENCE,
+    defaultOpenCodeModel: preferences?.defaultOpenCodeModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultCodexReasoningEffort:
       preferences?.defaultCodexReasoningEffort ?? DEFAULT_CODEX_REASONING_EFFORT,
     defaultClaudeApprovalMode:
@@ -454,6 +464,8 @@ export function manualSessionModelPlaceholder(agent: AgentType): string {
       return "gpt-5.3-codex";
     case "Gemini":
       return "gemini-2.5-pro";
+    case "OpenCode":
+      return "openai/gpt-5.6-sol";
   }
 }
 

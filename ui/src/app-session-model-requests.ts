@@ -14,6 +14,7 @@ export type AppSessionDefaultModels = {
   Codex: string;
   Cursor: string;
   Gemini: string;
+  OpenCode?: string;
 };
 
 export function configuredDefaultModelForAgent(
@@ -29,6 +30,8 @@ export function configuredDefaultModelForAgent(
       return defaultModels.Cursor;
     case "Gemini":
       return defaultModels.Gemini;
+    case "OpenCode":
+      return defaultModels.OpenCode ?? "default";
     default:
       return assertNever(agent, "Unhandled default model agent");
   }

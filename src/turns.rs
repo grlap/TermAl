@@ -48,6 +48,14 @@ fn run_turn_blocking(config: TurnConfig, recorder: &mut dyn TurnRecorder) -> Res
             &config.prompt,
             recorder,
         ),
+        Agent::OpenCode => run_acp_turn(
+            AcpAgent::OpenCode,
+            &config.cwd,
+            config.external_session_id.as_deref(),
+            &config.model,
+            &config.prompt,
+            recorder,
+        ),
     }
 }
 
@@ -355,6 +363,11 @@ struct AppPreferences {
     default_cursor_model: String,
     #[serde(default = "default_model_preference")]
     default_gemini_model: String,
+    #[serde(
+        default = "default_model_preference",
+        rename = "defaultOpenCodeModel"
+    )]
+    default_opencode_model: String,
     #[serde(default = "default_codex_reasoning_effort")]
     default_codex_reasoning_effort: CodexReasoningEffort,
     #[serde(default = "default_claude_approval_mode")]
@@ -377,6 +390,7 @@ impl Default for AppPreferences {
             default_claude_model: default_model_preference(),
             default_cursor_model: default_model_preference(),
             default_gemini_model: default_model_preference(),
+            default_opencode_model: default_model_preference(),
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             default_claude_approval_mode: default_claude_approval_mode(),
             default_claude_effort: default_claude_effort(),
@@ -395,6 +409,7 @@ impl AppPreferences {
             Agent::Claude => &self.default_claude_model,
             Agent::Cursor => &self.default_cursor_model,
             Agent::Gemini => &self.default_gemini_model,
+            Agent::OpenCode => &self.default_opencode_model,
         };
         let trimmed = preference.trim();
         if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
@@ -406,6 +421,9 @@ impl AppPreferences {
             return agent.default_model().to_owned();
         }
         if agent == Agent::Claude && validate_claude_default_model_preference(trimmed).is_err() {
+            return agent.default_model().to_owned();
+        }
+        if agent == Agent::OpenCode && normalize_opencode_model(trimmed).is_err() {
             return agent.default_model().to_owned();
         }
 

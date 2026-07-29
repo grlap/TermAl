@@ -19,6 +19,110 @@
 // replaced.
 
 impl AppState {
+    /// Builds the persisted OpenCode selection used when a live runtime
+    /// reports changed config options. The ACP reader cannot write protocol
+    /// requests itself, so it snapshots the user's selections here and queues
+    /// reconciliation back to the writer thread.
+    fn opencode_config_command(&self, session_id: &str) -> Result<AcpPromptCommand> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        if !record.session.agent.supports_opencode_settings() {
+            return Err(anyhow!(
+                "session `{session_id}` is not an OpenCode session"
+            ));
+        }
+        Ok(AcpPromptCommand {
+            cwd: record.session.workdir.clone(),
+            cursor_mode: None,
+            model: record
+                .session
+                .opencode_model
+                .clone()
+                .unwrap_or_else(|| OPENCODE_CONFIG_AUTO.to_owned()),
+            opencode_mode: record.session.opencode_mode.clone(),
+            prompt: String::new(),
+            resume_session_id: record.external_session_id.clone(),
+        })
+    }
+
+    /// Reads the latest OpenCode authority and option state immediately before
+    /// the serialized ACP writer applies a user setting. Reader notifications
+    /// and user requests share that writer, so this snapshot cannot be stale
+    /// relative to an earlier queued config reconciliation.
+    fn opencode_config_snapshot(&self, session_id: &str) -> Result<OpenCodeConfigSnapshot> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        if !record.session.agent.supports_opencode_settings() {
+            return Err(anyhow!(
+                "session `{session_id}` is not an OpenCode session"
+            ));
+        }
+        Ok(OpenCodeConfigSnapshot {
+            model_selection: record
+                .session
+                .opencode_model
+                .clone()
+                .unwrap_or_else(|| OPENCODE_CONFIG_AUTO.to_owned()),
+            effective_model: record.session.model.clone(),
+            model_options: record.session.model_options.clone(),
+            mode_selection: record
+                .session
+                .opencode_mode
+                .clone()
+                .unwrap_or_else(|| OPENCODE_CONFIG_AUTO.to_owned()),
+            current_mode: record.session.opencode_current_mode.clone(),
+            mode_options: record.session.opencode_mode_options.clone(),
+        })
+    }
+
+    /// Commits one agent-acknowledged OpenCode authority change. Explicit
+    /// choices become both selected and effective; `auto` changes only the
+    /// selected authority and preserves the agent-reported effective value.
+    fn sync_session_opencode_selection(
+        &self,
+        session_id: &str,
+        option_id: &str,
+        selection: String,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        if !record.session.agent.supports_opencode_settings() {
+            return Err(anyhow!(
+                "session `{session_id}` is not an OpenCode session"
+            ));
+        }
+
+        match option_id {
+            "model" => {
+                record.session.opencode_model = Some(selection.clone());
+                if selection != OPENCODE_CONFIG_AUTO {
+                    record.session.model = selection;
+                }
+            }
+            "mode" => {
+                record.session.opencode_mode = Some(selection.clone());
+                if selection != OPENCODE_CONFIG_AUTO {
+                    record.session.opencode_current_mode = Some(selection);
+                }
+            }
+            _ => bail!("unsupported OpenCode config option `{option_id}`"),
+        }
+        self.commit_locked(&mut inner).map(|_| ())
+    }
+
     /// Records the set of models a live Claude/ACP runtime knows about
     /// plus which one it's actively using, so the UI's model-picker
     /// dropdown matches what the runtime will actually accept. Noop
@@ -67,6 +171,87 @@ impl AppState {
 
         if changed {
             self.commit_locked(&mut inner)?;
+        }
+        Ok(())
+    }
+
+    /// Reconciles OpenCode's dynamic model/mode config after new, resume,
+    /// load, or a config-options update. The selected values preserve the
+    /// TermAl authority boundary (`auto` delegates to the agent; an explicit
+    /// live value is TermAl-authoritative), while the effective fields mirror
+    /// what OpenCode is actually running.
+    fn sync_session_opencode_config(
+        &self,
+        session_id: &str,
+        model_update: Option<(String, Option<String>, Vec<SessionModelOption>)>,
+        mode_update: Option<(String, Option<String>, Vec<SessionModelOption>)>,
+        notices: Vec<String>,
+    ) -> Result<()> {
+        let model_update = model_update
+            .map(|(selection, current, options)| {
+                Ok::<_, anyhow::Error>((
+                    normalize_opencode_model(&selection)?,
+                    current
+                        .as_deref()
+                        .map(normalize_opencode_model)
+                        .transpose()?,
+                    options,
+                ))
+            })
+            .transpose()?;
+        let mode_update = mode_update
+            .map(|(selection, current, options)| {
+                Ok::<_, anyhow::Error>((
+                    normalize_opencode_mode(&selection)?,
+                    current
+                        .as_deref()
+                        .map(normalize_opencode_mode)
+                        .transpose()?,
+                    options,
+                ))
+            })
+            .transpose()?;
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        if !record.session.agent.supports_opencode_settings() {
+            return Err(anyhow!(
+                "session `{session_id}` is not an OpenCode session"
+            ));
+        }
+
+        if let Some((model_selection, effective_model, model_options)) = model_update {
+            record.session.opencode_model = Some(model_selection);
+            if let Some(effective_model) = effective_model {
+                record.session.model = effective_model;
+            }
+            record.session.model_options = model_options;
+        }
+        if let Some((mode_selection, current_mode, mode_options)) = mode_update {
+            record.session.opencode_mode = Some(mode_selection);
+            record.session.opencode_current_mode = current_mode;
+            record.session.opencode_mode_options = mode_options;
+        }
+        self.commit_locked(&mut inner)?;
+        drop(inner);
+
+        for notice in notices {
+            self.push_message(
+                session_id,
+                Message::Text {
+                    attachments: Vec::new(),
+                    id: self.allocate_message_id(),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: notice,
+                    expanded_text: None,
+                    source: None,
+                },
+            )?;
         }
         Ok(())
     }

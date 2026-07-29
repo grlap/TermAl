@@ -14,6 +14,7 @@ import {
   CursorPreferencesPanel,
   GeminiPreferencesPanel,
   INTERNAL_CLAUDE_APPROVAL_MODES,
+  OpenCodePreferencesPanel,
   RemotePreferencesPanel,
 } from "./preferences-panels";
 import type { RemoteConfig } from "./types";
@@ -125,6 +126,27 @@ function renderGeminiPanel({
   return {
     onSelectModel,
     ...render(<GeminiPreferencesPanel {...props} />),
+  };
+}
+
+function renderOpenCodePanel({
+  defaultModel = "default",
+  onSelectModel = vi.fn(),
+  sessions = [],
+}: {
+  defaultModel?: string;
+  onSelectModel?: (model: string) => void;
+  sessions?: ComponentProps<typeof OpenCodePreferencesPanel>["sessions"];
+} = {}) {
+  return {
+    onSelectModel,
+    ...render(
+      <OpenCodePreferencesPanel
+        defaultOpenCodeModel={defaultModel}
+        onSelectModel={onSelectModel}
+        sessions={sessions}
+      />,
+    ),
   };
 }
 
@@ -363,7 +385,7 @@ describe("AgentDefaultModelControl", () => {
     expect(onSelectModel).toHaveBeenCalledWith("claude-sonnet-4-5");
   });
 
-  it("selects Cursor and Gemini defaults from live session options", async () => {
+  it("selects Cursor, Gemini, and OpenCode defaults from live session options", async () => {
     const onSelectCursorModel = vi.fn();
     renderCursorPanel({
       onSelectModel: onSelectCursorModel,
@@ -423,6 +445,38 @@ describe("AgentDefaultModelControl", () => {
     fireEvent.click(await screen.findByRole("option", { name: /Gemini Pro/u }));
 
     expect(onSelectGeminiModel).toHaveBeenCalledWith("gemini-pro");
+
+    const onSelectOpenCodeModel = vi.fn();
+    renderOpenCodePanel({
+      onSelectModel: onSelectOpenCodeModel,
+      sessions: [
+        {
+          id: "opencode-1",
+          name: "OpenCode",
+          emoji: "",
+          agent: "OpenCode",
+          workdir: "/tmp",
+          model: "opencode/big-pickle",
+          opencodeModel: "auto",
+          opencodeMode: "auto",
+          modelOptions: [
+            {
+              label: "GPT-5.6 Sol",
+              value: "openai/gpt-5.6-sol",
+              description: "OpenCode provider model",
+            },
+          ],
+          status: "idle",
+          preview: "",
+          messages: [],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("combobox", { name: "OpenCode default model" }));
+    fireEvent.click(await screen.findByRole("option", { name: /GPT-5\.6 Sol/u }));
+
+    expect(onSelectOpenCodeModel).toHaveBeenCalledWith("openai/gpt-5.6-sol");
   });
 
   it("keeps read-only auto-approve internal to delegation flows", () => {

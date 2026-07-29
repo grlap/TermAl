@@ -352,64 +352,70 @@ impl AppState {
             (runtime, stop_failure_is_best_effort)
         };
 
-        let mut clear_external_session_id = false;
-        if let Err(err) =
-            shutdown_removed_runtime(runtime_to_stop, &format!("session `{session_id}`"))
-        {
-            if stop_failure_is_best_effort {
-                eprintln!(
-                    "session cleanup warning> failed to stop session `{session_id}` cleanly: {err:#}"
-                );
-                clear_external_session_id = true;
-            } else {
-                let (mut deferred_callbacks, token) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    let index = inner
-                        .find_visible_session_index(session_id)
-                        .ok_or_else(|| ApiError::not_found("session not found"))?;
-                    let record = inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid");
-                    record.runtime_stop_in_progress = false;
-                    let deferred_callbacks = std::mem::take(&mut record.deferred_stop_callbacks);
-                    let token = record.runtime.runtime_token();
-                    (deferred_callbacks, token)
-                };
+        let clear_external_session_id =
+            match shutdown_stopped_runtime(runtime_to_stop, &format!("session `{session_id}`")) {
+                Ok(()) => false,
+            Err(err) => {
+                if stop_failure_is_best_effort {
+                    eprintln!(
+                        "session cleanup warning> failed to stop session `{session_id}` cleanly: {err:#}"
+                    );
+                    true
+                } else {
+                    let (mut deferred_callbacks, token) = {
+                        let mut inner = self.inner.lock().expect("state mutex poisoned");
+                        let index = inner
+                            .find_visible_session_index(session_id)
+                            .ok_or_else(|| ApiError::not_found("session not found"))?;
+                        let record = inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid");
+                        record.runtime_stop_in_progress = false;
+                        let deferred_callbacks =
+                            std::mem::take(&mut record.deferred_stop_callbacks);
+                        let token = record.runtime.runtime_token();
+                        (deferred_callbacks, token)
+                    };
 
-                // Replay any terminal callbacks that arrived during the failed shutdown window.
-                // The flag is now cleared so the callback methods will proceed normally.
-                if let Some(token) = token {
-                    deferred_callbacks.sort_by_key(|deferred| {
-                        matches!(deferred, DeferredStopCallback::RuntimeExited(_))
-                    });
-                    for deferred in deferred_callbacks {
-                        let replay_result = match deferred {
-                            DeferredStopCallback::TurnFailed(msg) => {
-                                self.fail_turn_if_runtime_matches(session_id, &token, &msg)
+                    // Replay any terminal callbacks that arrived during the failed shutdown window.
+                    // The flag is now cleared so the callback methods will proceed normally.
+                    if let Some(token) = token {
+                        deferred_callbacks.sort_by_key(|deferred| {
+                            matches!(deferred, DeferredStopCallback::RuntimeExited(_))
+                        });
+                        for deferred in deferred_callbacks {
+                            let replay_result = match deferred {
+                                DeferredStopCallback::TurnFailed(msg) => {
+                                    self.fail_turn_if_runtime_matches(session_id, &token, &msg)
+                                }
+                                DeferredStopCallback::TurnError(msg) => {
+                                    self.mark_turn_error_if_runtime_matches(session_id, &token, &msg)
+                                }
+                                DeferredStopCallback::TurnCompleted => {
+                                    self.finish_turn_ok_if_runtime_matches(session_id, &token)
+                                }
+                                DeferredStopCallback::RuntimeExited(msg) => self
+                                    .handle_runtime_exit_if_matches(
+                                        session_id,
+                                        &token,
+                                        msg.as_deref(),
+                                    ),
+                            };
+                            if let Err(replay_err) = replay_result {
+                                eprintln!(
+                                    "session cleanup warning> failed to replay deferred stop callback \
+                                     for session `{session_id}`: {replay_err:#}"
+                                );
                             }
-                            DeferredStopCallback::TurnError(msg) => {
-                                self.mark_turn_error_if_runtime_matches(session_id, &token, &msg)
-                            }
-                            DeferredStopCallback::TurnCompleted => {
-                                self.finish_turn_ok_if_runtime_matches(session_id, &token)
-                            }
-                            DeferredStopCallback::RuntimeExited(msg) => self
-                                .handle_runtime_exit_if_matches(session_id, &token, msg.as_deref()),
-                        };
-                        if let Err(replay_err) = replay_result {
-                            eprintln!(
-                                "session cleanup warning> failed to replay deferred stop callback \
-                                 for session `{session_id}`: {replay_err:#}"
-                            );
                         }
                     }
-                }
 
-                return Err(ApiError::internal(format!(
-                    "failed to stop session `{session_id}` cleanly: {err:#}"
-                )));
+                    return Err(ApiError::internal(format!(
+                        "failed to stop session `{session_id}` cleanly: {err:#}"
+                    )));
+                }
             }
-        }
+        };
         let orchestrator_stop_instance_id = options.orchestrator_stop_instance_id.clone();
         let (should_dispatch_next, pending_interaction_updates, created_messages, revision) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");

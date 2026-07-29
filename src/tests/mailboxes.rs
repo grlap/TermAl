@@ -80,6 +80,63 @@ fn mailbox_backend_rejects_exact_delegation_child_target_before_append() {
     );
 }
 
+#[tokio::test]
+async fn mailbox_read_routes_reject_delegation_children_as_non_peers() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let receipt = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("root peers should establish a mailbox");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        inner.sessions[target_index].session.parent_delegation_id =
+            Some("delegation-child-boundary".to_owned());
+    }
+
+    let list_err = list_mailboxes(AxumPath(target_id.clone()), State(state.clone()))
+        .await
+        .expect_err("delegation children must not list root-peer mailboxes");
+    assert_eq!(list_err.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        list_err.message,
+        "mailbox participant must be a local root session"
+    );
+
+    let read_err = read_mailbox(
+        AxumPath((target_id.clone(), receipt.mailbox_id.clone())),
+        State(state.clone()),
+        Json(ReadMailboxRequest {
+            after_sequence: 0,
+            limit: 20,
+        }),
+    )
+    .await
+    .expect_err("delegation children must not read root-peer mailboxes");
+    assert_eq!(read_err.status, StatusCode::BAD_REQUEST);
+
+    let exact_err = read_mailbox_message(
+        AxumPath((target_id.clone(), receipt.message_id.clone())),
+        State(state.clone()),
+    )
+    .await
+    .expect_err("delegation children must not read exact root-peer messages");
+    assert_eq!(exact_err.status, StatusCode::BAD_REQUEST);
+
+    let acknowledge_err = acknowledge_mailbox(
+        AxumPath((target_id, receipt.mailbox_id)),
+        State(state),
+        Json(AcknowledgeMailboxRequest {
+            expected_processed_through: 0,
+            processed_through: receipt.sequence,
+        }),
+    )
+    .await
+    .expect_err("delegation children must not acknowledge root-peer mailboxes");
+    assert_eq!(acknowledge_err.status, StatusCode::BAD_REQUEST);
+}
+
 #[test]
 fn mailbox_send_commits_body_before_metadata_only_wake_and_retry_does_not_rewake() {
     let (state, sender_id, target_id) = mailbox_test_state();
@@ -184,6 +241,156 @@ fn mailbox_send_commits_body_before_metadata_only_wake_and_retry_does_not_rewake
         target.queued_prompts.len(),
         1,
         "duplicate retry must not wake the receiver twice"
+    );
+}
+
+#[tokio::test]
+async fn normal_mailbox_interactions_reactivate_stale_live_participants() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let first = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("initial mailbox send should succeed");
+
+    state
+        .mailbox_store
+        .mark_session_left(&sender_id)
+        .expect("test should reproduce stale sender eviction");
+    let mut second_request = mailbox_send_request(&target_id);
+    second_request.idempotency_key = "sol-send-after-stale-left".to_owned();
+    second_request.message = "A live sender must self-heal before this append.".to_owned();
+    let second = state
+        .append_mailbox_message_and_notify(&sender_id, second_request)
+        .expect("ordinary send should reactivate a stale live sender");
+    assert_eq!(second.sequence, first.sequence + 1);
+
+    state
+        .mailbox_store
+        .mark_session_left(&target_id)
+        .expect("test should reproduce stale target eviction before list");
+    let Json(summaries) = list_mailboxes(AxumPath(target_id.clone()), State(state.clone()))
+        .await
+        .expect("ordinary list should reactivate a stale live target");
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].id, first.mailbox_id);
+
+    state
+        .mailbox_store
+        .mark_session_left(&target_id)
+        .expect("test should reproduce stale target eviction before read");
+    let Json(messages) = read_mailbox(
+        AxumPath((target_id.clone(), first.mailbox_id.clone())),
+        State(state.clone()),
+        Json(ReadMailboxRequest {
+            after_sequence: 0,
+            limit: 20,
+        }),
+    )
+    .await
+    .expect("ordinary read should reactivate a stale live target");
+    assert_eq!(messages.len(), 2);
+
+    state
+        .mailbox_store
+        .mark_session_left(&target_id)
+        .expect("test should reproduce stale target eviction before acknowledge");
+    let Json(summary) = acknowledge_mailbox(
+        AxumPath((target_id.clone(), first.mailbox_id.clone())),
+        State(state.clone()),
+        Json(AcknowledgeMailboxRequest {
+            expected_processed_through: 0,
+            processed_through: second.sequence,
+        }),
+    )
+    .await
+    .expect("ordinary acknowledgement should reactivate a stale live target");
+    assert_eq!(
+        summary
+            .participants
+            .iter()
+            .find(|participant| participant.session_id == target_id)
+            .expect("target participant should remain present")
+            .processed_through,
+        second.sequence
+    );
+}
+
+#[test]
+fn transient_send_eligibility_failure_never_evicts_a_participant() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let first = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("initial mailbox send should succeed");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        inner.sessions[target_index].hidden = true;
+    }
+
+    let mut transient_request = mailbox_send_request(&target_id);
+    transient_request.idempotency_key = "sol-transient-classification".to_owned();
+    let err = state
+        .append_mailbox_message_and_notify(&sender_id, transient_request)
+        .expect_err("temporarily ineligible target should reject before append");
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+
+    let sender_summary = state
+        .mailbox_store
+        .list_for_session(&sender_id)
+        .expect("sender mailbox should remain readable")
+        .into_iter()
+        .find(|summary| summary.id == first.mailbox_id)
+        .expect("sender should retain mailbox history");
+    assert!(
+        sender_summary
+            .participants
+            .iter()
+            .find(|participant| participant.session_id == target_id)
+            .expect("target participant should remain present")
+            .left_at
+            .is_none(),
+        "a transient send-time classification failure must not mutate left_at"
+    );
+}
+
+#[test]
+fn deliberate_session_deletion_remains_the_mailbox_eviction_authority() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let first = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("initial mailbox send should succeed");
+    state
+        .kill_session(&target_id)
+        .expect("deliberate session deletion should succeed");
+
+    let err = state
+        .ensure_mailbox_session_active(&target_id)
+        .expect_err("deleted session must not self-heal");
+    assert_eq!(err.status, StatusCode::NOT_FOUND);
+    assert!(
+        state
+            .mailbox_store
+            .list_for_session(&target_id)
+            .expect("deleted participant list should read")
+            .is_empty()
+    );
+    let sender_summary = state
+        .mailbox_store
+        .list_for_session(&sender_id)
+        .expect("sender mailbox should remain readable")
+        .into_iter()
+        .find(|summary| summary.id == first.mailbox_id)
+        .expect("sender should retain deleted peer history");
+    assert!(
+        sender_summary
+            .participants
+            .iter()
+            .find(|participant| participant.session_id == target_id)
+            .expect("deleted target snapshot should remain")
+            .left_at
+            .is_some(),
+        "deliberate deletion must retain its durable eviction marker"
     );
 }
 

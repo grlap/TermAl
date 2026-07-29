@@ -364,7 +364,7 @@ impl AppState {
                     session_id: record.session.id.clone(),
                 }
             }
-            agent @ (Agent::Cursor | Agent::Gemini) => {
+            agent @ (Agent::Cursor | Agent::Gemini | Agent::OpenCode) => {
                 if !attachments.is_empty() {
                     return Err(ApiError::bad_request(format!(
                         "{} sessions do not support image attachments yet",
@@ -383,6 +383,7 @@ impl AppState {
                     }
                     record.runtime = SessionRuntime::None;
                     record.pending_acp_approvals.clear();
+                    record.pending_acp_approval_order.clear();
                     record.runtime_reset_required = false;
                 }
 
@@ -431,13 +432,19 @@ impl AppState {
                     command: AcpPromptCommand {
                         cwd: record.session.workdir.clone(),
                         cursor_mode: record.session.cursor_mode,
-                        model: record.session.model.clone(),
+                        model: record
+                            .session
+                            .opencode_model
+                            .clone()
+                            .unwrap_or_else(|| record.session.model.clone()),
+                        opencode_mode: record.session.opencode_mode.clone(),
                         prompt: runtime_prompt.to_owned(),
                         resume_session_id: record.external_session_id.clone(),
                     },
                     mailbox_notification,
                     sender: handle.input_tx,
                     session_id: record.session.id.clone(),
+                    turn_lifecycle: handle.turn_lifecycle,
                 }
             }
         };

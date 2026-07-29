@@ -241,6 +241,7 @@ export function makeStateResponse(overrides: AppTestStateResponseOverrides): App
       defaultClaudeModel: "default",
       defaultCursorModel: "default",
       defaultGeminiModel: "default",
+      defaultOpenCodeModel: "default",
       defaultCodexReasoningEffort: "medium",
       defaultClaudeApprovalMode: "ask",
       defaultClaudeEffort: "default",

@@ -29,7 +29,7 @@
 // `refresh_session_model_options` takes three distinct handshake paths:
 // Codex paginated `model/list` JSON-RPC (see
 // `src/codex_rpc.rs::fire_codex_model_list_page`); ACP agents
-// (Claude-ACP, Cursor, Gemini) re-trigger the session setup that emits
+// (Cursor, Gemini, OpenCode) re-trigger the session setup that emits
 // model options on first session creation via
 // `AcpRuntimeCommand::RefreshSessionConfig`; Claude CLI re-spawns and
 // parses the initialize NDJSON response through `claude_model_options`
@@ -81,12 +81,34 @@ impl AppState {
         let mut claude_model_update: Option<(ClaudeRuntimeHandle, String)> = None;
         let mut claude_permission_mode_update: Option<(ClaudeRuntimeHandle, String)> = None;
         let mut acp_config_updates: Vec<(AcpRuntimeHandle, Value)> = Vec::new();
+        let mut opencode_config_update: Option<(
+            AcpRuntimeHandle,
+            Option<String>,
+            Option<String>,
+        )> = None;
 
         match record.session.agent {
-            agent if agent.supports_codex_prompt_settings() => {
-                if request.claude_approval_mode.is_some() || request.claude_effort.is_some() {
+            agent if agent.supports_opencode_settings() => {
+                if request.sandbox_mode.is_some()
+                    || request.approval_policy.is_some()
+                    || request.reasoning_effort.is_some()
+                    || request.claude_approval_mode.is_some()
+                    || request.claude_effort.is_some()
+                    || request.cursor_mode.is_some()
+                    || request.gemini_approval_mode.is_some()
+                {
                     return Err(ApiError::bad_request(
-                        "Claude mode and effort can only be changed for Claude sessions",
+                        "OpenCode sessions only support model and mode settings",
+                    ));
+                }
+            }
+            agent if agent.supports_codex_prompt_settings() => {
+                if request.claude_approval_mode.is_some()
+                    || request.claude_effort.is_some()
+                    || request.opencode_mode.is_some()
+                {
+                    return Err(ApiError::bad_request(
+                        "Claude/OpenCode settings can only be changed for their matching sessions",
                     ));
                 }
                 if request.cursor_mode.is_some() || request.gemini_approval_mode.is_some() {
@@ -101,6 +123,7 @@ impl AppState {
                     || request.reasoning_effort.is_some()
                     || request.cursor_mode.is_some()
                     || request.gemini_approval_mode.is_some()
+                    || request.opencode_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
                         "Claude sessions only support model, mode, and effort settings",
@@ -114,6 +137,7 @@ impl AppState {
                     || request.claude_approval_mode.is_some()
                     || request.claude_effort.is_some()
                     || request.gemini_approval_mode.is_some()
+                    || request.opencode_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
                         "Cursor sessions only support model and mode settings",
@@ -127,6 +151,7 @@ impl AppState {
                     || request.claude_approval_mode.is_some()
                     || request.claude_effort.is_some()
                     || request.cursor_mode.is_some()
+                    || request.opencode_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
                         "Gemini sessions only support model and approval mode settings",
@@ -142,6 +167,7 @@ impl AppState {
                     || request.claude_effort.is_some()
                     || request.cursor_mode.is_some()
                     || request.gemini_approval_mode.is_some()
+                    || request.opencode_mode.is_some()
                 {
                     return Err(ApiError::bad_request(format!(
                         "{} sessions do not support prompt settings yet",
@@ -174,8 +200,89 @@ impl AppState {
                 matching_session_model_option_value(value, &record.session.model_options)
                     .unwrap_or_else(|| value.to_owned())
             });
+        let requested_opencode_model = if record.session.agent.supports_opencode_settings() {
+            request
+                .model
+                .as_deref()
+                .map(normalize_opencode_model)
+                .transpose()
+                .map_err(|err| ApiError::bad_request(err.to_string()))?
+                .map(|value| {
+                    if value == OPENCODE_CONFIG_AUTO {
+                        return Ok(value);
+                    }
+                    if record.session.model_options.is_empty() {
+                        return Ok(value);
+                    }
+                    matching_session_model_option_value(&value, &record.session.model_options)
+                        .ok_or_else(|| {
+                            ApiError::bad_request(format!(
+                                "OpenCode no longer offers model `{value}`"
+                            ))
+                        })
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        let requested_opencode_mode = if record.session.agent.supports_opencode_settings() {
+            request
+                .opencode_mode
+                .as_deref()
+                .map(normalize_opencode_mode)
+                .transpose()
+                .map_err(|err| ApiError::bad_request(err.to_string()))?
+                .map(|value| {
+                    if value == OPENCODE_CONFIG_AUTO {
+                        return Ok(value);
+                    }
+                    if record.session.opencode_mode_options.is_empty() {
+                        return Ok(value);
+                    }
+                    matching_session_model_option_value(
+                        &value,
+                        &record.session.opencode_mode_options,
+                    )
+                    .ok_or_else(|| {
+                        ApiError::bad_request(format!(
+                            "OpenCode no longer offers mode `{value}`"
+                        ))
+                    })
+                })
+                .transpose()?
+        } else {
+            None
+        };
 
         match record.session.agent {
+            agent if agent.supports_opencode_settings() => {
+                let live_handle = match (&record.runtime, record.external_session_id.as_deref()) {
+                    (SessionRuntime::Acp(handle), Some(_)) => Some(handle.clone()),
+                    _ => None,
+                };
+                let changed_model = requested_opencode_model.filter(|model| {
+                    record.session.opencode_model.as_deref() != Some(model.as_str())
+                });
+                let changed_mode = requested_opencode_mode.filter(|mode| {
+                    record.session.opencode_mode.as_deref() != Some(mode.as_str())
+                });
+                if let Some(handle) = live_handle
+                    && (changed_model.is_some() || changed_mode.is_some())
+                {
+                    opencode_config_update =
+                        Some((handle, changed_model, changed_mode));
+                } else {
+                    if let Some(model) = changed_model {
+                        record.session.opencode_model = Some(model.clone());
+                        if model != OPENCODE_CONFIG_AUTO {
+                            record.session.model = model;
+                        }
+                    }
+                    if let Some(mode) = changed_mode {
+                        record.session.opencode_mode = Some(mode.clone());
+                    }
+                }
+            }
             agent if agent.supports_codex_prompt_settings() => {
                 let next_model = requested_model
                     .clone()
@@ -344,7 +451,67 @@ impl AppState {
                 .send(AcpRuntimeCommand::JsonRpcMessage(request));
         }
 
-        Ok(snapshot)
+        let Some((handle, model_selection, mode_selection)) = opencode_config_update else {
+            return Ok(snapshot);
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(40);
+        let (started_tx, started_rx) = mpsc::channel();
+        let (proceed_tx, proceed_rx) = mpsc::channel();
+        let (response_tx, response_rx) = mpsc::channel();
+        handle
+            .input_tx
+            .send(AcpRuntimeCommand::ApplyOpenCodeConfig {
+                model_selection,
+                mode_selection,
+                started_tx,
+                proceed_rx,
+                response_tx,
+            })
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to queue acknowledged OpenCode config update: {err}"
+                ))
+            })?;
+        let scheduling_budget = deadline
+            .saturating_duration_since(std::time::Instant::now())
+            .min(Duration::from_secs(5));
+        match started_rx.recv_timeout(scheduling_budget) {
+            Ok(()) => {
+                proceed_tx.send(()).map_err(|_| {
+                    ApiError::internal(
+                        "OpenCode runtime closed before the config update could proceed",
+                    )
+                })?;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                return Err(ApiError::conflict(
+                    "OpenCode runtime remained busy before the config update could start; retry the setting change",
+                ));
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(ApiError::internal(
+                    "OpenCode runtime closed before the config update could start",
+                ));
+            }
+        }
+
+        // One started update may require both a model and a mode
+        // acknowledgement. The writer gets the rest of the single 40-second
+        // request budget; its two ACP requests are independently capped at 15
+        // seconds, so a command admitted during the five-second scheduling
+        // window still has enough time to finish without landing after an API
+        // timeout.
+        let acknowledgement_budget =
+            deadline.saturating_duration_since(std::time::Instant::now());
+        match response_rx.recv_timeout(acknowledgement_budget) {
+            Ok(Ok(())) => Ok(self.snapshot()),
+            Ok(Err(detail)) => Err(ApiError::conflict(format!(
+                "OpenCode rejected the config update: {detail}"
+            ))),
+            Err(err) => Err(ApiError::internal(format!(
+                "timed out waiting for OpenCode config acknowledgement: {err}"
+            ))),
+        }
     }
 
     /// Asks the agent runtime for its current model list and syncs the
@@ -565,6 +732,17 @@ impl AppState {
             ))
         })?;
 
+        if agent == Agent::OpenCode
+            && matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval
+            )
+        {
+            return Err(ApiError::conflict(
+                "OpenCode model options cannot be refreshed during an active interaction",
+            ));
+        }
+
         if record.runtime_reset_required {
             if let SessionRuntime::Acp(handle) = &record.runtime {
                 handle.kill().map_err(|err| {
@@ -576,7 +754,40 @@ impl AppState {
             }
             record.runtime = SessionRuntime::None;
             record.pending_acp_approvals.clear();
+            record.pending_acp_approval_order.clear();
             record.runtime_reset_required = false;
+        }
+
+        // ACP has no standalone "get config options" request. For OpenCode,
+        // refresh therefore performs a controlled runtime restart and resumes
+        // the persisted external session on the new connection. That fresh
+        // handshake is the authoritative source of configOptions; queueing the
+        // setup command on an already-ready runtime would be a false-success
+        // no-op because `ensure_acp_session_ready` returns immediately.
+        if agent == Agent::OpenCode {
+            match &record.runtime {
+                SessionRuntime::Acp(handle) if handle.agent == expected_acp_agent => {
+                    handle.kill().map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to restart OpenCode session runtime for model refresh: {err:#}"
+                        ))
+                    })?;
+                    record.runtime = SessionRuntime::None;
+                    record.pending_acp_approvals.clear();
+                    record.pending_acp_approval_order.clear();
+                }
+                SessionRuntime::Acp(_) => {
+                    return Err(ApiError::internal(
+                        "unexpected ACP runtime attached to OpenCode session",
+                    ));
+                }
+                SessionRuntime::Claude(_) | SessionRuntime::Codex(_) => {
+                    return Err(ApiError::internal(
+                        "unexpected non-ACP runtime attached to OpenCode session",
+                    ));
+                }
+                SessionRuntime::None => {}
+            }
         }
 
         let handle = match &record.runtime {
@@ -597,8 +808,7 @@ impl AppState {
                 ));
             }
             SessionRuntime::None => {
-                let handle = spawn_acp_runtime(
-                    self.clone(),
+                let handle = self.start_acp_runtime_for_turn(
                     record.session.id.clone(),
                     record.session.workdir.clone(),
                     expected_acp_agent,
@@ -618,7 +828,12 @@ impl AppState {
         let command = AcpPromptCommand {
             cwd: record.session.workdir.clone(),
             cursor_mode: record.session.cursor_mode,
-            model: record.session.model.clone(),
+            model: record
+                .session
+                .opencode_model
+                .clone()
+                .unwrap_or_else(|| record.session.model.clone()),
+            opencode_mode: record.session.opencode_mode.clone(),
             prompt: String::new(),
             resume_session_id: record.external_session_id.clone(),
         };

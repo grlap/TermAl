@@ -327,6 +327,7 @@ function makeLiveStateParams(
       setDefaultClaudeModel: noopSetter,
       setDefaultCursorModel: noopSetter,
       setDefaultGeminiModel: noopSetter,
+      setDefaultOpenCodeModel: noopSetter,
       setDefaultCodexReasoningEffort: noopSetter,
       setDefaultClaudeApprovalMode: noopSetter,
       setDefaultClaudeEffort: noopSetter,

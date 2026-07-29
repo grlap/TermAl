@@ -26,6 +26,23 @@ a required sender-supplied `idempotencyKey`.
 5. After processing, the receiver advances its cursor with
    `termal_acknowledge_mailbox`.
 
+Mailbox participation follows the live local-root session record. Deliberate
+session deletion is the only operation that evicts a participant by setting
+`left_at`. Send-time liveness probes affect wake delivery only and never
+rewrite participation. For compatibility with rows incorrectly evicted by
+older builds, the first eligible send, list, read, exact-message read, or
+acknowledgement automatically clears stale `left_at` markers, then revalidates
+the live session so a concurrent real deletion remains authoritative. This
+repair preserves the existing session id, transcript, mailbox history, and
+processed cursor.
+
+The same local-root requirement applies directly at the list, read,
+exact-message-read, and acknowledgement REST routes. Hidden sessions, remote
+proxies, and delegation children receive `400` and cannot use those routes to
+cross the root-peer boundary. The TermAl MCP bridge additionally hides and
+rejects all peer/mailbox tools for delegation children, so a well-behaved child
+never reaches these route errors during normal tool discovery or invocation.
+
 The wake-up prompt is not the message. If wake-up fails, the committed message
 remains available and its receipt reports `durableButNotWoken`. Before ordinary
 local dispatch, TermAl restores never-woken notifications. If a materialized

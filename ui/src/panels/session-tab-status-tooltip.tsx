@@ -307,6 +307,20 @@ export function buildSessionTooltipRows(
     });
   }
 
+  if (session.agent === "OpenCode") {
+    const selectedMode = session.opencodeMode;
+    const effectiveMode = session.opencodeCurrentMode;
+    if (selectedMode || effectiveMode) {
+      rows.push({
+        key: "Mode",
+        value:
+          selectedMode === "auto" && effectiveMode
+            ? `Auto (${formatTooltipEnumLabel(effectiveMode)})`
+            : formatTooltipEnumLabel(selectedMode ?? effectiveMode ?? "auto"),
+      });
+    }
+  }
+
   return rows;
 }
 

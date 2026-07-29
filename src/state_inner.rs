@@ -121,6 +121,10 @@ impl StateInner {
         let session_id = format!("session-{number}");
         let session_name =
             name.unwrap_or_else(|| generated_session_name(agent, session_id.as_str()));
+        let session_model = model.unwrap_or_else(|| self.preferences.default_model_for_agent(agent));
+        let opencode_model = agent
+            .supports_opencode_settings()
+            .then(|| session_model.clone());
 
         let record = SessionRecord {
             active_codex_approval_policy: None,
@@ -140,6 +144,7 @@ impl StateInner {
             pending_codex_mcp_elicitations: HashMap::new(),
             pending_codex_app_requests: HashMap::new(),
             pending_acp_approvals: HashMap::new(),
+            pending_acp_approval_order: VecDeque::new(),
             queued_prompts: VecDeque::new(),
             queued_peer_messages: HashMap::new(),
             message_positions: HashMap::new(),
@@ -164,7 +169,7 @@ impl StateInner {
                 workdir,
                 project_id,
                 remote_id: None,
-                model: model.unwrap_or_else(|| self.preferences.default_model_for_agent(agent)),
+                model: session_model,
                 model_options: Vec::new(),
                 approval_policy: None,
                 reasoning_effort: None,
@@ -181,6 +186,12 @@ impl StateInner {
                 gemini_approval_mode: agent
                     .supports_gemini_approval_mode()
                     .then_some(default_gemini_approval_mode()),
+                opencode_model,
+                opencode_mode: agent
+                    .supports_opencode_settings()
+                    .then(|| OPENCODE_CONFIG_AUTO.to_owned()),
+                opencode_current_mode: None,
+                opencode_mode_options: Vec::new(),
                 external_session_id: None,
                 agent_commands_revision: 0,
                 codex_thread_state: None,

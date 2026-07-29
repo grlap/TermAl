@@ -595,6 +595,7 @@ export function updateAppSettings(payload: {
   defaultClaudeModel?: string;
   defaultCursorModel?: string;
   defaultGeminiModel?: string;
+  defaultOpenCodeModel?: string;
   defaultCodexReasoningEffort?: CodexReasoningEffort;
   defaultClaudeApprovalMode?: ClaudeApprovalMode;
   defaultClaudeEffort?: ClaudeEffortLevel;
@@ -1046,6 +1047,7 @@ export function updateSessionSettings(
     cursorMode?: CursorMode;
     claudeApprovalMode?: ClaudeApprovalMode;
     geminiApprovalMode?: GeminiApprovalMode;
+    opencodeMode?: string;
   },
 ) {
   return request<StateResponse>(

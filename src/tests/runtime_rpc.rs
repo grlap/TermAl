@@ -20,6 +20,40 @@
 
 use super::*;
 
+#[test]
+fn acp_dispatch_publishes_queued_turn_before_writer_consumption() {
+    let state = test_app_state();
+    let (input_tx, _input_rx) = mpsc::channel();
+    let turn_lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(false), Condvar::new()));
+
+    deliver_turn_dispatch(
+        &state,
+        TurnDispatch::PersistentAcp {
+            command: AcpPromptCommand {
+                cwd: "/tmp".to_owned(),
+                cursor_mode: None,
+                model: OPENCODE_CONFIG_AUTO.to_owned(),
+                opencode_mode: Some(OPENCODE_CONFIG_AUTO.to_owned()),
+                prompt: "queued before stop".to_owned(),
+                resume_session_id: None,
+            },
+            mailbox_notification: None,
+            sender: input_tx,
+            session_id: "queued-acp-session".to_owned(),
+            turn_lifecycle: turn_lifecycle.clone(),
+        },
+    )
+    .expect("live ACP writer channel should accept the prompt");
+
+    assert!(
+        *turn_lifecycle
+            .0
+            .lock()
+            .expect("ACP turn lifecycle mutex poisoned"),
+        "stop must observe a queued/starting prompt before the writer consumes it"
+    );
+}
+
 // pins the untimed ACP waiter: after the request id is written and parked in
 // the pending map, the caller blocks until a late response lands on the
 // stashed sender, then returns the raw result value and drains the entry.
@@ -236,14 +270,18 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("cursor-session-1".to_owned()),
         is_loading_history: false,
+        opencode_reconcile_fingerprints: VecDeque::new(),
         capabilities: Some(AcpCapabilities {
             supports_session_load: Some(true),
+            supports_session_resume: None,
         }),
     }));
+    let turn_lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(false), Condvar::new()));
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();
     let thread_pending_requests = pending_requests.clone();
     let thread_runtime_state = runtime_state.clone();
+    let thread_turn_lifecycle = turn_lifecycle.clone();
     let thread_state = state.clone();
     let thread_session_id = created.session_id.clone();
     let runtime_token = RuntimeToken::Acp("cursor-runtime-1".to_owned());
@@ -259,6 +297,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
                     &thread_state,
                     &thread_session_id,
                     &thread_runtime_state,
+                    &thread_turn_lifecycle,
                     &runtime_token,
                     AcpAgent::Cursor,
                     prompt,
@@ -267,8 +306,17 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
                 AcpRuntimeCommand::JsonRpcMessage(message) => {
                     write_acp_json_rpc_message(&mut stdin, &message, AcpAgent::Cursor).unwrap();
                 }
+                AcpRuntimeCommand::Cancel => {
+                    panic!("unexpected cancellation in prompt loop test");
+                }
                 AcpRuntimeCommand::RefreshSessionConfig { .. } => {
                     panic!("unexpected config refresh in prompt loop test");
+                }
+                AcpRuntimeCommand::ApplyOpenCodeConfig { .. } => {
+                    panic!("unexpected OpenCode config update in Cursor prompt loop test");
+                }
+                AcpRuntimeCommand::ReconcileOpenCodeConfig { .. } => {
+                    panic!("unexpected OpenCode reconciliation in Cursor prompt loop test");
                 }
             }
         }
@@ -279,6 +327,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
             cwd: "/tmp".to_owned(),
             cursor_mode: Some(CursorMode::Ask),
             model: "auto".to_owned(),
+            opencode_mode: None,
             prompt: "review-code".to_owned(),
             resume_session_id: Some("cursor-session-1".to_owned()),
         }))

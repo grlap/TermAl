@@ -60,6 +60,7 @@ async fn read_only_delegation_blocks_write_capable_surfaces() {
             claude_approval_mode: None,
             claude_effort: None,
             gemini_approval_mode: None,
+            opencode_mode: None,
         },
     ) {
         Ok(_) => panic!("read-only child settings update should be rejected"),
@@ -732,6 +733,7 @@ async fn read_only_delegation_blocks_project_and_workdir_writes_with_parent_sess
                     claude_approval_mode: None,
                     claude_effort: None,
                     gemini_approval_mode: None,
+                    opencode_mode: None,
                 },
             )
             .expect("parent/sibling settings should not inherit project-wide write blocking");
@@ -748,6 +750,7 @@ async fn read_only_delegation_blocks_project_and_workdir_writes_with_parent_sess
             claude_approval_mode: None,
             claude_effort: None,
             gemini_approval_mode: None,
+            opencode_mode: None,
         },
     ) {
         Ok(_) => panic!("read-only child settings should stay blocked"),

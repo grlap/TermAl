@@ -15,6 +15,7 @@ design decisions, and future plans.
 - [Agent Slash Commands](./agent-slash-commands.md)
 - [Cursor CLI Integration](./cursor-cli-integration.md)
 - [Gemini CLI Integration](./gemini-cli-integration.md)
+- [OpenCode ACP Integration](./opencode-acp-integration.md)
 - [Diff Review Workflow](./diff-review-workflow.md)
 - [File Change Awareness](./file-change-awareness.md)
 - [Markdown Document View](./markdown-document-view.md)

@@ -6,8 +6,8 @@
 //   - `AGENT_OPTIONS` — the read-only `{ label, value }` list for
 //     the agent combobox, typed as
 //     `ReadonlyArray<{ label: string; value: AgentType }>` and
-//     covering the four P0 agents (Claude / Codex / Cursor /
-//     Gemini).
+//     covering the five P0 agents (Claude / Codex / Cursor /
+//     Gemini / OpenCode).
 //   - `AGENT_OPTIONS_EXHAUSTIVE` — an
 //     `ExhaustiveValueCoverage<AgentType, typeof AGENT_OPTIONS>`
 //     witness that fails the build if a new `AgentType` lands
@@ -40,6 +40,7 @@ export const AGENT_OPTIONS = [
   { label: "Codex", value: "Codex" },
   { label: "Cursor", value: "Cursor" },
   { label: "Gemini", value: "Gemini" },
+  { label: "OpenCode", value: "OpenCode" },
 ] as const satisfies ReadonlyArray<{ label: string; value: AgentType }>;
 
 export const AGENT_OPTIONS_EXHAUSTIVE: ExhaustiveValueCoverage<

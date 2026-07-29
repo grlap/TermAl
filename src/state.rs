@@ -1107,6 +1107,11 @@ struct SessionRecord {
     pending_codex_mcp_elicitations: HashMap<String, CodexPendingMcpElicitation>,
     pending_codex_app_requests: HashMap<String, CodexPendingAppRequest>,
     pending_acp_approvals: HashMap<String, AcpPendingApproval>,
+    /// Arrival order for ACP permission requests. The map above owns the
+    /// routing payload; this queue makes the protocol's multiple-pending
+    /// behavior deterministic and prevents later requests from overtaking the
+    /// first unresolved approval.
+    pending_acp_approval_order: VecDeque<String>,
     /// FIFO follow-up prompts collected while the runtime is busy.
     queued_prompts: VecDeque<QueuedPromptRecord>,
     /// Original peer messages represented by a coalesced queued prompt, keyed

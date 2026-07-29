@@ -42,6 +42,7 @@ fn persists_remote_settings() {
             default_claude_model: None,
             default_cursor_model: None,
             default_gemini_model: None,
+            default_opencode_model: None,
             default_codex_reasoning_effort: None,
             default_codex_sandbox_mode: None,
             default_codex_approval_policy: None,
@@ -91,6 +92,7 @@ fn rejects_remote_settings_with_unsafe_remote_id() {
         default_claude_model: None,
         default_cursor_model: None,
         default_gemini_model: None,
+        default_opencode_model: None,
         default_codex_reasoning_effort: None,
         default_codex_sandbox_mode: None,
         default_codex_approval_policy: None,
@@ -133,6 +135,7 @@ fn rejects_remote_settings_with_invalid_ssh_host() {
         default_claude_model: None,
         default_cursor_model: None,
         default_gemini_model: None,
+        default_opencode_model: None,
         default_codex_reasoning_effort: None,
         default_codex_sandbox_mode: None,
         default_codex_approval_policy: None,
@@ -172,6 +175,7 @@ fn rejects_remote_settings_with_invalid_ssh_user() {
         default_claude_model: None,
         default_cursor_model: None,
         default_gemini_model: None,
+        default_opencode_model: None,
         default_codex_reasoning_effort: None,
         default_codex_sandbox_mode: None,
         default_codex_approval_policy: None,
@@ -598,6 +602,7 @@ fn remote_action_lookup_rejects_unusable_remotes_before_ssh() {
             default_claude_model: None,
             default_cursor_model: None,
             default_gemini_model: None,
+            default_opencode_model: None,
             default_codex_reasoning_effort: None,
             default_codex_sandbox_mode: None,
             default_codex_approval_policy: None,
@@ -2411,6 +2416,32 @@ fn remote_review_put_sends_scope_via_query_params() {
     let captured_for_server = captured.clone();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
     let port = listener.local_addr().expect("listener addr").port();
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    state
+        .remote_registry
+        .connections
+        .lock()
+        .expect("remote registry mutex poisoned")
+        .insert(
+            remote.id.clone(),
+            Arc::new(RemoteConnection {
+                config: Mutex::new(remote.clone()),
+                forwarded_port: port,
+                process: Mutex::new(None),
+                event_bridge_started: AtomicBool::new(false),
+                event_bridge_shutdown: AtomicBool::new(false),
+                supports_inline_orchestrator_templates: Mutex::new(None),
+            }),
+        );
     let server = std::thread::spawn(move || {
         for _ in 0..2 {
             let mut stream = accept_test_connection(&listener, "test listener");
@@ -2494,33 +2525,6 @@ fn remote_review_put_sends_scope_via_query_params() {
             panic!("unexpected request: {request_line}");
         }
     });
-
-    let state = test_app_state();
-    let remote = RemoteConfig {
-        id: "ssh-lab".to_owned(),
-        name: "SSH Lab".to_owned(),
-        transport: RemoteTransport::Ssh,
-        enabled: true,
-        host: Some("example.com".to_owned()),
-        port: Some(22),
-        user: Some("alice".to_owned()),
-    };
-    state
-        .remote_registry
-        .connections
-        .lock()
-        .expect("remote registry mutex poisoned")
-        .insert(
-            remote.id.clone(),
-            Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
-                forwarded_port: port,
-                process: Mutex::new(None),
-                event_bridge_started: AtomicBool::new(false),
-                event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(None),
-            }),
-        );
 
     let response: ReviewDocumentResponse = state
         .remote_put_json_with_query_scope(
