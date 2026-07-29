@@ -950,9 +950,11 @@ fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
     state
         .fail_turn_if_runtime_matches(&session_id, &runtime_token, "reader failure")
         .expect("fail_turn_if_runtime_matches should succeed");
-    state
+    let retry_admitted = state
         .note_turn_retry_if_runtime_matches(&session_id, &runtime_token, "Retrying Claude...")
         .expect("note_turn_retry_if_runtime_matches should succeed");
+    assert!(!retry_admitted);
+    assert!(!state.turn_retry_allowed_if_runtime_matches(&session_id, &runtime_token));
     state
         .mark_turn_error_if_runtime_matches(&session_id, &runtime_token, "runtime error")
         .expect("mark_turn_error_if_runtime_matches should succeed");
@@ -990,6 +992,118 @@ fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
     drop(inner);
 
     assert!(input_rx.recv_timeout(Duration::from_millis(100)).is_err());
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn delayed_claude_retry_is_dropped_during_stop_and_after_runtime_replacement() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, _runtime_input_rx) = test_claude_runtime_handle("claude-delayed-retry-original");
+    let stale_runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+    let (retry_tx, retry_rx) = mpsc::channel();
+    let replay_prompt = Arc::new(Mutex::new(Some(ClaudePromptCommand {
+        attachments: Vec::new(),
+        replay_generation: "retry-generation-stop".to_owned(),
+        text: "retry me".to_owned(),
+    })));
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].runtime_stop_in_progress = true;
+    }
+
+    assert!(!dispatch_claude_retry_if_current(
+        &state,
+        &session_id,
+        &stale_runtime_token,
+        &retry_tx,
+        &replay_prompt,
+        "retry-generation-stop",
+        "Retrying Claude automatically.",
+    ));
+    assert!(matches!(
+        retry_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    assert_eq!(claude_replay_generation(&replay_prompt), None);
+
+    let (replacement_runtime, _replacement_input_rx) =
+        test_claude_runtime_handle("claude-delayed-retry-replacement");
+    let replacement_runtime_token = RuntimeToken::Claude(replacement_runtime.runtime_id.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(replacement_runtime);
+        inner.sessions[index].runtime_stop_in_progress = false;
+    }
+    *replay_prompt
+        .lock()
+        .expect("Claude replay prompt mutex poisoned") = Some(ClaudePromptCommand {
+        attachments: Vec::new(),
+        replay_generation: "retry-generation-replaced".to_owned(),
+        text: "stale retry".to_owned(),
+    });
+
+    assert!(!dispatch_claude_retry_if_current(
+        &state,
+        &session_id,
+        &stale_runtime_token,
+        &retry_tx,
+        &replay_prompt,
+        "retry-generation-replaced",
+        "Retrying Claude automatically.",
+    ));
+    assert!(matches!(
+        retry_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    assert_eq!(claude_replay_generation(&replay_prompt), None);
+
+    let messages_before_idle_retry = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].session.status = SessionStatus::Idle;
+        inner.sessions[index].session.messages.len()
+    };
+    *replay_prompt
+        .lock()
+        .expect("Claude replay prompt mutex poisoned") = Some(ClaudePromptCommand {
+        attachments: Vec::new(),
+        replay_generation: "retry-generation-idle".to_owned(),
+        text: "do not resurrect this turn".to_owned(),
+    });
+    assert!(!dispatch_claude_retry_if_current(
+        &state,
+        &session_id,
+        &replacement_runtime_token,
+        &retry_tx,
+        &replay_prompt,
+        "retry-generation-idle",
+        "This message must not be recorded.",
+    ));
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        assert_eq!(inner.sessions[index].session.status, SessionStatus::Idle);
+        assert_eq!(
+            inner.sessions[index].session.messages.len(),
+            messages_before_idle_retry
+        );
+    }
+    assert_eq!(claude_replay_generation(&replay_prompt), None);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }

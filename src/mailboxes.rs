@@ -1464,6 +1464,30 @@ impl MailboxStore {
                 ],
             )
             .context("failed to append mailbox message")?;
+        // A participant cannot be "unread" on a message it wrote itself, so
+        // the sender's cursor follows its own append — otherwise
+        // `unreadCount` (which already excludes own sends) and
+        // `processedThrough` (which previously only moved on an explicit ack)
+        // disagree, and the natural "ack the sequence I last participated in"
+        // call fails CAS with a spurious 409 (tm-i1s).
+        //
+        // The `processed_through = sequence - 1` guard is the entire safety
+        // property: sequences are dense per mailbox, so the sender's cursor
+        // may only follow its own message when it was ALREADY caught up to
+        // the message immediately before it. If any peer message is still
+        // unread below this one, the guard fails, the cursor stays put, and
+        // that peer message cannot be silently consumed by an unrelated send.
+        transaction
+            .execute(
+                "UPDATE mailbox_participants
+                 SET processed_through = ?3
+                 WHERE mailbox_id = ?1
+                   AND session_id = ?2
+                   AND left_at IS NULL
+                   AND processed_through = ?3 - 1",
+                rusqlite::params![&mailbox_id, &input.sender_session_id, sequence],
+            )
+            .context("failed to advance sender mailbox cursor")?;
         self.register_pending_dispatch_outcome(&message_id);
         let finalization = MailboxDispatchFinalizationGuard {
             dispatch_finalization: self.dispatch_finalization.clone(),

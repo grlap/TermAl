@@ -292,6 +292,7 @@ impl AppState {
                 TurnDispatch::PersistentClaude {
                     command: ClaudePromptCommand {
                         attachments: attachments.clone(),
+                        replay_generation: Uuid::new_v4().to_string(),
                         text: runtime_prompt.clone(),
                     },
                     mailbox_notification: mailbox_notification.clone(),

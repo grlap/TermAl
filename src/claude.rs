@@ -22,6 +22,11 @@ struct ClaudeTurnState {
     parallel_agents: HashMap<String, ParallelAgentProgress>,
     permission_denied_this_turn: bool,
     pending_tools: HashMap<String, ClaudeToolUse>,
+    /// Whether this attempt emitted transcript content, reached a tool /
+    /// approval boundary, or produced a protocol event not explicitly proven
+    /// effect-free. Transient API retries are allowed only while this is false,
+    /// so replay cannot duplicate a partially executed turn or hidden hook.
+    replay_became_unsafe: bool,
     streamed_assistant_text: String,
     saw_text_delta: bool,
 }
@@ -888,6 +893,7 @@ fn record_claude_assistant_text_delta(
     }
 
     recorder.text_delta(delta)?;
+    state.replay_became_unsafe = true;
     state.saw_text_delta = true;
     state.streamed_assistant_text.push_str(delta);
     Ok(())
@@ -905,6 +911,7 @@ fn record_claude_completed_assistant_text(
     }
 
     if !state.saw_text_delta {
+        state.replay_became_unsafe = true;
         state.streamed_assistant_text.clear();
         state.streamed_assistant_text.push_str(trimmed);
         return recorder.push_text(trimmed);
@@ -938,6 +945,7 @@ fn clear_claude_turn_state(state: &mut ClaudeTurnState) {
     state.parallel_agents.clear();
     state.permission_denied_this_turn = false;
     state.pending_tools.clear();
+    state.replay_became_unsafe = false;
     state.streamed_assistant_text.clear();
     state.saw_text_delta = false;
 }
@@ -952,6 +960,39 @@ fn reset_claude_turn_state<R: TurnRecorder + ?Sized>(
     recorder.reset_turn_state()
 }
 
+/// Returns whether a system envelope is proven not to represent prompt work.
+fn claude_system_event_is_effect_free(message: &Value) -> bool {
+    match message.get("subtype").and_then(Value::as_str) {
+        Some("init") => true,
+        // Live Claude Code 2.1.220 stream capture emits this status immediately
+        // before the replayed user prompt. It describes request admission and
+        // does not itself run the prompt.
+        Some("status") => message.get("status").and_then(Value::as_str) == Some("requesting"),
+        // SessionStart hooks run once for the persistent child process. Replaying
+        // a prompt inside that same process cannot run them again. Prompt hooks
+        // such as UserPromptSubmit are intentionally not exempt.
+        Some("hook_started" | "hook_progress" | "hook_response") => {
+            message.get("hook_event").and_then(Value::as_str) == Some("SessionStart")
+        }
+        _ => false,
+    }
+}
+
+/// Returns whether a Claude `user` envelope is the CLI's echo of the submitted
+/// prompt rather than a tool-result boundary.
+fn claude_user_event_is_prompt_echo(message: &Value) -> bool {
+    let Some(content) = message.pointer("/message/content").and_then(Value::as_array) else {
+        return false;
+    };
+    !content.is_empty()
+        && content.iter().all(|block| {
+            matches!(
+                block.get("type").and_then(Value::as_str),
+                Some("text" | "image")
+            )
+        })
+}
+
 /// Handles Claude event.
 fn handle_claude_event(
     message: &Value,
@@ -960,6 +1001,7 @@ fn handle_claude_event(
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
     let Some(event_type) = message.get("type").and_then(Value::as_str) else {
+        state.replay_became_unsafe = true;
         return Ok(());
     };
 
@@ -970,10 +1012,16 @@ fn handle_claude_event(
                     *session_id = Some(found_session_id.to_owned());
                     recorder.note_external_session(found_session_id)?;
                 }
+            } else if !claude_system_event_is_effect_free(message) {
+                // Prompt hooks and future system events may represent effects
+                // TermAl does not understand. Fail closed unless the exact
+                // envelope is proven process-local or request-admission-only.
+                state.replay_became_unsafe = true;
             }
         }
         "stream_event" => {
             let Some(stream_type) = message.pointer("/event/type").and_then(Value::as_str) else {
+                state.replay_became_unsafe = true;
                 return Ok(());
             };
 
@@ -986,6 +1034,10 @@ fn handle_claude_event(
                             .and_then(Value::as_str)
                         {
                             record_claude_assistant_text_delta(state, recorder, text)?;
+                        } else {
+                            // Thinking, tool-input, and future delta shapes are
+                            // not proven safe to replay.
+                            state.replay_became_unsafe = true;
                         }
                     }
                 }
@@ -993,7 +1045,9 @@ fn handle_claude_event(
                     // Claude can emit the final assistant payload after `message_stop`.
                     // Keep the current text bubble open so any unseen suffix lands in it.
                 }
-                _ => {}
+                _ => {
+                    state.replay_became_unsafe = true;
+                }
             }
         }
         "assistant" => {
@@ -1003,6 +1057,7 @@ fn handle_claude_event(
             {
                 for content in contents {
                     let Some(content_type) = content.get("type").and_then(Value::as_str) else {
+                        state.replay_became_unsafe = true;
                         continue;
                     };
 
@@ -1018,23 +1073,39 @@ fn handle_claude_event(
                         "thinking" => {
                             if let Some(thinking) = content.get("thinking").and_then(Value::as_str)
                             {
+                                state.replay_became_unsafe = true;
                                 finish_claude_assistant_text_stream(state, recorder)?;
                                 let lines = split_thinking_lines(thinking);
                                 recorder.push_thinking("Thinking", lines)?;
                             }
                         }
                         "tool_use" => {
+                            state.replay_became_unsafe = true;
                             finish_claude_assistant_text_stream(state, recorder)?;
                             register_claude_tool_use(content, state, recorder)?;
                         }
-                        _ => {}
+                        _ => {
+                            state.replay_became_unsafe = true;
+                        }
                     }
                 }
+            } else {
+                state.replay_became_unsafe = true;
             }
         }
         "user" => {
+            // --replay-user-messages echoes the submitted text/image prompt on
+            // stdout before the assistant response. That echo is effect-free;
+            // tool results and unknown user content remain replay barriers.
+            if !claude_user_event_is_prompt_echo(message) {
+                state.replay_became_unsafe = true;
+            }
             handle_claude_tool_result(message, state, recorder)?;
         }
+        // Claude Code 2.1.220 emits this telemetry envelope immediately
+        // before the terminal result. It reports quota state only and does not
+        // represent assistant output, a tool boundary, or a hook effect.
+        "rate_limit_event" => {}
         "result" => {
             reset_claude_turn_state(state, recorder)?;
 
@@ -1046,7 +1117,9 @@ fn handle_claude_event(
                 recorder.error(&summarize_error(message))?;
             }
         }
-        _ => {}
+        _ => {
+            state.replay_became_unsafe = true;
+        }
     }
 
     Ok(())

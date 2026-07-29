@@ -51,6 +51,10 @@ fn push_claude_cli_common_args(
         args.extend(["--model".to_owned(), model.to_owned()]);
     }
     args.extend([
+        // Claude Code 2.1.220 requires --print when stream-json is used as
+        // stdin input. In that mode stdin remains open and continues to accept
+        // prompts, so the process is still the persistent editor-style bridge.
+        "--print".to_owned(),
         "--verbose".to_owned(),
         "--output-format".to_owned(),
         "stream-json".to_owned(),
@@ -88,6 +92,12 @@ fn claude_cli_persistent_args(
     args.extend([
         "--input-format".to_owned(),
         "stream-json".to_owned(),
+        // UserPromptSubmit and other hooks may have side effects before an API
+        // overload is reported. Include their lifecycle frames so the retry
+        // safety latch can observe them and fail closed. A live Claude Code
+        // 2.1.220 capture on 2026-07-29 verified SessionStart hook lifecycle
+        // frames precede init/status/user-echo and the assistant/result frames.
+        "--include-hook-events".to_owned(),
         "--include-partial-messages".to_owned(),
         "--permission-prompt-tool".to_owned(),
         "stdio".to_owned(),

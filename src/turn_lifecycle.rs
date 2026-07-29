@@ -130,7 +130,8 @@ impl AppState {
         Ok(())
     }
     /// Records a retry attempt on the transcript without ending the turn.
-    /// Runtime-token guarded: stale tokens silently no-op. Keeps the turn
+    /// Runtime-token guarded: stale or stopping runtimes return `false`.
+    /// Keeps the turn
     /// in Active (or leaves Approval alone) and refreshes the preview
     /// while the runtime retries under the covers. De-duplicates
     /// consecutive identical retry messages so repeated retries don't
@@ -140,10 +141,10 @@ impl AppState {
         session_id: &str,
         token: &RuntimeToken,
         detail: &str,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let cleaned = detail.trim();
         if cleaned.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -154,10 +155,16 @@ impl AppState {
         let duplicate_last_message = {
             let record = &inner.sessions[index];
             if !record.runtime.matches_runtime_token(token) {
-                return Ok(());
+                return Ok(false);
             }
             if record.runtime_stop_in_progress {
-                return Ok(());
+                return Ok(false);
+            }
+            if !matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval
+            ) {
+                return Ok(false);
             }
 
             matches!(
@@ -187,12 +194,30 @@ impl AppState {
             });
         }
 
-        if record.session.status != SessionStatus::Approval {
-            record.session.status = SessionStatus::Active;
-        }
         record.session.preview = make_preview(cleaned);
         self.commit_locked(&mut inner)?;
-        Ok(())
+        Ok(true)
+    }
+
+    /// Returns whether a delayed retry still belongs to the current live
+    /// runtime and the turn has not entered its stop window.
+    fn turn_retry_allowed_if_runtime_matches(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+    ) -> bool {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_session_index(session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .is_some_and(|record| {
+                record.runtime.matches_runtime_token(token)
+                    && !record.runtime_stop_in_progress
+                    && matches!(
+                        record.session.status,
+                        SessionStatus::Active | SessionStatus::Approval
+                    )
+            })
     }
 
     /// Active -> Error while the turn stays live. Runtime-token guarded:

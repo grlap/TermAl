@@ -1441,16 +1441,9 @@ fn message_carries_safe_replay_clause(message: &str) -> bool {
 /// hash to different schedules, while any single bridge's schedule is exact
 /// and test-assertable — no randomness, no clock reads (FNV-1a over the
 /// session id and attempt number).
+#[cfg(test)]
 fn safe_replay_retry_jitter_percent(session_id: &str, completed_attempts: u32) -> u32 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in session_id
-        .bytes()
-        .chain(completed_attempts.to_le_bytes())
-    {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    75 + u32::try_from(hash % 51).expect("modulo 51 fits in u32")
+    session_stable_retry_jitter_percent(session_id, completed_attempts)
 }
 
 /// Backoff after the Nth failed attempt: base 200ms doubling per failure
@@ -1458,9 +1451,11 @@ fn safe_replay_retry_jitter_percent(session_id: &str, completed_attempts: u32) -
 /// `TERMAL_DELEGATION_SAFE_REPLAY_RETRY_ATTEMPTS`), scaled by the session's
 /// deterministic jitter percentage.
 fn safe_replay_retry_delay(session_id: &str, completed_attempts: u32) -> Duration {
-    let base = TERMAL_DELEGATION_SAFE_REPLAY_RETRY_BASE_DELAY
-        * 2u32.saturating_pow(completed_attempts.saturating_sub(1));
-    base * safe_replay_retry_jitter_percent(session_id, completed_attempts) / 100
+    session_stable_retry_delay(
+        TERMAL_DELEGATION_SAFE_REPLAY_RETRY_BASE_DELAY,
+        session_id,
+        completed_attempts,
+    )
 }
 
 impl std::fmt::Display for TermalDelegationApiError {

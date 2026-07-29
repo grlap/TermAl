@@ -1096,3 +1096,102 @@ fn live_session_reactivation_uses_bounded_request_writer_admission() {
         "error should identify the contended request operation: {error:#}"
     );
 }
+
+// Pins tm-i1s: a participant cannot be unread on a message it wrote, so the
+// sender's cursor follows its own append. Before this, `unreadCount` (which
+// already excludes own sends) and `processedThrough` (which only moved on an
+// explicit ack) disagreed, and the natural "ack the sequence I last
+// participated in" call failed CAS with a spurious 409.
+#[test]
+fn mailbox_sender_cursor_follows_its_own_append() {
+    let root = MailboxTestRoot::new();
+    let store = MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+
+    let first = store.append(&test_input()).expect("first append should commit");
+    assert_eq!(first.receipt.sequence, 1);
+    drop(first);
+
+    let summaries = store
+        .list_for_session("session-sender")
+        .expect("sender should list its mailbox");
+    let sender_cursor = summaries[0]
+        .participants
+        .iter()
+        .find(|participant| participant.session_id == "session-sender")
+        .expect("sender participant should exist")
+        .processed_through;
+    assert_eq!(
+        sender_cursor, 1,
+        "the sender's cursor must follow its own message"
+    );
+    assert_eq!(
+        summaries[0].unread_count, 0,
+        "a sender is never unread on its own message"
+    );
+
+    // The natural ack — expecting the sequence just participated in — must
+    // now succeed rather than 409.
+    let second = store
+        .append(&MailboxAppendInput {
+            idempotency_key: "send-2".to_owned(),
+            ..test_input()
+        })
+        .expect("second append should commit");
+    assert_eq!(second.receipt.sequence, 2);
+    drop(second);
+    store
+        .acknowledge("session-sender", &summaries[0].id, 2, 2)
+        .expect("acking the sequence the sender last participated in must not conflict");
+}
+
+// The safety property that makes the above legal: the cursor may only follow
+// an own-append when the sender was ALREADY caught up. An unread PEER message
+// below the new sequence must block the advance, or an unrelated send would
+// silently consume it.
+#[test]
+fn mailbox_sender_cursor_never_skips_an_unread_peer_message() {
+    let root = MailboxTestRoot::new();
+    let store = MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+
+    // Peer writes first; the sender has NOT read it.
+    let inbound = store
+        .append(&MailboxAppendInput {
+            sender_session_id: "session-target".to_owned(),
+            sender_name: "Target".to_owned(),
+            target_session_id: "session-sender".to_owned(),
+            target_name: "Sender".to_owned(),
+            idempotency_key: "inbound-1".to_owned(),
+            ..test_input()
+        })
+        .expect("peer append should commit");
+    assert_eq!(inbound.receipt.sequence, 1);
+    drop(inbound);
+
+    // Now the sender writes its own message at sequence 2.
+    let outbound = store
+        .append(&MailboxAppendInput {
+            idempotency_key: "outbound-1".to_owned(),
+            ..test_input()
+        })
+        .expect("sender append should commit");
+    assert_eq!(outbound.receipt.sequence, 2);
+    drop(outbound);
+
+    let summaries = store
+        .list_for_session("session-sender")
+        .expect("sender should list its mailbox");
+    let sender_cursor = summaries[0]
+        .participants
+        .iter()
+        .find(|participant| participant.session_id == "session-sender")
+        .expect("sender participant should exist")
+        .processed_through;
+    assert_eq!(
+        sender_cursor, 0,
+        "the cursor must NOT jump past an unread peer message just because the sender wrote after it"
+    );
+    assert_eq!(
+        summaries[0].unread_count, 1,
+        "the unread peer message must remain unread and countable"
+    );
+}

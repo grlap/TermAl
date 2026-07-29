@@ -77,6 +77,7 @@ fn claude_default_model_delegates_to_claude_cli_default() {
         vec![
             "--model",
             "opus",
+            "--print",
             "--verbose",
             "--output-format",
             "stream-json",
@@ -85,6 +86,7 @@ fn claude_default_model_delegates_to_claude_cli_default() {
             "--no-chrome",
             "--input-format",
             "stream-json",
+            "--include-hook-events",
             "--include-partial-messages",
             "--permission-prompt-tool",
             "stdio",
@@ -116,6 +118,7 @@ fn claude_default_model_delegates_to_claude_cli_default() {
             None,
         ),
         vec![
+            "--print",
             "--verbose",
             "--output-format",
             "stream-json",
@@ -124,6 +127,7 @@ fn claude_default_model_delegates_to_claude_cli_default() {
             "--no-chrome",
             "--input-format",
             "stream-json",
+            "--include-hook-events",
             "--include-partial-messages",
             "--permission-prompt-tool",
             "stdio",

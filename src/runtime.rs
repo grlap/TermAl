@@ -15,6 +15,34 @@ Each adapter translates agent-native protocol events into recorder callbacks so
 the rest of the backend can work with one message model.
 */
 
+/// Deterministic, session-stable jitter percentage in `75..=125`.
+///
+/// Peers released by the same saturation event dephase because their session
+/// ids hash to different schedules, while one session's schedule remains exact
+/// and testable.
+fn session_stable_retry_jitter_percent(session_id: &str, completed_attempts: u32) -> u32 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in session_id
+        .bytes()
+        .chain(completed_attempts.to_le_bytes())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    75 + u32::try_from(hash % 51).expect("modulo 51 fits in u32")
+}
+
+/// Exponential retry delay after the Nth failed attempt, scaled by the
+/// session's deterministic jitter percentage.
+fn session_stable_retry_delay(
+    base_delay: Duration,
+    session_id: &str,
+    completed_attempts: u32,
+) -> Duration {
+    let base = base_delay * 2u32.saturating_pow(completed_attempts.saturating_sub(1));
+    base * session_stable_retry_jitter_percent(session_id, completed_attempts) / 100
+}
+
 
 /// Represents a Codex runtime command.
 #[derive(Clone)]
@@ -166,6 +194,10 @@ struct CodexPendingAppRequest {
 #[derive(Clone)]
 struct ClaudePromptCommand {
     attachments: Vec<PromptImageAttachment>,
+    /// Identifies the exact accepted turn whose prompt may be replayed.
+    /// Delayed retry commands carry this value so they cannot replay a newer
+    /// turn that reached the same persistent runtime in the meantime.
+    replay_generation: String,
     text: String,
 }
 
@@ -173,6 +205,13 @@ struct ClaudePromptCommand {
 #[derive(Clone)]
 enum ClaudeRuntimeCommand {
     Prompt(ClaudePromptCommand),
+    /// Internal: replays the last accepted prompt after a transient Claude API
+    /// rejection. The writer owns the saved prompt so the retry cannot drift
+    /// from the exact text and attachments originally dispatched.
+    RetryLastPrompt {
+        replay_generation: String,
+        retry_detail: String,
+    },
     PermissionResponse(ClaudePermissionDecision),
     SetModel(String),
     SetPermissionMode(String),

@@ -244,6 +244,67 @@ fn mailbox_send_commits_body_before_metadata_only_wake_and_retry_does_not_rewake
     );
 }
 
+#[test]
+fn live_busy_mailbox_wake_is_visible_and_drains_at_turn_completion() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let (runtime, input_rx) = test_claude_runtime_handle("live-mailbox-wake-runtime");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        inner.sessions[target_index].runtime = SessionRuntime::Claude(runtime);
+    }
+    let runtime_token = RuntimeToken::Claude("live-mailbox-wake-runtime".to_owned());
+
+    let receipt = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("live mailbox send should queue behind the active turn");
+    assert_eq!(receipt.notification_disposition, "queuedBehindActiveTurn");
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let target = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == target_id)
+            .expect("target should exist");
+        assert_eq!(target.session.pending_prompts.len(), 1);
+        let pending = &target.session.pending_prompts[0];
+        assert!(
+            pending.text.contains(&receipt.mailbox_id),
+            "the metadata-only wake should be visible through the queued-card wire field"
+        );
+        assert!(
+            pending
+                .source
+                .as_ref()
+                .is_some_and(MessageSource::is_mailbox),
+            "the visible queued card must retain mailbox provenance"
+        );
+    }
+
+    state
+        .finish_turn_ok_if_runtime_matches(&target_id, &runtime_token)
+        .expect("finishing the active turn should drain the queued mailbox wake");
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_secs(1)),
+        Ok(ClaudeRuntimeCommand::Prompt(command)) if command.text.contains(&receipt.mailbox_id)
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should exist");
+    assert!(
+        target.session.pending_prompts.is_empty(),
+        "the queued card should disappear after the wake starts"
+    );
+    assert_eq!(target.session.status, SessionStatus::Active);
+}
+
 #[tokio::test]
 async fn normal_mailbox_interactions_reactivate_stale_live_participants() {
     let (state, sender_id, target_id) = mailbox_test_state();

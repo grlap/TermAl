@@ -782,8 +782,9 @@ full TermAl restart.
 
 **Invocation:**
 ```bash
-claude --output-format stream-json --input-format stream-json \
+claude --print --output-format stream-json --input-format stream-json \
   --verbose --permission-prompt-tool stdio --include-partial-messages \
+  --include-hook-events \
   --setting-sources user,project,local --no-chrome --replay-user-messages \
   --resume <external_session_id>   # if resuming
 ```
@@ -803,6 +804,29 @@ claude --output-format stream-json --input-format stream-json \
 2. On user message → write `{ type: "user", message: { role: "user", content: [...] } }` to stdin
 3. Receive streaming events: `assistant` (text, tool_use, tool_result), `result` (turn complete)
 4. On tool approval needed → Claude sends `control_request { subtype: "can_use_tool" }` → TermAl either auto-approves or shows approval card → sends `control_response` with decision
+
+**Transient API retries:** Terminal Claude results with `is_error: true` and
+`api_error_status` 429, 503, or 529 retry the exact prompt inside the existing
+runtime, with bounded exponential backoff and visible attempt status. Replay is
+fail-closed: once an attempt emits transcript content, reaches a tool or
+approval boundary, or produces a protocol event that is not explicitly proven
+effect-free, the error remains terminal rather than risking duplicate side
+effects. TermAl enables Claude's `--include-hook-events` stream so configured
+prompt hooks cross that safety boundary instead of remaining invisible.
+Hook lifecycle envelopes update only the replay-safety latch and never create
+transcript cards. This broader fail-closed coverage deliberately trades some
+retry availability for protection against replaying effects introduced by
+future or unrecognized protocol events.
+The parser starts each accepted prompt generation with fresh turn-local state.
+Claude's exact text/image `user` echo, process-scoped `SessionStart` hooks, the
+`status=requesting` admission envelope, and quota-only `rate_limit_event` are
+the explicitly verified effect-free frames; tool results, prompt hooks, output,
+and unknown shapes remain replay barriers.
+Delayed retries are bound to the originating prompt generation,
+revalidate the live runtime immediately before writing, and are discarded when
+the runtime enters Stop or is replaced. The saved prompt is cleared when its
+terminal result is handled. Therefore this protects pre-effect overload
+failures, not every 529 that can occur during a long-running turn.
 
 **Session resume:** Pass `--resume <session_id>` on spawn. Claude restores full conversation context from its own `~/.claude/sessions/` storage.
 

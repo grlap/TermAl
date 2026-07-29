@@ -37,6 +37,514 @@ fn claude_permission_request(tool_name: &str, tool_input: Value) -> Value {
     })
 }
 
+#[test]
+fn claude_transient_api_retry_prefers_numeric_status_over_result_prose() {
+    let overloaded = json!({
+        "type": "result",
+        "subtype": "success",
+        "is_error": true,
+        "api_error_status": 529,
+        "result": "API Error: 529 Overloaded."
+    });
+    assert_eq!(claude_transient_api_status(&overloaded), Some(529));
+
+    let fatal_with_misleading_text = json!({
+        "type": "result",
+        "subtype": "success",
+        "is_error": true,
+        "api_error_status": 401,
+        "result": "API Error: 529 should not override the structural status"
+    });
+    assert_eq!(
+        claude_transient_api_status(&fatal_with_misleading_text),
+        None
+    );
+}
+
+#[test]
+fn claude_transient_api_retry_accepts_success_subtype_when_is_error_is_true() {
+    // Claude Code 2.1.220 reports API failures with the counterintuitive
+    // subtype `success`; `is_error` and `api_error_status` are authoritative.
+    let overloaded = json!({
+        "type": "result",
+        "subtype": "success",
+        "is_error": true,
+        "api_error_status": 529,
+        "result": "API Error: 529 Overloaded."
+    });
+
+    assert_eq!(claude_transient_api_status(&overloaded), Some(529));
+}
+
+#[test]
+fn claude_transient_api_retry_has_bounded_exact_legacy_fallback() {
+    for status in [429, 503, 529] {
+        let message = json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": true,
+            "result": format!("API Error: {status} temporary failure")
+        });
+        assert_eq!(claude_transient_api_status(&message), Some(status));
+    }
+
+    for message in [
+        json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": true,
+            "result": "The API is Overloaded; try later"
+        }),
+        json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": true,
+            "result": "API Error: 401 Unauthorized"
+        }),
+        json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "result": "API Error: 529 Overloaded"
+        }),
+        json!({
+            "type": "assistant",
+            "is_error": true,
+            "result": "API Error: 529 Overloaded"
+        }),
+    ] {
+        assert_eq!(claude_transient_api_status(&message), None);
+    }
+}
+
+#[test]
+fn claude_transient_api_retry_delay_is_session_stable_and_exponential() {
+    let session_id = "session-claude-retry";
+    let first = claude_transient_api_retry_delay(session_id, 1, 529);
+    let second = claude_transient_api_retry_delay(session_id, 2, 529);
+
+    assert_eq!(
+        first,
+        claude_transient_api_retry_delay(session_id, 1, 529),
+        "one session must get a deterministic retry schedule"
+    );
+    assert!(
+        (Duration::from_millis(150)..=Duration::from_millis(250)).contains(&first),
+        "first retry should be the 200ms base scaled by 75%-125% jitter"
+    );
+    assert!(
+        (Duration::from_millis(300)..=Duration::from_millis(500)).contains(&second),
+        "second retry should double the base before jitter"
+    );
+
+    let rate_limited = claude_transient_api_retry_delay(session_id, 1, 429);
+    assert!(
+        (Duration::from_millis(750)..=Duration::from_millis(1250)).contains(&rate_limited),
+        "429 should use the longer one-second capacity-window base"
+    );
+}
+
+#[test]
+fn claude_transient_api_retry_exhausts_after_five_total_attempts() {
+    let overloaded = json!({
+        "type": "result",
+        "subtype": "success",
+        "is_error": true,
+        "api_error_status": 529,
+        "result": "API Error: 529 Overloaded."
+    });
+
+    for prior_completed_attempts in 0..4 {
+        let Some(ClaudeTransientApiResult::Retry {
+            completed_attempts,
+            status,
+            ..
+        }) = classify_claude_transient_api_result(
+            &overloaded,
+            "session-bounded-retry",
+            prior_completed_attempts,
+            true,
+        )
+        else {
+            panic!(
+                "attempt {} should schedule a replay",
+                prior_completed_attempts + 1
+            );
+        };
+        assert_eq!(completed_attempts, prior_completed_attempts + 1);
+        assert_eq!(status, 529);
+    }
+
+    assert_eq!(
+        classify_claude_transient_api_result(&overloaded, "session-bounded-retry", 4, true),
+        Some(ClaudeTransientApiResult::Exhausted {
+            completed_attempts: 5,
+            status: 529,
+        })
+    );
+}
+
+#[test]
+fn claude_transient_api_retry_fails_closed_after_partial_turn_output() {
+    let overloaded = json!({
+        "type": "result",
+        "subtype": "success",
+        "is_error": true,
+        "api_error_status": 529,
+        "result": "API Error: 529 Overloaded."
+    });
+
+    assert_eq!(
+        classify_claude_transient_api_result(&overloaded, "session-partial-output", 0, false,),
+        None,
+        "a turn that emitted transcript or tool activity must not be replayed"
+    );
+}
+
+#[test]
+fn claude_tool_use_marks_transient_api_replay_unsafe() {
+    let mut state = ClaudeTurnState::default();
+    let mut recorder = TestRecorder::default();
+    let mut session_id = None;
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "tool-before-overload",
+                    "name": "WebSearch",
+                    "input": {}
+                }]
+            }
+        }),
+        &mut session_id,
+        &mut state,
+        &mut recorder,
+    )
+    .expect("tool use should be recorded");
+
+    assert!(
+        state.replay_became_unsafe,
+        "observing a tool use must suppress whole-prompt replay"
+    );
+}
+
+#[test]
+fn claude_unknown_protocol_events_mark_transient_replay_unsafe() {
+    for event in [
+        json!({
+            "type": "system",
+            "subtype": "hook_started",
+            "hook_name": "UserPromptSubmit",
+            "hook_event": "UserPromptSubmit"
+        }),
+        json!({
+            "type": "stream_event",
+            "event": { "type": "future_stream_event" }
+        }),
+        json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "future_content_block",
+                    "payload": "unknown"
+                }]
+            }
+        }),
+        json!({ "future": "missing top-level type" }),
+    ] {
+        let mut state = ClaudeTurnState::default();
+        let mut recorder = TestRecorder::default();
+        let mut session_id = None;
+
+        handle_claude_event(&event, &mut session_id, &mut state, &mut recorder)
+            .expect("unknown event should be tolerated but fail replay closed");
+
+        assert!(
+            state.replay_became_unsafe,
+            "unrecognized event must disable whole-prompt replay: {event}"
+        );
+    }
+}
+
+#[test]
+fn claude_hook_lifecycle_events_are_safety_only_and_do_not_reach_the_transcript() {
+    for subtype in ["hook_started", "hook_response"] {
+        let mut state = ClaudeTurnState::default();
+        let mut recorder = TestRecorder::default();
+        let mut session_id = None;
+
+        handle_claude_event(
+            &json!({
+                "type": "system",
+                "subtype": subtype,
+                "hook_name": "UserPromptSubmit",
+                "hook_event": "UserPromptSubmit"
+            }),
+            &mut session_id,
+            &mut state,
+            &mut recorder,
+        )
+        .expect("hook lifecycle events should be consumed without recorder output");
+
+        assert!(state.replay_became_unsafe);
+        assert!(session_id.is_none());
+        assert!(recorder.texts.is_empty());
+        assert!(recorder.text_deltas.is_empty());
+        assert!(recorder.thinking.is_empty());
+        assert!(recorder.commands.is_empty());
+        assert!(recorder.approvals.is_empty());
+        assert!(recorder.diffs.is_empty());
+        assert!(recorder.parallel_agents.is_empty());
+        assert!(recorder.subagent_results.is_empty());
+    }
+}
+
+#[test]
+fn claude_live_frame_sequence_keeps_only_pre_effect_overloads_replayable() {
+    let overloaded = json!({
+        "type": "result",
+        "subtype": "success",
+        "is_error": true,
+        "api_error_status": 529,
+        "result": "API Error: 529 Overloaded."
+    });
+    let prompt_echo = json!({
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{
+                "type": "text",
+                "text": "Review this change."
+            }]
+        }
+    });
+
+    let mut state = ClaudeTurnState::default();
+    let mut recorder = TestRecorder::default();
+    let mut session_id = None;
+    let mut observed_generation = None;
+
+    // Claude Code 2.1.220 emits process-scoped SessionStart hooks before the
+    // first prompt. The new prompt generation resets any out-of-turn parser
+    // state, while exact process-local hook/status frames remain effect-free.
+    handle_claude_event(
+        &json!({
+            "type": "system",
+            "subtype": "hook_started",
+            "hook_event": "SessionStart"
+        }),
+        &mut session_id,
+        &mut state,
+        &mut recorder,
+    )
+    .expect("SessionStart hook should be consumed");
+    handle_claude_event(
+        &json!({
+            "type": "system",
+            "subtype": "future_post_turn_event"
+        }),
+        &mut session_id,
+        &mut state,
+        &mut recorder,
+    )
+    .expect("out-of-turn unknown event should fail closed");
+    assert!(state.replay_became_unsafe);
+    reset_claude_turn_state_for_replay_generation(
+        &mut observed_generation,
+        Some("live-generation-1"),
+        &mut state,
+        &mut recorder,
+    )
+    .expect("new generation should establish a clean turn boundary");
+    assert!(!state.replay_became_unsafe);
+    for event in [
+        json!({
+            "type": "system",
+            "subtype": "status",
+            "status": "requesting"
+        }),
+        prompt_echo.clone(),
+        json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "allowed"
+            }
+        }),
+    ] {
+        handle_claude_event(&event, &mut session_id, &mut state, &mut recorder)
+            .expect("known effect-free frame should be consumed");
+    }
+    assert!(!state.replay_became_unsafe);
+    assert!(matches!(
+        classify_claude_transient_api_result(
+            &overloaded,
+            "session-live-sequence",
+            0,
+            !state.replay_became_unsafe
+        ),
+        Some(ClaudeTransientApiResult::Retry { status: 529, .. })
+    ));
+
+    // Prompt hooks occur after the prompt boundary and may have side effects.
+    handle_claude_event(
+        &json!({
+            "type": "system",
+            "subtype": "hook_response",
+            "hook_event": "UserPromptSubmit"
+        }),
+        &mut session_id,
+        &mut state,
+        &mut recorder,
+    )
+    .expect("prompt hook should be tolerated but fail replay closed");
+    assert_eq!(
+        classify_claude_transient_api_result(
+            &overloaded,
+            "session-live-sequence",
+            0,
+            !state.replay_became_unsafe
+        ),
+        None
+    );
+
+    reset_claude_turn_state_for_replay_generation(
+        &mut observed_generation,
+        Some("live-generation-2"),
+        &mut state,
+        &mut recorder,
+    )
+    .expect("next prompt generation should reset the prior turn");
+    handle_claude_event(
+        &json!({
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "delta": {
+                    "text": "partial assistant output"
+                }
+            }
+        }),
+        &mut session_id,
+        &mut state,
+        &mut recorder,
+    )
+    .expect("partial assistant output should be recorded");
+    assert_eq!(
+        classify_claude_transient_api_result(
+            &overloaded,
+            "session-live-sequence",
+            0,
+            !state.replay_became_unsafe
+        ),
+        None
+    );
+}
+
+#[test]
+fn claude_retry_replays_the_exact_last_written_prompt() {
+    let prompt = ClaudePromptCommand {
+        attachments: vec![PromptImageAttachment {
+            data: "encoded-image".to_owned(),
+            metadata: MessageImageAttachment {
+                byte_size: 13,
+                file_name: "retry.png".to_owned(),
+                media_type: "image/png".to_owned(),
+            },
+        }],
+        replay_generation: "retry-generation-1".to_owned(),
+        text: "review this exact prompt".to_owned(),
+    };
+    let mut writer = Vec::new();
+    let replay_prompt = Arc::new(Mutex::new(None));
+
+    write_claude_runtime_command(
+        &mut writer,
+        &replay_prompt,
+        ClaudeRuntimeCommand::Prompt(prompt),
+    )
+    .expect("initial prompt should be written");
+    write_claude_runtime_command(
+        &mut writer,
+        &replay_prompt,
+        ClaudeRuntimeCommand::RetryLastPrompt {
+            replay_generation: "retry-generation-1".to_owned(),
+            retry_detail: "Retrying Claude automatically.".to_owned(),
+        },
+    )
+    .expect("retry should replay the saved prompt");
+
+    let messages = String::from_utf8(writer)
+        .expect("Claude NDJSON should be UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("valid Claude NDJSON"))
+        .collect::<Vec<_>>();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0], messages[1]);
+}
+
+#[test]
+fn claude_stale_retry_generation_is_ignored_and_terminal_clear_releases_prompt() {
+    let prompt = ClaudePromptCommand {
+        attachments: vec![PromptImageAttachment {
+            data: "encoded-image".to_owned(),
+            metadata: MessageImageAttachment {
+                byte_size: 13,
+                file_name: "retry.png".to_owned(),
+                media_type: "image/png".to_owned(),
+            },
+        }],
+        replay_generation: "current-generation".to_owned(),
+        text: "retain only until terminal result".to_owned(),
+    };
+    let mut writer = Vec::new();
+    let replay_prompt = Arc::new(Mutex::new(None));
+    write_claude_runtime_command(
+        &mut writer,
+        &replay_prompt,
+        ClaudeRuntimeCommand::Prompt(prompt),
+    )
+    .expect("initial prompt should be written");
+    let initial_wire_len = writer.len();
+
+    write_claude_runtime_command(
+        &mut writer,
+        &replay_prompt,
+        ClaudeRuntimeCommand::RetryLastPrompt {
+            replay_generation: "stale-generation".to_owned(),
+            retry_detail: "Stale retry.".to_owned(),
+        },
+    )
+    .expect("stale retry should be ignored without killing the runtime");
+    assert_eq!(writer.len(), initial_wire_len);
+    assert!(!clear_claude_replay_prompt_if_matches(
+        &replay_prompt,
+        "stale-generation"
+    ));
+    assert_eq!(
+        claude_replay_generation(&replay_prompt).as_deref(),
+        Some("current-generation")
+    );
+
+    assert!(clear_claude_replay_prompt_if_matches(
+        &replay_prompt,
+        "current-generation"
+    ));
+    assert_eq!(claude_replay_generation(&replay_prompt), None);
+
+    write_claude_runtime_command(
+        &mut writer,
+        &replay_prompt,
+        ClaudeRuntimeCommand::RetryLastPrompt {
+            replay_generation: "current-generation".to_owned(),
+            retry_detail: "Retry after terminal cleanup.".to_owned(),
+        },
+    )
+    .expect("retry after terminal cleanup should remain a safe no-op");
+    assert_eq!(writer.len(), initial_wire_len);
+}
+
 // Pins read-only auto-approval as a filtered Claude permission mode, not a
 // shortcut to full `AutoApprove`. Read-only Bash commands may proceed without
 // surfacing an approval card so `/review-code` can finish unattended.
@@ -635,6 +1143,7 @@ fn clear_claude_turn_state_resets_all_fields() {
                 subagent_type: Some("worker".to_owned()),
             },
         )]),
+        replay_became_unsafe: true,
         streamed_assistant_text: "partial".to_owned(),
         saw_text_delta: true,
     };
@@ -647,6 +1156,7 @@ fn clear_claude_turn_state_resets_all_fields() {
     assert!(state.parallel_agents.is_empty());
     assert!(!state.permission_denied_this_turn);
     assert!(state.pending_tools.is_empty());
+    assert!(!state.replay_became_unsafe);
     assert!(state.streamed_assistant_text.is_empty());
     assert!(!state.saw_text_delta);
 }
@@ -684,6 +1194,7 @@ fn reset_claude_turn_state_clears_all_fields_and_finishes_streaming_text() {
                 subagent_type: Some("worker".to_owned()),
             },
         )]),
+        replay_became_unsafe: true,
         streamed_assistant_text: "partial".to_owned(),
         saw_text_delta: true,
     };
@@ -701,6 +1212,7 @@ fn reset_claude_turn_state_clears_all_fields_and_finishes_streaming_text() {
     assert!(state.parallel_agents.is_empty());
     assert!(!state.permission_denied_this_turn);
     assert!(state.pending_tools.is_empty());
+    assert!(!state.replay_became_unsafe);
     assert!(state.streamed_assistant_text.is_empty());
     assert!(!state.saw_text_delta);
     assert_eq!(recorder.reset_turn_state_calls, 1);
