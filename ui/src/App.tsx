@@ -1108,6 +1108,7 @@ export default function App() {
     handlePaneViewModeChange,
     handlePaneSourcePathChange,
     handleOpenSourceTab,
+    handleOpenMailboxTab,
     handleOpenDiffPreviewTab,
     handleOpenGitStatusDiffPreviewTab,
     handleOpenFilesystemTab,
@@ -2123,6 +2124,7 @@ export default function App() {
               onTabDrop={handleTabDrop}
               onPaneViewModeChange={handlePaneViewModeChange}
               onOpenSourceTab={handleOpenSourceTab}
+              onOpenMailboxTab={handleOpenMailboxTab}
               onOpenDiffPreviewTab={handleOpenDiffPreviewTab}
               onOpenGitStatusDiffPreviewTab={handleOpenGitStatusDiffPreviewTab}
               onOpenFilesystemTab={handleOpenFilesystemTab}

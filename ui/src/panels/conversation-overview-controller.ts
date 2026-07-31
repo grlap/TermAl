@@ -1,642 +1,319 @@
-// Owns the AgentSessionPanel-side wiring for the conversation overview rail:
-// tail-item synthesis, layout/viewport snapshot subscriptions, and overview
-// navigation. Does not own projection math (see conversation-overview-map.ts)
-// or rail rendering (see ConversationOverviewRail.tsx). Split out of
-// AgentSessionPanel.tsx during the round-28 shrinkage.
+// AgentSessionPanel wiring for the server-computed conversation overview.
+//
+// The rail is intentionally independent of transcript residency and
+// virtualizer layout. This controller owns only:
+//   - one bounded overview fetch keyed by server freshness metadata,
+//   - conversion of the resident scroll fraction into global positions, and
+//   - direct around-position history navigation for off-window targets.
 
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type RefObject,
 } from "react";
 
+import {
+  fetchSessionOverview,
+  type SessionOverviewResponse,
+} from "../api";
+import { requestSessionHistoryAroundPage } from "../session-history-demand";
 import { CONVERSATION_OVERVIEW_MIN_MESSAGES } from "./ConversationOverviewRail";
-import type {
-  ConversationOverviewItem,
-  ConversationOverviewTailItemInput,
-} from "./conversation-overview-map";
-import type {
-  VirtualizedConversationLayoutSnapshot,
-  VirtualizedConversationMessageListHandle,
-  VirtualizedConversationViewportSnapshot,
-} from "./VirtualizedConversationMessageList";
-import type { Session } from "../types";
+import type { ConversationOverviewViewport } from "./conversation-overview-map";
+import type { VirtualizedConversationMessageListHandle } from "./VirtualizedConversationMessageList";
 
-const CONVERSATION_OVERVIEW_LIVE_TURN_HEIGHT_PX = 108;
-const CONVERSATION_OVERVIEW_FALLBACK_MAX_HEIGHT_PX = 520;
-const CONVERSATION_OVERVIEW_MIN_HEIGHT_PX = 160;
+const EMPTY_OVERVIEW_VIEWPORT: ConversationOverviewViewport = {
+  startPosition: 0,
+  endPosition: 1,
+};
 const CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX = 24;
-const CONVERSATION_OVERVIEW_RAIL_BUILD_IDLE_TIMEOUT_MS = 1_500;
-const CONVERSATION_OVERVIEW_RAIL_BUILD_FALLBACK_DELAY_MS = 180;
-
-type ConversationOverviewRailBuildTask = {
-  id: number;
-  run: () => void;
-};
-
-type ConversationOverviewRailBuildScheduler = {
-  nextTaskId: number;
-  cancelDrain: (() => void) | null;
-  pendingTasks: ConversationOverviewRailBuildTask[];
-};
-
-type ConversationOverviewIdleWindow = Window &
-  typeof globalThis & {
-    requestIdleCallback?: (
-      callback: IdleRequestCallback,
-      options?: IdleRequestOptions,
-    ) => number;
-    cancelIdleCallback?: (handle: number) => void;
-  };
-
-function createConversationOverviewRailBuildScheduler(): ConversationOverviewRailBuildScheduler {
-  return {
-    nextTaskId: 1,
-    cancelDrain: null,
-    pendingTasks: [],
-  };
-}
-
-function resetConversationOverviewRailBuildScheduler(
-  scheduler: ConversationOverviewRailBuildScheduler,
-) {
-  scheduler.cancelDrain?.();
-  scheduler.cancelDrain = null;
-  scheduler.pendingTasks.splice(0);
-}
-
-function canUseMessageIndexFallback(
-  handle: VirtualizedConversationMessageListHandle,
-  item: ConversationOverviewItem,
-) {
-  const snapshot = handle.getLayoutSnapshot();
-  return snapshot.messages.some(
-    (message) =>
-      message.messageIndex === item.messageIndex &&
-      message.messageId === item.messageId,
-  );
-}
-
-function jumpToOverviewItem(
-  handle: VirtualizedConversationMessageListHandle,
-  item: ConversationOverviewItem,
-) {
-  if (handle.jumpToMessageId(item.messageId, { align: "center" })) {
-    return true;
-  }
-  if (!canUseMessageIndexFallback(handle, item)) {
-    return false;
-  }
-  return handle.jumpToMessageIndex(item.messageIndex, { align: "center" });
-}
-
-function scheduleConversationOverviewRailBuild(
-  scheduler: ConversationOverviewRailBuildScheduler,
-  run: () => void,
-) {
-  const task: ConversationOverviewRailBuildTask = {
-    id: scheduler.nextTaskId,
-    run,
-  };
-  scheduler.nextTaskId += 1;
-  scheduler.pendingTasks.push(task);
-  scheduleConversationOverviewRailBuildDrain(scheduler);
-  return () => {
-    const taskIndex = scheduler.pendingTasks.findIndex(
-      (candidate) => candidate.id === task.id,
-    );
-    if (taskIndex !== -1) {
-      scheduler.pendingTasks.splice(taskIndex, 1);
-    }
-    if (scheduler.pendingTasks.length === 0 && scheduler.cancelDrain !== null) {
-      scheduler.cancelDrain();
-      scheduler.cancelDrain = null;
-    }
-  };
-}
-
-function scheduleConversationOverviewRailBuildDrain(
-  scheduler: ConversationOverviewRailBuildScheduler,
-) {
-  if (scheduler.cancelDrain !== null) {
-    return;
-  }
-  scheduler.cancelDrain = scheduleConversationOverviewIdleCallback(() => {
-    scheduler.cancelDrain = null;
-    const task = scheduler.pendingTasks.shift();
-    if (task) {
-      task.run();
-    }
-    if (scheduler.pendingTasks.length > 0) {
-      scheduleConversationOverviewRailBuildDrain(scheduler);
-    }
-  });
-}
-
-function scheduleConversationOverviewIdleCallback(run: () => void) {
-  const idleWindow = window as ConversationOverviewIdleWindow;
-  if (
-    typeof idleWindow.requestIdleCallback === "function" &&
-    typeof idleWindow.cancelIdleCallback === "function"
-  ) {
-    const idleHandle = idleWindow.requestIdleCallback(
-      () => {
-        run();
-      },
-      { timeout: CONVERSATION_OVERVIEW_RAIL_BUILD_IDLE_TIMEOUT_MS },
-    );
-    return () => idleWindow.cancelIdleCallback?.(idleHandle);
-  }
-
-  const timeoutId = window.setTimeout(
-    run,
-    CONVERSATION_OVERVIEW_RAIL_BUILD_FALLBACK_DELAY_MS,
-  );
-  return () => {
-    window.clearTimeout(timeoutId);
-  };
-}
 
 export function useConversationOverviewController({
-  agent,
   isActive,
   messageCount,
-  onFullTranscriptDemand,
+  messageStartIndex,
+  renderedMessageCount,
   scrollContainerRef,
   sessionId,
-  showWaitingIndicator,
-  waitingIndicatorPrompt,
+  sessionMutationStamp,
 }: {
-  agent: Session["agent"];
   isActive: boolean;
   messageCount: number;
-  onFullTranscriptDemand?: () => void;
+  messageStartIndex: number;
+  renderedMessageCount: number;
   scrollContainerRef: RefObject<HTMLElement | null>;
   sessionId: string;
-  showWaitingIndicator: boolean;
-  waitingIndicatorPrompt: string | null;
+  sessionMutationStamp: number;
 }) {
-  const tailItems = useMemo(
-    () =>
-      buildConversationOverviewTailItems({
-        agent,
-        sessionId,
-        showWaitingIndicator,
-        waitingIndicatorPrompt,
-      }),
-    [agent, sessionId, showWaitingIndicator, waitingIndicatorPrompt],
-  );
   const shouldRender = messageCount >= CONVERSATION_OVERVIEW_MIN_MESSAGES;
   const virtualizerHandleRef =
     useRef<VirtualizedConversationMessageListHandle | null>(null);
-  const [isRailReady, setIsRailReady] = useState(false);
-  const [layoutSnapshot, setLayoutSnapshot] =
-    useState<VirtualizedConversationLayoutSnapshot | null>(null);
-  const [viewportSnapshot, setViewportSnapshot] =
-    useState<VirtualizedConversationViewportSnapshot | null>(null);
-  const layoutSnapshotMessageCount = layoutSnapshot?.messageCount ?? null;
-  const layoutSnapshotSessionId = layoutSnapshot?.sessionId ?? null;
-  const overviewSessionIdRef = useRef(sessionId);
-  const railBuildSchedulerRef = useRef(
-    createConversationOverviewRailBuildScheduler(),
-  );
   const navigationFrameIdsRef = useRef<Set<number>>(new Set());
-  overviewSessionIdRef.current = sessionId;
-
-  useEffect(
-    () => () => {
-      resetConversationOverviewRailBuildScheduler(railBuildSchedulerRef.current);
-    },
-    [],
+  const sessionIdRef = useRef(sessionId);
+  const messageStartIndexRef = useRef(messageStartIndex);
+  const renderedMessageCountRef = useRef(renderedMessageCount);
+  const [overview, setOverview] = useState<SessionOverviewResponse | null>(null);
+  const [viewport, setViewport] = useState<ConversationOverviewViewport>(
+    EMPTY_OVERVIEW_VIEWPORT,
   );
+  const [railHeightPx, setRailHeightPx] = useState<number | null>(null);
+  sessionIdRef.current = sessionId;
+  messageStartIndexRef.current = messageStartIndex;
+  renderedMessageCountRef.current = renderedMessageCount;
 
-  const refreshLayoutSnapshot = useCallback(() => {
-    const nextSnapshot = virtualizerHandleRef.current?.getLayoutSnapshot() ?? null;
-    setLayoutSnapshot((previousSnapshot) =>
-      areConversationOverviewLayoutSnapshotsEqual(previousSnapshot, nextSnapshot)
-        ? previousSnapshot
-        : nextSnapshot,
-    );
-    const nextViewportSnapshot =
-      nextSnapshot === null
-        ? null
-        : extractConversationOverviewViewportSnapshot(nextSnapshot);
-    setViewportSnapshot((previousSnapshot) =>
-      areConversationOverviewViewportSnapshotsEqual(
-        previousSnapshot,
-        nextViewportSnapshot,
-      )
-        ? previousSnapshot
-        : nextViewportSnapshot,
-    );
-  }, []);
-
-  const refreshViewportSnapshot = useCallback(() => {
-    const nextSnapshot = virtualizerHandleRef.current?.getViewportSnapshot() ?? null;
-    setViewportSnapshot((previousSnapshot) =>
-      areConversationOverviewViewportSnapshotsEqual(previousSnapshot, nextSnapshot)
-        ? previousSnapshot
-        : nextSnapshot,
-    );
-  }, []);
-  const layoutRefreshFrameIdRef = useRef<number | null>(null);
-  const viewportRefreshFrameIdRef = useRef<number | null>(null);
-
-  const cancelLayoutRefreshFrame = useCallback(() => {
-    if (layoutRefreshFrameIdRef.current === null) {
-      return;
-    }
-    window.cancelAnimationFrame(layoutRefreshFrameIdRef.current);
-    layoutRefreshFrameIdRef.current = null;
-  }, []);
-
-  const cancelViewportRefreshFrame = useCallback(() => {
-    if (viewportRefreshFrameIdRef.current === null) {
-      return;
-    }
-    window.cancelAnimationFrame(viewportRefreshFrameIdRef.current);
-    viewportRefreshFrameIdRef.current = null;
-  }, []);
-
-  const scheduleLayoutRefresh = useCallback(() => {
-    if (layoutRefreshFrameIdRef.current !== null) {
-      return;
-    }
-    const expectedSessionId = overviewSessionIdRef.current;
-    let frameId: number | null = null;
-    let ranSynchronously = false;
-    frameId = window.requestAnimationFrame(() => {
-      if (frameId === null) {
-        ranSynchronously = true;
-      } else if (layoutRefreshFrameIdRef.current === frameId) {
-        layoutRefreshFrameIdRef.current = null;
-      }
-      if (overviewSessionIdRef.current !== expectedSessionId) {
-        return;
-      }
-      refreshLayoutSnapshot();
-    });
-    layoutRefreshFrameIdRef.current = ranSynchronously ? null : frameId;
-  }, [refreshLayoutSnapshot]);
-
-  const scheduleViewportRefresh = useCallback(() => {
-    if (viewportRefreshFrameIdRef.current !== null) {
-      return;
-    }
-    const expectedSessionId = overviewSessionIdRef.current;
-    let frameId: number | null = null;
-    let ranSynchronously = false;
-    frameId = window.requestAnimationFrame(() => {
-      if (frameId === null) {
-        ranSynchronously = true;
-      } else if (viewportRefreshFrameIdRef.current === frameId) {
-        viewportRefreshFrameIdRef.current = null;
-      }
-      if (overviewSessionIdRef.current !== expectedSessionId) {
-        return;
-      }
-      refreshViewportSnapshot();
-    });
-    viewportRefreshFrameIdRef.current = ranSynchronously ? null : frameId;
-  }, [refreshViewportSnapshot]);
-
-  const scheduleResizeRefresh = useCallback(() => {
-    scheduleLayoutRefresh();
-    scheduleViewportRefresh();
-  }, [scheduleLayoutRefresh, scheduleViewportRefresh]);
-
-  const cancelNavigationFrames = useCallback(() => {
-    navigationFrameIdsRef.current.forEach((frameId) => {
-      window.cancelAnimationFrame(frameId);
-    });
-    navigationFrameIdsRef.current.clear();
-  }, []);
-
-  const scheduleNavigationFrame = useCallback((callback: () => void) => {
-    const expectedSessionId = overviewSessionIdRef.current;
-    let frameId: number | null = null;
-    let ranSynchronously = false;
-    const runFrame = () => {
-      if (frameId === null) {
-        ranSynchronously = true;
-      } else {
-        navigationFrameIdsRef.current.delete(frameId);
-      }
-      if (overviewSessionIdRef.current !== expectedSessionId) {
-        return;
-      }
-      callback();
-    };
-    frameId = window.requestAnimationFrame(runFrame);
-    if (!ranSynchronously) {
-      navigationFrameIdsRef.current.add(frameId);
-    }
-  }, []);
-
-  const navigate = useCallback(
-    (item: ConversationOverviewItem) => {
-      const handle = virtualizerHandleRef.current;
-      if (!handle) {
-        return;
-      }
-      const retryAfterFullTranscriptDemand = () => {
-        onFullTranscriptDemand?.();
-        const retryJump = () => {
-          const nextHandle = virtualizerHandleRef.current;
-          if (!nextHandle) {
-            return false;
-          }
-          const jumped = jumpToOverviewItem(nextHandle, item);
-          if (jumped) {
-            scheduleNavigationFrame(refreshViewportSnapshot);
-          }
-          return jumped;
-        };
-        scheduleNavigationFrame(() => {
-          if (retryJump()) {
-            return;
-          }
-          scheduleNavigationFrame(retryJump);
-        });
-      };
-      if (item.kind === "live_turn") {
-        const jumpedToTail =
-          messageCount > 0
-            ? handle.jumpToMessageIndex(messageCount - 1, { align: "end" })
-            : false;
-        const scrollTailIntoView = () => {
-          const node = scrollContainerRef.current;
-          if (!node) {
-            return;
-          }
-          node.scrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-          refreshViewportSnapshot();
-        };
-        if (jumpedToTail) {
-          scheduleNavigationFrame(scrollTailIntoView);
-        } else {
-          scrollTailIntoView();
-        }
-        return;
-      }
-      const jumped = jumpToOverviewItem(handle, item);
-      if (jumped) {
-        scheduleNavigationFrame(refreshViewportSnapshot);
-      } else if (onFullTranscriptDemand) {
-        retryAfterFullTranscriptDemand();
-      }
-    },
-    [
+  const refreshViewport = useCallback(() => {
+    const scrollNode = scrollContainerRef.current;
+    const nextViewport = conversationOverviewViewportFromResidentWindow({
       messageCount,
-      onFullTranscriptDemand,
-      refreshViewportSnapshot,
-      scheduleNavigationFrame,
-      scrollContainerRef,
-    ],
-  );
+      messageStartIndex,
+      renderedMessageCount,
+      scrollNode,
+    });
+    setViewport((current) =>
+      current.startPosition === nextViewport.startPosition &&
+      current.endPosition === nextViewport.endPosition
+        ? current
+        : nextViewport,
+    );
+    if (scrollNode && scrollNode.clientHeight > 0) {
+      const nextRailHeightPx = Math.max(
+        0,
+        scrollNode.clientHeight - CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX,
+      );
+      setRailHeightPx((current) =>
+        current === nextRailHeightPx ? current : nextRailHeightPx,
+      );
+    }
+  }, [
+    messageCount,
+    messageStartIndex,
+    renderedMessageCount,
+    scrollContainerRef,
+  ]);
 
-  useEffect(() => cancelNavigationFrames, [
-    cancelNavigationFrames,
+  useEffect(() => {
+    if (!isActive || !shouldRender) {
+      setOverview(null);
+      return undefined;
+    }
+    let canceled = false;
+    const expectedSessionId = sessionId;
+    setOverview((current) =>
+      current?.sessionId === expectedSessionId ? current : null,
+    );
+    void fetchSessionOverview(sessionId).then(
+      (response) => {
+        if (
+          canceled ||
+          sessionIdRef.current !== expectedSessionId ||
+          response.sessionId !== expectedSessionId
+        ) {
+          return;
+        }
+        setOverview(response);
+      },
+      () => {
+        if (!canceled && sessionIdRef.current === expectedSessionId) {
+          setOverview(null);
+        }
+      },
+    );
+    return () => {
+      canceled = true;
+    };
+  }, [
+    isActive,
+    messageCount,
     sessionId,
+    sessionMutationStamp,
     shouldRender,
   ]);
 
   useEffect(() => {
     if (!isActive || !shouldRender) {
-      setIsRailReady(false);
-      setLayoutSnapshot((previousSnapshot) =>
-        previousSnapshot === null ? previousSnapshot : null,
-      );
-      setViewportSnapshot((previousSnapshot) =>
-        previousSnapshot === null ? previousSnapshot : null,
-      );
-      return;
-    }
-
-    setIsRailReady(false);
-    const expectedSessionId = sessionId;
-    let firstFrameId: number | null = null;
-    let secondFrameId: number | null = null;
-    let cancelQueuedActivation: (() => void) | null = null;
-    let cancelled = false;
-    const activate = () => {
-      if (cancelled || overviewSessionIdRef.current !== expectedSessionId) {
-        return;
-      }
-      refreshLayoutSnapshot();
-      setIsRailReady(true);
-    };
-    firstFrameId = window.requestAnimationFrame(() => {
-      firstFrameId = null;
-      secondFrameId = window.requestAnimationFrame(() => {
-        secondFrameId = null;
-        cancelQueuedActivation = scheduleConversationOverviewRailBuild(
-          railBuildSchedulerRef.current,
-          activate,
-        );
-      });
-    });
-
-    return () => {
-      cancelled = true;
-      cancelQueuedActivation?.();
-      if (firstFrameId !== null) {
-        window.cancelAnimationFrame(firstFrameId);
-      }
-      if (secondFrameId !== null) {
-        window.cancelAnimationFrame(secondFrameId);
-      }
-    };
-  }, [isActive, refreshLayoutSnapshot, sessionId, shouldRender]);
-
-  useEffect(() => {
-    if (!isActive || !shouldRender || !isRailReady) {
+      setViewport(EMPTY_OVERVIEW_VIEWPORT);
+      setRailHeightPx(null);
       return undefined;
     }
     const scrollNode = scrollContainerRef.current;
-
-    scheduleLayoutRefresh();
-    scrollNode?.addEventListener("scroll", scheduleViewportRefresh, {
-      passive: true,
-    });
-    window.addEventListener("resize", scheduleResizeRefresh);
+    refreshViewport();
+    scrollNode?.addEventListener("scroll", refreshViewport, { passive: true });
+    const resizeObserver =
+      scrollNode && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(refreshViewport)
+        : null;
+    if (scrollNode) {
+      resizeObserver?.observe(scrollNode);
+    }
     return () => {
-      cancelLayoutRefreshFrame();
-      cancelViewportRefreshFrame();
-      scrollNode?.removeEventListener("scroll", scheduleViewportRefresh);
-      window.removeEventListener("resize", scheduleResizeRefresh);
+      scrollNode?.removeEventListener("scroll", refreshViewport);
+      resizeObserver?.disconnect();
     };
   }, [
-    cancelLayoutRefreshFrame,
-    cancelViewportRefreshFrame,
     isActive,
-    isRailReady,
+    refreshViewport,
     scrollContainerRef,
-    scheduleLayoutRefresh,
-    scheduleResizeRefresh,
-    scheduleViewportRefresh,
-    shouldRender,
-  ]);
-
-  useEffect(() => {
-    if (
-      !isActive ||
-      !shouldRender ||
-      !isRailReady ||
-      (layoutSnapshotSessionId === sessionId &&
-        layoutSnapshotMessageCount === messageCount)
-    ) {
-      return;
-    }
-    cancelLayoutRefreshFrame();
-    refreshLayoutSnapshot();
-  }, [
-    cancelLayoutRefreshFrame,
-    isActive,
-    isRailReady,
-    layoutSnapshotMessageCount,
-    layoutSnapshotSessionId,
-    messageCount,
-    refreshLayoutSnapshot,
     sessionId,
     shouldRender,
   ]);
 
-  const maxHeightPx =
-    viewportSnapshot?.viewportHeightPx !== undefined
-      ? Math.max(
-          CONVERSATION_OVERVIEW_MIN_HEIGHT_PX,
-          viewportSnapshot.viewportHeightPx -
-            CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX,
-        )
-      : CONVERSATION_OVERVIEW_FALLBACK_MAX_HEIGHT_PX;
+  const cancelNavigationFrames = useCallback(() => {
+    for (const frameId of navigationFrameIdsRef.current) {
+      window.cancelAnimationFrame(frameId);
+    }
+    navigationFrameIdsRef.current.clear();
+  }, []);
+
+  useEffect(() => cancelNavigationFrames, [
+    cancelNavigationFrames,
+    sessionId,
+  ]);
+
+  const scheduleNavigationFrame = useCallback((callback: () => void) => {
+    const expectedSessionId = sessionIdRef.current;
+    let frameId = 0;
+    let firedSynchronously = false;
+    frameId = window.requestAnimationFrame(() => {
+      firedSynchronously = true;
+      navigationFrameIdsRef.current.delete(frameId);
+      if (sessionIdRef.current === expectedSessionId) {
+        callback();
+      }
+    });
+    if (!firedSynchronously) {
+      navigationFrameIdsRef.current.add(frameId);
+    }
+  }, []);
+
+  const jumpToResidentPosition = useCallback((position: number) => {
+    const localIndex = position - messageStartIndexRef.current;
+    if (
+      localIndex < 0 ||
+      localIndex >= renderedMessageCountRef.current
+    ) {
+      return false;
+    }
+    return (
+      virtualizerHandleRef.current?.jumpToMessageIndex(localIndex, {
+        align: "center",
+        flush: true,
+      }) ?? false
+    );
+  }, []);
+
+  const navigate = useCallback(
+    (position: number) => {
+      const boundedPosition = Math.min(
+        Math.max(0, Math.floor(position)),
+        Math.max(0, messageCount - 1),
+      );
+      if (jumpToResidentPosition(boundedPosition)) {
+        scheduleNavigationFrame(refreshViewport);
+        return;
+      }
+      const expectedSessionId = sessionIdRef.current;
+      void requestSessionHistoryAroundPage(
+        expectedSessionId,
+        boundedPosition,
+      ).then((applied) => {
+        if (!applied || sessionIdRef.current !== expectedSessionId) {
+          return;
+        }
+        const retryJump = () => {
+          if (jumpToResidentPosition(boundedPosition)) {
+            refreshViewport();
+            return;
+          }
+          scheduleNavigationFrame(() => {
+            jumpToResidentPosition(boundedPosition);
+            refreshViewport();
+          });
+        };
+        scheduleNavigationFrame(retryJump);
+      });
+    },
+    [
+      jumpToResidentPosition,
+      messageCount,
+      refreshViewport,
+      scheduleNavigationFrame,
+    ],
+  );
 
   return {
-    isRailReady,
-    layoutSnapshot,
-    maxHeightPx,
+    isRailReady: overview !== null,
     navigate,
-    shouldRenderRail: shouldRender && isRailReady && layoutSnapshot !== null,
+    overview,
+    railHeightPx,
+    shouldRenderRail: isActive && shouldRender,
     shouldRender,
-    tailItems,
-    viewportSnapshot,
+    viewport,
     virtualizerHandleRef,
   };
 }
 
-/** @internal Exported for focused regression tests; not a cross-panel API. */
-export function buildConversationOverviewTailItems({
-  agent,
-  sessionId,
-  showWaitingIndicator,
-  waitingIndicatorPrompt,
+export function conversationOverviewViewportFromResidentWindow({
+  messageCount,
+  messageStartIndex,
+  renderedMessageCount,
+  scrollNode,
 }: {
-  agent: Session["agent"];
-  sessionId: string;
-  showWaitingIndicator: boolean;
-  waitingIndicatorPrompt: string | null;
-}): readonly ConversationOverviewTailItemInput[] {
-  if (!showWaitingIndicator) {
-    return [];
+  messageCount: number;
+  messageStartIndex: number;
+  renderedMessageCount: number;
+  scrollNode: Pick<
+    HTMLElement,
+    "clientHeight" | "scrollHeight" | "scrollTop"
+  > | null;
+}): ConversationOverviewViewport {
+  if (messageCount <= 0 || renderedMessageCount <= 0) {
+    return EMPTY_OVERVIEW_VIEWPORT;
   }
-  const isCommand = Boolean(waitingIndicatorPrompt?.trim().startsWith("/"));
-  return [
-    {
-      id: `live-turn:${sessionId}`,
-      kind: "live_turn",
-      status: "running",
-      estimatedHeightPx: CONVERSATION_OVERVIEW_LIVE_TURN_HEIGHT_PX,
-      textSample: `${agent} is working — ${
-        isCommand ? "Executing a command" : "Waiting for output"
-      }`,
-      author: "assistant",
-    },
-  ];
-}
-
-function areConversationOverviewLayoutSnapshotsEqual(
-  left: VirtualizedConversationLayoutSnapshot | null,
-  right: VirtualizedConversationLayoutSnapshot | null,
-): boolean {
-  if (left === right) {
-    return true;
-  }
-  if (!left || !right) {
-    return false;
-  }
-  if (
-    left.sessionId !== right.sessionId ||
-    left.messageCount !== right.messageCount ||
-    left.estimatedTotalHeightPx !== right.estimatedTotalHeightPx ||
-    left.viewportWidthPx !== right.viewportWidthPx ||
-    left.isActive !== right.isActive ||
-    left.messages.length !== right.messages.length
-  ) {
-    return false;
-  }
-
-  return left.messages.every((leftMessage, index) => {
-    const rightMessage = right.messages[index];
-    return (
-      rightMessage !== undefined &&
-      leftMessage.messageId === rightMessage.messageId &&
-      leftMessage.messageIndex === rightMessage.messageIndex &&
-      leftMessage.pageIndex === rightMessage.pageIndex &&
-      leftMessage.type === rightMessage.type &&
-      leftMessage.author === rightMessage.author &&
-      leftMessage.estimatedTopPx === rightMessage.estimatedTopPx &&
-      leftMessage.estimatedHeightPx === rightMessage.estimatedHeightPx &&
-      leftMessage.measuredPageHeightPx === rightMessage.measuredPageHeightPx
-    );
-  });
-}
-
-function extractConversationOverviewViewportSnapshot(
-  snapshot: VirtualizedConversationLayoutSnapshot,
-): VirtualizedConversationViewportSnapshot {
-  const firstMessage = snapshot.messages[0] ?? null;
-  const lastMessage = snapshot.messages[snapshot.messages.length - 1] ?? null;
-  return {
-    sessionId: snapshot.sessionId,
-    messageCount: snapshot.messageCount,
-    windowStartMessageId: firstMessage?.messageId ?? null,
-    windowEndMessageId: lastMessage?.messageId ?? null,
-    estimatedTotalHeightPx: snapshot.estimatedTotalHeightPx,
-    viewportTopPx: snapshot.viewportTopPx,
-    viewportHeightPx: snapshot.viewportHeightPx,
-    viewportWidthPx: snapshot.viewportWidthPx,
-    isActive: snapshot.isActive,
-    visiblePageRange: snapshot.visiblePageRange,
-    mountedPageRange: snapshot.mountedPageRange,
-  };
-}
-
-function areConversationOverviewViewportSnapshotsEqual(
-  left: VirtualizedConversationViewportSnapshot | null,
-  right: VirtualizedConversationViewportSnapshot | null,
-): boolean {
-  if (left === right) {
-    return true;
-  }
-  if (!left || !right) {
-    return false;
-  }
-  return (
-    left.sessionId === right.sessionId &&
-    left.messageCount === right.messageCount &&
-    left.windowStartMessageId === right.windowStartMessageId &&
-    left.windowEndMessageId === right.windowEndMessageId &&
-    left.estimatedTotalHeightPx === right.estimatedTotalHeightPx &&
-    left.viewportTopPx === right.viewportTopPx &&
-    left.viewportHeightPx === right.viewportHeightPx &&
-    left.viewportWidthPx === right.viewportWidthPx &&
-    left.isActive === right.isActive &&
-    left.visiblePageRange.startIndex === right.visiblePageRange.startIndex &&
-    left.visiblePageRange.endIndex === right.visiblePageRange.endIndex &&
-    left.mountedPageRange.startIndex === right.mountedPageRange.startIndex &&
-    left.mountedPageRange.endIndex === right.mountedPageRange.endIndex
+  const boundedStart = Math.min(
+    Math.max(0, messageStartIndex),
+    Math.max(0, messageCount - 1),
   );
+  const boundedResidentCount = Math.min(
+    renderedMessageCount,
+    messageCount - boundedStart,
+  );
+  if (!scrollNode || scrollNode.scrollHeight <= 0) {
+    return {
+      startPosition: boundedStart,
+      endPosition: Math.min(
+        messageCount,
+        boundedStart + boundedResidentCount,
+      ),
+    };
+  }
+
+  const visibleFraction = Math.min(
+    1,
+    Math.max(0, scrollNode.clientHeight / scrollNode.scrollHeight),
+  );
+  const visibleMessageCount = Math.max(
+    1,
+    Math.ceil(boundedResidentCount * visibleFraction),
+  );
+  const maxScrollTop = Math.max(
+    0,
+    scrollNode.scrollHeight - scrollNode.clientHeight,
+  );
+  const scrollFraction =
+    maxScrollTop > 0
+      ? Math.min(Math.max(scrollNode.scrollTop / maxScrollTop, 0), 1)
+      : 0;
+  const localStart = Math.round(
+    scrollFraction *
+      Math.max(0, boundedResidentCount - visibleMessageCount),
+  );
+  const startPosition = boundedStart + localStart;
+  return {
+    startPosition,
+    endPosition: Math.min(
+      messageCount,
+      startPosition + visibleMessageCount,
+    ),
+  };
 }

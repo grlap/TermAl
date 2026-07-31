@@ -87,6 +87,8 @@ export function labelForPaneViewMode(viewMode: PaneViewMode) {
       return "Git status";
     case "terminal":
       return "Terminal";
+    case "mailbox":
+      return "Mailbox";
     case "instructionDebugger":
       return "Instructions";
     case "diffPreview":
@@ -317,7 +319,10 @@ export function collectCandidateSourcePaths(session: Session) {
   return Array.from(new Set(paths));
 }
 
-export type LiveWaitingIndicatorPromptSession = Pick<Session, "messages" | "status">;
+export type LiveWaitingIndicatorPromptSession = Pick<
+  Session,
+  "liveActivity" | "status"
+>;
 
 export function findLastUserPromptInMessages(messages: readonly Message[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -344,7 +349,8 @@ export function resolveLiveWaitingIndicatorPrompt(
     return null;
   }
 
-  return findLastUserPromptInMessages(session.messages);
+  const prompt = session.liveActivity?.prompt.trim();
+  return prompt || null;
 }
 
 export function setSessionFlag(current: SessionFlagMap, sessionId: string, value: boolean): SessionFlagMap {

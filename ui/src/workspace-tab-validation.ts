@@ -19,6 +19,7 @@ const PANE_VIEW_MODES: readonly PaneViewMode[] = [
   "filesystem",
   "gitStatus",
   "terminal",
+  "mailbox",
   "instructionDebugger",
   "diffPreview",
 ];
@@ -61,6 +62,13 @@ export function isWorkspaceTab(value: unknown): value is WorkspaceTab {
       return (
         isNullableString(value.workdir) &&
         isNullableString(value.originSessionId) &&
+        isOptionalNullableString(value.originProjectId)
+      );
+    case "mailbox":
+      return (
+        isString(value.mailboxId) &&
+        isString(value.originSessionId) &&
+        isString(value.refreshToken) &&
         isOptionalNullableString(value.originProjectId)
       );
     case "controlPanel":

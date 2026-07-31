@@ -367,15 +367,49 @@ fn delegation_mcp_configs_bind_parent_session_and_base_url() {
         Some(TERMAL_DELEGATION_MCP_SERVER_NAME)
     );
     assert_eq!(
+        acp.pointer("/0/command"),
+        Some(&Value::String(command.to_owned()))
+    );
+    assert_eq!(
         acp.pointer("/0/args/2"),
         Some(&Value::String(parent.to_owned()))
     );
+    assert_eq!(acp.pointer("/0/env"), Some(&json!([])));
 
     let codex = termal_delegation_mcp_codex_config_with_command(command, parent, base_url);
     assert_eq!(
         codex.pointer("/mcp_servers/termal-delegation/args/2"),
         Some(&Value::String(parent.to_owned()))
     );
+}
+
+#[test]
+fn delegation_mcp_acp_server_emits_spec_env_variable_array() {
+    let server = TermalDelegationMcpStdioConfig {
+        command: "termal".to_owned(),
+        args: vec!["delegation-mcp".to_owned()],
+        env: BTreeMap::from([
+            ("EMPTY".to_owned(), String::new()),
+            ("FOO".to_owned(), "bar".to_owned()),
+        ]),
+    };
+
+    let descriptor = json!(termal_delegation_mcp_acp_server_from_stdio_config(
+        &server
+    ));
+    let env = descriptor
+        .get("env")
+        .and_then(Value::as_array)
+        .expect("emitted ACP McpServer.env should be an array");
+
+    assert_eq!(env.len(), 2);
+    assert!(env.contains(&json!({ "name": "EMPTY", "value": "" })));
+    assert!(env.contains(&json!({ "name": "FOO", "value": "bar" })));
+    assert!(env.iter().all(|variable| {
+        variable
+            .as_object()
+            .is_some_and(|object| object.len() == 2)
+    }));
 }
 
 #[test]

@@ -66,7 +66,7 @@ impl AppState {
                 }
                 let message_index = push_message_on_record(record, message.clone());
                 (
-                    message_index,
+                    global_message_index(record, message_index),
                     session_message_count(record),
                     record.session.preview.clone(),
                     record.session.status,
@@ -150,7 +150,7 @@ impl AppState {
                 // the emitted delta unless a future caller explicitly broadens that contract.
                 let message_index = insert_message_on_record(record, anchor_index, message.clone());
                 (
-                    message_index,
+                    global_message_index(record, message_index),
                     session_message_count(record),
                     record.session.preview.clone(),
                     record.session.status,
@@ -246,7 +246,7 @@ impl AppState {
                     session.preview = next_preview.clone();
                 }
                 (
-                    message_index,
+                    global_message_index(record, message_index),
                     session_message_count(record),
                     text_start_byte,
                     record.mutation_stamp,
@@ -341,7 +341,7 @@ impl AppState {
                     session.preview = next_preview.clone();
                 }
                 (
-                    message_index,
+                    global_message_index(record, message_index),
                     session_message_count(record),
                     record.mutation_stamp,
                 )
@@ -480,8 +480,21 @@ impl AppState {
                     }
                 };
                 record.session.preview = preview.clone();
+                if record.session.status == SessionStatus::Active {
+                    let activity =
+                        record
+                            .session
+                            .live_activity
+                            .get_or_insert_with(|| SessionLiveActivity {
+                                prompt: String::new(),
+                                command: None,
+                                command_status: None,
+                            });
+                    activity.command = Some(command.to_owned());
+                    activity.command_status = Some(status);
+                }
                 (
-                    message_index,
+                    global_message_index(record, message_index),
                     session_message_count(record),
                     created_message,
                     preview,
@@ -616,7 +629,7 @@ impl AppState {
                 let preview = parallel_agents_preview_text(&agents);
                 record.session.preview = preview.clone();
                 (
-                    message_index,
+                    global_message_index(record, message_index),
                     session_message_count(record),
                     created_message,
                     preview,

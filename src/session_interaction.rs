@@ -45,6 +45,8 @@ fn reset_hidden_claude_spare_record(record: &mut SessionRecord) {
     }
 
     record.session.messages.clear();
+    record.message_start_index = 0;
+    sync_retained_transcript_metadata(record);
     record.session.pending_prompts.clear();
     record.session.status = SessionStatus::Idle;
     record.session.preview = "Ready for a prompt.".to_owned();

@@ -281,6 +281,7 @@ export function resolveControlSurfaceSectionIdForWorkspaceTab(
     case "canvas":
     case "orchestratorCanvas":
     case "terminal":
+    case "mailbox":
     case "instructionDebugger":
     case "diffPreview":
       return null;

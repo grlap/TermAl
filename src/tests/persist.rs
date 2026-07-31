@@ -2878,6 +2878,148 @@ fn sqlite_startup_loads_sessions_and_delegations_from_split_tables() {
 }
 
 #[test]
+fn sqlite_startup_retains_only_the_latest_page_and_reads_older_history_by_index() {
+    let state_root =
+        std::env::temp_dir().join(format!("termal-sqlite-bounded-history-{}", Uuid::new_v4()));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let path = state_root.join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Bounded history".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let session_index = inner
+        .find_session_index(&session_id)
+        .expect("created session should exist");
+    {
+        let record = inner
+            .session_mut_by_index(session_index)
+            .expect("created session should be mutable");
+        record.session.messages = (0..130)
+            .map(|index| Message::Text {
+                attachments: Vec::new(),
+                id: format!("message-{index:03}"),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: format!("message {index}"),
+                expanded_text: None,
+                source: None,
+            })
+            .collect();
+        record.session.message_count = 130;
+        record.session.messages_loaded = true;
+        record.message_start_index = 0;
+        record.message_positions = build_message_positions(&record.session.messages);
+    }
+    persist_state(&path, &inner).expect("indexed transcript should persist");
+
+    let loaded = load_state(&path)
+        .expect("indexed transcript should load")
+        .expect("persisted state should exist");
+    let loaded_index = loaded
+        .find_session_index(&session_id)
+        .expect("loaded session should exist");
+    let loaded_record = &loaded.sessions[loaded_index];
+    assert_eq!(loaded_record.session.message_count, 130);
+    assert!(!loaded_record.session.messages_loaded);
+    assert_eq!(loaded_record.message_start_index, 66);
+    assert_eq!(loaded_record.session.messages.len(), 64);
+    assert_eq!(
+        loaded_record.session.messages.first().map(Message::id),
+        Some("message-066")
+    );
+    assert_eq!(
+        loaded_record.session.messages.last().map(Message::id),
+        Some("message-129")
+    );
+
+    assert_eq!(
+        persisted_message_position(&path, &session_id, "message-002")
+            .expect("indexed cursor lookup should succeed"),
+        Some(2)
+    );
+    let older_page = load_persisted_message_range(&path, &session_id, 2, 66)
+        .expect("older indexed history page should load");
+    assert_eq!(older_page.len(), 64);
+    assert_eq!(older_page.first().map(|(position, _)| *position), Some(2));
+    assert_eq!(older_page.last().map(|(position, _)| *position), Some(65));
+    assert_eq!(
+        older_page.first().map(|(_, message)| message.id()),
+        Some("message-002")
+    );
+    assert_eq!(
+        older_page.last().map(|(_, message)| message.id()),
+        Some("message-065")
+    );
+
+    let _ = fs::remove_dir_all(state_root);
+}
+
+#[test]
+fn local_history_cursor_and_page_share_the_persisted_read_path() {
+    let state = test_app_state();
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Combined history read".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let session_index = inner
+        .find_session_index(&session_id)
+        .expect("created session should exist");
+    {
+        let record = inner
+            .session_mut_by_index(session_index)
+            .expect("created session should be mutable");
+        record.session.messages = (0..130)
+            .map(|index| Message::Text {
+                attachments: Vec::new(),
+                id: format!("message-{index:03}"),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: format!("message {index}"),
+                expanded_text: None,
+                source: None,
+            })
+            .collect();
+        record.session.message_count = 130;
+        record.session.messages_loaded = true;
+        record.message_start_index = 0;
+        record.message_positions = build_message_positions(&record.session.messages);
+    }
+    persist_state(state.persistence_path.as_ref(), &inner)
+        .expect("indexed transcript should persist");
+    let loaded = load_state(state.persistence_path.as_ref())
+        .expect("indexed transcript should load")
+        .expect("persisted state should exist");
+    *state.inner.lock().expect("state mutex poisoned") = loaded;
+
+    // The cursor (65) and every returned row (1..64) are outside the retained
+    // 66..129 in-memory suffix, forcing the request through the shared SQLite
+    // snapshot for both cursor resolution and page loading.
+    let page = state
+        .get_session_history(&session_id, Some("message-065"), None, None, false, 64)
+        .expect("combined persisted cursor/page read should succeed");
+    assert_eq!(page.messages.len(), 64);
+    assert_eq!(page.messages.first().map(Message::id), Some("message-001"));
+    assert_eq!(page.messages.last().map(Message::id), Some("message-064"));
+    assert_eq!(page.next_before.as_deref(), Some("message-001"));
+    assert!(page.has_more);
+    assert!(page.has_newer);
+}
+
+#[test]
 fn sqlite_legacy_embedded_delegations_are_requeued_for_table_migration() {
     let state_root = std::env::temp_dir().join(format!(
         "termal-sqlite-legacy-delegations-{}",
@@ -2909,8 +3051,17 @@ fn sqlite_legacy_embedded_delegations_are_requeued_for_table_migration() {
     let delegation = make_persist_test_delegation("delegation-legacy", &parent_id, &child_id);
     inner.delegations.push(delegation.clone());
     let legacy_embedded_state = PersistedState::from_inner(&inner);
-    persist_state_parts_to_sqlite(&path, &legacy_embedded_state, &[], true, &[], true)
-        .expect("legacy sqlite metadata should persist with an empty delegation table");
+    persist_state_parts_to_sqlite(
+        &path,
+        &legacy_embedded_state,
+        &[],
+        true,
+        &BTreeSet::new(),
+        &[],
+        true,
+        &BTreeSet::new(),
+    )
+    .expect("legacy sqlite metadata should persist with an empty delegation table");
 
     let mut loaded = load_state(&path)
         .expect("legacy sqlite state should load")
@@ -2945,7 +3096,7 @@ fn sqlite_legacy_embedded_delegations_are_requeued_for_table_migration() {
 }
 
 #[test]
-fn sqlite_load_reports_malformed_metadata_session_and_delegation_rows() {
+fn sqlite_load_isolates_malformed_session_and_delegation_rows_but_rejects_metadata() {
     let state_root =
         std::env::temp_dir().join(format!("termal-sqlite-malformed-{}", Uuid::new_v4()));
     fs::create_dir_all(&state_root).expect("state root should exist");
@@ -2985,7 +3136,10 @@ fn sqlite_load_reports_malformed_metadata_session_and_delegation_rows() {
         .session
         .id;
     let delegation = make_persist_test_delegation("delegation-malformed", &parent_id, &child_id);
+    let mismatched_delegation =
+        make_persist_test_delegation("delegation-mismatched", &parent_id, &child_id);
     inner.delegations.push(delegation.clone());
+    inner.delegations.push(mismatched_delegation.clone());
     persist_state(&session_row_path, &inner).expect("session-row state should persist");
     persist_state(&delegation_row_path, &inner).expect("delegation-row state should persist");
     persist_state(&metadata_path, &inner).expect("metadata state should persist");
@@ -3000,13 +3154,22 @@ fn sqlite_load_reports_malformed_metadata_session_and_delegation_rows() {
             )
             .expect("session row should be corrupted");
     }
-    let session_error = match load_state(&session_row_path) {
-        Ok(_) => panic!("malformed session row should fail startup load"),
-        Err(error) => error,
-    };
+    let session_state = load_state(&session_row_path)
+        .expect("one malformed session row should not fail startup")
+        .expect("session-row state should exist");
     assert!(
-        format!("{session_error:#}").contains("failed to parse persisted session row"),
-        "{session_error:#}"
+        session_state
+            .sessions
+            .iter()
+            .all(|record| record.session.id != session_id),
+        "only the malformed session row should be skipped"
+    );
+    assert_eq!(session_state.sessions.len(), 2);
+    persist_state(&session_row_path, &session_state)
+        .expect("full persistence must preserve a quarantined session row");
+    assert!(
+        sqlite_table_ids(&session_row_path, "sessions").contains(&session_id),
+        "a skipped session row must remain durable for recovery"
     );
 
     {
@@ -3018,15 +3181,36 @@ fn sqlite_load_reports_malformed_metadata_session_and_delegation_rows() {
                 rusqlite::params![delegation.id],
             )
             .expect("delegation row should be corrupted");
+        let mut mismatched_value =
+            serde_json::to_value(&mismatched_delegation).expect("delegation should encode");
+        mismatched_value["id"] = Value::String("delegation-embedded-other".to_owned());
+        connection
+            .execute(
+                "UPDATE delegations SET value_json = ?2 WHERE id = ?1",
+                rusqlite::params![
+                    mismatched_delegation.id,
+                    serde_json::to_string(&mismatched_value)
+                        .expect("mismatched delegation should serialize")
+                ],
+            )
+            .expect("delegation identity should be corrupted");
     }
-    let delegation_error = match load_state(&delegation_row_path) {
-        Ok(_) => panic!("malformed delegation row should fail startup load"),
-        Err(error) => error,
-    };
+    let delegation_state = load_state(&delegation_row_path)
+        .expect("one malformed delegation row should not fail startup")
+        .expect("delegation-row state should exist");
     assert!(
-        format!("{delegation_error:#}").contains("failed to parse persisted delegation row"),
-        "{delegation_error:#}"
+        delegation_state
+            .delegations
+            .iter()
+            .all(|record| { record.id != delegation.id && record.id != mismatched_delegation.id }),
+        "invalid delegation rows should be skipped"
     );
+    assert_eq!(delegation_state.sessions.len(), 3);
+    persist_state(&delegation_row_path, &delegation_state)
+        .expect("full persistence must preserve quarantined delegation rows");
+    let persisted_delegation_ids = sqlite_table_ids(&delegation_row_path, "delegations");
+    assert!(persisted_delegation_ids.contains(&delegation.id));
+    assert!(persisted_delegation_ids.contains(&mismatched_delegation.id));
 
     {
         let connection =
@@ -3186,4 +3370,273 @@ fn commit_session_created_locked_signals_background_persist_instead_of_blocking(
     if let Some(state_root) = persistence_path.parent() {
         let _ = fs::remove_dir_all(state_root);
     }
+}
+
+/// Regression: a session whose metadata knows a remote transcript length but
+/// holds no local message rows must not abort startup.
+///
+/// Remote-proxy sessions are legitimately in this shape: the transcript lives
+/// on the remote host, so `message_count` is known from proxy metadata while
+/// zero `messages` rows exist locally. `load_persisted_session_tail` derived
+/// its expected tail purely from `message_count` and `bail!`ed when the row
+/// count disagreed, and that error propagates through `load_state` ->
+/// `AppState::new_with_paths` -> `main`, so ONE such session made TermAl
+/// refuse to boot. Absent local rows are a hydration state, not corruption.
+#[test]
+fn sqlite_startup_tolerates_remote_metadata_message_count_without_local_rows() {
+    let state_root =
+        std::env::temp_dir().join(format!("termal-sqlite-proxy-boot-{}", Uuid::new_v4()));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let path = state_root.join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Remote proxy".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let session_index = inner
+        .find_session_index(&session_id)
+        .expect("created session should exist");
+    {
+        let record = inner
+            .session_mut_by_index(session_index)
+            .expect("created session should be mutable");
+        // The remote-proxy shape: metadata knows the remote length, nothing
+        // is hydrated locally. Well above SQLITE_SESSION_TAIL_MESSAGES (64)
+        // so the loader computes a non-zero start_index and expects a tail.
+        record.session.messages = Vec::new();
+        record.session.message_count = 1408;
+        record.session.messages_loaded = false;
+        record.message_start_index = 0;
+        record.message_positions = build_message_positions(&record.session.messages);
+        record.remote_id = Some("remote-1".to_owned());
+        record.remote_session_id = Some("remote-session-1".to_owned());
+    }
+    persist_state(&path, &inner).expect("remote-proxy metadata should persist");
+
+    let loaded = load_state(&path)
+        .expect("startup must not fail when a proxy transcript has no local rows")
+        .expect("persisted state should exist");
+    let loaded_index = loaded
+        .find_session_index(&session_id)
+        .expect("loaded session should exist");
+    let loaded_record = &loaded.sessions[loaded_index];
+    // The remote length is retained so the UI can still show a count, and the
+    // session is reported as not locally hydrated rather than empty-and-loaded.
+    assert_eq!(loaded_record.session.message_count, 1408);
+    assert!(
+        !loaded_record.session.messages_loaded,
+        "a proxy with no local rows must not claim a fully loaded transcript"
+    );
+    assert!(
+        loaded_record.session.messages.is_empty(),
+        "no local rows exist, so no messages should be materialized"
+    );
+
+    let _ = fs::remove_dir_all(state_root);
+}
+
+/// Regression: one structurally invalid session row must not make otherwise
+/// healthy sessions unreachable at startup.
+///
+/// This exercises three independent per-session failure boundaries that used
+/// to propagate out of `load_state`: the SQLite row key disagreeing with the
+/// embedded session id, persisted session-field validation, and malformed
+/// message JSON. The invalid rows stay on disk for recovery, but none may be
+/// presented as a healthy in-memory session.
+#[test]
+fn sqlite_startup_skips_invalid_session_rows_and_loads_valid_sessions() {
+    let state_root = std::env::temp_dir().join(format!(
+        "termal-sqlite-session-isolation-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&state_root).expect("state root should exist");
+    let path = state_root.join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let valid_session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Valid".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let mismatched_session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Mismatched".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let invalid_settings_session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Invalid settings".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let malformed_transcript_session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Malformed transcript".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let mismatched_message_key_session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Mismatched message key".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let malformed_index = inner
+        .find_session_index(&malformed_transcript_session_id)
+        .expect("malformed transcript fixture session should exist");
+    push_message_on_record(
+        inner
+            .session_mut_by_index(malformed_index)
+            .expect("malformed transcript fixture session should be mutable"),
+        Message::Text {
+            attachments: Vec::new(),
+            id: "message-malformed".to_owned(),
+            timestamp: "2026-07-30T00:00:00Z".to_owned(),
+            author: Author::Assistant,
+            text: "stored before corruption".to_owned(),
+            expanded_text: None,
+            source: None,
+        },
+    );
+    let mismatched_message_index = inner
+        .find_session_index(&mismatched_message_key_session_id)
+        .expect("mismatched-message fixture session should exist");
+    push_message_on_record(
+        inner
+            .session_mut_by_index(mismatched_message_index)
+            .expect("mismatched-message fixture session should be mutable"),
+        Message::Text {
+            attachments: Vec::new(),
+            id: "message-embedded-id".to_owned(),
+            timestamp: "2026-07-30T00:00:00Z".to_owned(),
+            author: Author::Assistant,
+            text: "stored before key corruption".to_owned(),
+            expanded_text: None,
+            source: None,
+        },
+    );
+    persist_state(&path, &inner).expect("session isolation fixture should persist");
+
+    {
+        let connection =
+            rusqlite::Connection::open(&path).expect("session isolation fixture should reopen");
+        let mismatched_json: String = connection
+            .query_row(
+                "SELECT value_json FROM sessions WHERE id = ?1",
+                rusqlite::params![mismatched_session_id],
+                |row| row.get(0),
+            )
+            .expect("mismatched fixture metadata should load");
+        let mut mismatched_value: Value =
+            serde_json::from_str(&mismatched_json).expect("fixture metadata should parse");
+        mismatched_value["session"]["id"] = Value::String("session-embedded-other".to_owned());
+        connection
+            .execute(
+                "UPDATE sessions SET value_json = ?2 WHERE id = ?1",
+                rusqlite::params![
+                    mismatched_session_id,
+                    serde_json::to_string(&mismatched_value)
+                        .expect("mismatched fixture metadata should serialize")
+                ],
+            )
+            .expect("mismatched fixture metadata should update");
+
+        let invalid_settings_json: String = connection
+            .query_row(
+                "SELECT value_json FROM sessions WHERE id = ?1",
+                rusqlite::params![invalid_settings_session_id],
+                |row| row.get(0),
+            )
+            .expect("invalid-settings fixture metadata should load");
+        let mut invalid_settings_value: Value =
+            serde_json::from_str(&invalid_settings_json).expect("fixture metadata should parse");
+        invalid_settings_value["session"]["claudeApprovalMode"] = Value::Null;
+        connection
+            .execute(
+                "UPDATE sessions SET value_json = ?2 WHERE id = ?1",
+                rusqlite::params![
+                    invalid_settings_session_id,
+                    serde_json::to_string(&invalid_settings_value)
+                        .expect("invalid-settings fixture metadata should serialize")
+                ],
+            )
+            .expect("invalid-settings fixture metadata should update");
+
+        connection
+            .execute(
+                "UPDATE messages SET value_json = '{'
+                 WHERE session_id = ?1 AND message_id = 'message-malformed'",
+                rusqlite::params![malformed_transcript_session_id],
+            )
+            .expect("malformed transcript fixture should update");
+        connection
+            .execute(
+                "UPDATE messages SET message_id = 'message-row-id'
+                 WHERE session_id = ?1 AND message_id = 'message-embedded-id'",
+                rusqlite::params![mismatched_message_key_session_id],
+            )
+            .expect("message row key should update");
+    }
+
+    let loaded = load_state(&path)
+        .expect("one invalid session must not abort startup")
+        .expect("persisted state should exist");
+    assert!(
+        loaded.find_session_index(&valid_session_id).is_some(),
+        "the valid sibling session must remain reachable"
+    );
+    for invalid_session_id in [
+        &mismatched_session_id,
+        &invalid_settings_session_id,
+        &malformed_transcript_session_id,
+        &mismatched_message_key_session_id,
+    ] {
+        assert!(
+            loaded.find_session_index(invalid_session_id).is_none(),
+            "invalid session `{invalid_session_id}` must be skipped rather than presented as healthy"
+        );
+    }
+    persist_state(&path, &loaded)
+        .expect("full persistence must preserve every quarantined session row");
+    let stored_session_ids = sqlite_table_ids(&path, "sessions");
+    for invalid_session_id in [
+        &mismatched_session_id,
+        &invalid_settings_session_id,
+        &malformed_transcript_session_id,
+        &mismatched_message_key_session_id,
+    ] {
+        assert!(
+            stored_session_ids.contains(invalid_session_id),
+            "quarantined session `{invalid_session_id}` must stay on disk"
+        );
+    }
+
+    let _ = fs::remove_dir_all(state_root);
 }

@@ -44,10 +44,13 @@ import {
 } from "./conversation-markers";
 import {
   MessageNavigationProvider,
-  makeMessageNavigationLookup,
-  useMessageNavigationTargetMaps,
+  usePagedMessageNavigation,
   type MessageNavigationContextValue,
 } from "./conversation-navigation";
+import {
+  requestSessionHistoryNewerPage,
+  requestSessionHistoryOlderPage,
+} from "../session-history-demand";
 import {
   renderHighlightedText,
   type SearchHighlightTone,
@@ -56,7 +59,6 @@ import {
   commandMessagesForPaneViewMode,
   diffMessagesForPaneViewMode,
 } from "../SessionPaneView.messages";
-import { resolveLiveWaitingIndicatorPrompt } from "../app-utils";
 import {
   shouldShowAgentSessionWaitingIndicator,
 } from "./AgentSessionPanel.waiting-indicator";
@@ -66,13 +68,13 @@ import {
   includeUndeferredMessageTail,
   useInitialActiveTranscriptMessages,
 } from "./useInitialActiveTranscriptMessages";
-import { requestSessionFullHydration } from "../session-hydration-demand";
 import { MessageMetaMarkerMenuProvider } from "../message-cards";
 import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
 import type {
   PendingPrompt,
   ConversationMarker,
   CreateConversationMarkerOptions,
+  SessionLiveActivity,
 } from "../types";
 import type {
   AgentSessionPanelFooterProps,
@@ -185,6 +187,7 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
   isUpdating,
   showNewResponseIndicator,
   newResponseIndicatorLabel,
+  newResponseIndicatorQueuedCount,
   footerModeLabel,
   onScrollToLatest,
   onDraftCommit,
@@ -217,6 +220,7 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
         isUpdating={isUpdating}
         showNewResponseIndicator={showNewResponseIndicator}
         newResponseIndicatorLabel={newResponseIndicatorLabel}
+        newResponseIndicatorQueuedCount={newResponseIndicatorQueuedCount}
         onScrollToLatest={onScrollToLatest}
         onDraftCommit={onDraftCommit}
         onDraftAttachmentRemove={onDraftAttachmentRemove}
@@ -278,7 +282,6 @@ const SessionBody = memo(function SessionBody({
   renderPromptSettings,
 }: SessionBodyProps): JSX.Element | null {
   const activeSession = useSessionRecordSnapshot(activeSessionId);
-  const activeSessionMessages = activeSession?.messages;
   const activeSessionStatus = activeSession?.status;
   const commandMessages = useMemo(
     () =>
@@ -294,23 +297,16 @@ const SessionBody = memo(function SessionBody({
         : fallbackDiffMessages,
     [activeSession, fallbackDiffMessages, viewMode],
   );
-  const shouldResolveLiveWaitingPrompt =
+  const shouldResolveLiveWaitingActivity =
     showWaitingIndicator &&
     waitingIndicatorKind === "liveTurn" &&
     activeSessionStatus === "active";
-  const liveWaitingIndicatorPrompt = useMemo(
-    () =>
-      shouldResolveLiveWaitingPrompt && activeSessionMessages
-        ? resolveLiveWaitingIndicatorPrompt({
-            messages: activeSessionMessages,
-            status: "active",
-          })
-        : null,
-    [activeSessionMessages, activeSessionStatus, shouldResolveLiveWaitingPrompt],
-  );
-  const resolvedWaitingIndicatorPrompt = shouldResolveLiveWaitingPrompt
-    ? liveWaitingIndicatorPrompt
-    : waitingIndicatorPrompt;
+  const resolvedWaitingIndicatorActivity: SessionLiveActivity | null =
+    shouldResolveLiveWaitingActivity
+      ? (activeSession?.liveActivity ?? null)
+      : waitingIndicatorPrompt
+        ? { prompt: waitingIndicatorPrompt }
+        : null;
 
   if (!activeSession) {
     return (
@@ -349,7 +345,10 @@ const SessionBody = memo(function SessionBody({
           isLoading={isLoading}
           showWaitingIndicator={showWaitingIndicator}
           waitingIndicatorKind={waitingIndicatorKind}
-          waitingIndicatorPrompt={resolvedWaitingIndicatorPrompt}
+          waitingIndicatorPrompt={
+            resolvedWaitingIndicatorActivity?.prompt ?? waitingIndicatorPrompt
+          }
+          waitingIndicatorActivity={resolvedWaitingIndicatorActivity}
           onApprovalDecision={onApprovalDecision}
           onUserInputSubmit={onUserInputSubmit}
           onMcpElicitationSubmit={onMcpElicitationSubmit}
@@ -456,6 +455,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   showWaitingIndicator,
   waitingIndicatorKind,
   waitingIndicatorPrompt,
+  waitingIndicatorActivity,
   onApprovalDecision,
   onUserInputSubmit,
   onMcpElicitationSubmit,
@@ -475,34 +475,25 @@ const SessionConversationPage = memo(function SessionConversationPage({
     conversationSearchQuery.trim().length > 0 ||
     conversationSearchMatchedItemKeys.size > 0 ||
     conversationSearchActiveItemKey !== null;
-  useEffect(() => {
-    if (
-      session.messagesLoaded === false &&
-      (hasConversationSearch || visibleMarkers.length > 0)
-    ) {
-      requestSessionFullHydration(session.id);
-    }
-  }, [
-    hasConversationSearch,
-    session.id,
-    session.messagesLoaded,
-    visibleMarkers.length,
-  ]);
   const baseVisibleMessages = isActive
     ? includeUndeferredMessageTail(deferredMessages, session.messages)
     : session.messages;
   const {
-    isWindowed: isInitialTranscriptWindowActive,
+    hasOlderHistory,
+    hasNewerHistory,
     messages: visibleMessages,
-    requestFullTranscriptRender,
+    requestOlderTranscriptPage,
   } = useInitialActiveTranscriptMessages({
     hasConversationMarkers: visibleMarkers.length > 0,
     hasConversationSearch,
     isActive,
     // Summary count, not `baseVisibleMessages.length`: while a large session is
-    // tail-hydrated the latter is only the ~20-message window (tm-jfx/tm-2po).
+    // tail-hydrated the latter is only the 20-message window (tm-jfx/tm-2po).
     messageCount: session.messageCount,
     messages: baseVisibleMessages,
+    messagesLoaded: session.messagesLoaded,
+    hasOlderHistory: session.hasOlderHistory,
+    hasNewerHistory: session.hasNewerHistory,
     scrollContainerRef,
     sessionId: session.id,
   });
@@ -515,7 +506,12 @@ const SessionConversationPage = memo(function SessionConversationPage({
   // queued prompt stayed invisible until the turn stopped. The queue is tiny and only
   // changes on queue/dequeue (never per streamed token), so rendering it immediately
   // costs nothing. Regression from 089e9ed; do not re-defer this.
-  const visiblePendingPromptsBase = pendingPrompts;
+  // A bounded historical window is not the live tail. Do not splice live-only
+  // cards beneath stale history; the pane-level "Jump to latest" affordance
+  // owns reattachment to a bounded current tail.
+  const visiblePendingPromptsBase = hasNewerHistory
+    ? EMPTY_PENDING_PROMPTS
+    : pendingPrompts;
   const visibleMessageIds = useMemo(
     () => new Set(visibleMessages.map((message) => message.id)),
     [visibleMessages],
@@ -532,23 +528,31 @@ const SessionConversationPage = memo(function SessionConversationPage({
       ? visiblePendingPromptsBase
       : filteredPendingPrompts;
   }, [visibleMessages.length, visibleMessageIds, visiblePendingPromptsBase]);
-  const effectiveShowWaitingIndicator = shouldShowAgentSessionWaitingIndicator({
-    showWaitingIndicator,
-    waitingIndicatorKind,
-    sessionStatus: session.status,
-    visibleMessages,
-  });
+  const effectiveShowWaitingIndicator =
+    !hasNewerHistory &&
+    shouldShowAgentSessionWaitingIndicator({
+      showWaitingIndicator,
+      waitingIndicatorKind,
+      sessionStatus: session.status,
+      visibleMessages,
+    });
+  const overviewMessageCount = Math.max(
+    session.messageCount ?? 0,
+    overviewMessages.length,
+  );
+  const overviewMessageStartIndex =
+    session.messageStartIndex ??
+    (hasNewerHistory && !hasOlderHistory
+      ? 0
+      : Math.max(0, overviewMessageCount - overviewMessages.length));
   const conversationOverview = useConversationOverviewController({
-    agent: session.agent,
     isActive,
-    messageCount: overviewMessages.length,
-    onFullTranscriptDemand: requestFullTranscriptRender,
+    messageCount: overviewMessageCount,
+    messageStartIndex: overviewMessageStartIndex,
+    renderedMessageCount: overviewMessages.length,
     scrollContainerRef,
     sessionId: session.id,
-    showWaitingIndicator: effectiveShowWaitingIndicator,
-    waitingIndicatorPrompt: effectiveShowWaitingIndicator
-      ? waitingIndicatorPrompt
-      : null,
+    sessionMutationStamp: session.sessionMutationStamp ?? 0,
   });
   const markersByMessageId = useMemo(
     () => groupConversationMarkersByMessageId(visibleMarkers),
@@ -679,30 +683,31 @@ const SessionConversationPage = memo(function SessionConversationPage({
     jumpToMarker: jumpToConversationMarker,
     jumpToMessageId,
   } = useConversationMarkerJump({
-    onMissingMessageJump: requestFullTranscriptRender,
+    historyWindowKey: `${visibleMessages[0]?.id ?? ""}:${visibleMessages[visibleMessages.length - 1]?.id ?? ""}:${hasOlderHistory}`,
+    onMissingMessageJump: requestOlderTranscriptPage,
     onConversationSearchItemMount,
     scrollContainerRef,
     sessionId: session.id,
     virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
   });
-  // Navigation scans cheap message metadata from the loaded transcript slice.
-  // Missing off-window targets request full hydration and retry through the
-  // marker jump path.
-  const messageNavigationTargetMaps = useMessageNavigationTargetMaps(
-    session.messages,
+  const requestOlderPromptNavigationPage = useCallback(
+    () => requestSessionHistoryOlderPage(session.id),
+    [session.id],
   );
-  // The lookup closure stays stable across renders that don't replace the
-  // target maps, so memoized message cards consuming the context can stay
-  // memo-hits as long as their own props haven't changed.
-  const messageNavigationContextValue = useMemo<MessageNavigationContextValue>(
-    () => ({
-      getNavigationTargets: makeMessageNavigationLookup(
-        messageNavigationTargetMaps,
-      ),
+  const requestNewerPromptNavigationPage = useCallback(
+    () => requestSessionHistoryNewerPage(session.id),
+    [session.id],
+  );
+  const messageNavigationContextValue: MessageNavigationContextValue =
+    usePagedMessageNavigation({
+      hasNewerHistory,
+      hasOlderHistory,
       jumpToMessageId,
-    }),
-    [jumpToMessageId, messageNavigationTargetMaps],
-  );
+      messages: session.messages,
+      requestNewerPage: requestNewerPromptNavigationPage,
+      requestOlderPage: requestOlderPromptNavigationPage,
+      sessionId: session.id,
+    });
 
   useEffect(() => {
     if (
@@ -978,7 +983,8 @@ const SessionConversationPage = memo(function SessionConversationPage({
   }
 
   const isConversationVirtualized =
-    isInitialTranscriptWindowActive ||
+    hasOlderHistory ||
+    hasNewerHistory ||
     visibleMessages.length >= CONVERSATION_VIRTUALIZATION_MIN_MESSAGES;
   const conversationMessages = (
     <ConversationMessageList
@@ -1003,11 +1009,15 @@ const SessionConversationPage = memo(function SessionConversationPage({
       conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
       conversationSearchActiveItemKey={conversationSearchActiveItemKey}
       onConversationSearchItemMount={handleConversationItemMount}
-      forceVirtualized={isInitialTranscriptWindowActive}
+      forceVirtualized={hasOlderHistory || hasNewerHistory}
     />
   );
   const liveTurnCard = effectiveShowWaitingIndicator ? (
-    <RunningIndicator agent={session.agent} lastPrompt={waitingIndicatorPrompt} />
+    <RunningIndicator
+      agent={session.agent}
+      activity={waitingIndicatorActivity}
+      lastPrompt={waitingIndicatorPrompt}
+    />
   ) : null;
   const pendingPromptCards = visiblePendingPrompts.map((prompt) => (
     <MessageSlot
@@ -1085,21 +1095,12 @@ const SessionConversationPage = memo(function SessionConversationPage({
             </div>
             {conversationOverview.shouldRenderRail ? (
               <ConversationOverviewRail
-                messages={overviewMessages}
-                layoutSnapshot={conversationOverview.layoutSnapshot}
-                viewportSnapshot={conversationOverview.viewportSnapshot}
-                markers={visibleMarkers}
-                tailItems={conversationOverview.tailItems}
-                maxHeightPx={conversationOverview.maxHeightPx}
+                heightPx={conversationOverview.railHeightPx}
+                overview={conversationOverview.overview}
+                viewport={conversationOverview.viewport}
                 onNavigate={conversationOverview.navigate}
               />
-            ) : (
-              <div
-                aria-hidden="true"
-                className="conversation-overview-rail is-pending"
-                style={{ height: `${Math.ceil(conversationOverview.maxHeightPx)}px` }}
-              />
-            )}
+            ) : null}
           </div>
         ) : (
           conversationContent
@@ -1116,6 +1117,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   previous.isLoading === next.isLoading &&
   previous.showWaitingIndicator === next.showWaitingIndicator &&
   previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
+  previous.waitingIndicatorActivity === next.waitingIndicatorActivity &&
   previous.onUserInputSubmit === next.onUserInputSubmit &&
   previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
   previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&

@@ -1019,7 +1019,7 @@ describe("App live state - delta-gap core", () => {
     // would have streamed in the assistant reply were dropped. The next
     // delta references an unknown messageId. The reducer returns
     // `needsResync`, the caller schedules `/api/state`, and ALSO calls
-    // `startSessionHydration` directly so the per-session full-transcript
+    // `startSessionHydration` directly so a bounded authoritative tail
     // fetch happens regardless of whether the metadata-first summary
     // would flip `messagesLoaded` back to false. Without the explicit
     // hydration trigger the user can stay on a stale transcript until they
@@ -1173,17 +1173,17 @@ describe("App live state - delta-gap core", () => {
       });
       await settleAsyncUi();
 
-      // Both /api/state AND /api/sessions/session-1 should be fetched —
-      // the latter is the per-session re-hydration that this regression
+      // Both /api/state AND the bounded session-tail route should be fetched —
+      // the latter is the per-session repair that this regression
       // pins. Without the direct hydration trigger, only /api/state would
       // fire and the missing message would never appear.
-      expect(
-        fetchMock.mock.calls.some(
-          ([input]) =>
-            new URL(String(input), "http://localhost").pathname ===
-            "/api/sessions/session-1",
-        ),
-      ).toBe(true);
+      const requestedUrls = fetchMock.mock.calls.map(([input]) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        return `${requestUrl.pathname}${requestUrl.search}`;
+      });
+      expect(requestedUrls).toContain(
+        "/api/sessions/session-1?tail=20",
+      );
       expect(
         screen.getAllByText("Recovered assistant reply.").length,
       ).toBeGreaterThan(0);

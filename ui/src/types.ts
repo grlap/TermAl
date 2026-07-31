@@ -327,15 +327,28 @@ export type Session = {
   externalSessionId?: string | null;
   agentCommandsRevision?: number;
   codexThreadState?: CodexThreadState | null;
+  liveActivity?: SessionLiveActivity | null;
   status: SessionStatus;
   preview: string;
   messages: Message[];
   messageCount?: number | null;
   messagesLoaded?: boolean | null;
+  /** Global index of `messages[0]` inside the bounded transcript. */
+  messageStartIndex?: number;
+  /** Client-side location of the resident bounded transcript window. */
+  hasOlderHistory?: boolean;
+  /** Client-side location of the resident bounded transcript window. */
+  hasNewerHistory?: boolean;
   markers?: ConversationMarker[];
   pendingPrompts?: PendingPrompt[];
   sessionMutationStamp?: number | null;
   parentDelegationId?: string | null;
+};
+
+export type SessionLiveActivity = {
+  prompt: string;
+  command?: string | null;
+  commandStatus?: "running" | "success" | "error" | null;
 };
 
 export type CodexThreadState = "active" | "archived";

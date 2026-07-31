@@ -1024,6 +1024,48 @@ fn explicit_live_session_reactivation_restores_departed_mailbox_access() {
 }
 
 #[test]
+fn mailbox_range_reads_leave_every_participant_cursor_unchanged() {
+    let root = MailboxTestRoot::new();
+    let store =
+        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+    let first = store.append(&test_input()).expect("append should succeed");
+    let mailbox_id = first.mailbox_id.clone();
+    drop(first);
+    let before = store
+        .list_for_session("session-target")
+        .expect("mailbox summary should read")
+        .into_iter()
+        .find(|summary| summary.id == mailbox_id)
+        .expect("mailbox summary should exist");
+
+    let messages = store
+        .read_range("session-target", &mailbox_id, 0, 50)
+        .expect("mailbox range should read");
+    assert_eq!(messages.len(), 1);
+
+    let after = store
+        .list_for_session("session-target")
+        .expect("mailbox summary should re-read")
+        .into_iter()
+        .find(|summary| summary.id == mailbox_id)
+        .expect("mailbox summary should still exist");
+    let before_cursors = before
+        .participants
+        .iter()
+        .map(|participant| (&participant.session_id, participant.processed_through))
+        .collect::<Vec<_>>();
+    let after_cursors = after
+        .participants
+        .iter()
+        .map(|participant| (&participant.session_id, participant.processed_through))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        after_cursors, before_cursors,
+        "human mailbox paging must remain invisible to agent cursors"
+    );
+}
+
+#[test]
 fn reactivation_rollback_restores_only_rows_cleared_by_that_attempt() {
     let root = MailboxTestRoot::new();
     let store =

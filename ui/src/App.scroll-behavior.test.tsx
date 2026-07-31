@@ -41,6 +41,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App from "./App";
+import { upsertSessionStoreSession } from "./session-store";
 import { ThemedCombobox } from "./preferences-panels";
 import {
   describeCodexModelAdjustmentNotice,
@@ -623,7 +624,7 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        expect(messageStack.scrollTop).toBe(490);
+        expect(messageStack.scrollTop).toBe(570);
 
         const currentTablist = screen
           .getAllByRole("tablist", { name: "Tile tabs" })
@@ -698,7 +699,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("pages the session transcript by a fixed delta on plain PageDown", async () => {
+  it("pages the session transcript by 85% of the viewport on plain PageDown", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -726,7 +727,7 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        expect(messageStack.scrollTop).toBe(490);
+        expect(messageStack.scrollTop).toBe(570);
         expect(scrollToMock).not.toHaveBeenCalled();
 
         await dispatchStateEvent(latestEventSource(), {
@@ -767,7 +768,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("pages the session transcript upward by a fixed delta on plain PageUp", async () => {
+  it("pages the session transcript upward by 85% of the viewport on plain PageUp", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -795,7 +796,7 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        expect(messageStack.scrollTop).toBe(710);
+        expect(messageStack.scrollTop).toBe(630);
         expect(scrollToMock).not.toHaveBeenCalled();
 
         await dispatchStateEvent(latestEventSource(), {
@@ -2162,6 +2163,70 @@ describe("App scroll behaviour", () => {
       } finally {
         context.cleanup();
         restoreScrollGeometry();
+      }
+    });
+  });
+
+  it("never silently hides queued prompts behind a detached history window", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const context = await renderAppWithProjectAndSession();
+
+      try {
+        await act(async () => {
+          upsertSessionStoreSession({
+            session: makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              status: "active",
+              messagesLoaded: false,
+              hasOlderHistory: false,
+              hasNewerHistory: true,
+              messageCount: 1_000,
+              messages: [
+                {
+                  id: "message-history-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "assistant",
+                  text: "Detached historical window",
+                },
+              ],
+              pendingPrompts: [
+                {
+                  id: "pending-prompt-1",
+                  timestamp: "10:01",
+                  text: "First queued follow-up",
+                },
+                {
+                  id: "pending-prompt-2",
+                  timestamp: "10:02",
+                  text: "Second queued follow-up",
+                },
+                {
+                  id: "pending-prompt-3",
+                  timestamp: "10:03",
+                  text: "Third queued follow-up",
+                },
+              ],
+            }),
+            committedDraft: "",
+            draftAttachments: [],
+          });
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        expect(document.querySelectorAll(".pending-prompt-card")).toHaveLength(0);
+        const jumpToLatest = await screen.findByRole("button", {
+          name: /Jump to latest/,
+        });
+        expect(jumpToLatest).toBeInTheDocument();
+        expect(
+          within(jumpToLatest).getByText("3 queued"),
+        ).toHaveClass("new-response-indicator-queued-count");
+      } finally {
+        context.cleanup();
       }
     });
   });

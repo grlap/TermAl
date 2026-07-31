@@ -121,6 +121,7 @@ export function WorkspaceNodeView({
   onTabDrop,
   onPaneViewModeChange,
   onOpenSourceTab,
+  onOpenMailboxTab,
   onOpenDiffPreviewTab,
   onOpenGitStatusDiffPreviewTab,
   onOpenFilesystemTab,
@@ -232,6 +233,12 @@ export function WorkspaceNodeView({
     originSessionId: string | null,
     originProjectId: string | null,
     options?: OpenPathOptions,
+  ) => void;
+  onOpenMailboxTab: (
+    paneId: string,
+    mailboxId: string,
+    originSessionId: string,
+    originProjectId: string | null,
   ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
@@ -467,6 +474,7 @@ export function WorkspaceNodeView({
         onTabDrop={onTabDrop}
         onPaneViewModeChange={onPaneViewModeChange}
         onOpenSourceTab={onOpenSourceTab}
+        onOpenMailboxTab={onOpenMailboxTab}
         onOpenDiffPreviewTab={onOpenDiffPreviewTab}
         onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
         onOpenFilesystemTab={onOpenFilesystemTab}
@@ -597,6 +605,7 @@ export function WorkspaceNodeView({
           onTabDrop={onTabDrop}
           onPaneViewModeChange={onPaneViewModeChange}
           onOpenSourceTab={onOpenSourceTab}
+          onOpenMailboxTab={onOpenMailboxTab}
           onOpenDiffPreviewTab={onOpenDiffPreviewTab}
           onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
           onOpenFilesystemTab={onOpenFilesystemTab}
@@ -693,6 +702,7 @@ export function WorkspaceNodeView({
           onTabDrop={onTabDrop}
           onPaneViewModeChange={onPaneViewModeChange}
           onOpenSourceTab={onOpenSourceTab}
+          onOpenMailboxTab={onOpenMailboxTab}
           onOpenDiffPreviewTab={onOpenDiffPreviewTab}
           onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
           onOpenFilesystemTab={onOpenFilesystemTab}

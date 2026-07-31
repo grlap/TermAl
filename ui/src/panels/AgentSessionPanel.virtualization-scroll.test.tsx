@@ -26,7 +26,6 @@ import {
   AgentSessionPanelFooter,
   splitAgentCommandResolverTail,
 } from "./AgentSessionPanel";
-import { buildConversationOverviewTailItems } from "./conversation-overview-controller";
 import {
   VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS,
   VirtualizedConversationMessageList,
@@ -337,7 +336,7 @@ function lastJsonRequestBody(fetchMock: ReturnType<typeof stubResolvedAgentComma
 }
 
 describe("AgentSessionPanel virtualization scroll behavior", () => {
-  it("mounts more pages below when compact command pages shrink during scroll cooldown", async () => {
+  it("preserves the visible command when measured pages shrink during scroll cooldown", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
@@ -541,6 +540,17 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
       });
       expect(screen.queryByText("command-80")).not.toBeInTheDocument();
 
+      const visibleSlotBeforeCompaction = Array.from(
+        container.querySelectorAll<HTMLElement>(".virtualized-message-slot"),
+      ).find((slot) => {
+        const rect = slot.getBoundingClientRect();
+        return rect.bottom > 0 && rect.top < clientHeight;
+      });
+      expect(visibleSlotBeforeCompaction?.dataset.messageId).toBeTruthy();
+      const visibleMessageId = visibleSlotBeforeCompaction!.dataset.messageId!;
+      const visibleOffsetBeforeCompaction =
+        visibleSlotBeforeCompaction!.getBoundingClientRect().top;
+
       useCompactMeasurements = true;
       await act(async () => {
         new Set(resizeCallbacks.values()).forEach((callback) => {
@@ -551,7 +561,14 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText("command-80")).toBeInTheDocument();
+        const preservedSlot = container.querySelector<HTMLElement>(
+          `.virtualized-message-slot[data-message-id="${visibleMessageId}"]`,
+        );
+        expect(preservedSlot).not.toBeNull();
+        expect(preservedSlot!.getBoundingClientRect().top).toBeCloseTo(
+          visibleOffsetBeforeCompaction,
+          0,
+        );
       });
 
       const renderedPages = Array.from(

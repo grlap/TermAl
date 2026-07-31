@@ -168,7 +168,7 @@ fn dispatch_turn_and_snapshot(
         DispatchTurnResult::Queued => {}
     }
     Ok(SendMessageRouteResponse {
-        state: state.summary_snapshot_with_full_session(session_id),
+        state: state.summary_snapshot_with_session_detail(session_id),
         message_disposition,
     })
 }
@@ -229,7 +229,37 @@ struct GetSessionQuery {
     tail: Option<usize>,
 }
 
-/// Gets one full session.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetSessionHistoryQuery {
+    #[serde(default)]
+    before: Option<String>,
+    #[serde(default)]
+    after: Option<String>,
+    #[serde(default)]
+    around: Option<usize>,
+    #[serde(default)]
+    from: Option<String>,
+    #[serde(default = "default_session_history_page_limit")]
+    limit: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetSessionOverviewQuery {
+    #[serde(default = "default_session_overview_bucket_count")]
+    buckets: usize,
+}
+
+fn default_session_history_page_limit() -> usize {
+    SESSION_HISTORY_PAGE_MAX_MESSAGES
+}
+
+fn default_session_overview_bucket_count() -> usize {
+    SESSION_OVERVIEW_DEFAULT_BUCKETS
+}
+
+/// Gets one bounded recent suffix of a session.
 async fn get_session(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<String>,
@@ -249,12 +279,113 @@ async fn get_session(
     }
 
     let body = run_blocking_api(move || {
-        let response = match query.tail {
-            Some(message_limit) => state.get_session_tail(&session_id, message_limit),
-            None => state.get_session(&session_id),
-        }?;
+        let response = state.get_session_tail(
+            &session_id,
+            query.tail.unwrap_or(SESSION_TAIL_DEFAULT_MESSAGES),
+        )?;
         serde_json::to_vec(&response)
             .map_err(|err| ApiError::internal(format!("failed to serialize session: {err}")))
+    })
+    .await?;
+    Ok((
+        [(
+            axum::http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        )],
+        body,
+    )
+        .into_response())
+}
+
+/// Gets one bounded page of transcript history before an optional message id.
+async fn get_session_history(
+    State(state): State<AppState>,
+    AxumPath(session_id): AxumPath<String>,
+    query: Result<Query<GetSessionHistoryQuery>, QueryRejection>,
+) -> Result<Response, ApiError> {
+    let Query(query) =
+        query.map_err(|rejection| api_query_rejection("session history query", rejection))?;
+    if query.limit == 0 {
+        return Err(ApiError::bad_request(
+            "session history limit must be at least 1",
+        ));
+    }
+    if query.limit > SESSION_HISTORY_PAGE_MAX_MESSAGES {
+        return Err(ApiError::bad_request(format!(
+            "session history limit must be at most {SESSION_HISTORY_PAGE_MAX_MESSAGES}"
+        )));
+    }
+    if query.before.as_deref().is_some_and(str::is_empty) {
+        return Err(ApiError::bad_request(
+            "session history before cursor must not be empty",
+        ));
+    }
+    if query.after.as_deref().is_some_and(str::is_empty) {
+        return Err(ApiError::bad_request(
+            "session history after cursor must not be empty",
+        ));
+    }
+    let selector_count = usize::from(query.before.is_some())
+        + usize::from(query.after.is_some())
+        + usize::from(query.around.is_some())
+        + usize::from(query.from.is_some());
+    if selector_count > 1 {
+        return Err(ApiError::bad_request(
+            "session history accepts only one of before, after, around, or from",
+        ));
+    }
+    if query.from.as_deref().is_some_and(|from| from != "start") {
+        return Err(ApiError::bad_request(
+            "session history from must be `start` when provided",
+        ));
+    }
+    let body = run_blocking_api(move || {
+        let response = state.get_session_history(
+            &session_id,
+            query.before.as_deref(),
+            query.after.as_deref(),
+            query.around,
+            query.from.as_deref() == Some("start"),
+            query.limit,
+        )?;
+        serde_json::to_vec(&response).map_err(|err| {
+            ApiError::internal(format!("failed to serialize session history page: {err}"))
+        })
+    })
+    .await?;
+    Ok((
+        [(
+            axum::http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        )],
+        body,
+    )
+        .into_response())
+}
+
+/// Gets one whole-conversation, position-linear overview.
+async fn get_session_overview(
+    State(state): State<AppState>,
+    AxumPath(session_id): AxumPath<String>,
+    query: Result<Query<GetSessionOverviewQuery>, QueryRejection>,
+) -> Result<Response, ApiError> {
+    let Query(query) =
+        query.map_err(|rejection| api_query_rejection("session overview query", rejection))?;
+    if query.buckets == 0 {
+        return Err(ApiError::bad_request(
+            "session overview buckets must be at least 1",
+        ));
+    }
+    if query.buckets > SESSION_OVERVIEW_MAX_BUCKETS {
+        return Err(ApiError::bad_request(format!(
+            "session overview buckets must be at most {SESSION_OVERVIEW_MAX_BUCKETS}"
+        )));
+    }
+    let body = run_blocking_api(move || {
+        let response = state.get_session_overview(&session_id, query.buckets)?;
+        serde_json::to_vec(&response).map_err(|err| {
+            ApiError::internal(format!("failed to serialize session overview: {err}"))
+        })
     })
     .await?;
     Ok((

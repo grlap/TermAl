@@ -10,7 +10,11 @@ import {
 import { isScrollContainerNearBottom } from "./conversation-virtualization";
 import {
   doesMountedPageIntersectViewport,
+  findMountedMessageSlotById,
+  getMountedSlotViewportOffsetPx,
+  type PageMeasurementIdentity,
   type VirtualizedRange,
+  type VisibleMessageAnchor,
 } from "./virtualized-conversation-measurement";
 
 export function useVirtualizedConversationPageHeightChange({
@@ -19,8 +23,15 @@ export function useVirtualizedConversationPageHeightChange({
   hasUserScrollInteractionRef,
   isActive,
   isDetachedFromBottomRef,
+  isMessagePrependCommitRef,
+  lastNativeScrollTopRef,
   lastUserScrollInputTimeRef,
+  latestVisibleMessageAnchorRef,
+  layoutPageHeightsRef,
+  measuredPageIdentityRef,
   pageHeightsRef,
+  currentPageIdentityRef,
+  renderedListRef,
   scheduleDeferredLayoutVersion,
   scrollContainerRef,
   shouldKeepBottomAfterLayoutRef,
@@ -33,8 +44,19 @@ export function useVirtualizedConversationPageHeightChange({
   hasUserScrollInteractionRef: MutableRefObject<boolean>;
   isActive: boolean;
   isDetachedFromBottomRef: MutableRefObject<boolean>;
+  isMessagePrependCommitRef: MutableRefObject<boolean>;
+  lastNativeScrollTopRef: MutableRefObject<number>;
   lastUserScrollInputTimeRef: MutableRefObject<number>;
+  latestVisibleMessageAnchorRef: MutableRefObject<VisibleMessageAnchor | null>;
+  layoutPageHeightsRef: MutableRefObject<Record<string, number>>;
+  measuredPageIdentityRef: MutableRefObject<
+    Record<string, PageMeasurementIdentity>
+  >;
   pageHeightsRef: MutableRefObject<Record<string, number>>;
+  currentPageIdentityRef: MutableRefObject<
+    Record<string, PageMeasurementIdentity>
+  >;
+  renderedListRef: RefObject<HTMLDivElement | null>;
   scheduleDeferredLayoutVersion: (delayMs: number) => void;
   scrollContainerRef: RefObject<HTMLElement | null>;
   shouldKeepBottomAfterLayoutRef: MutableRefObject<boolean>;
@@ -57,12 +79,27 @@ export function useVirtualizedConversationPageHeightChange({
     }
 
     const roundedHeight = Math.round(nextHeight);
+    const currentPageIdentity = currentPageIdentityRef.current[pageKey];
+    if (!currentPageIdentity) {
+      // A disconnected ResizeObserver callback from a replaced page must not
+      // reintroduce its height under a key now owned by different content.
+      return;
+    }
     const previousHeight = pageHeightsRef.current[pageKey];
     if (previousHeight !== undefined && Math.abs(previousHeight - roundedHeight) < 1) {
       return;
     }
 
+    const previousLayoutHeight =
+      previousHeight ?? layoutPageHeightsRef.current[pageKey];
+    const layoutHeightDelta =
+      previousLayoutHeight !== undefined &&
+      Number.isFinite(previousLayoutHeight)
+        ? roundedHeight - previousLayoutHeight
+        : 0;
     pageHeightsRef.current[pageKey] = roundedHeight;
+    measuredPageIdentityRef.current[pageKey] = currentPageIdentity;
+    layoutPageHeightsRef.current[pageKey] = roundedHeight;
 
     const node = scrollContainerRef.current;
     if (node && hasUserScrollInteractionRef.current && !isScrollContainerNearBottom(node)) {
@@ -108,6 +145,52 @@ export function useVirtualizedConversationPageHeightChange({
     };
 
     const latestVisiblePageRange = visiblePageRangeRef.current;
+    // A mounted page at or above the viewport can finish measuring well after a
+    // bounded history prepend first restores the visible message anchor.
+    // Compare the anchor's live DOM offset with the offset captured by the
+    // scroll path; this handles both whole pages above the viewport and growth
+    // above the anchor inside the first visible page. Fall back to the page
+    // height delta only when that anchor is not mounted. The custom virtualizer
+    // owns this correction, so CSS disables native overflow anchoring.
+    const preservedAnchor = latestVisibleMessageAnchorRef.current;
+    const preservedAnchorSlot = preservedAnchor
+      ? findMountedMessageSlotById(
+          renderedListRef.current,
+          preservedAnchor.messageId,
+        )
+      : null;
+    const hasSyncedNativeScrollTop =
+      node !== null &&
+      Math.abs(node.scrollTop - lastNativeScrollTopRef.current) <= 1;
+    const anchorOffsetDelta =
+      node && hasSyncedNativeScrollTop && preservedAnchor && preservedAnchorSlot
+        ? getMountedSlotViewportOffsetPx(node, preservedAnchorSlot) -
+          preservedAnchor.viewportOffsetPx
+        : null;
+    if (
+      node &&
+      hasSyncedNativeScrollTop &&
+      isActive &&
+      !isMessagePrependCommitRef.current &&
+      pageIndex <= latestVisiblePageRange.startIndex &&
+      (hasUserScrollInteractionRef.current ||
+        isDetachedFromBottomRef.current ||
+        !isScrollContainerNearBottom(node))
+    ) {
+      const correction =
+        anchorOffsetDelta !== null && Math.abs(anchorOffsetDelta) >= 1
+          ? anchorOffsetDelta
+          : pageIndex < latestVisiblePageRange.startIndex &&
+              Math.abs(layoutHeightDelta) >= 1
+            ? layoutHeightDelta
+            : 0;
+      if (Math.abs(correction) >= 1) {
+        writeScrollTopAndSyncViewport(
+          node,
+          Math.max(node.scrollTop + correction, 0),
+        );
+      }
+    }
     const isVisiblePage =
       pageIndex >= latestVisiblePageRange.startIndex &&
       pageIndex < latestVisiblePageRange.endIndex;

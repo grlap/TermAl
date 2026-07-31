@@ -4003,6 +4003,13 @@ textarea {
   scrollbar-width: none;
 }
 
+.message-stack:has(.virtualized-message-list) {
+  /* The virtualizer compensates measured page-height changes and history
+     prepends itself. Chromium's native overflow anchoring would apply a second,
+     browser-timed correction and make the transcript drift while pages settle. */
+  overflow-anchor: none;
+}
+
 .message-stack:has(.conversation-with-overview)::-webkit-scrollbar,
 .message-stack:has(.session-conversation-page.has-conversation-overview-scroll)::-webkit-scrollbar {
   width: 0;
@@ -4037,10 +4044,12 @@ textarea {
   position: relative;
   display: grid;
   gap: var(--message-stack-gap);
+  min-width: 0;
 }
 
 .message-slot {
   display: block;
+  min-width: 0;
   /* Let the browser skip layout and painting for off-screen messages.
      This dramatically reduces DOM cost for long conversations and helps
      preserve scroll position when the tab is backgrounded. */
@@ -4335,6 +4344,7 @@ textarea {
 
 .virtualized-message-list {
   min-height: 1px;
+  min-width: 0;
 }
 
 .conversation-with-overview {
@@ -4344,6 +4354,7 @@ textarea {
   grid-template-columns: minmax(0, 1fr) var(--conversation-overview-rail-width);
   align-items: start;
   gap: 0.65rem;
+  min-width: 0;
 }
 
 .conversation-overview-content {
@@ -4360,6 +4371,7 @@ textarea {
   position: sticky;
   top: var(--conversation-overview-sticky-inset);
   width: var(--conversation-overview-rail-width);
+  height: min(32rem, calc(100vh - (var(--conversation-overview-sticky-inset) * 2)));
   max-height: calc(100vh - (var(--conversation-overview-sticky-inset) * 2));
   min-height: 6rem;
   border: 1px solid var(--line);
@@ -4401,66 +4413,6 @@ textarea {
   outline-offset: 2px;
 }
 
-.conversation-overview-item {
-  position: absolute;
-  z-index: 1;
-  left: var(--conversation-overview-lane-left);
-  width: var(--conversation-overview-lane-width);
-  min-height: 2px;
-  padding: 0;
-  border: 0;
-  border-radius: 2px;
-  background: var(--muted);
-  opacity: 0.42;
-  cursor: pointer;
-}
-
-.conversation-overview-item:hover,
-.conversation-overview-item:focus-visible {
-  opacity: 0.9;
-  outline: 1px solid var(--signal-blue);
-  outline-offset: 1px;
-}
-
-.conversation-overview-item.is-user_prompt {
-  background: var(--signal-blue);
-  opacity: 0.62;
-}
-
-.conversation-overview-item.is-command {
-  background: var(--signal-green);
-}
-
-.conversation-overview-item.is-diff,
-.conversation-overview-item.is-file_changes {
-  background: var(--signal-rose);
-}
-
-.conversation-overview-item.is-approval,
-.conversation-overview-item.is-input_request {
-  background: var(--signal-gold);
-}
-
-.conversation-overview-item.has-status-error {
-  background: var(--signal-red);
-  opacity: 0.72;
-}
-
-.conversation-overview-item.has-status-running {
-  background: var(--signal-blue);
-  opacity: 0.72;
-}
-
-.conversation-overview-item.is-live_turn {
-  background: var(--signal-blue);
-  opacity: 0.82;
-}
-
-.conversation-overview-item.is-mixed {
-  background: color-mix(in srgb, var(--muted) 72%, var(--signal-blue));
-  opacity: 0.5;
-}
-
 .conversation-overview-visual-track {
   position: absolute;
   z-index: 1;
@@ -4480,11 +4432,28 @@ textarea {
   width: 100%;
   min-height: 1px;
   border-radius: 0;
+  background: color-mix(in srgb, var(--muted) 65%, transparent);
+}
+
+.conversation-overview-visual-segment.is-command {
+  background: color-mix(in srgb, var(--signal-green) 70%, transparent);
+}
+
+.conversation-overview-visual-segment.is-diff {
+  background: color-mix(in srgb, var(--signal-rose) 70%, transparent);
+}
+
+.conversation-overview-visual-segment.is-error {
+  background: color-mix(in srgb, var(--signal-red) 78%, transparent);
+}
+
+.conversation-overview-visual-segment.is-text.has-user-messages {
+  background: color-mix(in srgb, var(--signal-blue) 62%, transparent);
 }
 
 .conversation-overview-marker {
   position: absolute;
-  z-index: 3;
+  z-index: 4;
   right: 0.1rem;
   width: 0.35rem;
   height: 0.35rem;
@@ -4495,18 +4464,58 @@ textarea {
   pointer-events: none;
 }
 
-.conversation-overview-viewport {
+.conversation-overview-viewport-range {
   position: absolute;
   z-index: 2;
   left: var(--conversation-overview-lane-left);
   width: var(--conversation-overview-lane-width);
-  min-height: 0.5rem;
+  min-height: 2px;
   box-sizing: border-box;
-  border: 1px solid var(--signal-blue);
-  border-radius: 0.35rem;
-  background: color-mix(in srgb, var(--signal-blue) 10%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface-card) 72%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--signal-blue) 72%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface-card) 82%, transparent);
   pointer-events: none;
+}
+
+.conversation-overview-viewport-handle {
+  position: absolute;
+  z-index: 3;
+  top: clamp(
+    0.75rem,
+    var(--conversation-overview-viewport-center, 50%),
+    calc(100% - 0.75rem)
+  );
+  left: calc(var(--conversation-overview-lane-left) - 0.16rem);
+  width: calc(var(--conversation-overview-lane-width) + 0.32rem);
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, var(--signal-blue) 84%, white);
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--surface-card) 74%, transparent);
+  box-shadow:
+    0 0 0 1px var(--surface-card),
+    0 0 0.45rem color-mix(in srgb, var(--signal-blue) 46%, transparent);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.conversation-overview-viewport-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0.2rem;
+  left: 0.2rem;
+  height: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--signal-blue) 92%, white);
+  transform: translateY(-50%);
+}
+
+.conversation-overview-rail:hover .conversation-overview-viewport-handle,
+.conversation-overview-rail:focus-visible .conversation-overview-viewport-handle {
+  border-color: color-mix(in srgb, var(--signal-blue) 68%, white);
+  box-shadow:
+    0 0 0 1px var(--surface-card),
+    0 0 0.6rem color-mix(in srgb, var(--signal-blue) 62%, transparent);
 }
 
 .virtualized-message-range-block {
@@ -4516,10 +4525,12 @@ textarea {
 .virtualized-message-range {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .virtualized-message-page {
   min-height: 1px;
+  min-width: 0;
 }
 
 .virtualized-message-spacer {
@@ -4540,6 +4551,7 @@ textarea {
 }
 
 .virtualized-message-slot {
+  min-width: 0;
   pointer-events: none;
 }
 
@@ -4610,7 +4622,9 @@ textarea {
 }
 
 .new-response-indicator {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
   width: fit-content;
   position: absolute;
   top: 0;
@@ -4627,6 +4641,15 @@ textarea {
   font-weight: 600;
   transform: translate(-50%, calc(-100% - 0.5rem));
   white-space: nowrap;
+}
+
+.new-response-indicator-queued-count {
+  border-radius: 999px;
+  padding: 0.12rem 0.42rem;
+  background: rgb(255 255 255 / 16%);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .new-response-indicator:hover {
@@ -10730,49 +10753,329 @@ textarea {
   }
 }
 .mailbox-message-link {
-  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-width: 0;
+  margin-top: 0.4rem;
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .mailbox-message-open {
-  font-size: 12px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--signal-blue);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
 }
 
-.mailbox-message-panel {
-  display: grid;
-  gap: 10px;
-  margin-top: 8px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+.mailbox-message-preview {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mailbox-message-sender-fable {
+  color: var(--signal-red);
+}
+
+.mailbox-message-sender-codex {
+  color: var(--signal-blue);
+}
+
+.mailbox-message-unread {
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--signal-gold) 42%, transparent);
+  border-radius: 999px;
+  padding: 0.08rem 0.38rem;
+  background: color-mix(in srgb, var(--signal-gold) 12%, transparent);
+  color: color-mix(in srgb, var(--signal-gold) 82%, var(--ink));
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.message-stack.mailbox-panel-stack {
+  padding: 0;
+  overflow: hidden;
+}
+
+.mailbox-workspace {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   background: var(--panel);
 }
 
-.mailbox-message-panel > header,
-.mailbox-message-meta {
+.mailbox-workspace-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 1rem;
+  padding: 1rem 1.1rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.mailbox-workspace-header h2 {
+  margin: 0.08rem 0 0;
+  font-size: 1rem;
+}
+
+.mailbox-workspace-id {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono-font);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mailbox-workspace-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.mailbox-live-state {
+  border-radius: 999px;
+  padding: 0.14rem 0.42rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.mailbox-live-state.live {
+  background: color-mix(in srgb, var(--success) 13%, transparent);
+  color: var(--success);
+}
+
+.mailbox-live-state.stale {
+  background: color-mix(in srgb, var(--signal-gold) 14%, transparent);
+  color: color-mix(in srgb, var(--signal-gold) 82%, var(--ink));
+}
+
+.mailbox-participants {
+  display: flex;
   flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.65rem 1.1rem;
+  border-bottom: 1px solid var(--line);
 }
 
-.mailbox-message-panel > header > div {
-  display: grid;
-  gap: 3px;
-}
-
-.mailbox-message-row {
-  display: grid;
-  gap: 6px;
-  padding: 10px;
+.mailbox-participant {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  background: var(--surface-card);
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.mailbox-participant.caught-up {
+  color: var(--success);
+}
+
+.mailbox-participant.lagging {
+  color: var(--signal-gold);
+}
+
+.mailbox-agent-dot {
+  width: 0.48rem;
+  height: 0.48rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.mailbox-agent-dot-fable {
+  background: var(--signal-red);
+}
+
+.mailbox-agent-dot-codex {
+  background: var(--signal-blue);
+}
+
+.mailbox-thread {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 0.42rem;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.7rem 1.1rem;
+}
+
+.mailbox-thread-row {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
   background: var(--surface-card);
 }
 
-.mailbox-message-meta {
+.mailbox-thread-row.unread {
+  border-left: 3px solid var(--signal-gold);
+}
+
+.mailbox-thread-row-summary {
+  display: grid;
+  grid-template-columns: auto auto auto minmax(8rem, 0.8fr) minmax(10rem, 1fr) auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.58rem 0.65rem;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.mailbox-thread-row-summary:hover {
+  background: color-mix(in srgb, var(--signal-blue) 5%, transparent);
+}
+
+.mailbox-thread-sequence,
+.mailbox-thread-route,
+.mailbox-thread-row-summary time {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.mailbox-thread-sequence {
+  font-family: var(--mono-font);
+}
+
+.mailbox-thread-topic,
+.mailbox-thread-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mailbox-thread-topic {
+  font-size: 0.78rem;
+}
+
+.mailbox-thread-preview {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.mailbox-state-chip {
+  border-radius: 999px;
+  padding: 0.14rem 0.42rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.mailbox-state-chip.processed {
+  background: color-mix(in srgb, var(--success) 13%, transparent);
+  color: var(--success);
+}
+
+.mailbox-state-chip.unread {
+  background: color-mix(in srgb, var(--signal-gold) 14%, transparent);
+  color: color-mix(in srgb, var(--signal-gold) 82%, var(--ink));
+}
+
+.mailbox-thread-detail {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.2rem 0.65rem 0.7rem;
+  border-top: 1px solid var(--line);
+}
+
+.mailbox-thread-detail dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.mailbox-thread-detail dl > div {
+  min-width: 0;
+}
+
+.mailbox-thread-detail dt {
+  color: var(--muted);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+}
+
+.mailbox-thread-detail dd {
+  overflow-wrap: anywhere;
+  margin: 0.12rem 0 0;
+  font-size: 0.72rem;
+}
+
+.mailbox-thread-detail pre {
+  max-height: 22em;
+  overflow: auto;
+  margin: 0;
+  padding: 0.7rem;
+  border-radius: var(--control-radius-tight);
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font: 0.75rem/1.5 var(--mono-font);
+  white-space: pre-wrap;
+}
+
+.mailbox-cursor-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.15rem 0;
+  color: var(--signal-gold);
+  font-size: 0.68rem;
+}
+
+.mailbox-cursor-divider::before,
+.mailbox-cursor-divider::after {
+  height: 0;
+  flex: 1 1 auto;
+  border-top: 1px dashed var(--signal-gold);
+  content: "";
+}
+
+.mailbox-load-older {
+  align-self: center;
+  margin: 0 0 0.65rem;
+}
+
+.mailbox-workspace > .support-copy,
+.mailbox-workspace > .error-copy {
+  margin: 0.8rem 1.1rem;
+}
+
+.mailbox-workspace > footer {
+  padding: 0.55rem 1.1rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+@media (max-width: 900px) {
+  .mailbox-thread-row-summary {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+  }
+
+  .mailbox-thread-route,
+  .mailbox-thread-preview,
+  .mailbox-thread-row-summary time {
+    display: none;
+  }
 }
 
 /* Coordination board panel (tm-uwx.7.3) — read-only control-panel section. */

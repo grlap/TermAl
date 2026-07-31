@@ -45,6 +45,7 @@ export function useSessionPaneActiveContext({
     activeTab?.kind === "filesystem" ? activeTab : null;
   const activeGitStatusTab = activeTab?.kind === "gitStatus" ? activeTab : null;
   const activeTerminalTab = activeTab?.kind === "terminal" ? activeTab : null;
+  const activeMailboxTab = activeTab?.kind === "mailbox" ? activeTab : null;
   const activeInstructionDebuggerTab =
     activeTab?.kind === "instructionDebugger" ? activeTab : null;
   const activeDiffPreviewTab =
@@ -226,6 +227,7 @@ export function useSessionPaneActiveContext({
     activeFilesystemTab,
     activeGitStatusTab,
     activeTerminalTab,
+    activeMailboxTab,
     activeInstructionDebuggerTab,
     activeDiffPreviewTab,
     activeSourceOriginSessionId,

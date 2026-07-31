@@ -439,7 +439,7 @@ impl AppState {
     /// "announce only when the record actually changed"
     /// invariant in one place. Takes an already-projected summary so
     /// callers build `SessionCreated` metadata from `SessionRecord`
-    /// instead of cloning a full transcript-bearing `Session` and
+    /// instead of cloning a retained transcript-bearing `Session` and
     /// clearing its messages.
     ///
     /// Deliberately NOT used by

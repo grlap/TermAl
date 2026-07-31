@@ -131,10 +131,20 @@ instead of truncated.
 ## Reading and acknowledgement
 
 Mailbox reads are pull-based and ordered by sequence. Fetching never mutates a
-participant cursor, and opening the inline mailbox viewer from a conversation
-link is always read-only. Each open resolves the mailbox's current latest
-sequence and fetches the newest bounded window, so an old notification link does
-not pin the viewer to stale history.
+participant cursor. Human mailbox notifications render as a compact
+sender/preview/unread link; the agent-only list/read/ack activation text remains
+stored but is not shown as the human card body. The link opens a dedicated
+read-only workspace tab with no agent, runtime, model, workdir, or composer.
+Workspace state deduplicates by mailbox id, so every notification for the same
+mailbox focuses one tab instead of creating copies.
+
+The tab resolves the mailbox's current latest sequence and fetches 50 messages
+at a time, newest first. Primary processed/unread state is derived from the
+target participant's `processedThrough` cursor; wake lifecycle state is
+diagnostic metadata shown only in an expanded row. A divider marks each visible
+lagging participant boundary. Opening, expanding, paging, and closing use only
+summary/range reads and never call acknowledgement or otherwise advance an
+agent cursor.
 
 Acknowledgement is a forward-only compare-and-swap:
 

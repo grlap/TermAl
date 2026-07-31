@@ -43,6 +43,14 @@ struct PersistedState {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     workspace_layouts: BTreeMap<String, WorkspaceLayoutDocument>,
     sessions: Vec<PersistedSessionRecord>,
+    /// Runtime-only ids whose normalized SQLite rows failed startup
+    /// validation. They are intentionally excluded from the healthy in-memory
+    /// model, but synchronous full-snapshot persistence must preserve the
+    /// original rows instead of interpreting their absence as deletion.
+    #[serde(skip)]
+    quarantined_persisted_session_ids: BTreeSet<String>,
+    #[serde(skip)]
+    quarantined_persisted_delegation_ids: BTreeSet<String>,
 }
 
 impl PersistedState {
@@ -73,6 +81,12 @@ impl PersistedState {
             delegation_waits: inner.delegation_waits.clone(),
             workspace_layouts: inner.workspace_layouts.clone(),
             sessions: Vec::new(),
+            quarantined_persisted_session_ids: inner
+                .quarantined_persisted_session_ids
+                .clone(),
+            quarantined_persisted_delegation_ids: inner
+                .quarantined_persisted_delegation_ids
+                .clone(),
         }
     }
 
@@ -112,6 +126,12 @@ impl PersistedState {
             delegation_waits: self.delegation_waits.clone(),
             workspace_layouts: self.workspace_layouts.clone(),
             sessions: Vec::new(),
+            quarantined_persisted_session_ids: self
+                .quarantined_persisted_session_ids
+                .clone(),
+            quarantined_persisted_delegation_ids: self
+                .quarantined_persisted_delegation_ids
+                .clone(),
         }
     }
 
@@ -146,7 +166,6 @@ impl PersistedState {
             ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids,
             remote_applied_revisions: HashMap::new(),
             remote_snapshot_applied_revisions: HashMap::new(),
-            remote_transcript_snapshot_applied_revisions: HashMap::new(),
             remote_session_transcript_applied_revisions: HashMap::new(),
             orchestrator_instances: self.orchestrator_instances,
             delegations: self.delegations,
@@ -160,6 +179,8 @@ impl PersistedState {
                 .into_iter()
                 .map(PersistedSessionRecord::into_record)
                 .collect::<Result<Vec<_>>>()?,
+            quarantined_persisted_session_ids: self.quarantined_persisted_session_ids,
+            quarantined_persisted_delegation_ids: self.quarantined_persisted_delegation_ids,
             // Mutation stamps are in-memory only — start at `0` on each
             // process lifetime. The persist thread's watermark also
             // starts at `0`, so a fresh load has no pending writes.
@@ -224,6 +245,8 @@ struct PersistedSessionRecord {
     remote_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
     orchestrator_auto_dispatch_blocked: bool,
+    #[serde(skip)]
+    message_start_index: usize,
     session: Session,
 }
 
@@ -234,6 +257,7 @@ impl PersistedSessionRecord {
         if !record.is_remote_proxy() {
             session.pending_prompts.clear();
         }
+        session.live_activity = None;
         session.session_mutation_stamp = None;
 
         Self {
@@ -249,6 +273,7 @@ impl PersistedSessionRecord {
             remote_id: record.remote_id.clone(),
             remote_session_id: record.remote_session_id.clone(),
             orchestrator_auto_dispatch_blocked: record.orchestrator_auto_dispatch_blocked,
+            message_start_index: record.message_start_index,
             session,
         }
     }
@@ -259,6 +284,7 @@ impl PersistedSessionRecord {
         validate_persisted_session_fields(&session, self.external_session_id.as_deref())?;
         session.session_mutation_stamp = None;
         session.external_session_id = self.external_session_id.clone();
+        session.live_activity = None;
         if session.agent.acp_runtime().is_none() {
             session.model_options.clear();
             session.opencode_mode_options.clear();
@@ -289,6 +315,7 @@ impl PersistedSessionRecord {
             pending_acp_approval_order: VecDeque::new(),
             queued_prompts: self.queued_prompts,
             queued_peer_messages: self.queued_peer_messages,
+            message_start_index: self.message_start_index,
             message_positions: build_message_positions(&session.messages),
             remote_id: self.remote_id,
             remote_session_id: self.remote_session_id,

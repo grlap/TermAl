@@ -44,10 +44,10 @@ lifecycles, and bounded file-descriptor budget remain one domain. See
 [durable agent mailboxes](agent-mailboxes.md) and the
 [coordination board](agent-boards.md) for their surface contracts.
 
-## Restartable Slice Schema
+## Current Schema
 
-The first implementation slice keeps the live object model intact and moves the
-durable container from one JSON file to SQLite rows:
+Schema v2 keeps session metadata JSON-shaped while moving ordered transcript
+messages into their own indexed rows:
 
 ```sql
 CREATE TABLE meta (
@@ -65,20 +65,52 @@ CREATE TABLE sessions (
   value_json TEXT NOT NULL
 );
 
+CREATE TABLE messages (
+  session_id TEXT NOT NULL,
+  position INTEGER NOT NULL CHECK(position >= 0),
+  message_id TEXT NOT NULL,
+  value_json TEXT NOT NULL,
+  overview_kind INTEGER NOT NULL DEFAULT 0,
+  is_user INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(session_id, position),
+  UNIQUE(session_id, message_id),
+  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+) WITHOUT ROWID;
+
+CREATE TABLE session_overviews (
+  session_id TEXT PRIMARY KEY,
+  value_blob BLOB NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+) WITHOUT ROWID;
+
 CREATE TABLE delegations (
   id TEXT PRIMARY KEY,
   value_json TEXT NOT NULL
 );
 ```
 
-`app_state.metadataState` stores global app metadata without session or
-delegation rows. `sessions.value_json` stores one serialized session record per
-row, and `delegations.value_json` stores one serialized delegation record per
-row. This is not the final lazy-message schema, but it is enough to stop
-create/fork persistence from rewriting every historical session in one
-monolithic file.
+`app_state.metadataState` stores global app metadata without session,
+delegation, or message rows. `sessions.value_json` stores one serialized
+metadata record with an empty `messages` array. `messages.value_json` stores one
+message payload. `overview_kind` and `is_user` are compact semantic fields
+maintained with each message write. The composite primary key answers ordered
+range reads without a table scan; the unique key answers stable message-id
+cursor lookups.
+`session_overviews.value_blob` stores those semantic fields in one byte per
+global message position. It is updated in the same transaction as the message
+rows and lets the whole-conversation overview endpoint read one small row
+instead of stepping through or parsing every persisted message.
+`delegations.value_json` stores one serialized delegation record per row.
 
-## Target Lazy-Loading Schema
+Startup validates every normalized row against its durable key: session and
+delegation table ids must match the ids embedded in their JSON payloads, and a
+message row's `message_id` must match `Message::id()`. Invalid rows are isolated
+from the healthy in-memory model and logged. Their ids remain in a runtime
+quarantine set so a later synchronous full-snapshot persistence fallback does
+not misinterpret the isolated row as a user deletion; the original SQLite row
+stays available for recovery or inspection.
+
+## Longer-Term Fully Columnar Schema
 
 Keep message payloads as JSON so the first migration is mostly a storage and API
 boundary change, not a rewrite of the message model.
@@ -159,10 +191,10 @@ CREATE INDEX idx_sessions_updated_at_ms
   ON sessions(updated_at_ms);
 ```
 
-`meta.schema_version` is `1`. TermAl does not run compatibility migrations for
-older local development schemas; a binary that opens an existing database with a
-different schema version refuses to start instead of rewriting data with an
-unknown layout.
+`meta.schema_version` is `2`. The single supported v1-to-v2 upgrade moves each
+embedded session message array into indexed `messages` rows in one transaction,
+then records schema v2. Any other schema version is rejected; there is no runtime
+dual-read or alternate hydration path.
 
 ## API Shape
 
@@ -172,7 +204,7 @@ unknown layout.
 Summaries include enough data to render lists, tabs, project grouping, status,
 preview, and settings controls, but not full message arrays.
 
-### Full Session
+### Bounded Session Detail
 
 Add:
 
@@ -180,15 +212,18 @@ Add:
 GET /api/sessions/{id}
 ```
 
-This returns the full session metadata plus the most recent message window.
-
-Add later, or in the same pass if cheap:
+This returns session metadata plus the most recent 20-message window. The
+optional `tail` limit is capped at 64; there is no unbounded transcript form.
 
 ```text
-GET /api/sessions/{id}/messages?before=<position>&limit=200
+GET /api/sessions/{id}/history?before=<message-id>&limit=64
+GET /api/sessions/{id}/history?from=start&limit=64
+GET /api/sessions/{id}/history?after=<message-id>&limit=64
 ```
 
-This supports "load earlier messages" without loading the entire conversation.
+These load one ascending bounded page without serializing the entire
+conversation. `before` and `after` are stable exclusive message-id cursors;
+`from=start` returns the true first page. The modes are mutually exclusive.
 
 ### Create Session
 
@@ -256,10 +291,10 @@ mailbox or board data.
 Split frontend state into:
 
 - Session summaries from `/api/state`.
-- Loaded session details keyed by session id.
+- Bounded session windows keyed by session id.
 
 Session tabs render immediately from summaries. Opening a session tab requests
-the full session if it is not loaded yet.
+the recent tail if it is not loaded yet; older pages are demand-loaded.
 
 Creating a session should:
 
@@ -279,32 +314,55 @@ Creating a session should:
    snapshot.
 5. Persist newly created sessions with a metadata update plus one session row
    instead of cloning every historical message.
-6. Add session summary/full-session API types while keeping old endpoints
-   temporarily compatible.
-7. Update frontend to use summaries plus lazy full-session loading.
+6. Add session summary and bounded-session API types.
+7. Update frontend to use summaries plus demand-loaded transcript pages.
 8. Move remaining mutation persistence writes from full-state snapshots to
    targeted SQLite row updates.
 9. Remove full messages from `/api/state`.
 10. Update SSE to avoid full message snapshots for ordinary non-create changes.
-11. Delete temporary compatibility code once tests cover the new flow.
+11. Add bidirectional page cursors and bounded browser-window eviction.
 
 ## Current Implementation Status
 
-The first restartable slice is implemented:
+The normalized transcript schema and bounded HTTP reads are implemented:
 
 - Production startup stores state in `~/.termal/termal.sqlite`.
-- SQLite stores global metadata separately from per-session JSON rows.
+- SQLite stores global metadata and per-session metadata separately from
+  transcript messages.
+- Schema v2 migrates message arrays out of v1 `sessions.value_json` rows in one
+  transaction without losing order or message ids. It reads legacy sessions in
+  bounded batches and isolates malformed rows so one damaged session cannot
+  prevent healthy siblings from migrating.
+- `messages` is a `WITHOUT ROWID` table with
+  `PRIMARY KEY(session_id, position)` for ordered range pages and
+  `UNIQUE(session_id, message_id)` for stable cursor resolution.
 - Creating or forking a session persists only global counters plus the created
   session row.
 - Create/fork responses return the created session directly and publish a small
   `sessionCreated` delta.
-- `GET /api/sessions/{id}` returns one authoritative full session plus the
-  current revision.
-- The frontend has a small on-demand hydration path for future summary sessions
-  that explicitly arrive with `messagesLoaded: false`.
+- `GET /api/sessions/{id}` returns a recent 20-message suffix by default and
+  never returns an unbounded local transcript.
+- `/history` returns at most 64 messages per request in backwards,
+  true-start, forwards, or centered `around` mode.
+- `/overview` returns one whole-conversation, position-linear semantic map from
+  the compact per-session overview blob plus the retained live tail. The same
+  session produces the same map regardless of transcript residency.
+- The frontend demand-loads older pages and does not schedule a background
+  all-history fetch.
+- Startup loads at most the latest 64 messages per session. After a successful
+  persistence pass, idle in-memory session records are trimmed to the same
+  64-message suffix; older pages are read from SQLite only on demand.
+- Startup treats each normalized session/delegation row as an isolation
+  boundary: malformed metadata, invalid embedded ids/settings, or unreadable
+  transcript rows are reported and skipped without making every other session
+  unreachable. A known transcript count with no local rows is an unhydrated
+  proxy/window state rather than a process-fatal error.
+- Remote proxy tails and history pages remain bounded across the remote
+  boundary rather than materializing a complete owner transcript locally.
 
-The remaining performance work is the broader summary/lazy-loading API split and
-targeted row updates for non-create mutations.
+The remaining memory-bound work is browser-side bidirectional page eviction.
+The browser does not automatically fetch all history, but pages a user has
+explicitly visited remain resident for that browser session.
 
 ## Test Plan
 
@@ -312,7 +370,14 @@ Backend tests:
 
 - Exercise SQLite startup load/save directly under `cargo test`.
 - `GET /api/state` excludes full message arrays.
-- `GET /api/sessions/{id}` returns full session details.
+- `GET /api/sessions/{id}` always returns the default 20-message suffix unless
+  a bounded `tail` is requested.
+- `GET /api/sessions/{id}/history` returns an ascending page using one of
+  `before={messageId}`, `after={messageId}`, `around={position}`, or
+  `from=start`, with `N <= 64`.
+- `GET /api/sessions/{id}/overview?buckets=512` remains under 8 KiB on the
+  compressed wire and answers a 25k-message persisted transcript in under
+  10 ms.
 - Creating a session inserts one session row and does not load/write unrelated
   messages.
 - Appending/updating a message touches only that session's message rows.
@@ -320,14 +385,17 @@ Backend tests:
 Frontend tests:
 
 - Create session opens the tab before model refresh resolves.
-- Opening an unloaded session fetches full details.
+- Opening an unloaded large session fetches its recent tail first, then prepends
+  bounded history pages on scroll or explicit marker-navigation demand.
+- Resident-only search labels partial results instead of claiming it searched
+  history that is not loaded.
 - Summary SSE updates do not discard loaded messages.
 - Message deltas update only the loaded target session.
 - Long-history fixtures do not force full message reconciliation on create.
 
 ## Expected Result
 
-Session creation becomes proportional to the new session plus small summary
-state, not proportional to all historical messages. Existing users keep their
-data through automatic import, and the renamed JSON file remains a simple local
-backup.
+Session creation and startup are proportional to session metadata plus bounded
+retained suffixes, not all historical messages. The one-time v1-to-v2 SQLite
+migration preserves existing transcript order and ids; normal runtime reads only
+the v2 indexed tables.

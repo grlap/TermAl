@@ -5,8 +5,8 @@
 
 use super::remote::{
     make_remote_session_summary_only, remote_text_message,
-    seed_remote_proxy_session_via_state_inner_upsert,
-    spawn_remote_session_and_state_response_server, spawn_remote_session_response_server,
+    seed_remote_proxy_session_via_state_inner_upsert, spawn_remote_session_history_response_server,
+    spawn_remote_session_overview_response_server, spawn_remote_session_response_server,
 };
 use super::remote_delta_replay::local_replay_test_remote;
 use super::*;
@@ -239,7 +239,7 @@ fn remote_session_created_summary_preserves_unloaded_message_count() {
 }
 
 #[test]
-fn remote_summary_count_decrease_marks_cached_transcript_unloaded() {
+fn remote_summary_count_decrease_discards_stale_cached_suffix() {
     let state = test_app_state();
     let remote = RemoteConfig {
         id: "ssh-lab".to_owned(),
@@ -306,8 +306,9 @@ fn remote_summary_count_decrease_marks_cached_transcript_unloaded() {
         .expect("remote proxy session should exist");
     let record = &inner.sessions[index];
     assert!(!record.session.messages_loaded);
-    assert_eq!(record.session.messages.len(), 3);
+    assert!(record.session.messages.is_empty());
     assert_eq!(record.session.message_count, 1);
+    assert_eq!(record.message_start_index, 1);
     drop(inner);
 
     let payload = delta_receiver
@@ -327,7 +328,7 @@ fn remote_summary_count_decrease_marks_cached_transcript_unloaded() {
 }
 
 #[test]
-fn remote_summary_same_count_with_new_stamp_marks_cached_transcript_unloaded() {
+fn remote_summary_same_count_with_new_stamp_discards_stale_cached_suffix() {
     let state = test_app_state();
     let remote = RemoteConfig {
         id: "ssh-lab".to_owned(),
@@ -395,8 +396,9 @@ fn remote_summary_same_count_with_new_stamp_marks_cached_transcript_unloaded() {
         .expect("remote proxy session should exist");
     let record = &inner.sessions[index];
     assert!(!record.session.messages_loaded);
-    assert_eq!(record.session.messages.len(), 1);
+    assert!(record.session.messages.is_empty());
     assert_eq!(record.session.message_count, 1);
+    assert_eq!(record.message_start_index, 1);
     assert_eq!(
         record.session.preview,
         "Same-count rewrite happened remotely."
@@ -518,7 +520,7 @@ fn remote_summary_without_stamp_preserves_cached_transcript_and_stamp() {
     .expect("sample remote session should exist");
     full_remote_session.messages = vec![remote_text_message(
         "remote-message-1",
-        "Cached text from stamped full transcript.",
+        "Cached text from stamped retained suffix.",
     )];
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 1;
@@ -561,7 +563,7 @@ fn remote_summary_without_stamp_preserves_cached_transcript_and_stamp() {
     assert_eq!(record.session.session_mutation_stamp, Some(10));
     assert!(matches!(
         &record.session.messages[0],
-        Message::Text { text, .. } if text == "Cached text from stamped full transcript."
+        Message::Text { text, .. } if text == "Cached text from stamped retained suffix."
     ));
     drop(inner);
 
@@ -600,7 +602,7 @@ fn remote_summary_without_any_stamps_preserves_cached_transcript() {
     .expect("sample remote session should exist");
     full_remote_session.messages = vec![remote_text_message(
         "remote-message-1",
-        "Cached text from unstamped full transcript.",
+        "Cached text from unstamped retained suffix.",
     )];
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 1;
@@ -643,7 +645,7 @@ fn remote_summary_without_any_stamps_preserves_cached_transcript() {
     assert_eq!(record.session.session_mutation_stamp, None);
     assert!(matches!(
         &record.session.messages[0],
-        Message::Text { text, .. } if text == "Cached text from unstamped full transcript."
+        Message::Text { text, .. } if text == "Cached text from unstamped retained suffix."
     ));
     drop(inner);
 
@@ -686,17 +688,6 @@ fn get_session_hydrates_unloaded_remote_proxy_from_remote_owner() {
     )];
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 1;
-    let mut remote_state = sample_remote_orchestrator_state(
-        "remote-project-1",
-        "/remote/repo",
-        3,
-        OrchestratorInstanceStatus::Running,
-    );
-    let mut remote_state_session = full_remote_session.clone();
-    make_remote_session_summary_only(&mut remote_state_session, 1);
-    remote_state.orchestrators.clear();
-    remote_state.sessions = vec![remote_state_session];
-
     let mut summary_session = full_remote_session.clone();
     make_remote_session_summary_only(&mut summary_session, 1);
     state
@@ -722,14 +713,11 @@ fn get_session_hydrates_unloaded_remote_proxy_from_remote_owner() {
         record.session.id.clone()
     };
 
-    let (port, requests, server) = spawn_remote_session_and_state_response_server(
-        SessionResponse {
-            revision: 3,
-            session: full_remote_session,
-            server_instance_id: "remote-instance".to_owned(),
-        },
-        Some(remote_state),
-    );
+    let (port, requests, server) = spawn_remote_session_response_server(SessionResponse {
+        revision: 3,
+        session: full_remote_session,
+        server_instance_id: "remote-instance".to_owned(),
+    });
     insert_test_remote_connection(&state, &remote, port);
 
     let response = state
@@ -762,14 +750,8 @@ fn get_session_hydrates_unloaded_remote_proxy_from_remote_owner() {
     assert!(
         request_lines
             .iter()
-            .any(|line| line.starts_with("GET /api/sessions/remote-session-1 ")),
-        "expected targeted remote session fetch, saw {request_lines:?}"
-    );
-    assert!(
-        request_lines
-            .iter()
-            .any(|line| line.starts_with("GET /api/state ")),
-        "expected remote state resync before applying newer session response, saw {request_lines:?}"
+            .any(|line| line.starts_with("GET /api/sessions/remote-session-1?tail=20 ")),
+        "expected bounded remote session tail fetch, saw {request_lines:?}"
     );
     join_test_server(server);
 
@@ -777,7 +759,7 @@ fn get_session_hydrates_unloaded_remote_proxy_from_remote_owner() {
 }
 
 #[test]
-fn get_session_tail_hydrates_unloaded_remote_proxy_before_slicing() {
+fn bounded_history_hydrates_unloaded_remote_proxy_before_slicing() {
     let state = test_app_state();
     let remote = RemoteConfig {
         id: "ssh-lab".to_owned(),
@@ -788,7 +770,7 @@ fn get_session_tail_hydrates_unloaded_remote_proxy_before_slicing() {
         port: Some(22),
         user: Some("alice".to_owned()),
     };
-    let local_project_id = create_test_remote_project(
+    let _local_project_id = create_test_remote_project(
         &state,
         &remote,
         "/remote/repo",
@@ -813,17 +795,6 @@ fn get_session_tail_hydrates_unloaded_remote_proxy_before_slicing() {
     ];
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 3;
-    let mut remote_state = sample_remote_orchestrator_state(
-        "remote-project-1",
-        "/remote/repo",
-        3,
-        OrchestratorInstanceStatus::Running,
-    );
-    let mut remote_state_session = full_remote_session.clone();
-    make_remote_session_summary_only(&mut remote_state_session, 3);
-    remote_state.orchestrators.clear();
-    remote_state.sessions = vec![remote_state_session];
-
     let mut summary_session = full_remote_session.clone();
     make_remote_session_summary_only(&mut summary_session, 3);
     state
@@ -849,33 +820,34 @@ fn get_session_tail_hydrates_unloaded_remote_proxy_before_slicing() {
         record.session.id.clone()
     };
 
-    let (port, requests, server) = spawn_remote_session_and_state_response_server(
-        SessionResponse {
+    let (port, requests, server) =
+        spawn_remote_session_history_response_server(SessionHistoryResponse {
+            messages: full_remote_session.messages[1..].to_vec(),
+            next_before: Some("remote-message-2".to_owned()),
+            has_more: true,
+            next_after: None,
+            has_newer: false,
+            message_start_index: 1,
+            message_count: 3,
             revision: 3,
-            session: full_remote_session,
+            session_mutation_stamp: 7,
             server_instance_id: "remote-instance".to_owned(),
-        },
-        Some(remote_state),
-    );
+        });
     insert_test_remote_connection(&state, &remote, port);
 
-    let response = state
-        .get_session_tail(&local_session_id, 2)
-        .expect("remote proxy tail should hydrate from owner before slicing");
-    assert_eq!(response.session.id, local_session_id);
-    assert_eq!(
-        response.session.project_id.as_deref(),
-        Some(local_project_id.as_str())
-    );
-    assert!(!response.session.messages_loaded);
-    assert_eq!(response.session.message_count, 3);
-    assert_eq!(response.session.messages.len(), 2);
+    let history = state
+        .get_session_history(&local_session_id, None, None, None, false, 2)
+        .expect("remote proxy history should page directly from its owner");
+    assert_eq!(history.message_count, 3);
+    assert_eq!(history.messages.len(), 2);
+    assert!(history.has_more);
+    assert_eq!(history.next_before.as_deref(), Some("remote-message-2"));
     assert!(matches!(
-        &response.session.messages[0],
+        &history.messages[0],
         Message::Text { text, .. } if text == "Remote line 2."
     ));
     assert!(matches!(
-        &response.session.messages[1],
+        &history.messages[1],
         Message::Text { text, .. } if text == "Remote line 3."
     ));
 
@@ -886,15 +858,16 @@ fn get_session_tail_hydrates_unloaded_remote_proxy_before_slicing() {
             .expect("remote proxy session should still exist");
         inner.sessions[index].session.clone()
     };
-    assert!(stored.messages_loaded);
-    assert_eq!(stored.messages.len(), 3);
+    assert!(!stored.messages_loaded);
+    assert!(stored.messages.is_empty());
+    assert_eq!(stored.message_count, 3);
 
     let request_lines = requests.lock().expect("requests mutex poisoned").clone();
     assert!(
         request_lines
             .iter()
-            .any(|line| line.starts_with("GET /api/sessions/remote-session-1 ")),
-        "expected targeted remote session fetch, saw {request_lines:?}"
+            .any(|line| line.starts_with("GET /api/sessions/remote-session-1/history?limit=2 ")),
+        "expected bounded remote history request, saw {request_lines:?}"
     );
     join_test_server(server);
 
@@ -902,7 +875,266 @@ fn get_session_tail_hydrates_unloaded_remote_proxy_before_slicing() {
 }
 
 #[test]
-fn get_session_falls_back_to_unloaded_summary_when_remote_owner_returns_summary() {
+fn conversation_overview_forwards_one_bounded_remote_request() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let mut summary_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    make_remote_session_summary_only(&mut summary_session, 3);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: summary_session.id.clone(),
+                session: summary_session,
+            },
+        )
+        .expect("remote summary session create delta should apply");
+    let local_session_id = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .expect("remote proxy session should exist");
+        inner.sessions[index].session.id.clone()
+    };
+
+    let (port, requests, server) =
+        spawn_remote_session_overview_response_server(SessionOverviewResponse {
+            session_id: "remote-session-1".to_owned(),
+            message_count: 3,
+            session_mutation_stamp: 7,
+            buckets: vec![
+                ConversationOverviewBucket {
+                    c: 2,
+                    k: ConversationOverviewKind::Text,
+                    u: 1,
+                    m: false,
+                },
+                ConversationOverviewBucket {
+                    c: 1,
+                    k: ConversationOverviewKind::Command,
+                    u: 0,
+                    m: false,
+                },
+            ],
+            markers: Vec::new(),
+            latest_position: 2,
+        });
+    insert_test_remote_connection(&state, &remote, port);
+
+    let overview = state
+        .get_session_overview(&local_session_id, 2)
+        .expect("remote overview should proxy directly to its owner");
+    assert_eq!(overview.session_id, local_session_id);
+    assert_eq!(overview.message_count, 3);
+    assert_eq!(overview.buckets.len(), 2);
+    assert_eq!(overview.buckets[1].k, ConversationOverviewKind::Command);
+
+    let request_lines = requests.lock().expect("requests mutex poisoned").clone();
+    assert!(
+        request_lines
+            .iter()
+            .any(|line| line.starts_with("GET /api/sessions/remote-session-1/overview?buckets=2 ")),
+        "expected bounded remote overview request, saw {request_lines:?}"
+    );
+    join_test_server(server);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn stale_remote_tail_response_cannot_overwrite_newer_synchronized_metadata() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let mut stale_remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    stale_remote_session.messages = vec![remote_text_message(
+        "remote-message-1",
+        "Stale remote tail.",
+    )];
+    stale_remote_session.messages_loaded = true;
+    stale_remote_session.message_count = 1;
+    stale_remote_session.session_mutation_stamp = Some(30);
+
+    let mut initial_summary = stale_remote_session.clone();
+    make_remote_session_summary_only(&mut initial_summary, 1);
+    initial_summary.session_mutation_stamp = Some(20);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: initial_summary.id.clone(),
+                session: initial_summary,
+            },
+        )
+        .expect("remote summary should apply");
+    let local_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .expect("remote proxy should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("remote proxy should be mutable");
+        record.session.message_count = 2;
+        record.session.session_mutation_stamp = Some(40);
+        record.session.preview = "Newer synchronized metadata.".to_owned();
+        let local_session_id = record.session.id.clone();
+        inner.note_remote_applied_revision(&remote.id, 4);
+        local_session_id
+    };
+
+    let (port, _requests, server) = spawn_remote_session_response_server(SessionResponse {
+        revision: 4,
+        session: stale_remote_session,
+        server_instance_id: "remote-instance".to_owned(),
+    });
+    insert_test_remote_connection(&state, &remote, port);
+
+    let error = match state.get_session(&local_session_id) {
+        Ok(_) => panic!("stale bounded tail must be rejected"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::CONFLICT, "{}", error.message);
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_remote_session_index(&remote.id, "remote-session-1")
+        .expect("remote proxy should remain");
+    assert_eq!(inner.sessions[index].session.message_count, 2);
+    assert_eq!(
+        inner.sessions[index].session.preview,
+        "Newer synchronized metadata."
+    );
+    drop(inner);
+    join_test_server(server);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn stale_remote_history_page_is_not_relabelled_with_current_proxy_metadata() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let mut summary = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    make_remote_session_summary_only(&mut summary, 2);
+    summary.session_mutation_stamp = Some(40);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 4,
+                session_id: summary.id.clone(),
+                session: summary,
+            },
+        )
+        .expect("current remote summary should apply");
+    let local_session_id = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .expect("remote proxy should exist");
+        inner.sessions[index].session.id.clone()
+    };
+
+    let (port, _requests, server) =
+        spawn_remote_session_history_response_server(SessionHistoryResponse {
+            messages: vec![remote_text_message(
+                "remote-message-1",
+                "Stale remote history.",
+            )],
+            next_before: None,
+            has_more: false,
+            next_after: None,
+            has_newer: false,
+            message_start_index: 0,
+            message_count: 1,
+            revision: 3,
+            session_mutation_stamp: 30,
+            server_instance_id: "remote-instance".to_owned(),
+        });
+    insert_test_remote_connection(&state, &remote, port);
+
+    let error = match state.get_session_history(&local_session_id, None, None, None, false, 2) {
+        Ok(_) => panic!("stale remote history must be rejected"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::CONFLICT, "{}", error.message);
+    join_test_server(server);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn get_session_adopts_bounded_summary_when_remote_owner_has_no_tail_bytes() {
     let state = test_app_state();
     let remote = RemoteConfig {
         id: "ssh-lab".to_owned(),
@@ -974,7 +1206,7 @@ fn get_session_falls_back_to_unloaded_summary_when_remote_owner_returns_summary(
 
     let response = state
         .get_session(&local_session_id)
-        .expect("metadata-only owner response should fall back to the cached summary");
+        .expect("metadata-only owner response should remain bounded");
     assert_eq!(response.session.id, local_session_id);
     assert_eq!(
         response.session.project_id.as_deref(),
@@ -983,7 +1215,7 @@ fn get_session_falls_back_to_unloaded_summary_when_remote_owner_returns_summary(
     assert!(!response.session.messages_loaded);
     assert!(response.session.messages.is_empty());
     assert_eq!(response.session.message_count, 1);
-    assert_eq!(response.session.preview, "Cached local summary.");
+    assert_eq!(response.session.preview, "Owner returned only a summary.");
     assert!(response.session.session_mutation_stamp.is_some());
 
     let stored = {
@@ -996,15 +1228,15 @@ fn get_session_falls_back_to_unloaded_summary_when_remote_owner_returns_summary(
     assert!(!stored.messages_loaded);
     assert!(stored.messages.is_empty());
     assert_eq!(stored.message_count, 1);
-    assert_eq!(stored.preview, "Cached local summary.");
-    assert_eq!(stored.session_mutation_stamp, Some(20));
+    assert_eq!(stored.preview, "Owner returned only a summary.");
+    assert_eq!(stored.session_mutation_stamp, Some(30));
 
     let request_lines = requests.lock().expect("requests mutex poisoned").clone();
     assert!(
         request_lines
             .iter()
-            .any(|line| line.starts_with("GET /api/sessions/remote-session-1 ")),
-        "expected targeted remote session fetch, saw {request_lines:?}"
+            .any(|line| line.starts_with("GET /api/sessions/remote-session-1?tail=20 ")),
+        "expected bounded remote tail fetch, saw {request_lines:?}"
     );
     assert!(
         request_lines
@@ -1093,7 +1325,7 @@ fn get_session_hydration_skips_side_fetch_when_remote_revision_is_already_seen()
     assert!(
         request_lines
             .iter()
-            .any(|line| line.starts_with("GET /api/sessions/remote-session-1 ")),
+            .any(|line| line.starts_with("GET /api/sessions/remote-session-1?tail=20 ")),
         "expected targeted remote session fetch, saw {request_lines:?}"
     );
     assert!(
@@ -1369,7 +1601,7 @@ fn get_session_propagates_remote_protocol_error_instead_of_cached_summary() {
 }
 
 #[test]
-fn get_session_returns_local_not_found_when_recoverable_remote_error_loses_cached_summary() {
+fn get_session_surfaces_remote_tail_transport_failure_without_summary_fallback() {
     let state = test_app_state();
     let remote = RemoteConfig {
         id: "ssh-lab".to_owned(),
@@ -1454,7 +1686,7 @@ fn get_session_returns_local_not_found_when_recoverable_remote_error_loses_cache
 
             if request
                 .request_line
-                .starts_with("GET /api/sessions/remote-session-1 ")
+                .starts_with("GET /api/sessions/remote-session-1?tail=")
             {
                 let mut inner = state_for_server.inner.lock().expect("state mutex poisoned");
                 let index = inner
@@ -1464,9 +1696,8 @@ fn get_session_returns_local_not_found_when_recoverable_remote_error_loses_cache
                 state_for_server
                     .commit_locked(&mut inner)
                     .expect("local proxy removal should commit");
-                // Drop the socket without an HTTP response so the visible
-                // hydration path sees a typed recoverable remote-connection
-                // miss, then falls back to the now-missing local summary.
+                // Drop the socket without an HTTP response. The bounded tail
+                // request must surface the transport failure directly.
                 return;
             }
 
@@ -1476,18 +1707,17 @@ fn get_session_returns_local_not_found_when_recoverable_remote_error_loses_cache
     insert_test_remote_connection(&state, &remote, port);
 
     let err = match state.get_session(&local_session_id) {
-        Ok(_) => panic!("missing cached summary should surface as local not found"),
+        Ok(_) => panic!("remote tail transport failure should surface"),
         Err(err) => err,
     };
-    assert_eq!(err.status, StatusCode::NOT_FOUND);
-    assert_eq!(err.kind, Some(ApiErrorKind::LocalSessionMissing));
-    assert_eq!(err.message, "session not found");
+    assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(err.kind, Some(ApiErrorKind::RemoteConnectionUnavailable));
 
     let request_lines = requests.lock().expect("requests mutex poisoned").clone();
     assert!(
         request_lines
             .iter()
-            .any(|line| line.starts_with("GET /api/sessions/remote-session-1 ")),
+            .any(|line| line.starts_with("GET /api/sessions/remote-session-1?tail=20 ")),
         "expected targeted remote session fetch, saw {request_lines:?}"
     );
     join_test_server(server);
@@ -1496,7 +1726,7 @@ fn get_session_returns_local_not_found_when_recoverable_remote_error_loses_cache
 }
 
 #[test]
-fn get_session_falls_back_to_summary_after_stale_remote_transcript() {
+fn get_session_tail_does_not_fetch_a_broad_remote_state_snapshot() {
     let state = test_app_state();
     let remote = RemoteConfig {
         id: "ssh-lab".to_owned(),
@@ -1554,37 +1784,21 @@ fn get_session_falls_back_to_summary_after_stale_remote_transcript() {
         inner.sessions[index].session.id.clone()
     };
 
-    let mut newer_remote_state = sample_remote_orchestrator_state(
-        "remote-project-1",
-        "/remote/repo",
-        4,
-        OrchestratorInstanceStatus::Running,
-    );
-    let mut newer_summary = stale_full_session.clone();
-    make_remote_session_summary_only(&mut newer_summary, 1);
-    newer_summary.preview = "Newer summary from state.".to_owned();
-    newer_summary.session_mutation_stamp = Some(40);
-    newer_remote_state.orchestrators.clear();
-    newer_remote_state.sessions = vec![newer_summary];
-
-    let (port, requests, server) = spawn_remote_session_and_state_response_server(
-        SessionResponse {
-            revision: 3,
-            session: stale_full_session,
-            server_instance_id: "remote-instance".to_owned(),
-        },
-        Some(newer_remote_state),
-    );
+    let (port, requests, server) = spawn_remote_session_response_server(SessionResponse {
+        revision: 3,
+        session: stale_full_session,
+        server_instance_id: "remote-instance".to_owned(),
+    });
     insert_test_remote_connection(&state, &remote, port);
 
     let response = state
         .get_session(&local_session_id)
-        .expect("stale remote transcript should fall back to the local summary");
+        .expect("bounded remote tail should load");
     assert_eq!(response.session.id, local_session_id);
-    assert!(!response.session.messages_loaded);
-    assert!(response.session.messages.is_empty());
+    assert!(response.session.messages_loaded);
+    assert_eq!(response.session.messages.len(), 1);
     assert_eq!(response.session.message_count, 1);
-    assert_eq!(response.session.preview, "Newer summary from state.");
+    assert_eq!(response.session.preview, "Stale transcript.");
     assert!(response.session.session_mutation_stamp.is_some());
 
     let inner = state.inner.lock().expect("state mutex poisoned");
@@ -1592,26 +1806,25 @@ fn get_session_falls_back_to_summary_after_stale_remote_transcript() {
         .find_remote_session_index(&remote.id, "remote-session-1")
         .expect("remote proxy session should still exist");
     let record = &inner.sessions[index];
-    assert!(!record.session.messages_loaded);
-    assert!(record.session.messages.is_empty());
+    assert!(record.session.messages_loaded);
+    assert_eq!(record.session.messages.len(), 1);
     assert_eq!(record.session.message_count, 1);
-    assert_eq!(record.session.preview, "Newer summary from state.");
-    assert_eq!(record.session.session_mutation_stamp, Some(40));
-    assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&4));
+    assert_eq!(record.session.preview, "Stale transcript.");
+    assert_eq!(record.session.session_mutation_stamp, Some(30));
     drop(inner);
 
     let request_lines = requests.lock().expect("requests mutex poisoned").clone();
     assert!(
         request_lines
             .iter()
-            .any(|line| line.starts_with("GET /api/sessions/remote-session-1 ")),
+            .any(|line| line.starts_with("GET /api/sessions/remote-session-1?tail=20 ")),
         "expected targeted remote session fetch, saw {request_lines:?}"
     );
     assert!(
         request_lines
             .iter()
-            .any(|line| line.starts_with("GET /api/state ")),
-        "expected remote state resync before falling back, saw {request_lines:?}"
+            .all(|line| !line.starts_with("GET /api/state ")),
+        "bounded tail fetch must not request a broad state snapshot, saw {request_lines:?}"
     );
 
     join_test_server(server);
@@ -1965,6 +2178,7 @@ fn remote_session_create_forwards_configured_default_model() {
         external_session_id: None,
         agent_commands_revision: 0,
         codex_thread_state: None,
+        live_activity: None,
         status: SessionStatus::Idle,
         preview: "Remote Default Model ready.".to_owned(),
         messages: Vec::new(),
@@ -2228,81 +2442,6 @@ fn inbound_remote_session_remote_id_is_replaced_by_connection_metadata() {
 }
 
 #[test]
-fn full_remote_state_snapshot_suppresses_same_revision_deltas() {
-    let state = test_app_state();
-    let remote = local_replay_test_remote();
-    create_test_remote_project(
-        &state,
-        &remote,
-        "/remote/repo",
-        "Remote Project",
-        "remote-project-1",
-    );
-
-    let mut remote_state = sample_remote_orchestrator_state(
-        "remote-project-1",
-        "/remote/repo",
-        1,
-        OrchestratorInstanceStatus::Running,
-    );
-    remote_state.revision = 3;
-    let remote_session = remote_state
-        .sessions
-        .iter_mut()
-        .find(|session| session.id == "remote-session-1")
-        .expect("sample remote session should exist");
-    remote_session.messages = vec![remote_text_message("remote-message-1", "Hello")];
-    remote_session.messages_loaded = true;
-    remote_session.message_count = 1;
-    remote_session.preview = "Hello".to_owned();
-    remote_session.session_mutation_stamp = Some(10);
-
-    state
-        .apply_remote_state_snapshot(&remote.id, remote_state)
-        .expect("full remote state snapshot should apply");
-
-    let mut delta_receiver = state.subscribe_delta_events();
-    state
-        .apply_remote_delta_event(
-            &remote.id,
-            DeltaEvent::TextDelta {
-                revision: 3,
-                session_id: "remote-session-1".to_owned(),
-                message_id: "remote-message-1".to_owned(),
-                message_index: 0,
-                message_count: 1,
-                text_start_byte: None,
-                delta: " world".to_owned(),
-                preview: Some("Hello world".to_owned()),
-                session_mutation_stamp: Some(11),
-            },
-        )
-        .expect("same-revision delta after full snapshot should be skipped");
-
-    assert!(
-        delta_receiver.try_recv().is_err(),
-        "same-revision delta after a full snapshot must not publish"
-    );
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    let index = inner
-        .find_remote_session_index(&remote.id, "remote-session-1")
-        .expect("remote proxy session should exist");
-    let record = &inner.sessions[index];
-    assert!(matches!(
-        &record.session.messages[0],
-        Message::Text { text, .. } if text == "Hello"
-    ));
-    assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&3));
-    assert_eq!(
-        inner.remote_snapshot_applied_revisions.get(&remote.id),
-        Some(&3)
-    );
-    drop(inner);
-
-    let _ = fs::remove_file(state.persistence_path.as_path());
-}
-
-#[test]
 fn metadata_remote_state_snapshot_allows_same_revision_transcript_delta() {
     let state = test_app_state();
     let remote = local_replay_test_remote();
@@ -2314,27 +2453,33 @@ fn metadata_remote_state_snapshot_allows_same_revision_transcript_delta() {
         "remote-project-1",
     );
 
-    let mut full_remote_state = sample_remote_orchestrator_state(
+    let mut seed_remote_state = sample_remote_orchestrator_state(
         "remote-project-1",
         "/remote/repo",
         1,
         OrchestratorInstanceStatus::Running,
     );
-    full_remote_state.revision = 2;
-    let full_remote_session = full_remote_state
+    let seed_remote_session = seed_remote_state
         .sessions
         .iter_mut()
         .find(|session| session.id == "remote-session-1")
         .expect("sample remote session should exist");
-    full_remote_session.messages = vec![remote_text_message("remote-message-1", "Hello")];
-    full_remote_session.messages_loaded = true;
-    full_remote_session.message_count = 1;
-    full_remote_session.preview = "Hello".to_owned();
-    full_remote_session.session_mutation_stamp = Some(10);
+    seed_remote_session.messages = vec![remote_text_message("remote-message-1", "Hello")];
+    seed_remote_session.messages_loaded = true;
+    seed_remote_session.message_count = 1;
+    seed_remote_session.preview = "Hello".to_owned();
+    seed_remote_session.session_mutation_stamp = Some(10);
 
     state
-        .apply_remote_state_snapshot(&remote.id, full_remote_state)
-        .expect("full remote state snapshot should apply");
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: seed_remote_session.id.clone(),
+                session: seed_remote_session.clone(),
+            },
+        )
+        .expect("bounded remote session seed should apply");
 
     let mut metadata_remote_state = sample_remote_orchestrator_state(
         "remote-project-1",
@@ -2402,12 +2547,6 @@ fn metadata_remote_state_snapshot_allows_same_revision_transcript_delta() {
     assert_eq!(
         inner.remote_snapshot_applied_revisions.get(&remote.id),
         Some(&3)
-    );
-    assert_eq!(
-        inner
-            .remote_transcript_snapshot_applied_revisions
-            .get(&remote.id),
-        Some(&2)
     );
     drop(inner);
 
@@ -2485,10 +2624,10 @@ fn targeted_remote_hydration_rejects_message_count_length_mismatch() {
                 session_mutation_stamp: Some(10),
             },
         )
-        .expect_err("targeted hydration should reject inconsistent full transcript");
+        .expect_err("targeted bounded-tail fetch should reject inconsistent metadata");
     assert!(
         err.to_string()
-            .contains("did not match loaded transcript length"),
+            .contains("inconsistent messagesLoaded metadata"),
         "unexpected error: {err:#}"
     );
 
@@ -2584,7 +2723,7 @@ fn remote_delta_falls_through_when_targeted_hydration_returns_summary() {
         .find_remote_session_index(&remote.id, "remote-session-1")
         .expect("remote proxy session should exist");
     let record = &inner.sessions[index];
-    assert!(!record.session.messages_loaded);
+    assert!(record.session.messages_loaded);
     assert_eq!(record.session.message_count, 1);
     assert_eq!(record.session.preview, "Delta repaired transcript.");
     assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&3));
@@ -2598,7 +2737,7 @@ fn remote_delta_falls_through_when_targeted_hydration_returns_summary() {
     assert!(
         request_lines
             .iter()
-            .any(|line| line.starts_with("GET /api/sessions/remote-session-1 ")),
+            .any(|line| line.starts_with("GET /api/sessions/remote-session-1?tail=64 ")),
         "expected targeted remote session fetch, saw {request_lines:?}"
     );
     join_test_server(server);
@@ -2703,7 +2842,7 @@ fn remote_delta_repair_rejects_newer_targeted_session_revision() {
     assert!(
         request_lines
             .iter()
-            .any(|line| line.starts_with("GET /api/sessions/remote-session-1 ")),
+            .any(|line| line.starts_with("GET /api/sessions/remote-session-1?tail=64 ")),
         "expected targeted remote session fetch, saw {request_lines:?}"
     );
     join_test_server(server);
@@ -3023,7 +3162,7 @@ fn remote_message_created_delta_rejects_gap_without_advancing_revision() {
         )
         .expect_err("gap remote MessageCreated should request resync");
     assert!(
-        error.to_string().contains("leaves a gap"),
+        error.to_string().contains("outside messageCount"),
         "unexpected error: {error:#}"
     );
     assert!(
@@ -3148,9 +3287,7 @@ fn remote_message_created_delta_rejects_existing_message_out_of_bounds_without_a
         )
         .expect_err("out-of-bounds existing remote MessageCreated should request resync");
     assert!(
-        error
-            .to_string()
-            .contains("out of bounds for existing message"),
+        error.to_string().contains("outside messageCount"),
         "unexpected error: {error:#}"
     );
     assert!(
@@ -3222,7 +3359,7 @@ fn remote_command_update_missing_target_rejects_gap_without_advancing_revision()
     assert!(
         error
             .to_string()
-            .contains("remote CommandUpdate index `1` leaves a gap"),
+            .contains("remote CommandUpdate index `1` is outside messageCount `1`"),
         "unexpected error: {error:#}"
     );
     assert!(
@@ -3286,7 +3423,7 @@ fn remote_parallel_agents_update_missing_target_rejects_gap_without_advancing_re
     assert!(
         error
             .to_string()
-            .contains("remote ParallelAgentsUpdate index `1` leaves a gap"),
+            .contains("remote ParallelAgentsUpdate index `1` is outside messageCount `1`"),
         "unexpected error: {error:#}"
     );
     assert!(

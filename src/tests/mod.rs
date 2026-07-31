@@ -586,7 +586,11 @@ fn accept_test_connection_with_timeout(
 }
 
 fn accept_test_connection(listener: &std::net::TcpListener, label: &str) -> std::net::TcpStream {
-    accept_test_connection_with_timeout(listener, label, std::time::Duration::from_secs(2))
+    // Full-suite runs intentionally execute several HTTP-heavy remote tests in
+    // parallel. Two seconds was short enough for a valid listener to time out
+    // before a scheduled test thread reached its first request, after which the
+    // client observed a misleading connection-refused hydration failure.
+    accept_test_connection_with_timeout(listener, label, std::time::Duration::from_secs(10))
 }
 
 fn join_test_server(server: std::thread::JoinHandle<()>) {
@@ -1056,6 +1060,7 @@ fn sample_remote_orchestrator_state(
                 external_session_id: None,
                 agent_commands_revision: 0,
                 codex_thread_state: None,
+                live_activity: None,
                 status: SessionStatus::Idle,
                 preview: format!("Remote {} ready.", template_session.name),
                 messages: Vec::new(),

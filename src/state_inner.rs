@@ -147,6 +147,7 @@ impl StateInner {
             pending_acp_approval_order: VecDeque::new(),
             queued_prompts: VecDeque::new(),
             queued_peer_messages: HashMap::new(),
+            message_start_index: 0,
             message_positions: HashMap::new(),
             remote_id: None,
             remote_session_id: None,
@@ -195,6 +196,7 @@ impl StateInner {
                 external_session_id: None,
                 agent_commands_revision: 0,
                 codex_thread_state: None,
+                live_activity: None,
                 status: SessionStatus::Idle,
                 preview: "Ready for a prompt.".to_owned(),
                 messages: Vec::new(),
@@ -242,7 +244,7 @@ impl StateInner {
             })
             .collect::<BTreeMap<_, _>>();
 
-        for record in &self.sessions {
+        for record in &mut self.sessions {
             if links.contains_key(&record.session.id) {
                 continue;
             }
@@ -611,6 +613,7 @@ impl StateInner {
     #[cfg_attr(test, allow(dead_code))]
     fn collect_persist_delta(&mut self, watermark: u64) -> PersistDelta {
         let mut changed_sessions: Vec<PersistedSessionRecord> = Vec::new();
+        let mut persisted_session_ids_to_trim = Vec::new();
         let retry_removed_ids = std::mem::take(&mut self.removed_session_ids);
         let retry_removed_delegation_ids = std::mem::take(&mut self.removed_delegation_ids);
         let mut removed_ids = retry_removed_ids.clone();
@@ -625,6 +628,12 @@ impl StateInner {
                 removed_ids.push(record.session.id.clone());
             } else {
                 changed_sessions.push(PersistedSessionRecord::from_record(record));
+                if !matches!(
+                    record.session.status,
+                    SessionStatus::Active | SessionStatus::Approval
+                ) {
+                    persisted_session_ids_to_trim.push(record.session.id.clone());
+                }
             }
         }
         let changed_delegations = self
@@ -647,12 +656,35 @@ impl StateInner {
         PersistDelta {
             metadata: PersistedState::metadata_from_inner(self),
             changed_sessions,
+            persisted_session_ids_to_trim,
             removed_session_ids: removed_ids,
             changed_delegations: (!changed_delegations.is_empty()).then_some(changed_delegations),
             removed_delegation_ids,
             drained_delegation_tombstones: retry_removed_delegation_ids,
             drained_explicit_tombstones: retry_removed_ids,
             watermark: self.last_mutation_stamp,
+        }
+    }
+
+    fn trim_persisted_session_tails(
+        &mut self,
+        watermark: u64,
+        persisted_session_ids: &[String],
+    ) {
+        for session_id in persisted_session_ids {
+            let Some(index) = self.find_session_index(session_id) else {
+                continue;
+            };
+            let record = &mut self.sessions[index];
+            if record.mutation_stamp > watermark
+                || matches!(
+                    record.session.status,
+                    SessionStatus::Active | SessionStatus::Approval
+                )
+            {
+                continue;
+            }
+            trim_retained_session_messages(record, SESSION_IN_MEMORY_MESSAGE_LIMIT);
         }
     }
 

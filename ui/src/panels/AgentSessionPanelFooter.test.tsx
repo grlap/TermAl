@@ -26,7 +26,6 @@ import {
   AgentSessionPanelFooter,
   splitAgentCommandResolverTail,
 } from "./AgentSessionPanel";
-import { buildConversationOverviewTailItems } from "./conversation-overview-controller";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { RunningIndicator } from "./session-activity-cards";
 import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
@@ -407,6 +406,7 @@ function renderFooter({
       isUpdating={isUpdating}
       showNewResponseIndicator={false}
       newResponseIndicatorLabel="New response"
+      newResponseIndicatorQueuedCount={0}
       footerModeLabel="Session"
       onScrollToLatest={onScrollToLatest}
       onDraftCommit={onDraftCommit}
@@ -475,18 +475,30 @@ function recordTextareaHeightWrites(
 }
 
 describe("AgentSessionPanelFooter", () => {
-  it("shows a command badge in the live turn card for slash commands", () => {
+  it("does not conflate a user slash command with an agent shell command", () => {
     render(<RunningIndicator agent="Codex" lastPrompt="/review-code" />);
 
-    expect(screen.getAllByText("Command")).toHaveLength(2);
-    expect(screen.getByText("Executing a command...")).toBeInTheDocument();
+    expect(screen.queryByText("Agent command")).not.toBeInTheDocument();
+    expect(screen.getByText("Current prompt")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for the next chunk of output...")).toBeInTheDocument();
   });
 
-  it("does not show a command badge in the live turn card for regular prompts", () => {
-    render(<RunningIndicator agent="Codex" lastPrompt="Review the staged diff" />);
+  it("shows explicit agent command activity independently from the user prompt", () => {
+    render(
+      <RunningIndicator
+        agent="Codex"
+        activity={{
+          prompt: "/review-code",
+          command: "cargo test --workspace",
+          commandStatus: "running",
+        }}
+        lastPrompt={null}
+      />,
+    );
 
-    expect(screen.queryByText("Command")).not.toBeInTheDocument();
-    expect(screen.getByText("Waiting for the next chunk of output...")).toBeInTheDocument();
+    expect(screen.getAllByText("Agent command")).toHaveLength(2);
+    expect(screen.getByText("Executing an agent command...")).toBeInTheDocument();
+    expect(screen.getByText("cargo test --workspace")).toBeInTheDocument();
   });
 
   it("marks the real composer input for overview focus deferral", () => {

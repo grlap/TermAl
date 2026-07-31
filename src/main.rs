@@ -50,6 +50,7 @@ use sha2::{Digest, Sha256};
 use shared_child::SharedChild;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
@@ -337,6 +338,8 @@ fn app_router(state: AppState) -> Router {
         .route("/api/projects/pick", post(pick_project_root))
         .route("/api/sessions", post(create_session))
         .route("/api/sessions/{id}", get(get_session))
+        .route("/api/sessions/{id}/history", get(get_session_history))
+        .route("/api/sessions/{id}/overview", get(get_session_overview))
         .route(
             "/api/sessions/{id}/delegations",
             get(list_session_delegations).post(create_session_delegation),
@@ -454,6 +457,10 @@ fn app_router(state: AppState) -> Router {
         .with_state(state)
         // One 10 MiB image expands to about 13.4 MiB when base64-encoded.
         .layer(DefaultBodyLimit::max(MAX_JSON_REQUEST_BODY_BYTES))
+        // The bounded conversation overview intentionally favors a stable,
+        // explicit JSON contract. HTTP compression keeps its 512 repeated
+        // bucket objects well below the rail's 8 KiB network budget.
+        .layer(CompressionLayer::new())
         .layer(cors)
 }
 

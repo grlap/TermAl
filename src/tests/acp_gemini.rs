@@ -14,6 +14,58 @@
 
 use super::*;
 
+fn assert_emitted_acp_delegation_mcp_descriptor(
+    written: &str,
+    method: &str,
+    parent_session_id: &str,
+) {
+    let request: Value = written
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .find(|request: &Value| request["method"].as_str() == Some(method))
+        .unwrap_or_else(|| panic!("{method} request should be emitted as JSON\n{written}"));
+    let servers = request
+        .pointer("/params/mcpServers")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("{method} should emit mcpServers as an array\n{written}"));
+    assert_eq!(
+        servers.len(),
+        1,
+        "{method} should emit exactly the parent-scoped TermAl MCP bridge"
+    );
+    let server = &servers[0];
+    assert_eq!(
+        server.get("name").and_then(Value::as_str),
+        Some(TERMAL_DELEGATION_MCP_SERVER_NAME)
+    );
+    assert!(
+        server
+            .get("command")
+            .and_then(Value::as_str)
+            .is_some_and(|command| !command.trim().is_empty()),
+        "{method} should emit a non-empty delegation MCP command"
+    );
+    let args = server
+        .get("args")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("{method} should emit delegation MCP args"));
+    assert!(
+        args.iter()
+            .any(|arg| arg.as_str() == Some("delegation-mcp")),
+        "{method} should select delegation-mcp mode"
+    );
+    assert!(
+        args.iter()
+            .any(|arg| arg.as_str() == Some(parent_session_id)),
+        "{method} should bind the parent session id"
+    );
+    assert_eq!(
+        server.get("env"),
+        Some(&json!([])),
+        "{method} ACP McpServer.env must use the spec EnvVariable array shape"
+    );
+}
+
 #[test]
 fn acp_config_option_display_text_is_bounded_before_persistence() {
     let oversized_label = "L".repeat(MAX_ACP_OPTION_LABEL_CHARS + 1);
@@ -261,14 +313,7 @@ fn acp_session_resume_attempts_load_when_session_load_support_is_unknown() {
         written.contains("\"method\":\"session/load\""),
         "session/load request should be written\n{written}"
     );
-    assert!(
-        written.contains("\"mcpServers\"")
-            && written.contains("\"name\":\"termal-delegation\"")
-            && written.contains("\"delegation-mcp\"")
-            && written.contains("\"--parent-session-id\"")
-            && written.contains(&format!("\"{}\"", created.session_id)),
-        "session/load should include the parent-scoped TermAl delegation MCP bridge\n{written}"
-    );
+    assert_emitted_acp_delegation_mcp_descriptor(&written, "session/load", &created.session_id);
     assert!(
         !written.contains("\"method\":\"session/new\""),
         "session/new should not be written when resuming with unknown capability support\n{written}"
@@ -487,13 +532,7 @@ fn acp_session_resume_prefers_resume_when_explicitly_supported() {
         written.contains("\"method\":\"session/resume\""),
         "session/resume request should be written\n{written}"
     );
-    assert!(
-        written.contains("\"mcpServers\"")
-            && written.contains("\"name\":\"termal-delegation\"")
-            && written.contains("\"--parent-session-id\"")
-            && written.contains(&format!("\"{}\"", created.session_id)),
-        "session/resume should include the parent-scoped TermAl MCP bridge\n{written}"
-    );
+    assert_emitted_acp_delegation_mcp_descriptor(&written, "session/resume", &created.session_id);
     assert!(
         !written.contains("\"method\":\"session/load\"")
             && !written.contains("\"method\":\"session/new\""),
@@ -701,12 +740,12 @@ fn opencode_session_new_reapplies_explicit_model_then_mode_before_ready() {
     let after_model = writer.contents();
     assert!(
         after_model.contains(
-            "\"method\":\"session/set_config_option\",\"params\":{\"optionId\":\"model\""
+            "\"method\":\"session/set_config_option\",\"params\":{\"configId\":\"model\""
         ),
         "model must be the first explicit OpenCode config request\n{after_model}"
     );
     assert!(
-        !after_model.contains("\"params\":{\"optionId\":\"mode\""),
+        !after_model.contains("\"params\":{\"configId\":\"mode\""),
         "mode must wait for the model acknowledgement\n{after_model}"
     );
     model_sender
@@ -717,10 +756,10 @@ fn opencode_session_new_reapplies_explicit_model_then_mode_before_ready() {
         take_pending_acp_request(&pending_requests, Duration::from_secs(1));
     let after_mode = writer.contents();
     let model_position = after_mode
-        .find("\"params\":{\"optionId\":\"model\"")
+        .find("\"params\":{\"configId\":\"model\"")
         .expect("model request should be present");
     let mode_position = after_mode
-        .find("\"params\":{\"optionId\":\"mode\"")
+        .find("\"params\":{\"configId\":\"mode\"")
         .expect("mode request should be present");
     assert!(
         model_position < mode_position,
@@ -2518,14 +2557,7 @@ fn acp_session_resume_skips_load_when_session_load_is_explicitly_unsupported() {
         written.contains("\"method\":\"session/new\""),
         "session/new should be written when support is explicitly unavailable\n{written}"
     );
-    assert!(
-        written.contains("\"mcpServers\"")
-            && written.contains("\"name\":\"termal-delegation\"")
-            && written.contains("\"delegation-mcp\"")
-            && written.contains("\"--parent-session-id\"")
-            && written.contains(&format!("\"{}\"", created.session_id)),
-        "session/new should include the parent-scoped TermAl delegation MCP bridge\n{written}"
-    );
+    assert_emitted_acp_delegation_mcp_descriptor(&written, "session/new", &created.session_id);
 
     let session = state
         .snapshot()

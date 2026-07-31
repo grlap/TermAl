@@ -25,6 +25,7 @@ import {
   createFilesystemTab,
   createGitStatusTab,
   createInstructionDebuggerTab,
+  createMailboxTab,
   createOrchestratorCanvasTab,
   createOrchestratorListTab,
   createProjectListTab,
@@ -40,6 +41,7 @@ export {
   createFilesystemTab,
   createGitStatusTab,
   createInstructionDebuggerTab,
+  createMailboxTab,
   createOrchestratorCanvasTab,
   createOrchestratorListTab,
   createProjectListTab,
@@ -60,6 +62,7 @@ export type {
   WorkspaceFilesystemTab,
   WorkspaceGitStatusTab,
   WorkspaceInstructionDebuggerTab,
+  WorkspaceMailboxTab,
   WorkspaceNode,
   WorkspaceOrchestratorCanvasTab,
   WorkspaceOrchestratorListTab,
@@ -88,6 +91,7 @@ import {
   type WorkspaceFilesystemTab,
   type WorkspaceGitStatusTab,
   type WorkspaceInstructionDebuggerTab,
+  type WorkspaceMailboxTab,
   type WorkspaceNode,
   type WorkspaceOrchestratorListTab,
   type WorkspaceOriginOnlyTab,
@@ -352,6 +356,25 @@ export function reconcileWorkspaceState(
             originSessionId,
             ...projectOriginProps(originProjectId),
             workdir: normalizeWorkspacePath(tab.workdir),
+          },
+        ];
+      }
+
+      if (tab.kind === "mailbox") {
+        const mailboxId = normalizeWorkspaceIdentifier(tab.mailboxId);
+        if (!mailboxId || !originSessionId) {
+          return [];
+        }
+        const {
+          originProjectId: _ignoredOriginProjectId,
+          ...tabWithoutOriginProjectId
+        } = tab;
+        return [
+          {
+            ...tabWithoutOriginProjectId,
+            mailboxId,
+            originSessionId,
+            ...projectOriginProps(originProjectId),
           },
         ];
       }
@@ -800,6 +823,53 @@ export function openTerminalInWorkspaceState(
       normalizedOriginSessionId,
       normalizedOriginProjectId,
     ),
+    preferredPaneId,
+  );
+}
+
+export function openMailboxInWorkspaceState(
+  workspace: WorkspaceState,
+  mailboxId: string,
+  preferredPaneId: string | null,
+  originSessionId: string,
+  originProjectId: string | null = null,
+): WorkspaceState {
+  const normalizedMailboxId = normalizeWorkspaceIdentifier(mailboxId);
+  const normalizedOriginSessionId = normalizeWorkspaceIdentifier(originSessionId);
+  if (!normalizedMailboxId || !normalizedOriginSessionId) {
+    return workspace;
+  }
+
+  const existing = findMailboxTab(workspace, normalizedMailboxId);
+  if (existing) {
+    const panes = workspace.panes.map((pane) =>
+      pane.id === existing.paneId
+        ? syncPaneState({
+            ...pane,
+            tabs: pane.tabs.map((tab) =>
+              tab.id === existing.tab.id && tab.kind === "mailbox"
+                ? {
+                    ...tab,
+                    originSessionId: normalizedOriginSessionId,
+                    ...projectOriginProps(normalizeWorkspaceIdentifier(originProjectId)),
+                    refreshToken: crypto.randomUUID(),
+                  }
+                : tab,
+            ),
+            activeTabId: existing.tab.id,
+          })
+        : pane,
+    );
+    return {
+      ...workspace,
+      panes,
+      activePaneId: existing.paneId,
+    };
+  }
+
+  return openTabInWorkspaceState(
+    workspace,
+    createMailboxTab(normalizedMailboxId, normalizedOriginSessionId, originProjectId),
     preferredPaneId,
   );
 }
@@ -2251,6 +2321,20 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     };
   }
 
+  if (activeTab.kind === "mailbox") {
+    return {
+      ...pane,
+      activeTabId: activeTab.id,
+      activeSessionId: resolveOriginSessionId(
+        activeTab.originSessionId,
+        pane.activeSessionId,
+        pane.tabs,
+      ),
+      viewMode: "mailbox",
+      sourcePath: null,
+    };
+  }
+
   return {
     ...pane,
     activeTabId: activeTab.id,
@@ -2366,6 +2450,22 @@ function findTerminalTab(
           normalizedOriginSessionId &&
         normalizeWorkspaceIdentifier(candidate.originProjectId ?? null) ===
           normalizedOriginProjectId,
+    );
+    if (tab) {
+      return { paneId: pane.id, tab };
+    }
+  }
+
+  return null;
+}
+
+function findMailboxTab(workspace: WorkspaceState, mailboxId: string) {
+  const normalizedMailboxId = normalizeWorkspaceIdentifier(mailboxId);
+  for (const pane of workspace.panes) {
+    const tab = pane.tabs.find(
+      (candidate): candidate is WorkspaceMailboxTab =>
+        candidate.kind === "mailbox" &&
+        normalizeWorkspaceIdentifier(candidate.mailboxId) === normalizedMailboxId,
     );
     if (tab) {
       return { paneId: pane.id, tab };

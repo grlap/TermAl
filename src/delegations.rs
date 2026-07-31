@@ -2329,7 +2329,7 @@ fn add_parent_delegation_card_locked(
     Some(ParentDelegationCardDelta::Created {
         session_id: record.session.id.clone(),
         message_id,
-        message_index,
+        message_index: global_message_index(record, message_index),
         message_count: session_message_count(record),
         message,
         preview: record.session.preview.clone(),
@@ -2373,7 +2373,7 @@ fn update_parent_delegation_card_locked(
         return Some(ParentDelegationCardDelta::Updated {
             session_id: record.session.id.clone(),
             message_id: id.clone(),
-            message_index,
+            message_index: global_message_index(record, message_index),
             message_count: session_message_count(record),
             agents,
             preview,
@@ -2925,7 +2925,7 @@ fn detach_delegation_child_runtime_locked(
             Some(DelegationChildTranscriptDelta::MessageUpdated {
                 session_id: session_id.clone(),
                 message_id: message.id().to_owned(),
-                message_index,
+                message_index: global_message_index(child, message_index),
                 message_count,
                 message,
                 preview: preview.clone(),
@@ -2938,7 +2938,7 @@ fn detach_delegation_child_runtime_locked(
         transcript_deltas.push(DelegationChildTranscriptDelta::MessageCreated {
             session_id,
             message_id: message.id().to_owned(),
-            message_index,
+            message_index: global_message_index(child, message_index),
             message_count,
             message,
             preview,

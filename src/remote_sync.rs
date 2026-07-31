@@ -43,6 +43,54 @@ fn delta_event_revision(event: &DeltaEvent) -> u64 {
     }
 }
 
+fn remote_delta_session_transcript_metadata(
+    event: &DeltaEvent,
+) -> Option<(&str, u32, Option<u64>)> {
+    match event {
+        DeltaEvent::MessageCreated {
+            session_id,
+            message_count,
+            session_mutation_stamp,
+            ..
+        }
+        | DeltaEvent::MessageUpdated {
+            session_id,
+            message_count,
+            session_mutation_stamp,
+            ..
+        }
+        | DeltaEvent::TextDelta {
+            session_id,
+            message_count,
+            session_mutation_stamp,
+            ..
+        }
+        | DeltaEvent::TextReplace {
+            session_id,
+            message_count,
+            session_mutation_stamp,
+            ..
+        }
+        | DeltaEvent::CommandUpdate {
+            session_id,
+            message_count,
+            session_mutation_stamp,
+            ..
+        }
+        | DeltaEvent::ParallelAgentsUpdate {
+            session_id,
+            message_count,
+            session_mutation_stamp,
+            ..
+        } => Some((
+            session_id.as_str(),
+            *message_count,
+            *session_mutation_stamp,
+        )),
+        _ => None,
+    }
+}
+
 struct RemoteSyncRollback {
     next_session_number: usize,
     sessions: Vec<SessionRecord>,
@@ -210,8 +258,21 @@ fn sync_remote_state_inner(
         });
     }
 
-    let remote_sessions_by_id = remote_state
+    // Broad `/api/state` and SSE `state` payloads are metadata only. Even if a
+    // malformed or older peer includes transcript bytes, this boundary drops
+    // them; transcript materialization is exclusively owned by bounded
+    // session-tail and history routes.
+    let remote_session_summaries = remote_state
         .sessions
+        .iter()
+        .cloned()
+        .map(|mut session| {
+            session.messages.clear();
+            session.messages_loaded = session.message_count == 0;
+            session
+        })
+        .collect::<Vec<_>>();
+    let remote_sessions_by_id = remote_session_summaries
         .iter()
         .map(|session| (session.id.as_str(), session))
         .collect::<HashMap<_, _>>();
@@ -339,29 +400,12 @@ fn apply_remote_state_if_newer_locked(
     true
 }
 
-fn remote_state_materializes_all_session_transcripts(remote_state: &StateResponse) -> bool {
-    // Empty snapshots provide no transcript evidence; keep same-revision
-    // transcript deltas eligible to fill sessions that appear later.
-    if remote_state.sessions.is_empty() {
-        return false;
-    }
-
-    remote_state.sessions.iter().all(|session| {
-        session.messages_loaded
-            && session.message_count == u32::try_from(session.messages.len()).unwrap_or(u32::MAX)
-    })
-}
-
 fn note_remote_applied_state_snapshot_revision(
     inner: &mut StateInner,
     remote_id: &str,
     remote_state: &StateResponse,
 ) {
-    if remote_state_materializes_all_session_transcripts(remote_state) {
-        inner.note_remote_applied_transcript_snapshot_revision(remote_id, remote_state.revision);
-    } else {
-        inner.note_remote_applied_snapshot_revision(remote_id, remote_state.revision);
-    }
+    inner.note_remote_applied_snapshot_revision(remote_id, remote_state.revision);
 }
 
 /// Applies remote session to record.
@@ -372,8 +416,11 @@ fn apply_remote_session_to_record(
     remote_session: &Session,
 ) {
     let local_session_id = record.session.id.clone();
+    let preserve_cached_messages =
+        !remote_session.messages_loaded && remote_session.messages.is_empty();
     let previous_messages =
-        (!remote_session.messages_loaded).then(|| record.session.messages.clone());
+        preserve_cached_messages.then(|| record.session.messages.clone());
+    let previous_message_start_index = record.message_start_index;
     let previous_messages_loaded = record.session.messages_loaded;
     let previous_remote_mutation_stamp = record.session.session_mutation_stamp;
     record.session =
@@ -382,16 +429,33 @@ fn apply_remote_session_to_record(
         record.session.session_mutation_stamp = previous_remote_mutation_stamp;
     }
     if let Some(messages) = previous_messages {
-        let count_matches =
-            record.session.message_count == u32::try_from(messages.len()).unwrap_or(u32::MAX);
+        let count_matches = record.session.message_count
+            == u32::try_from(
+                previous_message_start_index.saturating_add(messages.len()),
+            )
+            .unwrap_or(u32::MAX);
         let remote_mutation_stamp_matches = remote_mutation_stamp_allows_cached_transcript(
             previous_remote_mutation_stamp,
             remote_session.session_mutation_stamp,
         );
         let has_complete_previous_transcript =
             previous_messages_loaded && count_matches && remote_mutation_stamp_matches;
-        record.session.messages = messages;
-        record.session.messages_loaded = has_complete_previous_transcript;
+        if count_matches && remote_mutation_stamp_matches {
+            record.message_start_index = previous_message_start_index;
+            record.session.messages = messages;
+            record.session.messages_loaded = has_complete_previous_transcript;
+        } else {
+            record.message_start_index =
+                usize::try_from(record.session.message_count).unwrap_or(usize::MAX);
+            record.session.messages.clear();
+            record.session.messages_loaded = record.session.message_count == 0;
+        }
+    } else if remote_session.messages_loaded {
+        record.message_start_index = 0;
+    } else {
+        record.message_start_index = usize::try_from(remote_session.message_count)
+            .unwrap_or(usize::MAX)
+            .saturating_sub(record.session.messages.len());
     }
     record.external_session_id = record.session.external_session_id.clone();
     sync_codex_thread_state(record);
@@ -410,15 +474,13 @@ fn apply_remote_session_to_record(
     record.runtime = SessionRuntime::None;
     record.runtime_reset_required = false;
     clear_all_pending_requests(record);
-    if remote_session.messages_loaded {
-        record.message_positions = build_message_positions(&record.session.messages);
-    }
+    record.message_positions = build_message_positions(&record.session.messages);
 }
 
 /// Returns whether a metadata-only remote summary allows retaining the cached
-/// full transcript. A present incoming stamp is authoritative; an omitted stamp
-/// means the upstream cannot provide freshness evidence, so same-count cached
-/// transcripts are retained for compatibility with older remotes.
+/// transcript suffix. A present incoming stamp is authoritative; an omitted
+/// stamp means the upstream cannot provide freshness evidence, so a same-count
+/// cached suffix remains usable.
 fn remote_mutation_stamp_allows_cached_transcript(
     previous_stamp: Option<u64>,
     incoming_stamp: Option<u64>,
@@ -485,6 +547,13 @@ fn upsert_remote_proxy_session_record(
         pending_acp_approval_order: VecDeque::new(),
         queued_prompts: VecDeque::new(),
         queued_peer_messages: HashMap::new(),
+        message_start_index: if session.messages_loaded {
+            0
+        } else {
+            usize::try_from(session.message_count)
+                .unwrap_or(usize::MAX)
+                .saturating_sub(session.messages.len())
+        },
         message_positions: build_message_positions(&session.messages),
         remote_id: Some(remote_id.to_owned()),
         remote_session_id: Some(remote_session.id.clone()),
@@ -1101,9 +1170,20 @@ fn dispatch_remote_event_with_recovery(
             let payload = data_lines.join("\n");
             let delta: DeltaEvent = serde_json::from_str(&payload)
                 .with_context(|| format!("failed to decode remote delta event `{remote_id}`"))?;
-            if let Err(err) = state.apply_remote_delta_event(remote_id, delta) {
+            if let Err(err) = state.apply_remote_delta_event(remote_id, delta.clone()) {
                 eprintln!("remote delta apply failed for `{remote_id}`: {err:#}");
-                resync_remote_state_snapshot(state, remote_id, false)?;
+                match state.repair_remote_session_tail_after_delta_error(remote_id, &delta) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        resync_remote_state_snapshot(state, remote_id, false)?;
+                    }
+                    Err(repair_err) => {
+                        eprintln!(
+                            "remote bounded-tail repair failed for `{remote_id}`: {repair_err:#}; falling back to a full state resync"
+                        );
+                        resync_remote_state_snapshot(state, remote_id, false)?;
+                    }
+                }
             }
         }
         _ => {}

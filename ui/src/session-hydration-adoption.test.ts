@@ -29,7 +29,7 @@ function makeHydrationRequestContext(
   overrides: Partial<SessionHydrationRequestContext> = {},
 ): SessionHydrationRequestContext {
   return {
-    kind: "fullSession",
+    kind: "sessionTail",
     messageCount: 1,
     revision: 5,
     serverInstanceId: "server-a",

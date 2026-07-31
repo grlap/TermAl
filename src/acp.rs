@@ -996,7 +996,12 @@ fn configure_acp_session(
                 "session/set_config_option",
                 json!({
                     "sessionId": session_id,
-                    "optionId": "model",
+                    // ACP `session/set_config_option` identifies the option by
+                    // `configId`. `optionId` belongs to `session/request_permission`
+                    // and is rejected here with -32602 Invalid params — verified
+                    // against opencode 1.18.8, where `configId` succeeds and both
+                    // `optionId` and `id` fail. Do not "unify" these two names.
+                    "configId": "model",
                     "value": model_value,
                 }),
                 Duration::from_secs(15),
@@ -1018,7 +1023,8 @@ fn configure_acp_session(
                     "session/set_config_option",
                     json!({
                         "sessionId": session_id,
-                        "optionId": "mode",
+                        // See the `configId` note on the model option above.
+                        "configId": "mode",
                         "value": mode_value,
                     }),
                     Duration::from_secs(15),
@@ -1140,7 +1146,8 @@ fn reconcile_opencode_config_option(
             "session/set_config_option",
             json!({
                 "sessionId": external_session_id,
-                "optionId": option_id,
+                // `configId`, not `optionId` — see the note on the model option.
+                "configId": option_id,
                 "value": matching_value,
             }),
             Duration::from_secs(15),
@@ -1406,7 +1413,8 @@ fn apply_opencode_config_update(
                     "session/set_config_option",
                     json!({
                         "sessionId": external_session_id,
-                        "optionId": option_id,
+                        // `configId`, not `optionId` — see the note on the model option.
+                        "configId": option_id,
                         "value": matching_value,
                     }),
                     Duration::from_secs(15),

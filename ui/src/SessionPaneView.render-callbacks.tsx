@@ -149,6 +149,12 @@ type UseSessionRenderCallbacksParams = {
     originProjectId: string | null,
     options?: OpenPathOptions,
   ) => void;
+  onOpenMailboxTab?: (
+    paneId: string,
+    mailboxId: string,
+    originSessionId: string,
+    originProjectId: string | null,
+  ) => void;
   onOpenConversationFromDiff?: (
     sessionId: string,
     preferredPaneId: string | null,
@@ -206,6 +212,7 @@ export function useSessionRenderCallbacks({
   onCompactCodexThread,
   onForkCodexThread,
   onOpenDiffPreviewTab,
+  onOpenMailboxTab,
   onOpenSourceTab,
   onOpenConversationFromDiff,
   onInsertReviewIntoPrompt,
@@ -516,6 +523,17 @@ export function useSessionRenderCallbacks({
         connectionRetryDisplayState={getConnectionRetryDisplayState(message.id)}
         workspaceRoot={activeSession?.workdir ?? null}
         mailboxViewerSessionId={activeSession?.id ?? null}
+        onOpenMailbox={(mailboxId) => {
+          if (!activeSession) {
+            return;
+          }
+          onOpenMailboxTab?.(
+            paneId,
+            mailboxId,
+            activeSession.id,
+            activeSession.projectId ?? null,
+          );
+        }}
       />
     ),
     [
@@ -535,6 +553,7 @@ export function useSessionRenderCallbacks({
       latestAssistantMessageId,
       streamingAssistantTextMessageId,
       onOpenDiffPreviewTab,
+      onOpenMailboxTab,
       onOpenSourceTab,
       paneId,
       sessionFindQuery,

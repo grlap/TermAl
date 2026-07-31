@@ -95,6 +95,15 @@ written, and never inferred.
    which is immune to host drift. Decision thresholds are written before the
    data arrives so outcomes route themselves.
 
+### State-residency rule
+
+Optimizations that replace complete collections with bounded windows change
+the meaning of every downstream scan. A feature must not rediscover durable or
+live state by searching whatever happens to be resident. Continuously needed
+facts belong in explicit state; whole-history features use deliberate indexed,
+bounded queries. Never preserve an old assumption by adding a legacy
+full-hydration branch.
+
 ## 3. Communication — batch semantics, not realtime
 
 TermAl cross-session messaging is TURN-BASED AND BATCHED by design: messages

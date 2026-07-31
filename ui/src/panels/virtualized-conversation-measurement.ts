@@ -42,7 +42,27 @@ export type MessagePage = {
 export type EstimatedPageHeightEntry = {
   cacheKey: string;
   height: number;
+  identity: PageMeasurementIdentity;
 };
+
+export type PageMeasurementIdentity = {
+  hasTrailingGap: boolean;
+  messages: readonly Message[];
+};
+
+export function pageMatchesMeasurement(
+  page: MessagePage,
+  identity: PageMeasurementIdentity | undefined,
+) {
+  return (
+    identity !== undefined &&
+    page.hasTrailingGap === identity.hasTrailingGap &&
+    page.messages.length === identity.messages.length &&
+    page.messages.every(
+      (message, index) => message === identity.messages[index],
+    )
+  );
+}
 
 export function buildMessagePages(messages: Message[]) {
   const pages: MessagePage[] = [];

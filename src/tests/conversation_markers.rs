@@ -474,6 +474,85 @@ fn conversation_marker_rejects_missing_message_anchor() {
 }
 
 #[test]
+fn conversation_marker_crud_resolves_anchors_outside_the_resident_tail() {
+    let state = test_app_state();
+    let session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let session_id = inner
+            .create_session(
+                Agent::Codex,
+                Some("Paged marker anchors".to_owned()),
+                "/tmp".to_owned(),
+                None,
+                None,
+            )
+            .session
+            .id;
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        for index in 0..80 {
+            push_message_on_record(
+                record,
+                Message::Text {
+                    attachments: Vec::new(),
+                    id: format!("message-{index}"),
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: format!("Message {index}"),
+                    expanded_text: None,
+                    source: None,
+                },
+            );
+        }
+        persist_state(state.persistence_path.as_ref(), &inner)
+            .expect("complete transcript should persist before trimming");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should remain valid");
+        trim_retained_session_messages(record, 8);
+        assert_eq!(record.message_start_index, 72);
+        session_id
+    };
+
+    let created = state
+        .create_conversation_marker(
+            &session_id,
+            CreateConversationMarkerRequest {
+                kind: ConversationMarkerKind::Review,
+                name: "Durable range".to_owned(),
+                body: None,
+                color: "#3b82f6".to_owned(),
+                message_id: "message-4".to_owned(),
+                end_message_id: Some("message-9".to_owned()),
+            },
+        )
+        .expect("persisted off-window anchors should resolve");
+    assert_eq!(created.marker.message_index_hint, 4);
+    assert_eq!(created.marker.end_message_index_hint, Some(9));
+
+    let updated = state
+        .update_conversation_marker(
+            &session_id,
+            &created.marker.id,
+            UpdateConversationMarkerRequest {
+                kind: None,
+                name: None,
+                body: None,
+                color: None,
+                message_id: Some("message-12".to_owned()),
+                end_message_id: Some(Some("message-18".to_owned())),
+            },
+        )
+        .expect("persisted off-window update anchors should resolve");
+    assert_eq!(updated.marker.message_index_hint, 12);
+    assert_eq!(updated.marker.end_message_index_hint, Some(18));
+}
+
+#[test]
 fn conversation_marker_validation_errors_do_not_bump_mutation_stamp() {
     let state = test_app_state();
     let session_id = test_session_with_two_messages(&state);

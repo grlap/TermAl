@@ -18,9 +18,13 @@ fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir).join("termal.sqlite")
 }
 
-const SQLITE_SCHEMA_VERSION: &str = "1";
+const SQLITE_SCHEMA_VERSION: &str = "2";
+const SQLITE_PREVIOUS_SCHEMA_VERSION: &str = "1";
 const SQLITE_METADATA_KEY: &str = "metadataState";
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+const SQLITE_SESSION_TAIL_MESSAGES: usize = 64;
+const SQLITE_TRANSCRIPT_MIGRATION_SESSION_BATCH: usize = 16;
+const SQLITE_TRANSCRIPT_MIGRATION_MESSAGE_BATCH: usize = 64;
 
 /// Per-database writer locks shared by every in-process SQLite write path.
 ///
@@ -243,6 +247,7 @@ fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
                 "
                 PRAGMA journal_mode = WAL;
                 PRAGMA synchronous = NORMAL;
+                PRAGMA foreign_keys = ON;
                 ",
             )
             .with_context(|| {
@@ -253,6 +258,40 @@ fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
             })?;
     }
     harden_sqlite_state_file_permissions(path)?;
+    Ok(connection)
+}
+
+fn open_sqlite_state_read_connection(path: &FsPath) -> Result<rusqlite::Connection> {
+    reject_existing_sqlite_state_path_redirection(path)?;
+    let connection = rusqlite::Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .with_context(|| format!("failed to open `{}` for transcript paging", path.display()))?;
+    connection
+        .busy_timeout(SQLITE_BUSY_TIMEOUT)
+        .with_context(|| format!("failed to set SQLite read timeout for `{}`", path.display()))?;
+    connection
+        .execute_batch("PRAGMA query_only = ON;")
+        .with_context(|| format!("failed to configure SQLite transcript reader for `{}`", path.display()))?;
+    Ok(connection)
+}
+
+fn open_sqlite_history_snapshot(path: &FsPath) -> Result<rusqlite::Connection> {
+    let connection = open_sqlite_state_read_connection(path)?;
+    // Cursor resolution and range loading are separate statements. Keep them
+    // in one read transaction so a concurrent writer cannot move the cursor
+    // between those statements.
+    connection
+        .execute_batch("BEGIN DEFERRED TRANSACTION;")
+        .with_context(|| {
+            format!(
+                "failed to start SQLite transcript read snapshot for `{}`",
+                path.display()
+            )
+        })?;
     Ok(connection)
 }
 
@@ -830,14 +869,17 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
         Err(rusqlite::Error::QueryReturnedNoRows) => None,
         Err(err) => return Err(err).context("failed to read SQLite state schema version"),
     };
-    if let Some(stored_schema_version) = stored_schema_version.as_deref() {
-        if stored_schema_version != SQLITE_SCHEMA_VERSION {
-            bail!(
-                "unsupported SQLite state schema version `{}`; this binary supports `{}`",
-                stored_schema_version,
-                SQLITE_SCHEMA_VERSION
-            );
-        }
+    if let Some(stored_schema_version) = stored_schema_version.as_deref()
+        && !matches!(
+            stored_schema_version,
+            SQLITE_SCHEMA_VERSION | SQLITE_PREVIOUS_SCHEMA_VERSION
+        )
+    {
+        bail!(
+            "unsupported SQLite state schema version `{}`; this binary supports `{}`",
+            stored_schema_version,
+            SQLITE_SCHEMA_VERSION
+        );
     }
     connection
         .execute_batch(
@@ -852,6 +894,24 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
               value_json TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS messages (
+              session_id TEXT NOT NULL,
+              position INTEGER NOT NULL CHECK(position >= 0),
+              message_id TEXT NOT NULL,
+              value_json TEXT NOT NULL,
+              overview_kind INTEGER NOT NULL DEFAULT 0,
+              is_user INTEGER NOT NULL DEFAULT 0,
+              PRIMARY KEY(session_id, position),
+              UNIQUE(session_id, message_id),
+              FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            ) WITHOUT ROWID;
+
+            CREATE TABLE IF NOT EXISTS session_overviews (
+              session_id TEXT PRIMARY KEY,
+              value_blob BLOB NOT NULL,
+              FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            ) WITHOUT ROWID;
+
             CREATE TABLE IF NOT EXISTS delegations (
               id TEXT PRIMARY KEY,
               value_json TEXT NOT NULL
@@ -859,6 +919,11 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
             ",
         )
         .context("failed to initialize SQLite state schema")?;
+    ensure_sqlite_message_overview_columns(connection)?;
+    if stored_schema_version.as_deref() == Some(SQLITE_PREVIOUS_SCHEMA_VERSION) {
+        migrate_sqlite_state_schema_v1_to_v2(connection)?;
+    }
+    backfill_missing_sqlite_session_overviews(connection)?;
     connection
         .execute(
             "INSERT INTO meta(key, value) VALUES('schema_version', ?1)
@@ -866,6 +931,392 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
             rusqlite::params![SQLITE_SCHEMA_VERSION],
         )
         .context("failed to record SQLite state schema version")?;
+    Ok(())
+}
+
+fn encode_conversation_overview_message(
+    kind: ConversationOverviewKind,
+    is_user: bool,
+) -> u8 {
+    u8::try_from(conversation_overview_kind_index(kind)).unwrap_or_default()
+        | (u8::from(is_user) << 2)
+}
+
+fn decode_conversation_overview_message(
+    encoded: u8,
+) -> Result<(ConversationOverviewKind, bool)> {
+    if encoded & !0b111 != 0 {
+        bail!("conversation overview message byte {encoded} has unsupported flags");
+    }
+    let kind = match encoded & 0b11 {
+        0 => ConversationOverviewKind::Text,
+        1 => ConversationOverviewKind::Command,
+        2 => ConversationOverviewKind::Diff,
+        3 => ConversationOverviewKind::Error,
+        _ => unreachable!("two-bit overview kind is exhaustive"),
+    };
+    Ok((kind, encoded & 0b100 != 0))
+}
+
+fn ensure_sqlite_message_overview_columns(connection: &rusqlite::Connection) -> Result<()> {
+    let existing_columns = {
+        let mut statement = connection
+            .prepare("PRAGMA table_info(messages)")
+            .context("failed to inspect SQLite transcript columns")?;
+        statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .context("failed to query SQLite transcript columns")?
+            .collect::<rusqlite::Result<HashSet<_>>>()
+            .context("failed to read SQLite transcript columns")?
+    };
+    let missing_kind = !existing_columns.contains("overview_kind");
+    let missing_user = !existing_columns.contains("is_user");
+    if missing_kind {
+        connection
+            .execute(
+                "ALTER TABLE messages
+                 ADD COLUMN overview_kind INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .context("failed to add SQLite transcript overview kind")?;
+    }
+    if missing_user {
+        connection
+            .execute(
+                "ALTER TABLE messages
+                 ADD COLUMN is_user INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .context("failed to add SQLite transcript overview author flag")?;
+    }
+    if missing_kind || missing_user {
+        connection
+            .execute(
+                "UPDATE messages
+                 SET overview_kind = CASE
+                         WHEN instr(value_json, '\"status\":\"error\"') > 0
+                           OR instr(value_json, '\"decision\":\"interrupted\"') > 0
+                           OR instr(value_json, '\"decision\":\"canceled\"') > 0
+                           OR instr(value_json, '\"decision\":\"rejected\"') > 0
+                           OR instr(value_json, '\"state\":\"interrupted\"') > 0
+                           OR instr(value_json, '\"state\":\"canceled\"') > 0
+                         THEN 3
+                         WHEN instr(value_json, '\"type\":\"command\"') > 0 THEN 1
+                         WHEN instr(value_json, '\"type\":\"diff\"') > 0
+                           OR instr(value_json, '\"type\":\"fileChanges\"') > 0
+                         THEN 2
+                         ELSE 0
+                     END,
+                     is_user = instr(value_json, '\"author\":\"you\"') > 0",
+                [],
+            )
+            .context("failed to backfill SQLite transcript overview metadata")?;
+    }
+    Ok(())
+}
+
+fn backfill_missing_sqlite_session_overviews(
+    connection: &rusqlite::Connection,
+) -> Result<()> {
+    let session_ids = {
+        let mut statement = connection
+            .prepare(
+                "SELECT session.id
+                 FROM sessions AS session
+                 WHERE EXISTS (
+                     SELECT 1
+                     FROM messages AS message
+                     WHERE message.session_id = session.id
+                 )
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM session_overviews AS overview
+                     WHERE overview.session_id = session.id
+                 )
+                 ORDER BY session.id",
+            )
+            .context("failed to prepare missing transcript overview backfill")?;
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .context("failed to query missing transcript overview backfill")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("failed to read missing transcript overview sessions")?
+    };
+    let mut load_messages = connection
+        .prepare(
+            "SELECT position, overview_kind, is_user
+             FROM messages
+             WHERE session_id = ?1
+             ORDER BY position",
+        )
+        .context("failed to prepare transcript overview metadata backfill")?;
+    let mut insert = connection
+        .prepare(
+            "INSERT INTO session_overviews(session_id, value_blob)
+             VALUES(?1, ?2)",
+        )
+        .context("failed to prepare transcript overview blob backfill")?;
+    for session_id in session_ids {
+        let rows = load_messages
+            .query_map(rusqlite::params![session_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, bool>(2)?,
+                ))
+            })
+            .with_context(|| {
+                format!("failed to query transcript overview metadata for `{session_id}`")
+            })?;
+        let mut value_blob = Vec::new();
+        for row in rows {
+            let (position, kind_index, is_user) = row.with_context(|| {
+                format!("failed to read transcript overview metadata for `{session_id}`")
+            })?;
+            let position = usize::try_from(position)
+                .context("transcript overview position is negative or too large")?;
+            if position != value_blob.len() {
+                bail!(
+                    "transcript overview for `{session_id}` has a gap at position {}",
+                    value_blob.len()
+                );
+            }
+            let kind = match kind_index {
+                0 => ConversationOverviewKind::Text,
+                1 => ConversationOverviewKind::Command,
+                2 => ConversationOverviewKind::Diff,
+                3 => ConversationOverviewKind::Error,
+                _ => bail!(
+                    "transcript overview for `{session_id}` has invalid kind {kind_index}"
+                ),
+            };
+            value_blob.push(encode_conversation_overview_message(kind, is_user));
+        }
+        insert
+            .execute(rusqlite::params![session_id, value_blob])
+            .with_context(|| {
+                format!("failed to backfill transcript overview for `{session_id}`")
+            })?;
+    }
+    Ok(())
+}
+
+fn migrate_sqlite_state_schema_v1_to_v2(connection: &rusqlite::Connection) -> Result<()> {
+    let tx = connection
+        .unchecked_transaction()
+        .context("failed to start SQLite transcript migration")?;
+    let mut last_rowid = 0_i64;
+    let mut skipped_sessions = 0_usize;
+    loop {
+        // Bound migration memory by session batches instead of collecting every
+        // legacy row id before decoding. Message payloads are streamed in a
+        // separate bounded loop below, so Rust never materializes one session's
+        // complete embedded transcript either.
+        let encoded_sessions = {
+            let mut statement = tx
+                .prepare(
+                    "SELECT rowid, id
+                     FROM sessions
+                     WHERE rowid > ?1
+                     ORDER BY rowid
+                     LIMIT ?2",
+                )
+                .context("failed to prepare persisted transcript migration batch")?;
+            let rows = statement
+                .query_map(
+                    rusqlite::params![
+                        last_rowid,
+                        i64::try_from(SQLITE_TRANSCRIPT_MIGRATION_SESSION_BATCH)
+                            .context("transcript migration batch size exceeds SQLite range")?
+                    ],
+                    |row| {
+                        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                    },
+                )
+                .context("failed to query sessions for transcript migration")?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+                .context("failed to read a session batch for transcript migration")?
+        };
+        if encoded_sessions.is_empty() {
+            break;
+        }
+        for (rowid, session_id) in encoded_sessions {
+            last_rowid = rowid;
+            tx.execute_batch("SAVEPOINT transcript_session_migration")
+                .context("failed to start per-session transcript migration")?;
+            match migrate_sqlite_v1_session_transcript(&tx, rowid, &session_id) {
+                Ok(()) => {
+                    tx.execute_batch("RELEASE transcript_session_migration")
+                        .context("failed to commit per-session transcript migration")?;
+                }
+                Err(err) => {
+                    tx.execute_batch(
+                        "ROLLBACK TO transcript_session_migration;
+                         RELEASE transcript_session_migration;",
+                    )
+                    .context("failed to roll back invalid per-session transcript migration")?;
+                    skipped_sessions += 1;
+                    eprintln!(
+                        "persist> skipping invalid legacy session `{session_id}` during transcript migration: {err:#}"
+                    );
+                }
+            }
+        }
+    }
+    if skipped_sessions > 0 {
+        eprintln!(
+            "persist> skipped {skipped_sessions} invalid legacy session record(s) during transcript migration"
+        );
+    }
+
+    tx.execute(
+        "INSERT INTO meta(key, value) VALUES('schema_version', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        rusqlite::params![SQLITE_SCHEMA_VERSION],
+    )
+    .context("failed to advance SQLite state schema version")?;
+    tx.commit()
+        .context("failed to commit SQLite transcript migration")?;
+    Ok(())
+}
+
+fn migrate_sqlite_v1_session_transcript(
+    tx: &rusqlite::Transaction<'_>,
+    rowid: i64,
+    session_id: &str,
+) -> Result<()> {
+    // SQLite removes the embedded array before the value crosses into Rust.
+    // `json_each` below then exposes only one explicit message batch at a time.
+    let metadata_json: String = tx
+        .query_row(
+            "SELECT json_set(
+                       value_json,
+                       '$.session.messages',
+                       json('[]'),
+                       '$.session.messageCount',
+                       json_array_length(value_json, '$.session.messages')
+                     )
+             FROM sessions
+             WHERE rowid = ?1",
+            rusqlite::params![rowid],
+            |row| row.get(0),
+        )
+        .with_context(|| format!("failed to normalize legacy session `{session_id}` metadata"))?;
+    let record: PersistedSessionRecord = serde_json::from_str(&metadata_json)
+        .with_context(|| format!("failed to parse session `{session_id}` metadata"))?;
+    if record.session.id != session_id {
+        bail!(
+            "row id `{session_id}` does not match embedded id `{}`",
+            record.session.id
+        );
+    }
+    validate_persisted_session_fields(&record.session, record.external_session_id.as_deref())
+        .with_context(|| format!("persisted session `{session_id}` failed validation"))?;
+    let expected_message_count = usize::try_from(record.session.message_count)
+        .context("legacy transcript count does not fit this platform")?;
+    let mut next_position = 0_usize;
+    loop {
+        let message_rows = {
+            let mut statement = tx
+                .prepare(
+                    "SELECT CAST(entry.key AS INTEGER),
+                            json_extract(entry.value, '$.id'),
+                            entry.value
+                     FROM sessions AS session,
+                          json_each(session.value_json, '$.session.messages') AS entry
+                     WHERE session.rowid = ?1
+                       AND CAST(entry.key AS INTEGER) >= ?2
+                     ORDER BY CAST(entry.key AS INTEGER)
+                     LIMIT ?3",
+                )
+                .with_context(|| {
+                    format!("failed to prepare legacy transcript batch for `{session_id}`")
+                })?;
+            statement
+                .query_map(
+                    rusqlite::params![
+                        rowid,
+                        i64::try_from(next_position)
+                            .context("legacy transcript position exceeds SQLite range")?,
+                        i64::try_from(SQLITE_TRANSCRIPT_MIGRATION_MESSAGE_BATCH)
+                            .context("transcript migration message batch exceeds SQLite range")?,
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .with_context(|| {
+                    format!("failed to query legacy transcript batch for `{session_id}`")
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .with_context(|| {
+                    format!("failed to read legacy transcript batch for `{session_id}`")
+                })?
+        };
+        if message_rows.is_empty() {
+            break;
+        }
+        for (position, message_id, encoded) in message_rows {
+            let position = usize::try_from(position)
+                .context("legacy transcript position is negative or too large")?;
+            if position != next_position {
+                bail!("legacy transcript has a gap at position {next_position}");
+            }
+            let message: Message = serde_json::from_str(&encoded).with_context(|| {
+                format!("failed to parse legacy transcript position {position}")
+            })?;
+            if message.id() != message_id {
+                bail!(
+                    "legacy transcript position {position} id `{message_id}` does not match embedded id `{}`",
+                    message.id()
+                );
+            }
+            let (overview_kind, is_user) = conversation_overview_message_metadata(&message);
+            tx.execute(
+                "INSERT INTO messages(
+                     session_id,
+                     position,
+                     message_id,
+                     value_json,
+                     overview_kind,
+                     is_user
+                 )
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    session_id,
+                    i64::try_from(position)
+                        .context("legacy transcript position exceeds SQLite range")?,
+                    message_id,
+                    encoded,
+                    i64::try_from(conversation_overview_kind_index(overview_kind))
+                        .context("overview kind exceeds SQLite integer range")?,
+                    i64::from(is_user),
+                ],
+            )
+            .with_context(|| {
+                format!("failed to migrate transcript position {position} for `{session_id}`")
+            })?;
+            next_position = next_position.saturating_add(1);
+        }
+    }
+    if next_position != expected_message_count {
+        bail!(
+            "legacy transcript expected {expected_message_count} messages but migrated {next_position}"
+        );
+    }
+    let updated = tx
+        .execute(
+            "UPDATE sessions SET value_json = ?2 WHERE rowid = ?1",
+            rusqlite::params![rowid, metadata_json],
+        )
+        .with_context(|| format!("failed to store migrated metadata for `{session_id}`"))?;
+    if updated != 1 {
+        bail!("legacy session row disappeared during transcript migration");
+    }
     Ok(())
 }
 
@@ -921,6 +1372,90 @@ mod sqlite_schema_tests {
     }
 
     #[test]
+    fn schema_v2_backfills_compact_session_overview_metadata() {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        connection
+            .execute_batch(
+                "
+                PRAGMA foreign_keys = ON;
+                CREATE TABLE meta (
+                  key TEXT PRIMARY KEY,
+                  value TEXT NOT NULL
+                );
+                INSERT INTO meta(key, value) VALUES('schema_version', '2');
+                CREATE TABLE sessions (
+                  id TEXT PRIMARY KEY,
+                  value_json TEXT NOT NULL
+                );
+                CREATE TABLE messages (
+                  session_id TEXT NOT NULL,
+                  position INTEGER NOT NULL CHECK(position >= 0),
+                  message_id TEXT NOT NULL,
+                  value_json TEXT NOT NULL,
+                  PRIMARY KEY(session_id, position),
+                  UNIQUE(session_id, message_id),
+                  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                ) WITHOUT ROWID;
+                CREATE TABLE session_overviews (
+                  session_id TEXT PRIMARY KEY,
+                  value_blob BLOB NOT NULL,
+                  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                ) WITHOUT ROWID;
+                INSERT INTO sessions(id, value_json) VALUES('session-1', '{}');
+                INSERT INTO messages(session_id, position, message_id, value_json)
+                VALUES(
+                  'session-1',
+                  0,
+                  'message-1',
+                  '{\"type\":\"command\",\"id\":\"message-1\",\"author\":\"you\",\"status\":\"error\"}'
+                ), (
+                  'session-1',
+                  1,
+                  'message-2',
+                  '{\"type\":\"text\",\"id\":\"message-2\",\"author\":\"you\",\"text\":\"Human prompt\"}'
+                ), (
+                  'session-1',
+                  2,
+                  'message-3',
+                  '{\"type\":\"text\",\"id\":\"message-3\",\"author\":\"you\",\"text\":\"Peer prompt\",\"source\":{\"sessionId\":\"peer-session\",\"name\":\"Peer\"}}'
+                );
+                ",
+            )
+            .expect("legacy v2 fixture should initialize");
+
+        ensure_sqlite_state_schema(&connection)
+            .expect("v2 overview metadata should backfill");
+
+        let value_blob: Vec<u8> = connection
+            .query_row(
+                "SELECT value_blob
+                 FROM session_overviews
+                 WHERE session_id = 'session-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("backfilled overview blob should exist");
+        assert_eq!(
+            value_blob,
+            vec![
+                encode_conversation_overview_message(
+                    ConversationOverviewKind::Error,
+                    true,
+                ),
+                encode_conversation_overview_message(
+                    ConversationOverviewKind::Text,
+                    true,
+                ),
+                encode_conversation_overview_message(
+                    ConversationOverviewKind::Text,
+                    true,
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn fresh_state_schema_does_not_create_coordination_tables() {
         let connection =
             rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
@@ -943,6 +1478,262 @@ mod sqlite_schema_tests {
             .expect("coordination table count should be queryable");
         assert_eq!(coordination_table_count, 0);
     }
+
+    #[test]
+    fn transcript_schema_uses_indexed_range_and_cursor_queries() {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        ensure_sqlite_state_schema(&connection).expect("state schema should initialize");
+
+        let range_plan: Vec<String> = connection
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT position, value_json
+                 FROM messages
+                 WHERE session_id = ?1 AND position >= ?2 AND position < ?3
+                 ORDER BY position ASC",
+            )
+            .expect("range query plan should prepare")
+            .query_map(rusqlite::params!["session-1", 10_i64, 20_i64], |row| {
+                row.get(3)
+            })
+            .expect("range query plan should execute")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("range query plan rows should decode");
+        assert!(
+            range_plan
+                .iter()
+                .any(|detail| detail.contains("SEARCH messages USING PRIMARY KEY")),
+            "range query must use the (session_id, position) primary key: {range_plan:?}"
+        );
+        assert!(
+            range_plan.iter().all(|detail| !detail.contains("SCAN messages")),
+            "range query must not scan messages: {range_plan:?}"
+        );
+
+        let cursor_plan: Vec<String> = connection
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT position
+                 FROM messages
+                 WHERE session_id = ?1 AND message_id = ?2",
+            )
+            .expect("cursor query plan should prepare")
+            .query_map(rusqlite::params!["session-1", "message-1"], |row| {
+                row.get(3)
+            })
+            .expect("cursor query plan should execute")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("cursor query plan rows should decode");
+        assert!(
+            cursor_plan.iter().any(|detail| {
+                detail.contains("SEARCH messages")
+                    && detail.contains("session_id=?")
+                    && detail.contains("message_id=?")
+            }),
+            "cursor query must use the unique (session_id, message_id) index: {cursor_plan:?}"
+        );
+        assert!(
+            cursor_plan.iter().all(|detail| !detail.contains("SCAN messages")),
+            "cursor query must not scan messages: {cursor_plan:?}"
+        );
+    }
+
+    #[test]
+    fn schema_v1_migration_moves_embedded_transcript_without_loss() {
+        let expected_message_count = SQLITE_TRANSCRIPT_MIGRATION_MESSAGE_BATCH * 2 + 3;
+        let mut inner = StateInner::new();
+        let record = inner.create_session(
+            Agent::Claude,
+            Some("Migration".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        );
+        let index = inner
+            .find_session_index(&record.session.id)
+            .expect("created session should exist");
+        for sequence in 0..expected_message_count {
+            let message = Message::Text {
+                attachments: Vec::new(),
+                id: format!("message-{sequence}"),
+                timestamp: stamp_now(),
+                author: Author::You,
+                text: format!("body-{sequence}"),
+                expanded_text: None,
+                source: None,
+            };
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("created session index should stay valid");
+            let insert_at = record.session.messages.len();
+            insert_message_on_record(record, insert_at, message);
+        }
+        let persisted = PersistedState::from_inner(&inner);
+        let old_record = persisted
+            .sessions
+            .first()
+            .expect("persisted session should exist");
+        let old_encoded =
+            serde_json::to_string(old_record).expect("v1 session should serialize");
+
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        connection
+            .execute_batch(
+                "
+                PRAGMA foreign_keys = ON;
+                CREATE TABLE meta (
+                  key TEXT PRIMARY KEY,
+                  value TEXT NOT NULL
+                );
+                INSERT INTO meta(key, value) VALUES('schema_version', '1');
+                CREATE TABLE sessions (
+                  id TEXT PRIMARY KEY,
+                  value_json TEXT NOT NULL
+                );
+                ",
+            )
+            .expect("v1 schema should initialize");
+        connection
+            .execute(
+                "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)",
+                rusqlite::params![old_record.session.id, old_encoded],
+            )
+            .expect("v1 session should insert");
+
+        ensure_sqlite_state_schema(&connection).expect("v1 schema should migrate");
+
+        let schema_version: String = connection
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("schema version should load");
+        assert_eq!(schema_version, SQLITE_SCHEMA_VERSION);
+        let migrated_metadata: String = connection
+            .query_row(
+                "SELECT value_json FROM sessions WHERE id = ?1",
+                rusqlite::params![old_record.session.id],
+                |row| row.get(0),
+            )
+            .expect("migrated metadata should load");
+        let migrated_record: PersistedSessionRecord =
+            serde_json::from_str(&migrated_metadata).expect("migrated metadata should parse");
+        assert!(migrated_record.session.messages.is_empty());
+        assert_eq!(
+            usize::try_from(migrated_record.session.message_count).unwrap(),
+            expected_message_count
+        );
+
+        let migrated_messages: Vec<(i64, String, String)> = connection
+            .prepare(
+                "SELECT position, message_id, value_json
+                 FROM messages
+                 WHERE session_id = ?1
+                 ORDER BY position",
+            )
+            .expect("migrated transcript query should prepare")
+            .query_map(rusqlite::params![old_record.session.id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .expect("migrated transcript query should execute")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("migrated transcript rows should decode");
+        assert_eq!(migrated_messages.len(), expected_message_count);
+        for (sequence, (position, message_id, encoded)) in
+            migrated_messages.into_iter().enumerate()
+        {
+            assert_eq!(position, i64::try_from(sequence).unwrap());
+            assert_eq!(message_id, format!("message-{sequence}"));
+            let message: Message =
+                serde_json::from_str(&encoded).expect("migrated message should parse");
+            assert_eq!(message.id(), message_id);
+            assert!(matches!(
+                message,
+                Message::Text { text, .. } if text == format!("body-{sequence}")
+            ));
+        }
+    }
+
+    #[test]
+    fn schema_v1_migration_skips_one_invalid_session_without_blocking_valid_rows() {
+        let mut inner = StateInner::new();
+        inner.create_session(
+            Agent::Claude,
+            Some("Migration sibling".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        );
+        let valid_record = PersistedState::from_inner(&inner)
+            .sessions
+            .into_iter()
+            .next()
+            .expect("persisted session should exist");
+        let valid_session_id = valid_record.session.id.clone();
+        let valid_encoded =
+            serde_json::to_string(&valid_record).expect("valid v1 session should serialize");
+        let mut invalid_value =
+            serde_json::to_value(&valid_record).expect("invalid v1 fixture should encode");
+        invalid_value["session"]["id"] = Value::String("embedded-other-session".to_owned());
+        let invalid_encoded =
+            serde_json::to_string(&invalid_value).expect("invalid v1 fixture should serialize");
+
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        connection
+            .execute_batch(
+                "
+                PRAGMA foreign_keys = ON;
+                CREATE TABLE meta (
+                  key TEXT PRIMARY KEY,
+                  value TEXT NOT NULL
+                );
+                INSERT INTO meta(key, value) VALUES('schema_version', '1');
+                CREATE TABLE sessions (
+                  id TEXT PRIMARY KEY,
+                  value_json TEXT NOT NULL
+                );
+                ",
+            )
+            .expect("v1 schema should initialize");
+        connection
+            .execute(
+                "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)",
+                rusqlite::params![valid_session_id, valid_encoded],
+            )
+            .expect("valid v1 session should insert");
+        connection
+            .execute(
+                "INSERT INTO sessions(id, value_json) VALUES('invalid-row', ?1)",
+                rusqlite::params![invalid_encoded],
+            )
+            .expect("invalid sibling v1 session should insert");
+
+        ensure_sqlite_state_schema(&connection)
+            .expect("one invalid sibling must not abort the v1 migration");
+
+        let schema_version: String = connection
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("schema version should load");
+        assert_eq!(schema_version, SQLITE_SCHEMA_VERSION);
+        let valid_metadata: String = connection
+            .query_row(
+                "SELECT value_json FROM sessions WHERE id = ?1",
+                rusqlite::params![valid_session_id],
+                |row| row.get(0),
+            )
+            .expect("valid migrated sibling should remain readable");
+        let valid_migrated: PersistedSessionRecord =
+            serde_json::from_str(&valid_metadata).expect("valid migrated metadata should parse");
+        assert_eq!(valid_migrated.session.id, valid_session_id);
+    }
 }
 
 fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
@@ -952,18 +1743,59 @@ fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
     // schema initialization can create or recreate SQLite sidecars, so the
     // startup read path deliberately re-runs the full main/sidecar pass.
     harden_sqlite_state_file_permissions(path)?;
-    let session_records = load_session_records_from_sqlite(&connection, path)?;
-    let delegation_records = load_delegation_records_from_sqlite(&connection, path)?;
+    let (
+        mut session_records,
+        mut quarantined_session_ids,
+        mut skipped_session_records,
+    ) =
+        load_session_records_from_sqlite_with_skipped(&connection, path)?;
+    let (
+        delegation_records,
+        quarantined_delegation_ids,
+        delegation_table_row_count,
+    ) = load_delegation_records_from_sqlite(&connection, path)?;
     let Some(encoded) = sqlite_app_state_value(&connection, SQLITE_METADATA_KEY, path)? else {
         return Ok(None);
     };
     let mut persisted: PersistedState = serde_json::from_str(&encoded)
         .with_context(|| format!("failed to parse persisted state from `{}`", path.display()))?;
-    if !session_records.is_empty() {
-        persisted.sessions = session_records;
+    let project_ids = persisted
+        .projects
+        .iter()
+        .map(|project| project.id.as_str())
+        .collect::<HashSet<_>>();
+    session_records.retain(|record| {
+        let Some(project_id) = record.session.project_id.as_deref() else {
+            return true;
+        };
+        if project_ids.contains(project_id) {
+            return true;
+        }
+        skipped_session_records += 1;
+        quarantined_session_ids.insert(record.session.id.clone());
+        eprintln!(
+            "persist> skipping session `{}` because it references unknown project `{project_id}`",
+            record.session.id
+        );
+        false
+    });
+    if skipped_session_records > 0 {
+        eprintln!(
+            "persist> skipped {skipped_session_records} invalid session record(s) while loading `{}`",
+            path.display()
+        );
     }
-    let loaded_delegations_from_table =
-        apply_sqlite_delegation_records(&mut persisted, delegation_records);
+    // The normalized `sessions` table is authoritative even when every row was
+    // skipped. Falling back to the metadata blob here could resurrect stale or
+    // structurally invalid sessions after the row-level isolation above.
+    persisted.sessions = session_records;
+    persisted.quarantined_persisted_session_ids = quarantined_session_ids;
+    persisted.quarantined_persisted_delegation_ids = quarantined_delegation_ids;
+    let loaded_delegations_from_table = apply_sqlite_delegation_records(
+        &mut persisted,
+        delegation_records,
+        delegation_table_row_count > 0,
+    );
     let mut inner = persisted.into_inner().with_context(|| {
         format!("failed to validate state from `{}`", path.display())
     })?;
@@ -976,8 +1808,9 @@ fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
 fn apply_sqlite_delegation_records(
     persisted: &mut PersistedState,
     delegation_records: Vec<DelegationRecord>,
+    table_had_rows: bool,
 ) -> bool {
-    if delegation_records.is_empty() {
+    if !table_had_rows {
         return false;
     }
     persisted.delegations = delegation_records;
@@ -1001,15 +1834,26 @@ fn sqlite_app_state_value(
     }
 }
 
+#[cfg(test)]
 fn load_session_records_from_sqlite(
     connection: &rusqlite::Connection,
     path: &FsPath,
 ) -> Result<Vec<PersistedSessionRecord>> {
+    load_session_records_from_sqlite_with_skipped(connection, path)
+        .map(|(records, _, _)| records)
+}
+
+fn load_session_records_from_sqlite_with_skipped(
+    connection: &rusqlite::Connection,
+    path: &FsPath,
+) -> Result<(Vec<PersistedSessionRecord>, BTreeSet<String>, usize)> {
     let mut statement = connection
-        .prepare("SELECT value_json FROM sessions ORDER BY rowid")
+        .prepare("SELECT id, value_json FROM sessions ORDER BY rowid")
         .with_context(|| format!("failed to prepare session load from `{}`", path.display()))?;
     let rows = statement
-        .query_map([], |row| row.get::<_, String>(0))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .with_context(|| {
             format!(
                 "failed to query persisted sessions from `{}`",
@@ -1017,29 +1861,355 @@ fn load_session_records_from_sqlite(
             )
         })?;
     let mut records = Vec::new();
+    let mut quarantined_ids = BTreeSet::new();
+    let mut skipped = 0;
     for row in rows {
-        let encoded =
-            row.with_context(|| format!("failed to read session row from `{}`", path.display()))?;
-        let record = serde_json::from_str(&encoded).with_context(|| {
+        let (session_id, encoded) = match row {
+            Ok(row) => row,
+            Err(err) => {
+                skipped += 1;
+                eprintln!(
+                    "persist> skipping unreadable session row from `{}`: {err:#}",
+                    path.display()
+                );
+                continue;
+            }
+        };
+        let loaded_record = (|| -> Result<PersistedSessionRecord> {
+            let mut record: PersistedSessionRecord = serde_json::from_str(&encoded)
+                .with_context(|| format!("failed to parse persisted session `{session_id}`"))?;
+            if record.session.id != session_id {
+                bail!(
+                    "row id `{session_id}` does not match embedded id `{}`",
+                    record.session.id
+                );
+            }
+            validate_persisted_session_fields(
+                &record.session,
+                record.external_session_id.as_deref(),
+            )
+            .with_context(|| format!("persisted session `{session_id}` failed validation"))?;
+            load_persisted_session_tail(connection, path, &mut record)?;
+            Ok(record)
+        })();
+        match loaded_record {
+            Ok(record) => records.push(record),
+            Err(err) => {
+                skipped += 1;
+                quarantined_ids.insert(session_id.clone());
+                eprintln!("persist> skipping invalid session `{session_id}`: {err:#}");
+            }
+        }
+    }
+    Ok((records, quarantined_ids, skipped))
+}
+
+fn load_persisted_session_tail(
+    connection: &rusqlite::Connection,
+    path: &FsPath,
+    record: &mut PersistedSessionRecord,
+) -> Result<()> {
+    let total_message_count = usize::try_from(record.session.message_count)
+        .context("persisted transcript count does not fit this platform")?;
+    let start_index = total_message_count.saturating_sub(SQLITE_SESSION_TAIL_MESSAGES);
+    let mut statement = connection
+        .prepare(
+            "SELECT position, message_id, value_json
+             FROM messages
+             WHERE session_id = ?1 AND position >= ?2 AND position < ?3
+             ORDER BY position ASC",
+        )
+        .with_context(|| {
             format!(
-                "failed to parse persisted session row from `{}`",
+                "failed to prepare persisted transcript tail for `{}`",
+                record.session.id
+            )
+        })?;
+    let rows = statement
+        .query_map(
+            rusqlite::params![
+                record.session.id,
+                i64::try_from(start_index)
+                    .context("persisted transcript position exceeds SQLite integer range")?,
+                i64::try_from(total_message_count)
+                    .context("persisted transcript count exceeds SQLite integer range")?
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .with_context(|| {
+            format!(
+                "failed to query persisted transcript tail for `{}`",
+                record.session.id
+            )
+        })?;
+    let mut messages = Vec::new();
+    let mut unusable_tail: Option<String> = None;
+    for (expected_position, row) in (start_index..total_message_count).zip(rows) {
+        let (position, message_id, encoded) = row.with_context(|| {
+            format!(
+                "failed to read persisted transcript tail for `{}` from `{}`",
+                record.session.id,
                 path.display()
             )
         })?;
-        records.push(record);
+        let actual_position = usize::try_from(position)
+            .context("persisted transcript position is negative or too large")?;
+        if actual_position != expected_position {
+            unusable_tail = Some(format!("gap at position {expected_position}"));
+            break;
+        }
+        let message: Message = serde_json::from_str(&encoded).with_context(|| {
+            format!(
+                "failed to parse transcript position {actual_position} for `{}`",
+                record.session.id
+            )
+        })?;
+        if message.id() != message_id {
+            bail!(
+                "transcript position {actual_position} row id `{message_id}` does not match embedded id `{}` for `{}`",
+                message.id(),
+                record.session.id
+            );
+        }
+        messages.push(message);
     }
-    Ok(records)
+    let expected_tail_len = total_message_count.saturating_sub(start_index);
+    if unusable_tail.is_none() && messages.len() != expected_tail_len {
+        unusable_tail = Some(format!(
+            "expected {expected_tail_len} retained messages but loaded {}",
+            messages.len()
+        ));
+    }
+    // A transcript whose local rows do not cover the range implied by
+    // `message_count` is a HYDRATION state, not corruption, and it must never
+    // prevent startup. Remote-proxy sessions are legitimately in this shape:
+    // the transcript lives on the remote host, so `message_count` is known
+    // from proxy metadata while zero `messages` rows exist locally. This
+    // previously `bail!`ed, and the error propagated through `load_state` ->
+    // `AppState::new_with_paths` -> `main`, so a single such session made
+    // TermAl refuse to boot with no way for the user to reach any session.
+    //
+    // Degrade that one session to "not locally hydrated" and keep booting. No
+    // data is discarded: the rows that do exist stay on disk and the session
+    // rehydrates on demand. Crucially `message_start_index` becomes
+    // `total_message_count` rather than 0, so the empty window sits at the end
+    // of the transcript and `messages_loaded` stays false — an empty resident
+    // window must never be reported as a fully loaded transcript.
+    if let Some(reason) = unusable_tail {
+        if !messages.is_empty() {
+            // A partial tail means the rows themselves disagree with the
+            // metadata, which is worth surfacing. Zero rows is the ordinary
+            // unhydrated/proxy case and stays quiet to avoid boot-time noise
+            // proportional to the number of proxy sessions.
+            eprintln!(
+                "persist> session `{}` transcript tail is inconsistent ({reason}); starting it unhydrated",
+                record.session.id
+            );
+        }
+        record.message_start_index = total_message_count;
+        record.session.messages = Vec::new();
+        record.session.messages_loaded = total_message_count == 0;
+        return Ok(());
+    }
+    record.message_start_index = start_index;
+    record.session.messages = messages;
+    record.session.messages_loaded = start_index == 0;
+    Ok(())
+}
+
+fn persisted_message_position(
+    path: &FsPath,
+    session_id: &str,
+    message_id: &str,
+) -> Result<Option<usize>> {
+    let connection = open_sqlite_state_read_connection(path)?;
+    persisted_message_position_with_connection(&connection, session_id, message_id)
+}
+
+fn persisted_message_position_with_connection(
+    connection: &rusqlite::Connection,
+    session_id: &str,
+    message_id: &str,
+) -> Result<Option<usize>> {
+    match connection.query_row(
+        "SELECT position
+         FROM messages
+         WHERE session_id = ?1 AND message_id = ?2",
+        rusqlite::params![session_id, message_id],
+        |row| row.get::<_, i64>(0),
+    ) {
+        Ok(position) => Ok(Some(
+            usize::try_from(position)
+                .context("persisted transcript cursor position is negative or too large")?,
+        )),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(err) => Err(err).with_context(|| {
+            format!("failed to resolve transcript cursor for session `{session_id}`")
+        }),
+    }
+}
+
+#[cfg(test)]
+fn load_persisted_message_range(
+    path: &FsPath,
+    session_id: &str,
+    start_index: usize,
+    end_index: usize,
+) -> Result<Vec<(usize, Message)>> {
+    if start_index >= end_index {
+        return Ok(Vec::new());
+    }
+    let connection = open_sqlite_state_read_connection(path)?;
+    load_persisted_message_range_with_connection(
+        &connection,
+        session_id,
+        start_index,
+        end_index,
+    )
+}
+
+fn load_persisted_message_range_with_connection(
+    connection: &rusqlite::Connection,
+    session_id: &str,
+    start_index: usize,
+    end_index: usize,
+) -> Result<Vec<(usize, Message)>> {
+    if start_index >= end_index {
+        return Ok(Vec::new());
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT position, message_id, value_json
+             FROM messages
+             WHERE session_id = ?1 AND position >= ?2 AND position < ?3
+             ORDER BY position ASC",
+        )
+        .with_context(|| {
+            format!("failed to prepare transcript page for session `{session_id}`")
+        })?;
+    let rows = statement
+        .query_map(
+            rusqlite::params![
+                session_id,
+                i64::try_from(start_index)
+                    .context("transcript page start exceeds SQLite integer range")?,
+                i64::try_from(end_index)
+                    .context("transcript page end exceeds SQLite integer range")?,
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .with_context(|| format!("failed to query transcript page for session `{session_id}`"))?;
+    let mut messages = Vec::new();
+    for row in rows {
+        let (position, message_id, encoded) = row
+            .with_context(|| format!("failed to read transcript page for session `{session_id}`"))?;
+        let position = usize::try_from(position)
+            .context("persisted transcript position is negative or too large")?;
+        let message: Message = serde_json::from_str(&encoded).with_context(|| {
+            format!("failed to parse transcript position {position} for session `{session_id}`")
+        })?;
+        if message.id() != message_id {
+            bail!(
+                "transcript position {position} row id `{message_id}` does not match embedded id `{}` for session `{session_id}`",
+                message.id()
+            );
+        }
+        messages.push((position, message));
+    }
+    Ok(messages)
+}
+
+/// Loads the persisted prefix from one compact byte per message.
+///
+/// Persisted transcripts can be much larger than the retained in-memory tail.
+/// The blob is maintained transactionally with transcript rows, so a rail read
+/// never allocates full message payloads or steps through 25k SQLite rows.
+fn load_persisted_message_overview_with_connection(
+    connection: &rusqlite::Connection,
+    session_id: &str,
+    end_index: usize,
+    message_count: usize,
+    bucket_count: usize,
+) -> Result<Vec<(usize, ConversationOverviewKind, u32, u32)>> {
+    if end_index == 0 {
+        return Ok(Vec::new());
+    }
+    let value_blob = connection
+        .query_row(
+            "SELECT value_blob
+             FROM session_overviews
+             WHERE session_id = ?1",
+            rusqlite::params![session_id],
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .with_context(|| {
+            format!("failed to load transcript overview blob for session `{session_id}`")
+        })?;
+    if value_blob.len() < end_index {
+        bail!(
+            "persisted transcript overview for `{session_id}` has {} positions but needs {end_index}",
+            value_blob.len()
+        );
+    }
+    let mut kind_counts = vec![[0_u32; 4]; bucket_count];
+    let mut user_counts = vec![0_u32; bucket_count];
+    for (position, encoded) in value_blob.into_iter().take(end_index).enumerate() {
+        let (kind, is_user) = decode_conversation_overview_message(encoded)
+            .with_context(|| format!("invalid overview position {position} for `{session_id}`"))?;
+        let bucket_index =
+            conversation_overview_bucket_index(position, message_count, bucket_count);
+        let kind_index = conversation_overview_kind_index(kind);
+        kind_counts[bucket_index][kind_index] =
+            kind_counts[bucket_index][kind_index].saturating_add(1);
+        user_counts[bucket_index] =
+            user_counts[bucket_index].saturating_add(u32::from(is_user));
+    }
+    let mut overview = Vec::with_capacity(bucket_count.saturating_mul(2));
+    for bucket_index in 0..bucket_count {
+        for kind_index in 0..4 {
+            let count = kind_counts[bucket_index][kind_index];
+            if count == 0 {
+                continue;
+            }
+            let kind = match kind_index {
+                0 => ConversationOverviewKind::Text,
+                1 => ConversationOverviewKind::Command,
+                2 => ConversationOverviewKind::Diff,
+                3 => ConversationOverviewKind::Error,
+                _ => unreachable!("overview kind index is bounded"),
+            };
+            // Author counts are bucket-wide, so attach them to the first
+            // nonempty kind group and leave the remaining groups at zero.
+            let user_count = std::mem::take(&mut user_counts[bucket_index]);
+            overview.push((bucket_index, kind, count, user_count));
+        }
+    }
+    Ok(overview)
 }
 
 fn load_delegation_records_from_sqlite(
     connection: &rusqlite::Connection,
     path: &FsPath,
-) -> Result<Vec<DelegationRecord>> {
+) -> Result<(Vec<DelegationRecord>, BTreeSet<String>, usize)> {
     let mut statement = connection
-        .prepare("SELECT value_json FROM delegations ORDER BY rowid")
+        .prepare("SELECT id, value_json FROM delegations ORDER BY rowid")
         .with_context(|| format!("failed to prepare delegation load from `{}`", path.display()))?;
     let rows = statement
-        .query_map([], |row| row.get::<_, String>(0))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .with_context(|| {
             format!(
                 "failed to query persisted delegations from `{}`",
@@ -1047,18 +2217,348 @@ fn load_delegation_records_from_sqlite(
             )
         })?;
     let mut records = Vec::new();
+    let mut quarantined_ids = BTreeSet::new();
+    let mut skipped = 0_usize;
+    let mut row_count = 0_usize;
     for row in rows {
-        let encoded = row
-            .with_context(|| format!("failed to read delegation row from `{}`", path.display()))?;
-        let record = serde_json::from_str(&encoded).with_context(|| {
+        let (delegation_id, encoded) = match row {
+            Ok(row) => row,
+            Err(err) => {
+                skipped += 1;
+                eprintln!(
+                    "persist> skipping unreadable delegation row from `{}`: {err:#}",
+                    path.display()
+                );
+                continue;
+            }
+        };
+        row_count += 1;
+        match serde_json::from_str::<DelegationRecord>(&encoded) {
+            Ok(record) if record.id == delegation_id => records.push(record),
+            Ok(record) => {
+                skipped += 1;
+                quarantined_ids.insert(delegation_id.clone());
+                eprintln!(
+                    "persist> skipping invalid delegation `{delegation_id}` because its embedded id is `{}`",
+                    record.id
+                );
+            }
+            Err(err) => {
+                skipped += 1;
+                quarantined_ids.insert(delegation_id.clone());
+                eprintln!(
+                    "persist> skipping invalid delegation `{delegation_id}` from `{}`: {err:#}",
+                    path.display(),
+                );
+            }
+        }
+    }
+    if skipped > 0 {
+        eprintln!(
+            "persist> skipped {skipped} invalid delegation record(s) while loading `{}`",
+            path.display()
+        );
+    }
+    Ok((records, quarantined_ids, row_count))
+}
+
+struct SerializedPersistedMessage {
+    position: usize,
+    message_id: String,
+    value_json: String,
+    overview_kind: ConversationOverviewKind,
+    is_user: bool,
+}
+
+struct SerializedPersistedSession {
+    session_id: String,
+    message_start_index: usize,
+    message_count: usize,
+    write_overview: bool,
+    value_json: String,
+    messages: Vec<SerializedPersistedMessage>,
+}
+
+fn serialize_persisted_session(
+    record: &PersistedSessionRecord,
+) -> Result<SerializedPersistedSession> {
+    let mut metadata = record.clone();
+    let retained_end = record
+        .message_start_index
+        .checked_add(record.session.messages.len())
+        .context("persisted transcript position overflow")?;
+    let total_message_count = if record.session.messages_loaded {
+        retained_end
+    } else {
+        retained_end.max(
+            usize::try_from(record.session.message_count)
+                .context("persisted transcript count does not fit this platform")?,
+        )
+    };
+    metadata.session.messages.clear();
+    metadata.session.message_count =
+        u32::try_from(total_message_count).context("persisted transcript exceeds wire limit")?;
+    metadata.session.messages_loaded = total_message_count == 0;
+    metadata.message_start_index = 0;
+
+    let value_json =
+        serde_json::to_string(&metadata).context("failed to serialize persisted session metadata")?;
+    let messages = record
+        .session
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(local_index, message)| {
+            let position = record
+                .message_start_index
+                .checked_add(local_index)
+                .context("persisted transcript position overflow")?;
+            let value_json = serde_json::to_string(message)
+                .context("failed to serialize persisted transcript message")?;
+            let (overview_kind, is_user) = conversation_overview_message_metadata(message);
+            Ok(SerializedPersistedMessage {
+                position,
+                message_id: message.id().to_owned(),
+                value_json,
+                overview_kind,
+                is_user,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(SerializedPersistedSession {
+        session_id: record.session.id.clone(),
+        message_start_index: record.message_start_index,
+        message_count: total_message_count,
+        write_overview: record.remote_id.is_none(),
+        value_json,
+        messages,
+    })
+}
+
+fn write_serialized_persisted_session(
+    tx: &rusqlite::Transaction<'_>,
+    session: &SerializedPersistedSession,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)
+         ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json",
+        rusqlite::params![session.session_id, session.value_json],
+    )
+    .with_context(|| {
+        format!(
+            "failed to write persisted session metadata for `{}`",
+            session.session_id
+        )
+    })?;
+    tx.execute(
+        "DELETE FROM messages WHERE session_id = ?1 AND position >= ?2",
+        rusqlite::params![
+            session.session_id,
+            i64::try_from(session.message_start_index)
+                .context("persisted transcript position exceeds SQLite integer range")?
+        ],
+    )
+    .with_context(|| {
+        format!(
+            "failed to replace persisted transcript tail for `{}`",
+            session.session_id
+        )
+    })?;
+    let mut insert = tx
+        .prepare_cached(
+            "INSERT INTO messages(
+                 session_id,
+                 position,
+                 message_id,
+                 value_json,
+                 overview_kind,
+                 is_user
+             )
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .context("failed to prepare persisted transcript write")?;
+    for message in &session.messages {
+        insert
+            .execute(rusqlite::params![
+                session.session_id,
+                i64::try_from(message.position)
+                    .context("persisted transcript position exceeds SQLite integer range")?,
+                message.message_id,
+                message.value_json,
+                i64::try_from(conversation_overview_kind_index(message.overview_kind))
+                    .context("overview kind exceeds SQLite integer range")?,
+                i64::from(message.is_user),
+            ])
+            .with_context(|| {
+                format!(
+                    "failed to write transcript position {} for `{}`",
+                    message.position, session.session_id
+                )
+            })?;
+    }
+    if !session.write_overview {
+        tx.execute(
+            "DELETE FROM session_overviews WHERE session_id = ?1",
+            rusqlite::params![session.session_id],
+        )
+        .with_context(|| {
             format!(
-                "failed to parse persisted delegation row from `{}`",
-                path.display()
+                "failed to clear local transcript overview for remote proxy `{}`",
+                session.session_id
             )
         })?;
-        records.push(record);
+        return Ok(());
     }
-    Ok(records)
+    let mut overview_blob = if session.message_start_index == 0 {
+        Vec::with_capacity(session.message_count)
+    } else {
+        let existing = match tx.query_row(
+            "SELECT value_blob
+             FROM session_overviews
+             WHERE session_id = ?1",
+            rusqlite::params![session.session_id],
+            |row| row.get::<_, Vec<u8>>(0),
+        ) {
+            Ok(existing) => existing,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                let mut statement = tx
+                    .prepare(
+                        "SELECT overview_kind, is_user
+                         FROM messages
+                         WHERE session_id = ?1 AND position < ?2
+                         ORDER BY position",
+                    )
+                    .context("failed to prepare transcript overview prefix recovery")?;
+                statement
+                    .query_map(
+                        rusqlite::params![
+                            session.session_id,
+                            i64::try_from(session.message_start_index).context(
+                                "persisted transcript position exceeds SQLite integer range"
+                            )?,
+                        ],
+                        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?)),
+                    )
+                    .context("failed to query transcript overview prefix recovery")?
+                    .map(|row| {
+                        let (kind_index, is_user) =
+                            row.context("failed to read transcript overview prefix")?;
+                        let kind = match kind_index {
+                            0 => ConversationOverviewKind::Text,
+                            1 => ConversationOverviewKind::Command,
+                            2 => ConversationOverviewKind::Diff,
+                            3 => ConversationOverviewKind::Error,
+                            _ => bail!("invalid persisted transcript overview kind {kind_index}"),
+                        };
+                        Ok(encode_conversation_overview_message(kind, is_user))
+                    })
+                    .collect::<Result<Vec<_>>>()?
+            }
+            Err(err) => {
+                return Err(err).context("failed to load persisted transcript overview prefix");
+            }
+        };
+        if existing.len() < session.message_start_index {
+            bail!(
+                "persisted transcript overview for `{}` has {} positions but tail starts at {}",
+                session.session_id,
+                existing.len(),
+                session.message_start_index
+            );
+        }
+        let mut prefix = existing;
+        prefix.truncate(session.message_start_index);
+        prefix.reserve(session.messages.len());
+        prefix
+    };
+    overview_blob.extend(
+        session
+            .messages
+            .iter()
+            .map(|message| encode_conversation_overview_message(message.overview_kind, message.is_user)),
+    );
+    if overview_blob.len() != session.message_count {
+        bail!(
+            "persisted transcript overview for `{}` has {} positions but metadata expects {}",
+            session.session_id,
+            overview_blob.len(),
+            session.message_count
+        );
+    }
+    tx.execute(
+        "INSERT INTO session_overviews(session_id, value_blob)
+         VALUES(?1, ?2)
+         ON CONFLICT(session_id) DO UPDATE SET value_blob = excluded.value_blob",
+        rusqlite::params![session.session_id, overview_blob],
+    )
+    .with_context(|| {
+        format!(
+            "failed to write persisted transcript overview for `{}`",
+            session.session_id
+        )
+    })?;
+    Ok(())
+}
+
+fn remove_missing_persisted_sessions(
+    tx: &rusqlite::Transaction<'_>,
+    retained_session_ids: &HashSet<&str>,
+    quarantined_session_ids: &BTreeSet<String>,
+) -> Result<()> {
+    let stored_session_ids = {
+        let mut statement = tx
+            .prepare("SELECT id FROM sessions")
+            .context("failed to prepare stored-session replacement")?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .context("failed to query stored sessions for replacement")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("failed to read stored sessions for replacement")?
+    };
+    for session_id in stored_session_ids {
+        if retained_session_ids.contains(session_id.as_str())
+            || quarantined_session_ids.contains(&session_id)
+        {
+            continue;
+        }
+        tx.execute(
+            "DELETE FROM sessions WHERE id = ?1",
+            rusqlite::params![session_id],
+        )
+        .context("failed to remove stale persisted session")?;
+    }
+    Ok(())
+}
+
+fn remove_missing_persisted_delegations(
+    tx: &rusqlite::Transaction<'_>,
+    retained_delegation_ids: &HashSet<&str>,
+    quarantined_delegation_ids: &BTreeSet<String>,
+) -> Result<()> {
+    let stored_delegation_ids = {
+        let mut statement = tx
+            .prepare("SELECT id FROM delegations")
+            .context("failed to prepare stored-delegation replacement")?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .context("failed to query stored delegations for replacement")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("failed to read stored delegations for replacement")?
+    };
+    for delegation_id in stored_delegation_ids {
+        if retained_delegation_ids.contains(delegation_id.as_str())
+            || quarantined_delegation_ids.contains(&delegation_id)
+        {
+            continue;
+        }
+        tx.execute(
+            "DELETE FROM delegations WHERE id = ?1",
+            rusqlite::params![delegation_id],
+        )
+        .context("failed to remove stale persisted delegation")?;
+    }
+    Ok(())
 }
 
 fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) -> Result<()> {
@@ -1068,8 +2568,10 @@ fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) 
         &metadata,
         &persisted.sessions,
         true,
+        &persisted.quarantined_persisted_session_ids,
         &persisted.delegations,
         true,
+        &persisted.quarantined_persisted_delegation_ids,
     )
 }
 
@@ -1087,8 +2589,10 @@ fn persist_state_parts_to_sqlite(
     metadata: &PersistedState,
     sessions: &[PersistedSessionRecord],
     replace_sessions: bool,
+    quarantined_session_ids: &BTreeSet<String>,
     delegations: &[DelegationRecord],
     replace_delegations: bool,
+    quarantined_delegation_ids: &BTreeSet<String>,
 ) -> Result<()> {
     if let Some(parent) = path.parent() {
         create_local_state_directory(parent)?;
@@ -1102,8 +2606,10 @@ fn persist_state_parts_to_sqlite(
         metadata,
         sessions,
         replace_sessions,
+        quarantined_session_ids,
         delegations,
         replace_delegations,
+        quarantined_delegation_ids,
     )
 }
 
@@ -1119,18 +2625,16 @@ fn persist_state_parts_via_connection(
     metadata: &PersistedState,
     sessions: &[PersistedSessionRecord],
     replace_sessions: bool,
+    quarantined_session_ids: &BTreeSet<String>,
     delegations: &[DelegationRecord],
     replace_delegations: bool,
+    quarantined_delegation_ids: &BTreeSet<String>,
 ) -> Result<()> {
     let metadata_json =
         serde_json::to_string(metadata).context("failed to serialize persisted state metadata")?;
     let serialized_sessions = sessions
         .iter()
-        .map(|session| {
-            serde_json::to_string(session)
-                .context("failed to serialize persisted session")
-                .map(|json| (session.session.id.as_str(), json))
-        })
+        .map(serialize_persisted_session)
         .collect::<Result<Vec<_>>>()?;
     let serialized_delegations = delegations
         .iter()
@@ -1155,20 +2659,32 @@ fn persist_state_parts_via_connection(
     )
     .with_context(|| format!("failed to write state metadata to `{}`", path.display()))?;
     if replace_sessions {
-        tx.execute("DELETE FROM sessions", [])
+        let retained_session_ids = serialized_sessions
+            .iter()
+            .map(|session| session.session_id.as_str())
+            .collect::<HashSet<_>>();
+        remove_missing_persisted_sessions(
+            &tx,
+            &retained_session_ids,
+            quarantined_session_ids,
+        )
             .with_context(|| format!("failed to replace sessions in `{}`", path.display()))?;
     }
-    for (session_id, session_json) in serialized_sessions {
-        tx.execute(
-            "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)
-             ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json",
-            rusqlite::params![session_id, session_json],
-        )
-        .with_context(|| format!("failed to write persisted session to `{}`", path.display()))?;
+    for session in &serialized_sessions {
+        write_serialized_persisted_session(&tx, session)
+            .with_context(|| format!("failed to write persisted session to `{}`", path.display()))?;
     }
     if replace_delegations {
-        tx.execute("DELETE FROM delegations", [])
-            .with_context(|| format!("failed to replace delegations in `{}`", path.display()))?;
+        let retained_delegation_ids = serialized_delegations
+            .iter()
+            .map(|(delegation_id, _)| *delegation_id)
+            .collect::<HashSet<_>>();
+        remove_missing_persisted_delegations(
+            &tx,
+            &retained_delegation_ids,
+            quarantined_delegation_ids,
+        )
+        .with_context(|| format!("failed to replace delegations in `{}`", path.display()))?;
     }
     for (delegation_id, delegation_json) in serialized_delegations {
         tx.execute(
@@ -1317,11 +2833,7 @@ fn persist_delta_via_cache_inner(
     let serialized_sessions = delta
         .changed_sessions
         .iter()
-        .map(|session| {
-            serde_json::to_string(session)
-                .context("failed to serialize persisted session")
-                .map(|json| (session.session.id.as_str(), json))
-        })
+        .map(serialize_persisted_session)
         .collect::<Result<Vec<_>>>()?;
     let serialized_delegations = delta
         .changed_delegations
@@ -1372,16 +2884,11 @@ fn persist_delta_via_cache_inner(
             )
         })?;
     }
-    for (session_id, session_json) in serialized_sessions {
-        tx.execute(
-            "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)
-             ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json",
-            rusqlite::params![session_id, session_json],
-        )
-        .with_context(|| {
+    for session in &serialized_sessions {
+        write_serialized_persisted_session(&tx, session).with_context(|| {
             format!(
                 "failed to write persisted session `{}` to `{}`",
-                session_id,
+                session.session_id,
                 path.display()
             )
         })?;

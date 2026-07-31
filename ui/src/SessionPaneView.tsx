@@ -63,6 +63,7 @@ import { DiffPanel } from "./panels/DiffPanel";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { InstructionDebuggerPanel } from "./panels/InstructionDebuggerPanel";
+import { MailboxPanel } from "./panels/MailboxPanel";
 import { PaneTabs } from "./panels/PaneTabs";
 import { OrchestratorTemplatesPanel } from "./panels/OrchestratorTemplatesPanel";
 import { SessionCanvasPanel } from "./panels/SessionCanvasPanel";
@@ -181,6 +182,7 @@ export function SessionPaneView({
   onTabDrop,
   onPaneViewModeChange,
   onOpenSourceTab,
+  onOpenMailboxTab,
   onOpenDiffPreviewTab,
   onOpenGitStatusDiffPreviewTab,
   onOpenFilesystemTab,
@@ -281,6 +283,7 @@ export function SessionPaneView({
     activeFilesystemTab,
     activeGitStatusTab,
     activeTerminalTab,
+    activeMailboxTab,
     activeInstructionDebuggerTab,
     activeDiffPreviewTab,
     activeSourceOriginSessionId,
@@ -499,6 +502,13 @@ export function SessionPaneView({
   const activeSessionSearchMatchIndex = activeSessionSearchMatch
     ? Math.min(sessionFindActiveIndex, sessionSearchMatches.length - 1)
     : -1;
+  const isSessionSearchPartial = Boolean(
+    activeSession &&
+      ((activeSession.messageCount ?? activeSession.messages.length) >
+        activeSession.messages.length ||
+        activeSession.hasOlderHistory === true ||
+        activeSession.hasNewerHistory === true),
+  );
   const waitingIndicatorPrompt = useMemo(() => {
     if (showDelegationWaitIndicator) {
       return delegationWaitIndicatorPrompt(activeDelegationWaits);
@@ -512,13 +522,16 @@ export function SessionPaneView({
     }
 
     return resolveLiveWaitingIndicatorPrompt(
-      activeSessionMessages && activeSessionStatus
-        ? { messages: activeSessionMessages, status: activeSessionStatus }
+      activeSession && activeSessionStatus
+        ? {
+            liveActivity: activeSession.liveActivity,
+            status: activeSessionStatus,
+          }
         : null,
     );
   }, [
     activeDelegationWaits,
-    activeSessionMessages,
+    activeSession,
     activeSessionStatus,
     isSending,
     isSessionBusy,
@@ -631,6 +644,14 @@ export function SessionPaneView({
     visibleLastMessageAuthor,
     visibleMessageContentSignature,
   });
+  const queuedPromptHistoryAffordanceCount =
+    activeSession?.hasNewerHistory === true ? pendingPrompts.length : 0;
+  const effectiveShowNewResponseIndicator =
+    showNewResponseIndicator || queuedPromptHistoryAffordanceCount > 0;
+  const effectiveNewResponseIndicatorLabel =
+    queuedPromptHistoryAffordanceCount > 0
+      ? "Jump to latest"
+      : newResponseIndicatorLabel;
 
   const showDelegatedChildFooter =
     isDelegatedChildSession &&
@@ -640,7 +661,7 @@ export function SessionPaneView({
       activeSession &&
         (isSessionBusy ||
           isStopping ||
-          showNewResponseIndicator),
+          effectiveShowNewResponseIndicator),
     );
 
   function handleComposerPaste(
@@ -963,6 +984,7 @@ export function SessionPaneView({
     onCompactCodexThread,
     onForkCodexThread,
     onOpenDiffPreviewTab,
+    onOpenMailboxTab,
     onOpenSourceTab,
     onOpenConversationFromDiff,
     onInsertReviewIntoPrompt,
@@ -1266,6 +1288,7 @@ export function SessionPaneView({
                 query={sessionFindQuery}
                 activeIndex={activeSessionSearchMatchIndex}
                 matches={sessionSearchMatches}
+                isPartial={isSessionSearchPartial}
                 onChange={(nextValue) => setSessionFindQuery(nextValue)}
                 onNext={() => stepSessionFind(1)}
                 onPrevious={() => stepSessionFind(-1)}
@@ -1278,7 +1301,7 @@ export function SessionPaneView({
 
       <section
         ref={messageStackRef}
-        className={`message-stack${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}${activeTerminalTab ? " terminal-panel-stack" : ""}`}
+        className={`message-stack${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}${activeTerminalTab ? " terminal-panel-stack" : ""}${activeMailboxTab ? " mailbox-panel-stack" : ""}`}
         tabIndex={
           activeTab?.kind === "session" && pane.viewMode === "session"
             ? 0
@@ -1565,6 +1588,12 @@ export function SessionPaneView({
               }
             />
           )
+        ) : activeMailboxTab ? (
+          <MailboxPanel
+            key={`${activeMailboxTab.id}:${activeMailboxTab.refreshToken}`}
+            mailboxId={activeMailboxTab.mailboxId}
+            sessionId={activeMailboxTab.originSessionId}
+          />
         ) : activeTerminalTab ? (
           <section
             className="control-panel-section-stack terminal-section-stack"
@@ -1786,9 +1815,14 @@ export function SessionPaneView({
       </section>
       {showDelegatedChildFooter ? (
         <footer className="composer delegated-child-footer">
-          {showNewResponseIndicator ? (
+          {effectiveShowNewResponseIndicator ? (
             <button className="new-response-indicator" type="button" onClick={handleScrollToLatestFromFooter}>
-              {newResponseIndicatorLabel}
+              {effectiveNewResponseIndicatorLabel}
+              {queuedPromptHistoryAffordanceCount > 0 ? (
+                <span className="new-response-indicator-queued-count">
+                  {queuedPromptHistoryAffordanceCount} queued
+                </span>
+              ) : null}
             </button>
           ) : null}
           <div className="delegated-child-footer-status" role="status" aria-live="polite">
@@ -1821,6 +1855,7 @@ export function SessionPaneView({
         activeFilesystemTab ||
         activeGitStatusTab ||
         activeTerminalTab ||
+        activeMailboxTab ||
         activeInstructionDebuggerTab ||
         activeDiffPreviewTab ||
         isDelegatedChildSession ? null : (
@@ -1834,8 +1869,9 @@ export function SessionPaneView({
           isStopping={isStopping}
           isSessionBusy={isSessionBusy}
           isUpdating={isUpdating}
-          showNewResponseIndicator={showNewResponseIndicator}
-          newResponseIndicatorLabel={newResponseIndicatorLabel}
+          showNewResponseIndicator={effectiveShowNewResponseIndicator}
+          newResponseIndicatorLabel={effectiveNewResponseIndicatorLabel}
+          newResponseIndicatorQueuedCount={queuedPromptHistoryAffordanceCount}
           footerModeLabel={labelForPaneViewMode(pane.lastSessionViewMode)}
           onScrollToLatest={handleScrollToLatestFromFooter}
           onDraftCommit={handleDraftCommitFromFooter}

@@ -35,43 +35,151 @@
 const REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT: Duration = Duration::from_millis(100);
 #[cfg(not(test))]
 const REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT: Duration = Duration::from_secs(5);
-const SESSION_TAIL_HYDRATION_MAX_MESSAGES: usize = 500;
+const SESSION_TAIL_DEFAULT_MESSAGES: usize = 20;
+const SESSION_TAIL_HYDRATION_MAX_MESSAGES: usize = 64;
+const SESSION_HISTORY_PAGE_MAX_MESSAGES: usize = 64;
+const SESSION_OVERVIEW_DEFAULT_BUCKETS: usize = 200;
+const SESSION_OVERVIEW_MAX_BUCKETS: usize = 512;
+const SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS: usize = 160;
 
-/// Returns true for locally-typed remote hydration misses that can fall back to
-/// metadata without hiding local lookup or protocol errors.
-///
-/// Visible-pane hydration uses this to return a cached summary. Delta replay
-/// (`hydrate_remote_session_via_delta_replay` in `remote_routes.rs`) uses the
-/// same set to mean "targeted transcript repair is unavailable; try the narrow
-/// delta apply instead." The typed kind is the recovery contract; status
-/// controls the wire response but does not change local recoverability.
-fn is_recoverable_remote_hydration_miss(err: &ApiError) -> bool {
-    matches!(
-        err.kind,
-        Some(
-            ApiErrorKind::RemoteConnectionUnavailable
-                | ApiErrorKind::RemoteSessionHydrationFreshnessRace
-                | ApiErrorKind::RemoteSessionMissingFullTranscript
-        )
-    )
+fn bounded_live_activity_summary_text(value: &str) -> String {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS {
+        return normalized;
+    }
+    let mut bounded = normalized
+        .chars()
+        .take(SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS.saturating_sub(1))
+        .collect::<String>();
+    bounded.push('…');
+    bounded
 }
 
-fn select_visible_session_hydration_fallback_error(
-    original: ApiError,
-    fallback: ApiError,
-) -> ApiError {
-    // A typed local miss proves the cached summary no longer exists, so it is
-    // more actionable for the visible-pane caller than the recoverable remote
-    // hydration miss that triggered fallback. Other fallback failures preserve
-    // the original remote error because the local path only failed while trying
-    // to produce a degraded response.
-    // `LocalSessionMissing` is produced by local session lookup/fallback paths;
-    // new producers should review this selection policy before reusing it.
-    if fallback.kind == Some(ApiErrorKind::LocalSessionMissing) {
-        fallback
-    } else {
-        original
+fn bounded_live_activity_summary(
+    activity: &Option<SessionLiveActivity>,
+) -> Option<SessionLiveActivity> {
+    activity.as_ref().map(|activity| SessionLiveActivity {
+        prompt: bounded_live_activity_summary_text(&activity.prompt),
+        command: activity
+            .command
+            .as_deref()
+            .map(bounded_live_activity_summary_text),
+        command_status: activity.command_status,
+    })
+}
+
+#[derive(Clone, Copy, Default)]
+struct ConversationOverviewBucketCounts {
+    kinds: [u32; 4],
+    user_authored: u32,
+    marker_present: bool,
+}
+
+fn conversation_overview_kind_index(kind: ConversationOverviewKind) -> usize {
+    match kind {
+        ConversationOverviewKind::Text => 0,
+        ConversationOverviewKind::Command => 1,
+        ConversationOverviewKind::Diff => 2,
+        ConversationOverviewKind::Error => 3,
     }
+}
+
+fn dominant_conversation_overview_kind(
+    counts: [u32; 4],
+) -> ConversationOverviewKind {
+    // Error wins ties, followed by command and diff. Equal-count buckets
+    // should preserve the visually strongest signal instead of dissolving it
+    // into ordinary text.
+    let mut dominant = ConversationOverviewKind::Error;
+    let mut dominant_count = counts[conversation_overview_kind_index(dominant)];
+    for kind in [
+        ConversationOverviewKind::Command,
+        ConversationOverviewKind::Diff,
+        ConversationOverviewKind::Text,
+    ] {
+        let count = counts[conversation_overview_kind_index(kind)];
+        if count > dominant_count {
+            dominant = kind;
+            dominant_count = count;
+        }
+    }
+    dominant
+}
+
+fn conversation_overview_message_metadata(
+    message: &Message,
+) -> (ConversationOverviewKind, bool) {
+    let (author, kind) = match message {
+        Message::Command {
+            author,
+            status: CommandStatus::Error,
+            ..
+        } => (author, ConversationOverviewKind::Error),
+        Message::ParallelAgents { author, agents, .. }
+            if agents
+                .iter()
+                .any(|agent| agent.status == ParallelAgentStatus::Error) =>
+        {
+            (author, ConversationOverviewKind::Error)
+        }
+        Message::Approval {
+            author,
+            decision:
+                ApprovalDecision::Interrupted
+                | ApprovalDecision::Canceled
+                | ApprovalDecision::Rejected,
+            ..
+        } => (author, ConversationOverviewKind::Error),
+        Message::UserInputRequest { author, state, .. }
+        | Message::McpElicitationRequest { author, state, .. }
+        | Message::CodexAppRequest { author, state, .. }
+            if matches!(
+                state,
+                InteractionRequestState::Interrupted | InteractionRequestState::Canceled
+            ) =>
+        {
+            (author, ConversationOverviewKind::Error)
+        }
+        Message::Command { author, .. } => (author, ConversationOverviewKind::Command),
+        Message::Diff { author, .. } | Message::FileChanges { author, .. } => {
+            (author, ConversationOverviewKind::Diff)
+        }
+        Message::Text { author, .. }
+        | Message::Thinking { author, .. }
+        | Message::Markdown { author, .. }
+        | Message::SubagentResult { author, .. }
+        | Message::ParallelAgents { author, .. }
+        | Message::Approval { author, .. }
+        | Message::UserInputRequest { author, .. }
+        | Message::McpElicitationRequest { author, .. }
+        | Message::CodexAppRequest { author, .. } => {
+            (author, ConversationOverviewKind::Text)
+        }
+    };
+    (kind, matches!(author, Author::You))
+}
+
+fn conversation_overview_bucket_index(
+    position: usize,
+    message_count: usize,
+    bucket_count: usize,
+) -> usize {
+    debug_assert!(message_count > 0);
+    debug_assert!(bucket_count > 0);
+    position
+        .saturating_mul(bucket_count)
+        .checked_div(message_count)
+        .unwrap_or_default()
+        .min(bucket_count - 1)
+}
+
+/// A remote tail repair may fall back to applying the narrow SSE delta when
+/// transport or freshness prevents the bounded fetch itself.
+fn is_recoverable_remote_tail_miss(err: &ApiError) -> bool {
+    matches!(
+        err.kind,
+        Some(ApiErrorKind::RemoteConnectionUnavailable)
+    )
 }
 
 #[cfg(test)]
@@ -98,103 +206,6 @@ mod visible_session_hydration_error_tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.path);
         }
-    }
-
-    #[test]
-    fn recoverable_remote_hydration_misses_are_typed() {
-        for kind in [
-            ApiErrorKind::RemoteConnectionUnavailable,
-            ApiErrorKind::RemoteSessionHydrationFreshnessRace,
-            ApiErrorKind::RemoteSessionMissingFullTranscript,
-        ] {
-            for status in [StatusCode::BAD_GATEWAY, StatusCode::SERVICE_UNAVAILABLE] {
-                let err = ApiError::from_status(status, "copy can change").with_kind(kind);
-                assert!(is_recoverable_remote_hydration_miss(&err));
-            }
-        }
-    }
-
-    #[test]
-    fn remote_hydration_recovery_does_not_parse_copy() {
-        let legacy_connection_copy = ApiError::bad_gateway(
-            "Could not connect to remote \"SSH Lab\" over SSH. Check the host, network, and SSH settings, then try again.",
-        );
-        let legacy_freshness_copy = ApiError::bad_gateway(
-            "remote session response revision 5 cannot be safely applied; latest synchronized remote state revision is 4 and the transcript may have changed",
-        );
-
-        assert!(!is_recoverable_remote_hydration_miss(
-            &legacy_connection_copy
-        ));
-        assert!(!is_recoverable_remote_hydration_miss(
-            &legacy_freshness_copy
-        ));
-    }
-
-    #[test]
-    fn local_not_found_fallback_error_wins_over_recoverable_remote_error() {
-        let original = ApiError::bad_gateway("remote unavailable")
-            .with_kind(ApiErrorKind::RemoteConnectionUnavailable);
-        let fallback =
-            ApiError::local_session_missing();
-
-        let selected = select_visible_session_hydration_fallback_error(original, fallback);
-
-        assert_eq!(selected.status, StatusCode::NOT_FOUND);
-        assert_eq!(selected.message, "session not found");
-    }
-
-    #[test]
-    fn untyped_not_found_fallback_error_preserves_recoverable_remote_error() {
-        let original = ApiError::bad_gateway("remote unavailable")
-            .with_kind(ApiErrorKind::RemoteConnectionUnavailable);
-        let fallback = ApiError::not_found("generic not found");
-
-        let selected = select_visible_session_hydration_fallback_error(original, fallback);
-
-        assert_eq!(selected.status, StatusCode::BAD_GATEWAY);
-        assert_eq!(selected.message, "remote unavailable");
-        assert_eq!(
-            selected.kind,
-            Some(ApiErrorKind::RemoteConnectionUnavailable)
-        );
-    }
-
-    #[test]
-    fn transient_fallback_error_preserves_recoverable_remote_error() {
-        let original = ApiError::bad_gateway("remote unavailable")
-            .with_kind(ApiErrorKind::RemoteConnectionUnavailable);
-        let fallback = ApiError::internal("fallback failed");
-
-        let selected = select_visible_session_hydration_fallback_error(original, fallback);
-
-        assert_eq!(selected.status, StatusCode::BAD_GATEWAY);
-        assert_eq!(selected.message, "remote unavailable");
-        assert_eq!(
-            selected.kind,
-            Some(ApiErrorKind::RemoteConnectionUnavailable)
-        );
-    }
-
-    #[test]
-    fn hydration_fallback_response_tags_missing_local_session() {
-        let root = TempStateDir::new("termal-visible-session-fallback");
-        let state_path = root.path().join("state.json");
-        let templates_path = root.path().join("orchestrators.json");
-        let state = AppState::new_with_paths(
-            root.path().to_string_lossy().into_owned(),
-            state_path,
-            templates_path,
-        )
-        .expect("test state should initialize");
-
-        let err = match state.get_session_hydration_fallback_response("missing-session") {
-            Ok(_) => panic!("missing local session should return a typed error"),
-            Err(err) => err,
-        };
-
-        assert_eq!(err.status, StatusCode::NOT_FOUND);
-        assert_eq!(err.kind, Some(ApiErrorKind::LocalSessionMissing));
     }
 
     #[test]
@@ -250,6 +261,7 @@ mod visible_session_hydration_error_tests {
             external_session_id: None,
             agent_commands_revision: 0,
             codex_thread_state: None,
+            live_activity: None,
             status: SessionStatus::Idle,
             preview: "Remote session ready.".to_owned(),
             messages: Vec::new(),
@@ -292,14 +304,17 @@ mod visible_session_hydration_error_tests {
             .expect("local summary session should exist");
         assert!(local_summary_session.remote_id.is_none());
 
-        let remote_full = state
+        let remote_detail = state
             .get_session(&remote_session_id)
-            .expect("remote full session should be available");
-        assert_eq!(remote_full.session.remote_id.as_deref(), Some("ssh-lab"));
-        let local_full = state
+            .expect("remote session detail should be available");
+        assert_eq!(
+            remote_detail.session.remote_id.as_deref(),
+            Some("ssh-lab")
+        );
+        let local_detail = state
             .get_session(&local_session_id)
-            .expect("local full session should be available");
-        assert!(local_full.session.remote_id.is_none());
+            .expect("local session detail should be available");
+        assert!(local_detail.session.remote_id.is_none());
     }
 
     #[test]
@@ -353,7 +368,7 @@ mod visible_session_hydration_error_tests {
             .expect("summary session should be present");
         assert!(summary_session.pending_prompts.is_empty());
 
-        let targeted = state.summary_snapshot_with_full_session(&session_id);
+        let targeted = state.summary_snapshot_with_session_detail(&session_id);
         let targeted_session = targeted
             .sessions
             .iter()
@@ -369,6 +384,87 @@ mod visible_session_hydration_error_tests {
             Some("Expanded sensitive queued prompt")
         );
     }
+
+    #[test]
+    fn summary_snapshot_bounds_live_activity_but_targeted_detail_is_complete() {
+        let root = TempStateDir::new("termal-summary-live-activity");
+        let state = AppState::new_with_paths(
+            root.path().to_string_lossy().into_owned(),
+            root.path().join("state.sqlite"),
+            root.path().join("orchestrators.json"),
+        )
+        .expect("test state should initialize");
+        let session_id = state
+            .create_session(CreateSessionRequest {
+                name: Some("Active Session".to_owned()),
+                agent: Some(Agent::Codex),
+                workdir: Some(root.path().to_string_lossy().into_owned()),
+                project_id: None,
+                model: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+            })
+            .expect("session should be created")
+            .session_id;
+        let full_prompt = format!("{} PROMPT-TAIL", "private prompt ".repeat(40));
+        let full_command = format!("{} COMMAND-TAIL", "private command ".repeat(40));
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("session should exist");
+            inner.sessions[index].session.status = SessionStatus::Active;
+            inner.sessions[index].session.live_activity = Some(SessionLiveActivity {
+                prompt: full_prompt.clone(),
+                command: Some(full_command.clone()),
+                command_status: Some(CommandStatus::Running),
+            });
+        }
+
+        let summary = state.summary_snapshot();
+        let summary_activity = summary
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| session.live_activity.as_ref())
+            .expect("active summary should retain a bounded activity hint");
+        assert!(
+            summary_activity.prompt.chars().count()
+                <= SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS
+        );
+        assert!(!summary_activity.prompt.contains("PROMPT-TAIL"));
+        assert!(
+            summary_activity
+                .command
+                .as_deref()
+                .expect("summary command should remain available")
+                .chars()
+                .count()
+                <= SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS
+        );
+        assert!(
+            !summary_activity
+                .command
+                .as_deref()
+                .expect("summary command should remain available")
+                .contains("COMMAND-TAIL")
+        );
+
+        let targeted = state
+            .get_session(&session_id)
+            .expect("targeted session should load");
+        let targeted_activity = targeted
+            .session
+            .live_activity
+            .expect("targeted detail should retain activity");
+        assert_eq!(targeted_activity.prompt, full_prompt);
+        assert_eq!(targeted_activity.command.as_deref(), Some(full_command.as_str()));
+    }
 }
 
 impl AppState {
@@ -380,6 +476,9 @@ impl AppState {
         session.messages_loaded = record.session.messages_loaded;
         session.message_count = session_message_count(record);
         session.session_mutation_stamp = Some(record.mutation_stamp);
+        if session.status != SessionStatus::Active {
+            session.live_activity = None;
+        }
         session
     }
 
@@ -398,7 +497,11 @@ impl AppState {
         message_limit: usize,
         messages_loaded: bool,
     ) -> Session {
-        let mut session = Self::wire_session_summary_from_record(record);
+        // Targeted session detail is authorized to carry the session's live
+        // interaction state, including queued prompt bodies. Start from the
+        // complete projection so new targeted fields cannot be silently lost,
+        // then bound only the transcript payload.
+        let mut session = Self::wire_session_from_record(record);
         let source_messages = &record.session.messages;
         let start_index = Self::session_tail_start_index(record, message_limit);
         debug_assert!(
@@ -438,6 +541,12 @@ impl AppState {
             external_session_id: session.external_session_id.clone(),
             agent_commands_revision: session.agent_commands_revision,
             codex_thread_state: session.codex_thread_state,
+            // Global metadata snapshots need only the short working hint used
+            // by the session pane. Keep full user prompts and command bodies
+            // on targeted session-detail responses.
+            live_activity: (session.status == SessionStatus::Active)
+                .then(|| bounded_live_activity_summary(&session.live_activity))
+                .flatten(),
             status: session.status,
             preview: session.preview.clone(),
             messages: Vec::new(),
@@ -446,7 +555,7 @@ impl AppState {
             markers: session.markers.clone(),
             // Global state snapshots are metadata-first. Pending prompts can
             // contain user-authored prompt bodies, so expose them only through
-            // targeted full-session responses.
+            // targeted bounded session-detail responses.
             pending_prompts: Vec::new(),
             session_mutation_stamp: Some(record.mutation_stamp),
             parent_delegation_id: session.parent_delegation_id.clone(),
@@ -493,6 +602,10 @@ impl AppState {
             full.agent_commands_revision
         );
         debug_assert_eq!(summary.codex_thread_state, full.codex_thread_state);
+        debug_assert_eq!(
+            summary.live_activity,
+            bounded_live_activity_summary(&full.live_activity)
+        );
         debug_assert_eq!(summary.status, full.status);
         debug_assert_eq!(summary.preview, full.preview);
         debug_assert_eq!(summary.message_count, full.message_count);
@@ -526,17 +639,17 @@ impl AppState {
         self.snapshot_from_inner(&inner)
     }
 
-    fn summary_snapshot_with_full_session(&self, session_id: &str) -> StateResponse {
+    fn summary_snapshot_with_session_detail(&self, session_id: &str) -> StateResponse {
         let agent_readiness = self.agent_readiness_snapshot();
         let inner = self.inner.lock().expect("state mutex poisoned");
-        self.snapshot_from_inner_with_full_session(&inner, agent_readiness, session_id)
+        self.snapshot_from_inner_with_session_detail(&inner, agent_readiness, session_id)
     }
 
     /// Test-only full snapshot inspection helper.
     ///
     /// Production `/api/state`, action responses, and SSE state events are
-    /// metadata-first. Tests that need full transcripts use this helper so
-    /// `snapshot()` keeps the same shape in test and production builds.
+    /// metadata-first. Tests that inspect retained session windows use this
+    /// helper so `snapshot()` keeps the same shape in test and production.
     #[cfg(test)]
     fn full_snapshot(&self) -> StateResponse {
         let _ = self.agent_readiness_snapshot();
@@ -583,61 +696,10 @@ impl AppState {
             .clone()
     }
 
-    /// Returns one visible session with its state revision.
+    /// Test helper for the same bounded default tail exposed by the route.
+    #[cfg(test)]
     fn get_session(&self, session_id: &str) -> Result<SessionResponse, ApiError> {
-        enum SessionLookup {
-            Ready(SessionResponse),
-            HydrateRemoteProxy,
-        }
-
-        let lookup = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            let index = inner
-                .find_visible_session_index(session_id)
-                .ok_or_else(ApiError::local_session_missing)?;
-            let record = &inner.sessions[index];
-            if record.remote_id.is_some()
-                && record.remote_session_id.is_some()
-                && !record.session.messages_loaded
-            {
-                SessionLookup::HydrateRemoteProxy
-            } else {
-                SessionLookup::Ready(SessionResponse {
-                    revision: inner.revision,
-                    session: Self::wire_session_from_record(record),
-                    server_instance_id: self.server_instance_id.clone(),
-                })
-            }
-        };
-
-        match lookup {
-            SessionLookup::Ready(response) => Ok(response),
-            SessionLookup::HydrateRemoteProxy => {
-                let target = match self.remote_session_target(session_id) {
-                    Ok(Some(target)) => target,
-                    Ok(None) => {
-                        eprintln!(
-                            "remote session hydration for {session_id} fell back to cached summary: missing remote target"
-                        );
-                        // There is no upstream remote error to preserve here:
-                        // the proxy record changed between the initial
-                        // visibility check and target resolution. Return the
-                        // cached summary directly; if the local record also
-                        // disappeared, the fallback helper tags that miss as
-                        // `LocalSessionMissing`.
-                        return self.get_session_hydration_fallback_response(session_id);
-                    }
-                    Err(err) => return Err(err),
-                };
-                self.hydrate_remote_session_target(
-                    &target,
-                    None,
-                    None,
-                    REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT,
-                )
-                .or_else(|err| self.recover_visible_session_hydration(session_id, err))
-            }
-        }
+        self.get_session_tail(session_id, SESSION_TAIL_DEFAULT_MESSAGES)
     }
 
     /// Returns a visible session suffix without marking the transcript fully loaded.
@@ -655,11 +717,19 @@ impl AppState {
             record.remote_id.is_some()
                 && record.remote_session_id.is_some()
                 && !record.session.messages_loaded
+                && record.session.messages.is_empty()
         };
         if should_hydrate_remote_proxy {
-            // Reuse the full-session remote repair path, then project the
-            // now-localized transcript into the requested tail window below.
-            let _ = self.get_session(session_id)?;
+            let target = self
+                .remote_session_target(session_id)?
+                .ok_or_else(ApiError::local_session_missing)?;
+            return self.fetch_remote_session_tail_target(
+                &target,
+                message_limit,
+                None,
+                None,
+                REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT,
+            );
         }
 
         let inner = self.inner.lock().expect("state mutex poisoned");
@@ -676,61 +746,346 @@ impl AppState {
         })
     }
 
-    /// Recover a visible remote-proxy hydration miss with the best local
-    /// cached summary. Non-recoverable remote errors pass through unchanged;
-    /// if the local summary disappeared too, the typed local miss wins over
-    /// the transient remote miss.
-    fn recover_visible_session_hydration(
+    /// Returns a whole-conversation, position-linear overview independent of
+    /// the transcript window currently retained in memory.
+    fn get_session_overview(
         &self,
         session_id: &str,
-        err: ApiError,
-    ) -> Result<SessionResponse, ApiError> {
-        if !is_recoverable_remote_hydration_miss(&err) {
-            return Err(err);
-        }
-        eprintln!(
-            "remote session hydration for {session_id} fell back to cached summary: status={} kind={:?} message={}",
-            err.status, err.kind, err.message
+        requested_bucket_count: usize,
+    ) -> Result<SessionOverviewResponse, ApiError> {
+        debug_assert!(
+            (1..=SESSION_OVERVIEW_MAX_BUCKETS).contains(&requested_bucket_count)
         );
-        self.get_session_hydration_fallback_response(session_id)
-            .map_err(|fallback_err| {
-                eprintln!(
-                    "remote session hydration fallback for {session_id} failed: status={} kind={:?} message={}",
-                    fallback_err.status, fallback_err.kind, fallback_err.message
-                );
-                // `select_*` consumes both errors; log before this call if
-                // future diagnostics need fields from either value.
-                select_visible_session_hydration_fallback_error(err, fallback_err)
+        if let Some(target) = self.remote_session_target(session_id)? {
+            return self.fetch_remote_session_overview_target(
+                &target,
+                requested_bucket_count,
+                REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT,
+            );
+        }
+
+        let (
+            mut bucket_counts,
+            mut observed_positions,
+            resident_start_index,
+            message_count,
+            bucket_count,
+            session_mutation_stamp,
+            markers,
+        ) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_visible_session_index(session_id)
+                .ok_or_else(ApiError::local_session_missing)?;
+            let record = &inner.sessions[index];
+            let resident_start_index = record.message_start_index;
+            let message_count =
+                usize::try_from(session_message_count(record)).unwrap_or(usize::MAX);
+            let bucket_count = requested_bucket_count.min(message_count.max(1));
+            let mut bucket_counts =
+                vec![ConversationOverviewBucketCounts::default(); bucket_count];
+            let mut observed_positions = 0usize;
+            for (local_index, message) in record.session.messages.iter().enumerate() {
+                let position = resident_start_index.saturating_add(local_index);
+                if position >= message_count {
+                    break;
+                }
+                let (kind, is_user) = conversation_overview_message_metadata(message);
+                let bucket_index =
+                    conversation_overview_bucket_index(position, message_count, bucket_count);
+                let bucket = &mut bucket_counts[bucket_index];
+                bucket.kinds[conversation_overview_kind_index(kind)] =
+                    bucket.kinds[conversation_overview_kind_index(kind)].saturating_add(1);
+                bucket.user_authored = bucket.user_authored.saturating_add(u32::from(is_user));
+                observed_positions = observed_positions.saturating_add(1);
+            }
+            (
+                bucket_counts,
+                observed_positions,
+                resident_start_index,
+                message_count,
+                bucket_count,
+                record.mutation_stamp,
+                record.session.markers.clone(),
+            )
+        };
+
+        if resident_start_index > 0 {
+            let connection = open_sqlite_history_snapshot(self.persistence_path.as_ref())
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to open session overview snapshot: {err:#}"
+                    ))
+                })?;
+            let persisted = load_persisted_message_overview_with_connection(
+                &connection,
+                session_id,
+                resident_start_index,
+                message_count,
+                bucket_count,
+            )
+            .map_err(|err| {
+                ApiError::internal(format!("failed to load session overview: {err:#}"))
+            })?;
+            let mut persisted_positions = 0usize;
+            for (bucket_index, kind, count, user_count) in persisted {
+                let bucket = &mut bucket_counts[bucket_index];
+                bucket.kinds[conversation_overview_kind_index(kind)] = bucket.kinds
+                    [conversation_overview_kind_index(kind)]
+                    .saturating_add(count);
+                bucket.user_authored = bucket.user_authored.saturating_add(user_count);
+                persisted_positions = persisted_positions.saturating_add(count as usize);
+            }
+            if persisted_positions != resident_start_index {
+                return Err(ApiError::conflict(format!(
+                    "session overview loaded {persisted_positions} persisted positions but expected {resident_start_index}; refresh the session"
+                )));
+            }
+            observed_positions = observed_positions.saturating_add(persisted_positions);
+        }
+
+        if observed_positions != message_count {
+            return Err(ApiError::conflict(format!(
+                "session overview covered {observed_positions} positions but expected {message_count}; refresh the session"
+            )));
+        }
+
+        let overview_markers = markers
+            .into_iter()
+            .map(|marker| {
+                let position = if message_count == 0 {
+                    0
+                } else {
+                    marker.message_index_hint.min(message_count - 1)
+                };
+                if message_count > 0 {
+                    let bucket_index = conversation_overview_bucket_index(
+                        position,
+                        message_count,
+                        bucket_count,
+                    );
+                    bucket_counts[bucket_index].marker_present = true;
+                }
+                ConversationOverviewMarker {
+                    position,
+                    kind: marker.kind,
+                    label: (!marker.name.trim().is_empty()).then_some(marker.name),
+                }
             })
+            .collect();
+        let buckets = bucket_counts
+            .into_iter()
+            .map(|counts| ConversationOverviewBucket {
+                c: counts.kinds.into_iter().sum(),
+                k: dominant_conversation_overview_kind(counts.kinds),
+                u: counts.user_authored,
+                m: counts.marker_present,
+            })
+            .collect();
+
+        Ok(SessionOverviewResponse {
+            session_id: session_id.to_owned(),
+            message_count: u32::try_from(message_count).unwrap_or(u32::MAX),
+            session_mutation_stamp,
+            buckets,
+            markers: overview_markers,
+            latest_position: message_count.saturating_sub(1),
+        })
     }
 
-    /// Return the best local session shape when remote full-transcript
-    /// hydration cannot produce a fresh loaded response. Unloaded remote-proxy
-    /// sessions deliberately remain metadata-only (`messages_loaded = false`)
-    /// so clients keep them in the hydration retry path. Callers should only
-    /// use this for recoverable visible-pane misses; protocol and local
-    /// persistence failures must keep surfacing as errors. This helper acquires
-    /// `inner` itself; callers must not invoke it while holding the state lock.
-    fn get_session_hydration_fallback_response(
+    /// Returns one exclusive-before, ascending transcript page.
+    ///
+    /// Remote proxies forward the same bounded cursor query to the upstream
+    /// backend; they never materialize an unbounded transcript locally.
+    fn get_session_history(
         &self,
         session_id: &str,
-    ) -> Result<SessionResponse, ApiError> {
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_visible_session_index(session_id)
-            .ok_or_else(ApiError::local_session_missing)?;
-        let record = &inner.sessions[index];
-        let session = if record.remote_id.is_some()
-            && record.remote_session_id.is_some()
-            && !record.session.messages_loaded
-        {
-            Self::wire_session_summary_from_record(record)
-        } else {
-            Self::wire_session_from_record(record)
+        before: Option<&str>,
+        after: Option<&str>,
+        around: Option<usize>,
+        from_start: bool,
+        message_limit: usize,
+    ) -> Result<SessionHistoryResponse, ApiError> {
+        debug_assert!((1..=SESSION_HISTORY_PAGE_MAX_MESSAGES).contains(&message_limit));
+        if let Some(target) = self.remote_session_target(session_id)? {
+            return self.fetch_remote_session_history_target(
+                &target,
+                before,
+                after,
+                around,
+                from_start,
+                message_limit,
+                REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT,
+            );
+        }
+
+        let (
+            local_messages,
+            local_start_index,
+            local_cursor_position,
+            message_count,
+            revision,
+            session_mutation_stamp,
+        ) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_visible_session_index(session_id)
+                .ok_or_else(ApiError::local_session_missing)?;
+            let record = &inner.sessions[index];
+            (
+                record.session.messages.clone(),
+                record.message_start_index,
+                before.or(after).and_then(|cursor_id| {
+                    record
+                        .message_positions
+                        .get(cursor_id)
+                        .copied()
+                        .map(|local_index| global_message_index(record, local_index))
+                }),
+                usize::try_from(session_message_count(record)).unwrap_or(usize::MAX),
+                inner.revision,
+                record.mutation_stamp,
+            )
         };
-        Ok(SessionResponse {
-            revision: inner.revision,
-            session,
+        let cursor = before.or(after);
+        // A local history request uses at most one read connection. Cursor
+        // resolution and page loading must observe the same SQLite snapshot,
+        // and opening the database twice adds avoidable filesystem/pragma work
+        // to the scroll path.
+        let mut persistence_connection = None;
+        let cursor_position = match (cursor, local_cursor_position) {
+            (_, Some(position)) => Some(position),
+            (Some(cursor_id), None) => {
+                let connection =
+                    open_sqlite_history_snapshot(self.persistence_path.as_ref()).map_err(
+                        |err| {
+                            ApiError::internal(format!(
+                                "failed to open session history snapshot: {err:#}"
+                            ))
+                        },
+                    )?;
+                let position = persisted_message_position_with_connection(
+                    &connection,
+                    session_id,
+                    cursor_id,
+                )
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to resolve session history cursor: {err:#}"
+                    ))
+                })?
+                .ok_or_else(|| {
+                    ApiError::conflict(
+                        "session history cursor is no longer available; refresh the session tail",
+                    )
+                })?;
+                persistence_connection = Some(connection);
+                Some(position)
+            }
+            (None, None) => None,
+        };
+        let (start_index, end_index) = if let Some(around) = around {
+            if around >= message_count && message_count > 0 {
+                return Err(ApiError::conflict(
+                    "session history position is beyond the current transcript; refresh the session overview",
+                ));
+            }
+            let half_page = message_limit / 2;
+            let mut start_index = around.saturating_sub(half_page);
+            let end_index = start_index.saturating_add(message_limit).min(message_count);
+            start_index = end_index.saturating_sub(message_limit);
+            (start_index, end_index)
+        } else if from_start {
+            (0, message_limit.min(message_count))
+        } else if after.is_some() {
+            let start_index = cursor_position
+                .unwrap_or(message_count)
+                .saturating_add(1)
+                .min(message_count);
+            (
+                start_index,
+                start_index.saturating_add(message_limit).min(message_count),
+            )
+        } else {
+            let end_index = cursor_position.unwrap_or(message_count);
+            (end_index.saturating_sub(message_limit), end_index)
+        };
+        if end_index > message_count {
+            return Err(ApiError::conflict(
+                "session history cursor is beyond the current transcript; refresh the session tail",
+            ));
+        }
+        let mut page = vec![None; end_index.saturating_sub(start_index)];
+        for (local_index, message) in local_messages.into_iter().enumerate() {
+            let global_index = local_start_index.saturating_add(local_index);
+            if global_index < start_index || global_index >= end_index {
+                continue;
+            }
+            page[global_index - start_index] = Some(message);
+        }
+        if page.iter().any(Option::is_none) {
+            if persistence_connection.is_none() {
+                persistence_connection = Some(
+                    open_sqlite_history_snapshot(self.persistence_path.as_ref()).map_err(
+                        |err| {
+                            ApiError::internal(format!(
+                                "failed to open session history snapshot: {err:#}"
+                            ))
+                        },
+                    )?,
+                );
+            }
+            let persisted_messages = load_persisted_message_range_with_connection(
+                persistence_connection
+                    .as_ref()
+                    .expect("history snapshot should be open"),
+                session_id,
+                start_index,
+                end_index,
+            )
+            .map_err(|err| {
+                ApiError::internal(format!("failed to load session history page: {err:#}"))
+            })?;
+            for (position, message) in persisted_messages {
+                if position >= start_index && position < end_index {
+                    let slot = &mut page[position - start_index];
+                    if slot.is_none() {
+                        *slot = Some(message);
+                    }
+                }
+            }
+        }
+        let page = page
+            .into_iter()
+            .enumerate()
+            .map(|(offset, message)| {
+                message.ok_or_else(|| {
+                    ApiError::conflict(format!(
+                        "session history is missing persisted position {}; refresh the session tail",
+                        start_index + offset
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let has_more = start_index > 0 && !page.is_empty();
+        let next_before = has_more
+            .then(|| page.first().map(|message| message.id().to_owned()))
+            .flatten();
+        let has_newer = end_index < message_count && !page.is_empty();
+        let next_after = has_newer
+            .then(|| page.last().map(|message| message.id().to_owned()))
+            .flatten();
+
+        Ok(SessionHistoryResponse {
+            messages: page,
+            next_before,
+            has_more,
+            next_after,
+            has_newer,
+            message_start_index: start_index,
+            message_count: u32::try_from(message_count).unwrap_or(u32::MAX),
+            revision,
+            session_mutation_stamp,
             server_instance_id: self.server_instance_id.clone(),
         })
     }
@@ -780,9 +1135,6 @@ impl AppState {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         inner.remote_applied_revisions.remove(remote_id);
         inner.remote_snapshot_applied_revisions.remove(remote_id);
-        inner
-            .remote_transcript_snapshot_applied_revisions
-            .remove(remote_id);
         inner
             .remote_session_transcript_applied_revisions
             .remove(remote_id);
@@ -869,7 +1221,7 @@ impl AppState {
         }
     }
 
-    fn snapshot_from_inner_with_full_session(
+    fn snapshot_from_inner_with_session_detail(
         &self,
         inner: &StateInner,
         agent_readiness: Vec<AgentReadiness>,

@@ -23,6 +23,8 @@ export function resolveSessionPaneScrollStateKey(
       return `${paneId}:gitStatus:${activeTab.workdir ?? "empty"}`;
     case "terminal":
       return `${paneId}:terminal:${activeTab.id}`;
+    case "mailbox":
+      return `${paneId}:mailbox:${activeTab.mailboxId}`;
     case "instructionDebugger":
       return `${paneId}:instructionDebugger:${
         activeTab.originSessionId ?? activeTab.workdir ?? "empty"

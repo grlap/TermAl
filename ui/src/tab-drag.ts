@@ -106,6 +106,8 @@ function formatWorkspaceTabDragLabel(drag: WorkspaceTabDrag) {
       return `TermAl git ${drag.tab.workdir ?? "workspace"}`;
     case "terminal":
       return `TermAl terminal ${drag.tab.workdir ?? "workspace"}`;
+    case "mailbox":
+      return `TermAl mailbox ${drag.tab.mailboxId}`;
     case "controlPanel":
       return "TermAl control panel";
     case "orchestratorList":

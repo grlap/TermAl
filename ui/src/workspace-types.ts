@@ -22,6 +22,7 @@ export type PaneViewMode =
   | "filesystem"
   | "gitStatus"
   | "terminal"
+  | "mailbox"
   | "instructionDebugger"
   | "diffPreview";
 
@@ -64,6 +65,15 @@ export type WorkspaceTerminalTab = {
   workdir: string | null;
   originSessionId: string | null;
   originProjectId?: string | null;
+};
+
+export type WorkspaceMailboxTab = {
+  id: string;
+  kind: "mailbox";
+  mailboxId: string;
+  originSessionId: string;
+  originProjectId?: string | null;
+  refreshToken: string;
 };
 
 export type WorkspaceControlPanelTab = {
@@ -154,6 +164,7 @@ export type WorkspaceTab =
   | WorkspaceFilesystemTab
   | WorkspaceGitStatusTab
   | WorkspaceTerminalTab
+  | WorkspaceMailboxTab
   | WorkspaceControlPanelTab
   | WorkspaceOrchestratorListTab
   | WorkspaceCanvasTab

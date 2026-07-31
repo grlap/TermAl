@@ -826,7 +826,10 @@ Agent integration hooks:
   `thread/start` and `thread/resume`, using the same local executable and
   parent-scoped bridge arguments as the stdio bridge.
 - ACP sessions: populate `mcpServers` in `session/new`, `session/resume`, and
-  `session/load` with the TermAl MCP bridge configuration.
+  `session/load` with the TermAl MCP bridge configuration. ACP
+  `McpServer.env` is an array of `{name, value}` entries, so the shared ACP
+  projection converts the native environment map without changing Claude or
+  Codex descriptor shapes.
 - Cursor, Gemini, and OpenCode sessions: use the same ACP `mcpServers` path as long as
   those ACP backends accept it; if a backend rejects inline `mcpServers`, fall
   back to a backend-specific generated local config from the same descriptor.

@@ -41,6 +41,14 @@ TermAl initializes ACP v1 over JSON-RPC stdio and then uses:
 - `session/prompt` for turns;
 - the `session/cancel` notification for user cancellation.
 
+The inline delegation MCP descriptor follows the ACP `McpServer` schema:
+`env` is an array of `{name, value}` entries. Claude and Codex use environment
+maps in their native MCP configuration formats, so TermAl converts that map at
+the shared ACP boundary used by Cursor, Gemini, and OpenCode. Protocol-shape
+changes must include a live smoke against the real external binary; fixtures
+owned by TermAl are not sufficient evidence because both sides can encode the
+same incorrect assumption.
+
 OpenCode 1.18.8 exposes no typed invalid-session discriminator safe enough to
 authorize discarding continuity. A live wire probe on 2026-07-29 observed:
 

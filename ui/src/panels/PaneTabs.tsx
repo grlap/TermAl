@@ -975,6 +975,8 @@ export const PaneTabs = memo(function PaneTabs({
                         language={tab.language ?? null}
                         path={tab.displayPath ?? tab.filePath}
                       />
+                    ) : tab.kind === "mailbox" ? (
+                      <span aria-hidden="true">✉</span>
                     ) : (
                       <TabKindIcon kind={tab.kind} />
                     )}

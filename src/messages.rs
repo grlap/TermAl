@@ -23,19 +23,53 @@
 // synthesis treats the same text as a terminal sentinel rather than review
 // output. Keep both call sites tied to this neutral message contract.
 const SESSION_STOPPED_BY_USER_MESSAGE: &str = "Turn stopped by user.";
+const SESSION_IN_MEMORY_MESSAGE_LIMIT: usize = 64;
 
 /// Returns the transcript count carried by session-scoped SSE deltas.
 fn session_message_count(record: &SessionRecord) -> u32 {
     debug_assert!(
-        record.session.messages.len() <= u32::MAX as usize,
+        record
+            .message_start_index
+            .saturating_add(record.session.messages.len())
+            <= u32::MAX as usize,
         "session transcript length exceeded the wire messageCount range"
     );
-    let local_count = u32::try_from(record.session.messages.len()).unwrap_or(u32::MAX);
+    let retained_end = u32::try_from(
+        record
+            .message_start_index
+            .saturating_add(record.session.messages.len()),
+    )
+    .unwrap_or(u32::MAX);
     if record.session.messages_loaded {
-        local_count
+        retained_end
     } else {
-        record.session.message_count
+        record.session.message_count.max(retained_end)
     }
+}
+
+fn global_message_index(record: &SessionRecord, local_message_index: usize) -> usize {
+    record
+        .message_start_index
+        .saturating_add(local_message_index)
+}
+
+fn sync_retained_transcript_metadata(record: &mut SessionRecord) {
+    let retained_end = record
+        .message_start_index
+        .saturating_add(record.session.messages.len());
+    record.session.message_count = u32::try_from(retained_end).unwrap_or(u32::MAX);
+    record.session.messages_loaded = record.message_start_index == 0;
+}
+
+fn trim_retained_session_messages(record: &mut SessionRecord, limit: usize) {
+    if record.session.messages.len() <= limit {
+        return;
+    }
+    let remove_count = record.session.messages.len() - limit;
+    record.session.messages.drain(..remove_count);
+    record.message_start_index = record.message_start_index.saturating_add(remove_count);
+    record.message_positions = build_message_positions(&record.session.messages);
+    record.session.messages_loaded = false;
 }
 
 /// Recovers interrupted session record.
@@ -180,7 +214,7 @@ fn message_updated_delta_parts_for_indices(
             Some(MessageUpdatedDeltaParts {
                 session_id: session_id.clone(),
                 message_id: message.id().to_owned(),
-                message_index,
+                message_index: global_message_index(record, message_index),
                 message_count,
                 message,
                 preview: preview.clone(),
@@ -231,7 +265,7 @@ fn message_created_delta_parts_for_indices(
             Some(MessageCreatedDeltaParts {
                 session_id: session_id.clone(),
                 message_id: message.id().to_owned(),
-                message_index,
+                message_index: global_message_index(record, message_index),
                 message_count: initial_message_count + created_offset as u32 + 1,
                 message,
                 preview: preview.clone(),
@@ -324,6 +358,7 @@ fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: M
     let index = index.min(record.session.messages.len());
     record.session.messages.insert(index, message);
     record.message_positions = build_message_positions(&record.session.messages);
+    sync_retained_transcript_metadata(record);
     index
 }
 
@@ -417,8 +452,10 @@ fn replace_session_messages_on_record(
     messages: Vec<Message>,
     fallback_preview: Option<String>,
 ) {
+    record.message_start_index = 0;
     record.session.messages = messages;
     record.message_positions = build_message_positions(&record.session.messages);
+    sync_retained_transcript_metadata(record);
     record.session.preview = record
         .session
         .messages

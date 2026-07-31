@@ -510,6 +510,14 @@ impl AppState {
                             }
                             return Err(err);
                         }
+                        {
+                            let mut inner =
+                                inner_for_persist.lock().expect("state mutex poisoned");
+                            inner.trim_persisted_session_tails(
+                                next_watermark,
+                                &delta.persisted_session_ids_to_trim,
+                            );
+                        }
                         watermark = next_watermark;
                         if !pending_scope_deletions.is_empty() {
                             // Only a successful primary commit authorizes

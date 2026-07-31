@@ -2000,7 +2000,7 @@ describe("App live state — reconnect", () => {
       }),
     );
     const fetchSessionSpy = vi
-      .spyOn(api, "fetchSession")
+      .spyOn(api, "fetchSessionTail")
       .mockResolvedValue({
         revision: 6,
         serverInstanceId: "replacement-instance",
@@ -2050,9 +2050,9 @@ describe("App live state — reconnect", () => {
         // replacement-instance adoption: `forceMessagesUnloaded` flips
         // `messagesLoaded: false` on the summary, and the active-session
         // useEffect calls `startSessionHydration("session-1")`. Without
-        // the fix, the flag stays at `true` and `fetchSession` is never
-        // called, leaving the partial streaming text on screen forever.
-        expect(fetchSessionSpy).toHaveBeenCalledWith("session-1");
+        // the fix, the flag stays at `true` and the bounded tail is never
+        // fetched, leaving the partial streaming text on screen forever.
+        expect(fetchSessionSpy).toHaveBeenCalledWith("session-1", 20);
       });
     } finally {
       fetchStateSpy.mockRestore();

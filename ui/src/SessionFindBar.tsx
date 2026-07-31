@@ -37,6 +37,7 @@ export function SessionFindBar({
   query,
   activeIndex,
   matches,
+  isPartial,
   onChange,
   onNext,
   onPrevious,
@@ -46,6 +47,8 @@ export function SessionFindBar({
   query: string;
   activeIndex: number;
   matches: SessionSearchMatch[];
+  /** True when the resident bounded window does not cover the whole transcript. */
+  isPartial: boolean;
   onChange: (nextValue: string) => void;
   onNext: () => void;
   onPrevious: () => void;
@@ -58,8 +61,12 @@ export function SessionFindBar({
   const countLabel = !hasQuery
     ? "Type to search"
     : hasMatches
-      ? `${activeIndex + 1} of ${matches.length}`
-      : "No matches";
+      ? `${activeIndex + 1} of ${matches.length}${isPartial ? " loaded" : ""}`
+      : isPartial
+        ? "No matches in loaded messages"
+        : "No matches";
+  const partialSearchNotice =
+    "Search covers loaded messages only; older or newer history has not been searched.";
 
   return (
     <div
@@ -95,7 +102,11 @@ export function SessionFindBar({
       <span
         className="session-find-count"
         aria-live="polite"
-        title={currentMatch?.snippet ?? undefined}
+        title={
+          isPartial
+            ? partialSearchNotice
+            : (currentMatch?.snippet ?? undefined)
+        }
       >
         {countLabel}
       </span>

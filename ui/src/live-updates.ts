@@ -4,6 +4,7 @@ import type {
   Message,
   ParallelAgentsMessage,
   Session,
+  SessionLiveActivity,
   TextMessage,
 } from "./types";
 import { reconcileSessions } from "./session-reconcile";
@@ -199,6 +200,67 @@ function isValidMessageIndexForCount(
   return isValidMessageIndex(messageIndex) && messageIndex < messageCount;
 }
 
+function retainedTranscriptStartIndex(session: Session) {
+  if (session.messagesLoaded === true) {
+    return 0;
+  }
+  if (
+    typeof session.messageStartIndex === "number" &&
+    Number.isSafeInteger(session.messageStartIndex) &&
+    session.messageStartIndex >= 0
+  ) {
+    return session.messageStartIndex;
+  }
+  return Math.max(
+    0,
+    (session.messageCount ?? session.messages.length) - session.messages.length,
+  );
+}
+
+function retainedMessageIndexHint(session: Session, globalMessageIndex: number) {
+  return globalMessageIndex - retainedTranscriptStartIndex(session);
+}
+
+function liveActivityAfterTranscriptDelta(
+  session: Session,
+  delta: TranscriptDelta,
+): SessionLiveActivity | undefined {
+  if (
+    (delta.type === "messageCreated" || delta.type === "messageUpdated") &&
+    delta.status !== "active"
+  ) {
+    return undefined;
+  }
+  if (session.status !== "active" && delta.type !== "messageCreated") {
+    return session.liveActivity ?? undefined;
+  }
+
+  if (delta.type === "commandUpdate") {
+    return {
+      prompt: session.liveActivity?.prompt ?? "",
+      command: delta.command,
+      commandStatus: delta.status,
+    };
+  }
+
+  if (delta.type === "messageCreated" || delta.type === "messageUpdated") {
+    if (delta.message.type === "text" && delta.message.author === "you") {
+      return {
+        prompt: delta.message.text,
+      };
+    }
+    if (delta.message.type === "command") {
+      return {
+        prompt: session.liveActivity?.prompt ?? "",
+        command: delta.message.command,
+        commandStatus: delta.message.status,
+      };
+    }
+  }
+
+  return session.liveActivity ?? undefined;
+}
+
 function applyMetadataOnlySessionDelta(
   session: Session,
   delta: TranscriptDelta,
@@ -209,6 +271,7 @@ function applyMetadataOnlySessionDelta(
       : session.pendingPrompts;
   const base = {
     ...session,
+    liveActivity: liveActivityAfterTranscriptDelta(session, delta),
     messageCount: delta.messageCount,
     pendingPrompts,
     sessionMutationStamp: resolveSessionMutationStamp(
@@ -310,7 +373,7 @@ function messageCreatedDeltaHasProtocolViolation(
   const existingMessageIndex = findMessageIndex(
     session.messages,
     delta.messageId,
-    delta.messageIndex,
+    retainedMessageIndexHint(session, delta.messageIndex),
   );
   const knownMessageCount = Math.max(
     session.messageCount ?? 0,
@@ -324,7 +387,7 @@ function messageCreatedDeltaHasProtocolViolation(
       typeof currentStamp === "number" &&
       typeof deltaStamp === "number" &&
       currentStamp === deltaStamp &&
-      delta.messageIndex === session.messages.length &&
+      delta.messageIndex === knownMessageCount &&
       delta.messageCount === delta.messageIndex + 1;
     const isReplayOfKnownMessage =
       existingMessageIndex !== -1 &&
@@ -336,10 +399,26 @@ function messageCreatedDeltaHasProtocolViolation(
     }
   }
 
-  return (
+  if (
     existingMessageIndex === -1 &&
-    delta.messageCount <= session.messages.length
-  );
+    delta.messageCount <= knownMessageCount
+  ) {
+    const materializesEmptyUnloadedTail =
+      session.messagesLoaded === false &&
+      session.messages.length === 0 &&
+      delta.messageCount === knownMessageCount &&
+      delta.messageIndex + 1 === delta.messageCount;
+    const materializesNextMessageAfterRetainedPrefix =
+      session.messagesLoaded === false &&
+      delta.messageCount === session.messages.length + 1 &&
+      delta.messageIndex === session.messages.length;
+    return (
+      !materializesEmptyUnloadedTail &&
+      !materializesNextMessageAfterRetainedPrefix
+    );
+  }
+
+  return false;
 }
 
 function messageCreatedDeltaIsNoOp(
@@ -349,9 +428,12 @@ function messageCreatedDeltaIsNoOp(
   const existingMessageIndex = findMessageIndex(
     session.messages,
     delta.messageId,
-    delta.messageIndex,
+    retainedMessageIndexHint(session, delta.messageIndex),
   );
-  if (existingMessageIndex !== delta.messageIndex) {
+  if (
+    existingMessageIndex !==
+    retainedMessageIndexHint(session, delta.messageIndex)
+  ) {
     return false;
   }
 
@@ -359,6 +441,10 @@ function messageCreatedDeltaIsNoOp(
   // shape rather than trying to mirror each variant field-by-field here.
   return (
     serializedValuesMatch(session.messages[existingMessageIndex], delta.message) &&
+    serializedValuesMatch(
+      session.liveActivity,
+      liveActivityAfterTranscriptDelta(session, delta),
+    ) &&
     sessionStatusMetadataUpdateIsNoOp(
       session,
       delta.messageCount,
@@ -397,7 +483,7 @@ function applyMessageCreatedDeltaToRetainedTranscript(
   const existingMessageIndex = findMessageIndex(
     updatedMessages,
     delta.messageId,
-    delta.messageIndex,
+    retainedMessageIndexHint(session, delta.messageIndex),
   );
   if (existingMessageIndex !== -1) {
     const currentStamp = session.sessionMutationStamp;
@@ -411,13 +497,35 @@ function applyMessageCreatedDeltaToRetainedTranscript(
     }
     updatedMessages.splice(existingMessageIndex, 1);
   }
-  if (delta.messageIndex > updatedMessages.length) {
-    if (session.messagesLoaded !== false) {
+  const appendsAfterRetainedPrefix =
+    session.messagesLoaded === false &&
+    existingMessageIndex === -1 &&
+    delta.messageCount === updatedMessages.length + 1 &&
+    delta.messageIndex === updatedMessages.length;
+  const localMessageIndex = appendsAfterRetainedPrefix
+    ? updatedMessages.length
+    : retainedMessageIndexHint(session, delta.messageIndex);
+  if (
+    localMessageIndex < 0 ||
+    localMessageIndex > updatedMessages.length
+  ) {
+    if (
+      session.messagesLoaded === false &&
+      delta.messageIndex + 1 === delta.messageCount
+    ) {
+      // The delta is the new transcript tail but the retained suffix is
+      // disjoint (or empty). Keep one truthful contiguous suffix rather than
+      // pretending the missing positions exist between unrelated messages.
+      updatedMessages.splice(0, updatedMessages.length, delta.message);
+      session = {
+        ...session,
+        messageStartIndex: delta.messageIndex,
+      };
+    } else {
       return null;
     }
-    updatedMessages.push(delta.message);
   } else {
-    updatedMessages.splice(delta.messageIndex, 0, delta.message);
+    updatedMessages.splice(localMessageIndex, 0, delta.message);
   }
 
   const pendingPrompts = removePendingPromptForCreatedMessage(
@@ -438,10 +546,15 @@ function applyMessageCreatedDeltaToRetainedTranscript(
       updatedMessages.length >= nextMessageCount
         ? true
         : false,
+    messageStartIndex:
+      updatedMessages.length >= nextMessageCount
+        ? 0
+        : retainedTranscriptStartIndex(session),
     messageCount: nextMessageCount,
     pendingPrompts,
     preview: delta.preview,
     status: delta.status,
+    liveActivity: liveActivityAfterTranscriptDelta(session, delta),
     sessionMutationStamp: resolveSessionMutationStamp(
       session,
       delta.sessionMutationStamp,
@@ -462,13 +575,23 @@ function resolveRetainedMessageTargetOrFallback(
   const messageIndex = findMessageIndex(
     session.messages,
     delta.messageId,
-    delta.messageIndex,
+    retainedMessageIndexHint(session, delta.messageIndex),
   );
   if (messageIndex !== -1) {
     return { kind: "messageFound", messageIndex };
   }
 
   if (session.messagesLoaded === false) {
+    if (session.hasNewerHistory === true) {
+      return {
+        kind: "applied",
+        sessions: replaceSession(
+          sessions,
+          sessionIndex,
+          applyMetadataOnlySessionDelta(session, delta),
+        ),
+      };
+    }
     return {
       kind: "appliedNeedsResync",
       sessions: replaceSession(
@@ -528,6 +651,16 @@ export function applyDeltaToSessions(
       }
 
       if (session.messagesLoaded === false) {
+        if (session.hasNewerHistory === true) {
+          return {
+            kind: "applied",
+            sessions: replaceSession(
+              sessions,
+              sessionIndex,
+              applyMetadataOnlySessionDelta(session, delta),
+            ),
+          };
+        }
         const retainedTranscriptUpdate =
           applyMessageCreatedDeltaToRetainedTranscript(session, delta);
         if (retainedTranscriptUpdate) {
@@ -788,6 +921,10 @@ export function applyDeltaToSessions(
         message.output === delta.output &&
         message.outputLanguage === delta.outputLanguage &&
         message.status === delta.status &&
+        serializedValuesMatch(
+          session.liveActivity,
+          liveActivityAfterTranscriptDelta(session, delta),
+        ) &&
         sessionMetadataUpdateIsNoOp(
           session,
           delta.messageCount,
@@ -816,6 +953,7 @@ export function applyDeltaToSessions(
           messages: updatedMessages,
           messageCount: delta.messageCount,
           preview: delta.preview,
+          liveActivity: liveActivityAfterTranscriptDelta(session, delta),
           sessionMutationStamp: resolveSessionMutationStamp(
             session,
             delta.sessionMutationStamp,

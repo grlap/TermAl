@@ -98,12 +98,9 @@ enum ApiErrorKind {
     GitDocumentNotFile,
     GitDocumentNotFound,
     GitDocumentTooLarge,
-    /// Local session lookup vanished during visible-session hydration,
-    /// fallback, or remote-session-target resolution.
+    /// A local session lookup or remote-session-target resolution missed.
     LocalSessionMissing,
     RemoteConnectionUnavailable,
-    RemoteSessionHydrationFreshnessRace,
-    RemoteSessionMissingFullTranscript,
 }
 
 #[derive(Debug)]
@@ -536,6 +533,10 @@ struct Session {
     agent_commands_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     codex_thread_state: Option<CodexThreadState>,
+    /// Explicit current-turn state. UI activity must not depend on which
+    /// bounded transcript page happens to be resident.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    live_activity: Option<SessionLiveActivity>,
     status: SessionStatus,
     preview: String,
     messages: Vec<Message>,
@@ -551,6 +552,16 @@ struct Session {
     session_mutation_stamp: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     parent_delegation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionLiveActivity {
+    prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    command_status: Option<CommandStatus>,
 }
 
 fn session_messages_loaded_default() -> bool {
@@ -1675,7 +1686,7 @@ struct StateResponse {
     delegation_waits: Vec<DelegationWaitRecord>,
 }
 
-/// Represents one full session response payload.
+/// Represents one bounded session-tail response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionResponse {
@@ -1691,6 +1702,76 @@ struct SessionResponse {
     /// do not emit the field.
     #[serde(default)]
     server_instance_id: String,
+}
+
+/// One bounded, ascending transcript page.
+///
+/// `next_before` is the first message id in `messages` when older history
+/// remains. Supplying it as the next request's exclusive `before` cursor walks
+/// toward the beginning without relying on mutation-prone array indexes.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionHistoryResponse {
+    messages: Vec<Message>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    next_before: Option<String>,
+    has_more: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    next_after: Option<String>,
+    #[serde(default)]
+    has_newer: bool,
+    #[serde(default)]
+    message_start_index: usize,
+    message_count: u32,
+    revision: u64,
+    session_mutation_stamp: u64,
+    server_instance_id: String,
+}
+
+/// Coarse message category used by the position-linear conversation overview.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ConversationOverviewKind {
+    #[default]
+    Text,
+    Command,
+    Diff,
+    Error,
+}
+
+/// One equal-position bucket in a bounded conversation overview response.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+struct ConversationOverviewBucket {
+    /// Message count.
+    c: u32,
+    /// Dominant message kind.
+    k: ConversationOverviewKind,
+    /// User-authored message count.
+    u: u32,
+    /// Whether at least one conversation marker falls in this bucket.
+    m: bool,
+}
+
+/// One marker projected into whole-transcript position space.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationOverviewMarker {
+    position: usize,
+    kind: ConversationMarkerKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
+}
+
+/// Whole-conversation overview returned independently of transcript residency.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionOverviewResponse {
+    session_id: String,
+    message_count: u32,
+    session_mutation_stamp: u64,
+    buckets: Vec<ConversationOverviewBucket>,
+    markers: Vec<ConversationOverviewMarker>,
+    latest_position: usize,
 }
 
 /// Defines the workspace control panel side variants.
@@ -1980,7 +2061,7 @@ struct PickProjectRootResponse {
 }
 
 /// Defines the delta event variants.
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",

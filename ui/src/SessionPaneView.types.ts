@@ -100,6 +100,12 @@ export type SessionPaneViewProps = {
     originProjectId: string | null,
     options?: OpenPathOptions,
   ) => void;
+  onOpenMailboxTab?: (
+    paneId: string,
+    mailboxId: string,
+    originSessionId: string,
+    originProjectId: string | null,
+  ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
     message: DiffMessage,

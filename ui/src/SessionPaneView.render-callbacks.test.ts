@@ -109,6 +109,7 @@ function makeRenderCallbackParams(
     onCompactCodexThread: vi.fn(),
     onForkCodexThread: vi.fn(),
     onOpenDiffPreviewTab: vi.fn(),
+    onOpenMailboxTab: vi.fn(),
     onOpenSourceTab: vi.fn(),
     onOpenConversationFromDiff: vi.fn(),
     onInsertReviewIntoPrompt: vi.fn(),
@@ -269,6 +270,54 @@ function renderMultiDelegationCard(hook: {
 }
 
 describe("SessionPaneView render callbacks", () => {
+  it("routes mailbox cards into the owning workspace pane", () => {
+    const onOpenMailboxTab = vi.fn();
+    const mailboxMessage: Message = {
+      id: "mailbox-notification",
+      type: "text",
+      author: "you",
+      timestamp: "10:00",
+      text: "agent activation text",
+      source: {
+        kind: "mailbox",
+        name: "Termal::Fable",
+        mailbox: {
+          mailboxId: "mailbox-1",
+          messageId: "mailbox-message-1",
+          sequence: 1,
+          unreadCount: 1,
+        },
+      },
+    };
+    const { hook } = renderCallbacks({
+      activeSession: makeSession("idle", [mailboxMessage]),
+      onOpenMailboxTab,
+    });
+    const element = hook.result.current.renderSessionMessageCard(
+      mailboxMessage,
+      false,
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+    );
+    if (!element) {
+      throw new Error("Expected mailbox message card element");
+    }
+
+    const openMailbox = (
+      element.props as { onOpenMailbox?: (mailboxId: string) => void }
+    ).onOpenMailbox;
+    expect(openMailbox).toBeTypeOf("function");
+    openMailbox?.("mailbox-1");
+    expect(onOpenMailboxTab).toHaveBeenCalledWith(
+      "pane-1",
+      "mailbox-1",
+      "session-1",
+      null,
+    );
+  });
+
   it("streams only the active assistant text that is the last transcript item", () => {
     const session = makeSession("active", [assistantTable]);
     const streamingTextId = streamingAssistantTextMessageIdForSession(session);

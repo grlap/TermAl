@@ -853,7 +853,79 @@ describe("applyDeltaToSessions", () => {
     expect(result.sessions[0].sessionMutationStamp).toBe(101);
   });
 
-  it("retains a new prompt delta across an unhydrated transcript gap without marking it loaded", () => {
+  it("translates global delta indexes into a retained tail window", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 100,
+        messages: [
+          {
+            id: "message-98",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Older retained",
+          },
+          {
+            id: "message-99",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Current",
+          },
+        ],
+      }),
+    ];
+    const textResult = applyDeltaToSessions(sessions, {
+      type: "textReplace",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: "message-99",
+      messageIndex: 99,
+      messageCount: 100,
+      text: "Updated current",
+      preview: "Updated current",
+    });
+    expect(textResult.kind).toBe("applied");
+    if (textResult.kind !== "applied") {
+      throw new Error("expected global text replacement to apply");
+    }
+    expect(textResult.sessions[0].messages[1]).toMatchObject({
+      id: "message-99",
+      text: "Updated current",
+    });
+
+    const createResult = applyDeltaToSessions(textResult.sessions, {
+      type: "messageCreated",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "message-100",
+      messageIndex: 100,
+      messageCount: 101,
+      message: {
+        id: "message-100",
+        type: "text",
+        timestamp: "10:02",
+        author: "you",
+        text: "New prompt",
+      },
+      preview: "New prompt",
+      status: "active",
+    });
+    expect(createResult.kind).toBe("applied");
+    if (createResult.kind !== "applied") {
+      throw new Error("expected global tail append to apply");
+    }
+    expect(createResult.sessions[0].messages.map((message) => message.id)).toEqual([
+      "message-98",
+      "message-99",
+      "message-100",
+    ]);
+    expect(createResult.sessions[0].messageCount).toBe(101);
+    expect(createResult.sessions[0].messagesLoaded).toBe(false);
+  });
+
+  it("replaces a disjoint retained suffix with the newest created message", () => {
     const sessions = [
       makeSession("session-a", {
         messagesLoaded: false,
@@ -898,10 +970,9 @@ describe("applyDeltaToSessions", () => {
 
     expect(result.sessions[0].messagesLoaded).toBe(false);
     expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
-      "message-previous",
       "message-late-prompt",
     ]);
-    expect(result.sessions[0].messages[1]).toMatchObject({
+    expect(result.sessions[0].messages[0]).toMatchObject({
       author: "you",
       text: "Prompt after missing messages",
     });
@@ -1105,7 +1176,7 @@ describe("applyDeltaToSessions", () => {
     });
   });
 
-  it("retains a contiguous created message without marking an incomplete transcript loaded", () => {
+  it("requests a resync when a created message targets outside the retained suffix", () => {
     const sessions = [
       makeSession("session-a", {
         messagesLoaded: false,
@@ -1141,16 +1212,7 @@ describe("applyDeltaToSessions", () => {
 
     const result = applyDeltaToSessions(sessions, delta);
 
-    expect(result.kind).toBe("applied");
-    if (result.kind !== "applied") {
-      throw new Error("expected delta to apply");
-    }
-    expect(result.sessions[0].messagesLoaded).toBe(false);
-    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
-      "message-previous",
-      "message-new-prompt",
-    ]);
-    expect(result.sessions[0].messageCount).toBe(5);
+    expect(result).toEqual({ kind: "needsResync" });
   });
 
   it("requests a resync when a created message regresses the retained transcript count", () => {
@@ -1199,7 +1261,7 @@ describe("applyDeltaToSessions", () => {
     });
   });
 
-  it("accepts a progressive created-message replay after a final metadata snapshot", () => {
+  it("requests a resync for an older created-message replay outside the retained suffix", () => {
     const sessions = [
       makeSession("session-a", {
         messagesLoaded: false,
@@ -1237,40 +1299,7 @@ describe("applyDeltaToSessions", () => {
 
     const firstResult = applyDeltaToSessions(sessions, delta);
 
-    expect(firstResult.kind).toBe("applied");
-    if (firstResult.kind !== "applied") {
-      throw new Error("expected replayed created message to apply");
-    }
-    expect(firstResult.sessions[0].messagesLoaded).toBe(false);
-    expect(firstResult.sessions[0].messageCount).toBe(3);
-    expect(firstResult.sessions[0].sessionMutationStamp).toBe(101);
-    expect(
-      firstResult.sessions[0].messages.map((message) => message.id),
-    ).toEqual(["message-existing", "message-stop"]);
-
-    const secondResult = applyDeltaToSessions(firstResult.sessions, {
-      ...delta,
-      messageId: "message-files",
-      messageIndex: 2,
-      messageCount: 3,
-      message: {
-        id: "message-files",
-        type: "text",
-        timestamp: "10:01",
-        author: "assistant",
-        text: "Changed files.",
-      },
-    });
-
-    expect(secondResult.kind).toBe("applied");
-    if (secondResult.kind !== "applied") {
-      throw new Error("expected second replayed created message to apply");
-    }
-    expect(secondResult.sessions[0].messagesLoaded).toBe(true);
-    expect(secondResult.sessions[0].messageCount).toBe(3);
-    expect(
-      secondResult.sessions[0].messages.map((message) => message.id),
-    ).toEqual(["message-existing", "message-stop", "message-files"]);
+    expect(firstResult).toEqual({ kind: "needsResync" });
   });
 
   it("does not let an older created-message replay overwrite current content", () => {
@@ -1381,6 +1410,54 @@ describe("applyDeltaToSessions", () => {
       ),
     ).toHaveLength(1);
     expect(result.sessions[0].sessionMutationStamp).toBe(101);
+  });
+
+  it("appends a newly created tail message while summary hydration is pending", () => {
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 2,
+        sessionMutationStamp: 11,
+        messages: [
+          {
+            id: "message-previous",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Previous answer",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 3,
+      sessionId: "session-a",
+      messageId: "message-new-prompt",
+      messageIndex: 1,
+      messageCount: 2,
+      message: {
+        id: "message-new-prompt",
+        type: "text",
+        timestamp: "10:01",
+        author: "you",
+        text: "Latest prompt",
+      },
+      preview: "Latest prompt",
+      status: "active",
+      sessionMutationStamp: 11,
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind === "applied") {
+      expect(result.sessions[0].messages.map((entry) => entry.id)).toEqual([
+        "message-previous",
+        "message-new-prompt",
+      ]);
+      expect(result.sessions[0].liveActivity?.prompt).toBe("Latest prompt");
+    }
   });
 
   it("inserts created messages at the provided index", () => {

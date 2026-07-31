@@ -24,6 +24,12 @@ import { conversationMarkerColorsMatchForState } from "./conversation-marker-sta
 type ReconcileSessionsOptions = {
   disableMutationStampFastPath?: boolean;
   /**
+   * A targeted bounded-tail response owns transcript residency even when the
+   * preceding summary already advanced count/stamp metadata. Summary payloads
+   * never set this; they must continue preserving the current resident window.
+   */
+  adoptPartialMessages?: boolean;
+  /**
    * Force `messagesLoaded` to `false` on summary sessions even when the
    * local transcript already has at least `messageCount` retained
    * messages. Set this on backend-restart adoption: persisted sessions
@@ -66,7 +72,10 @@ export function applyDelegationParentIdsFromSummaries(
     const parentDelegationId = parentDelegationIdsByChildSessionId.get(
       session.id,
     );
-    if (!parentDelegationId || session.parentDelegationId === parentDelegationId) {
+    if (
+      !parentDelegationId ||
+      session.parentDelegationId === parentDelegationId
+    ) {
       return session;
     }
     changed = true;
@@ -104,7 +113,10 @@ export function reconcileSessions(
       nextSession,
       options,
     );
-    if (mergedSession !== previousSession || previous[index]?.id !== nextSession.id) {
+    if (
+      mergedSession !== previousSession ||
+      previous[index]?.id !== nextSession.id
+    ) {
       changed = true;
     }
     return mergedSession;
@@ -150,6 +162,12 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.externalSessionId === next.externalSessionId &&
     previous.agentCommandsRevision === next.agentCommandsRevision &&
     previous.codexThreadState === next.codexThreadState &&
+    (previous.liveActivity?.prompt ?? null) ===
+      (next.liveActivity?.prompt ?? null) &&
+    (previous.liveActivity?.command ?? null) ===
+      (next.liveActivity?.command ?? null) &&
+    (previous.liveActivity?.commandStatus ?? null) ===
+      (next.liveActivity?.commandStatus ?? null) &&
     previous.sessionMutationStamp === next.sessionMutationStamp &&
     previous.status === next.status &&
     previous.preview === next.preview &&
@@ -241,26 +259,40 @@ function reconcileSummarySession(
     return previous;
   }
 
-  // Metadata-only summaries redact prompt bodies; an empty list on this path
-  // means "not included", not "the backend has no queued prompts".
-  const pendingPrompts = previous.pendingPrompts;
+  // Metadata-only summaries redact prompt bodies; an empty list on that path
+  // means "not included", not "the backend has no queued prompts". Targeted
+  // bounded-tail responses are different: they carry the authoritative queue
+  // and must adopt or clear it together with transcript residency.
+  const pendingPrompts =
+    options?.adoptPartialMessages === true
+      ? reconcilePendingPrompts(previous.pendingPrompts, next.pendingPrompts)
+      : previous.pendingPrompts;
   const nextMessageCount =
     typeof next.messageCount === "number" ? next.messageCount : null;
-  const shouldAdoptPartialMessages =
-    next.messages.length > 0 &&
-    previous.messagesLoaded !== true &&
-    previous.messages.length < next.messages.length;
-  const messages = shouldAdoptPartialMessages
-    ? reconcileMessages(previous.messages, next.messages)
-    : previous.messages;
-  const hasCompleteMessages =
-    nextMessageCount === null || messages.length >= nextMessageCount;
+  const previousMessageCount =
+    typeof previous.messageCount === "number"
+      ? previous.messageCount
+      : previous.messages.length;
   const previousMutationStamp = previous.sessionMutationStamp ?? null;
   const nextMutationStamp = next.sessionMutationStamp ?? null;
   const hasDifferentKnownSummaryMutation =
     previousMutationStamp !== null &&
     nextMutationStamp !== null &&
     nextMutationStamp !== previousMutationStamp;
+  const hasDifferentKnownMessageCount =
+    nextMessageCount !== null && nextMessageCount !== previousMessageCount;
+  const shouldAdoptPartialMessages =
+    next.messages.length > 0 &&
+    previous.messagesLoaded !== true &&
+    (options?.adoptPartialMessages === true ||
+      previous.messages.length < next.messages.length ||
+      hasDifferentKnownSummaryMutation ||
+      hasDifferentKnownMessageCount);
+  const messages = shouldAdoptPartialMessages
+    ? reconcileMessages(previous.messages, next.messages)
+    : previous.messages;
+  const hasCompleteMessages =
+    nextMessageCount === null || messages.length >= nextMessageCount;
   // After a backend restart the server's persisted `sessionMutationStamp`
   // is `null`, so `hasDifferentKnownSummaryMutation` cannot detect that
   // the new server may have advanced the transcript. The caller signals
@@ -284,6 +316,20 @@ function reconcileSummarySession(
     ...next,
     messages,
     messagesLoaded,
+    messageStartIndex: shouldAdoptPartialMessages
+      ? next.messageStartIndex
+      : previous.messageStartIndex,
+    // Targeted bounded-tail hydration owns the resident window, including
+    // which transcript sides remain unloaded. Metadata-only summaries do not:
+    // they must preserve the reader's current attachment state.
+    hasOlderHistory:
+      options?.adoptPartialMessages === true
+        ? next.hasOlderHistory
+        : previous.hasOlderHistory,
+    hasNewerHistory:
+      options?.adoptPartialMessages === true
+        ? next.hasNewerHistory
+        : previous.hasNewerHistory,
   };
   if (pendingPrompts) {
     return {
@@ -296,7 +342,10 @@ function reconcileSummarySession(
   return rest;
 }
 
-function sameModelOptions(previous?: Session["modelOptions"], next?: Session["modelOptions"]) {
+function sameModelOptions(
+  previous?: Session["modelOptions"],
+  next?: Session["modelOptions"],
+) {
   if (previous === next) {
     return true;
   }
@@ -311,24 +360,35 @@ function sameModelOptions(previous?: Session["modelOptions"], next?: Session["mo
     const nextOption = next[index];
     const previousBadges = option.badges ?? [];
     const nextBadges = nextOption?.badges ?? [];
-    const previousSupportedClaudeEfforts = option.supportedClaudeEffortLevels ?? [];
-    const nextSupportedClaudeEfforts = nextOption?.supportedClaudeEffortLevels ?? [];
-    const previousSupportedReasoningEfforts = option.supportedReasoningEfforts ?? [];
-    const nextSupportedReasoningEfforts = nextOption?.supportedReasoningEfforts ?? [];
+    const previousSupportedClaudeEfforts =
+      option.supportedClaudeEffortLevels ?? [];
+    const nextSupportedClaudeEfforts =
+      nextOption?.supportedClaudeEffortLevels ?? [];
+    const previousSupportedReasoningEfforts =
+      option.supportedReasoningEfforts ?? [];
+    const nextSupportedReasoningEfforts =
+      nextOption?.supportedReasoningEfforts ?? [];
     return (
       nextOption?.label === option.label &&
       nextOption.value === option.value &&
       (nextOption.description ?? null) === (option.description ?? null) &&
-      (nextOption.defaultReasoningEffort ?? null) === (option.defaultReasoningEffort ?? null) &&
+      (nextOption.defaultReasoningEffort ?? null) ===
+        (option.defaultReasoningEffort ?? null) &&
       previousBadges.length === nextBadges.length &&
-      previousBadges.every((badge, badgeIndex) => nextBadges[badgeIndex] === badge) &&
-      previousSupportedClaudeEfforts.length === nextSupportedClaudeEfforts.length &&
-      previousSupportedClaudeEfforts.every(
-        (effort, effortIndex) => nextSupportedClaudeEfforts[effortIndex] === effort,
+      previousBadges.every(
+        (badge, badgeIndex) => nextBadges[badgeIndex] === badge,
       ) &&
-      previousSupportedReasoningEfforts.length === nextSupportedReasoningEfforts.length &&
+      previousSupportedClaudeEfforts.length ===
+        nextSupportedClaudeEfforts.length &&
+      previousSupportedClaudeEfforts.every(
+        (effort, effortIndex) =>
+          nextSupportedClaudeEfforts[effortIndex] === effort,
+      ) &&
+      previousSupportedReasoningEfforts.length ===
+        nextSupportedReasoningEfforts.length &&
       previousSupportedReasoningEfforts.every(
-        (effort, effortIndex) => nextSupportedReasoningEfforts[effortIndex] === effort,
+        (effort, effortIndex) =>
+          nextSupportedReasoningEfforts[effortIndex] === effort,
       )
     );
   });
@@ -388,7 +448,9 @@ function reconcileMessages(previous: Message[], next: Message[]): Message[] {
           firstChangedIndex = index;
           break;
         }
-        if (reconcileMessage(previous[index]!, next[index]!) !== previous[index]) {
+        if (
+          reconcileMessage(previous[index]!, next[index]!) !== previous[index]
+        ) {
           firstChangedIndex = index;
           break;
         }
@@ -415,7 +477,10 @@ function reconcileMessages(previous: Message[], next: Message[]): Message[] {
   return reconcileMessagesById(previous, next);
 }
 
-function reconcileMessagesById(previous: Message[], next: Message[]): Message[] {
+function reconcileMessagesById(
+  previous: Message[],
+  next: Message[],
+): Message[] {
   let previousById: Map<string, Message> | null = null;
   let changed = previous.length !== next.length;
 
@@ -432,7 +497,10 @@ function reconcileMessagesById(previous: Message[], next: Message[]): Message[] 
     }
 
     const mergedMessage = reconcileMessage(previousMessage, nextMessage);
-    if (mergedMessage !== previousMessage || previous[index]?.id !== nextMessage.id) {
+    if (
+      mergedMessage !== previousMessage ||
+      previous[index]?.id !== nextMessage.id
+    ) {
       changed = true;
     }
     return mergedMessage;
@@ -458,29 +526,47 @@ function reconcileMessage(previous: Message, next: Message): Message {
     case "markdown":
       return reconcileMarkdownMessage(previous as MarkdownMessage, next);
     case "parallelAgents":
-      return reconcileParallelAgentsMessage(previous as ParallelAgentsMessage, next);
+      return reconcileParallelAgentsMessage(
+        previous as ParallelAgentsMessage,
+        next,
+      );
     case "fileChanges":
       return reconcileFileChangesMessage(previous as FileChangesMessage, next);
     case "subagentResult":
-      return reconcileSubagentResultMessage(previous as SubagentResultMessage, next);
+      return reconcileSubagentResultMessage(
+        previous as SubagentResultMessage,
+        next,
+      );
     case "approval":
       return reconcileApprovalMessage(previous as ApprovalMessage, next);
     case "userInputRequest":
-      return reconcileUserInputRequestMessage(previous as UserInputRequestMessage, next);
+      return reconcileUserInputRequestMessage(
+        previous as UserInputRequestMessage,
+        next,
+      );
     case "mcpElicitationRequest":
       return reconcileMcpElicitationRequestMessage(
         previous as McpElicitationRequestMessage,
         next,
       );
     case "codexAppRequest":
-      return reconcileCodexAppRequestMessage(previous as CodexAppRequestMessage, next);
+      return reconcileCodexAppRequestMessage(
+        previous as CodexAppRequestMessage,
+        next,
+      );
   }
 
   return next;
 }
 
-function reconcileTextMessage(previous: TextMessage, next: TextMessage): TextMessage {
-  const attachments = reconcileAttachments(previous.attachments, next.attachments);
+function reconcileTextMessage(
+  previous: TextMessage,
+  next: TextMessage,
+): TextMessage {
+  const attachments = reconcileAttachments(
+    previous.attachments,
+    next.attachments,
+  );
   if (
     previous.timestamp === next.timestamp &&
     previous.author === next.author &&
@@ -517,7 +603,10 @@ function reconcileTextMessage(previous: TextMessage, next: TextMessage): TextMes
   return rest;
 }
 
-function reconcileThinkingMessage(previous: ThinkingMessage, next: ThinkingMessage): ThinkingMessage {
+function reconcileThinkingMessage(
+  previous: ThinkingMessage,
+  next: ThinkingMessage,
+): ThinkingMessage {
   if (
     previous.timestamp === next.timestamp &&
     previous.author === next.author &&
@@ -530,7 +619,10 @@ function reconcileThinkingMessage(previous: ThinkingMessage, next: ThinkingMessa
   return next;
 }
 
-function reconcileCommandMessage(previous: CommandMessage, next: CommandMessage): CommandMessage {
+function reconcileCommandMessage(
+  previous: CommandMessage,
+  next: CommandMessage,
+): CommandMessage {
   if (
     previous.timestamp === next.timestamp &&
     previous.author === next.author &&
@@ -546,7 +638,10 @@ function reconcileCommandMessage(previous: CommandMessage, next: CommandMessage)
   return next;
 }
 
-function reconcileDiffMessage(previous: DiffMessage, next: DiffMessage): DiffMessage {
+function reconcileDiffMessage(
+  previous: DiffMessage,
+  next: DiffMessage,
+): DiffMessage {
   if (
     previous.timestamp === next.timestamp &&
     previous.author === next.author &&
@@ -563,7 +658,10 @@ function reconcileDiffMessage(previous: DiffMessage, next: DiffMessage): DiffMes
   return next;
 }
 
-function reconcileMarkdownMessage(previous: MarkdownMessage, next: MarkdownMessage): MarkdownMessage {
+function reconcileMarkdownMessage(
+  previous: MarkdownMessage,
+  next: MarkdownMessage,
+): MarkdownMessage {
   if (
     previous.timestamp === next.timestamp &&
     previous.author === next.author &&
@@ -637,7 +735,10 @@ function reconcileSubagentResultMessage(
   return next;
 }
 
-function reconcileApprovalMessage(previous: ApprovalMessage, next: ApprovalMessage): ApprovalMessage {
+function reconcileApprovalMessage(
+  previous: ApprovalMessage,
+  next: ApprovalMessage,
+): ApprovalMessage {
   if (
     previous.timestamp === next.timestamp &&
     previous.author === next.author &&
@@ -712,7 +813,10 @@ function reconcileCodexAppRequestMessage(
   return next;
 }
 
-function sameUserInputQuestions(previous: UserInputQuestion[], next: UserInputQuestion[]) {
+function sameUserInputQuestions(
+  previous: UserInputQuestion[],
+  next: UserInputQuestion[],
+) {
   return (
     previous.length === next.length &&
     previous.every((question, index) => {
@@ -827,11 +931,15 @@ function reconcilePendingPrompts(
       return nextPrompt;
     }
 
-    const attachments = reconcileAttachments(previousPrompt.attachments, nextPrompt.attachments);
+    const attachments = reconcileAttachments(
+      previousPrompt.attachments,
+      nextPrompt.attachments,
+    );
     if (
       previousPrompt.timestamp === nextPrompt.timestamp &&
       previousPrompt.text === nextPrompt.text &&
-      (previousPrompt.expandedText ?? null) === (nextPrompt.expandedText ?? null) &&
+      (previousPrompt.expandedText ?? null) ===
+        (nextPrompt.expandedText ?? null) &&
       attachments === previousPrompt.attachments
     ) {
       if (previous[index]?.id !== nextPrompt.id) {

@@ -218,26 +218,20 @@ export function useVirtualizedConversationScrollEvents({
             captureLatestVisibleMessageAnchor(node);
             scheduleIdleMountedRangeCompaction(userScrollAdjustmentCooldownMs);
           }
-          // Scrollbar-thumb drag and touch-inertia scrolls have no preceding
-          // wheel/touch/key event, so `prewarmMountedRangeForUpwardWheel`
-          // never runs for them. Without flush, `setMountedPageRange` batches
-          // until the next React commit — and the browser paints the new
-          // scroll position first, exposing the top spacer as a visible void.
-          // Flush on upward scrolls (when not already near the bottom) so the
-          // mount + the prepend-restore in the consumer layout-effect run
-          // synchronously inside the scroll handler, before the next paint.
-          // The matching pane-write path already uses the same condition; we
-          // keep the conditions symmetric so neither code path can outrun the
-          // other.
-          const isActiveUpwardNativeScroll =
+          // Scrollbar-thumb drags and touch-inertia scrolls have no guaranteed
+          // pre-scroll input event. Without a synchronous range commit, React
+          // can defer this continuous-event update while the browser paints
+          // the new scroll position over spacer-only DOM. Keep every active
+          // native-scroll range change paint-safe in both directions; the
+          // reconciler still retains only its bounded working band.
+          const shouldFlushActiveNativeScroll =
             !isPassiveTailFollowScroll &&
-            scrollDelta < 0 &&
             !isScrollContainerNearBottom(node);
           reconcileMountedRangeForNativeScroll(
             node,
             scrollDelta,
             lastUserScrollKindRef.current,
-            { flush: isActiveUpwardNativeScroll },
+            { flush: shouldFlushActiveNativeScroll },
           );
           if (scrollDelta >= 0 && isScrollContainerNearBottom(node)) {
             // The user just scrolled DOWN to (or stayed at) the

@@ -152,7 +152,7 @@ fn sqlite_empty_delegation_table_preserves_embedded_delegations_for_migration() 
         PersistedState::from_inner(&inner)
     };
 
-    let loaded_from_table = apply_sqlite_delegation_records(&mut persisted, Vec::new());
+    let loaded_from_table = apply_sqlite_delegation_records(&mut persisted, Vec::new(), false);
 
     assert!(!loaded_from_table);
     assert!(

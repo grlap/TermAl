@@ -130,6 +130,7 @@ export const MessageCard = memo(
     connectionRetryDisplayState,
     workspaceRoot = null,
     mailboxViewerSessionId,
+    onOpenMailbox,
   }: {
     appearance?: MonacoAppearance;
     message: Message;
@@ -163,6 +164,7 @@ export const MessageCard = memo(
     connectionRetryDisplayState?: ConnectionRetryDisplayState;
     workspaceRoot?: string | null;
     mailboxViewerSessionId?: string | null;
+    onOpenMailbox?: (mailboxId: string) => void;
   }) {
     switch (message.type) {
       case "text": {
@@ -274,7 +276,7 @@ export const MessageCard = memo(
                 searchHighlightTone={searchHighlightTone}
                 workspaceRoot={workspaceRoot}
               />
-            ) : message.text ? (
+            ) : message.source?.kind === "mailbox" ? null : message.text ? (
               isDelegationFanIn ? (
                 <DelegationFanInMessage
                   text={message.text}
@@ -315,10 +317,13 @@ export const MessageCard = memo(
             )}
             {message.source?.kind === "mailbox" &&
             message.source.mailbox &&
-            mailboxViewerSessionId ? (
+            mailboxViewerSessionId &&
+            onOpenMailbox ? (
               <MailboxMessageLink
+                senderName={message.source.name}
                 sessionId={mailboxViewerSessionId}
                 source={message.source.mailbox}
+                onOpenMailbox={onOpenMailbox}
               />
             ) : null}
           </article>
@@ -478,7 +483,8 @@ export const MessageCard = memo(
       previous.connectionRetryDisplayState ===
         next.connectionRetryDisplayState &&
       previous.workspaceRoot === next.workspaceRoot &&
-      previous.mailboxViewerSessionId === next.mailboxViewerSessionId
+      previous.mailboxViewerSessionId === next.mailboxViewerSessionId &&
+      previous.onOpenMailbox === next.onOpenMailbox
     );
   },
 );

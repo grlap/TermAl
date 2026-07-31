@@ -73,7 +73,12 @@ bypass the bridge — caller-scoped REST auth is deferred with capability tokens
 Claude receives it through `--mcp-config`, ACP/Cursor/Gemini/OpenCode
 receive it through `mcpServers` on `session/new`, `session/resume`, and
 `session/load`, and Codex receives it through `config.mcp_servers` on
-`thread/start` and `thread/resume`.
+`thread/start` and `thread/resume`. Claude and Codex native MCP descriptors use
+an environment object map, while ACP `McpServer.env` is an array of
+`{name, value}` entries; TermAl performs that typed conversion only at the
+shared ACP boundary. External protocol-shape changes require a live smoke
+against the real agent binary in addition to TermAl-owned fixtures, because
+fixtures can encode the same incorrect assumption on both sides.
 
 ---
 
@@ -260,7 +265,9 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/telegram/config` | Update the singleton Telegram relay token in the OS credential store, enabled flag, subscribed projects, and default project/session. Returns sanitized `TelegramStatusResponse`; validation failures use the standard `{ "error": ... }` envelope. Multi-bot work should supersede this with profile-scoped create/update/delete routes. |
 | POST | `/api/telegram/test` | Validate a supplied or saved Telegram bot token through `getMe` -> `TelegramTestResponse`. Local test throttling returns `429` with `Retry-After`; Telegram auth/validation failures return `422`, and upstream/network failures return `502`. Multi-bot work should add `/api/telegram/bots/{bot_id}/test`. |
 | POST | `/api/sessions` | Create session |
-| GET | `/api/sessions/{id}` | Fetch one session -> `SessionResponse { revision, serverInstanceId, session }`. Local sessions return full transcripts unless `?tail=N` is supplied; remote-proxy sessions can return an unloaded cached summary (`messagesLoaded: false`) on recoverable hydration fallback. |
+| GET | `/api/sessions/{id}` | Fetch one bounded recent suffix -> `SessionResponse { revision, serverInstanceId, session }`. The default is 20 messages; `?tail=N` accepts `1..=64`. There is no unbounded transcript response or summary fallback. Remote-proxy sessions forward the same bounded tail request to the owner. |
+| GET | `/api/sessions/{id}/history` | Fetch one ascending transcript page by exclusive `before`/`after` cursor, true start, centered global `around` position, or latest tail -> `SessionHistoryResponse`. `limit` defaults to and is capped at 64. |
+| GET | `/api/sessions/{id}/overview` | Fetch one whole-conversation position map -> `SessionOverviewResponse`. `buckets` defaults to 200 and accepts `1..=512`; repeated bucket JSON is gzip-compressed on the wire. |
 | POST | `/api/sessions/{id}/settings` | Update session config |
 | POST | `/api/sessions/{id}/model-options/refresh` | Refresh live model list/options |
 | POST | `/api/sessions/{id}/codex/thread/fork` | Fork the live Codex thread into a new session |
@@ -297,29 +304,46 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/delegations/{delegation_id}/cancel` | Cancel a running delegation child session -> `DelegationStatusResponse`; unknown delegation ids, unknown parent ids, and wrong-parent requests return `404`. Terminal delegations are idempotent and return the current status. |
 | POST | `/api/sessions/{id}/delegations/{delegation_id}/followup` | Re-arm a terminal (Completed/Failed) delegation and dispatch another turn to its existing child session -> `DelegationStatusResponse`. A delegation that is still Running, was canceled, or whose child was removed returns `409`; unknown/wrong-parent ids return `404`. Backs the `termal_followup_session` MCP tool. |
 
-For local sessions, `GET /api/sessions/{id}` is a local full-transcript read. For
-unloaded remote-proxy sessions, the same route synchronously calls the owning
-remote's `GET /api/sessions/{remote_id}` and may also call remote `/api/state`
-when the remote session response is ahead of the locally applied remote
-revision. That `/api/state` fetch is a freshness check and global remote resync:
-it can update other proxy records for the same remote and publish local state
-before returning the requested `SessionResponse`. If the upstream session route
-cannot provide a full transcript before the visible-pane timeout, returns
-`messagesLoaded: false`, or loses a freshness race with a newer remote-state
-snapshot, TermAl can return the cached local summary with
-`messagesLoaded: false`. Frontend targeted hydration must keep that response
-unloaded and retry later rather than treating HTTP success as full transcript
-hydration.
+`GET /api/sessions/{id}` is always a bounded transcript read. It returns the
+newest 20 messages by default; `?tail=N` requires
+`1 <= N <= SESSION_TAIL_HYDRATION_MAX_MESSAGES` (`64`). Out-of-range values
+return `400` instead of silently changing the requested window. The response
+preserves the full `messageCount` and keeps `messagesLoaded: false` unless the
+returned suffix reaches the beginning. There is no size-based compatibility
+branch and no HTTP path that serializes an unbounded local transcript.
 
-`GET /api/sessions/{id}?tail=N` is the local tail-first hydration shortcut. It
-requires `1 <= N <= SESSION_TAIL_HYDRATION_MAX_MESSAGES` (`500`); out-of-range
-values return `400` instead of silently changing the requested window. Valid
-tail requests return the newest messages while preserving the full `messageCount`. Tail responses keep
-`messagesLoaded: false` unless the returned window covers the whole loaded
-transcript; clients must treat that shape as a partial tail window and still
-fetch the full session. The tail response and the later full response are
-separate HTTP reads, so their `revision` values may differ if the session
-changes between requests.
+Clients prepend older pages from
+`GET /api/sessions/{id}/history?before={messageId}&limit=N`. History pages are
+ascending and exclusive-before, with `N <= 64`, `nextBefore`, and `hasMore`.
+Older local pages come from the indexed `messages` table. Range reads use the
+`(session_id, position)` primary key and message-id cursors use the unique
+`(session_id, message_id)` index described in
+[SQLite session storage](features/sqlite-session-storage.md).
+Tail and page responses are separate HTTP reads, so their revisions may differ
+if the session changes between requests; the frontend preserves same-instance
+live tail appends and rejects missing cursors or replacement server instances
+through authoritative resync.
+
+Direct jumps use `around={globalMessagePosition}` and return one centered page
+with `messageStartIndex`; they never page-walk through intervening history.
+
+`GET /api/sessions/{id}/overview?buckets=N` is the separate bounded
+whole-conversation summary used by the minimap rail. The server maps message
+positions into equal semantic buckets from typed resident messages plus a
+transactionally maintained one-byte-per-message SQLite overview blob. The rail
+uses only this position-space response; virtualizer layout snapshots, pixel
+estimates, focus state, and resident-message fallbacks are intentionally not
+part of the overview path. Bucket `h` counts source-free human text prompts,
+separately from compatibility field `u`, which can also include peer/mailbox
+messages authored as `you`. The UI keeps ordinary kind buckets quiet and
+reserves strong accents for `h`, errors, markers, and the outlined viewport
+handle.
+
+Remote proxies preserve the same bounds at the source: tail requests forward
+`?tail=N` to the owner, history requests forward the selected bounded cursor or
+position plus `limit`, and overview requests forward the bucket count. They do
+not fetch a whole remote transcript and slice it locally, and a targeted
+transcript read does not trigger a broad remote `/api/state` side fetch.
 
 `GET /api/health` currently returns `{ ok: true, supportsInlineOrchestratorTemplates: true }`. Remote launchers use `supportsInlineOrchestratorTemplates` during health probes to decide whether a remote can accept inline local orchestrator templates or must be upgraded first.
 
@@ -350,7 +374,7 @@ Design constraints:
 
 `GET /api/events` returns a Server-Sent Events stream with four event types:
 
-- **`state`** — metadata-first `StateResponse` JSON. Sent on initial connect, after `commit_locked()`, and as a recovery when the client falls behind. Session entries carry shell metadata, `messageCount`, and `messagesLoaded: false`; full transcripts are loaded through `GET /api/sessions/{id}`.
+- **`state`** — metadata-first `StateResponse` JSON. Sent on initial connect, after `commit_locked()`, and as a recovery when the client falls behind. Session entries carry shell metadata, `messageCount`, and `messagesLoaded: false`; transcript tails and older bounded pages are loaded through the targeted session routes. Active `liveActivity` prompt/command fields are whitespace-normalized and bounded to a short UI hint here; the complete values remain available only in targeted session detail.
 - **`delta`** - incremental `DeltaEvent` JSON. Sent during streaming (text deltas, text replacements, command output updates) and small process-global updates such as `CodexUpdated`. Cheaper than full state.
 - **`workspaceFilesChanged`** - coalesced local workspace file watcher hints. Sent outside the main state revision stream with its own monotonically increasing file-event revision so source, diff, file tree, and git-preview panels can refresh only when touched paths match their scope.
 - **`lagged`** — control marker with a single-byte payload (wire format: `event: lagged\ndata:1\n\n`). Emitted in `api_sse.rs::state_events` when the broadcast receiver returns `RecvError::Lagged` on either the state-receiver or delta-receiver branch — i.e., the consumer fell past the broadcast channel capacity (state=128, delta=256) and dropped events. The marker is **always** immediately followed by a recovery `state` event on the same stream, but the recovery snapshot's revision may equal the client's `latestStateRevisionRef` (the consumer read some events from the burst before falling behind). Without the marker, the client's gate in `handleStateEvent` would reject the recovery as a redundant catch-up and silently lose whatever the dropped deltas carried. The client's `handleLaggedEvent` arms `forceAdoptNextStateEventRef = true` and records the current revision as the recovery baseline; the next `state` event is force-adopted only if the local stream has not already advanced past that baseline. The `"1"` payload is reserved — clients must NOT parse `data`; the byte is there because empty-data SSE frames can be coalesced/skipped by browsers per the WHATWG spec, so a control event without a `data:` line may never reach the JS handler. The `lagged` event has no `revision` field, and remote-proxy bridges absorb the marker locally by force-applying the next remote `state` snapshot rather than forwarding it.
@@ -385,9 +409,8 @@ HTTP error responses intentionally carry only `{ "error": string }`. The backend
 Every `Session` or session summary serialized on the wire carries
 `messageCount: u32`. `StateResponse.sessions` are metadata-first summary
 shells: they retain normal session metadata, set `messagesLoaded: false`, and
-keep `messages: []` only as a temporary adapter-compatible shape while the
-frontend migration is in progress. Full transcript-bearing sessions still come
-from `SessionResponse` and `CreateSessionResponse`. `SessionCreated` and
+keep `messages: []`. Bounded transcript suffixes come from `SessionResponse`;
+newly created empty sessions come from `CreateSessionResponse`. `SessionCreated` and
 `OrchestratorsUpdated.sessions` are metadata-first delta summaries with
 `messagesLoaded: false` and `messages: []`. The backend computes
 `messageCount` from the session record's transcript at wire-projection time;
@@ -395,9 +418,9 @@ the frontend keeps it on the session summary so reconnect/state adoption can
 preserve transcript height and gap-detection metadata without waiting for
 another session-scoped delta.
 
-`Session.messageCount` is soft-rollout compatible via `#[serde(default)]`, but
-`DeltaEvent.*.messageCount` is intentionally required on the wire. Mixed-version
-remote SSE bridges that omit delta counts are treated as a hard protocol break;
+`Session.messageCount` defaults only for persisted empty-session construction;
+`DeltaEvent.*.messageCount` is intentionally required on the wire. Remote SSE
+bridges that omit delta counts are treated as a hard protocol break;
 see `docs/metadata-first-state-plan.md` Contract Precisions -> Field semantics.
 
 ```
@@ -507,7 +530,10 @@ state changes — see `collect_persist_delta`, `persist_delta_via_cache`, and
 On startup, the backend loads state from `termal.sqlite` when it exists and
 otherwise boots a fresh local state. Template definitions live in
 `orchestrators.json` so reusable workflow designs can be managed separately
-from running instances.
+from running instances. Normalized session and delegation rows are independent
+startup failure boundaries: a malformed record is reported and skipped rather
+than aborting the process and hiding every healthy session. Schema-v1
+transcript extraction is likewise batched and skips malformed session rows.
 
 Coordination bootstrap runs before the persist worker, coordination stores,
 and HTTP listener. When upgrading from the former single-database layout, it

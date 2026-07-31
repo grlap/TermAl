@@ -53,7 +53,11 @@ import {
   PEER_MESSAGE_BATCH_AUTHOR_LABEL,
 } from "../long-peer-message";
 import { renderHighlightedText, type SearchHighlightTone } from "../search-highlight";
-import type { PendingPrompt, Session } from "../types";
+import type {
+  PendingPrompt,
+  Session,
+  SessionLiveActivity,
+} from "../types";
 import {
   MessageAttachmentList,
   MessageMeta,
@@ -63,16 +67,22 @@ import {
 
 export function RunningIndicator({
   agent,
+  activity,
   lastPrompt,
 }: {
   agent: Session["agent"];
+  activity?: SessionLiveActivity | null;
   lastPrompt: string | null;
 }) {
-  const isCommand = Boolean(lastPrompt?.trim().startsWith("/"));
+  const command = activity?.command?.trim() || null;
+  const prompt = activity?.prompt.trim() || lastPrompt?.trim() || null;
+  const commandIsRunning =
+    Boolean(command) && activity?.commandStatus === "running";
+  const tooltipText = command ?? prompt;
 
   return (
     <article
-      className={`activity-card activity-card-live ${lastPrompt ? "has-tooltip" : ""}`}
+      className={`activity-card activity-card-live ${tooltipText ? "has-tooltip" : ""}`}
       role="status"
       aria-live="polite"
     >
@@ -80,15 +90,23 @@ export function RunningIndicator({
       <div className="activity-card-copy">
         <div className="activity-card-heading">
           <div className="card-label">Live turn</div>
-          {isCommand ? <span className="message-meta-tag">Command</span> : null}
+          {command ? <span className="message-meta-tag">Agent command</span> : null}
         </div>
         <h3>{agent} is working</h3>
-        <p>{isCommand ? "Executing a command..." : "Waiting for the next chunk of output..."}</p>
+        <p>
+          {command
+            ? commandIsRunning
+              ? "Executing an agent command..."
+              : "Last agent command..."
+            : "Waiting for the next chunk of output..."}
+        </p>
       </div>
-      {lastPrompt ? (
+      {tooltipText ? (
         <div className="activity-tooltip" role="tooltip">
-          <div className="activity-tooltip-label">{isCommand ? "Command" : "Last prompt"}</div>
-          <p>{lastPrompt}</p>
+          <div className="activity-tooltip-label">
+            {command ? "Agent command" : "Current prompt"}
+          </div>
+          <p>{tooltipText}</p>
         </div>
       ) : null}
     </article>

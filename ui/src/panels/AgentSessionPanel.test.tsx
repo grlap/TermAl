@@ -22,7 +22,6 @@ import {
   AgentSessionPanelFooter,
   splitAgentCommandResolverTail,
 } from "./AgentSessionPanel";
-import { buildConversationOverviewTailItems } from "./conversation-overview-controller";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { RunningIndicator } from "./session-activity-cards";
 import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
@@ -978,6 +977,35 @@ describe("AgentSessionPanel conversation caching", () => {
 
     rerender(renderPanel({ liveTailPinned: false }));
     expect(liveTail).not.toHaveClass("is-pinned");
+  });
+
+  it("does not splice live-only cards beneath a historical window", () => {
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        status: "active",
+        messages: makeTextMessages(64),
+        messagesLoaded: false,
+        hasOlderHistory: false,
+        hasNewerHistory: true,
+        messageCount: 1_000,
+        pendingPrompts: [
+          {
+            id: "pending-live-prompt",
+            timestamp: "10:02",
+            text: "Queued at the live tail",
+          },
+        ],
+      }),
+      showWaitingIndicator: true,
+      waitingIndicatorPrompt: "Current live command",
+      liveTailPinned: true,
+    });
+
+    expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
+    expect(screen.queryByText("Queued at the live tail")).not.toBeInTheDocument();
+    expect(
+      document.querySelector(".conversation-live-tail"),
+    ).not.toBeInTheDocument();
   });
 
   it("removes the live-turn tail when the waiting indicator clears", () => {
@@ -4122,6 +4150,7 @@ describe("AgentSessionPanel conversation caching", () => {
   it("refreshes the live turn tooltip from the latest session store record", () => {
     const initialSession = makeSession("active-session", {
       status: "active",
+      liveActivity: { prompt: "old prompt" },
       messages: [
         {
           author: "you",
@@ -4145,6 +4174,7 @@ describe("AgentSessionPanel conversation caching", () => {
         sessions: [
           makeSession("active-session", {
             status: "active",
+            liveActivity: { prompt: "new prompt" },
             messages: [
               ...initialSession.messages,
               {

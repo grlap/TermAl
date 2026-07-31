@@ -22,14 +22,98 @@ type MountedPrependRestore = {
 };
 
 function rangesEqual(first: VirtualizedRange, second: VirtualizedRange) {
-  return first.startIndex === second.startIndex && first.endIndex === second.endIndex;
+  return (
+    first.startIndex === second.startIndex && first.endIndex === second.endIndex
+  );
 }
 
-function rangeContainsRange(container: VirtualizedRange, target: VirtualizedRange) {
+function rangeContainsRange(
+  container: VirtualizedRange,
+  target: VirtualizedRange,
+) {
   return (
     container.startIndex <= target.startIndex &&
     container.endIndex >= target.endIndex
   );
+}
+
+function clampRangeToPages(
+  range: VirtualizedRange,
+  pagesLength: number,
+): VirtualizedRange {
+  if (pagesLength <= 0) {
+    return { startIndex: 0, endIndex: 0 };
+  }
+
+  const startIndex = Math.min(
+    Math.max(Math.trunc(range.startIndex), 0),
+    pagesLength - 1,
+  );
+  return {
+    startIndex,
+    endIndex: Math.min(
+      Math.max(Math.trunc(range.endIndex), startIndex + 1),
+      pagesLength,
+    ),
+  };
+}
+
+export function resolveRenderedMountedPageRange({
+  mountedPageRange,
+  pagesLength,
+  preserveMountedPageRange,
+  searchPinnedMountedPageRange,
+  visiblePageRange,
+  workingMountedPageRange,
+}: {
+  mountedPageRange: VirtualizedRange;
+  pagesLength: number;
+  preserveMountedPageRange?: boolean;
+  searchPinnedMountedPageRange: VirtualizedRange | null;
+  visiblePageRange: VirtualizedRange;
+  workingMountedPageRange: VirtualizedRange;
+}): VirtualizedRange {
+  if (pagesLength <= 0) {
+    return { startIndex: 0, endIndex: 0 };
+  }
+
+  if (searchPinnedMountedPageRange) {
+    return clampRangeToPages(searchPinnedMountedPageRange, pagesLength);
+  }
+
+  const mountedRange = clampRangeToPages(mountedPageRange, pagesLength);
+  if (preserveMountedPageRange) {
+    return mountedRange;
+  }
+
+  const visibleRange = clampRangeToPages(visiblePageRange, pagesLength);
+  if (rangeContainsRange(mountedRange, visibleRange)) {
+    return mountedRange;
+  }
+
+  const workingRange = clampRangeToPages(workingMountedPageRange, pagesLength);
+  const mountedOverlapsViewport =
+    mountedRange.startIndex < visibleRange.endIndex &&
+    mountedRange.endIndex > visibleRange.startIndex;
+
+  // A live tail replacement can shrink the resident page set while an
+  // incremental-scroll cooldown intentionally defers mounted-range state
+  // reconciliation. Never render the stale indices: use the current working
+  // band immediately, retaining the old band only when it still overlaps the
+  // viewport. This guarantees at least one real mounted page covers every
+  // non-empty viewport commit.
+  return {
+    startIndex: Math.min(
+      workingRange.startIndex,
+      visibleRange.startIndex,
+      ...(mountedOverlapsViewport ? [mountedRange.startIndex] : []),
+    ),
+    endIndex: Math.max(
+      workingRange.endIndex,
+      visibleRange.endIndex,
+      ...(mountedOverlapsViewport ? [mountedRange.endIndex] : []),
+    ),
+  };
 }
 
 export function useVirtualizedConversationMountedRangeEffects({
@@ -57,7 +141,10 @@ export function useVirtualizedConversationMountedRangeEffects({
   visiblePageRange,
   workingMountedPageRange,
 }: {
-  applyMountedPageRange: (nextRange: VirtualizedRange, options?: { flush?: boolean }) => void;
+  applyMountedPageRange: (
+    nextRange: VirtualizedRange,
+    options?: { flush?: boolean },
+  ) => void;
   captureMountedPrependRestore: (node: HTMLElement) => MountedPrependRestore;
   hasUserScrollInteractionRef: MutableRefObject<boolean>;
   isActive: boolean;
@@ -91,7 +178,8 @@ export function useVirtualizedConversationMountedRangeEffects({
     }
 
     const inUserScrollCooldown =
-      performance.now() - lastUserScrollInputTimeRef.current < userScrollAdjustmentCooldownMs;
+      performance.now() - lastUserScrollInputTimeRef.current <
+      userScrollAdjustmentCooldownMs;
     const userScrollKind = lastUserScrollKindRef.current;
     // Only incremental scroll should grow via this layout effect. Seek-style
     // jumps (PageUp/PageDown/Home/End, large scrollbar moves) are owned by the
@@ -105,8 +193,14 @@ export function useVirtualizedConversationMountedRangeEffects({
     }
 
     const nextRange = {
-      startIndex: Math.min(mountedPageRange.startIndex, workingMountedPageRange.startIndex),
-      endIndex: Math.max(mountedPageRange.endIndex, workingMountedPageRange.endIndex),
+      startIndex: Math.min(
+        mountedPageRange.startIndex,
+        workingMountedPageRange.startIndex,
+      ),
+      endIndex: Math.max(
+        mountedPageRange.endIndex,
+        workingMountedPageRange.endIndex,
+      ),
     };
 
     if (!rangesEqual(nextRange, mountedPageRange)) {
@@ -155,7 +249,10 @@ export function useVirtualizedConversationMountedRangeEffects({
       // Active scroll is grow-only. Keep extra DOM on the opposite side until
       // the gesture settles; trimming during motion is what exposed spacer
       // blanks on the way down and snap-backs on the way up.
-      if (lastUserScrollKindRef.current === "seek" && viewportEscapedMountedBand) {
+      if (
+        lastUserScrollKindRef.current === "seek" &&
+        viewportEscapedMountedBand
+      ) {
         applyMountedPageRange(workingMountedPageRange);
       }
       return;
@@ -249,7 +346,8 @@ export function useVirtualizedConversationMountedRangeEffects({
     // top spacer. Grow from actual DOM bounds so the spacer is replaced by
     // mounted pages before the user sees a blank slab.
     const containerRect = node.getBoundingClientRect();
-    let missingAbovePx = firstPage.getBoundingClientRect().top - containerRect.top;
+    let missingAbovePx =
+      firstPage.getBoundingClientRect().top - containerRect.top;
     if (missingAbovePx <= 0) {
       return;
     }
@@ -329,8 +427,10 @@ export function useVirtualizedConversationMountedRangeEffects({
     // normal idle compaction.
     const containerRect = node.getBoundingClientRect();
     const renderedMountedBottom =
-      node.scrollTop + (lastPage.getBoundingClientRect().bottom - containerRect.top);
-    let missingBelowPx = node.scrollTop + node.clientHeight - renderedMountedBottom;
+      node.scrollTop +
+      (lastPage.getBoundingClientRect().bottom - containerRect.top);
+    let missingBelowPx =
+      node.scrollTop + node.clientHeight - renderedMountedBottom;
     if (missingBelowPx <= 0) {
       return;
     }

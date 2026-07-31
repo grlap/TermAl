@@ -11,6 +11,8 @@ import {
   deleteWorkspaceLayout,
   fetchDelegationResult,
   fetchDelegationStatus,
+  fetchSessionHistory,
+  fetchSessionOverview,
   fetchSessionTail,
   fetchTelegramStatus,
   fetchWorkspaceLayout,
@@ -331,6 +333,94 @@ describe("session API helpers", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/sessions/session%2Fone?tail=1",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("encodes bounded session history cursors", async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ messages: [], hasMore: false }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchSessionHistory("session/one", {
+      before: "message / one",
+      limit: 0,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/session%2Fone/history?limit=1&before=message+%2F+one",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("encodes centered history positions", async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ messages: [], hasMore: false }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchSessionHistory("session/one", {
+      around: 420.9,
+      limit: 64,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/session%2Fone/history?limit=64&around=420",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("fetches one bounded whole-conversation overview", async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            sessionId: "session/one",
+            messageCount: 100,
+            sessionMutationStamp: 1,
+            buckets: [],
+            markers: [],
+            latestPosition: 99,
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchSessionOverview("session/one", 999);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/session%2Fone/overview?buckets=512",
       expect.objectContaining({
         headers: expect.objectContaining({
           "Content-Type": "application/json",

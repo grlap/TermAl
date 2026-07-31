@@ -4,16 +4,17 @@
 //! focused module.
 
 use super::remote::{
-    make_remote_session_summary_only, remote_text_message, spawn_remote_state_response_server,
+    make_remote_session_summary_only, remote_text_message, spawn_remote_session_response_server,
+    spawn_remote_state_response_server,
 };
 use super::remote_delta_replay::local_replay_test_remote;
 use super::*;
 
 // Pins the live SSE consumer recovery path, not only the low-level delta
 // validator. A byte-offset gap must reject the incremental mutation and fetch
-// one authoritative snapshot before any corrupt text can become visible.
+// one bounded authoritative tail before any corrupt text can become visible.
 #[test]
-fn remote_text_delta_gap_triggers_authoritative_state_resync() {
+fn remote_text_delta_gap_triggers_bounded_authoritative_tail_repair() {
     let state = test_app_state();
     let remote = RemoteConfig {
         id: "ssh-lab".to_owned(),
@@ -42,10 +43,21 @@ fn remote_text_delta_gap_triggers_authoritative_state_resync() {
     initial_state.sessions[0].messages = vec![remote_text_message("remote-message-1", "Hello")];
     initial_state.sessions[0].messages_loaded = true;
     initial_state.sessions[0].message_count = 1;
-    let initial_data_lines =
-        vec![serde_json::to_string(&initial_state).expect("initial state should encode")];
-    dispatch_remote_event(&state, &remote.id, "state", &initial_data_lines)
-        .expect("initial remote state should apply");
+    let initial_session = initial_state
+        .sessions
+        .into_iter()
+        .find(|session| session.id == "remote-session-1")
+        .expect("initial remote session should exist");
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: initial_session.id.clone(),
+                session: initial_session,
+            },
+        )
+        .expect("initial remote session delta should apply");
 
     let mut repaired_state = sample_remote_orchestrator_state(
         "remote-project-1",
@@ -59,7 +71,16 @@ fn remote_text_delta_gap_triggers_authoritative_state_resync() {
     repaired_state.sessions[0].messages_loaded = true;
     repaired_state.sessions[0].message_count = 1;
     repaired_state.sessions[0].session_mutation_stamp = Some(11);
-    let (port, requests, server) = spawn_remote_state_response_server(repaired_state);
+    let repaired_session = repaired_state
+        .sessions
+        .into_iter()
+        .find(|session| session.id == "remote-session-1")
+        .expect("repaired remote session should exist");
+    let (port, requests, server) = spawn_remote_session_response_server(SessionResponse {
+        revision: 3,
+        session: repaired_session,
+        server_instance_id: "remote-instance".to_owned(),
+    });
     insert_test_remote_connection(&state, &remote, port);
 
     let discontinuous_delta = DeltaEvent::TextDelta {
@@ -78,16 +99,16 @@ fn remote_text_delta_gap_triggers_authoritative_state_resync() {
     let delta_data_lines =
         vec![serde_json::to_string(&discontinuous_delta).expect("text delta should encode")];
     dispatch_remote_event(&state, &remote.id, "delta", &delta_data_lines)
-        .expect("a rejected text delta should recover from authoritative state");
+        .expect("a rejected text delta should recover from an authoritative bounded tail");
 
     let request_lines = requests.lock().expect("requests mutex poisoned").clone();
     assert_eq!(
         request_lines,
         vec![
             "GET /api/health HTTP/1.1".to_owned(),
-            "GET /api/state HTTP/1.1".to_owned(),
+            "GET /api/sessions/remote-session-1?tail=64 HTTP/1.1".to_owned(),
         ],
-        "a byte gap should trigger exactly one authoritative state fetch"
+        "a byte gap should trigger exactly one bounded session-tail fetch"
     );
     join_test_server(server);
 
@@ -105,6 +126,146 @@ fn remote_text_delta_gap_triggers_authoritative_state_resync() {
     assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&3));
     drop(inner);
 
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_tail_repair_failure_falls_back_to_full_state_resync() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let mut initial_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    initial_state.sessions[0].preview = "Before recovery".to_owned();
+    initial_state.sessions[0].messages = vec![remote_text_message("remote-message-1", "Hello")];
+    initial_state.sessions[0].messages_loaded = true;
+    initial_state.sessions[0].message_count = 1;
+    let initial_session = initial_state.sessions[0].clone();
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: initial_session.id.clone(),
+                session: initial_session,
+            },
+        )
+        .expect("initial remote session should apply");
+
+    let mut repaired_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        3,
+        OrchestratorInstanceStatus::Running,
+    );
+    repaired_state.sessions[0].preview = "Recovered from full state".to_owned();
+    repaired_state.sessions[0].messages =
+        vec![remote_text_message("remote-message-1", "Hello world")];
+    repaired_state.sessions[0].messages_loaded = true;
+    repaired_state.sessions[0].message_count = 1;
+    repaired_state.sessions[0].session_mutation_stamp = Some(11);
+    let repaired_body =
+        serde_json::to_string(&repaired_state).expect("repaired state should encode");
+
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let requests_for_server = requests.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..4 {
+            let mut stream = accept_test_connection(&listener, "remote repair fallback listener");
+            let request = read_test_http_request(&mut stream);
+            requests_for_server
+                .lock()
+                .expect("requests mutex poisoned")
+                .push(request.request_line.clone());
+            if request.request_line.starts_with("GET /api/health ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    r#"{"ok":true}"#,
+                );
+            } else if request
+                .request_line
+                .starts_with("GET /api/sessions/remote-session-1?tail=64 ")
+            {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::BAD_GATEWAY,
+                    "application/json",
+                    r#"{"error":"tail unavailable"}"#,
+                );
+            } else if request.request_line.starts_with("GET /api/state ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    &repaired_body,
+                );
+            } else {
+                panic!("unexpected request: {}", request.request_line);
+            }
+        }
+    });
+    insert_test_remote_connection(&state, &remote, port);
+
+    let discontinuous_delta = DeltaEvent::TextDelta {
+        revision: 3,
+        session_id: "remote-session-1".to_owned(),
+        message_id: "remote-message-1".to_owned(),
+        message_index: 0,
+        message_count: 1,
+        text_start_byte: Some(6),
+        delta: " world".to_owned(),
+        preview: Some("Hello world".to_owned()),
+        session_mutation_stamp: Some(11),
+    };
+    dispatch_remote_event(
+        &state,
+        &remote.id,
+        "delta",
+        &[serde_json::to_string(&discontinuous_delta).expect("delta should encode")],
+    )
+    .expect("failed bounded repair should recover through full state");
+
+    assert_eq!(
+        requests.lock().expect("requests mutex poisoned").as_slice(),
+        [
+            "GET /api/health HTTP/1.1",
+            "GET /api/sessions/remote-session-1?tail=64 HTTP/1.1",
+            "GET /api/health HTTP/1.1",
+            "GET /api/state HTTP/1.1",
+        ]
+    );
+    join_test_server(server);
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_remote_session_index(&remote.id, "remote-session-1")
+        .expect("remote proxy should remain");
+    assert_eq!(
+        inner.sessions[index].session.preview,
+        "Recovered from full state"
+    );
+    drop(inner);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -376,8 +537,8 @@ fn state_inner_remote_applied_revision_methods_cover_monotonic_cases() {
     assert!(inner.should_skip_remote_applied_delta_revision("ssh-lab", 5));
     assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 7));
 
-    inner.note_remote_applied_transcript_snapshot_revision("ssh-lab", 8);
-    assert!(inner.should_skip_remote_applied_delta_revision("ssh-lab", 8));
+    inner.note_remote_applied_snapshot_revision("ssh-lab", 8);
+    assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 8));
     assert!(inner.should_skip_remote_applied_delta_revision("ssh-lab", 7));
     assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 9));
     assert!(!inner.should_skip_remote_applied_revision("ssh-lab-2", 1));
@@ -609,8 +770,7 @@ fn remote_applied_revision_tracking_is_per_remote_and_monotonic() {
         assert!(inner.should_skip_remote_applied_revision("ssh-lab", 1));
         assert!(!inner.should_skip_remote_applied_revision("ssh-lab", 3));
         assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 2));
-        inner.note_remote_applied_transcript_snapshot_revision("ssh-lab", 2);
-        assert!(inner.should_skip_remote_applied_delta_revision("ssh-lab", 2));
+        assert!(!inner.should_skip_remote_applied_delta_revision("ssh-lab", 2));
         assert!(!inner.should_skip_remote_applied_revision("ssh-lab-2", 2));
     }
 
@@ -672,12 +832,6 @@ fn remote_state_event_applies_non_fallback_empty_snapshot_payload() {
         inner.remote_snapshot_applied_revisions.get("ssh-lab"),
         Some(&1)
     );
-    assert_eq!(
-        inner
-            .remote_transcript_snapshot_applied_revisions
-            .get("ssh-lab"),
-        None
-    );
     drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -710,17 +864,21 @@ fn remote_lagged_marker_force_applies_next_same_revision_state_snapshot() {
     initial_state.sessions[0].preview = "Initial remote preview".to_owned();
     initial_state.sessions[0].messages = vec![remote_text_message("message-1", "Initial body")];
     initial_state.sessions[0].message_count = 1;
-    let initial_data_lines =
-        vec![serde_json::to_string(&initial_state).expect("state payload should encode")];
-
-    dispatch_remote_event_with_recovery(
-        &state,
-        "ssh-lab",
-        "state",
-        &initial_data_lines,
-        &mut recovery,
-    )
-    .expect("initial remote state should apply");
+    let initial_session = initial_state
+        .sessions
+        .into_iter()
+        .find(|session| session.id == "remote-session-1")
+        .expect("initial remote session should exist");
+    state
+        .apply_remote_delta_event(
+            "ssh-lab",
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: initial_session.id.clone(),
+                session: initial_session,
+            },
+        )
+        .expect("initial remote session delta should apply");
 
     let mut repaired_state = sample_remote_orchestrator_state(
         "remote-project-1",
@@ -1046,17 +1204,21 @@ fn remote_lagged_marker_does_not_force_apply_after_intervening_delta_progress() 
     initial_state.sessions[0].messages = vec![remote_text_message("message-1", "Initial body")];
     initial_state.sessions[0].messages_loaded = true;
     initial_state.sessions[0].message_count = 1;
-    let initial_data_lines =
-        vec![serde_json::to_string(&initial_state).expect("state payload should encode")];
-
-    dispatch_remote_event_with_recovery(
-        &state,
-        "ssh-lab",
-        "state",
-        &initial_data_lines,
-        &mut recovery,
-    )
-    .expect("initial remote state should apply");
+    let initial_session = initial_state
+        .sessions
+        .into_iter()
+        .find(|session| session.id == "remote-session-1")
+        .expect("initial remote session should exist");
+    state
+        .apply_remote_delta_event(
+            "ssh-lab",
+            DeltaEvent::SessionCreated {
+                revision: 2,
+                session_id: initial_session.id.clone(),
+                session: initial_session,
+            },
+        )
+        .expect("initial remote session delta should apply");
 
     dispatch_remote_event_with_recovery(
         &state,
@@ -1458,7 +1620,7 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
 
             if request
                 .request_line
-                .starts_with("GET /api/sessions/remote-session-1 ")
+                .starts_with("GET /api/sessions/remote-session-1?tail=64 ")
             {
                 let _ = session_request_tx.send(());
                 release_response_rx
@@ -1538,7 +1700,7 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
     let request_lines = requests.lock().expect("requests mutex poisoned").clone();
     let session_fetch_count = request_lines
         .iter()
-        .filter(|line| line.starts_with("GET /api/sessions/remote-session-1 "))
+        .filter(|line| line.starts_with("GET /api/sessions/remote-session-1?tail=64 "))
         .count();
     assert_eq!(
         session_fetch_count, 1,

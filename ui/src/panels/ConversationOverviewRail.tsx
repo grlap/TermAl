@@ -3,760 +3,322 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
   type CSSProperties,
-  type FocusEvent,
   type KeyboardEvent,
-  type MouseEvent,
   type PointerEvent,
 } from "react";
 
-import {
-  buildConversationOverviewProjection,
-  buildConversationOverviewSegments,
-  findConversationOverviewItemAtY,
-  projectConversationOverviewViewport,
-  type ConversationOverviewItem,
-  type ConversationOverviewMessageMetadataCache,
-  type ConversationOverviewProjection,
-  type ConversationOverviewMarkerInput,
-  type ConversationOverviewSegment,
-  type ConversationOverviewTailItemInput,
-} from "./conversation-overview-map";
-import { CONVERSATION_COMPOSER_INPUT_DATASET_KEY } from "./conversation-composer-focus";
 import type {
-  VirtualizedConversationLayoutSnapshot,
-  VirtualizedConversationViewportSnapshot,
-} from "./VirtualizedConversationMessageList";
-import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
-import type { Message } from "../types";
+  ConversationOverviewKind,
+  SessionOverviewResponse,
+} from "../api";
+import type { ConversationMarkerKind } from "../types";
+import {
+  conversationOverviewBucketIndexForPosition,
+  conversationOverviewPositionAtFraction,
+  projectConversationOverviewBuckets,
+  projectConversationOverviewMarkers,
+  projectConversationOverviewViewport,
+  type ConversationOverviewViewport,
+} from "./conversation-overview-map";
 
 export const CONVERSATION_OVERVIEW_MIN_MESSAGES = 30;
-// Segment-based: compact alternating/status-heavy transcripts as soon as the
-// rail appears, while homogeneous long runs can stay in per-segment mode.
-const CONVERSATION_OVERVIEW_COMPACT_SEGMENT_THRESHOLD = 64;
-const CONVERSATION_OVERVIEW_COMPACT_VISUAL_SEGMENT_COUNT = 96;
-const CONVERSATION_OVERVIEW_COMPACT_NAVIGATION_STALE_DELAY_MS = 2_000;
-const EMPTY_CONVERSATION_OVERVIEW_MARKERS: readonly ConversationOverviewMarkerInput[] =
-  [];
-const EMPTY_CONVERSATION_OVERVIEW_TAIL_ITEMS: readonly ConversationOverviewTailItemInput[] =
-  [];
-const EMPTY_COMPACT_OVERVIEW_VISUAL_SEGMENTS: readonly CompactOverviewVisualSegment[] =
-  [];
-const EMPTY_CONVERSATION_OVERVIEW_SEGMENT_LABELS: readonly string[] = [];
-const EMPTY_CONVERSATION_OVERVIEW_PROJECTION: ConversationOverviewProjection = {
-  items: [],
-  markers: [],
-  sourceHeightPx: 0,
-  estimatedScrollHeightPx: 1,
-  totalHeightPx: 0,
-  scale: 1,
-  viewportTopPx: 0,
-  viewportHeightPx: 0,
-  viewportSnapshotTranslation: null,
-};
-
-type CompactOverviewVisualSegment = {
-  id: string;
-  topPx: number;
-  heightPx: number;
-  fill: string;
-};
-
-type ConversationOverviewProjectionInput = {
-  messages: readonly Message[];
-  layoutSnapshot: VirtualizedConversationLayoutSnapshot | null;
-  markers: readonly ConversationOverviewMarkerInput[];
-  tailItems: readonly ConversationOverviewTailItemInput[];
-  enabled: boolean;
-  maxHeightPx?: number;
-};
+export const CONVERSATION_OVERVIEW_VIEWPORT_HANDLE_HEIGHT_PX = 24;
 
 export function ConversationOverviewRail({
-  messages,
-  layoutSnapshot,
-  viewportSnapshot = layoutSnapshot,
-  markers = EMPTY_CONVERSATION_OVERVIEW_MARKERS,
-  tailItems = EMPTY_CONVERSATION_OVERVIEW_TAIL_ITEMS,
+  overview,
+  viewport,
+  heightPx = null,
   minMessages = CONVERSATION_OVERVIEW_MIN_MESSAGES,
-  maxHeightPx,
   onNavigate,
 }: {
-  messages: readonly Message[];
-  layoutSnapshot: VirtualizedConversationLayoutSnapshot | null;
-  viewportSnapshot?: VirtualizedConversationViewportSnapshot | null;
-  markers?: readonly ConversationOverviewMarkerInput[];
-  tailItems?: readonly ConversationOverviewTailItemInput[];
+  overview: SessionOverviewResponse | null;
+  viewport: ConversationOverviewViewport;
+  heightPx?: number | null;
   minMessages?: number;
-  maxHeightPx?: number;
-  onNavigate: (item: ConversationOverviewItem) => void;
+  onNavigate: (position: number) => void;
 }) {
   const railRef = useRef<HTMLDivElement | null>(null);
   const dragPointerIdRef = useRef<number | null>(null);
-  const dragStartedItemRef = useRef<HTMLElement | null>(null);
-  const suppressNextClickRef = useRef(false);
-  const [focusedSegmentIndex, setFocusedSegmentIndex] = useState(0);
-  const [compactNavigationSegmentIndex, setCompactNavigationSegmentIndex] =
-    useState<number | null>(null);
-  const projection = useConversationOverviewProjection({
-    enabled: messages.length >= minMessages,
-    layoutSnapshot,
-    markers,
-    maxHeightPx,
-    messages,
-    tailItems,
-  });
+  const pendingPositionRef = useRef<number | null>(null);
+  const navigationFrameRef = useRef<number | null>(null);
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
+
+  const buckets = useMemo(
+    () => (overview ? projectConversationOverviewBuckets(overview) : []),
+    [overview],
+  );
+  const markers = useMemo(
+    () => (overview ? projectConversationOverviewMarkers(overview) : []),
+    [overview],
+  );
   const viewportProjection = useMemo(
-    () => projectConversationOverviewViewport(projection, viewportSnapshot),
-    [projection, viewportSnapshot],
+    () =>
+      overview
+        ? projectConversationOverviewViewport(overview, viewport)
+        : { topPercent: 0, heightPercent: 100 },
+    [overview, viewport],
   );
-  const segments = useMemo(
-    () => buildConversationOverviewSegments(projection),
-    [projection],
-  );
-  const shouldCompactSegments =
-    segments.length > CONVERSATION_OVERVIEW_COMPACT_SEGMENT_THRESHOLD;
-  const currentViewportItem = findConversationOverviewItemAtY(
-    projection,
-    viewportProjection.viewportTopPx,
-  );
-  const currentViewportItemIndex = currentViewportItem
-    ? projection.items.indexOf(currentViewportItem)
+  const currentBucketIndex = overview
+    ? conversationOverviewBucketIndexForPosition(
+        overview,
+        viewport.startPosition,
+      )
     : 0;
-  const currentSegmentIndex = findOverviewSegmentIndexForItemIndex(
-    segments,
-    currentViewportItemIndex,
-  );
-  const clampedFocusedSegmentIndex = clampOverviewSegmentIndex(
-    focusedSegmentIndex,
-    segments.length,
-  );
-  const compactSegmentIndex = clampOverviewSegmentIndex(
-    compactNavigationSegmentIndex ?? currentSegmentIndex,
-    segments.length,
-  );
-  const compactSegment = segments[compactSegmentIndex] ?? null;
-  const compactVisualSegments = useMemo(
-    () =>
-      shouldCompactSegments
-        ? buildCompactOverviewVisualSegments(
-            segments,
-            projection.totalHeightPx,
-          )
-        : EMPTY_COMPACT_OVERVIEW_VISUAL_SEGMENTS,
-    [projection.totalHeightPx, segments, shouldCompactSegments],
-  );
-  const segmentLabels = useMemo(
-    () =>
-      shouldCompactSegments
-        ? EMPTY_CONVERSATION_OVERVIEW_SEGMENT_LABELS
-        : segments.map((segment) =>
-            overviewSegmentLabel(segment, projection.items),
-          ),
-    [projection.items, segments, shouldCompactSegments],
-  );
+  const viewportCenterPercent =
+    viewportProjection.topPercent + viewportProjection.heightPercent / 2;
 
-  useEffect(() => {
-    if (
-      compactNavigationSegmentIndex !== null &&
-      clampOverviewSegmentIndex(compactNavigationSegmentIndex, segments.length) ===
-        currentSegmentIndex
-    ) {
-      setCompactNavigationSegmentIndex(null);
+  const cancelScheduledNavigation = useCallback(() => {
+    if (navigationFrameRef.current !== null) {
+      window.cancelAnimationFrame(navigationFrameRef.current);
+      navigationFrameRef.current = null;
     }
-  }, [compactNavigationSegmentIndex, currentSegmentIndex, segments.length]);
+    pendingPositionRef.current = null;
+  }, []);
 
-  useEffect(() => {
-    setFocusedSegmentIndex((index) =>
-      clampOverviewSegmentIndex(index, segments.length),
-    );
-  }, [segments.length]);
+  useEffect(() => cancelScheduledNavigation, [cancelScheduledNavigation]);
 
-  useEffect(() => {
-    if (compactNavigationSegmentIndex === null) {
-      return;
+  const flushScheduledNavigation = useCallback(() => {
+    navigationFrameRef.current = null;
+    const position = pendingPositionRef.current;
+    pendingPositionRef.current = null;
+    if (position !== null) {
+      onNavigateRef.current(position);
     }
+  }, []);
 
-    const timeoutId = window.setTimeout(() => {
-      setCompactNavigationSegmentIndex((index) =>
-        index === compactNavigationSegmentIndex ? null : index,
-      );
-    }, CONVERSATION_OVERVIEW_COMPACT_NAVIGATION_STALE_DELAY_MS);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [compactNavigationSegmentIndex, currentSegmentIndex]);
-
-  const navigateFromClientY = (clientY: number) => {
-    const rail = railRef.current;
-    if (!rail) {
-      return;
-    }
-    const rect = rail.getBoundingClientRect();
-    const mapY = rect.height > 0 ? clientY - rect.top : 0;
-    const item = findConversationOverviewItemAtY(projection, mapY);
-    if (item) {
-      if (shouldCompactSegments) {
-        const itemIndex = projection.items.indexOf(item);
-        setCompactNavigationSegmentIndex(
-          findOverviewSegmentIndexForItemIndex(segments, itemIndex),
-        );
+  const scheduleNavigation = useCallback(
+    (position: number) => {
+      pendingPositionRef.current = position;
+      if (navigationFrameRef.current === null) {
+        navigationFrameRef.current =
+          window.requestAnimationFrame(flushScheduledNavigation);
       }
-      onNavigate(item);
-    }
-  };
+    },
+    [flushScheduledNavigation],
+  );
 
-  const handleRailPointerDown = (event: PointerEvent<HTMLElement>) => {
-    if (event.button !== 0) {
+  const positionFromClientY = useCallback(
+    (clientY: number) => {
+      if (!overview || !railRef.current) {
+        return null;
+      }
+      const bounds = railRef.current.getBoundingClientRect();
+      if (bounds.height <= 0) {
+        return null;
+      }
+      return conversationOverviewPositionAtFraction(
+        overview,
+        (clientY - bounds.top) / bounds.height,
+      );
+    },
+    [overview],
+  );
+
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (!overview || event.button !== 0) {
       return;
     }
-    const startedItem =
-      event.target instanceof HTMLElement
-        ? event.target.closest<HTMLElement>(".conversation-overview-segment")
-        : null;
     dragPointerIdRef.current = event.pointerId;
-    dragStartedItemRef.current = startedItem || null;
-    suppressNextClickRef.current = startedItem !== null;
-    if (typeof event.currentTarget.setPointerCapture === "function") {
-      event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const position = positionFromClientY(event.clientY);
+    if (position !== null) {
+      cancelScheduledNavigation();
+      onNavigateRef.current(position);
     }
     event.preventDefault();
-    if (shouldCompactSegments) {
-      event.currentTarget.focus({ preventScroll: true });
-    }
-    navigateFromClientY(event.clientY);
   };
 
-  const handleRailPointerMove = (event: PointerEvent<HTMLElement>) => {
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (dragPointerIdRef.current !== event.pointerId) {
       return;
     }
+    const position = positionFromClientY(event.clientY);
+    if (position !== null) {
+      scheduleNavigation(position);
+    }
     event.preventDefault();
-    navigateFromClientY(event.clientY);
   };
 
-  const finishRailDrag = (event: PointerEvent<HTMLElement>) => {
+  const finishPointerDrag = (event: PointerEvent<HTMLDivElement>) => {
     if (dragPointerIdRef.current !== event.pointerId) {
       return;
     }
     dragPointerIdRef.current = null;
-    const startedItem = dragStartedItemRef.current;
-    const releaseTarget = resolvePointerEventTarget(event);
-    const releasedOnStartedItem =
-      startedItem !== null &&
-      releaseTarget !== null &&
-      startedItem.contains(releaseTarget);
-    if (!releasedOnStartedItem || event.type === "pointercancel") {
-      suppressNextClickRef.current = false;
+    if (event.type === "pointercancel") {
+      cancelScheduledNavigation();
+    } else {
+      const position = positionFromClientY(event.clientY);
+      cancelScheduledNavigation();
+      if (position !== null) {
+        onNavigateRef.current(position);
+      }
     }
-    dragStartedItemRef.current = null;
-    if (
-      typeof event.currentTarget.hasPointerCapture === "function" &&
-      event.currentTarget.hasPointerCapture(event.pointerId) &&
-      typeof event.currentTarget.releasePointerCapture === "function"
-    ) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
     }
   };
 
-  const focusOverviewSegmentAtIndex = useCallback((index: number) => {
-    setFocusedSegmentIndex(index);
-    railRef.current
-      ?.querySelector<HTMLButtonElement>(
-        `[data-conversation-overview-index="${index}"]`,
-      )
-      ?.focus();
-  }, []);
-
-  const navigateToSegment = useCallback((
-    segment: ConversationOverviewSegment,
-  ) => {
-    const item = projection.items[segment.startItemIndex];
-    if (item) {
-      onNavigate(item);
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!overview || overview.buckets.length === 0) {
+      return;
     }
-  }, [onNavigate, projection.items]);
-
-  const navigateToSegmentIndex = useCallback((index: number) => {
-    const segment = segments[index];
-    if (segment) {
-      setCompactNavigationSegmentIndex(index);
-      navigateToSegment(segment);
-    }
-  }, [navigateToSegment, segments]);
-
-  const handleSegmentClick = useCallback(
-    (event: MouseEvent<HTMLButtonElement>) => {
-      if (suppressNextClickRef.current) {
-        suppressNextClickRef.current = false;
+    const pageStep = Math.max(1, Math.floor(overview.buckets.length / 10));
+    let nextBucketIndex = currentBucketIndex;
+    switch (event.key) {
+      case "ArrowDown":
+      case "ArrowRight":
+        nextBucketIndex += 1;
+        break;
+      case "ArrowUp":
+      case "ArrowLeft":
+        nextBucketIndex -= 1;
+        break;
+      case "PageDown":
+        nextBucketIndex += pageStep;
+        break;
+      case "PageUp":
+        nextBucketIndex -= pageStep;
+        break;
+      case "Home":
+        nextBucketIndex = 0;
+        break;
+      case "End":
+        nextBucketIndex = overview.buckets.length - 1;
+        break;
+      default:
         return;
-      }
-      const index = readOverviewSegmentIndex(event.currentTarget);
-      const segment = index !== null ? segments[index] : null;
-      if (segment) {
-        navigateToSegment(segment);
-      }
-    },
-    [navigateToSegment, segments],
-  );
-
-  const handleSegmentFocus = useCallback(
-    (event: FocusEvent<HTMLButtonElement>) => {
-      const index = readOverviewSegmentIndex(event.currentTarget);
-      if (index !== null) {
-        setFocusedSegmentIndex(index);
-      }
-    },
-    [],
-  );
-
-  const handleSegmentKeyDown = useCallback((
-    event: KeyboardEvent<HTMLButtonElement>,
-  ) => {
-    const index = readOverviewSegmentIndex(event.currentTarget);
-    if (index === null) {
-      return;
-    }
-    const nextIndex = resolveOverviewSegmentKeyboardIndex(
-      event.key,
-      index,
-      segments.length,
-    );
-    if (nextIndex === null || nextIndex === index) {
-      return;
     }
     event.preventDefault();
-    focusOverviewSegmentAtIndex(nextIndex);
-  }, [focusOverviewSegmentAtIndex, segments.length]);
-
-  const handleCompactRailKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      navigateToSegmentIndex(compactSegmentIndex);
-      return;
-    }
-
-    const nextIndex = resolveOverviewSegmentKeyboardIndex(
-      event.key,
-      compactSegmentIndex,
-      segments.length,
+    const clampedBucketIndex = Math.min(
+      overview.buckets.length - 1,
+      Math.max(0, nextBucketIndex),
     );
-    if (nextIndex === null || nextIndex === compactSegmentIndex) {
-      return;
-    }
-    event.preventDefault();
-    navigateToSegmentIndex(nextIndex);
+    const position = Math.floor(
+      (clampedBucketIndex * overview.messageCount) /
+        overview.buckets.length,
+    );
+    onNavigateRef.current(position);
   };
 
-  if (messages.length < minMessages || projection.items.length === 0) {
+  const messageCount = overview?.messageCount ?? 0;
+  if (overview && messageCount < minMessages) {
     return null;
   }
 
   return (
     <div
-      aria-label="Conversation overview"
-      aria-orientation={shouldCompactSegments ? "vertical" : undefined}
-      aria-valuemax={shouldCompactSegments ? segments.length : undefined}
-      aria-valuemin={shouldCompactSegments ? 1 : undefined}
-      aria-valuenow={shouldCompactSegments ? compactSegmentIndex + 1 : undefined}
-      aria-valuetext={
-        shouldCompactSegments && compactSegment
-          ? overviewSegmentLabel(compactSegment, projection.items)
-          : undefined
-      }
-      className="conversation-overview-rail"
-      role={shouldCompactSegments ? "slider" : "navigation"}
       ref={railRef}
-      onPointerDown={handleRailPointerDown}
-      onPointerMove={handleRailPointerMove}
-      onPointerUp={finishRailDrag}
-      onPointerCancel={finishRailDrag}
-      onKeyDown={shouldCompactSegments ? handleCompactRailKeyDown : undefined}
-      style={{ height: `${Math.ceil(projection.totalHeightPx)}px` }}
-      tabIndex={shouldCompactSegments ? 0 : undefined}
+      aria-label={
+        overview
+          ? `Conversation overview, message ${Math.min(
+              overview.messageCount,
+              viewport.startPosition + 1,
+            )} of ${overview.messageCount}`
+          : "Loading conversation overview"
+      }
+      aria-orientation="vertical"
+      aria-valuemax={overview?.latestPosition ?? 0}
+      aria-valuemin={0}
+      aria-valuenow={overview ? viewport.startPosition : 0}
+      className={`conversation-overview-rail${overview ? "" : " is-pending"}`}
+      data-testid="conversation-overview-rail"
+      onKeyDown={handleKeyDown}
+      onPointerCancel={finishPointerDrag}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={finishPointerDrag}
+      role="slider"
+      style={heightPx === null ? undefined : { height: `${heightPx}px` }}
+      tabIndex={overview ? 0 : -1}
     >
-      {shouldCompactSegments ? (
-        <span
-          aria-hidden="true"
-          className="conversation-overview-visual-track"
-          data-testid="conversation-overview-visual-track"
-        >
-          {compactVisualSegments.map((visualSegment) => (
-            <span
-              key={visualSegment.id}
-              className="conversation-overview-visual-segment"
-              style={{
-                background: visualSegment.fill,
-                height: formatCssPx(visualSegment.heightPx),
-                top: formatCssPx(visualSegment.topPx),
-              }}
-            />
-          ))}
-        </span>
-      ) : (
-        segments.map((segment, index) => (
-          <button
-            key={segment.id}
-            type="button"
-            aria-label={segmentLabels[index]}
-            className={`conversation-overview-item conversation-overview-segment is-${segment.kind}${
-              segment.status ? ` has-status-${segment.status}` : ""
+      <span
+        aria-hidden="true"
+        className="conversation-overview-visual-track"
+        data-testid="conversation-overview-visual-track"
+      >
+        {buckets.map((bucket) => (
+          <span
+            key={bucket.index}
+            className={`conversation-overview-visual-segment is-${bucket.k}${
+              bucket.u > 0 ? " has-user-messages" : ""
             }`}
-            data-conversation-overview-index={index}
-            onClick={handleSegmentClick}
-            onKeyDown={handleSegmentKeyDown}
+            data-count={bucket.c}
+            data-kind={bucket.k}
             style={{
-              top: `${segment.mapTopPx}px`,
-              height: `${segment.mapHeightPx}px`,
+              height: `${bucket.heightPercent}%`,
+              top: `${bucket.topPercent}%`,
             }}
-            onFocus={handleSegmentFocus}
-            tabIndex={index === clampedFocusedSegmentIndex ? 0 : -1}
           />
-        ))
-      )}
-      {projection.markers.map((marker) => (
+        ))}
+      </span>
+      {markers.map((marker, index) => (
         <span
-          key={marker.id}
-          aria-label={marker.name}
-          className="conversation-overview-marker"
+          key={`${marker.position}:${marker.kind}:${marker.label ?? ""}:${index}`}
+          aria-label={marker.label ?? `${marker.kind} marker`}
+          className={`conversation-overview-marker is-${marker.kind}`}
           role="img"
           style={
             {
-              top: `${marker.mapTopPx}px`,
+              top: `${marker.topPercent}%`,
               "--conversation-overview-marker-color":
-                normalizeConversationMarkerColor(marker.color),
+                conversationOverviewMarkerColor(marker.kind),
             } as CSSProperties
           }
         />
       ))}
       <span
         aria-hidden="true"
-        className="conversation-overview-viewport"
+        className="conversation-overview-viewport-range"
         data-testid="conversation-overview-viewport"
         style={{
-          top: `${viewportProjection.viewportTopPx}px`,
-          height: `${Math.max(8, viewportProjection.viewportHeightPx)}px`,
+          height: `${viewportProjection.heightPercent}%`,
+          top: `${viewportProjection.topPercent}%`,
         }}
+      />
+      <span
+        aria-hidden="true"
+        className="conversation-overview-viewport-handle"
+        data-testid="conversation-overview-viewport-handle"
+        style={
+          {
+            "--conversation-overview-viewport-center": `${viewportCenterPercent}%`,
+            height: `${CONVERSATION_OVERVIEW_VIEWPORT_HANDLE_HEIGHT_PX}px`,
+          } as CSSProperties
+        }
       />
     </div>
   );
 }
 
-function useConversationOverviewProjection({
-  messages,
-  enabled,
-  layoutSnapshot,
-  markers,
-  tailItems,
-  maxHeightPx,
-}: ConversationOverviewProjectionInput) {
-  const metadataCacheRef = useRef<ConversationOverviewMessageMetadataCache>(
-    new WeakMap(),
-  );
-  const latestProjectionRef = useRef<ConversationOverviewProjection | null>(null);
-  const isPromptFocused = useComposerPromptFocused();
-
-  const projection = useMemo(() => {
-    if (!enabled) {
-      return null;
-    }
-
-    if (isPromptFocused && latestProjectionRef.current !== null) {
-      return null;
-    }
-
-    return buildConversationOverviewProjection({
-      layoutSnapshot,
-      markers,
-      maxHeightPx,
-      messageMetadataCache: metadataCacheRef.current,
-      messages,
-      tailItems,
-    });
-  }, [
-    enabled,
-    isPromptFocused,
-    layoutSnapshot,
-    markers,
-    maxHeightPx,
-    messages,
-    tailItems,
-  ]);
-
-  if (!enabled) {
-    latestProjectionRef.current = null;
-    return EMPTY_CONVERSATION_OVERVIEW_PROJECTION;
-  }
-
-  if (projection) {
-    latestProjectionRef.current = projection;
-    return projection;
-  }
-
-  return latestProjectionRef.current ?? EMPTY_CONVERSATION_OVERVIEW_PROJECTION;
-}
-
-function useComposerPromptFocused() {
-  const [isPromptFocused, setIsPromptFocused] = useState(
-    isComposerPromptFocused,
-  );
-
-  useEffect(() => {
-    const updateFocusedPrompt = () => {
-      setIsPromptFocused(isComposerPromptFocused());
-    };
-
-    document.addEventListener("focusin", updateFocusedPrompt, true);
-    document.addEventListener("focusout", updateFocusedPrompt, true);
-    return () => {
-      document.removeEventListener("focusin", updateFocusedPrompt, true);
-      document.removeEventListener("focusout", updateFocusedPrompt, true);
-    };
-  }, []);
-
-  return isPromptFocused;
-}
-
-function isComposerPromptFocused() {
-  const activeElement = document.activeElement;
-  return (
-    activeElement instanceof HTMLTextAreaElement &&
-    activeElement.dataset[CONVERSATION_COMPOSER_INPUT_DATASET_KEY] === "true"
-  );
-}
-
-function resolveOverviewSegmentKeyboardIndex(
-  key: string,
-  index: number,
-  segmentCount: number,
-) {
-  if (segmentCount <= 0) {
-    return null;
-  }
-  switch (key) {
-    case "ArrowDown":
-    case "ArrowRight":
-      return Math.min(index + 1, segmentCount - 1);
-    case "ArrowUp":
-    case "ArrowLeft":
-      return Math.max(index - 1, 0);
-    case "End":
-      return segmentCount - 1;
-    case "Home":
-      return 0;
-    default:
-      return null;
+function conversationOverviewMarkerColor(kind: ConversationMarkerKind) {
+  switch (kind) {
+    case "bug":
+      return "var(--signal-red)";
+    case "decision":
+      return "var(--signal-green)";
+    case "question":
+      return "var(--signal-gold)";
+    case "review":
+      return "var(--signal-rose)";
+    case "handoff":
+      return "var(--signal-blue)";
+    case "checkpoint":
+    case "custom":
+      return "var(--muted)";
   }
 }
 
-function clampOverviewSegmentIndex(index: number, segmentCount: number) {
-  if (segmentCount <= 0) {
-    return 0;
-  }
-  return Math.min(Math.max(index, 0), segmentCount - 1);
-}
-
-function findOverviewSegmentIndexForItemIndex(
-  segments: readonly ConversationOverviewSegment[],
-  itemIndex: number,
-) {
-  if (segments.length === 0) {
-    return 0;
-  }
-  const segmentIndex = segments.findIndex(
-    (segment) =>
-      itemIndex >= segment.startItemIndex && itemIndex <= segment.endItemIndex,
-  );
-  return segmentIndex === -1 ? 0 : segmentIndex;
-}
-
-function resolvePointerEventTarget(event: PointerEvent<HTMLElement>) {
-  if (
-    typeof document.elementFromPoint === "function" &&
-    Number.isFinite(event.clientX) &&
-    Number.isFinite(event.clientY)
-  ) {
-    const target = document.elementFromPoint(event.clientX, event.clientY);
-    if (target instanceof HTMLElement) {
-      return target;
-    }
-  }
-  return event.target instanceof HTMLElement ? event.target : null;
-}
-
-export function buildCompactOverviewVisualSegments(
-  segments: readonly ConversationOverviewSegment[],
-  totalHeightPx: number,
-) {
-  if (segments.length === 0) {
-    return EMPTY_COMPACT_OVERVIEW_VISUAL_SEGMENTS;
-  }
-
-  const boundedTotalHeightPx = Math.max(1, totalHeightPx);
-  const visualBucketCount = Math.min(
-    CONVERSATION_OVERVIEW_COMPACT_VISUAL_SEGMENT_COUNT,
-    Math.max(1, Math.ceil(boundedTotalHeightPx)),
-    segments.length,
-  );
-  const visualSegments: CompactOverviewVisualSegment[] = [];
-  let sourceSegmentIndex = 0;
-
-  for (let bucketIndex = 0; bucketIndex < visualBucketCount; bucketIndex += 1) {
-    const bucketTopPx =
-      (bucketIndex / visualBucketCount) * boundedTotalHeightPx;
-    const bucketBottomPx =
-      ((bucketIndex + 1) / visualBucketCount) * boundedTotalHeightPx;
-    const sampleY = bucketTopPx + (bucketBottomPx - bucketTopPx) / 2;
-
-    while (
-      sourceSegmentIndex < segments.length - 1 &&
-      sampleY >=
-        segments[sourceSegmentIndex].mapTopPx +
-          segments[sourceSegmentIndex].mapHeightPx
-    ) {
-      sourceSegmentIndex += 1;
-    }
-
-    const fill = overviewSegmentCompactFill(segments[sourceSegmentIndex]);
-    const previousVisualSegment = visualSegments[visualSegments.length - 1];
-    if (
-      previousVisualSegment &&
-      previousVisualSegment.fill === fill &&
-      Math.abs(
-        previousVisualSegment.topPx +
-          previousVisualSegment.heightPx -
-          bucketTopPx,
-      ) < 0.5
-    ) {
-      previousVisualSegment.heightPx = bucketBottomPx - previousVisualSegment.topPx;
-      continue;
-    }
-
-    visualSegments.push({
-      id: `compact:${bucketIndex}`,
-      topPx: bucketTopPx,
-      heightPx: Math.max(1, bucketBottomPx - bucketTopPx),
-      fill,
-    });
-  }
-
-  return visualSegments;
-}
-
-function overviewSegmentCompactFill(segment: ConversationOverviewSegment) {
-  if (segment.status === "error") {
-    return "color-mix(in srgb, var(--signal-red) 72%, transparent)";
-  }
-  if (segment.status === "running") {
-    return "color-mix(in srgb, var(--signal-blue) 72%, transparent)";
-  }
-  switch (segment.kind) {
-    case "user_prompt":
-      return "color-mix(in srgb, var(--signal-blue) 62%, transparent)";
-    case "command":
-      return "color-mix(in srgb, var(--signal-green) 42%, transparent)";
-    case "diff":
-    case "file_changes":
-      return "color-mix(in srgb, var(--signal-rose) 42%, transparent)";
-    case "approval":
-    case "input_request":
-      return "color-mix(in srgb, var(--signal-gold) 42%, transparent)";
-    case "live_turn":
-      return "color-mix(in srgb, var(--signal-blue) 82%, transparent)";
-    case "mixed":
-    default:
-      return "color-mix(in srgb, var(--muted) 50%, transparent)";
-  }
-}
-
-function formatCssPx(value: number) {
-  return `${Math.round(value * 100) / 100}px`;
-}
-
-function overviewItemLabel(item: ConversationOverviewItem) {
-  const sample = item.textSample ? `: ${item.textSample}` : "";
-  return `${overviewKindLabel(item.kind)} ${item.messageIndex + 1}${sample}`;
-}
-
-function overviewSegmentLabel(
-  segment: ConversationOverviewSegment,
-  items: readonly ConversationOverviewItem[],
-) {
-  const firstItem = items[segment.startItemIndex];
-  const lastItem = items[segment.endItemIndex] ?? firstItem;
-  if (!firstItem || !lastItem || segment.itemCount <= 1) {
-    return firstItem ? overviewItemLabel(firstItem) : "Conversation overview segment";
-  }
-
-  const sample = firstItem.textSample ? `: ${firstItem.textSample}` : "";
-  return `${overviewSegmentKindLabel(segment)} ${firstItem.messageIndex + 1}-${
-    lastItem.messageIndex + 1
-  } (${segment.itemCount} messages)${sample}`;
-}
-
-function readOverviewSegmentIndex(element: HTMLElement): number | null {
-  const rawIndex = element.dataset.conversationOverviewIndex;
-  if (!rawIndex) {
-    return null;
-  }
-  const index = Number(rawIndex);
-  return Number.isInteger(index) && index >= 0 ? index : null;
-}
-
-function overviewSegmentKindLabel(segment: ConversationOverviewSegment) {
-  if (segment.kind === "mixed") {
-    return "Mixed messages";
-  }
-  switch (segment.kind) {
-    case "approval":
-      return "Approvals";
-    case "assistant_text":
-      return "Assistant responses";
+export function conversationOverviewKindLabel(kind: ConversationOverviewKind) {
+  switch (kind) {
     case "command":
       return "Commands";
     case "diff":
       return "Diffs";
-    case "file_changes":
-      return "File changes";
-    case "input_request":
-      return "Input requests";
-    case "live_turn":
-      return "Live turns";
-    case "parallel_agents":
-      return "Parallel agent updates";
-    case "subagent_result":
-      return "Subagent results";
-    case "thinking":
-      return "Thinking updates";
-    case "user_prompt":
-      return "User prompts";
-  }
-}
-
-function overviewKindLabel(kind: ConversationOverviewItem["kind"]) {
-  switch (kind) {
-    case "approval":
-      return "Approval";
-    case "assistant_text":
-      return "Assistant response";
-    case "command":
-      return "Command";
-    case "diff":
-      return "Diff";
-    case "file_changes":
-      return "File changes";
-    case "input_request":
-      return "Input request";
-    case "live_turn":
-      return "Live turn";
-    case "parallel_agents":
-      return "Parallel agents";
-    case "subagent_result":
-      return "Subagent result";
-    case "thinking":
-      return "Thinking";
-    case "user_prompt":
-      return "User prompt";
+    case "error":
+      return "Errors";
+    case "text":
+      return "Messages";
   }
 }

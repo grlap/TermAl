@@ -6,24 +6,11 @@ import type {
   AdoptSessionsOptions,
   AdoptStateOptions,
 } from "./app-live-state-types";
-import type { AdoptFetchedSessionOutcome } from "./session-hydration-adoption";
-
-type FullFetchAdoptFetchedSessionOutcome = Exclude<
-  AdoptFetchedSessionOutcome,
-  "partial"
->;
-
-export function fullFetchAdoptFetchedSessionOutcome(
-  outcome: AdoptFetchedSessionOutcome,
-): FullFetchAdoptFetchedSessionOutcome {
-  if (outcome === "partial") {
-    console.warn(
-      "session hydration> full fetch unexpectedly produced a partial transcript adoption; retrying full hydration",
-    );
-    return "stale";
-  }
-  return outcome;
-}
+export type SessionHydrationOptions = {
+  allowDivergentTextRepairAfterNewerRevision?: boolean;
+  forceTailRepair?: boolean;
+  queueAfterCurrent?: boolean;
+};
 
 export function resolveAdoptStateSessionOptions(
   options: AdoptStateOptions | undefined,
@@ -60,9 +47,3 @@ export const SESSION_HYDRATION_RETRY_DELAYS_MS = [
 ] as const;
 export const SESSION_HYDRATION_MAX_RETRY_ATTEMPTS =
   SESSION_HYDRATION_RETRY_DELAYS_MS.length;
-
-/** Delay full large-transcript hydration after a tail fetch paints the pane. */
-export const SESSION_TAIL_FULL_HYDRATION_DEFER_MS = 750;
-export const SESSION_TAIL_FULL_HYDRATION_IDLE_TIMEOUT_MS = 5000;
-export const SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS = 1500;
-export const SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_HARD_TIMEOUT_MS = 120000;

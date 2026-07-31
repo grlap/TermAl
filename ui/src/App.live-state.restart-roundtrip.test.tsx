@@ -271,10 +271,10 @@ describe("App live state — restart roundtrip (canonical)", () => {
         ],
       });
 
-      // The "after restart" hydration response from the new server: full
-      // transcript including the assistant message that streamed during
-      // the restart window. `messagesLoaded: true` so adoption is
-      // canonical (replaces any stale preserved messages).
+      // The "after restart" bounded-tail response from the new server includes
+      // the assistant message that streamed during the restart window.
+      // `messagesLoaded: true` because this short fixture fits in the tail, so
+      // adoption replaces any stale preserved messages.
       const recoveredSession = makeSession("session-1", {
         name: "Codex Session",
         status: "idle",
@@ -285,7 +285,7 @@ describe("App live state — restart roundtrip (canonical)", () => {
         // stamp; matches the SSE state event's `sessionMutationStamp:
         // undefined` so `hydrationSessionMetadataMatches` accepts the
         // response. (Pre-restart, the assistant message streamed and
-        // completed; SQLite holds the full transcript; the new server
+        // completed; SQLite holds the indexed transcript; the new server
         // just loaded from disk and has not mutated yet.)
         sessionMutationStamp: undefined,
         messages: [
@@ -364,8 +364,8 @@ describe("App live state — restart roundtrip (canonical)", () => {
           sessionRequestCount += 1;
           // The visible-session hydration effect fires `/api/sessions/{id}`
           // after `forceMessagesUnloaded` flipped `messagesLoaded: false`.
-          // The response's full transcript replaces the stale local
-          // messages and the assistant reply becomes visible.
+          // This short transcript fits in the bounded tail response, which
+          // replaces the stale local messages and reveals the assistant reply.
           return jsonResponse({
             revision: 6,
             serverInstanceId: "replacement-instance",

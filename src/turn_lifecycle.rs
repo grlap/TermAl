@@ -349,6 +349,7 @@ impl AppState {
             if record.session.status == SessionStatus::Active {
                 record.session.status = SessionStatus::Idle;
             }
+            record.session.live_activity = None;
             if matches!(token, RuntimeToken::Codex(_)) {
                 trace_shared_codex_event(
                     "finish_apply",

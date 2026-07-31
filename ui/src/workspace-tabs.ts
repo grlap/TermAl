@@ -29,6 +29,7 @@ import {
   type WorkspaceFilesystemTab,
   type WorkspaceGitStatusTab,
   type WorkspaceInstructionDebuggerTab,
+  type WorkspaceMailboxTab,
   type WorkspaceOrchestratorCanvasTab,
   type WorkspaceOrchestratorListTab,
   type WorkspaceProjectListTab,
@@ -112,6 +113,27 @@ export function createTerminalTab(
     workdir: normalizeWorkspacePath(workdir),
     originSessionId: normalizedOriginSessionId,
     ...projectOriginProps(normalizedOriginProjectId),
+  };
+}
+
+export function createMailboxTab(
+  mailboxId: string,
+  originSessionId: string,
+  originProjectId: string | null = null,
+): WorkspaceMailboxTab {
+  const normalizedMailboxId = normalizeWorkspaceIdentifier(mailboxId);
+  const normalizedOriginSessionId = normalizeWorkspaceIdentifier(originSessionId);
+  if (!normalizedMailboxId || !normalizedOriginSessionId) {
+    throw new Error("Mailbox tabs require mailbox and viewer session ids.");
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    kind: "mailbox",
+    mailboxId: normalizedMailboxId,
+    originSessionId: normalizedOriginSessionId,
+    refreshToken: crypto.randomUUID(),
+    ...projectOriginProps(normalizeWorkspaceIdentifier(originProjectId)),
   };
 }
 

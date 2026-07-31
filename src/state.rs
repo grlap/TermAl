@@ -494,6 +494,7 @@ impl RemoteDeltaReplayCache {
 struct PersistDelta {
     metadata: PersistedState,
     changed_sessions: Vec<PersistedSessionRecord>,
+    persisted_session_ids_to_trim: Vec<String>,
     removed_session_ids: Vec<String>,
     changed_delegations: Option<Vec<DelegationRecord>>,
     removed_delegation_ids: Vec<String>,
@@ -876,20 +877,9 @@ struct StateInner {
     /// it; a crash leaves the on-disk item for the next boot.
     pending_coordination_scope_deletions: BTreeSet<String>,
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
-    /// Remote revision watermarks are ordered from weakest to strongest:
-    /// `remote_applied_revisions`, `remote_snapshot_applied_revisions`, then
-    /// `remote_transcript_snapshot_applied_revisions`. Recording a stronger
-    /// broad-state watermark also records every weaker one. The skip checks use
-    /// `>=` only when that watermark already materialized the same kind of data
-    /// at the supplied revision; otherwise they use `>` so same-revision repair
-    /// paths can still fill data omitted by a narrower event.
-    ///
-    /// Focused `/api/sessions/{id}` hydration is narrower than a broad
-    /// transcript snapshot, so it uses
-    /// `remote_session_transcript_applied_revisions` instead of bumping the
-    /// broad transcript watermark. That suppresses duplicate same-revision
-    /// transcript deltas for the hydrated session without dropping unrelated
-    /// sessions from the same remote revision.
+    /// Broad remote state is metadata-only. Focused bounded-tail responses use
+    /// `remote_session_transcript_applied_revisions` so a same-revision delta is
+    /// suppressed only for the session whose retained suffix was materialized.
     /// Tracks the latest remote revision applied for each mirrored remote so
     /// stale snapshots and deltas cannot roll local proxy state backward.
     remote_applied_revisions: HashMap<String, u64>,
@@ -897,20 +887,24 @@ struct StateInner {
     /// remote. Cleared with `remote_applied_revisions` and the per-remote replay
     /// cache when event-stream continuity is lost.
     remote_snapshot_applied_revisions: HashMap<String, u64>,
-    /// Tracks the latest broad snapshot that fully materialized session
-    /// transcripts for a mirrored remote. Same-revision deltas are allowed after
-    /// metadata-first snapshots because those snapshots may omit the transcript
-    /// bytes carried by the delta.
-    remote_transcript_snapshot_applied_revisions: HashMap<String, u64>,
-    /// Tracks focused full-session transcript hydration per remote session.
-    /// This is intentionally narrower than `remote_transcript_snapshot_applied_revisions`.
+    /// Tracks focused bounded-tail materialization per remote session.
     remote_session_transcript_applied_revisions: HashMap<String, HashMap<String, u64>>,
     /// Session records carry the serializable session plus runtime-only state.
     sessions: Vec<SessionRecord>,
+    /// Durable session rows isolated during startup validation.
+    ///
+    /// These records are deliberately absent from `sessions` so corrupted
+    /// payloads cannot appear healthy, but full-snapshot fallback persistence
+    /// must preserve their SQLite rows for recovery instead of treating them as
+    /// user-deleted sessions.
+    quarantined_persisted_session_ids: BTreeSet<String>,
     /// Runtime instances for orchestrator templates live beside ordinary sessions.
     orchestrator_instances: Vec<OrchestratorInstance>,
     /// Durable parent-child delegation links for ordinary sessions.
     delegations: Vec<DelegationRecord>,
+    /// Durable delegation rows isolated during startup validation. See
+    /// `quarantined_persisted_session_ids` for the preservation contract.
+    quarantined_persisted_delegation_ids: BTreeSet<String>,
     /// Pending parent resumes waiting on one or more child delegation results.
     delegation_waits: Vec<DelegationWaitRecord>,
     /// Runtime-only mutation stamps for delegation rows. The background persist
@@ -953,11 +947,12 @@ impl StateInner {
             ignored_discovered_codex_thread_ids: BTreeSet::new(),
             remote_applied_revisions: HashMap::new(),
             remote_snapshot_applied_revisions: HashMap::new(),
-            remote_transcript_snapshot_applied_revisions: HashMap::new(),
             remote_session_transcript_applied_revisions: HashMap::new(),
             sessions: Vec::new(),
+            quarantined_persisted_session_ids: BTreeSet::new(),
             orchestrator_instances: Vec::new(),
             delegations: Vec::new(),
+            quarantined_persisted_delegation_ids: BTreeSet::new(),
             delegation_waits: Vec::new(),
             delegation_mutation_stamps: BTreeMap::new(),
             removed_delegation_ids: BTreeMap::new(),
@@ -1005,10 +1000,6 @@ impl StateInner {
                 .remote_snapshot_applied_revisions
                 .get(remote_id)
                 .is_some_and(|latest_revision| *latest_revision > remote_revision)
-            || self
-                .remote_transcript_snapshot_applied_revisions
-                .get(remote_id)
-                .is_some_and(|latest_revision| *latest_revision >= remote_revision)
     }
 
     /// Returns whether a session-scoped remote delta is stale for this remote
@@ -1050,24 +1041,8 @@ impl StateInner {
             .or_insert(remote_revision);
     }
 
-    /// Records that a broad full-state snapshot included complete session
-    /// transcripts for this remote revision.
-    fn note_remote_applied_transcript_snapshot_revision(
-        &mut self,
-        remote_id: &str,
-        remote_revision: u64,
-    ) {
-        self.note_remote_applied_snapshot_revision(remote_id, remote_revision);
-        self.remote_transcript_snapshot_applied_revisions
-            .entry(remote_id.to_owned())
-            .and_modify(|latest_revision| {
-                *latest_revision = (*latest_revision).max(remote_revision);
-            })
-            .or_insert(remote_revision);
-    }
-
-    /// Records that focused full-session hydration materialized a single remote
-    /// session transcript at this revision.
+    /// Records that a focused bounded-tail response materialized the retained
+    /// suffix for one remote session at this revision.
     fn note_remote_session_transcript_applied_revision(
         &mut self,
         remote_id: &str,
@@ -1117,6 +1092,13 @@ struct SessionRecord {
     /// Original peer messages represented by a coalesced queued prompt, keyed
     /// by that prompt's stable id. Ordinary queued prompts have no entry.
     queued_peer_messages: HashMap<String, Vec<PendingPrompt>>,
+    /// Global transcript position represented by `session.messages[0]`.
+    ///
+    /// Persisted sessions load only a bounded recent tail into memory. New
+    /// sessions and fully localized remote sessions start at zero. Message
+    /// deltas translate local vec indices through this offset so browser
+    /// cursors keep using stable whole-transcript positions.
+    message_start_index: usize,
     message_positions: HashMap<String, usize>,
     /// Present only for proxy sessions mirrored from a remote TermAl backend.
     remote_id: Option<String>,

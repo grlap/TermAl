@@ -39,6 +39,38 @@ impl Drop for HttpRouteTestFiles {
     }
 }
 
+fn seed_loaded_history_messages(
+    state: &AppState,
+    session_id: &str,
+    message_count: usize,
+) -> Vec<String> {
+    let messages: Vec<Message> = (0..message_count)
+        .map(|index| Message::Text {
+            attachments: Vec::new(),
+            id: format!("history-message-{index:05}"),
+            timestamp: "12:00".to_owned(),
+            author: Author::Assistant,
+            text: format!("History message {index}"),
+            expanded_text: None,
+            source: None,
+        })
+        .collect();
+    let message_ids = messages
+        .iter()
+        .map(|message| message.id().to_owned())
+        .collect();
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(session_id)
+        .expect("seeded session should exist");
+    let record = &mut inner.sessions[index];
+    record.session.messages = messages;
+    record.session.messages_loaded = true;
+    record.message_positions = build_message_positions(&record.session.messages);
+    record.mutation_stamp = record.mutation_stamp.saturating_add(1);
+    message_ids
+}
+
 struct TempProjectRoot {
     path: PathBuf,
 }
@@ -217,12 +249,12 @@ async fn create_session_route_returns_created_response() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Pins `GET /api/sessions/{id}` — asserts 200 OK with a `SessionResponse`
-// carrying the full `Session` and the current `revision`, without the
-// caller needing a full `StateResponse` snapshot. Guards against the
-// single-session handler drifting from the state snapshot revision.
+// Pins `GET /api/sessions/{id}` — asserts 200 OK with bounded session detail
+// and the current `revision`, without the caller needing a full
+// `StateResponse` snapshot. Guards against the single-session handler drifting
+// from the state snapshot revision.
 #[tokio::test]
-async fn get_session_route_returns_full_session() {
+async fn get_session_route_returns_bounded_session_detail() {
     let state = test_app_state();
     let _files = HttpRouteTestFiles::capture(&state);
     let app = app_router(state.clone());
@@ -268,10 +300,9 @@ async fn get_session_route_returns_full_session() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// Pins `GET /api/sessions/{id}?tail=N` for tail-first UI hydration: the
-// response carries only the newest messages, keeps the full `messageCount`,
-// and leaves `messagesLoaded=false` so the browser still fetches the full
-// transcript in the background.
+// Pins bounded session reads: an explicit tail returns exactly that suffix,
+// while the no-query route still returns only the default recent tail. Neither
+// path has an unbounded-transcript branch.
 #[tokio::test]
 async fn get_session_route_can_return_tail_only() {
     let state = test_app_state();
@@ -294,23 +325,7 @@ async fn get_session_route_can_return_tail_only() {
         })
         .expect("session should be created");
     let session_id = created.session_id;
-    for index in 1..=5 {
-        let message_id = state.allocate_message_id();
-        state
-            .push_message(
-                &session_id,
-                Message::Text {
-                    attachments: Vec::new(),
-                    id: message_id,
-                    timestamp: stamp_now(),
-                    author: Author::Assistant,
-                    text: format!("Tail message {index}"),
-                    expanded_text: None,
-                    source: None,
-                },
-            )
-            .expect("message should append");
-    }
+    let message_ids = seed_loaded_history_messages(&state, &session_id, 80);
 
     let (status, response): (StatusCode, SessionResponse) = request_json(
         &app,
@@ -324,7 +339,7 @@ async fn get_session_route_can_return_tail_only() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(response.session.id, session_id);
-    assert_eq!(response.session.message_count, 5);
+    assert_eq!(response.session.message_count, 80);
     assert!(!response.session.messages_loaded);
     assert_eq!(response.session.messages.len(), 3);
     let tail_message_ids: Vec<String> = response
@@ -333,16 +348,9 @@ async fn get_session_route_can_return_tail_only() {
         .iter()
         .map(|message| message.id().to_owned())
         .collect();
-    assert!(matches!(
-        response.session.messages.first(),
-        Some(Message::Text { text, .. }) if text == "Tail message 3"
-    ));
-    assert!(matches!(
-        response.session.messages.last(),
-        Some(Message::Text { text, .. }) if text == "Tail message 5"
-    ));
+    assert_eq!(tail_message_ids, message_ids[77..].to_vec());
 
-    let (full_status, full_response): (StatusCode, SessionResponse) = request_json(
+    let (default_status, default_response): (StatusCode, SessionResponse) = request_json(
         &app,
         Request::builder()
             .method("GET")
@@ -352,17 +360,593 @@ async fn get_session_route_can_return_tail_only() {
     )
     .await;
 
-    assert_eq!(full_status, StatusCode::OK);
-    assert_eq!(full_response.session.messages.len(), 5);
-    let full_suffix_ids: Vec<String> = full_response
+    assert_eq!(default_status, StatusCode::OK);
+    assert_eq!(default_response.session.message_count, 80);
+    assert!(!default_response.session.messages_loaded);
+    assert_eq!(
+        default_response.session.messages.len(),
+        SESSION_TAIL_DEFAULT_MESSAGES
+    );
+    let default_suffix_ids: Vec<String> = default_response
         .session
         .messages
         .iter()
-        .skip(2)
         .map(|message| message.id().to_owned())
         .collect();
-    assert_eq!(tail_message_ids, full_suffix_ids);
+    assert_eq!(
+        default_suffix_ids,
+        message_ids[80 - SESSION_TAIL_DEFAULT_MESSAGES..].to_vec()
+    );
     let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins bounded, stable-id backward paging against a 20k-message transcript.
+// Each response is capped, ascending, and supplies the exclusive
+// cursor for the next page instead of returning one unbounded JSON document.
+#[tokio::test]
+async fn get_session_history_route_pages_large_transcript_by_message_id() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let created = state
+        .create_session(CreateSessionRequest {
+            name: Some("Route Session History".to_owned()),
+            agent: None,
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("session should be created");
+    let message_ids = seed_loaded_history_messages(&state, &created.session_id, 20_001);
+    let app = app_router(state.clone());
+
+    let (status, newest): (StatusCode, SessionHistoryResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/sessions/{}/history?limit={SESSION_HISTORY_PAGE_MAX_MESSAGES}",
+                created.session_id
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(newest.messages.len(), SESSION_HISTORY_PAGE_MAX_MESSAGES);
+    assert_eq!(newest.message_count, 20_001);
+    assert!(newest.has_more);
+    assert_eq!(
+        newest.messages.first().map(Message::id),
+        Some(message_ids[20_001 - SESSION_HISTORY_PAGE_MAX_MESSAGES].as_str())
+    );
+    assert_eq!(
+        newest.messages.last().map(Message::id),
+        Some(message_ids[20_000].as_str())
+    );
+    assert_eq!(
+        newest.next_before.as_deref(),
+        Some(message_ids[20_001 - SESSION_HISTORY_PAGE_MAX_MESSAGES].as_str())
+    );
+    assert!(!newest.has_newer);
+    assert!(newest.next_after.is_none());
+    assert_eq!(newest.server_instance_id, state.server_instance_id);
+
+    let before = newest.next_before.expect("older history should remain");
+    let (older_status, older): (StatusCode, SessionHistoryResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/sessions/{}/history?before={before}&limit={SESSION_HISTORY_PAGE_MAX_MESSAGES}",
+                created.session_id
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(older_status, StatusCode::OK);
+    assert_eq!(older.messages.len(), SESSION_HISTORY_PAGE_MAX_MESSAGES);
+    assert_eq!(
+        older.messages.first().map(Message::id),
+        Some(message_ids[20_001 - 2 * SESSION_HISTORY_PAGE_MAX_MESSAGES].as_str())
+    );
+    assert_eq!(
+        older.messages.last().map(Message::id),
+        Some(message_ids[20_001 - SESSION_HISTORY_PAGE_MAX_MESSAGES - 1].as_str())
+    );
+    assert!(older.messages.iter().all(|message| message.id() != before));
+    assert!(older.has_newer);
+    assert_eq!(
+        older.next_after.as_deref(),
+        older.messages.last().map(Message::id)
+    );
+
+    let (start_status, start): (StatusCode, SessionHistoryResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/sessions/{}/history?from=start&limit={SESSION_HISTORY_PAGE_MAX_MESSAGES}",
+                created.session_id
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(start_status, StatusCode::OK);
+    assert_eq!(start.messages.len(), SESSION_HISTORY_PAGE_MAX_MESSAGES);
+    assert_eq!(
+        start.messages.first().map(Message::id),
+        Some(message_ids[0].as_str())
+    );
+    assert_eq!(
+        start.messages.last().map(Message::id),
+        Some(message_ids[SESSION_HISTORY_PAGE_MAX_MESSAGES - 1].as_str())
+    );
+    assert!(!start.has_more);
+    assert!(start.next_before.is_none());
+    assert!(start.has_newer);
+    let after = start
+        .next_after
+        .clone()
+        .expect("forward history should remain");
+
+    let (forward_status, forward): (StatusCode, SessionHistoryResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/sessions/{}/history?after={after}&limit={SESSION_HISTORY_PAGE_MAX_MESSAGES}",
+                created.session_id
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(forward_status, StatusCode::OK);
+    assert_eq!(
+        forward.messages.first().map(Message::id),
+        Some(message_ids[SESSION_HISTORY_PAGE_MAX_MESSAGES].as_str())
+    );
+    assert!(forward.messages.iter().all(|message| message.id() != after));
+}
+
+#[tokio::test]
+async fn get_session_overview_route_is_complete_for_a_retained_tail() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("session should exist");
+        let record = &mut inner.sessions[index];
+        record.session.messages = (0..100)
+            .map(|position| {
+                let id = format!("overview-message-{position:03}");
+                if position < 25 {
+                    Message::Text {
+                        attachments: Vec::new(),
+                        id,
+                        timestamp: "12:00".to_owned(),
+                        author: Author::You,
+                        text: format!("Prompt {position}"),
+                        expanded_text: None,
+                        source: None,
+                    }
+                } else if position < 50 {
+                    Message::Command {
+                        id,
+                        timestamp: "12:00".to_owned(),
+                        author: Author::Assistant,
+                        command: format!("command-{position}"),
+                        command_language: None,
+                        output: String::new(),
+                        output_language: None,
+                        status: CommandStatus::Success,
+                    }
+                } else if position < 75 {
+                    Message::Diff {
+                        id,
+                        timestamp: "12:00".to_owned(),
+                        author: Author::Assistant,
+                        change_set_id: None,
+                        file_path: format!("file-{position}.rs"),
+                        summary: "Changed".to_owned(),
+                        diff: String::new(),
+                        language: None,
+                        change_type: ChangeType::Edit,
+                    }
+                } else {
+                    Message::Command {
+                        id,
+                        timestamp: "12:00".to_owned(),
+                        author: Author::Assistant,
+                        command: format!("failing-{position}"),
+                        command_language: None,
+                        output: String::new(),
+                        output_language: None,
+                        status: CommandStatus::Error,
+                    }
+                }
+            })
+            .collect();
+        record.session.messages_loaded = true;
+        record.session.message_count = 100;
+        record.message_start_index = 0;
+        record.message_positions = build_message_positions(&record.session.messages);
+        record.session.markers = vec![ConversationMarker {
+            id: "overview-marker".to_owned(),
+            session_id: session_id.clone(),
+            kind: ConversationMarkerKind::Review,
+            name: "Review bucket".to_owned(),
+            body: None,
+            color: "#4488ff".to_owned(),
+            message_id: "overview-message-040".to_owned(),
+            message_index_hint: 40,
+            end_message_id: None,
+            end_message_index_hint: None,
+            created_at: "12:00".to_owned(),
+            updated_at: "12:00".to_owned(),
+            created_by: ConversationMarkerAuthor::User,
+        }];
+        record.mutation_stamp = 9;
+        persist_state(state.persistence_path.as_ref(), &inner)
+            .expect("overview fixture should persist");
+    }
+    let fully_resident_overview = state
+        .get_session_overview(&session_id, 4)
+        .expect("fully resident overview should load");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("session should exist");
+        let record = &mut inner.sessions[index];
+        record.session.messages.drain(..70);
+        record.message_start_index = 70;
+        record.message_positions = build_message_positions(&record.session.messages);
+        record.session.messages_loaded = false;
+    }
+    let app = app_router(state);
+
+    let (status, overview): (StatusCode, SessionOverviewResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/sessions/{session_id}/overview?buckets=4"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(overview.session_id, session_id);
+    assert_eq!(overview.message_count, 100);
+    assert_eq!(overview.session_mutation_stamp, 9);
+    assert_eq!(overview.buckets.len(), 4);
+    assert_eq!(
+        overview
+            .buckets
+            .iter()
+            .map(|bucket| bucket.k)
+            .collect::<Vec<_>>(),
+        vec![
+            ConversationOverviewKind::Text,
+            ConversationOverviewKind::Command,
+            ConversationOverviewKind::Diff,
+            ConversationOverviewKind::Error,
+        ]
+    );
+    assert_eq!(overview.buckets[0].u, 25);
+    assert!(overview.buckets[1].m);
+    assert_eq!(overview.markers[0].position, 40);
+    assert_eq!(overview.latest_position, 99);
+    assert_eq!(
+        overview, fully_resident_overview,
+        "overview must not depend on transcript residency"
+    );
+}
+
+#[tokio::test]
+async fn get_session_history_route_centers_an_around_position() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    let message_ids = seed_loaded_history_messages(&state, &session_id, 100);
+    let app = app_router(state);
+
+    let (status, page): (StatusCode, SessionHistoryResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/sessions/{session_id}/history?around=50&limit=20"
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page.message_start_index, 40);
+    assert_eq!(page.messages.len(), 20);
+    assert_eq!(
+        page.messages.first().map(Message::id),
+        Some(message_ids[40].as_str())
+    );
+    assert_eq!(
+        page.messages.last().map(Message::id),
+        Some(message_ids[59].as_str())
+    );
+    assert!(page.has_more);
+    assert!(page.has_newer);
+}
+
+#[tokio::test]
+async fn get_session_overview_meets_large_transcript_latency_and_network_budgets() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    seed_loaded_history_messages(&state, &session_id, 25_000);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("session should exist");
+        inner.sessions[index].session.message_count = 25_000;
+    }
+
+    let started = std::time::Instant::now();
+    let overview = state
+        .get_session_overview(&session_id, SESSION_OVERVIEW_MAX_BUCKETS)
+        .expect("large overview should load");
+    let elapsed = started.elapsed();
+    assert_eq!(overview.buckets.len(), SESSION_OVERVIEW_MAX_BUCKETS);
+    assert!(
+        elapsed < Duration::from_millis(10),
+        "25k-message overview took {elapsed:?}"
+    );
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        persist_state(state.persistence_path.as_ref(), &inner)
+            .expect("large overview fixture should persist");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("session should exist");
+        let record = &mut inner.sessions[index];
+        record.session.messages.drain(..24_970);
+        record.message_start_index = 24_970;
+        record.message_positions = build_message_positions(&record.session.messages);
+        record.session.messages_loaded = false;
+    }
+    let bounded_started = std::time::Instant::now();
+    let bounded_overview = state
+        .get_session_overview(&session_id, SESSION_OVERVIEW_MAX_BUCKETS)
+        .expect("bounded-resident large overview should load");
+    let bounded_elapsed = bounded_started.elapsed();
+    assert_eq!(
+        bounded_overview, overview,
+        "large overview must not depend on transcript residency"
+    );
+    assert!(
+        bounded_elapsed < Duration::from_millis(10),
+        "25k-message bounded-resident overview took {bounded_elapsed:?}"
+    );
+
+    let app = app_router(state);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/sessions/{session_id}/overview?buckets={SESSION_OVERVIEW_MAX_BUCKETS}"
+                ))
+                .header(axum::http::header::ACCEPT_ENCODING, "gzip")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("overview request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::CONTENT_ENCODING)
+            .and_then(|value| value.to_str().ok()),
+        Some("gzip")
+    );
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("compressed overview body should load");
+    assert!(
+        body.len() < 8 * 1024,
+        "compressed 512-bucket overview was {} bytes",
+        body.len()
+    );
+}
+
+#[tokio::test]
+async fn get_session_history_route_rejects_missing_cursor() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    seed_loaded_history_messages(&state, &session_id, 10);
+    let app = app_router(state);
+
+    let (status, response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/sessions/{session_id}/history?before=missing-message&limit=5"
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        response.get("error").and_then(Value::as_str),
+        Some("session history cursor is no longer available; refresh the session tail")
+    );
+}
+
+#[tokio::test]
+async fn get_session_history_route_reports_missing_persisted_position_as_conflict() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    seed_loaded_history_messages(&state, &session_id, 2);
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        persist_state(state.persistence_path.as_path(), &inner)
+            .expect("history fixture should persist");
+    }
+    {
+        let connection = rusqlite::Connection::open(state.persistence_path.as_path())
+            .expect("history fixture database should open");
+        connection
+            .execute(
+                "DELETE FROM messages WHERE session_id = ?1 AND position = 0",
+                rusqlite::params![session_id],
+            )
+            .expect("one persisted history position should be removed");
+    }
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session should be mutable");
+        record.session.messages.clear();
+        record.session.messages_loaded = false;
+        record.message_start_index = 2;
+        record.message_positions.clear();
+    }
+    let app = app_router(state);
+
+    let (status, response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/api/sessions/{session_id}/history?from=start&limit=2"
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        response.get("error").and_then(Value::as_str),
+        Some("session history is missing persisted position 0; refresh the session tail")
+    );
+}
+
+#[tokio::test]
+async fn get_session_history_route_rejects_out_of_range_page_limits() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    let app = app_router(state);
+
+    for (limit, expected_error) in [
+        (0, "session history limit must be at least 1".to_owned()),
+        (
+            SESSION_HISTORY_PAGE_MAX_MESSAGES + 1,
+            format!("session history limit must be at most {SESSION_HISTORY_PAGE_MAX_MESSAGES}"),
+        ),
+    ] {
+        let (status, response): (StatusCode, Value) = request_json(
+            &app,
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/sessions/{session_id}/history?limit={limit}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            response.get("error").and_then(Value::as_str),
+            Some(expected_error.as_str())
+        );
+    }
+}
+
+#[tokio::test]
+async fn get_session_overview_route_rejects_out_of_range_bucket_counts() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    let app = app_router(state);
+
+    for (buckets, expected_error) in [
+        (0, "session overview buckets must be at least 1".to_owned()),
+        (
+            SESSION_OVERVIEW_MAX_BUCKETS + 1,
+            format!("session overview buckets must be at most {SESSION_OVERVIEW_MAX_BUCKETS}"),
+        ),
+    ] {
+        let (status, response): (StatusCode, Value) = request_json(
+            &app,
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/sessions/{session_id}/overview?buckets={buckets}"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            response.get("error").and_then(Value::as_str),
+            Some(expected_error.as_str())
+        );
+    }
+}
+
+#[tokio::test]
+async fn get_session_route_without_query_is_bounded_for_large_transcript() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    let message_ids = seed_loaded_history_messages(&state, &session_id, 513);
+    let app = app_router(state);
+
+    let (status, response): (StatusCode, SessionResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/sessions/{session_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response.session.message_count, 513);
+    assert!(!response.session.messages_loaded);
+    assert_eq!(
+        response.session.messages.len(),
+        SESSION_TAIL_DEFAULT_MESSAGES
+    );
+    assert_eq!(
+        response.session.messages.first().map(Message::id),
+        Some(message_ids[513 - SESSION_TAIL_DEFAULT_MESSAGES].as_str())
+    );
 }
 
 #[tokio::test]
@@ -559,7 +1143,9 @@ async fn get_session_route_rejects_tail_limit_above_cap() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(
         response.get("error").and_then(Value::as_str),
-        Some("session tail must be at most 500")
+        Some(
+            format!("session tail must be at most {SESSION_TAIL_HYDRATION_MAX_MESSAGES}").as_str()
+        )
     );
 }
 
@@ -691,12 +1277,97 @@ async fn snapshot_bearing_routes_include_message_count() {
     assert_eq!(
         session_body["session"]["messages"]
             .as_array()
-            .expect("session response should include full transcript")
+            .expect("bounded response should include the complete short transcript")
             .len(),
         2
     );
 
     let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Global snapshots redact queued prompt bodies, while the authorized targeted
+// session tail must include them so a live client can render mailbox wakeups
+// without fetching an unbounded transcript.
+#[tokio::test]
+async fn targeted_session_tail_includes_pending_prompts_redacted_from_global_state() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let created = state
+        .create_session(CreateSessionRequest {
+            name: Some("Queued Prompt Projection".to_owned()),
+            agent: None,
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("session should be created");
+    let session_id = created.session_id;
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("session should exist");
+        inner.sessions[index]
+            .session
+            .pending_prompts
+            .push(PendingPrompt {
+                attachments: Vec::new(),
+                id: "queued-mailbox-wakeup".to_owned(),
+                timestamp: "10:00".to_owned(),
+                text: "Queued mailbox wakeup".to_owned(),
+                expanded_text: Some("Expanded queued mailbox wakeup".to_owned()),
+                source: None,
+            });
+    }
+    let app = app_router(state.clone());
+
+    let (state_status, state_body): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/state")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(state_status, StatusCode::OK);
+    let state_session = state_body["sessions"]
+        .as_array()
+        .expect("state sessions should be an array")
+        .iter()
+        .find(|session| session["id"] == session_id)
+        .expect("state should include queued session");
+    assert!(
+        state_session.get("pendingPrompts").is_none(),
+        "global state must redact queued prompt bodies"
+    );
+
+    let (session_status, session_body): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/sessions/{session_id}?tail=1"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(session_status, StatusCode::OK);
+    assert_eq!(
+        session_body["session"]["pendingPrompts"],
+        json!([{
+            "id": "queued-mailbox-wakeup",
+            "timestamp": "10:00",
+            "text": "Queued mailbox wakeup",
+            "expandedText": "Expanded queued mailbox wakeup"
+        }])
+    );
 }
 
 // Pins `POST /api/sessions/{id}/messages`: prompt start must not advance the

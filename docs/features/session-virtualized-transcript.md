@@ -29,6 +29,162 @@ The current model is:
 3. **Measured page heights** refine spacer geometry, but mounted DOM remains
    authoritative while the user is actively reading.
 
+## Network History Paging
+
+Large transcripts are not returned to the browser as one unbounded session
+document. Initial hydration fetches the newest 20-message tail. When the reader
+approaches the top, the UI requests an ascending page of at most 64 older
+messages from:
+
+```text
+GET /api/sessions/{id}/history?before={exclusiveMessageId}&limit=64
+```
+
+The first retained message id is the stable, exclusive backwards cursor. Each
+response supplies `nextBefore` and `hasMore`; `messagesLoaded` becomes true only
+when the resident window spans both the true beginning and the live transcript
+tail. Reaching only one boundary leaves it false. `GET /api/sessions/{id}` is
+also bounded; it defaults to the recent 20-message tail and has no unbounded
+response branch.
+
+Boundary navigation is bounded too. Jump-to-start uses exactly one page:
+
+```text
+GET /api/sessions/{id}/history?from=start&limit=64
+```
+
+That replaces the resident tail with the true first page. Subsequent downward
+reading uses an exclusive forward cursor:
+
+```text
+GET /api/sessions/{id}/history?after={exclusiveMessageId}&limit=64
+```
+
+Position-targeted navigation also uses exactly one centered page:
+
+```text
+GET /api/sessions/{id}/history?around={globalMessagePosition}&limit=64
+```
+
+The response carries `messageStartIndex`, so the browser can replace its
+resident window without reconstructing a global position from message ids or
+walking intervening pages.
+
+Tail growth during the start-page request is not a merge conflict. The first
+page replaces transcript residency while current session metadata, counts, and
+the newer-history state remain authoritative. If the request still cannot be
+adopted (for example, replacement server instance or protocol failure), the
+keypress falls back to the top of the resident window instead of disappearing
+silently.
+
+After jump-to-start, the resident messages are a historical window, not the
+live tail. The pane keeps `hasNewerHistory` explicit, does not render live-only
+activity or pending-prompt cards below stale history, and shows a persistent
+**Jump to latest** affordance. Jump-to-bottom replaces the historical window
+with exactly one bounded latest page:
+
+```text
+GET /api/sessions/{id}/history?limit=64
+```
+
+Only after that page is adopted may bottom-follow resume. Reaching the bottom
+of the currently resident historical window is not equivalent to reaching the
+live transcript tail.
+
+Prompt submission is an explicit UI event. The pane may reattach a historical
+window for that event, but it must never reconstruct a prompt-send event from
+resident transcript data such as the last visible author. Replacing residency
+can legitimately change that author without any new prompt having been sent.
+
+Boundary scrolling and search never recursively request pages merely because
+more history exists. Marker, prompt, and overview-rail jumps use their durable
+global message position to request one centered page. They do not walk
+intervening pages and must never revive a full-transcript hydration branch.
+
+Older pages are prepended with message-id deduplication. The transcript
+virtualizer is the only owner of scroll anchoring while the page is inserted
+and measured; the history-loading hook does not write `scrollTop`. This avoids
+two independent compensation layers moving the visible messages after a page
+arrives. While the resident window still includes the live tail, live SSE
+appends remain visible during an older-page request. After explicit
+jump-to-start replaces the tail with a historical window, live state continues
+through session metadata, while live-only transcript cards remain hidden until
+the reader explicitly jumps back to the bounded latest page. A missing cursor
+or replacement `serverInstanceId` discards the page and requests an
+authoritative state/tail resync.
+
+Remote-proxy tail and history reads are freshness-sensitive. A proxy never
+returns cached summary metadata as a successful transcript response when its
+owner is unreachable, because that would make stale or absent transcript bytes
+look authoritative. Transport failures surface to the caller. Delayed remote
+REST responses are admitted only when their session count/mutation metadata is
+still compatible with the proxy state synchronized by SSE; incompatible pages
+return a conflict and are retried from current metadata.
+
+Search operates on the resident window and labels its results as loaded-only
+whenever older or newer pages are absent, so a zero-result resident search is
+never presented as a whole-transcript result. Marker CRUD resolves anchors
+against the indexed durable transcript, not just the resident tail. Marker
+navigation then requests one centered bounded page as described above. The
+virtualizer below still limits mounted DOM after multiple user-requested
+network pages have accumulated.
+
+Loaded pages currently remain resident for the active browser session. Network
+responses and JSON parsing are bounded, but total JavaScript heap is not yet
+bounded after a reader walks the whole transcript. The indexed-message and
+bidirectional-window work in the SQLite storage plan must add page eviction and
+re-fetch; the current implementation must not be described as complete
+bounded-memory transcript storage.
+
+### Transcript residency is not application state
+
+`session.messages` is a movable, bounded transcript window. Features must not
+rediscover durable or live state by scanning whichever messages happen to be
+resident. State needed continuously—current prompt, current agent shell
+command, pending prompts, counts, first-message identity—belongs in explicit
+session fields or a deliberately bounded endpoint.
+
+Recent-window rendering logic may inspect resident messages. Whole-transcript
+features such as prompt recall or global search need their own indexed query;
+they must never revive a full-hydration branch or silently treat the resident
+window as the complete transcript.
+
+## Whole-conversation overview rail
+
+The overview rail is a bounded whole-conversation feature, not a virtualizer
+layout projection. On pane activation the browser makes one request:
+
+```text
+GET /api/sessions/{id}/overview?buckets=200
+```
+
+`buckets` accepts `1..=512`. The response partitions stable global message
+positions into equal ranges and returns each range's message count, dominant
+semantic kind, user-authored count, and marker-presence flag, plus marker
+positions and current transcript freshness metadata.
+
+The backend computes the same map whether the full transcript or only the
+bounded retained tail is resident. Persisted messages carry compact
+kind/author metadata in a transactionally maintained one-byte-per-message
+session blob; the endpoint therefore reads one small row rather than parsing or
+hydrating message bodies. The repeated JSON bucket contract is served with HTTP
+compression.
+
+Buckets, markers, click targets, and the viewport indicator all use global
+message position as their only coordinate system. The indicator interpolates
+the visible interval from `messageStartIndex`, resident message count, and
+scroll fraction. A click maps directly to a global position and then to the
+single `around=` history request above.
+
+The exact viewport range remains position-linear, while a 24-pixel outlined
+handle centered on that range keeps the current location visible even when the
+honest range would otherwise project to only one or two pixels.
+
+The rail deliberately has no dependency on virtualizer layout snapshots,
+measured or estimated pixel heights, focus state, mounted pages, or transcript
+residency. Pixel measurement remains solely in the transcript virtualizer.
+The overview refetches when `messageCount` or `sessionMutationStamp` changes.
+
 ## Core Model
 
 ### Pages
@@ -294,10 +450,17 @@ These rules should remain true:
 6. Bottom-follow logic must stop immediately once the user explicitly scrolls
    away from the latest content.
 7. Pending prompts are part of the live tail and must render from the immediate
-   `session.pendingPrompts`. Never wrap the pending-prompt queue in
-   `useDeferredValue` — the continuous message stream starves the deferred update
-   and queued prompts vanish until the turn stops. Deferral is for the bulk message
-   history only, and even there the undeferred tail is always spliced back in.
+   `session.pendingPrompts` whenever the resident window is the live tail. Never
+   wrap the pending-prompt queue in `useDeferredValue` — the continuous message
+   stream starves the deferred update and queued prompts vanish until the turn
+   stops. When `hasNewerHistory` is true, hide live-only cards and show **Jump to
+   latest** instead of splicing those cards below stale history.
+8. The bottom of a historical window is not the live tail. Reattachment requires
+   one bounded latest-page request before bottom-follow can resume.
+9. Bottom-pin authority is resolved when a scroll write executes, not when an
+   anchor or saved position is captured. Once bottom-follow is active, delayed
+   restores must target the current real DOM bottom; they may not replay a
+   previously recorded `scrollTop`.
 
 ## Known Limitations
 

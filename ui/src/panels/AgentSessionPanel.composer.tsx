@@ -70,6 +70,7 @@ export const SessionComposer = memo(function SessionComposer({
   agentCommandsError,
   showNewResponseIndicator,
   newResponseIndicatorLabel,
+  newResponseIndicatorQueuedCount,
   onScrollToLatest,
   onDraftCommit,
   onDraftAttachmentRemove,
@@ -992,6 +993,11 @@ export const SessionComposer = memo(function SessionComposer({
       {showNewResponseIndicator ? (
         <button className="new-response-indicator" type="button" onClick={onScrollToLatest}>
           {newResponseIndicatorLabel}
+          {newResponseIndicatorQueuedCount > 0 ? (
+            <span className="new-response-indicator-queued-count">
+              {newResponseIndicatorQueuedCount} queued
+            </span>
+          ) : null}
         </button>
       ) : null}
       {draftAttachments.length > 0 ? (
@@ -1240,6 +1246,7 @@ export const SessionComposer = memo(function SessionComposer({
   previous.agentCommandsError === next.agentCommandsError &&
   previous.showNewResponseIndicator === next.showNewResponseIndicator &&
   previous.newResponseIndicatorLabel === next.newResponseIndicatorLabel &&
+  previous.newResponseIndicatorQueuedCount === next.newResponseIndicatorQueuedCount &&
   previous.onScrollToLatest === next.onScrollToLatest &&
   previous.onDraftCommit === next.onDraftCommit &&
   previous.onDraftAttachmentRemove === next.onDraftAttachmentRemove &&

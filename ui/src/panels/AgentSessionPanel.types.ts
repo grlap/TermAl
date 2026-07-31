@@ -26,6 +26,7 @@ import type {
   McpElicitationAction,
   SandboxMode,
   Session,
+  SessionLiveActivity,
 } from "../types";
 import type { PaneViewMode } from "../workspace";
 import type {
@@ -209,6 +210,7 @@ export type AgentSessionPanelFooterProps = {
   isUpdating: boolean;
   showNewResponseIndicator: boolean;
   newResponseIndicatorLabel: string;
+  newResponseIndicatorQueuedCount: number;
   footerModeLabel: string;
   onScrollToLatest: () => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
@@ -254,6 +256,7 @@ export type SessionComposerProps = {
   agentCommandsError: string | null;
   showNewResponseIndicator: boolean;
   newResponseIndicatorLabel: string;
+  newResponseIndicatorQueuedCount: number;
   onScrollToLatest: () => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
@@ -285,6 +288,7 @@ export type SessionConversationPageProps = {
   showWaitingIndicator: boolean;
   waitingIndicatorKind: WaitingIndicatorKind;
   waitingIndicatorPrompt: string | null;
+  waitingIndicatorActivity?: SessionLiveActivity | null;
   onApprovalDecision: (
     sessionId: string,
     messageId: string,

@@ -23,6 +23,14 @@ import type {
   UserInputRequestMessage,
 } from "./types";
 
+vi.mock("./api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./api")>();
+  return {
+    ...actual,
+    listMailboxes: vi.fn().mockResolvedValue([]),
+  };
+});
+
 describe("MessageCard", () => {
   it("disables non-head pending approval actions", () => {
     const message: ApprovalMessage = {
@@ -147,7 +155,7 @@ describe("MessageCard", () => {
       type: "text",
       author: "you",
       timestamp: "10:05",
-      text: "[TermAl mailbox notification]",
+      text: "[TermAl mailbox notification] First use termal_list_mailboxes, then termal_read_mailbox, then termal_acknowledge_mailbox.",
       source: {
         kind: "mailbox",
         sessionId: "session-sol",
@@ -165,14 +173,16 @@ describe("MessageCard", () => {
       <MessageCard
         message={message}
         mailboxViewerSessionId="session-fable"
+        onOpenMailbox={vi.fn()}
         onApprovalDecision={vi.fn()}
         onUserInputSubmit={vi.fn()}
       />,
     );
 
     expect(
-      screen.getByRole("button", { name: "Open mailbox (2 unread)" }),
+      screen.getByRole("button", { name: "Open mailbox →" }),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/termal_list_mailboxes/i)).toBeNull();
   });
 
   it("collapses a long peer message and provides a bottom hide control", () => {

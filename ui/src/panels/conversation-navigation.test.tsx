@@ -1,10 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import {
   MessageNavigationProvider,
   MessageNavigationButtons,
   buildMessageNavigationTargetMaps,
   makeMessageNavigationLookup,
+  usePagedMessageNavigation,
   type MessageNavigationContextValue,
 } from "./conversation-navigation";
 import type { Message } from "../types";
@@ -149,7 +158,10 @@ describe("MessageNavigationButtons", () => {
         prevMessageId: null,
         nextMessageId: null,
       }),
+      hasOlderHistory: false,
+      hasNewerHistory: false,
       jumpToMessageId: vi.fn(),
+      navigateToAdjacentMessage: vi.fn(),
     };
     const { container } = renderButtons("d1", "delegation", value);
 
@@ -158,13 +170,16 @@ describe("MessageNavigationButtons", () => {
   });
 
   it("renders both buttons and dispatches to the target message id", () => {
-    const jumpToMessageId = vi.fn();
+    const navigateToAdjacentMessage = vi.fn();
     const value: MessageNavigationContextValue = {
       getNavigationTargets: () => ({
         prevMessageId: "d1",
         nextMessageId: "d3",
       }),
-      jumpToMessageId,
+      hasOlderHistory: false,
+      hasNewerHistory: false,
+      jumpToMessageId: vi.fn(),
+      navigateToAdjacentMessage,
     };
     renderButtons("d2", "delegation", value);
 
@@ -181,21 +196,32 @@ describe("MessageNavigationButtons", () => {
     expect(next).toHaveTextContent("↓");
 
     fireEvent.click(prev);
-    expect(jumpToMessageId).toHaveBeenCalledWith("d1");
+    expect(navigateToAdjacentMessage).toHaveBeenCalledWith(
+      "d2",
+      "delegation",
+      "previous",
+    );
     fireEvent.click(next);
-    expect(jumpToMessageId).toHaveBeenCalledWith("d3");
-    expect(jumpToMessageId).toHaveBeenCalledTimes(2);
+    expect(navigateToAdjacentMessage).toHaveBeenCalledWith(
+      "d2",
+      "delegation",
+      "next",
+    );
+    expect(navigateToAdjacentMessage).toHaveBeenCalledTimes(2);
     cleanup();
   });
 
   it("disables the boundary button without hiding the group", () => {
-    const jumpToMessageId = vi.fn();
+    const navigateToAdjacentMessage = vi.fn();
     const value: MessageNavigationContextValue = {
       getNavigationTargets: () => ({
         prevMessageId: null,
         nextMessageId: "u2",
       }),
-      jumpToMessageId,
+      hasOlderHistory: false,
+      hasNewerHistory: false,
+      jumpToMessageId: vi.fn(),
+      navigateToAdjacentMessage,
     };
     renderButtons("u1", "userPrompt", value);
 
@@ -210,9 +236,45 @@ describe("MessageNavigationButtons", () => {
     expect(next).not.toBeDisabled();
 
     fireEvent.click(prev);
-    expect(jumpToMessageId).not.toHaveBeenCalled();
+    expect(navigateToAdjacentMessage).not.toHaveBeenCalled();
     fireEvent.click(next);
-    expect(jumpToMessageId).toHaveBeenCalledWith("u2");
+    expect(navigateToAdjacentMessage).toHaveBeenCalledWith(
+      "u1",
+      "userPrompt",
+      "next",
+    );
+    cleanup();
+  });
+
+  it("shows page-aware prompt arrows when the resident start page has one prompt", () => {
+    const navigateToAdjacentMessage = vi.fn();
+    const value: MessageNavigationContextValue = {
+      getNavigationTargets: () => ({
+        prevMessageId: null,
+        nextMessageId: null,
+      }),
+      hasOlderHistory: false,
+      hasNewerHistory: true,
+      jumpToMessageId: vi.fn(),
+      navigateToAdjacentMessage,
+    };
+    renderButtons("u1", "userPrompt", value);
+
+    const previous = screen.getByRole("button", {
+      name: "Jump to previous prompt",
+    });
+    const next = screen.getByRole("button", {
+      name: "Jump to next prompt",
+    });
+    expect(previous).toBeDisabled();
+    expect(next).not.toBeDisabled();
+
+    fireEvent.click(next);
+    expect(navigateToAdjacentMessage).toHaveBeenCalledWith(
+      "u1",
+      "userPrompt",
+      "next",
+    );
     cleanup();
   });
 
@@ -222,7 +284,10 @@ describe("MessageNavigationButtons", () => {
         prevMessageId: "u1",
         nextMessageId: "u3",
       }),
+      hasOlderHistory: false,
+      hasNewerHistory: false,
       jumpToMessageId: vi.fn(),
+      navigateToAdjacentMessage: vi.fn(),
     };
     renderButtons("u2", "userPrompt", value);
 
@@ -234,5 +299,111 @@ describe("MessageNavigationButtons", () => {
       screen.getByRole("button", { name: "Jump to next prompt" }),
     ).toBeTruthy();
     cleanup();
+  });
+});
+
+describe("usePagedMessageNavigation", () => {
+  it("loads a newer bounded page and jumps to the adjacent off-window prompt", async () => {
+    let resolveNewerPage: ((applied: boolean) => void) | null = null;
+    const requestNewerPage = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveNewerPage = resolve;
+        }),
+    );
+    const jumpToMessageId = vi.fn();
+    const initialMessages = [makeUserPrompt("u1"), makeAssistantText("a1")];
+    const { result, rerender } = renderHook(
+      ({
+        hasNewerHistory,
+        messages,
+      }: {
+        hasNewerHistory: boolean;
+        messages: Message[];
+      }) =>
+        usePagedMessageNavigation({
+          hasNewerHistory,
+          hasOlderHistory: false,
+          jumpToMessageId,
+          messages,
+          requestNewerPage,
+          requestOlderPage: vi.fn(async () => false),
+          sessionId: "session-1",
+        }),
+      {
+        initialProps: {
+          hasNewerHistory: true,
+          messages: initialMessages,
+        },
+      },
+    );
+
+    act(() => {
+      result.current.navigateToAdjacentMessage("u1", "userPrompt", "next");
+    });
+    await waitFor(() => expect(requestNewerPage).toHaveBeenCalledTimes(1));
+
+    rerender({
+      hasNewerHistory: false,
+      messages: [...initialMessages, makeUserPrompt("u2")],
+    });
+    await waitFor(() => expect(jumpToMessageId).toHaveBeenCalledWith("u2"));
+    act(() => resolveNewerPage?.(true));
+  });
+
+  it("loads an older bounded page and jumps to the adjacent off-window prompt", async () => {
+    let resolveOlderPage: ((applied: boolean) => void) | null = null;
+    const requestOlderPage = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveOlderPage = resolve;
+        }),
+    );
+    const jumpToMessageId = vi.fn();
+    const initialMessages = [makeUserPrompt("u2"), makeAssistantText("a2")];
+    const { result, rerender } = renderHook(
+      ({
+        hasOlderHistory,
+        messages,
+      }: {
+        hasOlderHistory: boolean;
+        messages: Message[];
+      }) =>
+        usePagedMessageNavigation({
+          hasNewerHistory: false,
+          hasOlderHistory,
+          jumpToMessageId,
+          messages,
+          requestNewerPage: vi.fn(async () => false),
+          requestOlderPage,
+          sessionId: "session-1",
+        }),
+      {
+        initialProps: {
+          hasOlderHistory: true,
+          messages: initialMessages,
+        },
+      },
+    );
+
+    act(() => {
+      result.current.navigateToAdjacentMessage(
+        "u2",
+        "userPrompt",
+        "previous",
+      );
+    });
+    await waitFor(() => expect(requestOlderPage).toHaveBeenCalledTimes(1));
+
+    rerender({
+      hasOlderHistory: false,
+      messages: [
+        makeUserPrompt("u1"),
+        makeAssistantText("a1"),
+        ...initialMessages,
+      ],
+    });
+    await waitFor(() => expect(jumpToMessageId).toHaveBeenCalledWith("u1"));
+    act(() => resolveOlderPage?.(true));
   });
 });

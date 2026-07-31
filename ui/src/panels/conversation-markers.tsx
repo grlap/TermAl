@@ -126,12 +126,15 @@ export function sortConversationMarkersForNavigation(
 }
 
 export function useConversationMarkerJump({
+  historyWindowKey,
   onMissingMessageJump,
   onConversationSearchItemMount,
   scrollContainerRef,
   sessionId,
   virtualizerHandleRef,
 }: {
+  /** Changes only when the resident bounded transcript window changes. */
+  historyWindowKey: string;
   onMissingMessageJump?: () => boolean | void;
   onConversationSearchItemMount: (
     itemKey: string,
@@ -148,6 +151,7 @@ export function useConversationMarkerJump({
   const messageSlotNodesSessionIdRef = useRef(sessionId);
   const [pendingHydratedJumpMessageId, setPendingHydratedJumpMessageId] =
     useState<string | null>(null);
+  const requestedHistoryWindowKeyRef = useRef<string | null>(null);
   activeSessionIdRef.current = sessionId;
 
   const ensureMessageSlotCacheForCurrentSession = useCallback(() => {
@@ -256,18 +260,17 @@ export function useConversationMarkerJump({
   );
 
   useEffect(() => {
-    if (pendingHydratedJumpMessageId === null) {
+    if (
+      pendingHydratedJumpMessageId === null ||
+      requestedHistoryWindowKeyRef.current === historyWindowKey
+    ) {
       return undefined;
     }
     let secondRetryFrame: number | null = null;
-    // The missing-message path usually triggers transcript hydration; retry
-    // outside React's effect phase so the virtualizer can flush its new range.
-    const staleJumpTimer = window.setTimeout(() => {
-      if (activeSessionIdRef.current !== sessionId) {
-        return;
-      }
-      setPendingHydratedJumpMessageId(null);
-    }, 1_000);
+    // A changed bounded-window key means the requested page has been adopted.
+    // Give React and the virtualizer two frames to mount/measure it. If the
+    // target is still absent, request exactly one more bounded page; repeat on
+    // the next key change until the target is found or history is exhausted.
     const retryFrame = window.requestAnimationFrame(() => {
       if (activeSessionIdRef.current !== sessionId) {
         return;
@@ -281,6 +284,13 @@ export function useConversationMarkerJump({
           return;
         }
         if (tryJumpToMessageId(pendingHydratedJumpMessageId)) {
+          requestedHistoryWindowKeyRef.current = null;
+          setPendingHydratedJumpMessageId(null);
+          return;
+        }
+        requestedHistoryWindowKeyRef.current = historyWindowKey;
+        if (onMissingMessageJump?.() !== true) {
+          requestedHistoryWindowKeyRef.current = null;
           setPendingHydratedJumpMessageId(null);
         }
       });
@@ -290,9 +300,19 @@ export function useConversationMarkerJump({
       if (secondRetryFrame !== null) {
         window.cancelAnimationFrame(secondRetryFrame);
       }
-      window.clearTimeout(staleJumpTimer);
     };
-  }, [pendingHydratedJumpMessageId, sessionId, tryJumpToMessageId]);
+  }, [
+    historyWindowKey,
+    onMissingMessageJump,
+    pendingHydratedJumpMessageId,
+    sessionId,
+    tryJumpToMessageId,
+  ]);
+
+  useEffect(() => {
+    requestedHistoryWindowKeyRef.current = null;
+    setPendingHydratedJumpMessageId(null);
+  }, [sessionId]);
 
   useEffect(() => cancelCorrectionFrame, [
     cancelCorrectionFrame,
@@ -307,15 +327,18 @@ export function useConversationMarkerJump({
     (messageId: string) => {
       cancelCorrectionFrame();
       setPendingHydratedJumpMessageId(null);
+      requestedHistoryWindowKeyRef.current = null;
       if (tryJumpToMessageId(messageId)) {
         return;
       }
       if (onMissingMessageJump?.()) {
+        requestedHistoryWindowKeyRef.current = historyWindowKey;
         setPendingHydratedJumpMessageId(messageId);
       }
     },
     [
       cancelCorrectionFrame,
+      historyWindowKey,
       onMissingMessageJump,
       tryJumpToMessageId,
     ],

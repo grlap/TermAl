@@ -23,6 +23,7 @@ import type {
   JsonValue,
   MailboxMessage,
   MailboxSummary,
+  Message,
   McpElicitationAction,
   OrchestratorInstance,
   OrchestratorTemplate,
@@ -103,6 +104,43 @@ export type SessionResponse = {
    * monotonic revision guard until safety-net pollers re-fetch.
    */
   serverInstanceId: string;
+};
+
+export type SessionHistoryResponse = {
+  messages: Message[];
+  nextBefore?: string | null;
+  hasMore: boolean;
+  nextAfter?: string | null;
+  hasNewer?: boolean;
+  messageStartIndex?: number;
+  messageCount: number;
+  revision: number;
+  sessionMutationStamp: number;
+  serverInstanceId: string;
+};
+
+export type ConversationOverviewKind = "text" | "command" | "diff" | "error";
+
+export type ConversationOverviewBucket = {
+  c: number;
+  k: ConversationOverviewKind;
+  u: number;
+  m: boolean;
+};
+
+export type ConversationOverviewMarker = {
+  position: number;
+  kind: ConversationMarkerKind;
+  label?: string | null;
+};
+
+export type SessionOverviewResponse = {
+  sessionId: string;
+  messageCount: number;
+  sessionMutationStamp: number;
+  buckets: ConversationOverviewBucket[];
+  markers: ConversationOverviewMarker[];
+  latestPosition: number;
 };
 
 export type CreateProjectResponse = {
@@ -493,18 +531,51 @@ export function fetchState() {
   return requestJsonFirst<StateResponse>("/api/state");
 }
 
-export function fetchSession(sessionId: string) {
-  return requestJsonFirst<SessionResponse>(
-    `/api/sessions/${encodeURIComponent(sessionId)}`,
-  );
-}
-
-export function fetchSessionTail(sessionId: string, messageLimit: number) {
+export function fetchSessionTail(sessionId: string, messageLimit = 20) {
   const query = new URLSearchParams({
     tail: String(Math.max(1, Math.floor(messageLimit))),
   });
   return requestJsonFirst<SessionResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}?${query.toString()}`,
+  );
+}
+
+export function fetchSessionHistory(
+  sessionId: string,
+  options: {
+    before?: string | null;
+    after?: string | null;
+    around?: number | null;
+    from?: "start";
+    limit: number;
+  },
+) {
+  const query = new URLSearchParams({
+    limit: String(Math.max(1, Math.floor(options.limit))),
+  });
+  if (options.before) {
+    query.set("before", options.before);
+  }
+  if (options.after) {
+    query.set("after", options.after);
+  }
+  if (options.around !== undefined && options.around !== null) {
+    query.set("around", String(Math.max(0, Math.floor(options.around))));
+  }
+  if (options.from) {
+    query.set("from", options.from);
+  }
+  return requestJsonFirst<SessionHistoryResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/history?${query.toString()}`,
+  );
+}
+
+export function fetchSessionOverview(sessionId: string, buckets = 200) {
+  const query = new URLSearchParams({
+    buckets: String(Math.max(1, Math.min(512, Math.floor(buckets)))),
+  });
+  return requestJsonFirst<SessionOverviewResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/overview?${query.toString()}`,
   );
 }
 

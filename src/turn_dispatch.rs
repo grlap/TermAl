@@ -463,12 +463,17 @@ impl AppState {
             source,
         };
         let message_index = push_message_on_record(record, message.clone());
+        record.session.live_activity = Some(SessionLiveActivity {
+            prompt: prompt.clone(),
+            command: None,
+            command_status: None,
+        });
         record.session.status = SessionStatus::Active;
         record.session.preview = prompt_preview_text(&prompt, &message_attachments);
         let message_delta = StartedTurnMessageDelta {
             session_id: record.session.id.clone(),
             message_id,
-            message_index,
+            message_index: global_message_index(record, message_index),
             message_count: session_message_count(record),
             message,
             preview: record.session.preview.clone(),

@@ -58,12 +58,12 @@ import {
   upsertSessionStoreSession,
 } from "./session-store";
 import {
-  SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES,
+  SESSION_HISTORY_PAGE_MESSAGE_COUNT,
   SESSION_TAIL_WINDOW_MESSAGE_COUNT,
 } from "./session-tail-policy";
 import {
   ApiRequestError,
-  fetchSession,
+  fetchSessionHistory,
   fetchSessionTail,
   type CreateSessionResponse,
   type DelegationWaitRecord,
@@ -80,9 +80,7 @@ import {
   isServerInstanceMismatch,
   shouldAdoptSnapshotRevision,
 } from "./state-revision";
-import {
-  type PendingStateResyncOptions,
-} from "./app-live-state-resync-options";
+import { type PendingStateResyncOptions } from "./app-live-state-resync-options";
 import {
   applyDelegationWaitConsumed,
   applyDelegationWaitCreated,
@@ -99,6 +97,14 @@ import {
   type AdoptFetchedSessionOutcome,
   type SessionHydrationRequestContext,
 } from "./session-hydration-adoption";
+import {
+  appendSessionHistoryPage,
+  prependSessionHistoryPage,
+  repairSessionTailFromHistoryPage,
+  replaceSessionWithHistoryAroundPage,
+  replaceSessionWithHistoryTailPage,
+  replaceSessionWithHistoryStartPage,
+} from "./session-history";
 import {
   applyDelegationParentIdsFromSummaries,
   reconcileSessions,
@@ -145,24 +151,16 @@ import type {
   UseAppLiveStateReturn,
 } from "./app-live-state-types";
 import {
-  fullFetchAdoptFetchedSessionOutcome,
   resolveAdoptStateSessionOptions,
   SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
   SESSION_HYDRATION_RETRY_DELAYS_MS,
-  SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS,
+  type SessionHydrationOptions,
 } from "./app-live-state-hydration";
 import {
-  cancelDeferredFullHydrationTimers,
-  clearDeferredFullHydrationTimer,
-  scheduleDeferredFullHydration as scheduleDeferredFullHydrationTimer,
-  shouldDelayFullHydrationStartForComposer as shouldDelayFullHydrationStartForComposerFromScheduler,
-  shouldPromoteDeferredFullHydration,
-  type DeferredFullHydrationHandle,
-  type SessionHydrationOptions,
-} from "./app-live-state-deferred-hydration";
-import {
-  addSessionFullHydrationDemandListener,
-} from "./session-hydration-demand";
+  addSessionHistoryPageDemandListener,
+  completeSessionHistoryPageDemand,
+  type SessionHistoryPageDemand,
+} from "./session-history-demand";
 import {
   enqueueWorkspaceFilesChangedEvent as enqueueWorkspaceFilesChangedEventInGate,
   flushWorkspaceFilesChangedEventBuffer as flushWorkspaceFilesChangedEventGateBuffer,
@@ -188,9 +186,6 @@ export {
   resolveAdoptStateSessionOptions,
   SESSION_HYDRATION_FIRST_RETRY_DELAY_MS,
   SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
-  SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_HARD_TIMEOUT_MS,
-  SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS,
-  SESSION_TAIL_FULL_HYDRATION_DEFER_MS,
 } from "./app-live-state-hydration";
 
 function rememberServerInstanceId(
@@ -282,21 +277,24 @@ export function useAppLiveState(
 
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
   const hydratedSessionIdsRef = useRef<Set<string>>(new Set());
+  // Records sessions whose current browser state already includes an
+  // authoritative recent tail. A partial transcript can remain
+  // `messagesLoaded: false` indefinitely without triggering another automatic
+  // page; explicit history demand still loads one older page at a time.
+  const tailLoadedSessionIdsRef = useRef<Set<string>>(new Set());
   const hydrationMismatchSessionIdsRef = useRef<Set<string>>(new Set());
   const queuedHydrationSessionIdsRef = useRef<Set<string>>(new Set());
-  const queuedTextRepairHydrationSessionIdsRef = useRef<Set<string>>(
-    new Set(),
-  );
+  const queuedTailRepairSessionIdsRef = useRef<Set<string>>(new Set());
+  const queuedTextRepairHydrationSessionIdsRef = useRef<Set<string>>(new Set());
   const lastFullStateServerInstanceIdRef = useRef<string | null>(
     lastSeenServerInstanceIdRef.current,
   );
   const hydrationRestartResyncPendingRef = useRef(false);
   const hydrationRetryTimersRef = useRef<Map<string, number>>(new Map());
-  const deferredFullHydrationTimersRef = useRef<
-    Map<string, DeferredFullHydrationHandle>
-  >(new Map());
   const hydrationRetryAttemptsRef = useRef<Map<string, number>>(new Map());
-  const hydrationCappedRetryAttemptsRef = useRef<Map<string, number>>(new Map());
+  const hydrationCappedRetryAttemptsRef = useRef<Map<string, number>>(
+    new Map(),
+  );
   const forceAdoptNextStateEventRef = useRef(false);
   const laggedRecoveryBaselineRevisionRef = useRef<number | null>(null);
 
@@ -315,9 +313,9 @@ export function useAppLiveState(
   // gives up after a non-200 SSE response and the client gets stuck".
   const [sseEpoch, setSseEpoch] = useState(0);
   const sseRecoveryAttemptRef = useRef(0);
-  const sseRecoveryTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
-    null,
-  );
+  const sseRecoveryTimerRef = useRef<ReturnType<
+    typeof window.setTimeout
+  > | null>(null);
   // Set by `forceSseReconnect` (e.g. from `handleSend` after detecting a
   // server-restart mid-request). Any later `adoptState` call that observes a
   // `fullStateServerInstanceChanged` flip consumes it and recreates SSE. The
@@ -345,8 +343,9 @@ export function useAppLiveState(
   // without losing the per-mount cleanup identity.
   const stateResyncInFlightRef = useRef(false);
   const stateResyncPendingRef = useRef(false);
-  const pendingStateResyncOptionsRef =
-    useRef<PendingStateResyncOptions | null>(null);
+  const pendingStateResyncOptionsRef = useRef<PendingStateResyncOptions | null>(
+    null,
+  );
   const pendingRecoveryOpenSessionIdRef = useRef<string | undefined>(undefined);
   const pendingRecoveryPaneIdRef = useRef<string | null | undefined>(undefined);
   // Bridges `adoptState` (declared at the hook body so the
@@ -394,7 +393,6 @@ export function useAppLiveState(
 
   function completeSessionHydration(sessionId: string) {
     clearHydrationRetry(sessionId);
-    clearDeferredFullHydration(sessionId);
     hydratedSessionIdsRef.current.add(sessionId);
   }
 
@@ -405,14 +403,6 @@ export function useAppLiveState(
     hydrationRetryTimersRef.current.clear();
     hydrationRetryAttemptsRef.current.clear();
     hydrationCappedRetryAttemptsRef.current.clear();
-  }
-
-  function clearDeferredFullHydration(sessionId: string) {
-    clearDeferredFullHydrationTimer(deferredFullHydrationTimersRef, sessionId);
-  }
-
-  function cancelDeferredFullHydrations() {
-    cancelDeferredFullHydrationTimers(deferredFullHydrationTimersRef);
   }
 
   function clearHydrationMismatchSessionIds(sessionIds: Iterable<string>) {
@@ -427,52 +417,26 @@ export function useAppLiveState(
     );
   }
 
-  function shouldStartTailFirstHydration(
+  function shouldStartTailLoad(
     sessionId: string,
-    options?: { allowDivergentTextRepairAfterNewerRevision?: boolean },
+    options?: SessionHydrationOptions,
   ) {
     if (options?.allowDivergentTextRepairAfterNewerRevision === true) {
       return false;
     }
     const session = sessionsRef.current.find((entry) => entry.id === sessionId);
-    if (!session || session.messagesLoaded !== false || session.messages.length > 0) {
+    if (!session) {
       return false;
     }
-    const messageCount =
-      typeof session.messageCount === "number"
-        ? session.messageCount
-        : session.messages.length;
-    return messageCount >= SESSION_TAIL_FIRST_HYDRATION_MIN_MESSAGES;
-  }
-
-  function shouldDelayFullHydrationStartForComposer(
-    sessionId: string,
-    options?: SessionHydrationOptions,
-  ) {
-    return shouldDelayFullHydrationStartForComposerFromScheduler({
-      sessionId,
-      options,
-      sessionStillNeedsHydration,
-      shouldStartTailFirstHydration,
-    });
-  }
-
-  function scheduleDeferredFullHydration(
-    sessionId: string,
-    options: {
-      autoStart?: boolean;
-      delayMs?: number;
-      firstScheduledAtMs?: number;
-    } = {},
-  ) {
-    scheduleDeferredFullHydrationTimer({
-      timersRef: deferredFullHydrationTimersRef,
-      isMountedRef,
-      sessionId,
-      sessionStillNeedsHydration,
-      startSessionHydration,
-      options,
-    });
+    if (options?.forceTailRepair === true) {
+      return true;
+    }
+    if (session.messagesLoaded !== false) {
+      return false;
+    }
+    return (
+      !tailLoadedSessionIdsRef.current.has(sessionId)
+    );
   }
 
   function scheduleHydrationRetry(
@@ -514,13 +478,20 @@ export function useAppLiveState(
   useEffect(() => {
     return () => {
       cancelHydrationRetries();
-      cancelDeferredFullHydrations();
     };
   }, []);
 
   useEffect(
     () =>
-      addSessionFullHydrationDemandListener(({ sessionId }) => {
+      addSessionHistoryPageDemandListener((demand) => {
+        const { sessionId } = demand;
+        if (
+          demand.direction !== "older" ||
+          demand.requestId !== undefined
+        ) {
+          void loadBoundedHistoryWindow(demand);
+          return;
+        }
         if (!isMountedRef.current || !sessionStillNeedsHydration(sessionId)) {
           return;
         }
@@ -646,7 +617,8 @@ export function useAppLiveState(
         ? []
         : mergedSessions.flatMap((session) => {
             const previousSession = previousSessionsById.get(session.id);
-            return previousSession && previousSession.workdir !== session.workdir
+            return previousSession &&
+              previousSession.workdir !== session.workdir
               ? [session.id]
               : [];
           }),
@@ -771,14 +743,19 @@ export function useAppLiveState(
           availableSessionIds.has(sessionId),
         ),
       );
+      queuedTailRepairSessionIdsRef.current = new Set(
+        [...queuedTailRepairSessionIdsRef.current].filter((sessionId) =>
+          availableSessionIds.has(sessionId),
+        ),
+      );
+      tailLoadedSessionIdsRef.current = new Set(
+        [...tailLoadedSessionIdsRef.current].filter((sessionId) =>
+          availableSessionIds.has(sessionId),
+        ),
+      );
       for (const sessionId of hydrationRetryTimersRef.current.keys()) {
         if (!availableSessionIds.has(sessionId)) {
           clearHydrationRetry(sessionId);
-        }
-      }
-      for (const sessionId of deferredFullHydrationTimersRef.current.keys()) {
-        if (!availableSessionIds.has(sessionId)) {
-          clearDeferredFullHydration(sessionId);
         }
       }
     }
@@ -790,6 +767,32 @@ export function useAppLiveState(
             !unhydratedSessionIds.has(sessionId),
         ),
       );
+    }
+    for (const session of mergedSessions) {
+      const previousSession = previousSessionsById.get(session.id);
+      const previousMessageCount =
+        previousSession?.messageCount ?? previousSession?.messages.length;
+      const nextMessageCount = session.messageCount ?? session.messages.length;
+      const previousMutationStamp =
+        previousSession?.sessionMutationStamp ?? null;
+      const nextMutationStamp = session.sessionMutationStamp ?? null;
+      const transcriptAuthorityChanged =
+        previousSession !== undefined &&
+        (previousMessageCount !== nextMessageCount ||
+          (previousMutationStamp !== null &&
+            nextMutationStamp !== null &&
+            previousMutationStamp !== nextMutationStamp));
+      if (
+        session.messagesLoaded === false &&
+        (previousSession?.messagesLoaded === true ||
+          transcriptAuthorityChanged)
+      ) {
+        // A bounded tail is only authoritative for the summary metadata that
+        // produced it. If a same-server snapshot advances the transcript count
+        // or mutation stamp, re-arm targeted hydration even when both the old
+        // and new projections are already `messagesLoaded: false`.
+        tailLoadedSessionIdsRef.current.delete(session.id);
+      }
     }
     if (hasRemovedSessions || unhydratedSessionIds.size > 0) {
       hydrationMismatchSessionIdsRef.current = new Set(
@@ -928,7 +931,7 @@ export function useAppLiveState(
       kind:
         options?.allowDivergentTextRepairAfterNewerRevision === true
           ? "textRepair"
-          : "fullSession",
+          : "sessionTail",
       messageCount: getHydrationMessageCount(session),
       revision: latestStateRevisionRef.current,
       serverInstanceId: lastSeenServerInstanceIdRef.current,
@@ -938,7 +941,7 @@ export function useAppLiveState(
 
   // Returns a discriminated outcome because metadata mismatch needs different
   // recovery depending on direction: stale responses retry hydration, while a
-  // full-session response ahead of the current summary must first force
+  // bounded session response ahead of the current summary must first force
   // `/api/state` so the global revision/session metadata catches up.
   function adoptFetchedSession(
     session: Session,
@@ -974,11 +977,16 @@ export function useAppLiveState(
     const hydratedSession = {
       ...session,
       messagesLoaded: adoptOutcome === "adopted",
+      hasOlderHistory: adoptOutcome === "partial",
+      hasNewerHistory: false,
     };
     const reconciledHydratedSession = reconcileSingleSession(
       currentSession,
       hydratedSession,
-      { disableMutationStampFastPath: true },
+      {
+        adoptPartialMessages: adoptOutcome === "partial",
+        disableMutationStampFastPath: true,
+      },
     );
     const nextSessions = latestSessions.map((entry, index) =>
       index === latestExistingIndex ? reconciledHydratedSession : entry,
@@ -1001,36 +1009,159 @@ export function useAppLiveState(
     return adoptOutcome;
   }
 
+  function publishHistorySession(session: Session) {
+    const latestSessions = sessionsRef.current;
+    const sessionIndex = latestSessions.findIndex(
+      (entry) => entry.id === session.id,
+    );
+    if (sessionIndex === -1) {
+      return false;
+    }
+    const nextSessions = latestSessions.map((entry, index) =>
+      index === sessionIndex ? session : entry,
+    );
+    sessionsRef.current = nextSessions;
+    upsertSessionSlice(session);
+    flushAndCancelPendingSessionRender(nextSessions);
+    setSessions(nextSessions);
+    hydrationMismatchSessionIdsRef.current.delete(session.id);
+    return true;
+  }
+
+  async function loadBoundedHistoryWindow(
+    demand: SessionHistoryPageDemand,
+  ) {
+    const { direction, requestId, sessionId } = demand;
+    let applied = false;
+    try {
+      if (!isMountedRef.current) {
+        return;
+      }
+      const requestedSession = sessionsRef.current.find(
+        (entry) => entry.id === sessionId,
+      );
+      if (!requestedSession) {
+        return;
+      }
+      const requestedAfter =
+        direction === "newer"
+          ? (requestedSession.messages[
+              requestedSession.messages.length - 1
+            ]?.id ?? null)
+          : null;
+      const requestedBefore =
+        direction === "older"
+          ? (requestedSession.messages[0]?.id ?? null)
+          : null;
+      if (direction === "newer" && !requestedAfter) {
+        return;
+      }
+      if (direction === "older" && !requestedBefore) {
+        return;
+      }
+      const historyPage = await fetchSessionHistory(sessionId, {
+        ...(direction === "start"
+          ? { from: "start" as const }
+          : direction === "newer"
+            ? { after: requestedAfter }
+            : direction === "older"
+              ? { before: requestedBefore }
+              : direction === "around"
+                ? { around: demand.position ?? 0 }
+              : {}),
+        limit: SESSION_HISTORY_PAGE_MESSAGE_COUNT,
+      });
+      if (
+        !isMountedRef.current ||
+        isServerInstanceMismatch(
+          lastSeenServerInstanceIdRef.current,
+          historyPage.serverInstanceId,
+        )
+      ) {
+        requestActionRecoveryResyncRef.current({
+          allowUnknownServerInstance: true,
+        });
+        return;
+      }
+      const currentSession = sessionsRef.current.find(
+        (entry) => entry.id === sessionId,
+      );
+      if (!currentSession) {
+        return;
+      }
+      const mergeOutcome =
+        direction === "start"
+          ? replaceSessionWithHistoryStartPage({
+              current: currentSession,
+              page: historyPage,
+            })
+          : direction === "newer"
+            ? appendSessionHistoryPage({
+                current: currentSession,
+                page: historyPage,
+                requestedAfter: requestedAfter!,
+              })
+            : direction === "older"
+              ? prependSessionHistoryPage({
+                  current: currentSession,
+                  page: historyPage,
+                  requestedBefore: requestedBefore!,
+                })
+              : direction === "around"
+                ? replaceSessionWithHistoryAroundPage({
+                    current: currentSession,
+                    page: historyPage,
+                    requestedPosition: demand.position ?? 0,
+                  })
+              : replaceSessionWithHistoryTailPage({
+                  current: currentSession,
+                  page: historyPage,
+                });
+      switch (mergeOutcome.kind) {
+        case "applied":
+          applied = publishHistorySession(mergeOutcome.session);
+          return;
+        case "cursorChanged":
+        case "metadataChanged":
+          requestActionRecoveryResyncRef.current();
+          return;
+        case "protocolError":
+          throw new Error(mergeOutcome.message);
+        default: {
+          const _exhaustive: never = mergeOutcome;
+          void _exhaustive;
+        }
+      }
+    } catch (error) {
+      reportRequestError(error);
+    } finally {
+      completeSessionHistoryPageDemand(requestId, applied);
+    }
+  }
+
   function startSessionHydration(
     sessionId: string,
     options?: SessionHydrationOptions,
   ) {
-    if (
-      options?.fromDeferredFullHydration !== true &&
-      deferredFullHydrationTimersRef.current.has(sessionId)
-    ) {
-      if (shouldPromoteDeferredFullHydration(options)) {
-        clearDeferredFullHydration(sessionId);
-      } else {
-        return;
-      }
-    }
-    if (options?.fromDeferredFullHydration === true) {
-      clearDeferredFullHydration(sessionId);
+    if (options?.forceTailRepair === true) {
+      // Keep the invalidation across a failed request so the ordinary retry
+      // path still performs a tail repair instead of falling into history
+      // paging.
+      tailLoadedSessionIdsRef.current.delete(sessionId);
     }
     if (hydratingSessionIdsRef.current.has(sessionId)) {
-      if (options?.queueAfterCurrent === true) {
+      if (
+        options?.queueAfterCurrent === true &&
+        options.forceTailRepair !== true
+      ) {
         queuedHydrationSessionIdsRef.current.add(sessionId);
+      }
+      if (options?.forceTailRepair === true) {
+        queuedTailRepairSessionIdsRef.current.add(sessionId);
       }
       if (options?.allowDivergentTextRepairAfterNewerRevision === true) {
         queuedTextRepairHydrationSessionIdsRef.current.add(sessionId);
       }
-      return;
-    }
-    if (shouldDelayFullHydrationStartForComposer(sessionId, options)) {
-      scheduleDeferredFullHydration(sessionId, {
-        delayMs: SESSION_TAIL_FULL_HYDRATION_COMPOSER_BUSY_RETRY_MS,
-      });
       return;
     }
 
@@ -1045,7 +1176,7 @@ export function useAppLiveState(
       let retryHydrationWithCap = false;
       try {
         let attemptedTailHydration = false;
-        if (shouldStartTailFirstHydration(sessionId, options)) {
+        if (shouldStartTailLoad(sessionId, options)) {
           attemptedTailHydration = true;
           const tailResponse = await fetchSessionTail(
             sessionId,
@@ -1062,8 +1193,20 @@ export function useAppLiveState(
             return;
           }
 
+          const tailSession = {
+            ...tailResponse.session,
+            messageStartIndex:
+              tailResponse.session.messagesLoaded === true
+                ? 0
+                : Math.max(
+                    0,
+                    (tailResponse.session.messageCount ??
+                      tailResponse.session.messages.length) -
+                      tailResponse.session.messages.length,
+                  ),
+          };
           const tailAdoptOutcome = adoptFetchedSession(
-            tailResponse.session,
+            tailSession,
             tailResponse.revision,
             tailResponse.serverInstanceId,
             {
@@ -1073,14 +1216,15 @@ export function useAppLiveState(
           );
           switch (tailAdoptOutcome) {
             case "partial":
+              tailLoadedSessionIdsRef.current.add(sessionId);
               queuedHydrationSessionIdsRef.current.delete(sessionId);
               if (!sessionStillNeedsHydration(sessionId)) {
                 completeSessionHydration(sessionId);
                 return;
               }
-              scheduleDeferredFullHydration(sessionId, { autoStart: false });
               return;
             case "adopted":
+              tailLoadedSessionIdsRef.current.add(sessionId);
               completeSessionHydration(sessionId);
               return;
             case "restartResync":
@@ -1092,7 +1236,8 @@ export function useAppLiveState(
               shouldRetryHydration = true;
               return;
             case "stale":
-              break;
+              shouldRetryHydration = true;
+              return;
             default: {
               const _exhaustive: never = tailAdoptOutcome;
               void _exhaustive;
@@ -1105,105 +1250,90 @@ export function useAppLiveState(
           completeSessionHydration(sessionId);
           return;
         }
-        // Recapture so the full-fetch classifier sees metadata mutated by
-        // partial tail adoption above.
-        const fullRequestContext =
-          captureHydrationRequestContext(sessionId, options) ?? requestContext;
-        const response = await fetchSession(sessionId);
-        if (!isMountedRef.current) {
-          return;
-        }
-        if (response.session.id !== sessionId) {
-          // Suppressed until the next authoritative state adoption clears the
-          // set. A timer reset would re-open the mismatch -> resync loop.
-          if (!hydrationMismatchSessionIdsRef.current.has(sessionId)) {
-            hydrationMismatchSessionIdsRef.current.add(sessionId);
-            requestActionRecoveryResyncRef.current();
-          }
-          return;
-        }
-        const adoptOutcome = fullFetchAdoptFetchedSessionOutcome(
-          adoptFetchedSession(
-            response.session,
-            response.revision,
-            response.serverInstanceId,
-            fullRequestContext,
-          ),
+
+        const retainedSession = sessionsRef.current.find(
+          (entry) => entry.id === sessionId,
         );
-        switch (adoptOutcome) {
-          case "adopted":
-            completeSessionHydration(sessionId);
-            break;
-          case "restartResync":
-            hydrationRestartResyncPendingRef.current = true;
-            requestActionRecoveryResyncRef.current();
-            // The recovery state probe is the authoritative path after a
-            // backend restart. Do not stack a session retry on top of it.
-            break;
-          case "stateResync":
-            requestActionRecoveryResyncRef.current();
+        const isTextRepair =
+          options?.allowDivergentTextRepairAfterNewerRevision === true;
+        if (
+          retainedSession &&
+          (isTextRepair ||
+            (retainedSession.messagesLoaded === false &&
+              retainedSession.messages.length > 0))
+        ) {
+          const requestedBefore = isTextRepair
+            ? null
+            : (retainedSession.messages[0]?.id ?? null);
+          if (!isTextRepair && !requestedBefore) {
             shouldRetryHydration = true;
-            break;
-          case "stale": {
-            // The classifier returns `"stale"` for several distinct
-            // reasons (see `classifyFetchedSessionAdoption`):
-            //   (a) the response is metadata-only
-            //       (`responseSession.messagesLoaded !== true`) —
-            //       the backend has not hydrated the full transcript
-            //       yet (typical for unloaded remote-proxy sessions
-            //       awaiting upstream fetch). Retrying is useful:
-            //       the backend will eventually load and the next
-            //       fetch will adopt.
-            //   (b) the response is fully loaded but local is also
-            //       fully loaded AND has advanced past the response
-            //       (revision / message_count / mutation_stamp
-            //       skew). SSE deltas arrived during the
-            //       `/api/sessions/{id}` round-trip and bumped local
-            //       state past what the response captured. Retrying
-            //       is FUTILE: the SSE stream is faster than the
-            //       REST round-trip, so the next fetch will race the
-            //       same way and lose again, producing an infinite
-            //       refetch loop during any active streaming turn
-            //       whose delta cadence is faster than the round-
-            //       trip (observed in practice: hundreds of MB of
-            //       `/api/sessions/{id}` traffic during a single
-            //       Codex table-printing turn). Local state is at
-            //       least as recent as the response anyway —
-            //       nothing to gain.
-            //   (c) local is summary-only (`messagesLoaded === false`)
-            //       and the response IS fully loaded but the
-            //       classifier rejected adoption (e.g., concurrent
-            //       delta bumped local metadata past the response's
-            //       snapshot, so `requestStillMatches` /
-            //       `responseMatches` failed). Retrying IS useful:
-            //       the next fetch should land the canonical
-            //       transcript that the metadata-only delta could
-            //       not provide.
-            //
-            // Skip retry only for case (b): both local AND response
-            // hydrated. Cases (a) and (c) keep the existing retry
-            // behaviour. See bugs.md "Hydration retry loop can spam
-            // persistent failures".
-            const localSession = sessionsRef.current.find(
-              (entry) => entry.id === sessionId,
-            );
-            const localFullyHydrated = localSession?.messagesLoaded === true;
-            const responseFullyHydrated =
-              response.session.messagesLoaded === true;
-            if (localFullyHydrated && responseFullyHydrated) {
-              clearHydrationRetry(sessionId);
-            } else {
-              shouldRetryHydration = true;
-            }
-            break;
+            return;
           }
-          default: {
-            const _exhaustive: never = adoptOutcome;
-            void _exhaustive;
-            shouldRetryHydration = true;
-            break;
+          const historyPage = await fetchSessionHistory(sessionId, {
+            before: requestedBefore,
+            limit: SESSION_HISTORY_PAGE_MESSAGE_COUNT,
+          });
+          if (!isMountedRef.current) {
+            return;
+          }
+          if (
+            isServerInstanceMismatch(
+              lastSeenServerInstanceIdRef.current,
+              historyPage.serverInstanceId,
+            )
+          ) {
+            requestActionRecoveryResyncRef.current({
+              allowUnknownServerInstance: true,
+            });
+            return;
+          }
+
+          const currentSession = sessionsRef.current.find(
+            (entry) => entry.id === sessionId,
+          );
+          if (!currentSession) {
+            return;
+          }
+          const mergeOutcome = isTextRepair
+            ? repairSessionTailFromHistoryPage({
+                current: currentSession,
+                page: historyPage,
+              })
+            : prependSessionHistoryPage({
+                current: currentSession,
+                page: historyPage,
+                requestedBefore: requestedBefore!,
+              });
+          switch (mergeOutcome.kind) {
+            case "applied":
+              if (!publishHistorySession(mergeOutcome.session)) {
+                return;
+              }
+              if (mergeOutcome.session.messagesLoaded === true) {
+                completeSessionHydration(sessionId);
+              } else {
+                clearHydrationRetry(sessionId);
+              }
+              return;
+            case "cursorChanged":
+            case "metadataChanged":
+              requestActionRecoveryResyncRef.current();
+              return;
+            case "protocolError":
+              throw new Error(mergeOutcome.message);
+            default: {
+              const _exhaustive: never = mergeOutcome;
+              void _exhaustive;
+              return;
+            }
           }
         }
+
+        // Every transcript load is either the recent tail or one bounded
+        // history page. Reaching this point means local metadata no longer
+        // describes either state; repair from the authoritative summary.
+        requestActionRecoveryResyncRef.current();
+        return;
       } catch (error) {
         if (!isMountedRef.current) {
           return;
@@ -1214,12 +1344,12 @@ export function useAppLiveState(
         // will repair our local view on the next SSE tick without
         // dropping a toast on the user. Mirrors
         // `fetchWorkspaceLayout`'s "404 -> silent recovery" UX
-        // posture; the transport shape differs (that one returns
-        // `null` at the API boundary so callers treat it as "no
-        // layout yet"; here `fetchSession` throws
-        // `ApiRequestError` and we branch on `instanceof` + status
-        // at the call site).
-        if (error instanceof ApiRequestError && error.status === 404) {
+        // posture; the transport throws `ApiRequestError` and we branch on
+        // `instanceof` + status at the call site.
+        if (
+          error instanceof ApiRequestError &&
+          (error.status === 404 || error.status === 409)
+        ) {
           requestActionRecoveryResyncRef.current();
           return;
         }
@@ -1234,6 +1364,16 @@ export function useAppLiveState(
         ) {
           startSessionHydration(sessionId, {
             allowDivergentTextRepairAfterNewerRevision: true,
+          });
+          return;
+        }
+        if (
+          queuedTailRepairSessionIdsRef.current.delete(sessionId) &&
+          isMountedRef.current
+        ) {
+          startSessionHydration(sessionId, {
+            forceTailRepair: true,
+            queueAfterCurrent: true,
           });
           return;
         }
@@ -1254,25 +1394,23 @@ export function useAppLiveState(
   }
 
   useEffect(() => {
-    const targetMessagesLoadedBySessionId = new Map<
-      string,
-      boolean | null | undefined
-    >();
+    const hydrationTargetIds = new Set<string>();
     if (activeSession) {
-      targetMessagesLoadedBySessionId.set(
-        activeSession.id,
-        activeSession.messagesLoaded,
-      );
+      hydrationTargetIds.add(activeSession.id);
     }
     for (const target of visibleSessionHydrationTargets) {
-      if (!targetMessagesLoadedBySessionId.has(target.id)) {
-        targetMessagesLoadedBySessionId.set(target.id, target.messagesLoaded);
-      }
+      hydrationTargetIds.add(target.id);
     }
 
-    const sessionIdsToHydrate = [...targetMessagesLoadedBySessionId.entries()]
-      .filter(([, messagesLoaded]) => messagesLoaded === false)
-      .map(([sessionId]) => sessionId);
+    const sessionIdsToHydrate = [...hydrationTargetIds].filter((sessionId) => {
+      const session = sessionsRef.current.find(
+        (candidate) => candidate.id === sessionId,
+      );
+      return (
+        session?.messagesLoaded === false &&
+        !tailLoadedSessionIdsRef.current.has(sessionId)
+      );
+    });
     if (sessionIdsToHydrate.length === 0) {
       return;
     }
@@ -1280,13 +1418,13 @@ export function useAppLiveState(
     for (const sessionId of sessionIdsToHydrate) {
       startSessionHydration(sessionId);
     }
-    // Deps intentionally do NOT include message counts:
-    // the body only reads target ids and `messagesLoaded` flags.
-    // Visible session pane changes and the one-shot
-    // `messagesLoaded: false -> true` transition are the only
-    // signals this effect cares about.
+    // This effect owns the one automatic request: loading the recent tail for
+    // a summary-only session. Once any messages are present, older history is
+    // fetched only by explicit scroll/search/marker demand. Do not turn
+    // `messagesLoaded: false` into an automatic page loop.
   }, [
     activeSession?.id,
+    activeSession?.messages.length,
     activeSession?.messagesLoaded,
     visibleSessionHydrationTargets,
   ]);
@@ -1368,8 +1506,9 @@ export function useAppLiveState(
       hydratingSessionIdsRef.current.clear();
       hydratedSessionIdsRef.current.clear();
       queuedHydrationSessionIdsRef.current.clear();
+      queuedTailRepairSessionIdsRef.current.clear();
       queuedTextRepairHydrationSessionIdsRef.current.clear();
-      cancelDeferredFullHydrations();
+      tailLoadedSessionIdsRef.current.clear();
       // Caller-requested EventSource recreation on instance change. See
       // `forceSseReconnect` for the full context. The flag is set
       // synchronously by `handleSend` BEFORE the recovery probe is in
@@ -1425,7 +1564,12 @@ export function useAppLiveState(
       setOrchestrators(adoptedStateSlices.orchestrators);
     }
     const nextDelegationWaits = nextState.delegationWaits ?? [];
-    if (!areDelegationWaitRecordsEqual(delegationWaitsRef.current, nextDelegationWaits)) {
+    if (
+      !areDelegationWaitRecordsEqual(
+        delegationWaitsRef.current,
+        nextDelegationWaits,
+      )
+    ) {
       delegationWaitsRef.current = nextDelegationWaits;
       setDelegationWaits(nextDelegationWaits);
     }

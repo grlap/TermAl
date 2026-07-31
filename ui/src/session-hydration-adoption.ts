@@ -22,7 +22,7 @@ type SessionHydrationRequestMetadata = {
 
 export type SessionHydrationRequestContext =
   | ({
-      kind: "fullSession";
+      kind: "sessionTail";
     } & SessionHydrationRequestMetadata)
   | ({
       kind: "partialTail";
@@ -268,8 +268,8 @@ export function classifyFetchedSessionAdoption({
     responseSession.messagesLoaded === true;
   // The downgrade allowance below is intentionally narrower than
   // "metadata-only": the request and response must still match the current
-  // summary, otherwise a delayed full-session response can clobber newer
-  // delta metadata and mark stale text as loaded. Same-metadata full-session
+  // summary, otherwise a delayed bounded-tail response can clobber newer
+  // delta metadata and mark stale text as loaded. Same-metadata tail
   // responses may still replace divergent retained messages below; that is
   // the recovery path for live text streams whose deltas were applied with a
   // revision gap and left the retained transcript inconsistent with the
@@ -295,6 +295,16 @@ export function classifyFetchedSessionAdoption({
     responseSession.messagesLoaded === true;
   if (canAdoptLoadedResponseWithoutRetainedMatch) {
     return "adopted";
+  }
+  const canAdoptPartialTailWithoutRetainedMatch =
+    requestContext.kind === "partialTail" &&
+    requestStillMatches &&
+    requestRevisionStillCurrent &&
+    responseMetadataMatches &&
+    responseSession.messagesLoaded !== true &&
+    responseSession.messages.length > 0;
+  if (canAdoptPartialTailWithoutRetainedMatch) {
+    return "partial";
   }
 
   if (!requestStillMatches || !responseMatches()) {

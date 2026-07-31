@@ -76,6 +76,10 @@ export function formatTabLabel(
     return `Terminal: ${formatPathTabLabel(tab.workdir, "Workspace")}`;
   }
 
+  if (tab.kind === "mailbox") {
+    return "Mailbox";
+  }
+
   if (tab.kind === "controlPanel") {
     return "Control panel";
   }

@@ -69,11 +69,7 @@ import {
 import type { AdoptStateOptions } from "./app-live-state-types";
 import { createAppLiveStateTransportEventHandlers } from "./app-live-state-transport-events";
 import { ReconnectStateMachine } from "./app-live-state-reconnect-state";
-
-type SessionHydrationOptions = {
-  allowDivergentTextRepairAfterNewerRevision?: boolean;
-  queueAfterCurrent?: boolean;
-};
+import type { SessionHydrationOptions } from "./app-live-state-hydration";
 
 type UseAppLiveStateTransportParams = {
   adoptState: (state: StateResponse, options?: AdoptStateOptions) => boolean;
@@ -903,7 +899,8 @@ export function useAppLiveStateTransport(
         // Recovery-triggered hydration is intentionally limited only by the
         // in-flight/queued sets in `startSessionHydration`. Phase-1 transport is
         // local, and freshness is more important than adding a cooldown that
-        // could defer the only full-transcript fetch after a problematic delta.
+        // could defer the only bounded transcript repair after a problematic
+        // delta.
         // Revisit with a per-session cooldown if remote/flaky networks make
         // repeated completed hydrations expensive.
         startSessionHydration(delta.sessionId, options?.hydrationOptions);

@@ -20,18 +20,18 @@ import {
 } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import * as api from "../api";
 import * as slashPalette from "./session-slash-palette";
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
   splitAgentCommandResolverTail,
 } from "./AgentSessionPanel";
-import { buildConversationOverviewTailItems } from "./conversation-overview-controller";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { RunningIndicator } from "./session-activity-cards";
 import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
 import { MessageCard } from "../message-cards";
-import * as sessionHydrationDemand from "../session-hydration-demand";
+import * as sessionHistoryDemand from "../session-history-demand";
 import {
   resetSessionStoreForTesting,
   syncComposerSessionsStore,
@@ -80,6 +80,29 @@ function makeTextMessages(count: number): Message[] {
     author: index % 2 === 0 ? "you" : "assistant",
     text: `Message ${index + 1}`,
   }));
+}
+
+function stubConversationOverview(
+  sessionId: string,
+  messageCount: number,
+  sessionMutationStamp = 0,
+) {
+  const bucketCount = Math.min(4, Math.max(1, messageCount));
+  return vi.spyOn(api, "fetchSessionOverview").mockResolvedValue({
+    sessionId,
+    messageCount,
+    sessionMutationStamp,
+    buckets: Array.from({ length: bucketCount }, (_, index) => ({
+        c:
+          Math.floor(((index + 1) * messageCount) / bucketCount) -
+          Math.floor((index * messageCount) / bucketCount),
+        k: index === 1 ? "command" : "text",
+        u: index === 0 ? 1 : 0,
+        m: false,
+      })),
+    markers: [],
+    latestPosition: Math.max(0, messageCount - 1),
+  });
 }
 
 function installLongTranscriptScrollNodeMocks(scrollNode: HTMLElement) {
@@ -299,6 +322,7 @@ afterEach(() => {
   act(() => {
     resetSessionStoreForTesting();
   });
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -360,15 +384,16 @@ describe("AgentSessionPanel virtualization", () => {
     expect(screen.getByText(activeSession.messages[0]?.id ?? "")).toBeInTheDocument();
   });
 
-  it("requests full hydration for partial transcripts with markers or active search", async () => {
+  it("does not cascade bounded history requests merely because markers or search are present", async () => {
     const hydrationSpy = vi.spyOn(
-      sessionHydrationDemand,
-      "requestSessionFullHydration",
+      sessionHistoryDemand,
+      "requestSessionHistoryPage",
     );
     try {
       const markerSession = makeSession("marker-session", {
         messages: makeTextMessages(1),
         messagesLoaded: false,
+        messageCount: 1_000,
         markers: [
           makeConversationMarker({
             id: "marker-1",
@@ -381,12 +406,35 @@ describe("AgentSessionPanel virtualization", () => {
         activeSession: markerSession,
       });
 
-      await waitFor(() => {
-        expect(hydrationSpy).toHaveBeenCalledWith("marker-session");
+      await act(async () => {
+        await Promise.resolve();
       });
+      expect(hydrationSpy).not.toHaveBeenCalled();
+
+      act(() => {
+        syncComposerSessionsStore({
+          sessions: [
+            {
+              ...markerSession,
+              messages: [
+                {
+                  ...makeTextMessages(1)[0],
+                  id: "older-marker-page-message",
+                },
+                ...markerSession.messages,
+              ],
+            },
+          ],
+          draftsBySessionId: {},
+          draftAttachmentsBySessionId: {},
+        });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(hydrationSpy).not.toHaveBeenCalled();
 
       markerRender.unmount();
-      hydrationSpy.mockClear();
 
       const searchSession = makeSession("search-session", {
         messages: makeTextMessages(1),
@@ -397,15 +445,16 @@ describe("AgentSessionPanel virtualization", () => {
         conversationSearchQuery: "Message",
       });
 
-      await waitFor(() => {
-        expect(hydrationSpy).toHaveBeenCalledWith("search-session");
+      await act(async () => {
+        await Promise.resolve();
       });
+      expect(hydrationSpy).not.toHaveBeenCalled();
     } finally {
       hydrationSpy.mockRestore();
     }
   });
 
-  it("renders a conversation overview rail for long active sessions after the initial transcript paint", async () => {
+  it("renders a conversation overview rail immediately for long active sessions", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
 
     class ResizeObserverMock {
@@ -415,6 +464,7 @@ describe("AgentSessionPanel virtualization", () => {
 
     window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
     try {
+      stubConversationOverview("active-session", 40);
       const { container } = renderSessionPanelWithDefaults({
         activeSession: makeSession("active-session", {
           status: "active",
@@ -428,16 +478,12 @@ describe("AgentSessionPanel virtualization", () => {
         waitingIndicatorPrompt: "run the build",
       });
 
-      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
       expect(
         container.querySelector(
           ".session-conversation-page.has-conversation-overview-scroll",
         ),
       ).not.toBeNull();
       expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
-      expect(
-        container.querySelector(".conversation-overview-rail.is-pending"),
-      ).not.toBeNull();
       const overviewContentBefore = container.querySelector(
         ".conversation-overview-content",
       );
@@ -447,9 +493,12 @@ describe("AgentSessionPanel virtualization", () => {
       expect(overviewContentBefore).not.toBeNull();
       expect(virtualizedListBefore).not.toBeNull();
 
-      const rail = await screen.findByLabelText("Conversation overview");
-      expect(screen.getAllByLabelText("Conversation overview")).toHaveLength(1);
+      const rail = await screen.findByLabelText(/^Conversation overview,/);
+      expect(screen.getAllByLabelText(/^Conversation overview,/)).toHaveLength(1);
       expect(rail).toBeInTheDocument();
+      expect(
+        container.querySelectorAll(".conversation-overview-visual-segment"),
+      ).toHaveLength(4);
       expect(container.querySelector(".conversation-overview-content")).toBe(
         overviewContentBefore,
       );
@@ -459,998 +508,171 @@ describe("AgentSessionPanel virtualization", () => {
       expect(
         rail.closest(".conversation-with-overview")?.querySelector(".activity-card-live"),
       ).toBeInTheDocument();
-      expect(
-        screen.getByRole("button", { name: /^User prompt 1:/ }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole("button", {
-          name: /^Live turn 41: Codex is working — Waiting for output/,
-        }),
-      ).toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
     }
   });
 
-  it("keeps the first long-session tail window until older transcript is requested", async () => {
-    vi.useFakeTimers();
-    const OriginalResizeObserver = window.ResizeObserver;
-    const OriginalTouchEvent = window.TouchEvent;
-    const scrollNode = document.createElement("section");
-    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
-
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-
-    class TouchEventMock extends Event {
-      readonly changedTouches: Touch[];
-      readonly touches: Touch[];
-
-      constructor(type: string, init: TouchEventInit = {}) {
-        super(type, { bubbles: init.bubbles ?? true, cancelable: init.cancelable });
-        this.changedTouches = init.changedTouches ?? [];
-        this.touches = init.touches ?? [];
-      }
-    }
-
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-    window.TouchEvent = TouchEventMock as unknown as typeof TouchEvent;
-    try {
-      const messages = makeTextMessages(600);
-      document.body.append(scrollNode);
-      const { container } = renderSessionPanelWithDefaults({
-        activeSession: makeSession("active-session", {
-          status: "idle",
-          messages,
-        }),
-        scrollContainerRef: { current: scrollNode },
-      });
-
-      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
-      expect(screen.getByText("message-600")).toBeInTheDocument();
-      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(100);
-      });
-      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
-      expect(screen.getByText("message-600")).toBeInTheDocument();
-      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(5_000);
-      });
-      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
-      expect(container.querySelector(".conversation-with-overview")).toBeNull();
-      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-
-      act(() => {
-        scrollNodeMocks.setScrollTop(50);
-        fireEvent.scroll(scrollNode);
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-      expect(screen.queryByText("message-193")).not.toBeInTheDocument();
-
-      act(() => {
-        fireEvent.wheel(scrollNode, { ctrlKey: true, deltaY: -120 });
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-      expect(screen.queryByText("message-193")).not.toBeInTheDocument();
-
-      act(() => {
-        fireEvent.wheel(scrollNode, { deltaY: -4 });
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-      expect(screen.queryByText("message-561")).not.toBeInTheDocument();
-
-      act(() => {
-        scrollNodeMocks.setScrollTop(160);
-        fireEvent.wheel(scrollNode, { deltaY: -7 });
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-      expect(screen.queryByText("message-561")).not.toBeInTheDocument();
-
-      act(() => {
-        scrollNodeMocks.setScrollTop(161);
-        fireEvent.wheel(scrollNode, { deltaY: -8 });
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-      expect(screen.queryByText("message-561")).not.toBeInTheDocument();
-
-      act(() => {
-        scrollNodeMocks.setScrollTop(20_000);
-        fireEvent.wheel(scrollNode, { deltaY: -120 });
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-      expect(screen.queryByText("message-193")).not.toBeInTheDocument();
-
-      act(() => {
-        scrollNode.dispatchEvent(new TouchEvent("touchstart", {
-          bubbles: true,
-          touches: [{ clientY: 100 } as Touch],
-          changedTouches: [{ clientY: 100 } as Touch],
-        }));
-        scrollNode.dispatchEvent(new TouchEvent("touchmove", {
-          bubbles: true,
-          touches: [{ clientY: 104 } as Touch],
-          changedTouches: [{ clientY: 104 } as Touch],
-        }));
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-      expect(screen.queryByText("message-193")).not.toBeInTheDocument();
-
-      const editable = document.createElement("textarea");
-      scrollNode.append(editable);
-      try {
-        act(() => {
-          fireEvent.keyDown(editable, { key: "PageUp" });
-        });
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(500);
-        });
-        expect(screen.queryByText("message-193")).not.toBeInTheDocument();
-      } finally {
-        editable.remove();
-      }
-
-      const outsideTarget = document.createElement("button");
-      document.body.append(outsideTarget);
-      try {
-        const nonDemandComposedPath = vi.fn(() => [
-          outsideTarget,
-          document.body,
-          document,
-          window,
-        ]);
-        const nonDemandKey = new KeyboardEvent("keydown", {
-          bubbles: true,
-          key: "a",
-        });
-        Object.defineProperty(nonDemandKey, "composedPath", {
-          value: nonDemandComposedPath,
-        });
-        act(() => {
-          outsideTarget.dispatchEvent(nonDemandKey);
-        });
-        expect(nonDemandComposedPath).not.toHaveBeenCalled();
-
-        act(() => {
-          fireEvent.keyDown(outsideTarget, { key: "Home" });
-        });
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(500);
-        });
-        expect(screen.queryByText("message-193")).not.toBeInTheDocument();
-      } finally {
-        outsideTarget.remove();
-      }
-
-      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
-      expect(screen.getByText("message-597")).toBeInTheDocument();
-      expect(screen.queryByText("message-193")).not.toBeInTheDocument();
-
-      act(() => {
-        scrollNodeMocks.setScrollTop(160);
-        fireEvent.wheel(scrollNode, { deltaY: -8 });
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-      expect(screen.getByText("message-177")).toBeInTheDocument();
-      expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
-    } finally {
-      window.ResizeObserver = OriginalResizeObserver;
-      window.TouchEvent = OriginalTouchEvent;
-      scrollNodeMocks.cleanup();
-      scrollNode.remove();
-      vi.useRealTimers();
-    }
-  });
-
-  it("keeps the first long-session tail window under StrictMode", async () => {
-    vi.useFakeTimers();
-    const OriginalResizeObserver = window.ResizeObserver;
-    const scrollNode = document.createElement("section");
-    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
-
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-
-    try {
-      document.body.append(scrollNode);
-      render(
-        <StrictMode>
-          {createAgentSessionPanelHarness({
-            activeSession: makeSession("active-session", {
-              status: "idle",
-              messages: makeTextMessages(600),
-            }),
-            scrollContainerRef: { current: scrollNode },
-          })()}
-        </StrictMode>,
-      );
-
-      expect(screen.getByText("message-600")).toBeInTheDocument();
-      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-
-      expect(screen.getByText("message-600")).toBeInTheDocument();
-      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-    } finally {
-      window.ResizeObserver = OriginalResizeObserver;
-      scrollNodeMocks.cleanup();
-      scrollNode.remove();
-      vi.useRealTimers();
-    }
-  });
-
-  it("hydrates and retries prompt navigation when the target starts outside the active tail window", async () => {
-    vi.useFakeTimers();
-    const OriginalResizeObserver = window.ResizeObserver;
-    const scrollNode = document.createElement("section");
-    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
-
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-
-    try {
-      document.body.append(scrollNode);
-      renderSessionPanelWithDefaults({
-        activeSession: makeSession("active-session", {
-          status: "idle",
-          messages: makeTextMessages(600),
-        }),
-        scrollContainerRef: { current: scrollNode },
-        renderMessageCard: renderNavigableMessageCard,
-      });
-
-      expect(screen.getByText("message-581")).toBeInTheDocument();
-      expect(screen.queryByText("message-579")).not.toBeInTheDocument();
-
-      fireEvent.click(
-        screen.getAllByRole("button", {
-          name: "Jump to previous prompt",
-        })[0]!,
-      );
-      scrollNodeMocks.setScrollHeight(90_000);
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-
-      expect(screen.getByText("message-579")).toBeInTheDocument();
-    } finally {
-      window.ResizeObserver = OriginalResizeObserver;
-      scrollNodeMocks.cleanup();
-      scrollNode.remove();
-      vi.useRealTimers();
-    }
-  });
-
-  it("hydrates and retries delegation navigation when the target starts outside the active tail window", async () => {
-    vi.useFakeTimers();
-    const OriginalResizeObserver = window.ResizeObserver;
-    const scrollNode = document.createElement("section");
-    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
-
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-
-    const messages = makeTextMessages(600).map((message) => ({
-      ...message,
-      author: "assistant" as const,
-    }));
-    messages[569] = {
-      id: "message-570",
-      type: "parallelAgents",
-      author: "assistant",
-      timestamp: "10:570",
-      agents: [
-        {
-          id: "delegation-570",
-          source: "delegation",
-          title: "Off-window review",
-          status: "completed",
-          detail: "Done",
-        },
-      ],
+  it("keeps the production rail wrapper from widening the transcript pane", async () => {
+    const nodeFsModule = "node:fs";
+    const { readFileSync } = (await import(nodeFsModule)) as {
+      readFileSync: (path: string, encoding: "utf8") => string;
     };
-    messages[589] = {
-      id: "message-590",
-      type: "parallelAgents",
-      author: "assistant",
-      timestamp: "10:590",
-      agents: [
-        {
-          id: "delegation-590",
-          source: "delegation",
-          title: "Visible review",
-          status: "completed",
-          detail: "Done",
-        },
-      ],
+    const runtimeProcess = (
+      globalThis as typeof globalThis & {
+        process: { cwd: () => string };
+      }
+    ).process;
+    const stylesCss = readFileSync(
+      `${runtimeProcess.cwd()}/src/styles.css`,
+      "utf8",
+    );
+    const messages = makeTextMessages(40);
+    const paneClientWidth = 689;
+    const blownOutPaneScrollWidth = 1_175;
+    const { container } = renderSessionPanelWithDefaults({
+      activeSession: makeSession("wide-session", { messages }),
+      renderMessageCard: (message) => (
+        <article
+          className={`message-card ${
+            message.author === "you" ? "bubble-you" : "bubble-assistant"
+          }`}
+        >
+          {message.id === "message-40" ? (
+            <pre>
+              <code>{"unbreakable".repeat(200)}</code>
+            </pre>
+          ) : (
+            message.id
+          )}
+        </article>
+      ),
+    });
+
+    const pane = container.querySelector<HTMLElement>(
+      ".session-conversation-page.has-conversation-overview-scroll",
+    );
+    expect(pane).not.toBeNull();
+    expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
+    expect(container.querySelector(".bubble-you")).not.toBeNull();
+
+    const widthConstraintSelectors = [
+      ".session-conversation-page",
+      ".conversation-with-overview",
+      ".conversation-overview-content",
+      ".virtualized-message-list",
+      ".virtualized-message-page",
+      ".virtualized-message-range",
+      ".virtualized-message-slot",
+      ".message-slot",
+    ];
+    expect(stylesCss).toContain(".session-conversation-page");
+    widthConstraintSelectors.forEach((selector) => {
+      const node = container.querySelector<HTMLElement>(selector);
+      expect(node, `missing production width constraint ${selector}`).not.toBeNull();
+    });
+    const selectorHasMinWidthZero = (selector: string) => {
+      const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(
+        `${escapedSelector}\\s*\\{[^}]*min-width:\\s*0(?:px)?\\s*;`,
+        "m",
+      ).test(stylesCss);
     };
-
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-
-    try {
-      document.body.append(scrollNode);
-      renderSessionPanelWithDefaults({
-        activeSession: makeSession("active-session", {
-          status: "idle",
-          messages,
-        }),
-        scrollContainerRef: { current: scrollNode },
-        renderMessageCard: renderNavigableMessageCard,
-      });
-
-      expect(screen.getByText("message-590")).toBeInTheDocument();
-      expect(screen.queryByText("message-570")).not.toBeInTheDocument();
-
-      fireEvent.click(
-        screen.getByRole("button", {
-          name: "Jump to previous delegation",
-        }),
+    const nonShrinkableGridItems = () =>
+      widthConstraintSelectors.filter(
+        (selector) => !selectorHasMinWidthZero(selector),
       );
-      scrollNodeMocks.setScrollHeight(90_000);
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
+    const hasOnlyShrinkableGridItems = () =>
+      nonShrinkableGridItems().length === 0;
 
-      expect(screen.getByText("message-570")).toBeInTheDocument();
-    } finally {
-      window.ResizeObserver = OriginalResizeObserver;
-      scrollNodeMocks.cleanup();
-      scrollNode.remove();
-      vi.useRealTimers();
-    }
+    Object.defineProperties(pane as HTMLElement, {
+      clientWidth: {
+        configurable: true,
+        value: paneClientWidth,
+      },
+      scrollWidth: {
+        configurable: true,
+        get: () =>
+          hasOnlyShrinkableGridItems()
+            ? paneClientWidth
+            : blownOutPaneScrollWidth,
+      },
+    });
+
+    expect(nonShrinkableGridItems()).toEqual([]);
+    expect((pane as HTMLElement).scrollWidth).toBe(
+      (pane as HTMLElement).clientWidth,
+    );
   });
 
-  it("hydrates a long-session tail after a native-scrollbar mousedown", async () => {
-    vi.useFakeTimers();
+  it("keeps the overview mounted and globally positioned for a 20-message tail of a large session", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
-    const scrollNode = document.createElement("section");
-    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
-
     class ResizeObserverMock {
       observe() {}
       disconnect() {}
     }
-
     window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-
     try {
-      const messages = makeTextMessages(600);
-      document.body.append(scrollNode);
+      stubConversationOverview("tail-session", 1_000);
       renderSessionPanelWithDefaults({
-        activeSession: makeSession("active-session", {
+        activeSession: makeSession("tail-session", {
           status: "idle",
-          messages,
+          messages: makeTextMessages(20),
+          messageCount: 1_000,
+          messageStartIndex: 980,
+          messagesLoaded: false,
+          hasOlderHistory: true,
+          hasNewerHistory: false,
         }),
-        scrollContainerRef: { current: scrollNode },
       });
 
-      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(5_000);
-      });
-      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
-      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-
-      act(() => {
-        fireEvent.mouseDown(scrollNode);
-        scrollNodeMocks.setScrollTop(50);
-        fireEvent.scroll(scrollNode);
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-
-      expect(screen.getByText("message-177")).toBeInTheDocument();
-    } finally {
-      window.ResizeObserver = OriginalResizeObserver;
-      scrollNodeMocks.cleanup();
-      scrollNode.remove();
-      vi.useRealTimers();
-    }
-  });
-
-  it("does not hydrate a long-session tail after mousedown inside transcript content", async () => {
-    vi.useFakeTimers();
-    const OriginalResizeObserver = window.ResizeObserver;
-    const scrollNode = document.createElement("section");
-    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
-    const transcriptChild = document.createElement("div");
-
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-
-    try {
-      const messages = makeTextMessages(600);
-      document.body.append(scrollNode);
-      scrollNode.append(transcriptChild);
-      renderSessionPanelWithDefaults({
-        activeSession: makeSession("active-session", {
-          status: "idle",
-          messages,
-        }),
-        scrollContainerRef: { current: scrollNode },
-      });
-
-      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-
-      act(() => {
-        scrollNodeMocks.setScrollTop(50);
-        fireEvent.mouseDown(transcriptChild);
-        fireEvent.scroll(scrollNode);
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-
-      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-    } finally {
-      window.ResizeObserver = OriginalResizeObserver;
-      transcriptChild.remove();
-      scrollNodeMocks.cleanup();
-      scrollNode.remove();
-      vi.useRealTimers();
-    }
-  });
-
-  it("keeps demand-hydration listeners bound across message arrivals while tail-windowed", async () => {
-    const OriginalResizeObserver = window.ResizeObserver;
-    const scrollNode = document.createElement("section");
-    const scrollNodeDemandEvents = [
-      "scroll",
-      "wheel",
-      "mousedown",
-      "touchstart",
-      "touchmove",
-      "touchend",
-      "touchcancel",
-    ] as const;
-    const addCounts = new Map<string, number>();
-    const removeCounts = new Map<string, number>();
-    let documentKeydownAdds = 0;
-    let documentKeydownRemoves = 0;
-    const originalAdd = scrollNode.addEventListener.bind(scrollNode);
-    const originalRemove = scrollNode.removeEventListener.bind(scrollNode);
-    const originalDocumentAdd = document.addEventListener.bind(document);
-    const originalDocumentRemove = document.removeEventListener.bind(document);
-
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-
-    Object.defineProperty(scrollNode, "clientHeight", {
-      configurable: true,
-      get: () => 600,
-    });
-    Object.defineProperty(scrollNode, "clientWidth", {
-      configurable: true,
-      get: () => 1000,
-    });
-    Object.defineProperty(scrollNode, "scrollHeight", {
-      configurable: true,
-      get: () => 24_000,
-    });
-    Object.defineProperty(scrollNode, "scrollTop", {
-      configurable: true,
-      get: () => 20_000,
-      set: () => {},
-    });
-    scrollNode.addEventListener = ((
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: AddEventListenerOptions | boolean,
-    ) => {
-      if (scrollNodeDemandEvents.includes(type as (typeof scrollNodeDemandEvents)[number])) {
-        addCounts.set(type, (addCounts.get(type) ?? 0) + 1);
-      }
-      return originalAdd(type, listener, options);
-    }) as typeof scrollNode.addEventListener;
-    scrollNode.removeEventListener = ((
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: EventListenerOptions | boolean,
-    ) => {
-      if (scrollNodeDemandEvents.includes(type as (typeof scrollNodeDemandEvents)[number])) {
-        removeCounts.set(type, (removeCounts.get(type) ?? 0) + 1);
-      }
-      return originalRemove(type, listener, options);
-    }) as typeof scrollNode.removeEventListener;
-    document.addEventListener = ((
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: AddEventListenerOptions | boolean,
-    ) => {
-      if (type === "keydown") {
-        documentKeydownAdds += 1;
-      }
-      return originalDocumentAdd(type, listener, options);
-    }) as typeof document.addEventListener;
-    document.removeEventListener = ((
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: EventListenerOptions | boolean,
-    ) => {
-      if (type === "keydown") {
-        documentKeydownRemoves += 1;
-      }
-      return originalDocumentRemove(type, listener, options);
-    }) as typeof document.removeEventListener;
-
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-    try {
-      const initialMessages = makeTextMessages(600);
-      const { unmount } = renderSessionPanelWithDefaults({
-        activeSession: makeSession("active-session", {
-          status: "idle",
-          messages: initialMessages,
-        }),
-        scrollContainerRef: { current: scrollNode },
-      });
-      await act(async () => {
-        await Promise.resolve();
-      });
-
-      const baselineAddCounts = new Map(addCounts);
-      const baselineRemoveCounts = new Map(removeCounts);
-      const baselineDocumentKeydownAdds = documentKeydownAdds;
-      const baselineDocumentKeydownRemoves = documentKeydownRemoves;
-      scrollNodeDemandEvents.forEach((eventName) => {
-        expect(baselineAddCounts.get(eventName)).toBeGreaterThan(0);
-      });
-      expect(baselineDocumentKeydownAdds).toBeGreaterThan(0);
-
-      act(() => {
-        syncComposerSessionsStore({
-          sessions: [
-            makeSession("active-session", {
-              status: "idle",
-              messages: [
-                ...initialMessages,
-                {
-                  author: "assistant",
-                  id: "message-601",
-                  text: "message-601",
-                  timestamp: "10:00",
-                  type: "text",
-                },
-              ],
-            }),
-          ],
-          draftsBySessionId: {},
-          draftAttachmentsBySessionId: {},
-        });
-      });
-      await act(async () => {
-        await Promise.resolve();
-      });
-
-      scrollNodeDemandEvents.forEach((eventName) => {
-        expect(addCounts.get(eventName)).toBe(baselineAddCounts.get(eventName));
-        expect(removeCounts.get(eventName)).toBe(
-          baselineRemoveCounts.get(eventName),
-        );
-      });
-      expect(documentKeydownAdds).toBe(baselineDocumentKeydownAdds);
-      expect(documentKeydownRemoves).toBe(baselineDocumentKeydownRemoves);
-
-      unmount();
-
-      scrollNodeDemandEvents.forEach((eventName) => {
-        expect(removeCounts.get(eventName)).toBeGreaterThanOrEqual(
-          (baselineRemoveCounts.get(eventName) ?? 0) + 1,
-        );
-      });
-      expect(documentKeydownRemoves).toBeGreaterThanOrEqual(
-        baselineDocumentKeydownRemoves + 1,
-      );
-    } finally {
-      window.ResizeObserver = OriginalResizeObserver;
-      document.addEventListener = originalDocumentAdd;
-      document.removeEventListener = originalDocumentRemove;
-    }
-  });
-
-  it("hydrates from retained demand listeners after a message arrives", async () => {
-    vi.useFakeTimers();
-    const OriginalResizeObserver = window.ResizeObserver;
-    const scrollNode = document.createElement("section");
-    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
-
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-
-    try {
-      const initialMessages = makeTextMessages(600);
-      document.body.append(scrollNode);
-      renderSessionPanelWithDefaults({
-        activeSession: makeSession("active-session", {
-          status: "idle",
-          messages: initialMessages,
-        }),
-        scrollContainerRef: { current: scrollNode },
-      });
-      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-
-      act(() => {
-        syncComposerSessionsStore({
-          sessions: [
-            makeSession("active-session", {
-              status: "idle",
-              messages: [
-                ...initialMessages,
-                {
-                  author: "assistant",
-                  id: "message-601",
-                  text: "message-601",
-                  timestamp: "10:00",
-                  type: "text",
-                },
-              ],
-            }),
-          ],
-          draftsBySessionId: {},
-          draftAttachmentsBySessionId: {},
-        });
-      });
-      await act(async () => {
-        await Promise.resolve();
-      });
-      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-      expect(screen.queryByLabelText("Conversation overview")).not.toBeInTheDocument();
-
-      act(() => {
-        scrollNodeMocks.setScrollTop(50);
-        fireEvent.wheel(scrollNode, { deltaY: -120 });
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-
-      expect(screen.getByText("message-177")).toBeInTheDocument();
-    } finally {
-      window.ResizeObserver = OriginalResizeObserver;
-      scrollNodeMocks.cleanup();
-      scrollNode.remove();
-      vi.useRealTimers();
-    }
-  });
-
-  it.each(["ArrowUp", "Home", "PageUp"] as const)(
-    "hydrates a long-session tail after %s inside the transcript",
-    async (key) => {
-      const OriginalResizeObserver = window.ResizeObserver;
-      const scrollNode = document.createElement("section");
-      const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
-
-      class ResizeObserverMock {
-        observe() {}
-        disconnect() {}
-      }
-
-      window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-
-      try {
-        const tailFirstPageSelector =
-          '.virtualized-message-page[data-page-key="0:8:message-581:message-588"]';
-        document.body.append(scrollNode);
-        const { container } = renderSessionPanelWithDefaults({
-          activeSession: makeSession("active-session", {
-            status: "idle",
-            messages: makeTextMessages(600),
-          }),
-          scrollContainerRef: { current: scrollNode },
-        });
-        expect(container.querySelector(tailFirstPageSelector)).not.toBeNull();
-
-        const keydown = new KeyboardEvent("keydown", { bubbles: true, key });
-        Object.defineProperty(keydown, "composedPath", {
-          value: () => [scrollNode, document.body, document, window],
-        });
-        act(() => {
-          scrollNode.dispatchEvent(keydown);
-        });
-        await act(async () => {
-          await Promise.resolve();
-        });
-
-        expect(container.querySelector(tailFirstPageSelector)).toBeNull();
-      } finally {
-        window.ResizeObserver = OriginalResizeObserver;
-        scrollNodeMocks.cleanup();
-        scrollNode.remove();
-      }
-    },
-  );
-
-  it("hydrates a long-session tail only after a pull-down touch gesture", async () => {
-    vi.useFakeTimers();
-    const OriginalResizeObserver = window.ResizeObserver;
-    const OriginalTouchEvent = window.TouchEvent;
-    const scrollNode = document.createElement("section");
-    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
-
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-
-    class TouchEventMock extends Event {
-      readonly changedTouches: Touch[];
-      readonly touches: Touch[];
-
-      constructor(type: string, init: TouchEventInit = {}) {
-        super(type, { bubbles: init.bubbles ?? true, cancelable: init.cancelable });
-        this.changedTouches = init.changedTouches ?? [];
-        this.touches = init.touches ?? [];
-      }
-    }
-
-    function dispatchTouch(type: string, clientY: number | null) {
-      scrollNode.dispatchEvent(
-        new TouchEvent(type, {
-          bubbles: true,
-          touches: clientY === null ? [] : [{ clientY } as Touch],
-          changedTouches: clientY === null ? [] : [{ clientY } as Touch],
-        }),
-      );
-    }
-
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-    window.TouchEvent = TouchEventMock as unknown as typeof TouchEvent;
-
-    try {
-      const tailFirstPageSelector =
-        '.virtualized-message-page[data-page-key="0:8:message-581:message-588"]';
-      document.body.append(scrollNode);
-      const { container } = renderSessionPanelWithDefaults({
-        activeSession: makeSession("active-session", {
-          status: "idle",
-          messages: makeTextMessages(600),
-        }),
-        scrollContainerRef: { current: scrollNode },
-      });
-      expect(container.querySelector(tailFirstPageSelector)).not.toBeNull();
-      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-
-      act(() => {
-        scrollNodeMocks.setScrollTop(50);
-        dispatchTouch("touchstart", 100);
-        dispatchTouch("touchmove", 50);
-        dispatchTouch("touchend", null);
-        dispatchTouch("touchmove", 200);
-        dispatchTouch("touchstart", 100);
-        dispatchTouch("touchcancel", null);
-        dispatchTouch("touchmove", 200);
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-      expect(container.querySelector(tailFirstPageSelector)).not.toBeNull();
-      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
-
-      act(() => {
-        scrollNodeMocks.setScrollTop(50);
-        dispatchTouch("touchstart", 100);
-        dispatchTouch("touchmove", 200);
-      });
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
-      });
-
-      expect(container.querySelector(tailFirstPageSelector)).toBeNull();
-    } finally {
-      window.ResizeObserver = OriginalResizeObserver;
-      window.TouchEvent = OriginalTouchEvent;
-      scrollNodeMocks.cleanup();
-      scrollNode.remove();
-      vi.useRealTimers();
-    }
-  });
-
-  it("tears down demand-hydration listeners after the first full render", async () => {
-    const OriginalResizeObserver = window.ResizeObserver;
-    const scrollNode = document.createElement("section");
-    const scrollNodeMocks = installLongTranscriptScrollNodeMocks(scrollNode);
-    const scrollNodeDemandEvents = [
-      "scroll",
-      "wheel",
-      "mousedown",
-      "touchstart",
-      "touchmove",
-      "touchend",
-      "touchcancel",
-    ] as const;
-    const addCounts = new Map<string, number>();
-    const removeCounts = new Map<string, number>();
-    let documentKeydownAdds = 0;
-    let documentKeydownRemoves = 0;
-    const originalAdd = scrollNode.addEventListener.bind(scrollNode);
-    const originalRemove = scrollNode.removeEventListener.bind(scrollNode);
-    const originalDocumentAdd = document.addEventListener.bind(document);
-    const originalDocumentRemove = document.removeEventListener.bind(document);
-
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-
-    scrollNode.addEventListener = ((
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: AddEventListenerOptions | boolean,
-    ) => {
-      if (
-        scrollNodeDemandEvents.includes(
-          type as (typeof scrollNodeDemandEvents)[number],
-        )
-      ) {
-        addCounts.set(type, (addCounts.get(type) ?? 0) + 1);
-      }
-      return originalAdd(type, listener, options);
-    }) as typeof scrollNode.addEventListener;
-    scrollNode.removeEventListener = ((
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: EventListenerOptions | boolean,
-    ) => {
-      if (
-        scrollNodeDemandEvents.includes(
-          type as (typeof scrollNodeDemandEvents)[number],
-        )
-      ) {
-        removeCounts.set(type, (removeCounts.get(type) ?? 0) + 1);
-      }
-      return originalRemove(type, listener, options);
-    }) as typeof scrollNode.removeEventListener;
-    document.addEventListener = ((
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: AddEventListenerOptions | boolean,
-    ) => {
-      if (type === "keydown") {
-        documentKeydownAdds += 1;
-      }
-      return originalDocumentAdd(type, listener, options);
-    }) as typeof document.addEventListener;
-    document.removeEventListener = ((
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: EventListenerOptions | boolean,
-    ) => {
-      if (type === "keydown") {
-        documentKeydownRemoves += 1;
-      }
-      return originalDocumentRemove(type, listener, options);
-    }) as typeof document.removeEventListener;
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-
-    try {
-      const tailFirstPageSelector =
-        '.virtualized-message-page[data-page-key="0:8:message-581:message-588"]';
-      document.body.append(scrollNode);
-      const { container } = renderSessionPanelWithDefaults({
-        activeSession: makeSession("active-session", {
-          status: "idle",
-          messages: makeTextMessages(600),
-        }),
-        scrollContainerRef: { current: scrollNode },
-      });
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      const baselineRemoveCounts = new Map(removeCounts);
-      const baselineDocumentKeydownRemoves = documentKeydownRemoves;
-      scrollNodeDemandEvents.forEach((eventName) => {
-        expect(addCounts.get(eventName)).toBeGreaterThan(0);
-      });
-      expect(documentKeydownAdds).toBeGreaterThan(0);
-      expect(container.querySelector(tailFirstPageSelector)).not.toBeNull();
-
-      act(() => {
-        scrollNodeMocks.setScrollTop(50);
-        fireEvent.wheel(scrollNode, { deltaY: -120 });
-      });
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      expect(container.querySelector(tailFirstPageSelector)).toBeNull();
-      scrollNodeDemandEvents.forEach((eventName) => {
-        expect(removeCounts.get(eventName), eventName).toBeGreaterThanOrEqual(
-          (baselineRemoveCounts.get(eventName) ?? 0) + 1,
-        );
-      });
-      expect(documentKeydownRemoves).toBeGreaterThanOrEqual(
-        baselineDocumentKeydownRemoves + 1,
-      );
-
-      const postHydrationRemoveCounts = new Map(removeCounts);
-      const postHydrationDocumentKeydownRemoves = documentKeydownRemoves;
-      act(() => {
-        fireEvent.wheel(scrollNode, { deltaY: -120 });
-      });
-      await act(async () => {
-        await Promise.resolve();
-      });
-
-      scrollNodeDemandEvents.forEach((eventName) => {
-        expect(removeCounts.get(eventName)).toBe(
-          postHydrationRemoveCounts.get(eventName),
-        );
-      });
-      expect(documentKeydownRemoves).toBe(postHydrationDocumentKeydownRemoves);
-    } finally {
-      window.ResizeObserver = OriginalResizeObserver;
-      document.addEventListener = originalDocumentAdd;
-      document.removeEventListener = originalDocumentRemove;
-      scrollNodeMocks.cleanup();
-      scrollNode.remove();
-    }
-  });
-
-  it.each([
-    ["Claude", "new prompt", "Claude is working — Waiting for output"],
-    ["Cursor", "new prompt", "Cursor is working — Waiting for output"],
-    ["Gemini", "new prompt", "Gemini is working — Waiting for output"],
-    ["Codex", "/review-code", "Codex is working — Executing a command"],
-  ] as const)(
-    "builds the conversation overview live-turn sample for %s",
-    (agent, waitingIndicatorPrompt, expectedSample) => {
       expect(
-        buildConversationOverviewTailItems({
-          agent,
-          sessionId: "active-session",
-          showWaitingIndicator: true,
-          waitingIndicatorPrompt,
-        })[0],
-      ).toEqual(expect.objectContaining({ textSample: expectedSample }));
-    },
-  );
+        await screen.findByLabelText(/^Conversation overview,/),
+      ).toBeInTheDocument();
+      await waitFor(() => {
+        const viewport = screen.getByTestId("conversation-overview-viewport");
+        expect(Number.parseFloat(viewport.style.top)).toBeGreaterThan(0);
+      });
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+    }
+  });
+
+  it("keeps explicit live command activity after the prompt leaves the bounded tail", async () => {
+    const assistantOnlyTail: Message[] = Array.from(
+      { length: 40 },
+      (_, index) => ({
+        id: `assistant-tail-${index}`,
+        type: "text",
+        timestamp: "10:00",
+        author: "assistant",
+        text: `Assistant output ${index}`,
+      }),
+    );
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("active-session", {
+        status: "active",
+        messages: assistantOnlyTail,
+        messagesLoaded: false,
+        messageCount: 81,
+        liveActivity: {
+          prompt: "Fix the paging bug",
+          command: "cargo test session_history",
+          commandStatus: "running",
+        },
+      }),
+      showWaitingIndicator: true,
+      waitingIndicatorPrompt: null,
+    });
+
+    expect(
+      await screen.findByText("Executing an agent command..."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("cargo test session_history")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Fix the paging bug"),
+    ).not.toBeInTheDocument();
+  });
 
   it("navigates the virtualized transcript from conversation overview items", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
@@ -1494,6 +716,7 @@ describe("AgentSessionPanel virtualization", () => {
     window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
 
     try {
+      stubConversationOverview("active-session", 40);
       renderSessionPanelWithDefaults({
         activeSession: makeSession("active-session", {
           status: "active",
@@ -1507,30 +730,37 @@ describe("AgentSessionPanel virtualization", () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByLabelText("Conversation overview")).toBeInTheDocument();
+        expect(
+          screen.getByLabelText(/^Conversation overview,/),
+        ).toBeInTheDocument();
       });
 
+      const rail = screen.getByLabelText(/^Conversation overview,/);
+      Object.defineProperty(rail, "getBoundingClientRect", {
+        configurable: true,
+        value: () =>
+          ({
+            bottom: 500,
+            height: 500,
+            left: 0,
+            right: 20,
+            top: 0,
+            width: 20,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          }) as DOMRect,
+      });
       act(() => {
-        fireEvent.click(
-          screen.getByRole("button", { name: /^Assistant response 20:/ }),
-        );
+        fireEvent.pointerDown(rail, {
+          button: 0,
+          clientY: 375,
+          pointerId: 1,
+        });
       });
 
       expect(scrollTop).toBeGreaterThan(0);
-      const scrollAfterMessageJump = scrollTop;
-
-      act(() => {
-        fireEvent.click(
-          screen.getByRole("button", {
-            name: /^Live turn 41: Codex is working — Waiting for output/,
-          }),
-        );
-      });
-
-      expect(scrollTop).toBe(19_500);
-      expect(scrollWrites.some((write) => write > scrollAfterMessageJump)).toBe(
-        true,
-      );
+      expect(scrollWrites.length).toBeGreaterThan(0);
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       window.requestAnimationFrame = originalRequestAnimationFrame;
@@ -1538,15 +768,24 @@ describe("AgentSessionPanel virtualization", () => {
     }
   });
 
-  it("refreshes the conversation overview viewport and max height from scroll and resize events", async () => {
+  it("tracks the owning message-stack height while the composer is focused", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
     const scrollNode = document.createElement("section");
-    let clientHeight = 500;
+    scrollNode.className = "message-stack";
+    const focusedComposer = document.createElement("textarea");
+    focusedComposer.dataset.conversationComposerInput = "true";
+    document.body.append(scrollNode, focusedComposer);
+    focusedComposer.focus();
+    let clientHeight = 576;
     let scrollTop = 0;
 
+    const resizeCallbacks: ResizeObserverCallback[] = [];
     class ResizeObserverMock {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
       observe() {}
       disconnect() {}
     }
@@ -1579,6 +818,7 @@ describe("AgentSessionPanel virtualization", () => {
     window.cancelAnimationFrame = vi.fn() as unknown as typeof cancelAnimationFrame;
 
     try {
+      stubConversationOverview("active-session", 90);
       renderSessionPanelWithDefaults({
         activeSession: makeSession("active-session", {
           status: "active",
@@ -1587,13 +827,14 @@ describe("AgentSessionPanel virtualization", () => {
         scrollContainerRef: { current: scrollNode },
       });
 
-      const rail = await screen.findByLabelText("Conversation overview");
+      const rail = await screen.findByLabelText(/^Conversation overview,/);
       const viewport = screen.getByTestId("conversation-overview-viewport");
 
       await waitFor(() => {
-        expect(rail).toHaveStyle({ height: "476px" });
+        expect(rail).toHaveStyle({ height: "552px" });
       });
       const initialViewportTop = viewport.style.top;
+      const initialViewportHeight = viewport.style.height;
 
       act(() => {
         scrollTop = 1_500;
@@ -1605,14 +846,19 @@ describe("AgentSessionPanel virtualization", () => {
       });
 
       act(() => {
-        clientHeight = 700;
-        window.dispatchEvent(new Event("resize"));
+        clientHeight = 976;
+        resizeCallbacks.forEach((callback) =>
+          callback([], {} as ResizeObserver),
+        );
       });
 
       await waitFor(() => {
-        expect(rail).toHaveStyle({ height: "676px" });
+        expect(rail).toHaveStyle({ height: "952px" });
+        expect(viewport.style.height).not.toBe(initialViewportHeight);
       });
     } finally {
+      focusedComposer.remove();
+      scrollNode.remove();
       window.ResizeObserver = OriginalResizeObserver;
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
@@ -3296,7 +2542,7 @@ describe("AgentSessionPanel virtualization", () => {
     }
   });
 
-  it("does not introduce an extra scroll adjustment when deferred virtual layout catches up after scroll idle", async () => {
+  it("compensates an above-viewport measurement exactly once before deferred layout catches up", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
@@ -3504,6 +2750,8 @@ describe("AgentSessionPanel virtualization", () => {
       const firstVisibleSlot = slotsBefore[firstVisibleSlotIndex]!;
       const anchorMessageId = firstVisibleSlot.dataset.messageId!;
       const measuredAboveViewportSlot = slotsBefore[0]!;
+      const anchorTopBeforeMeasurement =
+        firstVisibleSlot.getBoundingClientRect().top;
 
       scrollWrites.length = 0;
       measuredHeights.set(measuredAboveViewportSlot.dataset.messageId!, 320);
@@ -3526,9 +2774,18 @@ describe("AgentSessionPanel virtualization", () => {
         container.querySelectorAll(".virtualized-message-page").length,
       ).toBeGreaterThan(0);
       const lastScrollWrite =
-        scrollWrites.length > 0 ? scrollWrites[scrollWrites.length - 1] : middleScrollTop;
-      expect(lastScrollWrite).toBe(middleScrollTop);
-      expect(scrollTop).toBe(middleScrollTop);
+        scrollWrites.length > 0
+          ? scrollWrites[scrollWrites.length - 1]
+          : middleScrollTop + 220;
+      expect(lastScrollWrite).toBe(middleScrollTop + 220);
+      expect(scrollTop).toBe(middleScrollTop + 220);
+      expect(
+        container
+          .querySelector<HTMLElement>(
+            `[data-message-id="${anchorMessageId}"]`,
+          )
+          ?.getBoundingClientRect().top,
+      ).toBe(anchorTopBeforeMeasurement);
     } finally {
       vi.useRealTimers();
       window.ResizeObserver = OriginalResizeObserver;

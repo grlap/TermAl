@@ -31,6 +31,10 @@ import {
 } from "./message-stack-scroll-sync";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
 import {
+  requestSessionHistoryStartPage,
+  requestSessionHistoryTailPage,
+} from "./session-history-demand";
+import {
   resolveSettledScrollMinimumAttempts,
   syncMessageStackScrollPosition,
 } from "./scroll-position";
@@ -38,9 +42,32 @@ import type { SessionSearchMatch } from "./session-find";
 import type { Message, Session } from "./types";
 import type { PaneViewMode } from "./workspace";
 
-const SESSION_PAGE_JUMP_VIEWPORT_FACTOR = 0.45;
+const SESSION_PAGE_SCROLL_VIEWPORT_FACTOR = 0.85;
+const SESSION_PAGE_SCROLL_MINIMUM_PX = 160;
+
+export function resolveSessionPageScrollDistance(clientHeight: number) {
+  return Math.max(
+    Math.round(Math.max(0, clientHeight) * SESSION_PAGE_SCROLL_VIEWPORT_FACTOR),
+    SESSION_PAGE_SCROLL_MINIMUM_PX,
+  );
+}
 
 type NewResponseIndicatorKind = "activity" | "response";
+
+export function resolveNewResponseIndicatorVisibility({
+  hasUnloadedNewerHistory,
+  indicatorKind,
+  liveTailPinned,
+}: {
+  hasUnloadedNewerHistory: boolean;
+  indicatorKind: NewResponseIndicatorKind | null;
+  liveTailPinned: boolean;
+}) {
+  return (
+    hasUnloadedNewerHistory ||
+    (!liveTailPinned && indicatorKind !== null)
+  );
+}
 
 type PaneScrollPosition = {
   top: number;
@@ -119,6 +146,9 @@ export function useSessionPaneScrollState({
   const paneTailFollowUserEscapeByKeyRef = useRef<
     Record<string, true | undefined>
   >({});
+  const currentScrollStateKeyRef = useRef(scrollStateKey);
+  const pendingStartHistoryDemandRef = useRef<{ key: string } | null>(null);
+  const pendingTailHistoryDemandRef = useRef<{ key: string } | null>(null);
   const paneLastTouchClientYRef = useRef<number | null>(null);
   const sessionSearchItemRefsRef = useRef<Record<string, HTMLElement | null>>(
     {},
@@ -132,17 +162,38 @@ export function useSessionPaneScrollState({
   const [visitedSessionIds, setVisitedSessionIds] = useState<
     Record<string, true | undefined>
   >({});
+  currentScrollStateKeyRef.current = scrollStateKey;
+
+  useEffect(() => {
+    // Leaving a pane/session must not let its unresolved boundary demand block
+    // a fresh request when the reader returns. Each request is also compared by
+    // object identity in its completion callback, so a late old completion
+    // cannot clear a newer demand for the same key.
+    if (pendingStartHistoryDemandRef.current?.key !== scrollStateKey) {
+      pendingStartHistoryDemandRef.current = null;
+    }
+    if (pendingTailHistoryDemandRef.current?.key !== scrollStateKey) {
+      pendingTailHistoryDemandRef.current = null;
+    }
+  }, [scrollStateKey]);
 
   const savedScrollPosition = paneScrollPositions[scrollStateKey];
   const savedScrollShouldStick = savedScrollPosition?.shouldStick === true;
   const waitingIndicatorShouldStick = savedScrollShouldStick;
+  const hasUnloadedNewerHistory = activeSession?.hasNewerHistory === true;
   const newResponseIndicatorKind =
     newResponseIndicatorByKey[scrollStateKey] ?? null;
-  const showNewResponseIndicator = newResponseIndicatorKind !== null;
   const newResponseIndicatorLabel =
-    newResponseIndicatorKind === "activity" ? "New activity" : "New response";
+    hasUnloadedNewerHistory
+      ? "Jump to latest"
+      : newResponseIndicatorKind === "activity"
+        ? "New activity"
+        : "New response";
 
   function getTailFollowIntent() {
+    if (hasUnloadedNewerHistory) {
+      return false;
+    }
     return paneShouldStickToBottomRef.current[paneId] ?? true;
   }
 
@@ -168,7 +219,16 @@ export function useSessionPaneScrollState({
     liveTailPinnedByKey[scrollStateKey] ??
     savedScrollPosition?.shouldStick ??
     getTailFollowIntent();
-  const liveTailPinned = tailFollowIntent;
+  const liveTailPinned = !hasUnloadedNewerHistory && tailFollowIntent;
+  // A delayed indicator-state transition must not override explicit
+  // attachment. Geometry can briefly include estimated or stale virtual
+  // spacer height while residency changes, but a tail-pinned pane has no
+  // unseen response to advertise.
+  const showNewResponseIndicator = resolveNewResponseIndicatorVisibility({
+    hasUnloadedNewerHistory,
+    indicatorKind: newResponseIndicatorKind,
+    liveTailPinned,
+  });
 
   function hasTailFollowUserEscape() {
     return Boolean(paneTailFollowUserEscapeByKeyRef.current[scrollStateKey]);
@@ -385,6 +445,10 @@ export function useSessionPaneScrollState({
   }
 
   function followLatestMessageForPromptSend() {
+    if (hasUnloadedNewerHistory) {
+      scrollMessageStackToBoundary("bottom");
+      return undefined;
+    }
     if (getTailFollowIntent() || isMessageStackNearBottom()) {
       scrollToLatestMessage("smooth", false, "bottom_follow");
       return undefined;
@@ -402,72 +466,117 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    if (direction < 0) {
-      markTailFollowUserEscape();
-    }
-    const distance = Math.max(Math.round(node.clientHeight * 0.85), 160);
-    node.scrollBy({
-      top: distance * direction,
-      behavior: "smooth",
-    });
-    notifyMessageStackScrollWrite(node, {
-      scrollSource: "user",
-    });
-  }
-
-  function scrollSessionMessageStackByPageJump(direction: -1 | 1) {
-    const node = messageStackRef.current;
-    if (!node) {
-      return;
-    }
-
-    const distance = Math.max(
-      Math.round(node.clientHeight * SESSION_PAGE_JUMP_VIEWPORT_FACTOR),
-      1,
-    );
-    scrollMessageStackByDelta(distance * direction, {
+    scrollMessageStackByDelta(resolveSessionPageScrollDistance(node.clientHeight) * direction, {
       scrollKind: "page_jump",
     });
   }
 
+  function scrollSessionMessageStackByPageJump(direction: -1 | 1) {
+    scrollMessageStackByPage(direction);
+  }
+
   function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
     if (boundary === "bottom") {
+      const applyBottomBoundary = () => {
+        cancelSettledScrollToBottom();
+        cancelPaneProgrammaticBottomFollow();
+        const node = messageStackRef.current;
+        if (node) {
+          if (
+            !scrollVirtualizedMessageStackToBottom(node, {
+              scrollKind: "bottom_boundary",
+              scrollSource: "user",
+            })
+          ) {
+            scrollToLatestMessage("auto", true, "seek");
+          }
+        }
+      };
+      if (hasUnloadedNewerHistory && activeSession) {
+        if (pendingTailHistoryDemandRef.current?.key === scrollStateKey) {
+          return;
+        }
+        setTailFollowIntent(false);
+        setNewResponseIndicator(scrollStateKey, true);
+        const requestedScrollStateKey = scrollStateKey;
+        const demand = { key: requestedScrollStateKey };
+        pendingTailHistoryDemandRef.current = demand;
+        void requestSessionHistoryTailPage(activeSession.id).then((applied) => {
+          if (pendingTailHistoryDemandRef.current === demand) {
+            pendingTailHistoryDemandRef.current = null;
+          }
+          if (
+            !applied ||
+            currentScrollStateKeyRef.current !== requestedScrollStateKey
+          ) {
+            return;
+          }
+          requestAnimationFrame(() => {
+            if (
+              currentScrollStateKeyRef.current === requestedScrollStateKey
+            ) {
+              applyBottomBoundary();
+            }
+          });
+        });
+        return;
+      }
+      applyBottomBoundary();
+      return;
+    }
+
+    const applyTopBoundary = () => {
+      const node = messageStackRef.current;
+      if (!node) {
+        return;
+      }
       cancelSettledScrollToBottom();
       cancelPaneProgrammaticBottomFollow();
-      const node = messageStackRef.current;
-      if (node) {
-        if (
-          !scrollVirtualizedMessageStackToBottom(node, {
-            scrollKind: "bottom_boundary",
-            scrollSource: "user",
-          })
-        ) {
-          scrollToLatestMessage("auto", true, "seek");
-        }
-      }
-      return;
-    }
-
-    const node = messageStackRef.current;
-    if (!node) {
-      return;
-    }
-
-    cancelSettledScrollToBottom();
-    cancelPaneProgrammaticBottomFollow();
-    node.scrollTo({
-      top: 0,
-      behavior: "auto",
-    });
-    notifyMessageStackScrollWrite(node, {
-      scrollKind: "seek",
-      scrollSource: "user",
-    });
-    setTailFollowIntent(false);
-    paneScrollPositions[scrollStateKey] = {
-      top: 0,
-      shouldStick: false,
+      node.scrollTo({
+        top: 0,
+        behavior: "auto",
+      });
+      notifyMessageStackScrollWrite(node, {
+        scrollKind: "seek",
+        scrollSource: "user",
+      });
+      setTailFollowIntent(false);
+      paneScrollPositions[scrollStateKey] = {
+        top: 0,
+        shouldStick: false,
+      };
     };
+    const needsTrueStartPage =
+      activeSession &&
+      (activeSession.hasOlderHistory ??
+        (activeSession.messagesLoaded === false &&
+          activeSession.hasNewerHistory !== true));
+    if (!needsTrueStartPage) {
+      applyTopBoundary();
+      return;
+    }
+    if (pendingStartHistoryDemandRef.current?.key === scrollStateKey) {
+      return;
+    }
+    const requestedScrollStateKey = scrollStateKey;
+    const demand = { key: requestedScrollStateKey };
+    pendingStartHistoryDemandRef.current = demand;
+    void requestSessionHistoryStartPage(activeSession.id).then(() => {
+      if (pendingStartHistoryDemandRef.current === demand) {
+        pendingStartHistoryDemandRef.current = null;
+      }
+      if (currentScrollStateKeyRef.current !== requestedScrollStateKey) {
+        return;
+      }
+      // A failed/superseded page request still honors the user's navigation
+      // against the resident window. Silently swallowing the keypress makes a
+      // transient history race indistinguishable from broken input.
+      requestAnimationFrame(() => {
+        if (currentScrollStateKeyRef.current === requestedScrollStateKey) {
+          applyTopBoundary();
+        }
+      });
+    });
   }
 
   const handleMessageStackWheelRef = useRef<
@@ -752,6 +861,17 @@ export function useSessionPaneScrollState({
       scrollStateKey,
       paneScrollPositions,
     );
+    if (hasUnloadedNewerHistory) {
+      cancelPaneProgrammaticBottomFollow();
+      cancelSettledScrollToBottom();
+      setTailFollowIntent(false);
+      paneScrollPositions[scrollStateKey] = {
+        top: node.scrollTop,
+        shouldStick: false,
+      };
+      setNewResponseIndicator(scrollStateKey, true);
+      return;
+    }
     if (isPaneProgrammaticBottomFollowActive()) {
       const targetTop = Math.max(node.scrollHeight - node.clientHeight, 0);
       setTailFollowIntent(true);
@@ -787,6 +907,12 @@ export function useSessionPaneScrollState({
   function restoreMessageStackScrollTop(targetTop: number) {
     const node = messageStackRef.current;
     if (!node) {
+      return false;
+    }
+    // A saved detached position can be recorded during the brief gap between
+    // DOM growth and the next bottom-follow write. Never replay it after the
+    // pane has re-entered explicit tail-follow.
+    if (getTailFollowIntent()) {
       return false;
     }
 
@@ -882,6 +1008,7 @@ export function useSessionPaneScrollState({
     if (
       deferContentScrollEffects ||
       !activeSession ||
+      activeSession.hasNewerHistory === true ||
       !isActive ||
       !isSessionTabActive ||
       paneViewMode !== "session"
@@ -911,6 +1038,7 @@ export function useSessionPaneScrollState({
     });
   }, [
     activeSession?.id,
+    activeSession?.hasNewerHistory,
     deferContentScrollEffects,
     isActive,
     isSessionTabActive,
@@ -1062,33 +1190,28 @@ export function useSessionPaneScrollState({
 
     if (hasSessionFindQuery) {
       setTailFollowIntent(false);
-      if (paneViewMode === "session" && visibleLastMessageAuthor === "assistant") {
-        setNewResponseIndicator(scrollStateKey, true);
+      if (paneViewMode === "session") {
+        setNewResponseIndicator(
+          scrollStateKey,
+          true,
+          visibleLastMessageAuthor === "assistant" ? "response" : "activity",
+        );
       }
       return;
     }
 
     const shouldScroll =
       getTailFollowIntent() ||
-      paneScrollPositions[scrollStateKey]?.shouldStick === true ||
-      visibleLastMessageAuthor === "you";
+      paneScrollPositions[scrollStateKey]?.shouldStick === true;
     if (!shouldScroll) {
-      if (paneViewMode === "session" && visibleLastMessageAuthor === "assistant") {
-        setNewResponseIndicator(scrollStateKey, true);
+      if (paneViewMode === "session") {
+        setNewResponseIndicator(
+          scrollStateKey,
+          true,
+          visibleLastMessageAuthor === "assistant" ? "response" : "activity",
+        );
       }
       return;
-    }
-
-    if (visibleLastMessageAuthor === "you") {
-      setNewResponseIndicator(scrollStateKey, false);
-      let cleanup: (() => void) | undefined;
-      const frameId = window.requestAnimationFrame(() => {
-        cleanup = followLatestMessageForPromptSend();
-      });
-      return () => {
-        window.cancelAnimationFrame(frameId);
-        cleanup?.();
-      };
     }
 
     setNewResponseIndicator(scrollStateKey, false);
@@ -1147,10 +1270,10 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    if (isMessageStackNearBottom()) {
-      return;
-    }
-
+    // A resident history window can end with a user-authored message, so its
+    // last author is not evidence that a prompt was just submitted. Only the
+    // explicit send transition may reattach a detached pane to the live tail.
+    setNewResponseIndicator(scrollStateKey, false);
     let cleanup: (() => void) | undefined;
     const frameId = window.requestAnimationFrame(() => {
       cleanup = followLatestMessageForPromptSend();

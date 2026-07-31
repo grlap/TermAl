@@ -38,6 +38,11 @@ impl AppState {
         if self.remote_session_target(&session_id)?.is_some() {
             return self.proxy_remote_create_conversation_marker(&session_id, request);
         }
+        let anchors = self.resolve_local_conversation_marker_anchors(
+            &session_id,
+            &request.message_id,
+            request.end_message_id.as_deref(),
+        )?;
 
         let (marker, revision, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -48,9 +53,8 @@ impl AppState {
                 let record = inner
                     .session_by_index(index)
                     .expect("session index should be valid");
-                let marker = build_conversation_marker(record, request)?;
                 ensure_local_marker_session(record)?;
-                marker
+                build_conversation_marker(record, request, anchors)?
             };
             let session_mutation_stamp = {
                 let record = inner
@@ -95,26 +99,32 @@ impl AppState {
             return self.proxy_remote_update_conversation_marker(&session_id, &marker_id, request);
         }
 
+        // Snapshot the current marker before durable anchor resolution. SQLite
+        // reads must never happen while the process-wide state mutex is held.
+        let existing_marker = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .ok_or_else(ApiError::local_session_missing)?;
+            let record = inner
+                .session_by_index(index)
+                .expect("session index should be valid");
+            ensure_local_marker_session(record)?;
+            record
+                .session
+                .markers
+                .iter()
+                .find(|marker| marker.id == marker_id)
+                .cloned()
+                .ok_or_else(|| ApiError::not_found("conversation marker not found"))?
+        };
+        let marker =
+            self.patch_local_conversation_marker(&session_id, existing_marker.clone(), request)?;
         let (marker, revision, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(&session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
-            let marker = {
-                let record = inner
-                    .session_by_index(index)
-                    .expect("session index should be valid");
-                ensure_local_marker_session(record)?;
-                let marker_index = record
-                    .session
-                    .markers
-                    .iter()
-                    .position(|marker| marker.id == marker_id)
-                    .ok_or_else(|| ApiError::not_found("conversation marker not found"))?;
-                let next_marker =
-                    patch_conversation_marker(record, marker_index, request, &session_id)?;
-                next_marker
-            };
             let session_mutation_stamp = {
                 let record = inner
                     .session_mut_by_index(index)
@@ -125,6 +135,11 @@ impl AppState {
                     .iter()
                     .position(|entry| entry.id == marker_id)
                     .ok_or_else(|| ApiError::not_found("conversation marker not found"))?;
+                if record.session.markers[marker_index] != existing_marker {
+                    return Err(ApiError::conflict(
+                        "conversation marker changed while its anchors were being resolved; retry",
+                    ));
+                }
                 record.session.markers[marker_index] = marker.clone();
                 record.mutation_stamp
             };
@@ -145,6 +160,132 @@ impl AppState {
             server_instance_id: self.server_instance_id.clone(),
             session_mutation_stamp: Some(session_mutation_stamp),
         })
+    }
+
+    fn resolve_local_conversation_marker_anchors(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        end_message_id: Option<&str>,
+    ) -> Result<ResolvedConversationMarkerAnchors, ApiError> {
+        let (message_id, message_index_hint) =
+            self.resolve_local_conversation_marker_anchor(session_id, message_id, "message id")?;
+        let (end_message_id, end_message_index_hint) = match end_message_id {
+            Some(end_message_id) => {
+                let (end_message_id, end_message_index_hint) = self
+                    .resolve_local_conversation_marker_anchor(
+                        session_id,
+                        end_message_id,
+                        "end message id",
+                    )?;
+                if end_message_index_hint < message_index_hint {
+                    return Err(ApiError::bad_request(
+                        "conversation marker end message must not precede the start message",
+                    ));
+                }
+                (Some(end_message_id), Some(end_message_index_hint))
+            }
+            None => (None, None),
+        };
+        Ok(ResolvedConversationMarkerAnchors {
+            message_id,
+            message_index_hint,
+            end_message_id,
+            end_message_index_hint,
+        })
+    }
+
+    fn resolve_local_conversation_marker_anchor(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        label: &str,
+    ) -> Result<(String, usize), ApiError> {
+        let message_id = normalize_marker_route_id(message_id, label)?;
+        let resident_index = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(ApiError::local_session_missing)?;
+            let record = inner
+                .session_by_index(index)
+                .expect("session index should be valid");
+            ensure_local_marker_session(record)?;
+            marker_message_index_on_record(record, &message_id)
+        };
+        if let Some(message_index) = resident_index {
+            return Ok((message_id, message_index));
+        }
+        let persisted_index = if self.persistence_path.exists() {
+            persisted_message_position(self.persistence_path.as_ref(), session_id, &message_id)
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to resolve conversation marker anchor: {err:#}"
+                    ))
+                })?
+        } else {
+            None
+        };
+        persisted_index
+            .map(|message_index| (message_id, message_index))
+            .ok_or_else(|| {
+                ApiError::bad_request(format!("conversation marker {label} was not found"))
+            })
+    }
+
+    fn patch_local_conversation_marker(
+        &self,
+        session_id: &str,
+        mut marker: ConversationMarker,
+        request: UpdateConversationMarkerRequest,
+    ) -> Result<ConversationMarker, ApiError> {
+        if let Some(kind) = request.kind {
+            marker.kind = kind;
+        }
+        if let Some(name) = request.name {
+            marker.name = normalize_conversation_marker_name(&name)?;
+        }
+        if let Some(body) = request.body {
+            marker.body = normalize_conversation_marker_body(body)?;
+        }
+        if let Some(color) = request.color {
+            marker.color = normalize_conversation_marker_color(&color)?;
+        }
+        if let Some(message_id) = request.message_id {
+            let (message_id, message_index_hint) = self
+                .resolve_local_conversation_marker_anchor(session_id, &message_id, "message id")?;
+            marker.message_id = message_id;
+            marker.message_index_hint = message_index_hint;
+        }
+        if let Some(end_message_id) = request.end_message_id {
+            match end_message_id {
+                Some(end_message_id) => {
+                    let (end_message_id, end_message_index_hint) = self
+                        .resolve_local_conversation_marker_anchor(
+                            session_id,
+                            &end_message_id,
+                            "end message id",
+                        )?;
+                    marker.end_message_id = Some(end_message_id);
+                    marker.end_message_index_hint = Some(end_message_index_hint);
+                }
+                None => {
+                    marker.end_message_id = None;
+                    marker.end_message_index_hint = None;
+                }
+            }
+        }
+        if marker
+            .end_message_index_hint
+            .is_some_and(|end_message_index| end_message_index < marker.message_index_hint)
+        {
+            return Err(ApiError::bad_request(
+                "conversation marker end message must not precede the start message",
+            ));
+        }
+        marker.session_id = session_id.to_owned();
+        marker.updated_at = stamp_now();
+        Ok(marker)
     }
 
     fn delete_conversation_marker(
@@ -384,22 +525,22 @@ impl AppState {
     }
 }
 
+struct ResolvedConversationMarkerAnchors {
+    message_id: String,
+    message_index_hint: usize,
+    end_message_id: Option<String>,
+    end_message_index_hint: Option<usize>,
+}
+
 fn build_conversation_marker(
     record: &SessionRecord,
     request: CreateConversationMarkerRequest,
+    anchors: ResolvedConversationMarkerAnchors,
 ) -> Result<ConversationMarker, ApiError> {
     let session_id = record.session.id.clone();
     let name = normalize_conversation_marker_name(&request.name)?;
     let body = normalize_conversation_marker_body(request.body)?;
     let color = normalize_conversation_marker_color(&request.color)?;
-    let message_id = normalize_marker_route_id(&request.message_id, "message id")?;
-    let message_index_hint = message_index_on_session(&record.session, &message_id)
-        .ok_or_else(|| ApiError::bad_request("conversation marker message id was not found"))?;
-    let (end_message_id, end_message_index_hint) = resolve_marker_end_anchor(
-        record,
-        message_index_hint,
-        request.end_message_id.as_deref(),
-    )?;
     let now = stamp_now();
     Ok(ConversationMarker {
         id: format!("marker-{}", Uuid::new_v4()),
@@ -408,99 +549,23 @@ fn build_conversation_marker(
         name,
         body,
         color,
-        message_id,
-        message_index_hint,
-        end_message_id,
-        end_message_index_hint,
+        message_id: anchors.message_id,
+        message_index_hint: anchors.message_index_hint,
+        end_message_id: anchors.end_message_id,
+        end_message_index_hint: anchors.end_message_index_hint,
         created_at: now.clone(),
         updated_at: now,
         created_by: ConversationMarkerAuthor::User,
     })
 }
 
-fn patch_conversation_marker(
-    record: &SessionRecord,
-    marker_index: usize,
-    request: UpdateConversationMarkerRequest,
-    session_id: &str,
-) -> Result<ConversationMarker, ApiError> {
-    let mut marker = record
+fn marker_message_index_on_record(record: &SessionRecord, message_id: &str) -> Option<usize> {
+    record
         .session
-        .markers
-        .get(marker_index)
-        .cloned()
-        .ok_or_else(|| ApiError::not_found("conversation marker not found"))?;
-
-    if let Some(kind) = request.kind {
-        marker.kind = kind;
-    }
-    if let Some(name) = request.name {
-        marker.name = normalize_conversation_marker_name(&name)?;
-    }
-    if let Some(body) = request.body {
-        marker.body = normalize_conversation_marker_body(body)?;
-    }
-    if let Some(color) = request.color {
-        marker.color = normalize_conversation_marker_color(&color)?;
-    }
-    if let Some(message_id) = request.message_id {
-        let message_id = normalize_marker_route_id(&message_id, "message id")?;
-        let message_index_hint = message_index_on_session(&record.session, &message_id)
-            .ok_or_else(|| ApiError::bad_request("conversation marker message id was not found"))?;
-        marker.message_id = message_id;
-        marker.message_index_hint = message_index_hint;
-    }
-    if let Some(end_message_id) = request.end_message_id {
-        match end_message_id {
-            Some(end_message_id) => {
-                let (end_message_id, end_message_index_hint) = resolve_marker_end_anchor(
-                    record,
-                    marker.message_index_hint,
-                    Some(end_message_id.as_str()),
-                )?;
-                marker.end_message_id = end_message_id;
-                marker.end_message_index_hint = end_message_index_hint;
-            }
-            None => {
-                marker.end_message_id = None;
-                marker.end_message_index_hint = None;
-            }
-        }
-    } else if let Some(end_message_id) = marker.end_message_id.clone() {
-        let (_end_message_id, end_message_index_hint) =
-            resolve_marker_end_anchor(record, marker.message_index_hint, Some(&end_message_id))?;
-        marker.end_message_index_hint = end_message_index_hint;
-    }
-    marker.session_id = session_id.to_owned();
-    marker.updated_at = stamp_now();
-
-    Ok(marker)
-}
-
-fn resolve_marker_end_anchor(
-    record: &SessionRecord,
-    start_message_index: usize,
-    end_message_id: Option<&str>,
-) -> Result<(Option<String>, Option<usize>), ApiError> {
-    let Some(end_message_id) = end_message_id else {
-        return Ok((None, None));
-    };
-    let end_message_id = normalize_marker_route_id(end_message_id, "end message id")?;
-    let end_message_index = message_index_on_session(&record.session, &end_message_id)
-        .ok_or_else(|| ApiError::bad_request("conversation marker end message id was not found"))?;
-    if end_message_index < start_message_index {
-        return Err(ApiError::bad_request(
-            "conversation marker end message must not precede the start message",
-        ));
-    }
-    Ok((Some(end_message_id), Some(end_message_index)))
-}
-
-fn message_index_on_session(session: &Session, message_id: &str) -> Option<usize> {
-    session
         .messages
         .iter()
         .position(|message| message.id() == message_id)
+        .map(|local_index| global_message_index(record, local_index))
 }
 
 fn update_conversation_marker_request_has_changes(request: &UpdateConversationMarkerRequest) -> bool {

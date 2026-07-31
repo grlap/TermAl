@@ -114,16 +114,37 @@ fn termal_delegation_mcp_args(parent_session_id: &str, base_url: &str) -> Vec<St
     ]
 }
 
+#[derive(Debug, Serialize)]
+struct TermalDelegationMcpStdioConfig {
+    command: String,
+    args: Vec<String>,
+    env: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TermalDelegationAcpEnvVariable<'a> {
+    name: &'a str,
+    value: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct TermalDelegationAcpMcpServer<'a> {
+    name: &'static str,
+    command: &'a str,
+    args: &'a [String],
+    env: Vec<TermalDelegationAcpEnvVariable<'a>>,
+}
+
 fn termal_delegation_mcp_stdio_config_with_command(
     command: &str,
     parent_session_id: &str,
     base_url: &str,
-) -> Value {
-    json!({
-        "command": command,
-        "args": termal_delegation_mcp_args(parent_session_id, base_url),
-        "env": {},
-    })
+) -> TermalDelegationMcpStdioConfig {
+    TermalDelegationMcpStdioConfig {
+        command: command.to_owned(),
+        args: termal_delegation_mcp_args(parent_session_id, base_url),
+        env: BTreeMap::new(),
+    }
 }
 
 fn termal_delegation_mcp_current_exe() -> Result<String> {
@@ -157,12 +178,30 @@ fn termal_delegation_mcp_acp_servers_with_command(
 ) -> Value {
     let server =
         termal_delegation_mcp_stdio_config_with_command(command, parent_session_id, base_url);
-    json!([{
-        "name": TERMAL_DELEGATION_MCP_SERVER_NAME,
-        "command": server.get("command").cloned().unwrap_or(Value::Null),
-        "args": server.get("args").cloned().unwrap_or_else(|| json!([])),
-        "env": server.get("env").cloned().unwrap_or_else(|| json!({})),
-    }])
+    json!([termal_delegation_mcp_acp_server_from_stdio_config(
+        &server
+    )])
+}
+
+fn termal_delegation_mcp_acp_server_from_stdio_config(
+    server: &TermalDelegationMcpStdioConfig,
+) -> TermalDelegationAcpMcpServer<'_> {
+    TermalDelegationAcpMcpServer {
+        name: TERMAL_DELEGATION_MCP_SERVER_NAME,
+        command: &server.command,
+        args: &server.args,
+        // ACP McpServer.env is an array of EnvVariable objects. Claude and
+        // Codex use object maps for their native MCP configuration formats,
+        // so this conversion must remain at the shared ACP boundary.
+        env: server
+            .env
+            .iter()
+            .map(|(name, value)| TermalDelegationAcpEnvVariable {
+                name,
+                value,
+            })
+            .collect(),
+    }
 }
 
 fn termal_delegation_mcp_codex_config_with_command(
@@ -174,11 +213,7 @@ fn termal_delegation_mcp_codex_config_with_command(
         termal_delegation_mcp_stdio_config_with_command(command, parent_session_id, base_url);
     json!({
         "mcp_servers": {
-            TERMAL_DELEGATION_MCP_SERVER_NAME: {
-                "command": server.get("command").cloned().unwrap_or(Value::Null),
-                "args": server.get("args").cloned().unwrap_or_else(|| json!([])),
-                "env": server.get("env").cloned().unwrap_or_else(|| json!({})),
-            },
+            TERMAL_DELEGATION_MCP_SERVER_NAME: server,
         },
     })
 }

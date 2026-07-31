@@ -295,6 +295,21 @@ describe("App live state - delta-gap core", () => {
     await clickAndSettle(sessionRowButton);
   }
 
+  function boundedHistoryResponseForSession(
+    session: Session,
+    revision: number,
+  ): api.SessionHistoryResponse {
+    return {
+      hasMore: false,
+      messageCount: session.messageCount ?? session.messages.length,
+      messages: session.messages,
+      nextBefore: null,
+      revision,
+      serverInstanceId: "test-instance",
+      sessionMutationStamp: session.sessionMutationStamp ?? 0,
+    };
+  }
+
   function expectContainerTextContains(
     container: Element | null,
     expectedCells: string[],
@@ -742,7 +757,7 @@ describe("App live state - delta-gap core", () => {
           }
           return stateResync.promise;
         }
-        if (requestUrl.pathname === "/api/sessions/session-1") {
+        if (requestUrl.pathname === "/api/sessions/session-1/history") {
           sessionHydrationRequestCount += 1;
           return sessionHydration.promise;
         }
@@ -835,11 +850,7 @@ describe("App live state - delta-gap core", () => {
             ),
           );
           sessionHydration.resolve(
-            jsonResponse({
-              revision: 4,
-              serverInstanceId: "test-instance",
-              session: repairedSession,
-            }),
+            jsonResponse(boundedHistoryResponseForSession(repairedSession, 4)),
           );
           await flushUiWork();
         });
@@ -916,7 +927,7 @@ describe("App live state - delta-gap core", () => {
           }
           return stateResync.promise;
         }
-        if (requestUrl.pathname === "/api/sessions/session-1") {
+        if (requestUrl.pathname === "/api/sessions/session-1/history") {
           sessionHydrationRequestCount += 1;
           return sessionHydration.promise;
         }
@@ -996,11 +1007,7 @@ describe("App live state - delta-gap core", () => {
             codex: { notices: [] },
           });
           sessionHydration.resolve(
-            jsonResponse({
-              revision: 4,
-              serverInstanceId: "test-instance",
-              session: repairedSession,
-            }),
+            jsonResponse(boundedHistoryResponseForSession(repairedSession, 4)),
           );
           await flushUiWork();
         });
@@ -1009,7 +1016,11 @@ describe("App live state - delta-gap core", () => {
             0,
           );
         });
-        expect(screen.queryByText("Source-Focussed")).not.toBeInTheDocument();
+        expect(
+          Array.from(document.querySelectorAll(".message-card")).some((card) =>
+            card.textContent?.includes("Source-Focussed"),
+          ),
+        ).toBe(false);
 
         await act(async () => {
           stateResync.resolve(
@@ -1105,7 +1116,7 @@ describe("App live state - delta-gap core", () => {
           }
           return stateResync.promise;
         }
-        if (requestUrl.pathname === "/api/sessions/session-1") {
+        if (requestUrl.pathname === "/api/sessions/session-1/history") {
           sessionHydrationRequestCount += 1;
           return sessionHydration.promise;
         }
@@ -1254,11 +1265,7 @@ describe("App live state - delta-gap core", () => {
             ),
           );
           sessionHydration.resolve(
-            jsonResponse({
-              revision: 10,
-              serverInstanceId: "test-instance",
-              session: finalSession,
-            }),
+            jsonResponse(boundedHistoryResponseForSession(finalSession, 10)),
           );
           await flushUiWork();
         });

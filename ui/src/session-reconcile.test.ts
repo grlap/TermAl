@@ -235,7 +235,7 @@ describe("reconcileSessions", () => {
     });
   });
 
-  it("preserves delegated child ownership when a full hydration response omits it", () => {
+  it("preserves delegated child ownership when a bounded detail response omits it", () => {
     const previous = [
       makeSession("child-session", {
         parentDelegationId: "delegation-1",
@@ -382,6 +382,84 @@ describe("reconcileSessions", () => {
     expect(merged[0].messages[0]).toBe(previous[0].messages[0]);
     expect(merged[0].messages[1]).toBe(partialAssistantMessage);
     expect(merged[0].messageCount).toBe(3);
+  });
+
+  it("adopts targeted partial-tail residency flags instead of preserving a detached window", () => {
+    const queuedPrompt = {
+      id: "prompt-1",
+      timestamp: "10:02",
+      text: "Queued while the session is busy",
+    };
+    const historicalWindow = makeSession("session-a", {
+      messagesLoaded: false,
+      hasOlderHistory: false,
+      hasNewerHistory: true,
+      messageCount: 1_000,
+      messageStartIndex: 0,
+      sessionMutationStamp: 10,
+      messages: [
+        {
+          id: "message-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Historical prompt",
+        },
+      ],
+    });
+    const targetedTail = makeSession("session-a", {
+      messagesLoaded: false,
+      hasOlderHistory: true,
+      hasNewerHistory: false,
+      messageCount: 1_000,
+      messageStartIndex: 980,
+      sessionMutationStamp: 11,
+      pendingPrompts: [queuedPrompt],
+      messages: [
+        {
+          id: "message-1000",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Live tail",
+        },
+      ],
+    });
+
+    const merged = reconcileSingleSession(historicalWindow, targetedTail, {
+      adoptPartialMessages: true,
+      disableMutationStampFastPath: true,
+    });
+
+    expect(merged.messages).toEqual(targetedTail.messages);
+    expect(merged.messageStartIndex).toBe(980);
+    expect(merged.hasOlderHistory).toBe(true);
+    expect(merged.hasNewerHistory).toBe(false);
+    expect(merged.pendingPrompts).toEqual([queuedPrompt]);
+  });
+
+  it("clears completed queued prompts from a targeted partial-tail response", () => {
+    const previous = makeSession("session-a", {
+      messagesLoaded: false,
+      pendingPrompts: [
+        {
+          id: "prompt-1",
+          timestamp: "10:02",
+          text: "Previously queued",
+        },
+      ],
+    });
+    const targetedTail = makeSession("session-a", {
+      messagesLoaded: false,
+      pendingPrompts: [],
+    });
+
+    const merged = reconcileSingleSession(previous, targetedTail, {
+      adoptPartialMessages: true,
+      disableMutationStampFastPath: true,
+    });
+
+    expect(merged.pendingPrompts).toBeUndefined();
   });
 
   it("reuses marker state when only valid color casing changed", () => {

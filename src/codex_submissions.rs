@@ -91,7 +91,7 @@ impl AppState {
                 let (message, message_count, preview, status, session_mutation_stamp) =
                     interaction_message_update_parts(record, message_index, message_id);
                 (
-                    message_index,
+                    global_message_index(record, message_index),
                     message,
                     message_count,
                     preview,
@@ -120,7 +120,7 @@ impl AppState {
                 "state warning> failed to refresh delegation after interaction response: {err:#}"
             );
         }
-        Ok(self.summary_snapshot_with_full_session(session_id))
+        Ok(self.summary_snapshot_with_session_detail(session_id))
     }
 
     /// Routes an approval decision back to the originating agent.

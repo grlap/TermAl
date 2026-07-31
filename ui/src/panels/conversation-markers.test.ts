@@ -60,11 +60,15 @@ function makeVirtualizerHandle(
 }
 
 function MarkerJumpHarness({
+  historyWindowKey = "window-1",
+  onMissingMessageJump,
   onReady,
   scrollRoot,
   sessionId,
   virtualizerHandle,
 }: {
+  historyWindowKey?: string;
+  onMissingMessageJump?: () => boolean;
   onReady: (api: MarkerJumpApi) => void;
   scrollRoot: HTMLElement;
   sessionId: string;
@@ -76,6 +80,8 @@ function MarkerJumpHarness({
   scrollContainerRef.current = scrollRoot;
   virtualizerHandleRef.current = virtualizerHandle;
   const api = useConversationMarkerJump({
+    historyWindowKey,
+    onMissingMessageJump,
     onConversationSearchItemMount: () => {},
     scrollContainerRef,
     sessionId,
@@ -519,6 +525,80 @@ describe("conversation marker helpers", () => {
     } finally {
       frames.restore();
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it("requests bounded history pages until an off-window marker target becomes reachable", () => {
+    const frames = installManualAnimationFrames();
+    const scrollRoot = document.createElement("section");
+    const jumpToMessageId = vi.fn(() => false);
+    const virtualizerHandle = makeVirtualizerHandle(jumpToMessageId);
+    const onMissingMessageJump = vi.fn(() => true);
+    let markerJump: MarkerJumpApi | null = null;
+
+    try {
+      const { rerender } = render(
+        createElement(MarkerJumpHarness, {
+          historyWindowKey: "window-1",
+          onMissingMessageJump,
+          onReady: (api) => {
+            markerJump = api;
+          },
+          scrollRoot,
+          sessionId: "session-1",
+          virtualizerHandle,
+        }),
+      );
+
+      act(() => {
+        markerJump?.jumpToMarker(
+          makeMarker("marker-old", { messageId: "message-old" }),
+        );
+      });
+      expect(onMissingMessageJump).toHaveBeenCalledTimes(1);
+
+      rerender(
+        createElement(MarkerJumpHarness, {
+          historyWindowKey: "window-2",
+          onMissingMessageJump,
+          onReady: (api) => {
+            markerJump = api;
+          },
+          scrollRoot,
+          sessionId: "session-1",
+          virtualizerHandle,
+        }),
+      );
+      act(() => {
+        frames.flushNextFrame();
+        frames.flushNextFrame();
+      });
+      expect(onMissingMessageJump).toHaveBeenCalledTimes(2);
+
+      jumpToMessageId.mockReturnValue(true);
+      rerender(
+        createElement(MarkerJumpHarness, {
+          historyWindowKey: "window-3",
+          onMissingMessageJump,
+          onReady: (api) => {
+            markerJump = api;
+          },
+          scrollRoot,
+          sessionId: "session-1",
+          virtualizerHandle,
+        }),
+      );
+      act(() => {
+        frames.flushNextFrame();
+      });
+
+      expect(jumpToMessageId).toHaveBeenLastCalledWith("message-old", {
+        align: "center",
+        flush: true,
+      });
+      expect(onMissingMessageJump).toHaveBeenCalledTimes(2);
+    } finally {
+      frames.restore();
     }
   });
 

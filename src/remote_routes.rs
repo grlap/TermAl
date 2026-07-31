@@ -77,9 +77,6 @@ impl Drop for RemoteDeltaHydrationInFlightGuard {
     }
 }
 
-const REMOTE_SESSION_RESPONSE_MISSING_FULL_TRANSCRIPT: &str =
-    "remote session response did not include a full transcript";
-
 impl AppState {
     // -- event bridge lifecycle --
 
@@ -451,37 +448,6 @@ impl AppState {
         Ok(())
     }
 
-    fn commit_applied_remote_state_before_rejection(
-        &self,
-        inner: &mut StateInner,
-        remote_state_applied: bool,
-        rejection_context: &str,
-    ) -> Result<(), ApiError> {
-        if !remote_state_applied {
-            return Ok(());
-        }
-
-        self.commit_locked(inner).map_err(|err| {
-            ApiError::internal(format!(
-                "failed to persist remote state before {rejection_context}: {err:#}"
-            ))
-        })?;
-        Ok(())
-    }
-
-    /// Fetches the remote owner's full session transcript for a local proxy,
-    /// localizes it into the proxy record, and returns the local full-session
-    /// response shape. This keeps `/api/sessions/{id}` full-transcript-only
-    /// even after metadata-first remote summaries create unloaded proxy records.
-    /// Accepts metadata-light remotes that do not emit mutation stamps yet:
-    /// when both stamps are `None`, `messageCount` is the only freshness
-    /// evidence available and the caller has already confirmed broad remote
-    /// state is newer than the candidate session response.
-    fn remote_session_metadata_matches_record(record: &SessionRecord, session: &Session) -> bool {
-        session_message_count(record) == session.message_count
-            && record.session.session_mutation_stamp == session.session_mutation_stamp
-    }
-
     fn command_status_replay_code(status: CommandStatus) -> u8 {
         match status {
             CommandStatus::Running => 0,
@@ -758,15 +724,15 @@ impl AppState {
         }
     }
 
-    fn hydrate_remote_session_target(
+    fn fetch_remote_session_tail_target(
         &self,
         target: &RemoteSessionTarget,
+        message_limit: usize,
         min_remote_revision: Option<u64>,
         delta_expectation: Option<RemoteDeltaHydrationExpectation>,
-        // Applied independently to each remote round-trip below; this is not
-        // a shared end-to-end budget across `/api/sessions` and `/api/state`.
         request_timeout: Duration,
     ) -> Result<SessionResponse, ApiError> {
+        let query = vec![("tail".to_owned(), message_limit.to_string())];
         let remote_response: SessionResponse = self.remote_registry.request_json_with_timeout(
             &target.remote,
             Method::GET,
@@ -774,7 +740,7 @@ impl AppState {
                 "/api/sessions/{}",
                 encode_uri_component(&target.remote_session_id)
             ),
-            &[],
+            &query,
             None,
             request_timeout,
         )?;
@@ -785,19 +751,26 @@ impl AppState {
                 remote_response.session.id, target.remote_session_id
             )));
         }
-        if !remote_response.session.messages_loaded {
-            return Err(
-                ApiError::bad_gateway(REMOTE_SESSION_RESPONSE_MISSING_FULL_TRANSCRIPT)
-                    .with_kind(ApiErrorKind::RemoteSessionMissingFullTranscript),
-            );
+        if remote_response.session.messages.len() > message_limit {
+            return Err(ApiError::bad_gateway(format!(
+                "remote session tail returned {} messages, exceeding requested limit {message_limit}",
+                remote_response.session.messages.len()
+            )));
         }
         let loaded_message_count =
             u32::try_from(remote_response.session.messages.len()).unwrap_or(u32::MAX);
-        if loaded_message_count != remote_response.session.message_count {
+        if loaded_message_count > remote_response.session.message_count {
             return Err(ApiError::bad_gateway(format!(
-                "remote session response messageCount {} did not match loaded transcript length {}",
-                remote_response.session.message_count, loaded_message_count
+                "remote session tail length {loaded_message_count} exceeded messageCount {}",
+                remote_response.session.message_count
             )));
+        }
+        if remote_response.session.messages_loaded
+            != (loaded_message_count == remote_response.session.message_count)
+        {
+            return Err(ApiError::bad_gateway(
+                "remote session tail returned inconsistent messagesLoaded metadata",
+            ));
         }
         if let Some(min_revision) = min_remote_revision {
             if remote_response.revision < min_revision {
@@ -823,119 +796,12 @@ impl AppState {
             }
         }
 
-        let remote_state_for_full_hydration = if min_remote_revision.is_none() {
-            let latest_remote_revision = {
-                let inner = self.inner.lock().expect("state mutex poisoned");
-                inner
-                    .remote_applied_revisions
-                    .get(&target.remote.id)
-                    .copied()
-            };
-            if latest_remote_revision
-                .map(|revision| revision < remote_response.revision)
-                .unwrap_or(true)
-            {
-                let remote_state: StateResponse = self.remote_registry.request_json_with_timeout(
-                    &target.remote,
-                    Method::GET,
-                    "/api/state",
-                    &[],
-                    None,
-                    request_timeout,
-                )?;
-                Some(remote_state)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
         let (revision, session) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let mut remote_state_applied = false;
-            if let Some(remote_state) = remote_state_for_full_hydration.as_ref() {
-                if remote_state.revision < remote_response.revision {
-                    return Err(ApiError::bad_gateway(format!(
-                        "remote state revision {} is older than remote session response revision {}",
-                        remote_state.revision, remote_response.revision
-                    )));
-                }
-                if apply_remote_state_if_newer_locked(
-                    &mut inner,
-                    &target.remote.id,
-                    remote_state,
-                    None,
-                    RemoteSnapshotApplyMode::GateBySnapshotRevision,
-                ) {
-                    remote_state_applied = true;
-                    note_remote_applied_state_snapshot_revision(
-                        &mut inner,
-                        &target.remote.id,
-                        remote_state,
-                    );
-                }
-            }
-
-            let current_remote_revision = inner
-                .remote_applied_revisions
-                .get(&target.remote.id)
-                .copied();
-            if min_remote_revision.is_none() {
-                if current_remote_revision
-                    .is_none_or(|revision| revision < remote_response.revision)
-                {
-                    self.commit_applied_remote_state_before_rejection(
-                        &mut inner,
-                        remote_state_applied,
-                        "stale session rejection",
-                    )?;
-                    let synchronized_revision = current_remote_revision
-                        .map(|revision| revision.to_string())
-                        .unwrap_or_else(|| "none".to_owned());
-                    return Err(ApiError::bad_gateway(format!(
-                        "remote session response revision {} cannot be safely applied; latest synchronized remote state revision is {synchronized_revision} and the transcript may have changed",
-                        remote_response.revision,
-                    ))
-                    .with_kind(ApiErrorKind::RemoteSessionHydrationFreshnessRace));
-                }
-            }
-            let Some(index) = inner
+            let index = inner
                 .find_remote_session_index(&target.remote.id, &target.remote_session_id)
                 .or_else(|| inner.find_session_index(&target.local_session_id))
-            else {
-                // Preserve the newer remote state fetched for this hydration even if the
-                // requested proxy disappeared or was replaced before we localized the full
-                // transcript.
-                self.commit_applied_remote_state_before_rejection(
-                    &mut inner,
-                    remote_state_applied,
-                    "missing-session rejection",
-                )?;
-                return Err(ApiError::not_found("session not found"));
-            };
-            if min_remote_revision.is_none()
-                && current_remote_revision
-                    .is_some_and(|revision| revision > remote_response.revision)
-            {
-                let record = inner
-                    .sessions
-                    .get(index)
-                    .ok_or_else(|| ApiError::not_found("session not found"))?;
-                if !Self::remote_session_metadata_matches_record(record, &remote_response.session) {
-                    self.commit_applied_remote_state_before_rejection(
-                        &mut inner,
-                        remote_state_applied,
-                        "stale session rejection",
-                    )?;
-                    return Err(ApiError::bad_gateway(format!(
-                        "remote session response revision {} is older than synchronized remote state revision {} and does not match current session metadata",
-                        remote_response.revision,
-                        current_remote_revision.expect("checked as newer")
-                    ))
-                    .with_kind(ApiErrorKind::RemoteSessionHydrationFreshnessRace));
-                }
-            }
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
             if let Some(remote_revision) = min_remote_revision {
                 if inner.should_skip_remote_session_applied_delta_revision(
                     &target.remote.id,
@@ -953,6 +819,47 @@ impl AppState {
                     });
                 }
             }
+            let record = inner
+                .sessions
+                .get(index)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let latest_remote_revision = inner
+                .remote_applied_revisions
+                .get(&target.remote.id)
+                .copied()
+                .unwrap_or_default()
+                .max(
+                    inner
+                        .remote_session_transcript_applied_revisions
+                        .get(&target.remote.id)
+                        .and_then(|sessions| sessions.get(&target.remote_session_id))
+                        .copied()
+                        .unwrap_or_default(),
+                );
+            let response_is_compatible_at_current_revision =
+                match (
+                    record.session.session_mutation_stamp,
+                    remote_response.session.session_mutation_stamp,
+                ) {
+                    (Some(current_stamp), Some(response_stamp)) => {
+                        response_stamp > current_stamp
+                            || (response_stamp == current_stamp
+                                && remote_response.session.message_count
+                                    == record.session.message_count)
+                    }
+                    (Some(_), None) => false,
+                    (None, _) => true,
+                };
+            if remote_response.revision < latest_remote_revision
+                || (remote_response.revision == latest_remote_revision
+                    && !response_is_compatible_at_current_revision)
+            {
+                return Err(ApiError::conflict(format!(
+                    "remote session tail revision {} is stale relative to synchronized revision {latest_remote_revision}",
+                    remote_response.revision
+                )));
+            }
+
             let local_project_ids_by_remote_project_id =
                 remote_project_id_map(&inner, &target.remote.id);
             let local_project_id = local_project_id_for_remote_project(
@@ -961,7 +868,6 @@ impl AppState {
             )
             .map(LocalProjectId::into_inner)
             .or_else(|| inner.sessions[index].session.project_id.clone());
-
             let session = {
                 let record = inner
                     .session_mut_by_index(index)
@@ -974,30 +880,21 @@ impl AppState {
                 );
                 Self::wire_session_from_record(record)
             };
-            if min_remote_revision.is_none() {
+            let bounded_tail_materialized = remote_response.session.message_count == 0
+                || !remote_response.session.messages.is_empty();
+            if bounded_tail_materialized {
                 inner.note_remote_session_transcript_applied_revision(
                     &target.remote.id,
                     &target.remote_session_id,
                     remote_response.revision,
                 );
-                inner.note_remote_applied_revision(&target.remote.id, remote_response.revision);
-            } else if let Some(remote_revision) = min_remote_revision {
-                // A targeted full-session repair materializes only this
-                // transcript. Advance the session-specific transcript
-                // watermark to the response revision so later deltas for this
-                // session are skipped, but keep the broad remote watermark at
-                // the triggering delta revision so unrelated sessions at
-                // intermediate revisions can still apply.
-                inner.note_remote_session_transcript_applied_revision(
-                    &target.remote.id,
-                    &target.remote_session_id,
-                    remote_response.revision,
-                );
+            }
+            if let Some(remote_revision) = min_remote_revision {
                 inner.note_remote_applied_revision(&target.remote.id, remote_revision);
             }
             let revision = self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!(
-                    "failed to persist remote session hydration: {err:#}"
+                    "failed to persist bounded remote session tail: {err:#}"
                 ))
             })?;
             (revision, session)
@@ -1010,10 +907,238 @@ impl AppState {
         })
     }
 
-    /// Returns whether an unloaded remote proxy was repaired, is already being
-    /// repaired by another delta, or still needs the caller to apply the narrow
-    /// delta. `SkipInFlight` intentionally does not mark the delta replay key:
-    /// the in-flight hydration has not proved this specific delta was applied.
+    fn fetch_remote_session_history_target(
+        &self,
+        target: &RemoteSessionTarget,
+        before: Option<&str>,
+        after: Option<&str>,
+        around: Option<usize>,
+        from_start: bool,
+        message_limit: usize,
+        request_timeout: Duration,
+    ) -> Result<SessionHistoryResponse, ApiError> {
+        let mut query = vec![("limit".to_owned(), message_limit.to_string())];
+        if let Some(before) = before {
+            query.push(("before".to_owned(), before.to_owned()));
+        }
+        if let Some(after) = after {
+            query.push(("after".to_owned(), after.to_owned()));
+        }
+        if let Some(around) = around {
+            query.push(("around".to_owned(), around.to_string()));
+        }
+        if from_start {
+            query.push(("from".to_owned(), "start".to_owned()));
+        }
+        let remote_page: SessionHistoryResponse =
+            self.remote_registry.request_json_with_timeout(
+                &target.remote,
+                Method::GET,
+                &format!(
+                    "/api/sessions/{}/history",
+                    encode_uri_component(&target.remote_session_id)
+                ),
+                &query,
+                None,
+                request_timeout,
+            )?;
+        if remote_page.messages.len() > message_limit {
+            return Err(ApiError::bad_gateway(format!(
+                "remote session history returned {} messages, exceeding requested limit {message_limit}",
+                remote_page.messages.len()
+            )));
+        }
+        if remote_page.has_more != remote_page.next_before.is_some() {
+            return Err(ApiError::bad_gateway(
+                "remote session history returned inconsistent cursor metadata",
+            ));
+        }
+        if remote_page.has_newer != remote_page.next_after.is_some() {
+            return Err(ApiError::bad_gateway(
+                "remote session history returned inconsistent forward cursor metadata",
+            ));
+        }
+        if remote_page.has_newer
+            && remote_page.next_after.as_deref()
+                != remote_page.messages.last().map(|message| message.id())
+        {
+            return Err(ApiError::bad_gateway(
+                "remote session history forward cursor did not match the last returned message",
+            ));
+        }
+        if remote_page.has_more
+            && remote_page.next_before.as_deref()
+                != remote_page.messages.first().map(|message| message.id())
+        {
+            return Err(ApiError::bad_gateway(
+                "remote session history cursor did not match the first returned message",
+            ));
+        }
+
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_remote_session_index(&target.remote.id, &target.remote_session_id)
+            .or_else(|| inner.find_session_index(&target.local_session_id))
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let record = inner
+            .sessions
+            .get(index)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let metadata_matches_current_session =
+            remote_page.message_count == record.session.message_count
+                && record.session.session_mutation_stamp.is_some()
+                && Some(remote_page.session_mutation_stamp)
+                    == record.session.session_mutation_stamp;
+        let latest_remote_revision = inner
+            .remote_applied_revisions
+            .get(&target.remote.id)
+            .copied()
+            .unwrap_or_default();
+        let compatible_without_remote_mutation_stamp =
+            record.session.session_mutation_stamp.is_none()
+                && remote_page.message_count == record.session.message_count
+                && remote_page.revision >= latest_remote_revision;
+        if !metadata_matches_current_session && !compatible_without_remote_mutation_stamp {
+            return Err(ApiError::conflict(
+                "remote session history changed while the page was loading; retry the request",
+            ));
+        }
+        Ok(SessionHistoryResponse {
+            messages: remote_page.messages,
+            next_before: remote_page.next_before,
+            has_more: remote_page.has_more,
+            next_after: remote_page.next_after,
+            has_newer: remote_page.has_newer,
+            message_start_index: remote_page.message_start_index,
+            message_count: remote_page.message_count,
+            revision: inner.revision,
+            session_mutation_stamp: inner.sessions[index].mutation_stamp,
+            server_instance_id: self.server_instance_id.clone(),
+        })
+    }
+
+    fn fetch_remote_session_overview_target(
+        &self,
+        target: &RemoteSessionTarget,
+        bucket_count: usize,
+        request_timeout: Duration,
+    ) -> Result<SessionOverviewResponse, ApiError> {
+        let query = vec![("buckets".to_owned(), bucket_count.to_string())];
+        let mut remote_overview: SessionOverviewResponse =
+            self.remote_registry.request_json_with_timeout(
+                &target.remote,
+                Method::GET,
+                &format!(
+                    "/api/sessions/{}/overview",
+                    encode_uri_component(&target.remote_session_id)
+                ),
+                &query,
+                None,
+                request_timeout,
+            )?;
+        if remote_overview.session_id != target.remote_session_id {
+            return Err(ApiError::bad_gateway(format!(
+                "remote session overview id `{}` did not match requested session `{}`",
+                remote_overview.session_id, target.remote_session_id
+            )));
+        }
+        if remote_overview.buckets.len() > bucket_count {
+            return Err(ApiError::bad_gateway(format!(
+                "remote session overview returned {} buckets, exceeding requested limit {bucket_count}",
+                remote_overview.buckets.len()
+            )));
+        }
+        let bucket_message_count: u64 = remote_overview
+            .buckets
+            .iter()
+            .map(|bucket| u64::from(bucket.c))
+            .sum();
+        if bucket_message_count != u64::from(remote_overview.message_count) {
+            return Err(ApiError::bad_gateway(
+                "remote session overview returned inconsistent bucket counts",
+            ));
+        }
+        if remote_overview
+            .buckets
+            .iter()
+            .any(|bucket| bucket.u > bucket.c)
+        {
+            return Err(ApiError::bad_gateway(
+                "remote session overview returned inconsistent author counts",
+            ));
+        }
+
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_remote_session_index(&target.remote.id, &target.remote_session_id)
+            .or_else(|| inner.find_session_index(&target.local_session_id))
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let record = inner
+            .sessions
+            .get(index)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        if remote_overview.message_count != record.session.message_count
+            || record.session.session_mutation_stamp.is_some_and(|stamp| {
+                stamp != remote_overview.session_mutation_stamp
+            })
+        {
+            return Err(ApiError::conflict(
+                "remote session overview changed while loading; retry the request",
+            ));
+        }
+        remote_overview.session_id = target.local_session_id.clone();
+        Ok(remote_overview)
+    }
+
+    fn repair_remote_session_tail_after_delta_error(
+        &self,
+        remote_id: &str,
+        event: &DeltaEvent,
+    ) -> Result<bool, anyhow::Error> {
+        let Some((remote_session_id, message_count, session_mutation_stamp)) =
+            remote_delta_session_transcript_metadata(event)
+        else {
+            return Ok(false);
+        };
+        let target = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) =
+                inner.find_remote_session_index(remote_id, remote_session_id)
+            else {
+                return Ok(false);
+            };
+            let record = &inner.sessions[index];
+            let remote = inner
+                .find_remote(remote_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("unknown remote `{remote_id}`"))?;
+            RemoteSessionTarget {
+                local_session_id: record.session.id.clone(),
+                remote,
+                remote_session_id: remote_session_id.to_owned(),
+            }
+        };
+        self.fetch_remote_session_tail_target(
+            &target,
+            SESSION_TAIL_HYDRATION_MAX_MESSAGES,
+            Some(delta_event_revision(event)),
+            Some(RemoteDeltaHydrationExpectation {
+                message_count,
+                session_mutation_stamp,
+            }),
+            REMOTE_REQUEST_TIMEOUT,
+        )
+        .map_err(|err| {
+            anyhow!(
+                "failed to repair remote session `{remote_session_id}` from a bounded tail: {}",
+                err.message
+            )
+        })?;
+        Ok(true)
+    }
+
+    /// Ensures an unloaded remote proxy has one bounded tail before applying a
+    /// narrow delta. It never asks either backend for an unbounded transcript.
     fn hydrate_unloaded_remote_session_for_delta(
         &self,
         remote_id: &str,
@@ -1035,7 +1160,7 @@ impl AppState {
                 return Ok(RemoteDeltaHydrationOutcome::Continue);
             };
             let record = &inner.sessions[index];
-            if record.session.messages_loaded {
+            if record.session.messages_loaded || !record.session.messages.is_empty() {
                 return Ok(RemoteDeltaHydrationOutcome::Continue);
             }
             let remote = inner
@@ -1064,8 +1189,9 @@ impl AppState {
             }
         };
 
-        let hydration_result = self.hydrate_remote_session_target(
+        let hydration_result = self.fetch_remote_session_tail_target(
             &target,
+            SESSION_TAIL_HYDRATION_MAX_MESSAGES,
             Some(remote_revision),
             Some(RemoteDeltaHydrationExpectation {
                 message_count: remote_message_count,
@@ -1074,13 +1200,22 @@ impl AppState {
             REMOTE_REQUEST_TIMEOUT,
         );
         match hydration_result {
-            Ok(_) => {}
-            Err(err) if is_recoverable_remote_hydration_miss(&err) => {
+            Ok(_) => {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                let retained_tail_loaded = inner
+                    .find_remote_session_index(remote_id, remote_session_id)
+                    .and_then(|index| inner.sessions.get(index))
+                    .is_some_and(|record| !record.session.messages.is_empty());
+                if !retained_tail_loaded {
+                    return Ok(RemoteDeltaHydrationOutcome::Continue);
+                }
+            }
+            Err(err) if is_recoverable_remote_tail_miss(&err) => {
                 return Ok(RemoteDeltaHydrationOutcome::Continue);
             }
             Err(err) => {
                 return Err(anyhow!(
-                    "failed to hydrate remote session `{remote_session_id}`: {}",
+                    "failed to fetch bounded tail for remote session `{remote_session_id}`: {}",
                     err.message
                 ));
             }
@@ -1331,6 +1466,11 @@ impl AppState {
                         message.id()
                     ));
                 }
+                if message_index >= usize::try_from(remote_message_count).unwrap_or(usize::MAX) {
+                    return Err(anyhow!(
+                        "remote MessageCreated index `{message_index}` is outside messageCount `{remote_message_count}` for session `{session_id}`"
+                    ));
+                }
                 let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
@@ -1374,9 +1514,16 @@ impl AppState {
                         let applied_message_index = if let Some(existing_index) =
                             message_index_on_record(record, &message_id)
                         {
+                            let local_message_index = message_index
+                                .checked_sub(record.message_start_index)
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "remote MessageCreated index `{message_index}` predates the retained transcript window for existing message `{message_id}` in session `{session_id}`"
+                                    )
+                                })?;
                             let max_index_after_removal =
                                 record.session.messages.len().saturating_sub(1);
-                            if message_index > max_index_after_removal {
+                            if local_message_index > max_index_after_removal {
                                 return Err(anyhow!(
                                     "remote MessageCreated index `{message_index}` is out of bounds for existing message `{message_id}` in session `{session_id}`"
                                 ));
@@ -1385,17 +1532,32 @@ impl AppState {
                             record
                                 .session
                                 .messages
-                                .insert(message_index, message.clone());
+                                .insert(local_message_index, message.clone());
                             record.message_positions =
                                 build_message_positions(&record.session.messages);
                             message_index
                         } else {
-                            if message_index > record.session.messages.len() {
+                            if record.session.messages.is_empty() {
+                                record.message_start_index = message_index;
+                            }
+                            let local_message_index = message_index
+                                .checked_sub(record.message_start_index)
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "remote MessageCreated index `{message_index}` predates the retained transcript window in session `{session_id}`"
+                                    )
+                                })?;
+                            if local_message_index > record.session.messages.len() {
                                 return Err(anyhow!(
                                     "remote MessageCreated index `{message_index}` leaves a gap in session `{session_id}`"
                                 ));
                             }
-                            insert_message_on_record(record, message_index, message.clone())
+                            insert_message_on_record(
+                                record,
+                                local_message_index,
+                                message.clone(),
+                            );
+                            message_index
                         };
                         record.session.preview = preview.clone();
                         record.session.status = status;
@@ -1493,7 +1655,7 @@ impl AppState {
                         let record = inner
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
-                        let Some(applied_message_index) =
+                        let Some(local_message_index) =
                             message_index_on_record(record, &message_id)
                         else {
                             return Err(anyhow!(
@@ -1503,7 +1665,7 @@ impl AppState {
                         let existing_message = record
                             .session
                             .messages
-                            .get_mut(applied_message_index)
+                            .get_mut(local_message_index)
                             .expect("message_index_on_record returned an out-of-bounds index");
                         *existing_message = message.clone();
                         record.session.preview = preview.clone();
@@ -1513,7 +1675,7 @@ impl AppState {
                         }
                         (
                             record.session.id.clone(),
-                            applied_message_index,
+                            global_message_index(record, local_message_index),
                             session_message_count(record),
                             record.mutation_stamp,
                         )
@@ -1610,11 +1772,12 @@ impl AppState {
                         let record = inner
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
-                        let message_index = message_index_on_record(record, &message_id)
+                        let local_message_index = message_index_on_record(record, &message_id)
                             .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
-                        let Some(message) = record.session.messages.get_mut(message_index) else {
+                        let Some(message) = record.session.messages.get_mut(local_message_index)
+                        else {
                             return Err(anyhow!(
-                                "remote message index `{message_index}` is out of bounds"
+                                "remote message index `{local_message_index}` is out of bounds"
                             ));
                         };
                         let text_start_byte = match message {
@@ -1637,7 +1800,7 @@ impl AppState {
                         }
                         (
                             record.session.id.clone(),
-                            message_index,
+                            global_message_index(record, local_message_index),
                             session_message_count(record),
                             text_start_byte,
                             record.mutation_stamp,
@@ -1711,11 +1874,12 @@ impl AppState {
                         let record = inner
                             .session_mut_by_index(index)
                             .expect("session index should be valid");
-                        let message_index = message_index_on_record(record, &message_id)
+                        let local_message_index = message_index_on_record(record, &message_id)
                             .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
-                        let Some(message) = record.session.messages.get_mut(message_index) else {
+                        let Some(message) = record.session.messages.get_mut(local_message_index)
+                        else {
                             return Err(anyhow!(
-                                "remote message index `{message_index}` is out of bounds"
+                                "remote message index `{local_message_index}` is out of bounds"
                             ));
                         };
                         match message {
@@ -1739,7 +1903,7 @@ impl AppState {
                         }
                         (
                             record.session.id.clone(),
-                            message_index,
+                            global_message_index(record, local_message_index),
                             session_message_count(record),
                             record.mutation_stamp,
                         )
@@ -1780,6 +1944,11 @@ impl AppState {
                 status,
                 ..
             } => {
+                if message_index >= usize::try_from(remote_message_count).unwrap_or(usize::MAX) {
+                    return Err(anyhow!(
+                        "remote CommandUpdate index `{message_index}` is outside messageCount `{remote_message_count}` for session `{session_id}`"
+                    ));
+                }
                 let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
@@ -1847,7 +2016,7 @@ impl AppState {
                                     *existing_output = output.clone();
                                     *existing_output_language = output_language.clone();
                                     *existing_status = status;
-                                    (None, existing_index)
+                                    (None, global_message_index(record, existing_index))
                                 }
                                 _ => {
                                     return Err(anyhow!(
@@ -1856,7 +2025,17 @@ impl AppState {
                                 }
                             }
                         } else {
-                            if message_index > record.session.messages.len() {
+                            if record.session.messages.is_empty() {
+                                record.message_start_index = message_index;
+                            }
+                            let local_message_index = message_index
+                                .checked_sub(record.message_start_index)
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "remote CommandUpdate index `{message_index}` predates the retained transcript window in session `{session_id}`"
+                                    )
+                                })?;
+                            if local_message_index > record.session.messages.len() {
                                 return Err(anyhow!(
                                     "remote CommandUpdate index `{message_index}` leaves a gap in session `{session_id}`"
                                 ));
@@ -1871,9 +2050,12 @@ impl AppState {
                                 output_language: output_language.clone(),
                                 status,
                             };
-                            let applied_message_index =
-                                insert_message_on_record(record, message_index, message.clone());
-                            (Some(message), applied_message_index)
+                            insert_message_on_record(
+                                record,
+                                local_message_index,
+                                message.clone(),
+                            );
+                            (Some(message), message_index)
                         };
                         record.session.preview = preview.clone();
                         if remote_session_mutation_stamp.is_some() {
@@ -1944,6 +2126,11 @@ impl AppState {
                 session_mutation_stamp: remote_session_mutation_stamp,
                 ..
             } => {
+                if message_index >= usize::try_from(remote_message_count).unwrap_or(usize::MAX) {
+                    return Err(anyhow!(
+                        "remote ParallelAgentsUpdate index `{message_index}` is outside messageCount `{remote_message_count}` for session `{session_id}`"
+                    ));
+                }
                 let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
                     remote_id,
                     &session_id,
@@ -2003,7 +2190,7 @@ impl AppState {
                                     ..
                                 } => {
                                     *existing_agents = agents.clone();
-                                    (None, existing_index)
+                                    (None, global_message_index(record, existing_index))
                                 }
                                 _ => {
                                     return Err(anyhow!(
@@ -2012,7 +2199,17 @@ impl AppState {
                                 }
                             }
                         } else {
-                            if message_index > record.session.messages.len() {
+                            if record.session.messages.is_empty() {
+                                record.message_start_index = message_index;
+                            }
+                            let local_message_index = message_index
+                                .checked_sub(record.message_start_index)
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "remote ParallelAgentsUpdate index `{message_index}` predates the retained transcript window in session `{session_id}`"
+                                    )
+                                })?;
+                            if local_message_index > record.session.messages.len() {
                                 return Err(anyhow!(
                                     "remote ParallelAgentsUpdate index `{message_index}` leaves a gap in session `{session_id}`"
                                 ));
@@ -2023,9 +2220,12 @@ impl AppState {
                                 author: Author::Assistant,
                                 agents: agents.clone(),
                             };
-                            let applied_message_index =
-                                insert_message_on_record(record, message_index, message.clone());
-                            (Some(message), applied_message_index)
+                            insert_message_on_record(
+                                record,
+                                local_message_index,
+                                message.clone(),
+                            );
+                            (Some(message), message_index)
                         };
                         record.session.preview = preview.clone();
                         if remote_session_mutation_stamp.is_some() {

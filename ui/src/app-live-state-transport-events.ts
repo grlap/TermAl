@@ -51,11 +51,7 @@ import {
 import type { AdoptStateOptions } from "./app-live-state-types";
 import type { RequestStateResyncOptions } from "./app-live-state-resync-options";
 import type { ReconnectRecoveryStateSnapshot } from "./app-live-state-reconnect-state";
-
-type SessionHydrationOptions = {
-  allowDivergentTextRepairAfterNewerRevision?: boolean;
-  queueAfterCurrent?: boolean;
-};
+import type { SessionHydrationOptions } from "./app-live-state-hydration";
 
 type AppLiveStateTransportEventHandlersContext = {
   adoptState: (state: StateResponse, options?: AdoptStateOptions) => boolean;
@@ -391,6 +387,7 @@ export function createAppLiveStateTransportEventHandlers(
                   rearmOnFailure: true,
                 },
                 hydrationOptions: {
+                  forceTailRepair: true,
                   queueAfterCurrent: true,
                 },
               });
@@ -489,6 +486,7 @@ export function createAppLiveStateTransportEventHandlers(
                   ? {
                       allowDivergentTextRepairAfterNewerRevision:
                         delta.type === "textDelta",
+                      forceTailRepair: delta.type !== "textDelta",
                       queueAfterCurrent: result.kind === "appliedNeedsResync",
                     }
                   : undefined,
@@ -501,13 +499,16 @@ export function createAppLiveStateTransportEventHandlers(
         // fails, the client must stay in the reconnecting state. Use
         // rearmOnFailure so a failed resync re-arms polling instead of
         // stalling recovery.
-        // Force per-session re-hydration as well so the affected session's
-        // full transcript is re-fetched even if the /api/state summary's
-        // reconcile decides the session looks fresh enough to keep
+        // Force a bounded per-session repair as well so the affected session's
+        // recent tail is re-fetched even if the /api/state summary's reconcile
+        // decides the session looks fresh enough to keep
         // `messagesLoaded: true`. `hydratingSessionIdsRef` deduplicates so
         // a no-op when hydration is already in flight or queued.
         triggerRecoveryForDelta(delta, {
-          hydrationOptions: { queueAfterCurrent: true },
+          hydrationOptions: {
+            forceTailRepair: true,
+            queueAfterCurrent: true,
+          },
         });
         return;
       }
@@ -605,11 +606,14 @@ export function createAppLiveStateTransportEventHandlers(
           // summary's `reconcileSummarySession` would not flip
           // `messagesLoaded` back to false and the hydration effect would
           // not re-fire. Calling `startSessionHydration` directly fetches
-          // the full transcript via `/api/sessions/{id}` so the missing
-          // message body actually appears. See bugs.md "Stuck assistant
+          // the authoritative bounded tail via `/api/sessions/{id}` so a
+          // missing recent message body can appear. See bugs.md "Stuck assistant
           // reply visible only after refresh".
           triggerRecoveryForDelta(delta, {
-            hydrationOptions: { queueAfterCurrent: true },
+            hydrationOptions: {
+              forceTailRepair: true,
+              queueAfterCurrent: true,
+            },
           });
         }
         return;
@@ -624,7 +628,9 @@ export function createAppLiveStateTransportEventHandlers(
       // until they refresh. Same reasoning as the appliedNeedsResync
       // branch above. See bugs.md "Stuck assistant reply visible only
       // after refresh".
-      triggerRecoveryForDelta(delta);
+      triggerRecoveryForDelta(delta, {
+        hydrationOptions: { forceTailRepair: true },
+      });
     } catch {
       // Parse or reducer failure — restore reconnecting state so the retry
       // affordance stays available, and re-arm polling.
