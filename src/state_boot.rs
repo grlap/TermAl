@@ -40,7 +40,7 @@
 
 fn is_empty_top_level_auto_imported_codex_ghost(record: &SessionRecord) -> bool {
     !record.hidden
-        && !record.is_remote_proxy()
+        && record.is_local_session()
         && record.session.agent == Agent::Codex
         && record.external_session_id.is_some()
         && record.session.parent_delegation_id.is_none()
@@ -143,7 +143,7 @@ impl StateInner {
                 });
 
             let existing_index = self.sessions.iter().position(|record| {
-                !record.is_remote_proxy()
+                record.is_local_session()
                     && record.session.agent == Agent::Codex
                     && record.external_session_id.as_deref() == Some(thread.id.as_str())
             });
@@ -286,7 +286,7 @@ impl StateInner {
             .collect::<HashSet<_>>();
 
         for record in &mut self.sessions {
-            let should_normalize = record.remote_id.is_none()
+            let should_normalize = record.is_local_session()
                 && record
                     .session
                     .project_id
@@ -311,7 +311,7 @@ impl StateInner {
     /// `handle_runtime_exit_if_matches` in `turn_lifecycle.rs` instead.
     fn recover_interrupted_sessions(&mut self) {
         for index in 0..self.sessions.len() {
-            if self.sessions[index].is_remote_proxy() {
+            if !self.sessions[index].is_local_session() {
                 continue;
             }
             let recovery = {

@@ -494,7 +494,6 @@ impl RemoteDeltaReplayCache {
 struct PersistDelta {
     metadata: PersistedState,
     changed_sessions: Vec<PersistedSessionRecord>,
-    persisted_session_ids_to_trim: Vec<String>,
     removed_session_ids: Vec<String>,
     changed_delegations: Option<Vec<DelegationRecord>>,
     removed_delegation_ids: Vec<String>,
@@ -1127,9 +1126,27 @@ struct SessionRecord {
 }
 
 impl SessionRecord {
+    /// Returns the paired remote identity when this record is a valid proxy.
+    fn remote_proxy_identity(&self) -> Result<Option<(&str, &str)>> {
+        validate_remote_proxy_identity(
+            self.remote_id.as_deref(),
+            self.remote_session_id.as_deref(),
+        )
+    }
+
     /// Returns whether remote proxy.
     fn is_remote_proxy(&self) -> bool {
-        self.remote_id.is_some() && self.remote_session_id.is_some()
+        self.remote_proxy_identity()
+            .is_ok_and(|identity| identity.is_some())
+    }
+
+    /// Returns whether this record has the canonical local identity.
+    ///
+    /// An invalid partial remote identity is deliberately neither local nor a
+    /// remote proxy, so local-only paths fail closed instead of acting on it.
+    fn is_local_session(&self) -> bool {
+        self.remote_proxy_identity()
+            .is_ok_and(|identity| identity.is_none())
     }
 }
 

@@ -2996,6 +2996,45 @@ fn start_turn_on_record_rejects_remote_proxy_sessions() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+#[test]
+fn start_turn_on_record_rejects_invalid_remote_proxy_identity() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(&session_id)
+        .expect("session should exist");
+    inner.sessions[index].remote_id = Some("ssh-lab".to_owned());
+    inner.sessions[index].remote_session_id = None;
+
+    let error = match state.start_turn_on_record(
+        &mut inner.sessions[index],
+        "message-invalid-proxy".to_owned(),
+        "This must not dispatch.".to_owned(),
+        Vec::new(),
+        None,
+        None,
+    ) {
+        Ok(_) => panic!("invalid proxy identity should reject local turn dispatch"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        error.message,
+        "session has invalid remote proxy identity: remoteId requires remoteSessionId"
+    );
+    assert!(
+        inner.sessions[index]
+            .active_turn_start_message_count
+            .is_none()
+    );
+    assert!(inner.sessions[index].session.messages.is_empty());
+    assert!(inner.sessions[index].session.pending_prompts.is_empty());
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Pins failed transition delivery: when the destination's runtime
 // can't accept the queued prompt, resume_pending_orchestrator_transitions
 // still marks last_delivered_completion_revision on the source, clears

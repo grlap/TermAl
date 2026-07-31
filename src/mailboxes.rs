@@ -306,7 +306,7 @@ impl AppState {
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = &inner.sessions[index];
             if record.hidden
-                || record.is_remote_proxy()
+                || !record.is_local_session()
                 || record.session.parent_delegation_id.is_some()
                 || inner
                     .find_delegation_index_by_child_session_id(session_id)
@@ -505,7 +505,7 @@ impl AppState {
         for (label, index) in [("sender", sender_index), ("target", target_index)] {
             let record = &inner.sessions[index];
             if record.hidden
-                || record.is_remote_proxy()
+                || !record.is_local_session()
                 || record.session.parent_delegation_id.is_some()
                 || inner
                     .find_delegation_index_by_child_session_id(&record.session.id)
@@ -539,7 +539,7 @@ impl AppState {
                 .is_some_and(|index| {
                     let record = &inner.sessions[index];
                     !record.hidden
-                        && !record.is_remote_proxy()
+                        && record.is_local_session()
                         && record.session.parent_delegation_id.is_none()
                         && inner
                             .find_delegation_index_by_child_session_id(session_id)
@@ -591,7 +591,7 @@ impl AppState {
         let Some(index) = inner.find_visible_session_index(session_id) else {
             return Ok(false);
         };
-        if inner.sessions[index].is_remote_proxy()
+        if !inner.sessions[index].is_local_session()
             || inner.sessions[index].session.parent_delegation_id.is_some()
             || inner
                 .find_delegation_index_by_child_session_id(session_id)
@@ -911,7 +911,7 @@ impl AppState {
                 .iter()
                 .filter(|record| {
                     !record.hidden
-                        && !record.is_remote_proxy()
+                        && record.is_local_session()
                         && record.session.parent_delegation_id.is_none()
                         && inner
                             .find_delegation_index_by_child_session_id(&record.session.id)

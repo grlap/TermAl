@@ -2655,6 +2655,123 @@ fn sqlite_delta_upserts_only_changed_session_rows_and_removes_hidden_or_deleted_
 }
 
 #[test]
+fn invalid_in_memory_remote_identity_isolated_from_full_and_delta_persistence() {
+    let state_root = PersistTestRoot::new("invalid-in-memory-remote-identity");
+    let path = state_root.path().join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let invalid_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Invalid identity".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let healthy_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Healthy sibling".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    persist_state(&path, &inner).expect("valid baseline should persist");
+    let invalid_baseline =
+        sqlite_row_json(&path, "sessions", &invalid_id).expect("baseline row should exist");
+
+    let invalid_index = inner
+        .find_session_index(&invalid_id)
+        .expect("invalid identity session should exist");
+    {
+        let invalid_record = inner
+            .session_mut_by_index(invalid_index)
+            .expect("invalid identity session should be mutable");
+        invalid_record.remote_id = Some("remote-without-session".to_owned());
+        assert!(
+            !invalid_record.is_local_session() && !invalid_record.is_remote_proxy(),
+            "a partial remote identity must be neither local nor remote"
+        );
+        assert!(
+            invalid_record.remote_proxy_identity().is_err(),
+            "the partial identity must retain an explicit validation error"
+        );
+    }
+    let healthy_index = inner
+        .find_session_index(&healthy_id)
+        .expect("healthy sibling should exist");
+    inner
+        .session_mut_by_index(healthy_index)
+        .expect("healthy sibling should be mutable")
+        .session
+        .preview = "healthy full update".to_owned();
+
+    persist_state(&path, &inner).expect("one invalid session must not abort full persistence");
+    assert_eq!(
+        sqlite_row_json(&path, "sessions", &invalid_id),
+        Some(invalid_baseline.clone()),
+        "full persistence must preserve the invalid session's last good row"
+    );
+    let healthy_full: Value = serde_json::from_str(
+        &sqlite_row_json(&path, "sessions", &healthy_id)
+            .expect("healthy sibling row should remain"),
+    )
+    .expect("healthy sibling row should decode");
+    assert_eq!(
+        healthy_full["session"]["preview"],
+        Value::String("healthy full update".to_owned())
+    );
+
+    let watermark = inner.last_mutation_stamp;
+    inner
+        .session_mut_by_index(invalid_index)
+        .expect("invalid identity session should still be mutable")
+        .remote_id = Some("remote-still-without-session".to_owned());
+    inner
+        .session_mut_by_index(healthy_index)
+        .expect("healthy sibling should still be mutable")
+        .session
+        .preview = "healthy delta update".to_owned();
+    let delta = inner.collect_persist_delta(watermark);
+    assert_eq!(
+        delta.changed_sessions.len(),
+        2,
+        "both changed sessions should reach the persistence boundary"
+    );
+    let mut cache = SqlitePersistConnectionCache::new();
+    let persisted_session_ids = persist_delta_via_cache(&mut cache, &path, &delta)
+        .expect("one invalid session must not abort delta persistence");
+    assert_eq!(
+        persisted_session_ids,
+        vec![healthy_id.clone()],
+        "only the successfully serialized sibling may be reported as persisted"
+    );
+    assert_eq!(
+        sqlite_row_json(&path, "sessions", &invalid_id),
+        Some(invalid_baseline),
+        "delta persistence must preserve the invalid session's last good row"
+    );
+    let healthy_delta: Value = serde_json::from_str(
+        &sqlite_row_json(&path, "sessions", &healthy_id)
+            .expect("healthy sibling row should remain after delta"),
+    )
+    .expect("healthy sibling delta row should decode");
+    assert_eq!(
+        healthy_delta["session"]["preview"],
+        Value::String("healthy delta update".to_owned())
+    );
+
+    let loaded = load_state(&path)
+        .expect("isolated state should reload")
+        .expect("isolated state should exist");
+    assert!(loaded.find_session_index(&invalid_id).is_some());
+    assert!(loaded.find_session_index(&healthy_id).is_some());
+}
+
+#[test]
 fn sqlite_delta_upserts_changed_delegation_rows_and_removes_deleted_rows() {
     let state_root =
         std::env::temp_dir().join(format!("termal-sqlite-delegation-delta-{}", Uuid::new_v4()));
@@ -3441,6 +3558,90 @@ fn sqlite_startup_tolerates_remote_metadata_message_count_without_local_rows() {
     let _ = fs::remove_dir_all(state_root);
 }
 
+/// Regression: a persisted remote proxy can own a bounded, nonzero transcript
+/// suffix while deliberately omitting the local-only overview blob. Schema
+/// startup must recognize that shape before attempting local overview
+/// backfill.
+#[test]
+fn sqlite_startup_tolerates_bounded_remote_proxy_suffix_without_overview() {
+    let state_root = PersistTestRoot::new("bounded-remote-proxy-boot");
+    let path = state_root.path().join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Bounded remote proxy".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let session_index = inner
+        .find_session_index(&session_id)
+        .expect("created session should exist");
+    {
+        let record = inner
+            .session_mut_by_index(session_index)
+            .expect("created session should be mutable");
+        record.session.messages = (936..1000)
+            .map(|position| Message::Text {
+                attachments: Vec::new(),
+                id: format!("remote-message-{position}"),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: format!("remote message {position}"),
+                expanded_text: None,
+                source: None,
+            })
+            .collect();
+        record.session.message_count = 1000;
+        record.session.messages_loaded = false;
+        record.message_start_index = 936;
+        record.message_positions = build_message_positions(&record.session.messages);
+        record.remote_id = Some("remote-1".to_owned());
+        record.remote_session_id = Some("remote-session-1".to_owned());
+    }
+    persist_state(&path, &inner).expect("bounded remote proxy should persist");
+    {
+        let connection =
+            rusqlite::Connection::open(&path).expect("remote proxy database should reopen");
+        let overview_count: u32 = connection
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM session_overviews
+                 WHERE session_id = ?1",
+                rusqlite::params![session_id],
+                |row| row.get(0),
+            )
+            .expect("remote overview count should be queryable");
+        assert_eq!(
+            overview_count, 0,
+            "remote proxies must not persist local overview blobs"
+        );
+    }
+
+    let loaded = load_state(&path)
+        .expect("bounded remote proxy suffix must not abort startup")
+        .expect("persisted state should exist");
+    let loaded_index = loaded
+        .find_session_index(&session_id)
+        .expect("loaded remote proxy should exist");
+    let loaded_record = &loaded.sessions[loaded_index];
+    assert_eq!(loaded_record.message_start_index, 936);
+    assert_eq!(loaded_record.session.message_count, 1000);
+    assert!(!loaded_record.session.messages_loaded);
+    assert_eq!(loaded_record.session.messages.len(), 64);
+    assert_eq!(
+        loaded_record.session.messages.first().map(Message::id),
+        Some("remote-message-936")
+    );
+    assert_eq!(
+        loaded_record.session.messages.last().map(Message::id),
+        Some("remote-message-999")
+    );
+}
+
 /// Regression: one structurally invalid session row must not make otherwise
 /// healthy sessions unreachable at startup.
 ///
@@ -3502,6 +3703,16 @@ fn sqlite_startup_skips_invalid_session_rows_and_loads_valid_sessions() {
         .create_session(
             Agent::Claude,
             Some("Mismatched message key".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let partial_remote_identity_session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Partial remote identity".to_owned()),
             "/tmp".to_owned(),
             None,
             None,
@@ -3603,6 +3814,27 @@ fn sqlite_startup_skips_invalid_session_rows_and_loads_valid_sessions() {
                 rusqlite::params![mismatched_message_key_session_id],
             )
             .expect("message row key should update");
+
+        let partial_remote_json: String = connection
+            .query_row(
+                "SELECT value_json FROM sessions WHERE id = ?1",
+                rusqlite::params![partial_remote_identity_session_id],
+                |row| row.get(0),
+            )
+            .expect("partial-remote fixture metadata should load");
+        let mut partial_remote_value: Value =
+            serde_json::from_str(&partial_remote_json).expect("fixture metadata should parse");
+        partial_remote_value["remoteId"] = Value::String("remote-without-session".to_owned());
+        connection
+            .execute(
+                "UPDATE sessions SET value_json = ?2 WHERE id = ?1",
+                rusqlite::params![
+                    partial_remote_identity_session_id,
+                    serde_json::to_string(&partial_remote_value)
+                        .expect("partial-remote fixture metadata should serialize")
+                ],
+            )
+            .expect("partial-remote fixture metadata should update");
     }
 
     let loaded = load_state(&path)
@@ -3617,6 +3849,7 @@ fn sqlite_startup_skips_invalid_session_rows_and_loads_valid_sessions() {
         &invalid_settings_session_id,
         &malformed_transcript_session_id,
         &mismatched_message_key_session_id,
+        &partial_remote_identity_session_id,
     ] {
         assert!(
             loaded.find_session_index(invalid_session_id).is_none(),
@@ -3631,6 +3864,7 @@ fn sqlite_startup_skips_invalid_session_rows_and_loads_valid_sessions() {
         &invalid_settings_session_id,
         &malformed_transcript_session_id,
         &mismatched_message_key_session_id,
+        &partial_remote_identity_session_id,
     ] {
         assert!(
             stored_session_ids.contains(invalid_session_id),

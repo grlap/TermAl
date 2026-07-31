@@ -154,7 +154,7 @@ fn collect_workspace_file_watch_scopes(state: &AppState) -> Vec<WorkspaceFileWat
             }
         }
         for record in &inner.sessions {
-            if record.remote_id.is_some() {
+            if !record.is_local_session() {
                 continue;
             }
 

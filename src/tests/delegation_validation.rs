@@ -296,10 +296,63 @@ fn delegation_rejects_windows_symlinked_cwd_escape_from_project() {
 
 #[tokio::test]
 async fn delegation_route_rejects_remote_proxy_parent_without_local_project() {
-    for (remote_id, remote_session_id) in [
-        (Some("ssh-review"), Some("remote-parent-1")),
-        (Some("ssh-review"), None),
-        (None, Some("remote-parent-1")),
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let parent_index = inner
+            .find_visible_session_index(&parent_session_id)
+            .expect("parent session should exist");
+        let parent = inner
+            .session_mut_by_index(parent_index)
+            .expect("parent session index should be valid");
+        parent.session.project_id = None;
+        parent.remote_id = Some("ssh-review".to_owned());
+        parent.remote_session_id = Some("remote-parent-1".to_owned());
+    }
+
+    let app = app_router(state.clone());
+    let (status, body): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{parent_session_id}/delegations"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"prompt":"review remote parent","writePolicy":{"kind":"readOnly"}}"#,
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("delegations for remote-backed sessions are not implemented")
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(inner.delegations.is_empty());
+    assert_eq!(inner.sessions.len(), 1);
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[tokio::test]
+async fn delegation_route_rejects_partial_remote_proxy_identity() {
+    for (remote_id, remote_session_id, expected_detail) in [
+        (
+            Some("ssh-review"),
+            None,
+            "remoteId requires remoteSessionId",
+        ),
+        (
+            None,
+            Some("remote-parent-1"),
+            "remoteSessionId requires remoteId",
+        ),
     ] {
         let state = test_app_state();
         let parent_session_id = test_session_id(&state, Agent::Codex);
@@ -311,7 +364,6 @@ async fn delegation_route_rejects_remote_proxy_parent_without_local_project() {
             let parent = inner
                 .session_mut_by_index(parent_index)
                 .expect("parent session index should be valid");
-            parent.session.project_id = None;
             parent.remote_id = remote_id.map(str::to_owned);
             parent.remote_session_id = remote_session_id.map(str::to_owned);
         }
@@ -324,22 +376,19 @@ async fn delegation_route_rejects_remote_proxy_parent_without_local_project() {
                 .uri(format!("/api/sessions/{parent_session_id}/delegations"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"prompt":"review remote parent","writePolicy":{"kind":"readOnly"}}"#,
+                    r#"{"prompt":"review invalid parent","writePolicy":{"kind":"readOnly"}}"#,
                 ))
                 .unwrap(),
         )
         .await;
 
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert!(
-            body["error"]
-                .as_str()
-                .unwrap()
-                .contains("delegations for remote-backed sessions are not implemented")
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            body["error"],
+            Value::String(format!("invalid parent session proxy: {expected_detail}"))
         );
         let inner = state.inner.lock().expect("state mutex poisoned");
         assert!(inner.delegations.is_empty());
-        assert_eq!(inner.sessions.len(), 1);
         drop(inner);
 
         let _ = fs::remove_file(state.persistence_path.as_path());

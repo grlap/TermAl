@@ -250,11 +250,62 @@ struct PersistedSessionRecord {
     session: Session,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedRemoteProxyIdentity {
+    #[serde(default)]
+    remote_id: Option<String>,
+    #[serde(default)]
+    remote_session_id: Option<String>,
+}
+
+impl PersistedRemoteProxyIdentity {
+    fn from_session_json(encoded: &str) -> Result<Self> {
+        let value: Value = serde_json::from_str(encoded)
+            .context("failed to parse persisted remote proxy identity")?;
+        if !value.is_object() {
+            bail!("persisted session metadata is not an object");
+        }
+        serde_json::from_value(value)
+            .context("failed to decode persisted remote proxy identity")
+    }
+
+    fn remote_proxy_identity(&self) -> Result<Option<(&str, &str)>> {
+        validate_remote_proxy_identity(
+            self.remote_id.as_deref(),
+            self.remote_session_id.as_deref(),
+        )
+    }
+
+    fn is_remote_proxy(&self) -> Result<bool> {
+        self.remote_proxy_identity()
+            .map(|identity| identity.is_some())
+    }
+}
+
+fn validate_remote_proxy_identity<'a>(
+    remote_id: Option<&'a str>,
+    remote_session_id: Option<&'a str>,
+) -> Result<Option<(&'a str, &'a str)>> {
+    match (remote_id, remote_session_id) {
+        (None, None) => Ok(None),
+        (Some(remote_id), Some(_)) if remote_id.trim().is_empty() => {
+            bail!("remoteId must not be empty")
+        }
+        (Some(_), Some(remote_session_id)) if remote_session_id.trim().is_empty() => {
+            bail!("remoteSessionId must not be empty")
+        }
+        (Some(remote_id), Some(remote_session_id)) => Ok(Some((remote_id, remote_session_id))),
+        (Some(_), None) => bail!("remoteId requires remoteSessionId"),
+        (None, Some(_)) => bail!("remoteSessionId requires remoteId"),
+    }
+}
+
 impl PersistedSessionRecord {
     /// Builds the value from record.
     fn from_record(record: &SessionRecord) -> Self {
         let mut session = record.session.clone();
-        if !record.is_remote_proxy() {
+        if record.is_local_session() {
             session.pending_prompts.clear();
         }
         session.live_activity = None;
@@ -280,6 +331,16 @@ impl PersistedSessionRecord {
 
     /// Converts the value into record.
     fn into_record(self) -> Result<SessionRecord> {
+        let remote_proxy_identity = validate_remote_proxy_identity(
+            self.remote_id.as_deref(),
+            self.remote_session_id.as_deref(),
+        )
+        .with_context(|| {
+            format!(
+                "persisted session `{}` has invalid remote proxy identity",
+                self.session.id
+            )
+        })?;
         let mut session = self.session;
         validate_persisted_session_fields(&session, self.external_session_id.as_deref())?;
         session.session_mutation_stamp = None;
@@ -290,7 +351,7 @@ impl PersistedSessionRecord {
             session.opencode_mode_options.clear();
             session.opencode_current_mode = None;
         }
-        if self.remote_id.is_none() {
+        if remote_proxy_identity.is_none() {
             session.pending_prompts.clear();
         }
 

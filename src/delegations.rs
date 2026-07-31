@@ -415,11 +415,16 @@ impl AppState {
                 .ok_or_else(ApiError::local_session_missing)?;
             let parent_record = &inner.sessions[parent_index];
             let parent = &parent_record.session;
+            let parent_remote_identity = parent_record
+                .remote_proxy_identity()
+                .map_err(|err| {
+                    ApiError::internal(format!("invalid parent session proxy: {err:#}"))
+                })?;
             (
                 parent.workdir.clone(),
                 parent.project_id.clone(),
                 parent.agent,
-                parent_record.remote_id.is_some() || parent_record.remote_session_id.is_some(),
+                parent_remote_identity.is_some(),
             )
         };
         if parent_is_remote_backed {
@@ -3401,7 +3406,7 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
     let child = &inner.sessions[child_index];
     match child.session.status {
         SessionStatus::Active | SessionStatus::Approval => {
-            if !matches!(child.runtime, SessionRuntime::None) || child.is_remote_proxy() {
+            if !matches!(child.runtime, SessionRuntime::None) || !child.is_local_session() {
                 return DelegationChildOutcome::Running;
             }
             delegation_child_result_outcome(child, false).unwrap_or_else(|| {

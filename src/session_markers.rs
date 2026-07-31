@@ -631,9 +631,9 @@ fn is_valid_conversation_marker_color(value: &str) -> bool {
 }
 
 fn ensure_local_marker_session(record: &SessionRecord) -> Result<(), ApiError> {
-    if record.remote_id.is_some() {
+    if !record.is_local_session() {
         return Err(ApiError::bad_request(
-            "conversation markers on remote proxy sessions are read-only on this host",
+            "conversation markers on non-local sessions are read-only on this host",
         ));
     }
     Ok(())

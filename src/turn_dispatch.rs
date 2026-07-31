@@ -199,10 +199,18 @@ impl AppState {
         expanded_prompt: Option<String>,
         source: Option<MessageSource>,
     ) -> std::result::Result<StartedTurn, ApiError> {
-        if record.is_remote_proxy() {
-            return Err(ApiError::internal(
-                "remote proxy sessions must dispatch through the remote backend",
-            ));
+        match record.remote_proxy_identity() {
+            Ok(None) => {}
+            Ok(Some(_)) => {
+                return Err(ApiError::internal(
+                    "remote proxy sessions must dispatch through the remote backend",
+                ));
+            }
+            Err(err) => {
+                return Err(ApiError::internal(format!(
+                    "session has invalid remote proxy identity: {err:#}"
+                )));
+            }
         }
 
         let message_attachments = attachments
@@ -508,7 +516,7 @@ impl AppState {
                 .sessions
                 .iter()
                 .filter(|record| {
-                    !record.is_remote_proxy()
+                    record.is_local_session()
                         && matches!(
                             record.session.status,
                             SessionStatus::Idle | SessionStatus::Error
@@ -593,7 +601,7 @@ impl AppState {
         };
         let eligible = {
             let record = &inner.sessions[index];
-            !record.is_remote_proxy()
+            record.is_local_session()
                 && matches!(
                     record.session.status,
                     SessionStatus::Idle | SessionStatus::Error

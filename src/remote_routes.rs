@@ -123,13 +123,13 @@ impl AppState {
                 .find_session_index(session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
             let record = &inner.sessions[index];
-            let Some(remote_id) = record.remote_id.clone() else {
+            let Some((remote_id, remote_session_id)) = record
+                .remote_proxy_identity()
+                .map_err(|err| ApiError::internal(format!("invalid session proxy: {err:#}")))?
+            else {
                 return Ok(None);
             };
-            let Some(remote_session_id) = record.remote_session_id.clone() else {
-                return Ok(None);
-            };
-            (remote_id, remote_session_id)
+            (remote_id.to_owned(), remote_session_id.to_owned())
         };
         let remote = self.lookup_remote_config(&remote_id)?;
         Ok(Some(RemoteSessionTarget {
@@ -183,7 +183,10 @@ impl AppState {
         if let Some(session_id) = normalize_optional_identifier(session_id) {
             if let Some(index) = inner.find_session_index(session_id) {
                 let record = &inner.sessions[index];
-                if record.remote_id.is_some() && record.remote_session_id.is_some() {
+                // This is only a semaphore-selection hint. Invalid identities
+                // deliberately choose the local permit here; the subsequent
+                // authoritative resolver rejects them with a typed error.
+                if record.is_remote_proxy() {
                     return true;
                 }
             }

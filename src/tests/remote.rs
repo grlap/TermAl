@@ -79,6 +79,44 @@ fn persists_remote_settings() {
     );
 }
 
+#[test]
+fn remote_session_target_rejects_partial_proxy_identity() {
+    for (remote_id, remote_session_id, expected_detail) in [
+        (Some("ssh-lab"), None, "remoteId requires remoteSessionId"),
+        (
+            None,
+            Some("remote-session-1"),
+            "remoteSessionId requires remoteId",
+        ),
+    ] {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("session should exist");
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session should be mutable");
+            record.remote_id = remote_id.map(str::to_owned);
+            record.remote_session_id = remote_session_id.map(str::to_owned);
+        }
+
+        let error = match state.remote_session_target(&session_id) {
+            Ok(_) => panic!("partial proxy identity should fail target resolution"),
+            Err(error) => error,
+        };
+        assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            error.message,
+            format!("invalid session proxy: {expected_detail}")
+        );
+
+        let _ = fs::remove_file(state.persistence_path.as_path());
+    }
+}
+
 // Pins that remote ids containing path-unsafe characters are rejected
 // with a 400 before anything is persisted.
 // Guards against remote ids being used as filesystem/route components

@@ -1,12 +1,14 @@
 /*
 SQLite-backed session state persistence.
 
-Owns the on-disk schema (`ensure_sqlite_state_schema`), connection lifecycle
-(`open_sqlite_state_connection`, `SqlitePersistConnectionCache`), load path
-(`load_state`, `load_state_from_sqlite`), and the per-transaction write helpers
-used by the background persist thread
+Owns the on-disk schema entry point (`ensure_sqlite_state_schema`), connection
+lifecycle (`open_sqlite_state_connection`, `SqlitePersistConnectionCache`),
+load path (`load_state`, `load_state_from_sqlite`), and the per-transaction
+write helpers used by the background persist thread
 (`persist_state_parts_via_connection`, `persist_delta_via_cache`,
 `persist_created_session`, `persist_state_from_persisted`, `persist_state`).
+Overview-specific schema upgrades and backfill live in
+`persist_sqlite_overview.rs`.
 
 Extracted from `api.rs` so HTTP handler code and SQLite persistence live
 in separate files. The crate still compiles as one `include!()`-assembled
@@ -934,172 +936,9 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
     Ok(())
 }
 
-fn encode_conversation_overview_message(
-    kind: ConversationOverviewKind,
-    is_user: bool,
-) -> u8 {
-    u8::try_from(conversation_overview_kind_index(kind)).unwrap_or_default()
-        | (u8::from(is_user) << 2)
-}
-
-fn decode_conversation_overview_message(
-    encoded: u8,
-) -> Result<(ConversationOverviewKind, bool)> {
-    if encoded & !0b111 != 0 {
-        bail!("conversation overview message byte {encoded} has unsupported flags");
-    }
-    let kind = match encoded & 0b11 {
-        0 => ConversationOverviewKind::Text,
-        1 => ConversationOverviewKind::Command,
-        2 => ConversationOverviewKind::Diff,
-        3 => ConversationOverviewKind::Error,
-        _ => unreachable!("two-bit overview kind is exhaustive"),
-    };
-    Ok((kind, encoded & 0b100 != 0))
-}
-
-fn ensure_sqlite_message_overview_columns(connection: &rusqlite::Connection) -> Result<()> {
-    let existing_columns = {
-        let mut statement = connection
-            .prepare("PRAGMA table_info(messages)")
-            .context("failed to inspect SQLite transcript columns")?;
-        statement
-            .query_map([], |row| row.get::<_, String>(1))
-            .context("failed to query SQLite transcript columns")?
-            .collect::<rusqlite::Result<HashSet<_>>>()
-            .context("failed to read SQLite transcript columns")?
-    };
-    let missing_kind = !existing_columns.contains("overview_kind");
-    let missing_user = !existing_columns.contains("is_user");
-    if missing_kind {
-        connection
-            .execute(
-                "ALTER TABLE messages
-                 ADD COLUMN overview_kind INTEGER NOT NULL DEFAULT 0",
-                [],
-            )
-            .context("failed to add SQLite transcript overview kind")?;
-    }
-    if missing_user {
-        connection
-            .execute(
-                "ALTER TABLE messages
-                 ADD COLUMN is_user INTEGER NOT NULL DEFAULT 0",
-                [],
-            )
-            .context("failed to add SQLite transcript overview author flag")?;
-    }
-    if missing_kind || missing_user {
-        connection
-            .execute(
-                "UPDATE messages
-                 SET overview_kind = CASE
-                         WHEN instr(value_json, '\"status\":\"error\"') > 0
-                           OR instr(value_json, '\"decision\":\"interrupted\"') > 0
-                           OR instr(value_json, '\"decision\":\"canceled\"') > 0
-                           OR instr(value_json, '\"decision\":\"rejected\"') > 0
-                           OR instr(value_json, '\"state\":\"interrupted\"') > 0
-                           OR instr(value_json, '\"state\":\"canceled\"') > 0
-                         THEN 3
-                         WHEN instr(value_json, '\"type\":\"command\"') > 0 THEN 1
-                         WHEN instr(value_json, '\"type\":\"diff\"') > 0
-                           OR instr(value_json, '\"type\":\"fileChanges\"') > 0
-                         THEN 2
-                         ELSE 0
-                     END,
-                     is_user = instr(value_json, '\"author\":\"you\"') > 0",
-                [],
-            )
-            .context("failed to backfill SQLite transcript overview metadata")?;
-    }
-    Ok(())
-}
-
-fn backfill_missing_sqlite_session_overviews(
-    connection: &rusqlite::Connection,
-) -> Result<()> {
-    let session_ids = {
-        let mut statement = connection
-            .prepare(
-                "SELECT session.id
-                 FROM sessions AS session
-                 WHERE EXISTS (
-                     SELECT 1
-                     FROM messages AS message
-                     WHERE message.session_id = session.id
-                 )
-                   AND NOT EXISTS (
-                     SELECT 1
-                     FROM session_overviews AS overview
-                     WHERE overview.session_id = session.id
-                 )
-                 ORDER BY session.id",
-            )
-            .context("failed to prepare missing transcript overview backfill")?;
-        statement
-            .query_map([], |row| row.get::<_, String>(0))
-            .context("failed to query missing transcript overview backfill")?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .context("failed to read missing transcript overview sessions")?
-    };
-    let mut load_messages = connection
-        .prepare(
-            "SELECT position, overview_kind, is_user
-             FROM messages
-             WHERE session_id = ?1
-             ORDER BY position",
-        )
-        .context("failed to prepare transcript overview metadata backfill")?;
-    let mut insert = connection
-        .prepare(
-            "INSERT INTO session_overviews(session_id, value_blob)
-             VALUES(?1, ?2)",
-        )
-        .context("failed to prepare transcript overview blob backfill")?;
-    for session_id in session_ids {
-        let rows = load_messages
-            .query_map(rusqlite::params![session_id], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, bool>(2)?,
-                ))
-            })
-            .with_context(|| {
-                format!("failed to query transcript overview metadata for `{session_id}`")
-            })?;
-        let mut value_blob = Vec::new();
-        for row in rows {
-            let (position, kind_index, is_user) = row.with_context(|| {
-                format!("failed to read transcript overview metadata for `{session_id}`")
-            })?;
-            let position = usize::try_from(position)
-                .context("transcript overview position is negative or too large")?;
-            if position != value_blob.len() {
-                bail!(
-                    "transcript overview for `{session_id}` has a gap at position {}",
-                    value_blob.len()
-                );
-            }
-            let kind = match kind_index {
-                0 => ConversationOverviewKind::Text,
-                1 => ConversationOverviewKind::Command,
-                2 => ConversationOverviewKind::Diff,
-                3 => ConversationOverviewKind::Error,
-                _ => bail!(
-                    "transcript overview for `{session_id}` has invalid kind {kind_index}"
-                ),
-            };
-            value_blob.push(encode_conversation_overview_message(kind, is_user));
-        }
-        insert
-            .execute(rusqlite::params![session_id, value_blob])
-            .with_context(|| {
-                format!("failed to backfill transcript overview for `{session_id}`")
-            })?;
-    }
-    Ok(())
-}
+include!("persist_sqlite_overview.rs");
+#[cfg(test)]
+include!("persist_sqlite_overview_tests.rs");
 
 fn migrate_sqlite_state_schema_v1_to_v2(connection: &rusqlite::Connection) -> Result<()> {
     let tx = connection
@@ -1212,6 +1051,11 @@ fn migrate_sqlite_v1_session_transcript(
     }
     validate_persisted_session_fields(&record.session, record.external_session_id.as_deref())
         .with_context(|| format!("persisted session `{session_id}` failed validation"))?;
+    validate_remote_proxy_identity(
+        record.remote_id.as_deref(),
+        record.remote_session_id.as_deref(),
+    )
+    .with_context(|| format!("persisted session `{session_id}` has invalid remote proxy identity"))?;
     let expected_message_count = usize::try_from(record.session.message_count)
         .context("legacy transcript count does not fit this platform")?;
     let mut next_position = 0_usize;
@@ -1453,6 +1297,86 @@ mod sqlite_schema_tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn schema_v2_isolates_malformed_overview_backfill_per_session() {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        connection
+            .execute_batch(
+                "
+                PRAGMA foreign_keys = ON;
+                CREATE TABLE meta (
+                  key TEXT PRIMARY KEY,
+                  value TEXT NOT NULL
+                );
+                INSERT INTO meta(key, value) VALUES('schema_version', '2');
+                CREATE TABLE sessions (
+                  id TEXT PRIMARY KEY,
+                  value_json TEXT NOT NULL
+                );
+                CREATE TABLE messages (
+                  session_id TEXT NOT NULL,
+                  position INTEGER NOT NULL CHECK(position >= 0),
+                  message_id TEXT NOT NULL,
+                  value_json TEXT NOT NULL,
+                  PRIMARY KEY(session_id, position),
+                  UNIQUE(session_id, message_id),
+                  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                ) WITHOUT ROWID;
+                CREATE TABLE session_overviews (
+                  session_id TEXT PRIMARY KEY,
+                  value_blob BLOB NOT NULL,
+                  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                ) WITHOUT ROWID;
+                INSERT INTO sessions(id, value_json)
+                VALUES('healthy-local', '{}'), ('gapped-local', '{}');
+                INSERT INTO messages(session_id, position, message_id, value_json)
+                VALUES(
+                  'healthy-local',
+                  0,
+                  'healthy-message',
+                  '{\"type\":\"text\",\"id\":\"healthy-message\",\"author\":\"agent\",\"text\":\"ok\"}'
+                ), (
+                  'gapped-local',
+                  4,
+                  'gapped-message',
+                  '{\"type\":\"text\",\"id\":\"gapped-message\",\"author\":\"agent\",\"text\":\"bad\"}'
+                );
+                ",
+            )
+            .expect("mixed local fixture should initialize");
+
+        ensure_sqlite_state_schema(&connection)
+            .expect("one malformed session must not abort global schema startup");
+
+        let healthy_blob: Vec<u8> = connection
+            .query_row(
+                "SELECT value_blob
+                 FROM session_overviews
+                 WHERE session_id = 'healthy-local'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("healthy local session should still be backfilled");
+        assert_eq!(
+            healthy_blob,
+            vec![encode_conversation_overview_message(
+                ConversationOverviewKind::Text,
+                false,
+            )]
+        );
+        let malformed_overview_count: u32 = connection
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM session_overviews
+                 WHERE session_id = 'gapped-local'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("malformed overview count should be queryable");
+        assert_eq!(malformed_overview_count, 0);
     }
 
     #[test]
@@ -1889,6 +1813,13 @@ fn load_session_records_from_sqlite_with_skipped(
                 record.external_session_id.as_deref(),
             )
             .with_context(|| format!("persisted session `{session_id}` failed validation"))?;
+            validate_remote_proxy_identity(
+                record.remote_id.as_deref(),
+                record.remote_session_id.as_deref(),
+            )
+            .with_context(|| {
+                format!("persisted session `{session_id}` has invalid remote proxy identity")
+            })?;
             load_persisted_session_tail(connection, path, &mut record)?;
             Ok(record)
         })();
@@ -2282,6 +2213,16 @@ struct SerializedPersistedSession {
 fn serialize_persisted_session(
     record: &PersistedSessionRecord,
 ) -> Result<SerializedPersistedSession> {
+    let remote_proxy_identity = validate_remote_proxy_identity(
+        record.remote_id.as_deref(),
+        record.remote_session_id.as_deref(),
+    )
+    .with_context(|| {
+        format!(
+            "persisted session `{}` has invalid remote proxy identity",
+            record.session.id
+        )
+    })?;
     let mut metadata = record.clone();
     let retained_end = record
         .message_start_index
@@ -2330,10 +2271,35 @@ fn serialize_persisted_session(
         session_id: record.session.id.clone(),
         message_start_index: record.message_start_index,
         message_count: total_message_count,
-        write_overview: record.remote_id.is_none(),
+        write_overview: remote_proxy_identity.is_none(),
         value_json,
         messages,
     })
+}
+
+fn serialize_persisted_sessions_with_isolation(
+    sessions: &[PersistedSessionRecord],
+) -> Vec<SerializedPersistedSession> {
+    let mut serialized_sessions = Vec::with_capacity(sessions.len());
+    let mut skipped = 0_usize;
+    for record in sessions {
+        match serialize_persisted_session(record) {
+            Ok(session) => serialized_sessions.push(session),
+            Err(err) => {
+                skipped += 1;
+                eprintln!(
+                    "persist> preserving the last good row for invalid in-memory session `{}`: {err:#}",
+                    record.session.id
+                );
+            }
+        }
+    }
+    if skipped > 0 {
+        eprintln!(
+            "persist> skipped {skipped} invalid in-memory session record(s) while persisting"
+        );
+    }
+    serialized_sessions
 }
 
 fn write_serialized_persisted_session(
@@ -2632,10 +2598,7 @@ fn persist_state_parts_via_connection(
 ) -> Result<()> {
     let metadata_json =
         serde_json::to_string(metadata).context("failed to serialize persisted state metadata")?;
-    let serialized_sessions = sessions
-        .iter()
-        .map(serialize_persisted_session)
-        .collect::<Result<Vec<_>>>()?;
+    let serialized_sessions = serialize_persisted_sessions_with_isolation(sessions);
     let serialized_delegations = delegations
         .iter()
         .map(|delegation| {
@@ -2659,9 +2622,12 @@ fn persist_state_parts_via_connection(
     )
     .with_context(|| format!("failed to write state metadata to `{}`", path.display()))?;
     if replace_sessions {
-        let retained_session_ids = serialized_sessions
+        // Retain every session from the snapshot, including any session whose
+        // current in-memory value failed validation. Such a session is skipped
+        // above so its last known-good SQLite row remains recoverable.
+        let retained_session_ids = sessions
             .iter()
-            .map(|session| session.session_id.as_str())
+            .map(|session| session.session.id.as_str())
             .collect::<HashSet<_>>();
         remove_missing_persisted_sessions(
             &tx,
@@ -2815,7 +2781,7 @@ fn persist_delta_via_cache(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,
     delta: &PersistDelta,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let result = persist_delta_via_cache_inner(cache, path, delta);
     if result.is_err() {
         cache.invalidate();
@@ -2827,14 +2793,15 @@ fn persist_delta_via_cache_inner(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,
     delta: &PersistDelta,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let metadata_json = serde_json::to_string(&delta.metadata)
         .context("failed to serialize persisted state metadata")?;
-    let serialized_sessions = delta
-        .changed_sessions
+    let serialized_sessions =
+        serialize_persisted_sessions_with_isolation(&delta.changed_sessions);
+    let persisted_session_ids = serialized_sessions
         .iter()
-        .map(serialize_persisted_session)
-        .collect::<Result<Vec<_>>>()?;
+        .map(|session| session.session_id.clone())
+        .collect::<Vec<_>>();
     let serialized_delegations = delta
         .changed_delegations
         .as_deref()
@@ -2932,7 +2899,7 @@ fn persist_delta_via_cache_inner(
     // TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS when the operator explicitly
     // accepts insecure state-file modes.
     verify_persist_commit_integrity(path)?;
-    Ok(())
+    Ok(persisted_session_ids)
 }
 
 /// Persists state from a pre-built `PersistedState` snapshot.

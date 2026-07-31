@@ -83,7 +83,7 @@ fn resolve_board_scope_for_session(
         .ok_or_else(|| ApiError::not_found("session not found"))?;
     let record = &inner.sessions[session_index];
     if record.hidden
-        || record.is_remote_proxy()
+        || !record.is_local_session()
         || record.session.parent_delegation_id.is_some()
         || inner
             .find_delegation_index_by_child_session_id(&record.session.id)

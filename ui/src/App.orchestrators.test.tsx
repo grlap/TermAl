@@ -421,28 +421,24 @@ describe("App orchestrators", () => {
         await renderApp();
 
         const eventSource = latestEventSource();
-        act(() => {
-          eventSource.dispatchOpen();
-          eventSource.dispatchNamedEvent("state", {
-            revision: 2,
-            projects: [
-              {
-                id: "project-local",
-                name: "Local Project",
-                rootPath: "/repo",
-                remoteId: "local",
-              },
-            ],
-            sessions: [],
-          });
+        await dispatchOpenedStateEvent(eventSource, {
+          revision: 2,
+          projects: [
+            {
+              id: "project-local",
+              name: "Local Project",
+              rootPath: "/repo",
+              remoteId: "local",
+            },
+          ],
+          sessions: [],
         });
-        await settleAsyncUi();
 
-        await clickAndSettle(
+        fireEvent.click(
           await screen.findByRole("button", { name: "Open preferences" }),
         );
-        await clickAndSettle(
-          screen.getByRole("tab", { name: "Orchestrators" }),
+        fireEvent.click(
+          await screen.findByRole("tab", { name: "Orchestrators" }),
         );
         expect(
           await screen.findByDisplayValue("Delivery Flow"),
@@ -462,7 +458,7 @@ describe("App orchestrators", () => {
           throw new Error("Run button not found");
         }
         expect(runButton).toBeEnabled();
-        await clickAndSettle(runButton);
+        fireEvent.click(runButton);
 
         await waitFor(() => {
           expect(createOrchestratorInstanceSpy).toHaveBeenCalledWith(

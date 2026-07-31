@@ -475,47 +475,52 @@ impl AppState {
                         // `changed_sessions` + `removed_session_ids` is
                         // fine; the transaction just upserts one
                         // app_state row.
-                        if let Err(err) =
-                            persist_delta_via_cache(&mut cache, &persist_path_for_persist, &delta)
-                        {
-                            // On write failure, restore only the drained
-                            // explicit `removed_session_ids` into `inner` so
-                            // the next tick can retry the tombstones.
-                            // Without this, a transient SQLite error
-                            // (locked DB, disk full, I/O error) would
-                            // silently leak an orphan `sessions` row
-                            // into SQLite — `collect_persist_delta`
-                            // drained the vec via `mem::take`, and
-                            // since the watermark wasn't advanced the
-                            // `changed_sessions` side auto-retries on
-                            // the next tick, but the tombstone side
-                            // has no equivalent per-row signal.
-                            // `changed_sessions` and synthesized hidden-session
-                            // deletes recover via mutation-stamp re-collection;
-                            // only drained explicit tombstones need manual
-                            // restoration.
-                            if !delta.drained_explicit_tombstones.is_empty() {
-                                let mut inner =
-                                    inner_for_persist.lock().expect("state mutex poisoned");
-                                inner.restore_drained_explicit_tombstones(
-                                    &delta.drained_explicit_tombstones,
-                                );
+                        let persisted_session_ids = match persist_delta_via_cache(
+                            &mut cache,
+                            &persist_path_for_persist,
+                            &delta,
+                        ) {
+                            Ok(persisted_session_ids) => persisted_session_ids,
+                            Err(err) => {
+                                // On write failure, restore only the drained
+                                // explicit `removed_session_ids` into `inner` so
+                                // the next tick can retry the tombstones.
+                                // Without this, a transient SQLite error
+                                // (locked DB, disk full, I/O error) would
+                                // silently leak an orphan `sessions` row
+                                // into SQLite — `collect_persist_delta`
+                                // drained the vec via `mem::take`, and
+                                // since the watermark wasn't advanced the
+                                // `changed_sessions` side auto-retries on
+                                // the next tick, but the tombstone side
+                                // has no equivalent per-row signal.
+                                // `changed_sessions` and synthesized hidden-session
+                                // deletes recover via mutation-stamp re-collection;
+                                // only drained explicit tombstones need manual
+                                // restoration.
+                                if !delta.drained_explicit_tombstones.is_empty() {
+                                    let mut inner =
+                                        inner_for_persist.lock().expect("state mutex poisoned");
+                                    inner.restore_drained_explicit_tombstones(
+                                        &delta.drained_explicit_tombstones,
+                                    );
+                                }
+                                if !delta.drained_delegation_tombstones.is_empty() {
+                                    let mut inner =
+                                        inner_for_persist.lock().expect("state mutex poisoned");
+                                    inner.restore_drained_delegation_tombstones(
+                                        &delta.drained_delegation_tombstones,
+                                    );
+                                }
+                                return Err(err);
                             }
-                            if !delta.drained_delegation_tombstones.is_empty() {
-                                let mut inner =
-                                    inner_for_persist.lock().expect("state mutex poisoned");
-                                inner.restore_drained_delegation_tombstones(
-                                    &delta.drained_delegation_tombstones,
-                                );
-                            }
-                            return Err(err);
-                        }
+                        };
                         {
                             let mut inner =
                                 inner_for_persist.lock().expect("state mutex poisoned");
                             inner.trim_persisted_session_tails(
                                 next_watermark,
-                                &delta.persisted_session_ids_to_trim,
+                                &persisted_session_ids,
                             );
                         }
                         watermark = next_watermark;

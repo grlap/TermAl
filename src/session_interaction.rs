@@ -200,7 +200,7 @@ struct QueuedPromptRecord {
 
 /// Syncs pending prompts.
 fn sync_pending_prompts(record: &mut SessionRecord) {
-    if record.is_remote_proxy() {
+    if !record.is_local_session() {
         return;
     }
     let missing_single_peer_messages = record

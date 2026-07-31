@@ -91,7 +91,7 @@ impl AppState {
                     .iter()
                     .filter(|session_record| {
                         !session_record.hidden
-                            && !session_record.is_remote_proxy()
+                            && session_record.is_local_session()
                             && session_record.session.agent == Agent::Claude
                             && session_record.session.workdir == workdir
                             && session_record.session.project_id == project_id
@@ -100,7 +100,7 @@ impl AppState {
                     .collect::<Vec<_>>();
                 inner.retain_sessions(|session_record| {
                     let should_consider = session_record.hidden
-                        && !session_record.is_remote_proxy()
+                        && session_record.is_local_session()
                         && session_record.session.agent == Agent::Claude
                         && session_record.session.workdir == workdir
                         && session_record.session.project_id == project_id;
@@ -133,14 +133,14 @@ impl AppState {
                     .iter()
                     .filter(|session_record| {
                         !session_record.hidden
-                            && !session_record.is_remote_proxy()
+                            && session_record.is_local_session()
                             && session_record.session.agent == Agent::Claude
                     })
                     .map(claude_spare_profile)
                     .collect::<Vec<_>>();
                 inner.retain_sessions(|session_record| {
                     if !(session_record.hidden
-                        && !session_record.is_remote_proxy()
+                        && session_record.is_local_session()
                         && session_record.session.agent == Agent::Claude)
                     {
                         return true;

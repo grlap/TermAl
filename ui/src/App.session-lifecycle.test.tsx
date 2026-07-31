@@ -394,7 +394,6 @@ describe("App session lifecycle", () => {
             target: { value: "Recover this prompt" },
           });
         });
-        await settleAsyncUi();
         vi.useFakeTimers();
         await clickAndSettle(screen.getByRole("button", { name: "Send" }));
 
@@ -464,7 +463,6 @@ describe("App session lifecycle", () => {
           );
           await flushUiWork();
         });
-        await settleAsyncUi();
 
         expect(composer).toHaveValue("");
         expect(fetchMock).not.toHaveBeenCalled();
@@ -599,11 +597,9 @@ describe("App session lifecycle", () => {
             target: { value: "Restart-spanning prompt" },
           });
         });
-        await settleAsyncUi();
 
         fetchMock.mockClear();
         await clickAndSettle(screen.getByRole("button", { name: "Send" }));
-        await settleAsyncUi();
 
         // Two fetches expected: the POST itself, AND an immediate /api/state
         // probe driven by the unseen-instance recovery path. Without the
@@ -671,7 +667,6 @@ describe("App session lifecycle", () => {
           });
           await flushUiWork();
         });
-        await settleAsyncUi();
 
         await act(async () => {
           newestEventSource.dispatchNamedEvent("delta", {
@@ -694,7 +689,6 @@ describe("App session lifecycle", () => {
           });
           await flushUiWork();
         });
-        await settleAsyncUi();
 
         // The assistant reply streamed through the new transport must
         // appear in the visible transcript. This is the user-facing

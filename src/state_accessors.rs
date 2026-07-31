@@ -714,8 +714,7 @@ impl AppState {
                 .find_visible_session_index(session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
             let record = &inner.sessions[index];
-            record.remote_id.is_some()
-                && record.remote_session_id.is_some()
+            record.is_remote_proxy()
                 && !record.session.messages_loaded
                 && record.session.messages.is_empty()
         };

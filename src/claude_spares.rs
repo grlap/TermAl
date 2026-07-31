@@ -61,7 +61,7 @@ impl AppState {
                 .iter()
                 .filter(|record| {
                     !record.hidden
-                        && !record.is_remote_proxy()
+                        && record.is_local_session()
                         && record.session.agent == Agent::Claude
                 })
                 .map(|record| {
@@ -142,7 +142,7 @@ impl AppState {
             .session_mut_by_index(index)
             .expect("session index should be valid");
             if !record.hidden
-                || record.is_remote_proxy()
+                || !record.is_local_session()
                 || record.session.agent != Agent::Claude
                 || !matches!(record.runtime, SessionRuntime::None)
             {

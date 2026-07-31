@@ -514,7 +514,7 @@ impl AppState {
             let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
-            if record.is_remote_proxy() || record.hidden {
+            if !record.is_local_session() || record.hidden {
                 continue;
             }
 
