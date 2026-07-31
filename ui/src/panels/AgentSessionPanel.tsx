@@ -500,8 +500,6 @@ const SessionConversationPage = memo(function SessionConversationPage({
     messages: visibleMessages,
     requestOlderTranscriptPage,
   } = useInitialActiveTranscriptMessages({
-    hasConversationMarkers: visibleMarkers.length > 0,
-    hasConversationSearch,
     isActive,
     // Summary count, not `baseVisibleMessages.length`: while a large session is
     // tail-hydrated the latter is only the 20-message window (tm-jfx/tm-2po).

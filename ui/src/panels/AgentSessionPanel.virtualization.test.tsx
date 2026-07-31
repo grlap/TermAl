@@ -384,12 +384,13 @@ describe("AgentSessionPanel virtualization", () => {
     expect(screen.getByText(activeSession.messages[0]?.id ?? "")).toBeInTheDocument();
   });
 
-  it("does not cascade bounded history requests merely because markers or search are present", async () => {
+  it("does not cascade for markers or search but honors explicit upward demand", async () => {
     const hydrationSpy = vi.spyOn(
       sessionHistoryDemand,
       "requestSessionHistoryPage",
     );
     try {
+      const markerScrollNode = document.createElement("section");
       const markerSession = makeSession("marker-session", {
         messages: makeTextMessages(1),
         messagesLoaded: false,
@@ -404,6 +405,7 @@ describe("AgentSessionPanel virtualization", () => {
       });
       const markerRender = renderSessionPanelWithDefaults({
         activeSession: markerSession,
+        scrollContainerRef: { current: markerScrollNode },
       });
 
       await act(async () => {
@@ -434,8 +436,18 @@ describe("AgentSessionPanel virtualization", () => {
       });
       expect(hydrationSpy).not.toHaveBeenCalled();
 
-      markerRender.unmount();
+      await act(async () => {
+        markerScrollNode.scrollTop = 0;
+        fireEvent.wheel(markerScrollNode, { deltaY: -20 });
+        await Promise.resolve();
+      });
+      expect(hydrationSpy).toHaveBeenCalledTimes(1);
+      expect(hydrationSpy).toHaveBeenLastCalledWith("marker-session");
 
+      markerRender.unmount();
+      hydrationSpy.mockClear();
+
+      const searchScrollNode = document.createElement("section");
       const searchSession = makeSession("search-session", {
         messages: makeTextMessages(1),
         messagesLoaded: false,
@@ -443,12 +455,21 @@ describe("AgentSessionPanel virtualization", () => {
       renderSessionPanelWithDefaults({
         activeSession: searchSession,
         conversationSearchQuery: "Message",
+        scrollContainerRef: { current: searchScrollNode },
       });
 
       await act(async () => {
         await Promise.resolve();
       });
       expect(hydrationSpy).not.toHaveBeenCalled();
+
+      await act(async () => {
+        searchScrollNode.scrollTop = 0;
+        fireEvent.wheel(searchScrollNode, { deltaY: -20 });
+        await Promise.resolve();
+      });
+      expect(hydrationSpy).toHaveBeenCalledTimes(1);
+      expect(hydrationSpy).toHaveBeenLastCalledWith("search-session");
     } finally {
       hydrationSpy.mockRestore();
     }

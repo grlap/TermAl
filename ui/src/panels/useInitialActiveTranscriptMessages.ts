@@ -131,8 +131,6 @@ function isTranscriptDemandKeyEventInScope(
 // user demand for the next page. The virtualizer is the single owner of scroll
 // anchoring while a page is prepended and measured.
 export function useInitialActiveTranscriptMessages({
-  hasConversationMarkers,
-  hasConversationSearch,
   isActive,
   messageCount,
   messages,
@@ -142,8 +140,6 @@ export function useInitialActiveTranscriptMessages({
   scrollContainerRef,
   sessionId,
 }: {
-  hasConversationMarkers: boolean;
-  hasConversationSearch: boolean;
   isActive: boolean;
   // The session's TRUE transcript length, which is NOT `messages.length` while a
   // large session is tail-hydrated: `messages` then holds only the 20-message
@@ -180,7 +176,7 @@ export function useInitialActiveTranscriptMessages({
     if (!isActive || !hasOlderHistory) {
       return undefined;
     }
-    if (hasConversationMarkers || hasConversationSearch || !hasMessages) {
+    if (!hasMessages) {
       return undefined;
     }
 
@@ -298,8 +294,6 @@ export function useInitialActiveTranscriptMessages({
       node.removeEventListener("touchcancel", handleTouchEnd);
     };
   }, [
-    hasConversationMarkers,
-    hasConversationSearch,
     hasMessages,
     hasOlderHistory,
     isActive,

@@ -36,8 +36,6 @@ function makeScrollNodeRef() {
 }
 
 function renderTranscriptDemandHook({
-  hasConversationMarkers = false,
-  hasConversationSearch = false,
   hasNewerHistory,
   hasOlderHistory,
   isActive = true,
@@ -49,8 +47,6 @@ function renderTranscriptDemandHook({
   } as RefObject<HTMLElement | null>,
   sessionId = "session-a",
 }: {
-  hasConversationMarkers?: boolean;
-  hasConversationSearch?: boolean;
   hasNewerHistory?: boolean;
   hasOlderHistory?: boolean;
   isActive?: boolean;
@@ -62,8 +58,6 @@ function renderTranscriptDemandHook({
 } = {}) {
   return renderHook((props) => useInitialActiveTranscriptMessages(props), {
     initialProps: {
-      hasConversationMarkers,
-      hasConversationSearch,
       hasNewerHistory,
       hasOlderHistory,
       isActive,
@@ -169,8 +163,6 @@ describe("useInitialActiveTranscriptMessages", () => {
       hook.result.current.requestOlderTranscriptPage();
     });
     hook.rerender({
-      hasConversationMarkers: false,
-      hasConversationSearch: false,
       hasNewerHistory: undefined,
       hasOlderHistory: undefined,
       isActive: true,
