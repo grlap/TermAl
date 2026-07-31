@@ -129,7 +129,9 @@ function isTranscriptDemandKeyEventInScope(
 
 // The server supplies the recent tail and older pages. This hook only detects
 // user demand for the next page. The virtualizer is the single owner of scroll
-// anchoring while a page is prepended and measured.
+// anchoring while a page is prepended and measured. Each interaction latch is
+// consumed by one request so later programmatic scroll corrections cannot
+// inherit an old gesture and cascade through additional history pages.
 export function useInitialActiveTranscriptMessages({
   isActive,
   messageCount,
@@ -189,6 +191,13 @@ export function useInitialActiveTranscriptMessages({
     let hasDemandInteraction = false;
     let hasQueuedWheelDemandRender = false;
     let disposed = false;
+    const consumeOlderTranscriptPageDemand = () => {
+      if (!hasDemandInteraction) {
+        return;
+      }
+      hasDemandInteraction = false;
+      requestOlderTranscriptPage();
+    };
     const requestOlderTranscriptPageAfterWheel = () => {
       if (hasQueuedWheelDemandRender) {
         return;
@@ -197,7 +206,7 @@ export function useInitialActiveTranscriptMessages({
       queueMicrotask(() => {
         hasQueuedWheelDemandRender = false;
         if (!disposed) {
-          requestOlderTranscriptPage();
+          consumeOlderTranscriptPageDemand();
         }
       });
     };
@@ -206,7 +215,7 @@ export function useInitialActiveTranscriptMessages({
         hasDemandInteraction &&
         node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX
       ) {
-        requestOlderTranscriptPage();
+        consumeOlderTranscriptPageDemand();
       }
     };
     const handleWheel = (event: WheelEvent) => {
@@ -245,7 +254,7 @@ export function useInitialActiveTranscriptMessages({
       if (
         node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX
       ) {
-        requestOlderTranscriptPage();
+        consumeOlderTranscriptPageDemand();
       }
     };
     const handleTouchStart = (event: TouchEvent) => {
@@ -263,7 +272,7 @@ export function useInitialActiveTranscriptMessages({
           INITIAL_ACTIVE_TRANSCRIPT_TOUCH_PULL_DEMAND_THRESHOLD_PX &&
         node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX
       ) {
-        requestOlderTranscriptPage();
+        consumeOlderTranscriptPageDemand();
       }
       lastTouchClientY = touch.clientY;
     };

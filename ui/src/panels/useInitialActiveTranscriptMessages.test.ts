@@ -186,7 +186,7 @@ describe("useInitialActiveTranscriptMessages", () => {
     cleanup();
   });
 
-  it("requests history after upward wheel demand near the top", async () => {
+  it("consumes upward wheel demand before a programmatic near-top scroll", async () => {
     const { cleanup, node, ref } = makeScrollNodeRef();
     const listener = vi.fn();
     const removeListener = addSessionHistoryPageDemandListener(listener);
@@ -204,6 +204,21 @@ describe("useInitialActiveTranscriptMessages", () => {
       sessionId: "session-a",
       direction: "older",
     });
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      node.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      node.dispatchEvent(
+        new WheelEvent("wheel", { bubbles: true, deltaY: -20 }),
+      );
+      await Promise.resolve();
+    });
+    expect(listener).toHaveBeenCalledTimes(2);
+
     removeListener();
     cleanup();
   });

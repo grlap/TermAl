@@ -487,10 +487,6 @@ const SessionConversationPage = memo(function SessionConversationPage({
   const pendingPrompts = session.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
   const deferredMessages = useDeferredValue(session.messages);
   const visibleMarkers = session.markers ?? EMPTY_CONVERSATION_MARKERS;
-  const hasConversationSearch =
-    conversationSearchQuery.trim().length > 0 ||
-    conversationSearchMatchedItemKeys.size > 0 ||
-    conversationSearchActiveItemKey !== null;
   const baseVisibleMessages = isActive
     ? includeUndeferredMessageTail(deferredMessages, session.messages)
     : session.messages;
