@@ -29,6 +29,7 @@ import {
   createOrchestratorCanvasTab,
   createOrchestratorListTab,
   createProjectListTab,
+  createResponseBoardTab,
   createSessionListTab,
   createSessionTab,
   createSourceTab,
@@ -45,6 +46,7 @@ export {
   createOrchestratorCanvasTab,
   createOrchestratorListTab,
   createProjectListTab,
+  createResponseBoardTab,
   createSessionListTab,
   createSessionTab,
   createSourceTab,
@@ -69,6 +71,7 @@ export type {
   WorkspaceOriginOnlyTab,
   WorkspacePane,
   WorkspaceProjectListTab,
+  WorkspaceResponseBoardTab,
   WorkspaceSessionListTab,
   WorkspaceSessionTab,
   WorkspaceSourceFocus,
@@ -97,6 +100,7 @@ import {
   type WorkspaceOriginOnlyTab,
   type WorkspacePane,
   type WorkspaceProjectListTab,
+  type WorkspaceResponseBoardTab,
   type WorkspaceSessionListTab,
   type WorkspaceSessionTab,
   type WorkspaceSourceFocus,
@@ -373,6 +377,20 @@ export function reconcileWorkspaceState(
           {
             ...tabWithoutOriginProjectId,
             mailboxId,
+            originSessionId,
+            ...projectOriginProps(originProjectId),
+          },
+        ];
+      }
+
+      if (tab.kind === "responseBoard") {
+        const {
+          originProjectId: _ignoredOriginProjectId,
+          ...tabWithoutOriginProjectId
+        } = tab;
+        return [
+          {
+            ...tabWithoutOriginProjectId,
             originSessionId,
             ...projectOriginProps(originProjectId),
           },
@@ -870,6 +888,44 @@ export function openMailboxInWorkspaceState(
   return openTabInWorkspaceState(
     workspace,
     createMailboxTab(normalizedMailboxId, normalizedOriginSessionId, originProjectId),
+    preferredPaneId,
+  );
+}
+
+export function openResponseBoardInWorkspaceState(
+  workspace: WorkspaceState,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+): WorkspaceState {
+  const existing = findResponseBoardTab(workspace);
+  if (existing) {
+    const panes = workspace.panes.map((pane) =>
+      pane.id === existing.paneId
+        ? syncPaneState({
+            ...pane,
+            tabs: pane.tabs.map((tab) =>
+              tab.id === existing.tab.id && tab.kind === "responseBoard"
+                ? {
+                    ...tab,
+                    originSessionId: normalizeWorkspaceIdentifier(originSessionId),
+                    ...projectOriginProps(
+                      normalizeWorkspaceIdentifier(originProjectId),
+                    ),
+                    refreshToken: crypto.randomUUID(),
+                  }
+                : tab,
+            ),
+            activeTabId: existing.tab.id,
+          })
+        : pane,
+    );
+    return { ...workspace, panes, activePaneId: existing.paneId };
+  }
+
+  return openTabInWorkspaceState(
+    workspace,
+    createResponseBoardTab(originSessionId, originProjectId),
     preferredPaneId,
   );
 }
@@ -2335,6 +2391,20 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     };
   }
 
+  if (activeTab.kind === "responseBoard") {
+    return {
+      ...pane,
+      activeTabId: activeTab.id,
+      activeSessionId: resolveOriginSessionId(
+        activeTab.originSessionId,
+        pane.activeSessionId,
+        pane.tabs,
+      ),
+      viewMode: "responseBoard",
+      sourcePath: null,
+    };
+  }
+
   return {
     ...pane,
     activeTabId: activeTab.id,
@@ -2472,6 +2542,19 @@ function findMailboxTab(workspace: WorkspaceState, mailboxId: string) {
     }
   }
 
+  return null;
+}
+
+function findResponseBoardTab(workspace: WorkspaceState) {
+  for (const pane of workspace.panes) {
+    const tab = pane.tabs.find(
+      (candidate): candidate is WorkspaceResponseBoardTab =>
+        candidate.kind === "responseBoard",
+    );
+    if (tab) {
+      return { paneId: pane.id, tab };
+    }
+  }
   return null;
 }
 

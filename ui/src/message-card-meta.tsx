@@ -9,7 +9,10 @@ import {
   type SearchHighlightTone,
 } from "./search-highlight";
 import type { ImageAttachment } from "./types";
-import { useIsMessageMetaMarkerMenuTriggerEnabled } from "./message-meta-marker-menu-context";
+import {
+  useIsMessageMetaMarkerMenuTriggerEnabled,
+  useMessageMetaResponseBoardDragStart,
+} from "./message-meta-marker-menu-context";
 
 export function promptCommandMetaLabel(
   text: string,
@@ -75,6 +78,7 @@ export function MessageMeta({
   // sender's session name; an empty/absent name falls back to "You".
   const displayName = isUser ? trimmedSourceName || "You" : "Agent";
   const enableMarkerMenuTrigger = useIsMessageMetaMarkerMenuTriggerEnabled();
+  const responseBoardDragStart = useMessageMetaResponseBoardDragStart();
   const isMarkerMenuTrigger = enableMarkerMenuTrigger;
   const markerMenuLabel = `${displayName}, open marker actions`;
   const markerMenuTitle = isUser
@@ -82,7 +86,11 @@ export function MessageMeta({
     : "Open marker actions for assistant message";
 
   return (
-    <div className="message-meta">
+    <div
+      className="message-meta"
+      draggable={responseBoardDragStart ? true : undefined}
+      onDragStart={responseBoardDragStart ?? undefined}
+    >
       <span
         className={`message-meta-author ${isUser ? "message-meta-author-user" : "message-meta-author-agent"}`}
         role={isMarkerMenuTrigger ? "button" : undefined}

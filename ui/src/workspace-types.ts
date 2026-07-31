@@ -23,6 +23,7 @@ export type PaneViewMode =
   | "gitStatus"
   | "terminal"
   | "mailbox"
+  | "responseBoard"
   | "instructionDebugger"
   | "diffPreview";
 
@@ -72,6 +73,14 @@ export type WorkspaceMailboxTab = {
   kind: "mailbox";
   mailboxId: string;
   originSessionId: string;
+  originProjectId?: string | null;
+  refreshToken: string;
+};
+
+export type WorkspaceResponseBoardTab = {
+  id: string;
+  kind: "responseBoard";
+  originSessionId: string | null;
   originProjectId?: string | null;
   refreshToken: string;
 };
@@ -165,6 +174,7 @@ export type WorkspaceTab =
   | WorkspaceGitStatusTab
   | WorkspaceTerminalTab
   | WorkspaceMailboxTab
+  | WorkspaceResponseBoardTab
   | WorkspaceControlPanelTab
   | WorkspaceOrchestratorListTab
   | WorkspaceCanvasTab

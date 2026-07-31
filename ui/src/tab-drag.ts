@@ -108,6 +108,8 @@ function formatWorkspaceTabDragLabel(drag: WorkspaceTabDrag) {
       return `TermAl terminal ${drag.tab.workdir ?? "workspace"}`;
     case "mailbox":
       return `TermAl mailbox ${drag.tab.mailboxId}`;
+    case "responseBoard":
+      return "TermAl response board";
     case "controlPanel":
       return "TermAl control panel";
     case "orchestratorList":

@@ -64,6 +64,7 @@ import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { InstructionDebuggerPanel } from "./panels/InstructionDebuggerPanel";
 import { MailboxPanel } from "./panels/MailboxPanel";
+import { ResponseBoardPanel } from "./panels/ResponseBoardPanel";
 import { PaneTabs } from "./panels/PaneTabs";
 import { OrchestratorTemplatesPanel } from "./panels/OrchestratorTemplatesPanel";
 import { SessionCanvasPanel } from "./panels/SessionCanvasPanel";
@@ -141,6 +142,15 @@ import { resolveSessionPaneScrollStateKey } from "./SessionPaneView.scroll-key";
 import { useSessionPaneScrollState } from "./SessionPaneView.scroll";
 import { useSessionPaneSourceFileState } from "./SessionPaneView.source-file";
 import type { SessionPaneViewProps } from "./SessionPaneView.types";
+import {
+  createResponseBoardCard,
+  fetchResponseBoard,
+  type ResponseBoardCard,
+} from "./api";
+import { nextResponseBoardCardPosition } from "./response-board";
+import { requestResponseBoardSourceNavigation } from "./response-board-navigation";
+
+const NOOP_OPEN_RESPONSE_BOARD_TAB = () => {};
 
 export function SessionPaneView({
   pane,
@@ -183,6 +193,7 @@ export function SessionPaneView({
   onPaneViewModeChange,
   onOpenSourceTab,
   onOpenMailboxTab,
+  onOpenResponseBoardTab = NOOP_OPEN_RESPONSE_BOARD_TAB,
   onOpenDiffPreviewTab,
   onOpenGitStatusDiffPreviewTab,
   onOpenFilesystemTab,
@@ -270,6 +281,41 @@ export function SessionPaneView({
     nextSessionLookup.set(storeActiveSession.id, storeActiveSession);
     return nextSessionLookup;
   }, [sessionLookup, storeActiveSession]);
+  const handlePinResponseBoardMessage = useCallback(
+    async (sessionId: string, messageId: string) => {
+      try {
+        onComposerError(null);
+        const board = await fetchResponseBoard();
+        const position = nextResponseBoardCardPosition(board.cards);
+        await createResponseBoardCard({ sessionId, messageId, ...position });
+        const sourceSession = activeContextSessionLookup.get(sessionId) ?? null;
+        onOpenResponseBoardTab(
+          pane.id,
+          sessionId,
+          sourceSession?.projectId ?? null,
+        );
+      } catch (error) {
+        onComposerError(getErrorMessage(error));
+      }
+    },
+    [
+      activeContextSessionLookup,
+      onComposerError,
+      onOpenResponseBoardTab,
+      pane.id,
+    ],
+  );
+  const handleOpenResponseBoardSource = useCallback(
+    (card: ResponseBoardCard) => {
+      onOpenConversationFromDiff(card.sourceSessionId, pane.id);
+      requestResponseBoardSourceNavigation({
+        sessionId: card.sourceSessionId,
+        messageId: card.sourceMessageId,
+        messagePosition: card.sourceMessagePosition,
+      });
+    },
+    [onOpenConversationFromDiff, pane.id],
+  );
   const {
     activeTab,
     activeControlPanelTab,
@@ -284,6 +330,7 @@ export function SessionPaneView({
     activeGitStatusTab,
     activeTerminalTab,
     activeMailboxTab,
+    activeResponseBoardTab,
     activeInstructionDebuggerTab,
     activeDiffPreviewTab,
     activeSourceOriginSessionId,
@@ -1132,7 +1179,6 @@ export function SessionPaneView({
           ))}
         </div>
       ) : null}
-
       <div ref={paneTopRef} className="pane-top">
         <div className="pane-bar">
           <div className="pane-bar-left">
@@ -1301,7 +1347,7 @@ export function SessionPaneView({
 
       <section
         ref={messageStackRef}
-        className={`message-stack${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}${activeTerminalTab ? " terminal-panel-stack" : ""}${activeMailboxTab ? " mailbox-panel-stack" : ""}`}
+        className={`message-stack${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}${activeTerminalTab ? " terminal-panel-stack" : ""}${activeMailboxTab ? " mailbox-panel-stack" : ""}${activeResponseBoardTab ? " response-board-panel-stack" : ""}`}
         tabIndex={
           activeTab?.kind === "session" && pane.viewMode === "session"
             ? 0
@@ -1594,6 +1640,12 @@ export function SessionPaneView({
             mailboxId={activeMailboxTab.mailboxId}
             sessionId={activeMailboxTab.originSessionId}
           />
+        ) : activeResponseBoardTab ? (
+          <ResponseBoardPanel
+            key={`${activeResponseBoardTab.id}:${activeResponseBoardTab.refreshToken}`}
+            refreshToken={activeResponseBoardTab.refreshToken}
+            onOpenSource={handleOpenResponseBoardSource}
+          />
         ) : activeTerminalTab ? (
           <section
             className="control-panel-section-stack terminal-section-stack"
@@ -1797,6 +1849,7 @@ export function SessionPaneView({
             onCancelQueuedPrompt={onCancelQueuedPrompt}
             onCreateConversationMarker={onCreateConversationMarker}
             onDeleteConversationMarker={onDeleteConversationMarker}
+            onPinResponseBoardMessage={handlePinResponseBoardMessage}
             onSessionSettingsChange={onSessionSettingsChange}
             conversationSearchQuery={
               hasSessionFindQuery ? sessionFindQuery : ""
@@ -1856,6 +1909,7 @@ export function SessionPaneView({
         activeGitStatusTab ||
         activeTerminalTab ||
         activeMailboxTab ||
+        activeResponseBoardTab ||
         activeInstructionDebuggerTab ||
         activeDiffPreviewTab ||
         isDelegatedChildSession ? null : (

@@ -80,6 +80,10 @@ export function formatTabLabel(
     return "Mailbox";
   }
 
+  if (tab.kind === "responseBoard") {
+    return "Response board";
+  }
+
   if (tab.kind === "controlPanel") {
     return "Control panel";
   }

@@ -1109,6 +1109,7 @@ export default function App() {
     handlePaneSourcePathChange,
     handleOpenSourceTab,
     handleOpenMailboxTab,
+    handleOpenResponseBoardTab,
     handleOpenDiffPreviewTab,
     handleOpenGitStatusDiffPreviewTab,
     handleOpenFilesystemTab,
@@ -1940,7 +1941,6 @@ export default function App() {
         selectedProjectId={selectedProjectId}
         activeSession={activeSession}
         sessions={sessions}
-        delegationChildSessionIds={delegationChildSessionIds}
         orchestrators={orchestrators}
         openSessionIds={openSessionIds}
         sessionListFilter={sessionListFilter}
@@ -2007,6 +2007,7 @@ export default function App() {
         handleOpenOrchestratorCanvasTab={handleOpenOrchestratorCanvasTab}
         handleOpenSessionListTab={handleOpenSessionListTab}
         handleOpenCanvasTab={handleOpenCanvasTab}
+        handleOpenResponseBoardTab={handleOpenResponseBoardTab}
         openCreateProjectDialog={openCreateProjectDialog}
         openCreateSessionDialog={openCreateSessionDialog}
         handleOpenSourceTab={handleOpenSourceTab}
@@ -2125,6 +2126,7 @@ export default function App() {
               onPaneViewModeChange={handlePaneViewModeChange}
               onOpenSourceTab={handleOpenSourceTab}
               onOpenMailboxTab={handleOpenMailboxTab}
+              onOpenResponseBoardTab={handleOpenResponseBoardTab}
               onOpenDiffPreviewTab={handleOpenDiffPreviewTab}
               onOpenGitStatusDiffPreviewTab={handleOpenGitStatusDiffPreviewTab}
               onOpenFilesystemTab={handleOpenFilesystemTab}

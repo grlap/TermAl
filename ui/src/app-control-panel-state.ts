@@ -57,8 +57,7 @@ type ControlSurfaceSectionId =
   | "sessions"
   | "projects"
   | "orchestrators"
-  | "git"
-  | "board";
+  | "git";
 
 type UseAppControlPanelStateParams = {
   remoteConfigs: RemoteConfig[];

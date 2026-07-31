@@ -106,6 +106,11 @@ export type SessionPaneViewProps = {
     originSessionId: string,
     originProjectId: string | null,
   ) => void;
+  onOpenResponseBoardTab?: (
+    paneId: string,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
     message: DiffMessage,

@@ -143,6 +143,25 @@ export type SessionOverviewResponse = {
   latestPosition: number;
 };
 
+export type ResponseBoardCard = {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  snapshot: Message;
+  sourceSessionId: string;
+  sourceMessageId: string;
+  sourceMessagePosition: number;
+  sourceSessionName: string;
+  sourceAgent: AgentType;
+  createdAt: string;
+};
+
+export type ResponseBoard = {
+  cards: ResponseBoardCard[];
+};
+
 export type CreateProjectResponse = {
   projectId: string;
   state: StateResponse;
@@ -567,6 +586,42 @@ export function fetchSessionHistory(
   }
   return requestJsonFirst<SessionHistoryResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/history?${query.toString()}`,
+  );
+}
+
+export function fetchResponseBoard() {
+  return requestJsonFirst<ResponseBoard>("/api/response-board");
+}
+
+export function createResponseBoardCard(payload: {
+  sessionId: string;
+  messageId: string;
+  x: number;
+  y: number;
+}) {
+  return request<ResponseBoardCard>("/api/response-board/cards", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateResponseBoardCard(
+  cardId: string,
+  payload: { x: number; y: number; w: number; h: number },
+) {
+  return request<ResponseBoardCard>(
+    `/api/response-board/cards/${encodeURIComponent(cardId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function deleteResponseBoardCard(cardId: string) {
+  return request<void>(
+    `/api/response-board/cards/${encodeURIComponent(cardId)}`,
+    { method: "DELETE" },
   );
 }
 

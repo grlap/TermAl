@@ -37,19 +37,19 @@ describe("ControlPanelSurface", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Git status" })).toBeInTheDocument();
     expect(screen.getByTestId("section-body")).toHaveTextContent("git");
 
-    fireEvent.click(screen.getByRole("button", { name: "Board" }));
-
-    expect(screen.getByRole("heading", { level: 2, name: "Board" })).toBeInTheDocument();
-    expect(screen.getByTestId("section-body")).toHaveTextContent("board");
   });
 
-  it("appends Board for users whose stored v2 order predates it", () => {
-    // Migration proof: a real pre-board v2 stored order must surface the new
-    // section automatically (normalizer appends missing defaults) and keep
-    // the user's chosen order for the rest (review, mailbox #238-3).
+  it("drops the retired coordination-board section from stored dock order", () => {
     window.localStorage.setItem(
       "termal-control-panel-section-order-v2",
-      JSON.stringify(["git", "files", "projects", "sessions", "orchestrators"]),
+      JSON.stringify([
+        "git",
+        "board",
+        "files",
+        "projects",
+        "sessions",
+        "orchestrators",
+      ]),
     );
 
     renderSurface();
@@ -60,8 +60,21 @@ describe("ControlPanelSurface", () => {
       "Projects",
       "Sessions",
       "Orchestrators",
-      "Board",
     ]);
+  });
+
+  it("opens the real Response Board from the persistent dock action", () => {
+    const onOpenResponseBoard = vi.fn();
+    renderSurface({ onOpenResponseBoard });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Response Board" }),
+    );
+
+    expect(onOpenResponseBoard).toHaveBeenCalledOnce();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Sessions" }),
+    ).toBeInTheDocument();
   });
 
   it("opens preferences from the dock without switching sections", () => {
@@ -125,7 +138,7 @@ describe("ControlPanelSurface", () => {
     expect(screen.getByTestId("section-body")).toHaveTextContent("sessions");
   });
 
-  it("uses Projects, Sessions, Orchestrators, Files, Git status, Board as the default dock order", () => {
+  it("uses Projects, Sessions, Orchestrators, Files, Git status as the default dock order", () => {
     renderSurface();
 
     expect(getDockSectionLabels()).toEqual([
@@ -134,7 +147,6 @@ describe("ControlPanelSurface", () => {
       "Orchestrators",
       "Files",
       "Git status",
-      "Board",
     ]);
   });
 
@@ -152,7 +164,6 @@ describe("ControlPanelSurface", () => {
       "Orchestrators",
       "Files",
       "Git status",
-      "Board",
     ]);
   });
 
@@ -175,7 +186,6 @@ describe("ControlPanelSurface", () => {
       "Sessions",
       "Orchestrators",
       "Files",
-      "Board",
     ]);
 
     unmount();
@@ -187,32 +197,6 @@ describe("ControlPanelSurface", () => {
       "Sessions",
       "Orchestrators",
       "Files",
-      "Board",
-    ]);
-  });
-
-  it("drags Board as an internal reorder when it has no launcher tab", () => {
-    const onSectionTabDragStart = vi.fn();
-    renderSurface({ onSectionTabDragStart });
-    const projectsButton = screen.getByRole("button", { name: "Projects" });
-    const boardButton = screen.getByRole("button", { name: "Board" });
-    const dataTransfer = createDataTransfer();
-
-    expect(boardButton).toHaveAttribute("title", "Board (drag to reorder)");
-    mockButtonBounds(projectsButton, { top: 0, height: 40 });
-    fireEvent.dragStart(boardButton, { dataTransfer });
-    fireEvent.dragOver(projectsButton, { clientY: 36, dataTransfer });
-    fireEvent.drop(projectsButton, { clientY: 36, dataTransfer });
-    fireEvent.dragEnd(boardButton, { dataTransfer });
-
-    expect(onSectionTabDragStart).not.toHaveBeenCalled();
-    expect(getDockSectionLabels()).toEqual([
-      "Projects",
-      "Board",
-      "Sessions",
-      "Orchestrators",
-      "Files",
-      "Git status",
     ]);
   });
 
@@ -257,13 +241,13 @@ function renderSurface(
     ),
     files: createControlPanelSectionLauncherTab("files", launcherOptions),
     git: createControlPanelSectionLauncherTab("git", launcherOptions),
-    board: createControlPanelSectionLauncherTab("board", launcherOptions),
   };
   return render(
     <ControlPanelSurface
       gitStatusCount={5}
       isPreferencesOpen={false}
       launcherPaneId="pane-1"
+      onOpenResponseBoard={() => {}}
       onOpenPreferences={() => {}}
       projectCount={3}
       sessionCount={7}
@@ -280,7 +264,12 @@ function getDockSectionLabels() {
   return within(dock)
     .getAllByRole("button")
     .map((button) => button.getAttribute("aria-label"))
-    .filter((label): label is string => label !== null && label !== "Open preferences");
+    .filter(
+      (label): label is string =>
+        label !== null &&
+        label !== "Open Response Board" &&
+        label !== "Open preferences",
+    );
 }
 
 function createDataTransfer() {

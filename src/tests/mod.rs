@@ -58,6 +58,7 @@ mod remote_hydration;
 mod remote_orchestrator;
 mod remote_state_events;
 mod remote_terminal;
+mod response_board;
 mod review;
 mod runtime_rpc;
 mod session_lifecycle;

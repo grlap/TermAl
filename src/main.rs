@@ -432,6 +432,15 @@ fn app_router(state: AppState) -> Router {
             "/api/sessions/{id}/board/set",
             post(set_coordination_board_key),
         )
+        .route("/api/response-board", get(get_response_board))
+        .route(
+            "/api/response-board/cards",
+            post(create_response_board_card),
+        )
+        .route(
+            "/api/response-board/cards/{id}",
+            patch(update_response_board_card).delete(delete_response_board_card),
+        )
         .route(
             "/api/sessions/{id}/queued-prompts/{prompt_id}/cancel",
             post(cancel_queued_prompt),
@@ -609,6 +618,7 @@ include!("coordination_persist.rs");
 include!("mailboxes.rs");
 include!("coordination_board.rs");
 include!("board_routes.rs");
+include!("response_board.rs");
 include!("runtime.rs");
 include!("claude_spawn.rs");
 include!("codex_home.rs");

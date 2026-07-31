@@ -17,7 +17,12 @@ import {
 } from "../tab-drag";
 import type { WorkspaceTab } from "../workspace";
 
-export type ControlPanelSectionId = "files" | "sessions" | "projects" | "orchestrators" | "git" | "board";
+export type ControlPanelSectionId =
+  | "files"
+  | "sessions"
+  | "projects"
+  | "orchestrators"
+  | "git";
 
 const DEFAULT_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSectionId[] = [
   "projects",
@@ -25,7 +30,6 @@ const DEFAULT_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSectionId[] = [
   "orchestrators",
   "files",
   "git",
-  "board",
 ];
 const CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY = "termal-control-panel-section-order-v2";
 
@@ -33,6 +37,7 @@ type ControlPanelSurfaceProps = {
   fixedSection?: ControlPanelSectionId | null;
   gitStatusCount: number;
   isPreferencesOpen: boolean;
+  onOpenResponseBoard?: () => void;
   onOpenPreferences: () => void;
   onSectionTabDragEnd?: () => void;
   onSectionTabDragStart?: (
@@ -76,6 +81,11 @@ const PREFERENCES_ACTION: ControlPanelActionDefinition = {
   icon: <SettingsIcon />,
 };
 
+const RESPONSE_BOARD_ACTION: ControlPanelActionDefinition = {
+  label: "Open Response Board",
+  icon: <BoardIcon />,
+};
+
 export function ControlPanelSectionIcon({ sectionId }: { sectionId: ControlPanelSectionId }) {
   switch (sectionId) {
     case "files":
@@ -88,8 +98,6 @@ export function ControlPanelSectionIcon({ sectionId }: { sectionId: ControlPanel
       return <OrchestratorsIcon />;
     case "git":
       return <GitStatusIcon />;
-    case "board":
-      return <BoardIcon />;
   }
 }
 
@@ -97,6 +105,7 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
   fixedSection = null,
   gitStatusCount,
   isPreferencesOpen,
+  onOpenResponseBoard,
   onOpenPreferences,
   onSectionTabDragEnd,
   onSectionTabDragStart,
@@ -141,11 +150,6 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
       id: "git",
       label: "Git status",
       icon: <ControlPanelSectionIcon sectionId="git" />,
-    },
-    board: {
-      id: "board",
-      label: "Board",
-      icon: <ControlPanelSectionIcon sectionId="board" />,
     },
   };
   const sectionDefinitions = fixedSection
@@ -259,9 +263,17 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
           </div>
           <div className="control-panel-activity-spacer" />
           <div className="control-panel-activity-group">
+            {onOpenResponseBoard ? (
+              <ControlPanelActionButton
+                definition={RESPONSE_BOARD_ACTION}
+                onClick={onOpenResponseBoard}
+              />
+            ) : null}
             <ControlPanelActionButton
               definition={PREFERENCES_ACTION}
               isExpanded={isPreferencesOpen}
+              controls="settings-dialog"
+              hasPopup="dialog"
               onClick={onOpenPreferences}
             />
           </div>
@@ -379,10 +391,14 @@ function ControlPanelActivityButton({
 function ControlPanelActionButton({
   definition,
   isExpanded,
+  controls,
+  hasPopup,
   onClick,
 }: {
   definition: ControlPanelActionDefinition;
-  isExpanded: boolean;
+  isExpanded?: boolean;
+  controls?: string;
+  hasPopup?: "dialog";
   onClick: () => void;
 }) {
   return (
@@ -390,9 +406,9 @@ function ControlPanelActionButton({
       className="control-panel-activity-button control-panel-action-button"
       type="button"
       aria-label={definition.label}
-      aria-controls="settings-dialog"
+      aria-controls={controls}
       aria-expanded={isExpanded}
-      aria-haspopup="dialog"
+      aria-haspopup={hasPopup}
       title={definition.label}
       onClick={onClick}
     >

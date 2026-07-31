@@ -50,6 +50,7 @@ import type {
   Message,
   Session,
 } from "../types";
+import { RESPONSE_BOARD_MESSAGE_MIME } from "../response-board";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
@@ -65,6 +66,71 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
     ...overrides,
   };
 }
+
+describe("AgentSessionPanel response-board actions", () => {
+  it("drags from the message header while leaving the message body selectable", () => {
+    const onPinResponseBoardMessage = vi.fn();
+    const activeSession = makeSession("session-board-source", {
+      messages: [
+        {
+          id: "message-board-source",
+          type: "text",
+          timestamp: "10:00",
+          author: "assistant",
+          text: "Do not serialize this body into the drag payload",
+        },
+      ],
+    });
+    const renderPanel = createAgentSessionPanelHarness({
+      activeSession,
+      onPinResponseBoardMessage,
+      renderMessageCard: (message) => (
+        <MessageCard
+          message={message}
+          onApprovalDecision={() => {}}
+          onUserInputSubmit={() => {}}
+        />
+      ),
+    });
+    const { container } = render(renderPanel());
+
+    fireEvent.click(screen.getByRole("button", { name: "Pin to board" }));
+    expect(onPinResponseBoardMessage).toHaveBeenCalledWith(
+      "session-board-source",
+      "message-board-source",
+    );
+
+    const values = new Map<string, string>();
+    const setDragImage = vi.fn();
+    const dataTransfer = {
+      effectAllowed: "none",
+      getData: (type: string) => values.get(type) ?? "",
+      setData: (type: string, value: string) => values.set(type, value),
+      setDragImage,
+    } as unknown as DataTransfer;
+    const shell = container.querySelector(
+      ".conversation-message-marker-shell",
+    );
+    const header = container.querySelector(".message-meta");
+    expect(shell).toBeTruthy();
+    expect(header).toBeTruthy();
+    expect(shell).not.toHaveAttribute("draggable");
+    expect(header).toHaveAttribute("draggable", "true");
+
+    fireEvent.dragStart(
+      screen.getByText("Do not serialize this body into the drag payload"),
+      { dataTransfer },
+    );
+    expect(values.has(RESPONSE_BOARD_MESSAGE_MIME)).toBe(false);
+
+    fireEvent.dragStart(header as Element, { dataTransfer });
+    expect(JSON.parse(values.get(RESPONSE_BOARD_MESSAGE_MIME) ?? "null")).toEqual({
+      sessionId: "session-board-source",
+      messageId: "message-board-source",
+    });
+    expect(setDragImage).toHaveBeenCalledWith(shell, expect.any(Number), expect.any(Number));
+  });
+});
 
 function makeTextMessages(count: number): Message[] {
   return Array.from({ length: count }, (_, index) => ({

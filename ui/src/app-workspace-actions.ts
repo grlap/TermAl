@@ -35,6 +35,7 @@ import {
   openOrchestratorCanvasInWorkspaceState,
   openOrchestratorListInWorkspaceState,
   openProjectListInWorkspaceState,
+  openResponseBoardInWorkspaceState,
   openSessionInWorkspaceState,
   openSessionListInWorkspaceState,
   openSourceInWorkspaceState,
@@ -162,6 +163,11 @@ type UseAppWorkspaceActionsReturn = {
     paneId: string,
     mailboxId: string,
     originSessionId: string,
+    originProjectId: string | null,
+  ) => void;
+  handleOpenResponseBoardTab: (
+    paneId: string,
+    originSessionId: string | null,
     originProjectId: string | null,
   ) => void;
   handleOpenDiffPreviewTab: (
@@ -681,6 +687,23 @@ export function useAppWorkspaceActions({
     );
   }
 
+  function handleOpenResponseBoardTab(
+    paneId: string,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) {
+    setWorkspace((current) =>
+      applyControlPanelLayout(
+        openResponseBoardInWorkspaceState(
+          current,
+          paneId,
+          originSessionId,
+          originProjectId,
+        ),
+      ),
+    );
+  }
+
   function handleOpenDiffPreviewTab(
     paneId: string,
     message: DiffMessage,
@@ -1130,6 +1153,7 @@ export function useAppWorkspaceActions({
     handlePaneSourcePathChange,
     handleOpenSourceTab,
     handleOpenMailboxTab,
+    handleOpenResponseBoardTab,
     handleOpenDiffPreviewTab,
     handleOpenGitStatusDiffPreviewTab,
     handleOpenFilesystemTab,

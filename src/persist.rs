@@ -918,6 +918,18 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
               id TEXT PRIMARY KEY,
               value_json TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS board_cards (
+              id TEXT PRIMARY KEY,
+              x REAL NOT NULL,
+              y REAL NOT NULL,
+              w REAL NOT NULL,
+              h REAL NOT NULL,
+              snapshot_json TEXT NOT NULL,
+              source_session_id TEXT NOT NULL,
+              source_message_id TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            );
             ",
         )
         .context("failed to initialize SQLite state schema")?;

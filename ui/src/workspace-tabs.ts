@@ -33,6 +33,7 @@ import {
   type WorkspaceOrchestratorCanvasTab,
   type WorkspaceOrchestratorListTab,
   type WorkspaceProjectListTab,
+  type WorkspaceResponseBoardTab,
   type WorkspaceSessionListTab,
   type WorkspaceSessionTab,
   type WorkspaceSourceFocus,
@@ -132,6 +133,19 @@ export function createMailboxTab(
     kind: "mailbox",
     mailboxId: normalizedMailboxId,
     originSessionId: normalizedOriginSessionId,
+    refreshToken: crypto.randomUUID(),
+    ...projectOriginProps(normalizeWorkspaceIdentifier(originProjectId)),
+  };
+}
+
+export function createResponseBoardTab(
+  originSessionId: string | null = null,
+  originProjectId: string | null = null,
+): WorkspaceResponseBoardTab {
+  return {
+    id: crypto.randomUUID(),
+    kind: "responseBoard",
+    originSessionId: normalizeWorkspaceIdentifier(originSessionId),
     refreshToken: crypto.randomUUID(),
     ...projectOriginProps(normalizeWorkspaceIdentifier(originProjectId)),
   };

@@ -50,7 +50,10 @@ import {
 import {
   requestSessionHistoryNewerPage,
   requestSessionHistoryOlderPage,
+  requestSessionHistoryAroundPage,
 } from "../session-history-demand";
+import { writeResponseBoardMessageDragData } from "../response-board";
+import { subscribeResponseBoardSourceNavigation } from "../response-board-navigation";
 import {
   renderHighlightedText,
   type SearchHighlightTone,
@@ -90,6 +93,7 @@ const EMPTY_PENDING_PROMPTS: readonly PendingPrompt[] = [];
 const EMPTY_CONVERSATION_MARKERS: readonly ConversationMarker[] = [];
 const NOOP_CREATE_CONVERSATION_MARKER = () => {};
 const NOOP_DELETE_CONVERSATION_MARKER = () => {};
+const NOOP_PIN_RESPONSE_BOARD_MESSAGE = () => {};
 
 // The transcript virtualizer and overview rail intentionally share the same
 // size threshold. The rail may still defer its first paint, but marker jumps
@@ -116,6 +120,7 @@ export function AgentSessionPanel({
   onCancelQueuedPrompt,
   onCreateConversationMarker = NOOP_CREATE_CONVERSATION_MARKER,
   onDeleteConversationMarker = NOOP_DELETE_CONVERSATION_MARKER,
+  onPinResponseBoardMessage = NOOP_PIN_RESPONSE_BOARD_MESSAGE,
   onSessionSettingsChange,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
@@ -138,6 +143,9 @@ export function AgentSessionPanel({
   );
   const stableOnDeleteConversationMarker = useStableEvent(
     onDeleteConversationMarker,
+  );
+  const stableOnPinResponseBoardMessage = useStableEvent(
+    onPinResponseBoardMessage,
   );
   const stableOnSessionSettingsChange = useStableEvent(onSessionSettingsChange);
 
@@ -162,6 +170,7 @@ export function AgentSessionPanel({
       onCancelQueuedPrompt={stableOnCancelQueuedPrompt}
       onCreateConversationMarker={stableOnCreateConversationMarker}
       onDeleteConversationMarker={stableOnDeleteConversationMarker}
+      onPinResponseBoardMessage={stableOnPinResponseBoardMessage}
       onSessionSettingsChange={stableOnSessionSettingsChange}
       conversationSearchQuery={conversationSearchQuery}
       conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
@@ -271,6 +280,7 @@ const SessionBody = memo(function SessionBody({
   onCancelQueuedPrompt,
   onCreateConversationMarker,
   onDeleteConversationMarker,
+  onPinResponseBoardMessage,
   onSessionSettingsChange,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
@@ -356,6 +366,7 @@ const SessionBody = memo(function SessionBody({
           onCancelQueuedPrompt={onCancelQueuedPrompt}
           onCreateConversationMarker={onCreateConversationMarker}
           onDeleteConversationMarker={onDeleteConversationMarker}
+          onPinResponseBoardMessage={onPinResponseBoardMessage}
           conversationSearchQuery={conversationSearchQuery}
           conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
           conversationSearchActiveItemKey={conversationSearchActiveItemKey}
@@ -421,6 +432,7 @@ const SessionBody = memo(function SessionBody({
   previous.onUserInputSubmit === next.onUserInputSubmit &&
   previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
   previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
+  previous.onPinResponseBoardMessage === next.onPinResponseBoardMessage &&
   previous.onCancelQueuedPrompt === next.onCancelQueuedPrompt &&
   previous.onCreateConversationMarker === next.onCreateConversationMarker &&
   previous.onDeleteConversationMarker === next.onDeleteConversationMarker &&
@@ -463,11 +475,15 @@ const SessionConversationPage = memo(function SessionConversationPage({
   onCancelQueuedPrompt,
   onCreateConversationMarker,
   onDeleteConversationMarker,
+  onPinResponseBoardMessage,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
   conversationSearchActiveItemKey,
   onConversationSearchItemMount,
 }: SessionConversationPageProps) {
+  const stableOnPinResponseBoardMessage = useStableEvent(
+    onPinResponseBoardMessage,
+  );
   const pendingPrompts = session.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
   const deferredMessages = useDeferredValue(session.messages);
   const visibleMarkers = session.markers ?? EMPTY_CONVERSATION_MARKERS;
@@ -690,6 +706,21 @@ const SessionConversationPage = memo(function SessionConversationPage({
     sessionId: session.id,
     virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
   });
+  useEffect(
+    () =>
+      subscribeResponseBoardSourceNavigation(session.id, (request) => {
+        void requestSessionHistoryAroundPage(
+          request.sessionId,
+          request.messagePosition,
+        ).then((accepted) => {
+          if (!accepted) {
+            return;
+          }
+          window.requestAnimationFrame(() => jumpToMessageId(request.messageId));
+        });
+      }),
+    [jumpToMessageId, session.id],
+  );
   const requestOlderPromptNavigationPage = useCallback(
     () => requestSessionHistoryOlderPage(session.id),
     [session.id],
@@ -944,9 +975,37 @@ const SessionConversationPage = memo(function SessionConversationPage({
           onContextMenu={handleMarkerContextMenu}
           onKeyDown={handleMarkerTriggerKeyDown}
         >
-          <MessageMetaMarkerMenuProvider>
+          <MessageMetaMarkerMenuProvider
+            onResponseBoardDragStart={(event) => {
+              writeResponseBoardMessageDragData(event.dataTransfer, {
+                sessionId: session.id,
+                messageId: message.id,
+              });
+              const messageShell = event.currentTarget.closest<HTMLElement>(
+                ".conversation-message-marker-shell",
+              );
+              if (messageShell) {
+                const bounds = messageShell.getBoundingClientRect();
+                event.dataTransfer.setDragImage(
+                  messageShell,
+                  Math.min(Math.max(event.clientX - bounds.left, 0), bounds.width),
+                  Math.min(Math.max(event.clientY - bounds.top, 0), bounds.height),
+                );
+              }
+            }}
+          >
             {rendered}
           </MessageMetaMarkerMenuProvider>
+          <button
+            type="button"
+            className="response-board-pin-message"
+            onClick={(event) => {
+              event.stopPropagation();
+              stableOnPinResponseBoardMessage(session.id, message.id);
+            }}
+          >
+            Pin to board
+          </button>
         </div>
       );
     },
@@ -959,6 +1018,8 @@ const SessionConversationPage = memo(function SessionConversationPage({
       openMarkerContextMenu,
       pendingCreatedMarkers,
       renderMessageCard,
+      session.id,
+      stableOnPinResponseBoardMessage,
     ],
   );
 
