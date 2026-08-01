@@ -25,6 +25,10 @@ const MAX_BOARD_ZOOM = 2;
 const BOARD_ZOOM_BUTTON_FACTOR = 1.2;
 const BOARD_WHEEL_ZOOM_SENSITIVITY = 0.0015;
 
+function wheelRequestsBoardZoom(event: WheelEvent) {
+  return event.ctrlKey || event.getModifierState("Fn");
+}
+
 type BoardView = {
   panX: number;
   panY: number;
@@ -337,7 +341,7 @@ export function ResponseBoardPanel({
 
   const handleBoardWheel = useCallback((event: WheelEvent) => {
     const surface = surfaceRef.current;
-    if (!event.ctrlKey || !surface) {
+    if (!wheelRequestsBoardZoom(event) || !surface) {
       return;
     }
     event.preventDefault();

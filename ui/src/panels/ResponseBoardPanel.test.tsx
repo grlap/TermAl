@@ -296,6 +296,47 @@ describe("ResponseBoardPanel", () => {
     );
   });
 
+  it("supports Fn-wheel zoom without intercepting an unmodified wheel", async () => {
+    vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [pinnedCard] });
+    const { container } = render(
+      <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />,
+    );
+    expect(await screen.findByText("Server-owned immutable response")).toBeTruthy();
+    const surface = container.querySelector(".response-board-surface") as HTMLElement;
+    const plane = container.querySelector(".response-board-plane") as HTMLElement;
+    mockSurfaceRect(surface);
+
+    const ordinaryWheelEvent = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 300,
+      clientY: 250,
+      deltaY: -100,
+    });
+    act(() => {
+      surface.dispatchEvent(ordinaryWheelEvent);
+    });
+    expect(ordinaryWheelEvent.defaultPrevented).toBe(false);
+    expect(readBoardTransform(plane)).toEqual({ panX: 0, panY: 0, zoom: 1 });
+
+    const fnZoomEvent = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 300,
+      clientY: 250,
+      deltaY: -100,
+    });
+    Object.defineProperty(fnZoomEvent, "getModifierState", {
+      value: (modifier: string) => modifier === "Fn",
+    });
+    act(() => {
+      surface.dispatchEvent(fnZoomEvent);
+    });
+
+    expect(fnZoomEvent.defaultPrevented).toBe(true);
+    expect(readBoardTransform(plane).zoom).toBeGreaterThan(1);
+  });
+
   it("divides card drag deltas by the persisted view scale", async () => {
     vi.useFakeTimers();
     window.localStorage.setItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY, "0.5");

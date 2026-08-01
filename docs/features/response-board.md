@@ -27,13 +27,15 @@ It has no browser scrollbars: dragging empty canvas pans one transform-backed
 content plane. During that gesture selection is suppressed, while ordinary
 drag-selection inside a card body remains available for copying response text.
 
-Ctrl-wheel/trackpad pinch zooms around the cursor. Cmd/Ctrl `+`, `-`, and `0`
-provide keyboard zoom and reset, with matching toolbar controls. Zoom is
-clamped to 25–200% and stored as local per-board view state; pan and scale are
-composed on the content plane. Card positions and dimensions stay in logical
-coordinates, so moving, resizing, dropping, and persisted API geometry remain
-zoom-independent. Position and dimensions are persisted in `termal.sqlite`'s
-`board_cards` table; view zoom is stored only in browser `localStorage`.
+Fn-wheel and Ctrl-wheel/trackpad pinch zoom around the cursor. Fn-wheel depends
+on the browser exposing the Fn modifier; Ctrl-wheel remains the portable
+fallback. Cmd/Ctrl `+`, `-`, and `0` provide keyboard zoom and reset, with
+matching toolbar controls. Zoom is clamped to 25–200% and stored as local
+per-board view state; pan and scale are composed on the content plane. Card
+positions and dimensions stay in logical coordinates, so moving, resizing,
+dropping, and persisted API geometry remain zoom-independent. Position and
+dimensions are persisted in `termal.sqlite`'s `board_cards` table; view zoom is
+stored only in browser `localStorage`.
 
 The board is intentionally global and singular in v1. It is not scoped to a
 project, session, browser workspace, or agent, and it does not wake sessions.

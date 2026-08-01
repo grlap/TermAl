@@ -2,10 +2,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { configDefaults } from "vitest/config";
+import { assertVitestResourceBudget } from "../scripts/vitest-resource-preflight.mjs";
 
 const SERIALIZED_REACT_TESTS = [
   "src/App.*.test.tsx",
   "src/backend-connection.test.tsx",
+  "src/panels/AgentSessionPanel.virtualization*.test.tsx",
   "src/SessionPaneView.delegation-composer.test.tsx",
   "src/SessionPaneView.retry-display.test.tsx",
 ];
@@ -67,6 +69,10 @@ function configureBackendUnavailableProxy(proxy: {
   });
 }
 
+if (process.env.VITEST === "true") {
+  assertVitestResourceBudget();
+}
+
 export default defineConfig({
   plugins: [
     monacoEsmCssStub(),
@@ -120,11 +126,12 @@ export default defineConfig({
     // worker contexts. Forks remain the fallback if a future native dependency
     // needs process-level crash or process.exit isolation.
     pool: "threads",
-    // Keep React/jsdom suites below machine-wide CPU saturation. Two threads
-    // preserve parallel coverage while leaving enough CPU for each test's
-    // unchanged 10-second diagnostic budget on developer machines that are
-    // also running long-lived agent sessions.
-    maxWorkers: 2,
+    // Keep React/jsdom suites below machine-wide CPU saturation. A single
+    // worker prevents heavyweight files from stealing each other's unchanged
+    // 10-second diagnostic budget on developer machines that are also running
+    // long-lived agent sessions. Parallel test processes are deliberately not
+    // traded for retries or longer per-test timeouts.
+    maxWorkers: 1,
     setupFiles: "./src/test-setup.ts",
     testTimeout: 10_000,
     projects: [
@@ -147,8 +154,8 @@ export default defineConfig({
           name: "serialized-react",
           include: SERIALIZED_REACT_TESTS,
           // These files either render the full App or exercise the same
-          // scheduler-sensitive SessionPaneView lifecycle. Run this
-          // behavior-based set one file at a time so the runner does not
+          // scheduler-sensitive SessionPaneView/virtualizer lifecycle. Run
+          // this behavior-based set one file at a time so the runner does not
           // oversubscribe the lifecycle it is measuring or abandon an open
           // `act()` scope.
           maxWorkers: 1,
