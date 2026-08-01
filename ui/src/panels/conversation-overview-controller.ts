@@ -29,6 +29,12 @@ const EMPTY_OVERVIEW_VIEWPORT: ConversationOverviewViewport = {
 };
 const CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX = 24;
 
+type ConversationOverviewRailFrame = {
+  heightPx: number;
+  rightPx: number;
+  topPx: number;
+};
+
 export function useConversationOverviewController({
   isActive,
   messageCount,
@@ -57,7 +63,8 @@ export function useConversationOverviewController({
   const [viewport, setViewport] = useState<ConversationOverviewViewport>(
     EMPTY_OVERVIEW_VIEWPORT,
   );
-  const [railHeightPx, setRailHeightPx] = useState<number | null>(null);
+  const [railFrame, setRailFrame] =
+    useState<ConversationOverviewRailFrame | null>(null);
   sessionIdRef.current = sessionId;
   messageStartIndexRef.current = messageStartIndex;
   renderedMessageCountRef.current = renderedMessageCount;
@@ -76,21 +83,35 @@ export function useConversationOverviewController({
         ? current
         : nextViewport,
     );
-    if (scrollNode && scrollNode.clientHeight > 0) {
-      const nextRailHeightPx = Math.max(
-        0,
-        scrollNode.clientHeight - CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX,
-      );
-      setRailHeightPx((current) =>
-        current === nextRailHeightPx ? current : nextRailHeightPx,
-      );
-    }
   }, [
     messageCount,
     messageStartIndex,
     renderedMessageCount,
     scrollContainerRef,
   ]);
+
+  const refreshRailFrame = useCallback(() => {
+    const scrollNode = scrollContainerRef.current;
+    if (scrollNode && scrollNode.clientHeight > 0) {
+      const bounds = scrollNode.getBoundingClientRect();
+      const insetPx = CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX / 2;
+      const nextRailFrame = {
+        heightPx: Math.max(
+          0,
+          scrollNode.clientHeight - CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX,
+        ),
+        rightPx: Math.max(0, window.innerWidth - bounds.right + insetPx),
+        topPx: Math.max(0, bounds.top + insetPx),
+      };
+      setRailFrame((current) =>
+        current?.heightPx === nextRailFrame.heightPx &&
+        current.rightPx === nextRailFrame.rightPx &&
+        current.topPx === nextRailFrame.topPx
+          ? current
+          : nextRailFrame,
+      );
+    }
+  }, [scrollContainerRef]);
 
   useEffect(() => {
     if (!isActive || !shouldRender) {
@@ -133,25 +154,32 @@ export function useConversationOverviewController({
   useEffect(() => {
     if (!isActive || !shouldRender) {
       setViewport(EMPTY_OVERVIEW_VIEWPORT);
-      setRailHeightPx(null);
+      setRailFrame(null);
       return undefined;
     }
     const scrollNode = scrollContainerRef.current;
     refreshViewport();
+    refreshRailFrame();
     scrollNode?.addEventListener("scroll", refreshViewport, { passive: true });
+    window.addEventListener("resize", refreshRailFrame, { passive: true });
     const resizeObserver =
       scrollNode && typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(refreshViewport)
+        ? new ResizeObserver(() => {
+            refreshViewport();
+            refreshRailFrame();
+          })
         : null;
     if (scrollNode) {
       resizeObserver?.observe(scrollNode);
     }
     return () => {
       scrollNode?.removeEventListener("scroll", refreshViewport);
+      window.removeEventListener("resize", refreshRailFrame);
       resizeObserver?.disconnect();
     };
   }, [
     isActive,
+    refreshRailFrame,
     refreshViewport,
     scrollContainerRef,
     sessionId,
@@ -245,7 +273,9 @@ export function useConversationOverviewController({
     isRailReady: overview !== null,
     navigate,
     overview,
-    railHeightPx,
+    railHeightPx: railFrame?.heightPx ?? null,
+    railRightPx: railFrame?.rightPx ?? null,
+    railTopPx: railFrame?.topPx ?? null,
     shouldRenderRail: isActive && shouldRender,
     shouldRender,
     viewport,

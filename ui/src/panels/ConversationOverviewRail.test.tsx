@@ -33,6 +33,27 @@ describe("ConversationOverviewRail", () => {
     const rail = screen.getByTestId("conversation-overview-rail");
     expect(rail).toHaveClass("is-pending");
     expect(rail).toHaveAttribute("aria-label", "Loading conversation overview");
+    expect(rail).toHaveStyle({ position: "fixed" });
+  });
+
+  it("anchors the rail to the transcript viewport instead of scroll content", () => {
+    render(
+      <ConversationOverviewRail
+        heightPx={480}
+        rightPx={28}
+        topPx={96}
+        overview={overview()}
+        viewport={{ startPosition: 40, endPosition: 60 }}
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("conversation-overview-rail")).toHaveStyle({
+      position: "fixed",
+      height: "480px",
+      right: "28px",
+      top: "96px",
+    });
   });
 
   it("renders server buckets, markers, and viewport in one position scale", () => {

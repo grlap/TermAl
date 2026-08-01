@@ -66,6 +66,10 @@ import {
   syncMessageStackScrollPosition,
 } from "./scroll-position";
 import {
+  MESSAGE_STACK_SCROLL_WRITE_EVENT,
+  requestMessageStackBottomRepin,
+} from "./message-stack-scroll-sync";
+import {
   resolveAdoptedStateSlices,
   resolveRecoveredWorkspaceLayoutRequestError,
 } from "./state-adoption";
@@ -2802,6 +2806,132 @@ describe("App scroll behaviour", () => {
           delete (HTMLElement.prototype as unknown as Record<string, unknown>)
             .clientHeight;
         }
+      }
+    });
+  });
+
+  it("keeps a bottom-pinned transcript attached while a sibling composer resizes", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const resizeCallbacksByTarget = new Map<
+        Element,
+        Set<ResizeObserverCallback>
+      >();
+      class ResizeObserverHarness {
+        private readonly callback: ResizeObserverCallback;
+        private readonly targets = new Set<Element>();
+
+        constructor(callback: ResizeObserverCallback) {
+          this.callback = callback;
+        }
+
+        observe(target: Element) {
+          this.targets.add(target);
+          const callbacks = resizeCallbacksByTarget.get(target) ?? new Set();
+          callbacks.add(this.callback);
+          resizeCallbacksByTarget.set(target, callbacks);
+        }
+
+        unobserve(target: Element) {
+          this.targets.delete(target);
+          const callbacks = resizeCallbacksByTarget.get(target);
+          callbacks?.delete(this.callback);
+          if (callbacks?.size === 0) {
+            resizeCallbacksByTarget.delete(target);
+          }
+        }
+
+        disconnect() {
+          this.targets.forEach((target) => this.unobserve(target));
+        }
+      }
+
+      const scrollToMock = mockScrollToAndApplyTop();
+      const { cleanup: teardown } = await renderAppWithProjectAndSession({
+        resizeObserver:
+          ResizeObserverHarness as unknown as typeof ResizeObserver,
+      });
+
+      try {
+        const messageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        const composer = await screen.findByLabelText("Message Session 1");
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+        if (!(composer instanceof HTMLTextAreaElement)) {
+          throw new Error("Session composer not found");
+        }
+
+        expect(messageStack.contains(composer)).toBe(false);
+        expect(messageStack.parentElement).toBe(composer.closest(".workspace-pane"));
+
+        let clientHeight = 200;
+        Object.defineProperty(messageStack, "clientHeight", {
+          configurable: true,
+          get: () => clientHeight,
+        });
+        Object.defineProperty(messageStack, "scrollHeight", {
+          configurable: true,
+          get: () => 1000,
+        });
+        messageStack.scrollTop = 800;
+        await act(async () => {
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+        scrollToMock.mockClear();
+        const authorityScrollWrites: CustomEvent[] = [];
+        messageStack.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, (event) => {
+          authorityScrollWrites.push(event as CustomEvent);
+        });
+        messageStack.scrollTop = 790;
+        requestMessageStackBottomRepin(messageStack);
+        expect(authorityScrollWrites).not.toHaveLength(0);
+        expect(messageStack.scrollTop).toBe(800);
+
+        const notifyMessageStackResize = async () => {
+          const callbacks = resizeCallbacksByTarget.get(messageStack);
+          expect(callbacks?.size).toBeGreaterThan(0);
+          await act(async () => {
+            callbacks?.forEach((callback) =>
+              callback(
+                [
+                  {
+                    target: messageStack,
+                    contentRect: messageStack.getBoundingClientRect(),
+                  } as unknown as ResizeObserverEntry,
+                ],
+                {} as ResizeObserver,
+              ),
+            );
+            await flushUiWork();
+          });
+        };
+
+        fireEvent.change(composer, {
+          target: { value: "first line\nsecond line\nthird line" },
+        });
+        await act(async () => {
+          await flushUiWork();
+        });
+        for (const nextClientHeight of [190, 180, 170, 160]) {
+          clientHeight = nextClientHeight;
+          await notifyMessageStackResize();
+          expect(messageStack.scrollTop).toBe(1000 - nextClientHeight);
+        }
+
+        fireEvent.change(composer, { target: { value: "first line" } });
+        await act(async () => {
+          await flushUiWork();
+        });
+        for (const nextClientHeight of [170, 180, 190, 200]) {
+          clientHeight = nextClientHeight;
+          await notifyMessageStackResize();
+          expect(messageStack.scrollTop).toBe(1000 - nextClientHeight);
+        }
+      } finally {
+        teardown();
       }
     });
   });

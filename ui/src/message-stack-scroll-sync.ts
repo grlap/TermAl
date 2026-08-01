@@ -1,5 +1,7 @@
 export const MESSAGE_STACK_SCROLL_WRITE_EVENT =
   "termal:message-stack-scroll-write";
+export const MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT =
+  "termal:message-stack-bottom-repin-request";
 
 export const MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS = 1200;
 
@@ -42,4 +44,12 @@ export function notifyMessageStackScrollWrite(
       },
     ),
   );
+}
+
+// Synchronous request seam for layout owners that need to preserve an existing
+// bottom pin without becoming another transcript scroll writer. SessionPaneView
+// handles the request through its scroll authority, including explicit
+// tail-follow intent, saved pane position, and virtualizer notification.
+export function requestMessageStackBottomRepin(node: HTMLElement) {
+  node.dispatchEvent(new Event(MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT));
 }

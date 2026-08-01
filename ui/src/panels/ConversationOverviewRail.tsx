@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 
 import type {
   ConversationOverviewKind,
@@ -29,12 +30,16 @@ export function ConversationOverviewRail({
   overview,
   viewport,
   heightPx = null,
+  rightPx = null,
+  topPx = null,
   minMessages = CONVERSATION_OVERVIEW_MIN_MESSAGES,
   onNavigate,
 }: {
   overview: SessionOverviewResponse | null;
   viewport: ConversationOverviewViewport;
   heightPx?: number | null;
+  rightPx?: number | null;
+  topPx?: number | null;
   minMessages?: number;
   onNavigate: (position: number) => void;
 }) {
@@ -207,7 +212,7 @@ export function ConversationOverviewRail({
     return null;
   }
 
-  return (
+  const rail = (
     <div
       ref={railRef}
       aria-label={
@@ -230,7 +235,13 @@ export function ConversationOverviewRail({
       onPointerMove={handlePointerMove}
       onPointerUp={finishPointerDrag}
       role="slider"
-      style={heightPx === null ? undefined : { height: `${heightPx}px` }}
+      style={{
+        position: "fixed",
+        zIndex: "var(--z-pane-overlay)",
+        ...(heightPx === null ? null : { height: `${heightPx}px` }),
+        ...(rightPx === null ? null : { right: `${rightPx}px` }),
+        ...(topPx === null ? null : { top: `${topPx}px` }),
+      }}
       tabIndex={overview ? 0 : -1}
     >
       <span
@@ -290,6 +301,14 @@ export function ConversationOverviewRail({
       />
     </div>
   );
+
+  // The rail is a viewport overlay whose geometry is measured from this
+  // session's transcript pane. Keeping it under the scroll container lets
+  // ancestor overflow/stacking contexts clip a `position: fixed` descendant,
+  // leaving the grid column visible while the rail itself disappears. Portal
+  // it to the document overlay layer so transcript scrolling cannot move or
+  // clip it. React still preserves the logical owner/event tree.
+  return createPortal(rail, document.body);
 }
 
 function conversationOverviewMarkerColor(kind: ConversationMarkerKind) {

@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createResponseBoardCard,
@@ -12,7 +12,10 @@ import {
   RESPONSE_BOARD_MESSAGE_MIME,
   writeResponseBoardMessageDragData,
 } from "../response-board";
-import { ResponseBoardPanel } from "./ResponseBoardPanel";
+import {
+  RESPONSE_BOARD_ZOOM_STORAGE_KEY,
+  ResponseBoardPanel,
+} from "./ResponseBoardPanel";
 
 vi.mock("../api", () => ({
   createResponseBoardCard: vi.fn(),
@@ -56,12 +59,44 @@ const pinnedCard: ResponseBoardCard = {
   createdAt: "2026-07-31T12:34:56Z",
 };
 
+function mockSurfaceRect(surface: Element) {
+  vi.spyOn(surface, "getBoundingClientRect").mockReturnValue({
+    bottom: 650,
+    height: 600,
+    left: 100,
+    right: 900,
+    top: 50,
+    width: 800,
+    x: 100,
+    y: 50,
+    toJSON: () => ({}),
+  });
+}
+
+function readBoardTransform(plane: HTMLElement) {
+  const match = plane.style.transform.match(
+    /^translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)$/,
+  );
+  expect(match).toBeTruthy();
+  return {
+    panX: Number(match?.[1]),
+    panY: Number(match?.[2]),
+    zoom: Number(match?.[3]),
+  };
+}
+
 describe("ResponseBoardPanel", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
+    window.localStorage.removeItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY);
     vi.mocked(fetchResponseBoard).mockReset();
     vi.mocked(createResponseBoardCard).mockReset();
     vi.mocked(updateResponseBoardCard).mockReset();
     vi.mocked(deleteResponseBoardCard).mockReset();
+  });
+
+  afterEach(() => {
+    window.localStorage.removeItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY);
   });
 
   it("mounts beside a session fixture and replaces an ids-only drop with the server snapshot", async () => {
@@ -179,5 +214,193 @@ describe("ResponseBoardPanel", () => {
     expect(plane?.style.height).toBe("572px");
     expect(plane?.style.minWidth).toBe("100%");
     expect(plane?.style.minHeight).toBe("100%");
+  });
+
+  it("suppresses selection only while an empty-canvas pan gesture is active", async () => {
+    window.localStorage.setItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY, "0.5");
+    vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [pinnedCard] });
+    const removeAllRanges = vi.fn();
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      removeAllRanges,
+    } as unknown as Selection);
+
+    const { container } = render(
+      <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />,
+    );
+    expect(await screen.findByText("Server-owned immutable response")).toBeTruthy();
+    const surface = container.querySelector(".response-board-surface") as HTMLElement;
+    const plane = container.querySelector(".response-board-plane") as HTMLElement;
+    const cardBody = container.querySelector(".response-board-card-body") as HTMLElement;
+
+    fireEvent.pointerDown(surface, {
+      button: 0,
+      pointerId: 11,
+      clientX: 200,
+      clientY: 180,
+    });
+    expect(removeAllRanges).toHaveBeenCalledOnce();
+    expect(surface).toHaveClass("is-panning");
+    fireEvent.pointerMove(surface, {
+      pointerId: 11,
+      clientX: 240,
+      clientY: 200,
+    });
+    expect(readBoardTransform(plane)).toEqual({
+      panX: 40,
+      panY: 20,
+      zoom: 0.5,
+    });
+    fireEvent.pointerUp(surface, { pointerId: 11 });
+    expect(surface).not.toHaveClass("is-panning");
+
+    fireEvent.pointerDown(cardBody, {
+      button: 0,
+      pointerId: 12,
+      clientX: 220,
+      clientY: 200,
+    });
+    expect(removeAllRanges).toHaveBeenCalledOnce();
+    expect(surface).not.toHaveClass("is-panning");
+  });
+
+  it("keeps the logical point under the cursor stationary during ctrl-wheel zoom", async () => {
+    vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [pinnedCard] });
+    const { container } = render(
+      <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />,
+    );
+    expect(await screen.findByText("Server-owned immutable response")).toBeTruthy();
+    const surface = container.querySelector(".response-board-surface") as HTMLElement;
+    const plane = container.querySelector(".response-board-plane") as HTMLElement;
+    mockSurfaceRect(surface);
+
+    const zoomEvent = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      clientX: 300,
+      clientY: 250,
+      deltaY: 100,
+    });
+    act(() => {
+      surface.dispatchEvent(zoomEvent);
+    });
+
+    const transform = readBoardTransform(plane);
+    expect(zoomEvent.defaultPrevented).toBe(true);
+    expect(transform.zoom).toBeLessThan(1);
+    expect(transform.panX + 200 * transform.zoom).toBeCloseTo(200, 5);
+    expect(transform.panY + 200 * transform.zoom).toBeCloseTo(200, 5);
+    expect(Number(window.localStorage.getItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY))).toBeCloseTo(
+      transform.zoom,
+      5,
+    );
+  });
+
+  it("divides card drag deltas by the persisted view scale", async () => {
+    vi.useFakeTimers();
+    window.localStorage.setItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY, "0.5");
+    try {
+      vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [pinnedCard] });
+      vi.mocked(updateResponseBoardCard).mockImplementation(
+        async (_cardId, geometry) => ({ ...pinnedCard, ...geometry }),
+      );
+      const { container } = render(
+        <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />,
+      );
+      await act(async () => Promise.resolve());
+
+      const header = container.querySelector(".response-board-card-header") as HTMLElement;
+      const card = container.querySelector(".response-board-card") as HTMLElement;
+      fireEvent.pointerDown(header, {
+        button: 0,
+        pointerId: 13,
+        clientX: 100,
+        clientY: 100,
+      });
+      fireEvent.pointerMove(card, {
+        pointerId: 13,
+        clientX: 150,
+        clientY: 125,
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+      });
+
+      expect(updateResponseBoardCard).toHaveBeenCalledWith("card-1", {
+        x: 220,
+        y: 130,
+        w: 360,
+        h: 420,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("supports keyboard and toolbar zoom controls with a 25%-200% range and reset", async () => {
+    vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [] });
+    const { container } = render(
+      <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />,
+    );
+    expect(await screen.findByText("Drop an agent response anywhere on the board.")).toBeTruthy();
+    const surface = container.querySelector(".response-board-surface") as HTMLElement;
+    mockSurfaceRect(surface);
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
+    expect(screen.getByRole("button", { name: "Reset board zoom to 100%" })).toHaveTextContent(
+      "83%",
+    );
+    fireEvent.keyDown(surface, { ctrlKey: true, key: "+" });
+    expect(screen.getByRole("button", { name: "Reset board zoom to 100%" })).toHaveTextContent(
+      "100%",
+    );
+
+    const zoomIn = screen.getByRole("button", { name: "Zoom in" });
+    for (let index = 0; index < 20; index += 1) {
+      fireEvent.click(zoomIn);
+    }
+    expect(screen.getByRole("button", { name: "Reset board zoom to 100%" })).toHaveTextContent(
+      "200%",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reset board zoom to 100%" }));
+    expect(screen.getByRole("button", { name: "Reset board zoom to 100%" })).toHaveTextContent(
+      "100%",
+    );
+  });
+
+  it("converts drops back into logical coordinates at the active zoom", async () => {
+    window.localStorage.setItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY, "0.5");
+    vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [] });
+    vi.mocked(createResponseBoardCard).mockResolvedValue(pinnedCard);
+    const dataTransfer = new MemoryDataTransfer();
+    writeResponseBoardMessageDragData(
+      dataTransfer as unknown as DataTransfer,
+      { sessionId: "session-1", messageId: "message-1" },
+    );
+    const { container } = render(
+      <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />,
+    );
+    expect(await screen.findByText("Drop an agent response anywhere on the board.")).toBeTruthy();
+    const surface = container.querySelector(".response-board-surface") as HTMLElement;
+    mockSurfaceRect(surface);
+
+    const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperties(dropEvent, {
+      clientX: { value: 300 },
+      clientY: { value: 180 },
+      dataTransfer: { value: dataTransfer },
+    });
+    act(() => {
+      surface.dispatchEvent(dropEvent);
+    });
+    await waitFor(() =>
+      expect(createResponseBoardCard).toHaveBeenCalledWith({
+        sessionId: "session-1",
+        messageId: "message-1",
+        x: 220,
+        y: 232,
+      }),
+    );
   });
 });

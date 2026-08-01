@@ -517,8 +517,9 @@ describe("AgentSessionPanel virtualization", () => {
       const rail = await screen.findByLabelText(/^Conversation overview,/);
       expect(screen.getAllByLabelText(/^Conversation overview,/)).toHaveLength(1);
       expect(rail).toBeInTheDocument();
+      expect(rail).toHaveStyle({ zIndex: "var(--z-pane-overlay)" });
       expect(
-        container.querySelectorAll(".conversation-overview-visual-segment"),
+        rail.querySelectorAll(".conversation-overview-visual-segment"),
       ).toHaveLength(4);
       expect(container.querySelector(".conversation-overview-content")).toBe(
         overviewContentBefore,
@@ -526,9 +527,8 @@ describe("AgentSessionPanel virtualization", () => {
       expect(container.querySelector(".virtualized-message-list")).toBe(
         virtualizedListBefore,
       );
-      expect(
-        rail.closest(".conversation-with-overview")?.querySelector(".activity-card-live"),
-      ).toBeInTheDocument();
+      expect(rail.parentElement).toBe(document.body);
+      expect(container.querySelector(".activity-card-live")).toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
     }

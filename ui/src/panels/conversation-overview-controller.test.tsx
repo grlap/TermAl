@@ -97,6 +97,55 @@ describe("useConversationOverviewController", () => {
     });
   });
 
+  it("keeps the rail frame anchored to the scroll viewport across wheel scrolls", async () => {
+    const scrollNode = document.createElement("section");
+    let scrollTop = 0;
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 600 },
+      scrollHeight: { configurable: true, value: 1200 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (nextValue: number) => {
+          scrollTop = nextValue;
+        },
+      },
+    });
+    scrollNode.getBoundingClientRect = () =>
+      ({
+        bottom: 700,
+        height: 600,
+        left: 100,
+        right: 900,
+        top: 100,
+        width: 800,
+        x: 100,
+        y: 100,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    const { result } = renderHook(() =>
+      useConversationOverviewController(
+        controllerProps({ scrollContainerRef: { current: scrollNode } }),
+      ),
+    );
+    const expectedRight = Math.max(0, window.innerWidth - 900 + 12);
+    await waitFor(() => {
+      expect(result.current.railHeightPx).toBe(576);
+      expect(result.current.railRightPx).toBe(expectedRight);
+      expect(result.current.railTopPx).toBe(112);
+    });
+
+    act(() => {
+      scrollTop = 300;
+      scrollNode.dispatchEvent(new Event("scroll"));
+    });
+
+    expect(result.current.railHeightPx).toBe(576);
+    expect(result.current.railRightPx).toBe(expectedRight);
+    expect(result.current.railTopPx).toBe(112);
+  });
+
   it("jumps resident positions without loading history", async () => {
     const { result } = renderHook(() =>
       useConversationOverviewController(controllerProps()),

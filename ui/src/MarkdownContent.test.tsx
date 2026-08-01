@@ -1484,6 +1484,9 @@ describe("MarkdownContent", () => {
         <MarkdownContent isStreaming markdown={markdown} />,
       );
       expect(container.querySelector(".markdown-table-scroll")).toBeNull();
+      expect(
+        screen.getByText("Response still streaming…"),
+      ).toBeInTheDocument();
       const fragment = container.querySelector(".markdown-streaming-fragment");
       expect(fragment).not.toBeNull();
       expect(fragment?.textContent).toBe(markdown);

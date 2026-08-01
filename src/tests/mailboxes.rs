@@ -969,7 +969,11 @@ fn delivered_unacknowledged_notification_does_not_loop_or_starve_user_prompt() {
         TurnDispatch::PersistentClaude { command, .. } => command.text.clone(),
         _ => panic!("expected Claude mailbox wake"),
     };
-    assert!(first_prompt.contains(&receipt.mailbox_id));
+    assert_eq!(
+        first_prompt,
+        mailbox_notification_text(&receipt.mailbox_id, 1, receipt.sequence, "Sol"),
+        "human-only queue presentation must not rewrite the agent-facing activation prompt"
+    );
     deliver_turn_dispatch(&state, first).expect("runtime should accept the mailbox wake");
     assert!(matches!(
         input_rx.recv_timeout(Duration::from_secs(1)),

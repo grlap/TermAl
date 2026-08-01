@@ -2,6 +2,7 @@
 // Does not own draft state, slash-palette behavior, send/delegate actions, or session selection.
 // Split from AgentSessionPanel.tsx to keep SessionComposer focused on composer orchestration.
 import { useEffect, useRef } from "react";
+import { requestMessageStackBottomRepin } from "../message-stack-scroll-sync";
 
 export function useComposerAutoResize(activeSessionId: string | null) {
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -171,6 +172,33 @@ export function useComposerAutoResize(activeSessionId: string | null) {
       (parseFloat(textarea.style.height) ||
         textarea.getBoundingClientRect().height ||
         null);
+    // tm-7cu.18: the shrink probe below collapses the textarea to its minimum
+    // and the `scrollHeight` read flushes layout in that collapsed state. The
+    // flex-sibling transcript pane is transiently TALLER during that flush, so
+    // the browser natively clamps a bottom-pinned scrollTop down — and keeps
+    // the clamped value after the height is restored (drift == previousHeight
+    // - minHeight, measured to the pixel). No JS writes scroll; the browser
+    // does it during layout, which is why it must be prevented, not corrected.
+    // Two guards: (1) lock the composer container's height for the duration of
+    // the synchronous measurement so sibling layout never observes the probe;
+    // (2) ask the pane's scroll authority to preserve an explicit bottom pin in
+    // the SAME task after the real height is applied, before paint — an async
+    // correction loses to a steady typing cadence by construction.
+    const composerContainerElement = textarea.closest(".composer");
+    const composerContainer =
+      composerContainerElement instanceof HTMLElement
+        ? composerContainerElement
+        : null;
+    const transcriptPaneElement =
+      sizingState.panelElement?.querySelector(".message-stack") ?? null;
+    const transcriptPane =
+      transcriptPaneElement instanceof HTMLElement ? transcriptPaneElement : null;
+    let containerHeightLock: string | null = null;
+    if (shouldAllowShrink && composerContainer) {
+      containerHeightLock = composerContainer.style.height;
+      composerContainer.style.height = `${composerContainer.getBoundingClientRect().height}px`;
+    }
+
     const shrinkProbeHeight = Math.max(sizingState.minHeight, 1);
     if (shouldAllowShrink) {
       textarea.style.transition = "none";
@@ -215,6 +243,19 @@ export function useComposerAutoResize(activeSessionId: string | null) {
     if (composerLastAppliedOverflowYRef.current !== nextOverflowY) {
       textarea.style.overflowY = nextOverflowY;
       composerLastAppliedOverflowYRef.current = nextOverflowY;
+    }
+    // Release the probe lock only after the final height is applied, so the
+    // sibling pane sees exactly one transition: previous height -> final
+    // height, never the collapsed probe state.
+    if (containerHeightLock !== null && composerContainer) {
+      composerContainer.style.height = containerHeightLock;
+    }
+    // Same-task bottom re-pin request: any real composer height change may move
+    // the pane's max scroll. Ask SessionPaneView's single scroll authority to
+    // decide synchronously from explicit tail-follow intent whether a correction
+    // is needed, then update saved position plus virtualizer bookkeeping.
+    if (transcriptPane) {
+      requestMessageStackBottomRepin(transcriptPane);
     }
     composerLastMeasuredDraftLengthRef.current = currentDraftLength;
   }

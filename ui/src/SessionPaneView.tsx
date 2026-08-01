@@ -372,6 +372,19 @@ export function SessionPaneView({
     projectLookup,
     sessionLookup: activeContextSessionLookup,
   });
+  const handleOpenMailboxFromPendingPrompt = useStableEvent(
+    (mailboxId: string) => {
+      if (!activeSession) {
+        return;
+      }
+      onOpenMailboxTab?.(
+        pane.id,
+        mailboxId,
+        activeSession.id,
+        activeSession.projectId ?? null,
+      );
+    },
+  );
   const paneRootRef = useRef<HTMLElement | null>(null);
   const paneTopRef = useRef<HTMLDivElement | null>(null);
   const [activeDropPlacement, setActiveDropPlacement] = useState<Exclude<
@@ -1850,6 +1863,7 @@ export function SessionPaneView({
             onCreateConversationMarker={onCreateConversationMarker}
             onDeleteConversationMarker={onDeleteConversationMarker}
             onPinResponseBoardMessage={handlePinResponseBoardMessage}
+            onOpenMailbox={handleOpenMailboxFromPendingPrompt}
             onSessionSettingsChange={onSessionSettingsChange}
             conversationSearchQuery={
               hasSessionFindQuery ? sessionFindQuery : ""

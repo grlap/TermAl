@@ -94,6 +94,7 @@ const EMPTY_CONVERSATION_MARKERS: readonly ConversationMarker[] = [];
 const NOOP_CREATE_CONVERSATION_MARKER = () => {};
 const NOOP_DELETE_CONVERSATION_MARKER = () => {};
 const NOOP_PIN_RESPONSE_BOARD_MESSAGE = () => {};
+const NOOP_OPEN_MAILBOX = () => {};
 
 // The transcript virtualizer and overview rail intentionally share the same
 // size threshold. The rail may still defer its first paint, but marker jumps
@@ -121,6 +122,7 @@ export function AgentSessionPanel({
   onCreateConversationMarker = NOOP_CREATE_CONVERSATION_MARKER,
   onDeleteConversationMarker = NOOP_DELETE_CONVERSATION_MARKER,
   onPinResponseBoardMessage = NOOP_PIN_RESPONSE_BOARD_MESSAGE,
+  onOpenMailbox = NOOP_OPEN_MAILBOX,
   onSessionSettingsChange,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
@@ -147,6 +149,7 @@ export function AgentSessionPanel({
   const stableOnPinResponseBoardMessage = useStableEvent(
     onPinResponseBoardMessage,
   );
+  const stableOnOpenMailbox = useStableEvent(onOpenMailbox);
   const stableOnSessionSettingsChange = useStableEvent(onSessionSettingsChange);
 
   return (
@@ -171,6 +174,7 @@ export function AgentSessionPanel({
       onCreateConversationMarker={stableOnCreateConversationMarker}
       onDeleteConversationMarker={stableOnDeleteConversationMarker}
       onPinResponseBoardMessage={stableOnPinResponseBoardMessage}
+      onOpenMailbox={stableOnOpenMailbox}
       onSessionSettingsChange={stableOnSessionSettingsChange}
       conversationSearchQuery={conversationSearchQuery}
       conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
@@ -281,6 +285,7 @@ const SessionBody = memo(function SessionBody({
   onCreateConversationMarker,
   onDeleteConversationMarker,
   onPinResponseBoardMessage,
+  onOpenMailbox,
   onSessionSettingsChange,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
@@ -367,6 +372,7 @@ const SessionBody = memo(function SessionBody({
           onCreateConversationMarker={onCreateConversationMarker}
           onDeleteConversationMarker={onDeleteConversationMarker}
           onPinResponseBoardMessage={onPinResponseBoardMessage}
+          onOpenMailbox={onOpenMailbox}
           conversationSearchQuery={conversationSearchQuery}
           conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
           conversationSearchActiveItemKey={conversationSearchActiveItemKey}
@@ -433,6 +439,7 @@ const SessionBody = memo(function SessionBody({
   previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
   previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
   previous.onPinResponseBoardMessage === next.onPinResponseBoardMessage &&
+  previous.onOpenMailbox === next.onOpenMailbox &&
   previous.onCancelQueuedPrompt === next.onCancelQueuedPrompt &&
   previous.onCreateConversationMarker === next.onCreateConversationMarker &&
   previous.onDeleteConversationMarker === next.onDeleteConversationMarker &&
@@ -476,6 +483,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   onCreateConversationMarker,
   onDeleteConversationMarker,
   onPinResponseBoardMessage,
+  onOpenMailbox,
   conversationSearchQuery,
   conversationSearchMatchedItemKeys,
   conversationSearchActiveItemKey,
@@ -712,7 +720,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
           }
           window.requestAnimationFrame(() => jumpToMessageId(request.messageId));
         });
-      }),
+      }, conversationPageRef),
     [jumpToMessageId, session.id],
   );
   const requestOlderPromptNavigationPage = useCallback(
@@ -1084,6 +1092,8 @@ const SessionConversationPage = memo(function SessionConversationPage({
     >
       <PendingPromptCard
         prompt={prompt}
+        sessionId={session.id}
+        onOpenMailbox={onOpenMailbox}
         onCancel={
           prompt.localOnly
             ? undefined
@@ -1151,6 +1161,8 @@ const SessionConversationPage = memo(function SessionConversationPage({
             {conversationOverview.shouldRenderRail ? (
               <ConversationOverviewRail
                 heightPx={conversationOverview.railHeightPx}
+                rightPx={conversationOverview.railRightPx}
+                topPx={conversationOverview.railTopPx}
                 overview={conversationOverview.overview}
                 viewport={conversationOverview.viewport}
                 onNavigate={conversationOverview.navigate}
@@ -1178,6 +1190,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
   previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
   previous.onCreateConversationMarker === next.onCreateConversationMarker &&
   previous.onDeleteConversationMarker === next.onDeleteConversationMarker &&
+  previous.onOpenMailbox === next.onOpenMailbox &&
   previous.conversationSearchQuery === next.conversationSearchQuery &&
   previous.conversationSearchMatchedItemKeys === next.conversationSearchMatchedItemKeys &&
   previous.conversationSearchActiveItemKey === next.conversationSearchActiveItemKey &&

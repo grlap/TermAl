@@ -353,9 +353,8 @@ function ControlPanelActivityButton({
       }}
       onDragOver={(event) => onDragOver(event, definition.id)}
       onDragStart={(event) => {
-        // Sections without a launcher tab (e.g. the control-panel-only board,
-        // tm-uwx.7.3) always drag as an internal reorder — an external drag
-        // would build a null tab and die silently (review, mailbox #238-2).
+        // Sections without a launcher tab always drag as an internal reorder;
+        // an external drag would build a null tab and die silently.
         if (event.shiftKey || !onExternalDragStart || !launcherTab) {
           onDragStart(event, definition.id);
         } else {
@@ -592,7 +591,7 @@ function GitStatusIcon() {
 }
 
 function BoardIcon() {
-  // Tile grid: the coordination board's key/value facts (tm-uwx.7.3).
+  // Spatial card grid for the Response Board workspace.
   return (
     <svg viewBox="0 0 20 20" focusable="false" aria-hidden="true">
       <rect x="3.25" y="3.25" width="5.5" height="5.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" />

@@ -17,10 +17,11 @@
 //     shown in the transcript while a prompt is waiting to be
 //     submitted. Reuses `<MessageMeta>` + `<MessageAttachmentList>`
 //     + `<ExpandedPromptPanel>` so search-highlight and attachment
-//     chips match the rest of the transcript. Wraps its body in a
-//     `memo` comparator keyed on `prompt`, `searchQuery`, and
-//     `searchHighlightTone` to avoid re-rendering on unrelated
-//     parent state changes.
+//     chips match the rest of the transcript. Structured mailbox
+//     wake-ups reuse `<MailboxMessageLink>` instead of exposing the
+//     agent activation boilerplate. Wraps its body in a `memo`
+//     comparator keyed on its render data and actions to avoid
+//     re-rendering on unrelated parent state changes.
 //
 // What this file does NOT own:
 //   - `<ExpandedPromptPanel>` and the expansion logic — lives in
@@ -52,6 +53,7 @@ import {
   LongPeerMessage,
   PEER_MESSAGE_BATCH_AUTHOR_LABEL,
 } from "../long-peer-message";
+import { MailboxMessageLink } from "../mailbox-message-link";
 import { renderHighlightedText, type SearchHighlightTone } from "../search-highlight";
 import type {
   PendingPrompt,
@@ -115,12 +117,16 @@ export function RunningIndicator({
 
 export const PendingPromptCard = memo(function PendingPromptCard({
   prompt,
+  sessionId,
   onCancel,
+  onOpenMailbox,
   searchQuery = "",
   searchHighlightTone = "match",
 }: {
   prompt: PendingPrompt;
+  sessionId: string;
   onCancel?: () => void;
+  onOpenMailbox: (mailboxId: string) => void;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
@@ -128,6 +134,8 @@ export const PendingPromptCard = memo(function PendingPromptCard({
   const isDelegationFanIn =
     !prompt.source && isDelegationFanInText(prompt.text);
   const isPeerBatch = isPeerMessageBatch(prompt.source);
+  const mailboxSource =
+    prompt.source?.kind === "mailbox" ? prompt.source.mailbox : null;
   const shouldCollapsePeerMessage =
     (Boolean(prompt.source) || isPeerBatch) && isLongPeerMessage(prompt.text);
 
@@ -166,7 +174,14 @@ export const PendingPromptCard = memo(function PendingPromptCard({
           searchHighlightTone={searchHighlightTone}
         />
       ) : null}
-      {prompt.text ? (
+      {mailboxSource ? (
+        <MailboxMessageLink
+          senderName={prompt.source?.name ?? "Mailbox"}
+          sessionId={sessionId}
+          source={mailboxSource}
+          onOpenMailbox={onOpenMailbox}
+        />
+      ) : prompt.text ? (
         isDelegationFanIn ? (
           <DelegationFanInMessage
             text={prompt.text}
@@ -203,6 +218,8 @@ export const PendingPromptCard = memo(function PendingPromptCard({
   );
 }, (previous, next) =>
   previous.prompt === next.prompt &&
+  previous.sessionId === next.sessionId &&
+  previous.onOpenMailbox === next.onOpenMailbox &&
   previous.searchQuery === next.searchQuery &&
   previous.searchHighlightTone === next.searchHighlightTone
 );

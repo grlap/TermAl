@@ -6,26 +6,55 @@ export type ResponseBoardSourceNavigation = {
 
 type NavigationListener = (request: ResponseBoardSourceNavigation) => void;
 
-const pendingBySessionId = new Map<string, ResponseBoardSourceNavigation>();
-const listenersBySessionId = new Map<string, Set<NavigationListener>>();
+export const RESPONSE_BOARD_SOURCE_NAVIGATION_TTL_MS = 30_000;
+
+type PendingNavigation = {
+  request: ResponseBoardSourceNavigation;
+  deliveredTo: Set<object>;
+  expiresAt: number;
+  expiryTimer: ReturnType<typeof setTimeout>;
+};
+
+const pendingBySessionId = new Map<string, PendingNavigation>();
+const listenersBySessionId = new Map<
+  string,
+  Map<object, NavigationListener>
+>();
 
 export function requestResponseBoardSourceNavigation(
   request: ResponseBoardSourceNavigation,
 ) {
-  pendingBySessionId.set(request.sessionId, request);
+  const previous = pendingBySessionId.get(request.sessionId);
+  if (previous) {
+    clearTimeout(previous.expiryTimer);
+  }
+  const pending: PendingNavigation = {
+    request,
+    deliveredTo: new Set(),
+    expiresAt: Date.now() + RESPONSE_BOARD_SOURCE_NAVIGATION_TTL_MS,
+    expiryTimer: setTimeout(() => {
+      if (pendingBySessionId.get(request.sessionId) === pending) {
+        pendingBySessionId.delete(request.sessionId);
+      }
+    }, RESPONSE_BOARD_SOURCE_NAVIGATION_TTL_MS),
+  };
+  pendingBySessionId.set(request.sessionId, pending);
   deliverPendingResponseBoardNavigation(request.sessionId);
 }
 
 export function subscribeResponseBoardSourceNavigation(
   sessionId: string,
   listener: NavigationListener,
+  subscriberKey: object = listener,
 ) {
-  const listeners = listenersBySessionId.get(sessionId) ?? new Set();
-  listeners.add(listener);
+  const listeners = listenersBySessionId.get(sessionId) ?? new Map();
+  listeners.set(subscriberKey, listener);
   listenersBySessionId.set(sessionId, listeners);
   queueMicrotask(() => deliverPendingResponseBoardNavigation(sessionId));
   return () => {
-    listeners.delete(listener);
+    if (listeners.get(subscriberKey) === listener) {
+      listeners.delete(subscriberKey);
+    }
     if (listeners.size === 0) {
       listenersBySessionId.delete(sessionId);
     }
@@ -33,11 +62,21 @@ export function subscribeResponseBoardSourceNavigation(
 }
 
 function deliverPendingResponseBoardNavigation(sessionId: string) {
-  const request = pendingBySessionId.get(sessionId);
-  const listener = listenersBySessionId.get(sessionId)?.values().next().value;
-  if (!request || !listener) {
+  const pending = pendingBySessionId.get(sessionId);
+  if (!pending) {
     return;
   }
-  pendingBySessionId.delete(sessionId);
-  listener(request);
+  if (pending.expiresAt <= Date.now()) {
+    clearTimeout(pending.expiryTimer);
+    pendingBySessionId.delete(sessionId);
+    return;
+  }
+  for (const [subscriberKey, listener] of
+    listenersBySessionId.get(sessionId) ?? []) {
+    if (pending.deliveredTo.has(subscriberKey)) {
+      continue;
+    }
+    pending.deliveredTo.add(subscriberKey);
+    listener(pending.request);
+  }
 }

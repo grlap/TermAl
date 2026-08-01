@@ -23,7 +23,7 @@ Optional sidecar:
 
 **Frontend:** React 18 + TypeScript, served on `:4173` in dev with a Vite proxy to the backend.
 **Backend:** Rust + axum + tokio, bound to `127.0.0.1:8787` by default, overridable with `TERMAL_PORT`.
-**Persistence:** `~/.termal/termal.sqlite` stores sessions, projects, preferences, remote config, workspace layouts, and orchestrator instances. `~/.termal/coordination.sqlite` stores durable mailboxes and coordination boards in a separate SQLite writer domain. `~/.termal/orchestrators.json` stores reusable orchestrator templates.
+**Persistence:** `~/.termal/termal.sqlite` stores sessions, projects, preferences, remote config, workspace layouts, orchestrator instances, and the visual Response Board. `~/.termal/coordination.sqlite` stores durable mailboxes and agent coordination boards in a separate SQLite writer domain. `~/.termal/orchestrators.json` stores reusable orchestrator templates.
 **Real-time:** Server-Sent Events with a monotonic revision counter for ordering.
 
 **Current status:** The current implementation includes server-backed workspace layouts, project-scoped SSH remotes, orchestrator templates and runtime instances, session-scoped model controls, workspace terminal tabs, file-change awareness, and the Telegram relay.
@@ -289,6 +289,10 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | GET | `/api/sessions/{id}/board` | List one local project's coordination-board entries through a local root session. Supports generation-aware pagination and an unchanged fast path. |
 | GET | `/api/sessions/{id}/board/keys/{key}` | Read one active coordination-board head, including its CAS revision, `updatedAtGeneration` (when the key last changed), and current `scopeGeneration`. Missing and tombstoned keys return `404` with reconciliation detail when available. |
 | POST | `/api/sessions/{id}/board/set` | Create, update, deliberately restore, or delete one coordination-board key with revision CAS and a sender-scoped idempotency key. A successful first create returns `201`; duplicate replays and later mutations return `200`; conflicts return `409`. |
+| GET | `/api/response-board` | Read the singleton visual Response Board and its immutable response snapshots. |
+| POST | `/api/response-board/cards` | Pin one durable transcript message by source session/message ids. The server resolves and snapshots the durable message; callers cannot submit replacement snapshot content. |
+| PATCH | `/api/response-board/cards/{id}` | Persist bounded card position and dimensions. |
+| DELETE | `/api/response-board/cards/{id}` | Remove one visual response card. |
 | POST | `/api/sessions/{id}/delegations` | Create a Phase 1 local child delegation session with `readOnly` or `isolatedWorktree` write policy. Returns `201` with `DelegationResponse`; unsupported worker/`sharedWorktree`/remote-backed variants return `501`, active-limit conflicts return `409`, handler-level prompt/scope validation returns `400`, and JSON schema/deserialization failures return `422`. |
 | GET | `/api/sessions/{id}/delegations` | List compact summaries for delegations owned by this parent -> `DelegationListResponse`. This recovery endpoint returns exact delegation/child-session ids, title, agent, and fresh lifecycle status without prompts or transcripts; same-title delegations remain distinct. Unknown parent ids return `404`. Backs `termal_list_delegations`. |
 | POST | `/api/sessions/{id}/delegation-waits` | Create a parent-scoped backend resume wait for one or more delegations. Returns `201` with `DelegationWaitResponse`; terminal targets may consume the wait immediately and queue/resume the parent in the same response cycle. |

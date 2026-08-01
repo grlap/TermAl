@@ -1188,16 +1188,24 @@ export function MarkdownContent({
           // `$$` math display, partial pipe-table). Rendered as plain
           // text so streaming chunks don't briefly appear as
           // raw-`| ... |` text, runaway code blocks, or tables with
-          // mismatched cell counts. Snaps to the canonical render
-          // once the block closes (a blank line for tables, the
-          // matching closing fence for code/math) and the next
-          // textDelta fires the memoized re-split.
-          <pre
-            className={`markdown-streaming-fragment${pendingMarkdownLooksLikeTable ? " markdown-streaming-fragment-table" : ""}`}
-            aria-busy="true"
-          >
-            {pendingMarkdown}
-          </pre>
+          // mismatched cell counts. The explicit status label prevents
+          // this deliberate raw tail from looking like a completed reply
+          // that was truncated mid-token. The fragment snaps to the
+          // canonical render when the turn settles.
+          <div className="markdown-streaming-fragment-shell" aria-busy="true">
+            <span
+              className="markdown-streaming-fragment-status"
+              role="status"
+              aria-atomic="true"
+            >
+              Response still streaming…
+            </span>
+            <pre
+              className={`markdown-streaming-fragment${pendingMarkdownLooksLikeTable ? " markdown-streaming-fragment-table" : ""}`}
+            >
+              {pendingMarkdown}
+            </pre>
+          </div>
         ) : null}
       </div>
     </div>

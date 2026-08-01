@@ -19,6 +19,17 @@ import { readResponseBoardMessageDragData } from "../response-board";
 
 const BOARD_PADDING = 72;
 const CARD_PATCH_DEBOUNCE_MS = 250;
+export const RESPONSE_BOARD_ZOOM_STORAGE_KEY = "termal.response-board.zoom.v1";
+const MIN_BOARD_ZOOM = 0.25;
+const MAX_BOARD_ZOOM = 2;
+const BOARD_ZOOM_BUTTON_FACTOR = 1.2;
+const BOARD_WHEEL_ZOOM_SENSITIVITY = 0.0015;
+
+type BoardView = {
+  panX: number;
+  panY: number;
+  zoom: number;
+};
 
 type CardGesture = {
   kind: "move" | "resize";
@@ -30,15 +41,48 @@ type CardGesture = {
   y: number;
   w: number;
   h: number;
+  zoom: number;
 };
 
 type PanGesture = {
   pointerId: number;
   clientX: number;
   clientY: number;
-  scrollLeft: number;
-  scrollTop: number;
+  panX: number;
+  panY: number;
 };
+
+function clampBoardZoom(value: number) {
+  return Math.min(MAX_BOARD_ZOOM, Math.max(MIN_BOARD_ZOOM, value));
+}
+
+function readStoredBoardZoom() {
+  try {
+    const stored = Number(window.localStorage.getItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY));
+    return Number.isFinite(stored) && stored > 0 ? clampBoardZoom(stored) : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function zoomBoardViewAtPoint(
+  view: BoardView,
+  requestedZoom: number,
+  surfaceX: number,
+  surfaceY: number,
+): BoardView {
+  const zoom = clampBoardZoom(requestedZoom);
+  if (zoom === view.zoom) {
+    return view;
+  }
+  const logicalX = (surfaceX - view.panX) / view.zoom;
+  const logicalY = (surfaceY - view.panY) / view.zoom;
+  return {
+    zoom,
+    panX: surfaceX - logicalX * zoom,
+    panY: surfaceY - logicalY * zoom,
+  };
+}
 
 export function ResponseBoardPanel({
   refreshToken,
@@ -50,6 +94,12 @@ export function ResponseBoardPanel({
   const [cards, setCards] = useState<ResponseBoardCard[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<BoardView>(() => ({
+    panX: 0,
+    panY: 0,
+    zoom: readStoredBoardZoom(),
+  }));
+  const [isPanning, setIsPanning] = useState(false);
   const cardsRef = useRef<ResponseBoardCard[]>([]);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const cardGestureRef = useRef<CardGesture | null>(null);
@@ -95,6 +145,17 @@ export function ResponseBoardPanel({
     },
     [],
   );
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        RESPONSE_BOARD_ZOOM_STORAGE_KEY,
+        String(view.zoom),
+      );
+    } catch {
+      // View persistence is best-effort; board data remains server-owned.
+    }
+  }, [view.zoom]);
 
   const scheduleCardPatch = useCallback((card: ResponseBoardCard) => {
     const currentTimer = patchTimersRef.current.get(card.id);
@@ -154,8 +215,8 @@ export function ResponseBoardPanel({
       if (!gesture || gesture.pointerId !== event.pointerId) {
         return;
       }
-      const deltaX = event.clientX - gesture.clientX;
-      const deltaY = event.clientY - gesture.clientY;
+      const deltaX = (event.clientX - gesture.clientX) / gesture.zoom;
+      const deltaY = (event.clientY - gesture.clientY) / gesture.zoom;
       updateCardGeometry(gesture.cardId, (card) =>
         gesture.kind === "move"
           ? {
@@ -206,9 +267,10 @@ export function ResponseBoardPanel({
         y: card.y,
         w: card.w,
         h: card.h,
+        zoom: view.zoom,
       };
     },
-    [],
+    [view.zoom],
   );
 
   const handleRemove = useCallback((cardId: string) => {
@@ -239,14 +301,86 @@ export function ResponseBoardPanel({
     const clientY = Number.isFinite(event.clientY)
       ? event.clientY
       : rect.top + surface.clientHeight / 2;
-    const x = Math.max(0, clientX - rect.left + surface.scrollLeft - 180);
-    const y = Math.max(0, clientY - rect.top + surface.scrollTop - 28);
+    const x = Math.max(
+      0,
+      (clientX - rect.left - view.panX) / view.zoom - 180,
+    );
+    const y = Math.max(
+      0,
+      (clientY - rect.top - view.panY) / view.zoom - 28,
+    );
     setError(null);
     void createResponseBoardCard({ ...source, x, y }).then(
       (card) => replaceCards([...cardsRef.current, card]),
       (reason) => setError(getErrorMessage(reason)),
     );
-  }, [replaceCards]);
+  }, [replaceCards, view.panX, view.panY, view.zoom]);
+
+  const zoomAtSurfaceCenter = useCallback(
+    (resolveZoom: (currentZoom: number) => number) => {
+      const surface = surfaceRef.current;
+      if (!surface) {
+        return;
+      }
+      const rect = surface.getBoundingClientRect();
+      setView((current) =>
+        zoomBoardViewAtPoint(
+          current,
+          resolveZoom(current.zoom),
+          rect.width / 2,
+          rect.height / 2,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleBoardWheel = useCallback((event: WheelEvent) => {
+    const surface = surfaceRef.current;
+    if (!event.ctrlKey || !surface) {
+      return;
+    }
+    event.preventDefault();
+    const rect = surface.getBoundingClientRect();
+    const surfaceX = event.clientX - rect.left;
+    const surfaceY = event.clientY - rect.top;
+    setView((current) =>
+      zoomBoardViewAtPoint(
+        current,
+        current.zoom * Math.exp(-event.deltaY * BOARD_WHEEL_ZOOM_SENSITIVITY),
+        surfaceX,
+        surfaceY,
+      ),
+    );
+  }, []);
+
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!surface) {
+      return;
+    }
+    surface.addEventListener("wheel", handleBoardWheel, { passive: false });
+    return () => surface.removeEventListener("wheel", handleBoardWheel);
+  }, [handleBoardWheel]);
+
+  const handleBoardKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!(event.ctrlKey || event.metaKey)) {
+        return;
+      }
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        zoomAtSurfaceCenter((zoom) => zoom * BOARD_ZOOM_BUTTON_FACTOR);
+      } else if (event.key === "-" || event.key === "_") {
+        event.preventDefault();
+        zoomAtSurfaceCenter((zoom) => zoom / BOARD_ZOOM_BUTTON_FACTOR);
+      } else if (event.key === "0") {
+        event.preventDefault();
+        zoomAtSurfaceCenter(() => 1);
+      }
+    },
+    [zoomAtSurfaceCenter],
+  );
 
   const handlePanPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -254,16 +388,20 @@ export function ResponseBoardPanel({
       if (event.button !== 0 || target.closest(".response-board-card")) {
         return;
       }
+      event.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      event.currentTarget.focus({ preventScroll: true });
       event.currentTarget.setPointerCapture?.(event.pointerId);
+      setIsPanning(true);
       panGestureRef.current = {
         pointerId: event.pointerId,
         clientX: event.clientX,
         clientY: event.clientY,
-        scrollLeft: event.currentTarget.scrollLeft,
-        scrollTop: event.currentTarget.scrollTop,
+        panX: view.panX,
+        panY: view.panY,
       };
     },
-    [],
+    [view.panX, view.panY],
   );
 
   const handlePanPointerMove = useCallback(
@@ -272,10 +410,11 @@ export function ResponseBoardPanel({
       if (!gesture || gesture.pointerId !== event.pointerId) {
         return;
       }
-      event.currentTarget.scrollLeft =
-        gesture.scrollLeft - (event.clientX - gesture.clientX);
-      event.currentTarget.scrollTop =
-        gesture.scrollTop - (event.clientY - gesture.clientY);
+      setView((current) => ({
+        ...current,
+        panX: gesture.panX + (event.clientX - gesture.clientX),
+        panY: gesture.panY + (event.clientY - gesture.clientY),
+      }));
     },
     [],
   );
@@ -285,6 +424,7 @@ export function ResponseBoardPanel({
       return;
     }
     panGestureRef.current = null;
+    setIsPanning(false);
     event.currentTarget.releasePointerCapture?.(event.pointerId);
   }, []);
 
@@ -305,11 +445,41 @@ export function ResponseBoardPanel({
   return (
     <section className="response-board-panel" aria-label="Response board">
       <header className="response-board-toolbar">
-        <div>
+        <div className="response-board-toolbar-copy">
           <strong>Response board</strong>
           <span>Drag any transcript message here or use Pin to board.</span>
         </div>
-        <span className="response-board-card-count">{cards.length} cards</span>
+        <div className="response-board-toolbar-actions">
+          <div className="response-board-zoom-controls" aria-label="Board zoom controls">
+            <button
+              type="button"
+              aria-label="Zoom out"
+              onClick={() =>
+                zoomAtSurfaceCenter((zoom) => zoom / BOARD_ZOOM_BUTTON_FACTOR)
+              }
+            >
+              −
+            </button>
+            <button
+              type="button"
+              className="response-board-zoom-reset"
+              aria-label="Reset board zoom to 100%"
+              onClick={() => zoomAtSurfaceCenter(() => 1)}
+            >
+              {Math.round(view.zoom * 100)}%
+            </button>
+            <button
+              type="button"
+              aria-label="Zoom in"
+              onClick={() =>
+                zoomAtSurfaceCenter((zoom) => zoom * BOARD_ZOOM_BUTTON_FACTOR)
+              }
+            >
+              +
+            </button>
+          </div>
+          <span className="response-board-card-count">{cards.length} cards</span>
+        </div>
       </header>
       {error ? (
         <div className="response-board-error" role="alert">
@@ -321,7 +491,10 @@ export function ResponseBoardPanel({
       ) : null}
       <div
         ref={surfaceRef}
-        className="response-board-surface"
+        className={`response-board-surface${isPanning ? " is-panning" : ""}`}
+        tabIndex={0}
+        aria-label="Response board canvas"
+        aria-keyshortcuts="Control+= Meta+= Control+- Meta+- Control+0 Meta+0"
         onDragOver={(event) => {
           event.preventDefault();
           event.dataTransfer.dropEffect = "copy";
@@ -331,14 +504,17 @@ export function ResponseBoardPanel({
         onPointerMove={handlePanPointerMove}
         onPointerUp={finishPan}
         onPointerCancel={finishPan}
+        onLostPointerCapture={finishPan}
+        onKeyDown={handleBoardKeyDown}
       >
         <div
           className="response-board-plane"
           style={{
             width: planeSize.width,
             height: planeSize.height,
-            minWidth: "100%",
-            minHeight: "100%",
+            minWidth: `${100 / view.zoom}%`,
+            minHeight: `${100 / view.zoom}%`,
+            transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`,
           }}
         >
           {isLoading ? (

@@ -3351,6 +3351,126 @@ fn sqlite_load_isolates_malformed_session_and_delegation_rows_but_rejects_metada
     let _ = fs::remove_dir_all(state_root);
 }
 
+#[test]
+fn sqlite_v1_migration_skip_preserves_the_only_embedded_transcript_copy() {
+    let state_root = PersistTestRoot::new("v1-migration-skip-preserves-transcript");
+    let path = state_root.path().join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Legacy recovery".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let session_index = inner
+        .find_session_index(&session_id)
+        .expect("legacy fixture session should exist");
+    for sequence in 0..2 {
+        let record = inner
+            .session_mut_by_index(session_index)
+            .expect("legacy fixture session should remain mutable");
+        let insert_at = record.session.messages.len();
+        insert_message_on_record(
+            record,
+            insert_at,
+            Message::Text {
+                attachments: Vec::new(),
+                id: format!("legacy-message-{sequence}"),
+                timestamp: stamp_now(),
+                author: Author::You,
+                text: format!("recoverable body {sequence}"),
+                expanded_text: None,
+                source: None,
+            },
+        );
+    }
+
+    let persisted = PersistedState::from_inner(&inner);
+    let mut legacy_session_value = serde_json::to_value(
+        persisted
+            .sessions
+            .first()
+            .expect("legacy fixture should contain the session row"),
+    )
+    .expect("legacy session row should encode");
+    legacy_session_value["session"]["messages"][1]["id"] =
+        Value::String("legacy-message-0".to_owned());
+    let legacy_session_json =
+        serde_json::to_string(&legacy_session_value).expect("legacy session row should serialize");
+    let metadata_json =
+        serde_json::to_string(&persisted).expect("legacy metadata should serialize");
+
+    {
+        let connection =
+            rusqlite::Connection::open(&path).expect("legacy sqlite fixture should open");
+        connection
+            .execute_batch(
+                "
+                PRAGMA foreign_keys = ON;
+                CREATE TABLE meta (
+                  key TEXT PRIMARY KEY,
+                  value TEXT NOT NULL
+                );
+                INSERT INTO meta(key, value) VALUES('schema_version', '1');
+                CREATE TABLE app_state (
+                  key TEXT PRIMARY KEY,
+                  value_json TEXT NOT NULL
+                );
+                CREATE TABLE sessions (
+                  id TEXT PRIMARY KEY,
+                  value_json TEXT NOT NULL
+                );
+                ",
+            )
+            .expect("legacy v1 schema should initialize");
+        connection
+            .execute(
+                "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)",
+                rusqlite::params![SQLITE_METADATA_KEY, metadata_json],
+            )
+            .expect("legacy metadata should insert");
+        connection
+            .execute(
+                "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)",
+                rusqlite::params![session_id, legacy_session_json],
+            )
+            .expect("legacy session row should insert");
+    }
+
+    let loaded = load_state(&path)
+        .expect("one skipped legacy transcript must not abort startup")
+        .expect("legacy persisted state should exist");
+    assert!(
+        loaded.find_session_index(&session_id).is_none(),
+        "a skipped local transcript must be quarantined, not exposed as an empty unhydrated session"
+    );
+
+    persist_state(&path, &loaded)
+        .expect("a normal persistence pass must preserve the quarantined legacy row");
+    let preserved_json = sqlite_row_json(&path, "sessions", &session_id)
+        .expect("the skipped legacy session row must remain recoverable");
+    let preserved_value: Value = serde_json::from_str(&preserved_json)
+        .expect("preserved legacy row should remain valid JSON");
+    let preserved_messages = preserved_value["session"]["messages"]
+        .as_array()
+        .expect("preserved legacy transcript should remain an array");
+    assert_eq!(preserved_messages.len(), 2);
+    assert_eq!(preserved_messages[0]["text"], "recoverable body 0");
+    assert_eq!(preserved_messages[1]["text"], "recoverable body 1");
+
+    let reloaded = load_state(&path)
+        .expect("repeated boot must keep isolating the skipped legacy row")
+        .expect("persisted state should remain available after repeated boot");
+    assert!(
+        reloaded.find_session_index(&session_id).is_none(),
+        "the durable quarantine signal must survive repeated boot"
+    );
+}
+
 // Regression guard: `commit_session_created_locked` must route
 // the persist work through the background channel rather than
 // calling `persist_created_session` synchronously under the state

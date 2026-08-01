@@ -117,6 +117,7 @@ export type AgentSessionPanelProps = {
   ) => CreateConversationMarkerHandlerResult;
   onDeleteConversationMarker?: (sessionId: string, markerId: string) => void;
   onPinResponseBoardMessage?: (sessionId: string, messageId: string) => void;
+  onOpenMailbox?: (mailboxId: string) => void;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -173,6 +174,7 @@ export type SessionBodyProps = {
   ) => CreateConversationMarkerHandlerResult;
   onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
   onPinResponseBoardMessage: (sessionId: string, messageId: string) => void;
+  onOpenMailbox: (mailboxId: string) => void;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -307,6 +309,7 @@ export type SessionConversationPageProps = {
   ) => CreateConversationMarkerHandlerResult;
   onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
   onPinResponseBoardMessage: (sessionId: string, messageId: string) => void;
+  onOpenMailbox: (mailboxId: string) => void;
   conversationSearchQuery: string;
   conversationSearchMatchedItemKeys: ReadonlySet<string>;
   conversationSearchActiveItemKey: string | null;

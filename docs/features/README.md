@@ -25,6 +25,7 @@ design decisions, and future plans.
 - [SQLite Session Storage](./sqlite-session-storage.md)
 - [Durable Agent Mailboxes](./agent-mailboxes.md)
 - [Coordination Board](./agent-boards.md)
+- [Response Board](./response-board.md)
 - [Shared Codex App-Server](./shared-codex-app-server.md)
 - [Agent Integration Comparison](./agent-integration-comparison.md)
 - [Orchestration](./orchestration.md)

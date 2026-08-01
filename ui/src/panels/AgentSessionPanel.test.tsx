@@ -696,6 +696,57 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(within(queuedPromptCard).queryByText("You")).not.toBeInTheDocument();
   });
 
+  it("renders queued mailbox wakeups as compact launch cards without changing queue controls", () => {
+    const onCancelQueuedPrompt = vi.fn();
+    const onOpenMailbox = vi.fn();
+    const activationText = [
+      "[TermAl mailbox notification]",
+      "Mailbox `mailbox-queued` has 2 unread message(s). Latest inbound: #7 from Termal::Fable.",
+      "First use `termal_list_mailboxes`, then `termal_read_mailbox`, then `termal_acknowledge_mailbox`.",
+    ].join("\n");
+
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        messages: [],
+        pendingPrompts: [
+          {
+            id: "pending-mailbox-wakeup",
+            timestamp: "10:04",
+            text: activationText,
+            source: {
+              kind: "mailbox",
+              sessionId: "session-fable",
+              name: "Termal::Fable",
+              mailbox: {
+                mailboxId: "mailbox-queued",
+                messageId: "mailbox-message-7",
+                sequence: 7,
+                unreadCount: 2,
+              },
+            },
+          },
+        ],
+      }),
+      onCancelQueuedPrompt,
+      onOpenMailbox,
+      showWaitingIndicator: true,
+    });
+
+    expect(screen.queryByText(/termal_list_mailboxes/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Mailbox notification #7")).toBeInTheDocument();
+    expect(screen.getAllByText("Termal::Fable").length).toBeGreaterThan(0);
+    expect(screen.getByText("2 unread")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open mailbox →" }));
+    expect(onOpenMailbox).toHaveBeenCalledWith("mailbox-queued");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel queued prompt" }));
+    expect(onCancelQueuedPrompt).toHaveBeenCalledWith(
+      "session-a",
+      "pending-mailbox-wakeup",
+    );
+  });
+
   it("collapses a long queued peer prompt inside the live tail", () => {
     const finalFinding = "Queued peer report final finding.";
     const peerText = [

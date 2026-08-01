@@ -651,13 +651,17 @@ export function createReducedMimeDragDataTransfer(
 export type RenderAppWithProjectAndSessionOptions = {
   includeGitStatus?: boolean;
   includeWorkspacePersistence?: boolean;
+  resizeObserver?: typeof ResizeObserver;
 };
 
 export async function renderAppWithProjectAndSession(
   options: RenderAppWithProjectAndSessionOptions = {},
 ) {
-  const { includeGitStatus = false, includeWorkspacePersistence = false } =
-    options;
+  const {
+    includeGitStatus = false,
+    includeWorkspacePersistence = false,
+    resizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver,
+  } = options;
   const originalFetch = globalThis.fetch;
   const originalEventSource = globalThis.EventSource;
   const originalResizeObserver = globalThis.ResizeObserver;
@@ -739,7 +743,7 @@ export async function renderAppWithProjectAndSession(
   );
   vi.stubGlobal(
     "ResizeObserver",
-    ResizeObserverMock as unknown as typeof ResizeObserver,
+    resizeObserver,
   );
   const scrollIntoViewSpy = vi
     .spyOn(HTMLElement.prototype, "scrollIntoView")

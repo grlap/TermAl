@@ -54,6 +54,12 @@
   --cursor-grabbing: url("./assets/cursors/grabbing.svg") 12 9, grabbing;
   --cursor-resize-col: url("./assets/cursors/resize-col.svg") 16 16, col-resize;
   --cursor-resize-row: url("./assets/cursors/resize-row.svg") 16 16, row-resize;
+  /* Body-portaled overlay hierarchy. Pane overlays must remain below global
+     menus and modal backdrops even when their logical owner is nested. */
+  --z-pane-overlay: 10;
+  --z-pane-tooltip: 12;
+  --z-global-menu: 18;
+  --z-modal-backdrop: 20;
 }
 
 [data-theme="dark"],
@@ -990,7 +996,8 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 1.1rem;
-  position: sticky;
+  position: fixed;
+  z-index: 4;
   top: 0.85rem;
   align-self: start;
   height: calc(100vh - 1.7rem);
@@ -1335,7 +1342,7 @@ textarea {
 .dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: var(--z-modal-backdrop);
   display: grid;
   place-items: center;
   padding: 1.5rem;
@@ -2738,7 +2745,7 @@ textarea {
 .pane-tab-context-menu {
   left: 0;
   top: 0;
-  z-index: 18;
+  z-index: var(--z-global-menu);
   min-width: 12.5rem;
   border-radius: 1rem;
 }
@@ -2757,7 +2764,7 @@ textarea {
   position: fixed;
   left: 0;
   top: 0;
-  z-index: 12;
+  z-index: var(--z-pane-tooltip);
   width: min(38rem, calc(100vw - 1.5rem));
   padding: 0.85rem 0.95rem 0.95rem;
   border: 1px solid var(--tooltip-border);
@@ -4364,11 +4371,12 @@ textarea {
 }
 
 .conversation-overview-rail {
+  --conversation-overview-rail-width: 2.35rem;
   --conversation-overview-lane-left: 0.45rem;
   --conversation-overview-lane-width: calc(100% - 0.9rem);
   --conversation-overview-sticky-inset: 0.5rem;
 
-  position: sticky;
+  position: fixed;
   top: var(--conversation-overview-sticky-inset);
   width: var(--conversation-overview-rail-width);
   height: min(32rem, calc(100vh - (var(--conversation-overview-sticky-inset) * 2)));
@@ -4687,20 +4695,13 @@ textarea {
   padding-bottom: 1px;
 }
 
-.conversation-live-tail.is-pinned {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-}
-
-/* An expanded queued fan-in can be taller than the viewport. Keeping its live
-   tail sticky would pin that entire block over the transcript until the active
-   turn finishes. Let it participate in normal flow while it is open. */
-.conversation-live-tail.is-pinned:has(
-  .expandable-session-message.is-expanded
-) {
-  position: static;
-}
+/* tm-7cu.20 (Greg, 2026-07-31): the live-turn card is a REGULAR message. It
+   participates in normal flow and scrolls away with the transcript — no sticky
+   bottom, no z-index overlay floating over real messages. The `is-pinned`
+   class is still applied (the liveTailPinned state feeds scroll logic and
+   tests); it deliberately carries no positioning any more. The previous
+   sticky treatment also required a :has() carve-out for expanded fan-ins —
+   a sign the overlay was fighting the content it covered. */
 
 .conversation-pending-prompts {
   display: grid;
@@ -8123,8 +8124,35 @@ textarea {
  * render once the block settles. See
  * `ui/src/markdown-streaming-split.ts` for the cut policy.
  */
-.markdown-streaming-fragment {
+.markdown-streaming-fragment-shell {
   margin: 0.5rem 0 0;
+  display: grid;
+  gap: 0.28rem;
+}
+
+.markdown-streaming-fragment-status {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  gap: 0.36rem;
+  color: var(--text-muted, var(--muted));
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+}
+
+.markdown-streaming-fragment-status::before {
+  content: "";
+  width: 0.42rem;
+  height: 0.42rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--signal-blue);
+  box-shadow: 0 0 0 0.18rem var(--accent-blue-soft);
+}
+
+.markdown-streaming-fragment {
+  margin: 0;
   padding: 0.5rem 0.75rem;
   background: var(--code-block-bg, var(--surface-2, #1f1f23));
   color: var(--code-block-fg, var(--text-muted, inherit));
@@ -10869,7 +10897,7 @@ textarea {
   background: color-mix(in srgb, var(--surface-card) 96%, transparent);
 }
 
-.response-board-toolbar > div {
+.response-board-toolbar-copy {
   display: grid;
   gap: 0.18rem;
 }
@@ -10883,6 +10911,48 @@ textarea {
 .response-board-card-count {
   color: var(--muted);
   font-size: 0.72rem;
+}
+
+.response-board-toolbar-actions,
+.response-board-zoom-controls {
+  display: flex;
+  align-items: center;
+}
+
+.response-board-toolbar-actions {
+  flex: none;
+  gap: 0.55rem;
+}
+
+.response-board-zoom-controls {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--surface-white);
+}
+
+.response-board-zoom-controls button {
+  min-width: 1.85rem;
+  min-height: 1.75rem;
+  padding: 0.15rem 0.4rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.response-board-zoom-controls button:hover,
+.response-board-zoom-controls button:focus-visible {
+  background: color-mix(in srgb, var(--signal-blue) 10%, transparent);
+  color: var(--signal-blue);
+}
+
+.response-board-zoom-controls .response-board-zoom-reset {
+  min-width: 3.25rem;
+  border-right: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
 }
 
 .response-board-card-count {
@@ -10921,7 +10991,7 @@ textarea {
   position: relative;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   overscroll-behavior: contain;
   cursor: var(--cursor-grab);
   touch-action: none;
@@ -10931,12 +11001,19 @@ textarea {
   background-size: 1.25rem 1.25rem, auto;
 }
 
-.response-board-surface:active {
+.response-board-surface.is-panning {
   cursor: var(--cursor-grabbing);
+}
+
+.response-board-surface.is-panning,
+.response-board-surface.is-panning * {
+  user-select: none !important;
 }
 
 .response-board-plane {
   position: relative;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
 .response-board-empty {
@@ -11035,7 +11112,7 @@ textarea {
 
 .response-board-card-snapshot {
   min-width: 0;
-  pointer-events: none;
+  user-select: text;
 }
 
 .response-board-card-snapshot > .message-card {
@@ -11342,140 +11419,4 @@ textarea {
   .mailbox-thread-row-summary time {
     display: none;
   }
-}
-
-/* Coordination board panel (tm-uwx.7.3) — read-only control-panel section. */
-.control-panel-section-board {
-  overflow: hidden;
-}
-
-.board-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-  overflow: hidden auto;
-  padding: 8px;
-}
-
-.board-panel-header {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-}
-
-.board-panel-title {
-  font-weight: 600;
-}
-
-.board-panel-generation {
-  color: var(--muted);
-  font-size: 0.85em;
-}
-
-.board-panel-refresh-mode {
-  color: var(--muted);
-  font-size: 0.75em;
-}
-
-.board-panel-refresh-mode-stale {
-  color: var(--signal-gold);
-}
-
-.board-panel-refresh {
-  margin-left: auto;
-}
-
-.board-panel-error {
-  color: var(--danger-text, var(--danger));
-  font-size: 0.9em;
-  overflow-wrap: anywhere;
-}
-
-.board-panel-loading,
-.board-panel-empty {
-  color: var(--muted);
-  font-size: 0.9em;
-  padding: 8px 0;
-}
-
-.board-panel-entries {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.board-panel-entry {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 8px;
-  transition: border-color 0.3s ease;
-}
-
-.board-panel-entry-head {
-  align-items: baseline;
-  display: flex;
-  gap: 8px;
-}
-
-.board-panel-entry-key {
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.board-panel-entry-revision {
-  color: var(--muted);
-  font-size: 0.85em;
-  margin-left: auto;
-  white-space: nowrap;
-}
-
-.board-panel-entry-value {
-  margin: 6px 0;
-  max-height: 200px;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: 0.85em;
-}
-
-.board-panel-entry-meta {
-  color: var(--muted);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 0.8em;
-}
-
-.board-panel-entry-stamp {
-  font-style: italic;
-  overflow-wrap: anywhere;
-}
-
-/* Board visibility upgrade (2026-07-27): live poll + change highlighting. */
-.board-panel-last-write {
-  color: var(--muted);
-  font-size: 0.85em;
-  white-space: nowrap;
-}
-
-.board-panel-entry-changed {
-  /* --signal-blue is defined by every theme; the previous --accent token was
-     a phantom that fell back to the base border color, leaving the highlight
-     invisible (review 2026-07-27, High). */
-  border-color: var(--signal-blue);
-}
-
-.board-panel-entry-changed-badge {
-  background: var(--accent-blue-bg);
-  border: 1px solid var(--accent-blue-border);
-  border-radius: 4px;
-  color: var(--ink);
-  font-size: 0.7em;
-  padding: 1px 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }

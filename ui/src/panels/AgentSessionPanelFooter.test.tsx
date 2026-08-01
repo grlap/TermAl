@@ -28,7 +28,10 @@ import {
 } from "./AgentSessionPanel";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { RunningIndicator } from "./session-activity-cards";
-import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
+import {
+  MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
+  notifyMessageStackScrollWrite,
+} from "../message-stack-scroll-sync";
 import { MessageCard } from "../message-cards";
 import {
   resetSessionStoreForTesting,
@@ -2529,10 +2532,13 @@ describe("AgentSessionPanelFooter", () => {
 
     try {
       ({ unmount } = render(
-        renderFooter({
-          onSend,
-          session: makeSession("session-a"),
-        }),
+        <div className="workspace-pane">
+          <div className="message-stack" />
+          {renderFooter({
+            onSend,
+            session: makeSession("session-a"),
+          })}
+        </div>,
       ));
       drainAnimationFrames();
 
@@ -2540,6 +2546,20 @@ describe("AgentSessionPanelFooter", () => {
       if (!(textarea instanceof HTMLTextAreaElement)) {
         throw new Error("Composer textarea not found");
       }
+      const messageStack = document.querySelector<HTMLElement>(".message-stack");
+      if (!messageStack) {
+        throw new Error("Message stack not found");
+      }
+      Object.defineProperties(messageStack, {
+        clientHeight: { configurable: true, value: 200 },
+        scrollHeight: { configurable: true, value: 1_000 },
+      });
+      messageStack.scrollTop = 800;
+      const bottomRepinRequests: Event[] = [];
+      messageStack.addEventListener(
+        MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
+        (event) => bottomRepinRequests.push(event),
+      );
 
       act(() => {
         fireEvent.change(textarea, {
@@ -2549,6 +2569,7 @@ describe("AgentSessionPanelFooter", () => {
       drainAnimationFrames();
       expect(textarea.style.height).toBe("96px");
 
+      bottomRepinRequests.length = 0;
       act(() => {
         fireEvent.click(screen.getByRole("button", { name: "Send" }));
       });
@@ -2560,6 +2581,7 @@ describe("AgentSessionPanelFooter", () => {
       );
       expect(textarea).toHaveValue("");
       expect(textarea.style.height).toBe("40px");
+      expect(bottomRepinRequests).not.toHaveLength(0);
       expect(sawZeroHeightProbe).toBe(false);
       expect(textarea.style.transition).not.toBe("none");
     } finally {

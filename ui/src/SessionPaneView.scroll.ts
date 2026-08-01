@@ -25,6 +25,7 @@ import {
   pruneSessionFlags,
 } from "./app-utils";
 import {
+  MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
   notifyMessageStackScrollWrite,
   type MessageStackScrollWriteKind,
@@ -387,6 +388,98 @@ export function useSessionPaneScrollState({
     setNewResponseIndicator(scrollStateKey, false);
     return true;
   }
+
+  useLayoutEffect(() => {
+    const node = messageStackRef.current;
+    if (
+      !node ||
+      !isActive ||
+      !isSessionTabActive ||
+      paneViewMode !== "session"
+    ) {
+      return;
+    }
+
+    // Composer measurement may need an immediate, same-task correction before
+    // paint. It requests that correction instead of writing scrollTop itself;
+    // this handler remains the authority and rejects the request once explicit
+    // tail-follow intent has been released by user navigation.
+    const handleBottomRepinRequest = () => {
+      if (
+        currentScrollStateKeyRef.current !== scrollStateKey ||
+        !getTailFollowIntent()
+      ) {
+        return;
+      }
+      scrollToLatestMessage("auto", true);
+    };
+
+    node.addEventListener(
+      MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
+      handleBottomRepinRequest,
+    );
+    return () => {
+      node.removeEventListener(
+        MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
+        handleBottomRepinRequest,
+      );
+    };
+  }, [
+    activeSession?.id,
+    hasUnloadedNewerHistory,
+    isActive,
+    isSessionTabActive,
+    paneViewMode,
+    scrollStateKey,
+  ]);
+
+  useLayoutEffect(() => {
+    const node = messageStackRef.current;
+    const ResizeObserverCtor = globalThis.ResizeObserver;
+    if (
+      !node ||
+      typeof ResizeObserverCtor !== "function" ||
+      !isActive ||
+      !isSessionTabActive ||
+      paneViewMode !== "session"
+    ) {
+      return;
+    }
+
+    // The composer is a sibling of the scroll container. Its animated growth
+    // and shrink therefore change the message stack's own client height without
+    // changing transcript content. ResizeObserver fires for every rendered
+    // transition step; when explicit tail-follow is still active, route each
+    // correction through the existing single scroll authority so the live tail
+    // remains exactly pinned without introducing another scroll writer.
+    const resizeObserver = new ResizeObserverCtor(() => {
+      if (
+        currentScrollStateKeyRef.current !== scrollStateKey ||
+        !getTailFollowIntent()
+      ) {
+        return;
+      }
+
+      // A viewport resize does not change transcript residency. Use the pane's
+      // ordinary exact-bottom writer without classifying this as `bottom_pin`
+      // (which remounts the virtualizer's bottom range) or `bottom_follow`
+      // (which starts a smooth-scroll cooldown). Repeating either lifecycle on
+      // every textarea transition frame made the rail and transcript oscillate.
+      scrollToLatestMessage("auto", true);
+    });
+    resizeObserver.observe(node);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [
+    activeSession?.id,
+    hasUnloadedNewerHistory,
+    isActive,
+    isSessionTabActive,
+    paneViewMode,
+    scrollStateKey,
+  ]);
 
   function scrollMessageStackByDelta(
     deltaY: number,

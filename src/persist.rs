@@ -1929,22 +1929,33 @@ fn load_persisted_session_tail(
             messages.len()
         ));
     }
-    // A transcript whose local rows do not cover the range implied by
-    // `message_count` is a HYDRATION state, not corruption, and it must never
-    // prevent startup. Remote-proxy sessions are legitimately in this shape:
-    // the transcript lives on the remote host, so `message_count` is known
-    // from proxy metadata while zero `messages` rows exist locally. This
-    // previously `bail!`ed, and the error propagated through `load_state` ->
-    // `AppState::new_with_paths` -> `main`, so a single such session made
-    // TermAl refuse to boot with no way for the user to reach any session.
+    // A REMOTE-PROXY transcript whose local rows do not cover the range
+    // implied by `message_count` is a hydration state, not corruption: the
+    // transcript lives on the remote host, so its metadata can legitimately
+    // know a count while zero `messages` rows exist locally.
     //
-    // Degrade that one session to "not locally hydrated" and keep booting. No
-    // data is discarded: the rows that do exist stay on disk and the session
-    // rehydrates on demand. Crucially `message_start_index` becomes
-    // `total_message_count` rather than 0, so the empty window sits at the end
-    // of the transcript and `messages_loaded` stays false — an empty resident
-    // window must never be reported as a fully loaded transcript.
+    // A LOCAL session in the same shape must be quarantined instead. In
+    // particular, a v1 transcript migration can roll back one session while
+    // the outer schema migration advances to v2. Its legacy row still holds
+    // the only embedded transcript copy, but there are no normalized rows.
+    // Treating that as ordinary hydration clears the embedded messages in
+    // memory and lets the next persist overwrite the recovery copy. Return an
+    // error before mutating `record`; the row-level loader records the session
+    // in the runtime quarantine, and full persistence preserves its untouched
+    // row. The same local/remote distinction also fails safe for normalized
+    // local rows lost or damaged after migration.
     if let Some(reason) = unusable_tail {
+        let is_remote_proxy = validate_remote_proxy_identity(
+            record.remote_id.as_deref(),
+            record.remote_session_id.as_deref(),
+        )?
+        .is_some();
+        if !is_remote_proxy {
+            bail!(
+                "local session `{}` transcript tail is inconsistent ({reason}); preserving its persisted row for recovery",
+                record.session.id
+            );
+        }
         if !messages.is_empty() {
             // A partial tail means the rows themselves disagree with the
             // metadata, which is worth surfacing. Zero rows is the ordinary
