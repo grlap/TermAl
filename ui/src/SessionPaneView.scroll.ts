@@ -75,6 +75,51 @@ type PaneScrollPosition = {
   shouldStick: boolean;
 };
 
+type LatestTurnOutputState = {
+  hasAgentOutput: boolean;
+  promptMessageId: string | null;
+};
+
+export function resolveLatestTurnOutputState(
+  messages: readonly Message[],
+): LatestTurnOutputState {
+  let hasAgentOutput = false;
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message) {
+      continue;
+    }
+    if (message.author === "you") {
+      return {
+        hasAgentOutput,
+        promptMessageId: message.id,
+      };
+    }
+    if (message.author === "assistant") {
+      hasAgentOutput = true;
+    }
+  }
+
+  return {
+    hasAgentOutput,
+    promptMessageId: null,
+  };
+}
+
+export function isFirstAgentOutputForObservedPrompt(
+  previous: LatestTurnOutputState | undefined,
+  current: LatestTurnOutputState,
+) {
+  return (
+    previous !== undefined &&
+    previous.promptMessageId !== null &&
+    previous.promptMessageId === current.promptMessageId &&
+    !previous.hasAgentOutput &&
+    current.hasAgentOutput
+  );
+}
+
 type UseSessionPaneScrollStateParams = {
   activeSession: Session | null;
   activeSessionSearchMatch: SessionSearchMatch | null;
@@ -140,10 +185,14 @@ export function useSessionPaneScrollState({
   const previousShowWaitingIndicatorByKeyRef = useRef<
     Record<string, boolean | undefined>
   >({});
+  const latestTurnOutputByKeyRef = useRef<
+    Record<string, LatestTurnOutputState | undefined>
+  >({});
   const paneProgrammaticBottomFollowRef = useRef<{
     key: string | null;
     until: number;
   }>({ key: null, until: Number.NEGATIVE_INFINITY });
+  const liveFlowActiveRef = useRef(false);
   const paneTailFollowUserEscapeByKeyRef = useRef<
     Record<string, true | undefined>
   >({});
@@ -164,6 +213,7 @@ export function useSessionPaneScrollState({
     Record<string, true | undefined>
   >({});
   currentScrollStateKeyRef.current = scrollStateKey;
+  liveFlowActiveRef.current = isSending || showWaitingIndicator;
 
   useEffect(() => {
     // Leaving a pane/session must not let its unresolved boundary demand block
@@ -411,6 +461,16 @@ export function useSessionPaneScrollState({
       ) {
         return;
       }
+      // A settled smooth follow already re-reads the bottom geometry on each
+      // animation frame. A synchronous `auto` write here would cancel that
+      // native animation and make composer/card growth appear as a snap.
+      if (isPaneProgrammaticBottomFollowActive()) {
+        return;
+      }
+      if (liveFlowActiveRef.current) {
+        scheduleSmoothLiveTailFollow();
+        return;
+      }
       scrollToLatestMessage("auto", true);
     };
 
@@ -428,9 +488,11 @@ export function useSessionPaneScrollState({
     activeSession?.id,
     hasUnloadedNewerHistory,
     isActive,
+    isSending,
     isSessionTabActive,
     paneViewMode,
     scrollStateKey,
+    showWaitingIndicator,
   ]);
 
   useLayoutEffect(() => {
@@ -439,6 +501,7 @@ export function useSessionPaneScrollState({
     if (
       !node ||
       typeof ResizeObserverCtor !== "function" ||
+      hasUnloadedNewerHistory ||
       !isActive ||
       !isSessionTabActive ||
       paneViewMode !== "session"
@@ -446,34 +509,155 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    // The composer is a sibling of the scroll container. Its animated growth
-    // and shrink therefore change the message stack's own client height without
-    // changing transcript content. ResizeObserver fires for every rendered
-    // transition step; when explicit tail-follow is still active, route each
-    // correction through the existing single scroll authority so the live tail
-    // remains exactly pinned without introducing another scroll writer.
-    const resizeObserver = new ResizeObserverCtor(() => {
+    let conversationPage: HTMLElement | null = null;
+    let previousContentHeight = 0;
+    let previousViewportHeight = node.clientHeight;
+    let resizeObserver: ResizeObserver;
+    let pageVisibilityObserver: MutationObserver | null = null;
+
+    const bindActiveConversationPage = () => {
+      const nextConversationPage = node.querySelector(
+        ".session-conversation-page:not([hidden]), .empty-state:not([hidden])",
+      );
+      const nextPage =
+        nextConversationPage instanceof HTMLElement
+          ? nextConversationPage
+          : null;
+      if (nextPage === conversationPage) {
+        return false;
+      }
+      if (conversationPage) {
+        resizeObserver.unobserve(conversationPage);
+      }
+      pageVisibilityObserver?.disconnect();
+      conversationPage = nextPage;
+      previousContentHeight = conversationPage?.getBoundingClientRect().height ?? 0;
+      if (conversationPage) {
+        resizeObserver.observe(conversationPage);
+        pageVisibilityObserver?.observe(conversationPage, {
+          attributeFilter: ["hidden"],
+          attributes: true,
+        });
+      }
+      return true;
+    };
+
+    const repinAfterRelevantResize = () => {
+      const activePageChanged = bindActiveConversationPage();
+      const nextContentHeight =
+        conversationPage?.getBoundingClientRect().height ?? 0;
+      const nextViewportHeight = node.clientHeight;
+      const contentChanged =
+        Math.abs(nextContentHeight - previousContentHeight) > 0.5;
+      const viewportChanged =
+        Math.abs(nextViewportHeight - previousViewportHeight) > 0.5;
+      previousContentHeight = nextContentHeight;
+      previousViewportHeight = nextViewportHeight;
+      if (!activePageChanged && !contentChanged && !viewportChanged) {
+        return;
+      }
       if (
         currentScrollStateKeyRef.current !== scrollStateKey ||
         !getTailFollowIntent()
       ) {
         return;
       }
-
-      // A viewport resize does not change transcript residency. Use the pane's
-      // ordinary exact-bottom writer without classifying this as `bottom_pin`
-      // (which remounts the virtualizer's bottom range) or `bottom_follow`
-      // (which starts a smooth-scroll cooldown). Repeating either lifecycle on
-      // every textarea transition frame made the rail and transcript oscillate.
+      // New command cards often gain their measured height after the smooth
+      // bottom-follow has started. The settled loop will target that new
+      // bottom on its next frame; a second synchronous writer here would
+      // interrupt the animation and produce the visible up/down jump.
+      if (isPaneProgrammaticBottomFollowActive()) {
+        return;
+      }
+      if (liveFlowActiveRef.current) {
+        scheduleSmoothLiveTailFollow();
+        return;
+      }
+      // ResizeObserver callbacks run before paint. Correct synchronously through
+      // the pane's single authority so a pinned user never sees the old top
+      // followed by a second-frame snap to the new bottom.
       scrollToLatestMessage("auto", true);
+    };
+
+    resizeObserver = new ResizeObserverCtor(() => repinAfterRelevantResize());
+
+    const MutationObserverCtor = globalThis.MutationObserver;
+    const rootChildObserver =
+      typeof MutationObserverCtor === "function"
+        ? new MutationObserverCtor(() => repinAfterRelevantResize())
+        : null;
+    pageVisibilityObserver =
+      typeof MutationObserverCtor === "function"
+        ? new MutationObserverCtor(() => repinAfterRelevantResize())
+        : null;
+    bindActiveConversationPage();
+
+    // The composer is a sibling of the message stack. Observe the stable pane
+    // frame rather than the stack itself: pane/window resizing changes this
+    // frame, while textarea growth is handled by the explicit repin request and
+    // does not generate a second correction for each transition frame.
+    const paneFrame = paneRootRef.current;
+    if (paneFrame && paneFrame !== node) {
+      resizeObserver.observe(paneFrame);
+    }
+
+    // Page replacement is structural: the active conversation page is a direct
+    // message-stack child. Observe only that boundary plus the current page's
+    // `hidden` attribute. A subtree observer runs for every streamed text-node
+    // mutation and turns token delivery into repeated synchronous layout reads.
+    rootChildObserver?.observe(node, {
+      childList: true,
     });
-    resizeObserver.observe(node);
+    const handleWindowResize = () => repinAfterRelevantResize();
+    window.addEventListener("resize", handleWindowResize);
 
     return () => {
       resizeObserver.disconnect();
+      rootChildObserver?.disconnect();
+      pageVisibilityObserver?.disconnect();
+      window.removeEventListener("resize", handleWindowResize);
     };
   }, [
     activeSession?.id,
+    hasUnloadedNewerHistory,
+    isActive,
+    isSending,
+    isSessionTabActive,
+    paneViewMode,
+    scrollStateKey,
+    showWaitingIndicator,
+  ]);
+
+  useLayoutEffect(() => {
+    const currentTurnOutput = resolveLatestTurnOutputState(
+      activeSession?.messages ?? [],
+    );
+    const previousTurnOutput = latestTurnOutputByKeyRef.current[scrollStateKey];
+    latestTurnOutputByKeyRef.current[scrollStateKey] = currentTurnOutput;
+
+    const receivedFirstOutputForPrompt = isFirstAgentOutputForObservedPrompt(
+      previousTurnOutput,
+      currentTurnOutput,
+    );
+    if (
+      !receivedFirstOutputForPrompt ||
+      hasUnloadedNewerHistory ||
+      !isActive ||
+      !isSessionTabActive ||
+      paneViewMode !== "session" ||
+      !getTailFollowIntent()
+    ) {
+      return;
+    }
+
+    // A new agent card is inserted immediately above the in-flow LIVE TURN
+    // tail. Enter bottom-follow mode before ResizeObserver delivery so neither
+    // content measurement nor composer reflow can issue a competing `auto`
+    // correction. The settled loop then glides to every measured bottom instead
+    // of first snapping to the estimate and correcting again.
+    return scheduleSmoothLiveTailFollow();
+  }, [
+    activeSession?.messages,
     hasUnloadedNewerHistory,
     isActive,
     isSessionTabActive,
@@ -543,8 +727,7 @@ export function useSessionPaneScrollState({
       return undefined;
     }
     if (getTailFollowIntent() || isMessageStackNearBottom()) {
-      scrollToLatestMessage("smooth", false, "bottom_follow");
-      return undefined;
+      return scheduleSmoothLiveTailFollow();
     }
 
     return scheduleSettledScrollToBottom("auto", {
@@ -882,6 +1065,19 @@ export function useSessionPaneScrollState({
     return cancel;
   }
 
+  function scheduleSmoothLiveTailFollow() {
+    // Mark the entire live-flow transition before its first animation frame.
+    // Composer measurements and ResizeObserver delivery can run in the gap
+    // between the React commit and that frame; they must join this settled
+    // animation instead of issuing an intervening synchronous correction.
+    beginPaneProgrammaticBottomFollow();
+    return scheduleSettledScrollToBottom("smooth", {
+      maxAttempts: 24,
+      minAttempts: 4,
+      scrollKind: "bottom_follow",
+    });
+  }
+
   function cancelSettledScrollToBottom() {
     const cancel = settledScrollToBottomCancelRef.current;
     settledScrollToBottomCancelRef.current = null;
@@ -1123,12 +1319,7 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    return scheduleSettledScrollToBottom("auto", {
-      maxAttempts: 24,
-      minAttempts: 4,
-      preferVirtualizedBoundary: true,
-      scrollKind: "bottom_follow",
-    });
+    return scheduleSmoothLiveTailFollow();
   }, [
     activeSession?.id,
     activeSession?.hasNewerHistory,
@@ -1271,11 +1462,7 @@ export function useSessionPaneScrollState({
         paneScrollPositions[scrollStateKey]?.shouldStick === true
       ) {
         setNewResponseIndicator(scrollStateKey, false);
-        return scheduleSettledScrollToBottom("smooth", {
-          maxAttempts: 24,
-          minAttempts: 4,
-          scrollKind: "bottom_follow",
-        });
+        return scheduleSmoothLiveTailFollow();
       }
       setNewResponseIndicator(scrollStateKey, true, "activity");
       return;
@@ -1308,11 +1495,7 @@ export function useSessionPaneScrollState({
     }
 
     setNewResponseIndicator(scrollStateKey, false);
-    return scheduleSettledScrollToBottom("smooth", {
-      maxAttempts: 24,
-      minAttempts: 4,
-      scrollKind: "bottom_follow",
-    });
+    return scheduleSmoothLiveTailFollow();
   }, [
     activeSession?.id,
     deferContentScrollEffects,

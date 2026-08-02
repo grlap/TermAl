@@ -501,7 +501,7 @@ describe("App live state — reconnect", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
@@ -864,7 +864,7 @@ describe("App live state — reconnect", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       expect(stateRequestCount).toBe(0);
 
@@ -917,7 +917,7 @@ describe("App live state — reconnect", () => {
         screen.getAllByText("Recovered queued reconnect session"),
       ).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -1130,7 +1130,7 @@ describe("App live state — reconnect", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
@@ -1223,7 +1223,7 @@ describe("App live state — reconnect", () => {
       ).toHaveLength(2);
       expect(screen.queryByText("Still syncing.")).not.toBeInTheDocument();
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -1293,7 +1293,7 @@ describe("App live state — reconnect", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      await screen.findByText("Waiting for the next chunk of output...");
+      await screen.findByText("Working on the current turn...");
       act(() => {
         eventSource.dispatchError();
       });
@@ -1331,7 +1331,7 @@ describe("App live state — reconnect", () => {
         expect(screen.getAllByText("Here.")).toHaveLength(2);
       });
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
       expect(
         fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
@@ -2706,7 +2706,7 @@ describe("App live state — reconnect", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      await screen.findByText("Waiting for the next chunk of output...");
+      await screen.findByText("Working on the current turn...");
       act(() => {
         eventSource.dispatchError();
       });
@@ -2723,7 +2723,7 @@ describe("App live state — reconnect", () => {
         expect(screen.getAllByText("Here.")).toHaveLength(2);
       });
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       scrollIntoViewSpy.mockRestore();
@@ -2834,7 +2834,7 @@ describe("App live state — reconnect", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
       stateRequestCount = 0;
@@ -2872,7 +2872,7 @@ describe("App live state — reconnect", () => {
       ).toBeNull();
       expect(screen.getAllByText("Partial output.")).toHaveLength(2);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -2985,7 +2985,7 @@ describe("App live state — reconnect", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
       stateRequestCount = 0;
@@ -3036,7 +3036,7 @@ describe("App live state — reconnect", () => {
         screen.getAllByText("Here after stale reconnect state."),
       ).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();

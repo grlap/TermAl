@@ -18,6 +18,7 @@ export function useComposerAutoResize(activeSessionId: string | null) {
   const composerLastAppliedOverflowYRef = useRef<"auto" | "hidden" | null>(null);
   const composerSizingStateRef = useRef<{
     borderHeight: number;
+    heightTransitionEnabled: boolean;
     minHeight: number;
     panelElement: HTMLElement | null;
     panelSlotElement: HTMLElement | null;
@@ -122,6 +123,9 @@ export function useComposerAutoResize(activeSessionId: string | null) {
 
       composerSizingStateRef.current = {
         minHeight: parseFloat(computedStyle.minHeight) || 0,
+        heightTransitionEnabled: transitionIncludesHeight(
+          computedStyle.transitionProperty,
+        ),
         borderHeight:
           (parseFloat(computedStyle.borderTopWidth) || 0) +
           (parseFloat(computedStyle.borderBottomWidth) || 0),
@@ -160,6 +164,9 @@ export function useComposerAutoResize(activeSessionId: string | null) {
       textarea.style.transition === "none"
         ? pendingPreviousInlineTransition
         : textarea.style.transition;
+    const heightTransitionEnabled =
+      sizingState.heightTransitionEnabled ||
+      transitionIncludesHeight(previousInlineTransition);
     if (
       !shouldAllowShrink &&
       pendingPreviousInlineTransition !== null &&
@@ -211,12 +218,16 @@ export function useComposerAutoResize(activeSessionId: string | null) {
     const nextOverflowY: "auto" | "hidden" =
       contentHeight > maxHeight + 1 ? "auto" : "hidden";
 
+    const didHeightChange =
+      previousMeasuredHeight == null ||
+      Math.abs(previousMeasuredHeight - nextHeight) > 0.5;
     if (shouldAllowShrink) {
       const hasPreviousMeasuredHeight = previousMeasuredHeight != null;
-      const heightChanged =
-        !hasPreviousMeasuredHeight ||
-        Math.abs(previousMeasuredHeight - nextHeight) > 0.5;
-      if (hasPreviousMeasuredHeight && heightChanged) {
+      if (
+        hasPreviousMeasuredHeight &&
+        didHeightChange &&
+        heightTransitionEnabled
+      ) {
         textarea.style.height = `${previousMeasuredHeight}px`;
         void textarea.offsetHeight;
         if (animateHeight) {
@@ -224,6 +235,13 @@ export function useComposerAutoResize(activeSessionId: string | null) {
         } else {
           scheduleComposerTransitionRestore(textarea, previousInlineTransition);
         }
+      } else if (hasPreviousMeasuredHeight && didHeightChange) {
+        // Height changes are deliberately immediate. Animating the composer
+        // resized its transcript sibling over many frames, which woke both the
+        // scroll and minimap observers on every frame and made ordinary typing
+        // laggy. One final height plus one same-task re-pin keeps the invariant
+        // without a per-frame correction loop.
+        restoreComposerInputTransition(textarea, previousInlineTransition);
       } else if (hasPreviousMeasuredHeight && forceRefreshMetrics) {
         textarea.style.height = `${previousMeasuredHeight}px`;
         restoreComposerInputTransition(textarea, previousInlineTransition);
@@ -254,7 +272,7 @@ export function useComposerAutoResize(activeSessionId: string | null) {
     // the pane's max scroll. Ask SessionPaneView's single scroll authority to
     // decide synchronously from explicit tail-follow intent whether a correction
     // is needed, then update saved position plus virtualizer bookkeeping.
-    if (transcriptPane) {
+    if (transcriptPane && didHeightChange) {
       requestMessageStackBottomRepin(transcriptPane);
     }
     composerLastMeasuredDraftLengthRef.current = currentDraftLength;
@@ -347,4 +365,13 @@ export function useComposerAutoResize(activeSessionId: string | null) {
     resizeComposerInput,
     scheduleComposerResize,
   };
+}
+
+function transitionIncludesHeight(transitionProperty: string) {
+  return transitionProperty
+    .split(",")
+    .some((property) => {
+      const transitionedProperty = property.trim().split(/\s+/, 1)[0];
+      return transitionedProperty === "height" || transitionedProperty === "all";
+    });
 }

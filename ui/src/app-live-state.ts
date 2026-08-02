@@ -58,6 +58,9 @@ import {
   upsertSessionStoreSession,
 } from "./session-store";
 import {
+  noteSessionTailAdopted,
+} from "./session-hydration-performance";
+import {
   SESSION_HISTORY_PAGE_MESSAGE_COUNT,
   SESSION_TAIL_WINDOW_MESSAGE_COUNT,
 } from "./session-tail-policy";
@@ -276,6 +279,8 @@ export function useAppLiveState(
   } = preferenceSetters;
 
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
+  const activeSessionIdRef = useRef(activeSession?.id ?? null);
+  activeSessionIdRef.current = activeSession?.id ?? null;
   const hydratedSessionIdsRef = useRef<Set<string>>(new Set());
   // Records sessions whose current browser state already includes an
   // authoritative recent tail. A partial transcript can remain
@@ -1002,6 +1007,13 @@ export function useAppLiveState(
       lastSeenServerInstanceIdRef.current = serverInstanceId;
     }
     sessionsRef.current = nextSessions;
+    if (activeSessionIdRef.current === session.id) {
+      // Attach an explicit adoption generation to the exact session object that
+      // enters the record store. The transcript commit consumes that token;
+      // message sampling cannot collide and an async request cannot use a stale
+      // active-session value captured by an earlier React render.
+      noteSessionTailAdopted(reconciledHydratedSession);
+    }
     upsertSessionSlice(reconciledHydratedSession);
     flushAndCancelPendingSessionRender(nextSessions);
     setSessions(nextSessions);

@@ -346,7 +346,7 @@ fn coordination_cleanup_pass_completes_available_scopes_and_retains_retryable_fa
     inner
         .pending_coordination_scope_deletions
         .insert(completed_scope.to_owned());
-    let inner = Arc::new(Mutex::new(inner));
+    let inner = Arc::new(StateMutex::new(inner));
 
     let pass = process_pending_coordination_scope_deletions(&inner, |scope_project_id| {
         if scope_project_id == retryable_scope {
@@ -383,7 +383,7 @@ fn coordination_cleanup_pass_retains_non_retryable_failures_without_blocking_pri
     inner
         .pending_coordination_scope_deletions
         .insert(scope_project_id.to_owned());
-    let inner = Arc::new(Mutex::new(inner));
+    let inner = Arc::new(StateMutex::new(inner));
 
     let pass = process_pending_coordination_scope_deletions(&inner, |_| {
         Err(anyhow!("coordination database is corrupt"))
@@ -440,7 +440,7 @@ fn coordination_cleanup_pass_handles_multiple_scopes_and_a_large_cascade_outside
     inner
         .pending_coordination_scope_deletions
         .insert("project-second-cleanup".to_owned());
-    let inner = Arc::new(Mutex::new(inner));
+    let inner = Arc::new(StateMutex::new(inner));
 
     let pass = process_pending_coordination_scope_deletions(&inner, |scope_project_id| {
         store.delete_scope_for_project_lifecycle(scope_project_id)
@@ -1640,7 +1640,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         )),
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
         stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
-        inner: Arc::new(Mutex::new(StateInner::new())),
+        inner: Arc::new(StateMutex::new(StateInner::new())),
     };
     (state, persist_rx)
 }
@@ -2494,6 +2494,7 @@ fn make_persist_test_delegation(
         started_at: Some(stamp_now()),
         completed_at: None,
         result: None,
+        result_parser_version: 0,
     }
 }
 

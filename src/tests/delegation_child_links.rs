@@ -21,6 +21,7 @@ fn test_delegation_record(
         started_at: None,
         completed_at: None,
         result: None,
+        result_parser_version: 0,
     }
 }
 

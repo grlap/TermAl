@@ -203,7 +203,7 @@ struct CoordinationCleanupPass {
 }
 
 fn process_pending_coordination_scope_deletions<F>(
-    inner: &Arc<Mutex<StateInner>>,
+    inner: &Arc<StateMutex<StateInner>>,
     mut delete_scope: F,
 ) -> CoordinationCleanupPass
 where
@@ -259,7 +259,7 @@ where
 
 fn run_coordination_cleanup_worker(
     cleanup_rx: mpsc::Receiver<CoordinationCleanupRequest>,
-    inner: Arc<Mutex<StateInner>>,
+    inner: Arc<StateMutex<StateInner>>,
     coordination_board_store: Arc<CoordinationBoardStore>,
     persist_tx: mpsc::Sender<PersistRequest>,
 ) {
@@ -379,7 +379,7 @@ impl AppState {
         // literal further below) so we can share an `Arc` clone with the
         // background persist thread. The thread briefly re-locks it on
         // each tick to collect the diff; see `StateInner::collect_persist_delta`.
-        let inner_arc = Arc::new(Mutex::new(inner));
+        let inner_arc = Arc::new(StateMutex::new(inner));
         let inner_for_persist = Arc::clone(&inner_arc);
         let inner_for_coordination_cleanup = Arc::clone(&inner_arc);
         let coordination_board_store_for_persist = Arc::clone(&coordination_board_store);

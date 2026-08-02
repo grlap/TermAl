@@ -3,6 +3,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -73,6 +74,11 @@ import {
 } from "./useInitialActiveTranscriptMessages";
 import { MessageMetaMarkerMenuProvider } from "../message-cards";
 import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
+import {
+  cancelPendingSessionTranscriptCommit,
+  noteSessionTranscriptCommitted,
+  sessionTranscriptCommitToken,
+} from "../session-hydration-performance";
 import type {
   PendingPrompt,
   ConversationMarker,
@@ -515,6 +521,32 @@ const SessionConversationPage = memo(function SessionConversationPage({
     scrollContainerRef,
     sessionId: session.id,
   });
+  const transcriptCommitToken = sessionTranscriptCommitToken(session);
+  useLayoutEffect(() => {
+    if (
+      isActive &&
+      transcriptCommitToken !== null &&
+      visibleMessages.length > 0
+    ) {
+      noteSessionTranscriptCommitted(
+        session.id,
+        transcriptCommitToken,
+        visibleMessages.length,
+      );
+    }
+  }, [
+    isActive,
+    session.id,
+    transcriptCommitToken,
+    visibleMessages.length,
+  ]);
+  useEffect(() => {
+    if (!isActive) {
+      cancelPendingSessionTranscriptCommit(session.id);
+      return;
+    }
+    return () => cancelPendingSessionTranscriptCommit(session.id);
+  }, [isActive, session.id]);
   const overviewMessages = visibleMessages;
   // Pending prompts are the live tail's queued follow-ups, NOT bulk history — keep
   // them undeferred. The message list defers its bulk for streaming perf but always
@@ -691,6 +723,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
     markersByMessageId,
     onCreateConversationMarker: handleCreateConversationMarker,
     onDeleteConversationMarker,
+    onPinResponseBoardMessage: stableOnPinResponseBoardMessage,
     onSetMarkerPanelVisible: setMarkerPanelVisibilityOverride,
     scrollContainerRef,
     sessionId: session.id,
@@ -998,16 +1031,6 @@ const SessionConversationPage = memo(function SessionConversationPage({
           >
             {rendered}
           </MessageMetaMarkerMenuProvider>
-          <button
-            type="button"
-            className="response-board-pin-message"
-            onClick={(event) => {
-              event.stopPropagation();
-              stableOnPinResponseBoardMessage(session.id, message.id);
-            }}
-          >
-            Pin to board
-          </button>
         </div>
       );
     },
@@ -1021,7 +1044,6 @@ const SessionConversationPage = memo(function SessionConversationPage({
       pendingCreatedMarkers,
       renderMessageCard,
       session.id,
-      stableOnPinResponseBoardMessage,
     ],
   );
 
@@ -1161,6 +1183,7 @@ const SessionConversationPage = memo(function SessionConversationPage({
             {conversationOverview.shouldRenderRail ? (
               <ConversationOverviewRail
                 heightPx={conversationOverview.railHeightPx}
+                portalTarget={conversationOverview.railPortalTarget}
                 rightPx={conversationOverview.railRightPx}
                 topPx={conversationOverview.railTopPx}
                 overview={conversationOverview.overview}

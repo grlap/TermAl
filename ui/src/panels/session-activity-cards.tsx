@@ -8,11 +8,11 @@
 //   - `RunningIndicator` — the activity card that reports the
 //     agent's live turn status. Renders a pulsing dot, the agent
 //     name ("Claude is working" / "Codex is working" etc.), and
-//     either the "Waiting for the next chunk of output..." /
-//     "Executing a command..." sub-line. When `lastPrompt` is
-//     present, attaches a hover tooltip that echoes the prompt or
-//     command. Emits `role="status"` + `aria-live="polite"`. The
-//     command branch is gated on `lastPrompt?.trim().startsWith("/")`.
+//     latest user prompt as the turn context. When `lastPrompt` is
+//     present, attaches a hover/focus tooltip with the complete prompt.
+//     Agent commands stay in transcript command cards and never replace
+//     the user intent summarized here. Emits `role="status"` +
+//     `aria-live="polite"`.
 //   - `PendingPromptCard` — the user-side queued-prompt bubble
 //     shown in the transcript while a prompt is waiting to be
 //     submitted. Reuses `<MessageMeta>` + `<MessageAttachmentList>`
@@ -36,9 +36,7 @@
 //     `./AgentSessionPanel.tsx`.
 //
 // Split out of `ui/src/panels/AgentSessionPanel.tsx`. Same class
-// names, same copy ("Live turn", "Executing a command...",
-// "Waiting for the next chunk of output...", "Cancel queued
-// prompt"), same memo comparator keys.
+// names and the same queued-prompt behavior.
 
 import { memo } from "react";
 import {
@@ -76,38 +74,29 @@ export function RunningIndicator({
   activity?: SessionLiveActivity | null;
   lastPrompt: string | null;
 }) {
-  const command = activity?.command?.trim() || null;
   const prompt = activity?.prompt.trim() || lastPrompt?.trim() || null;
-  const commandIsRunning =
-    Boolean(command) && activity?.commandStatus === "running";
-  const tooltipText = command ?? prompt;
+  const tooltipText = prompt;
 
   return (
     <article
       className={`activity-card activity-card-live ${tooltipText ? "has-tooltip" : ""}`}
       role="status"
       aria-live="polite"
+      tabIndex={tooltipText ? 0 : undefined}
     >
       <div className="activity-spinner" aria-hidden="true" />
       <div className="activity-card-copy">
         <div className="activity-card-heading">
           <div className="card-label">Live turn</div>
-          {command ? <span className="message-meta-tag">Agent command</span> : null}
         </div>
         <h3>{agent} is working</h3>
-        <p>
-          {command
-            ? commandIsRunning
-              ? "Executing an agent command..."
-              : "Last agent command..."
-            : "Waiting for the next chunk of output..."}
+        <p className={prompt ? "activity-card-prompt" : undefined}>
+          {prompt ?? "Working on the current turn..."}
         </p>
       </div>
       {tooltipText ? (
         <div className="activity-tooltip" role="tooltip">
-          <div className="activity-tooltip-label">
-            {command ? "Agent command" : "Current prompt"}
-          </div>
+          <div className="activity-tooltip-label">Current prompt</div>
           <p>{tooltipText}</p>
         </div>
       ) : null}

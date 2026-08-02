@@ -422,7 +422,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         )),
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
         stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
-        inner: Arc::new(Mutex::new(reloaded_inner)),
+        inner: Arc::new(StateMutex::new(reloaded_inner)),
     };
 
     let codex_created = reloaded_state

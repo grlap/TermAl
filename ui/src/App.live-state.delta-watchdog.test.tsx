@@ -441,7 +441,7 @@ describe("App live state - delta-gap core", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
       stateRequestCount = 0;
@@ -477,7 +477,7 @@ describe("App live state - delta-gap core", () => {
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Here after ignored deltas.")).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -584,7 +584,7 @@ describe("App live state - delta-gap core", () => {
 
       await openSessionByName("Codex Session");
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
       stateRequestCount = 0;
@@ -624,7 +624,7 @@ describe("App live state - delta-gap core", () => {
         screen.getAllByText("Here after duplicate messageCreated deltas."),
       ).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -874,7 +874,7 @@ describe("App live state - delta-gap core", () => {
 
         await openSessionByName("Codex Session");
         expect(
-          screen.getByText("Waiting for the next chunk of output..."),
+          screen.getByText("Working on the current turn..."),
         ).toBeInTheDocument();
         fetchMock.mockClear();
         stateRequestCount = 0;
@@ -903,7 +903,7 @@ describe("App live state - delta-gap core", () => {
           screen.getAllByText("Recovered after appliedNoOp replays."),
         ).toHaveLength(2);
         expect(
-          screen.queryByText("Waiting for the next chunk of output..."),
+          screen.queryByText("Working on the current turn..."),
         ).not.toBeInTheDocument();
       } finally {
         vi.useRealTimers();
@@ -1020,7 +1020,7 @@ describe("App live state - delta-gap core", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
       stateRequestCount = 0;
@@ -1055,7 +1055,7 @@ describe("App live state - delta-gap core", () => {
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Here after orchestrators.")).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -1414,7 +1414,7 @@ describe("App live state - delta-gap core", () => {
 
       await clickAndSettle(quietSessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
       stateRequestCount = 0;
@@ -1452,7 +1452,7 @@ describe("App live state - delta-gap core", () => {
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Recovered quiet session.")).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -1611,7 +1611,7 @@ describe("App live state - delta-gap core", () => {
 
       await clickAndSettle(quietSessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
       stateRequestCount = 0;
@@ -1684,7 +1684,7 @@ describe("App live state - delta-gap core", () => {
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Recovered quiet session.")).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -1699,7 +1699,7 @@ describe("App live state - delta-gap core", () => {
   it("watchdog-resyncs a quiet active session even before any assistant output arrives", async () => {
     // The user sent a prompt and the session went active, but the assistant's
     // first SSE delta never arrived. Without watchdog recovery the user is
-    // stuck staring at "Waiting for the next chunk of output..." forever.
+    // stuck staring at "Working on the current turn..." forever.
     // Once the staleness window elapses, the watchdog must resync — see
     // bugs.md "Watchdog ignored user-prompt turn boundaries…".
     const originalFetch = globalThis.fetch;
@@ -1798,7 +1798,7 @@ describe("App live state - delta-gap core", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
 

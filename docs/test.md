@@ -42,6 +42,7 @@ Before a code review of staged/unstaged work:
 ```bash
 cargo check
 cd ui && npx tsc --noEmit
+cd .. && node --test scripts/review-freeze-fingerprint.test.mjs scripts/vitest-resource-preflight.test.mjs
 ```
 
 If either command reports errors, stop and fix those first. Warnings can be
@@ -65,6 +66,12 @@ through to `cargo test`, for example:
 ```bash
 scripts/test-rust.sh mailbox_store_tests
 ```
+
+The review-integrity helper tests run on Linux, macOS, and Windows in CI. The
+Vitest resource preflight itself uses three fixed CPU samples and the median,
+so one scheduler spike does not reject a gate while sustained starvation still
+fails before frontend tests start. Windows reports process CPU availability
+without presenting its unsupported load-average value as real system load.
 
 ## Backend Testing Guidelines
 

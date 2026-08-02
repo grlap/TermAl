@@ -131,7 +131,7 @@ fn delegation_wait_all_queues_consolidated_parent_resume_after_children_finish()
     finish_delegation_child_with_assistant_text(
         &state,
         &first.delegation.child_session_id,
-        "## Result\n\nStatus: completed\n\nSummary:\nBackend side is clean.\n\nFindings:\n- High src/delegations.rs:1413 - Resume prompt drops child findings.\n\nNotes:\n- Backend wait path inspected.",
+        "## Result\n\nStatus: completed\n\n### Summary\nBackend side is clean.\n\n### Findings: Code Review — 2026-08-02\n\n#### Changes Reviewed\n- Backend wait flow.\n\n#### Actionable\n\n| Severity | Location | Finding |\n|---|---|---|\n| High | [src/delegations.rs:1413](/repo/src/delegations.rs:1413) | Resume prompt drops child findings. |\n\n#### Informational\n- No other issues.\n\n### Notes\n- Backend wait path inspected.",
     );
     state
         .refresh_delegation_for_child_session(&first.delegation.child_session_id)

@@ -94,7 +94,15 @@ describe("AgentSessionPanel response-board actions", () => {
     });
     const { container } = render(renderPanel());
 
-    fireEvent.click(screen.getByRole("button", { name: "Pin to board" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Agent, open marker actions" }),
+    );
+    const messageActions = screen.getByRole("menu", {
+      name: "Conversation marker actions",
+    });
+    fireEvent.click(
+      within(messageActions).getByRole("menuitem", { name: "Pin to board" }),
+    );
     expect(onPinResponseBoardMessage).toHaveBeenCalledWith(
       "session-board-source",
       "message-board-source",
@@ -1062,6 +1070,9 @@ describe("AgentSessionPanel conversation caching", () => {
       });
     });
 
+    expect(
+      screen.getByText("Live turn").closest(".activity-card-live"),
+    ).toBe(liveTurnCard);
     expect(scrollTop).toBe(120);
     expect(scrollWrites).toEqual([]);
   });
@@ -1096,7 +1107,7 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(liveTail).not.toHaveClass("is-pinned");
   });
 
-  it("does not splice live-only cards beneath a historical window", () => {
+  it("does not splice live-only cards beneath a historical window", async () => {
     renderSessionPanelWithDefaults({
       activeSession: makeSession("session-a", {
         status: "active",
@@ -1116,6 +1127,9 @@ describe("AgentSessionPanel conversation caching", () => {
       showWaitingIndicator: true,
       waitingIndicatorPrompt: "Current live command",
       liveTailPinned: true,
+    });
+    await act(async () => {
+      await Promise.resolve();
     });
 
     expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
@@ -1278,7 +1292,7 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     expect(screen.getByText("Live turn")).toBeInTheDocument();
-    expect(screen.getByText("Waiting for the next chunk of output...")).toBeInTheDocument();
+    expect(screen.getByText("Working on the current turn...")).toBeInTheDocument();
   });
 
   it("keeps send waiting feedback visible during an active turn after file output", () => {
@@ -1311,7 +1325,7 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     expect(screen.getByText("Live turn")).toBeInTheDocument();
-    expect(screen.getByText("Waiting for the next chunk of output...")).toBeInTheDocument();
+    expect(screen.getByText("Working on the current turn...")).toBeInTheDocument();
   });
 
   it("keeps the live-turn indicator visible while active, even after file-change output", () => {
@@ -3672,7 +3686,7 @@ describe("AgentSessionPanel conversation caching", () => {
 
   it.each([
     ["ArrowDown", "Add checkpoint marker"],
-    ["ArrowUp", "Hide markers window"],
+    ["ArrowUp", "Pin to board"],
   ])(
     "starts marker-menu %s navigation from the nearest boundary when focus is outside menu items",
     (key, expectedItemName) => {
@@ -3765,6 +3779,7 @@ describe("AgentSessionPanel conversation caching", () => {
       "Add checkpoint marker",
       "Remove Review point",
       "Hide markers window",
+      "Pin to board",
     ]);
   });
 

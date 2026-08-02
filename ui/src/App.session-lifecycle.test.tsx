@@ -1997,7 +1997,7 @@ describe("App session lifecycle", () => {
         // No SSE state arrives here: the active session exists only because the
         // create-session REST flow adopted it locally.
         expect(
-          screen.getByText("Waiting for the next chunk of output..."),
+          screen.getByText("Working on the current turn..."),
         ).toBeInTheDocument();
         fetchStateSpy.mockClear();
 
@@ -2014,7 +2014,7 @@ describe("App session lifecycle", () => {
         await waitFor(() => {
           expect(fetchStateSpy).toHaveBeenCalledTimes(1);
           expect(
-            screen.queryByText("Waiting for the next chunk of output..."),
+            screen.queryByText("Working on the current turn..."),
           ).not.toBeInTheDocument();
         });
       } finally {

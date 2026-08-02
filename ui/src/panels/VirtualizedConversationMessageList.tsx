@@ -119,12 +119,16 @@ export function resolveVirtualizedScrollWriteTarget({
     : requestedScrollTop;
 }
 
-const ACTIVE_MOUNTED_RESERVE_ABOVE_VIEWPORTS = 3;
+// Keep the same four-viewport reserve in both directions. The virtualizer's
+// page-height estimates can be much taller than compact command/message rows;
+// a smaller upward reserve lets fast wheel or touch momentum reach the top
+// spacer before real DOM replaces it.
+const ACTIVE_MOUNTED_RESERVE_ABOVE_VIEWPORTS = 4;
 // Expandable delegation and peer-message bodies are capped at 60vh. When one
 // collapses, content below it can move upward by most of a viewport before the
-// ResizeObserver measurement and native scroll anchoring settle. Keep one more
-// viewport mounted below than above so that movement lands on real DOM instead
-// of briefly exposing only the virtual spacer.
+// ResizeObserver measurement and native scroll anchoring settle. The matching
+// below reserve plus whole-page hysteresis keeps that movement on real DOM
+// instead of briefly exposing only the virtual spacer.
 const ACTIVE_MOUNTED_RESERVE_BELOW_VIEWPORTS = 4;
 const BOUNDARY_SEEK_MOUNTED_RESERVE_ABOVE_VIEWPORTS = 1;
 const BOUNDARY_SEEK_MOUNTED_RESERVE_BELOW_VIEWPORTS = 0;
@@ -855,9 +859,9 @@ export function VirtualizedConversationMessageList({
     ? 0
     : ACTIVE_MOUNTED_EXTRA_PAGES_BELOW;
   // Active scroll keeps a working set around the viewport instead of waiting
-  // until the reader is close to a band edge. The reserve is intentionally
-  // wider below the viewport because height overestimates show up there as
-  // visible blank space before the next page is mounted and measured.
+  // until the reader is close to a band edge. The symmetric pixel reserve
+  // keeps upward and downward momentum on real DOM; extra whole-page
+  // hysteresis below still covers large collapses of expandable cards.
   const workingMountedPageRange = useMemo(() => {
     if (pages.length === 0) {
       return { startIndex: 0, endIndex: 0 };
@@ -872,11 +876,6 @@ export function VirtualizedConversationMessageList({
       activeMountedBufferBelowPx,
     );
 
-    // Keep extra whole pages mounted below the computed working range. The
-    // bottom edge is where minor page-height drift shows up most clearly as a
-    // deterministic "messages disappear at this exact offset" gap. Holding
-    // extra pages below turns that hard boundary into hysteresis instead of a
-    // visible blank slab.
     return {
       startIndex: baseRange.startIndex,
       endIndex: Math.min(

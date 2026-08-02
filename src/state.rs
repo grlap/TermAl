@@ -25,7 +25,7 @@ mutex.
 
 /// Wake signal sent to the background persist thread.
 ///
-/// The persist thread owns an `Arc<Mutex<StateInner>>` and collects
+/// The persist thread owns an `Arc<StateMutex<StateInner>>` and collects
 /// the diff itself on each tick — it locks briefly, filters sessions
 /// by `mutation_stamp > watermark`, clones only that subset plus app
 /// metadata, drains `removed_session_ids`, then releases the lock and
@@ -46,6 +46,228 @@ enum PersistRequest {
     /// "Server restart without browser refresh can lose the last
     /// streamed message" for the durability contract this closes.
     Shutdown,
+}
+
+/// The one process-wide durable-state mutex, with production diagnostics for
+/// the rare long hold that otherwise presents as several unrelated HTTP
+/// requests completing at exactly the same time.
+///
+/// `#[track_caller]` records the acquisition site without changing hundreds of
+/// call sites. The guard reports both excessive acquisition waits and holds;
+/// the latter identifies the actual holder that stalled the rest of the app.
+const STATE_MUTEX_WARN_AFTER: Duration = Duration::from_millis(250);
+
+const STATE_MUTEX_DIAGNOSTIC_QUEUE_CAPACITY: usize = 64;
+
+#[derive(Clone, Debug)]
+enum StateMutexDiagnostic {
+    Waited {
+        waited: Duration,
+        file: &'static str,
+        line: u32,
+        column: u32,
+    },
+    Held {
+        held: Duration,
+        waited: Duration,
+        file: &'static str,
+        line: u32,
+        column: u32,
+    },
+}
+
+type StateMutexDiagnosticReporter = Arc<dyn Fn(StateMutexDiagnostic) + Send + Sync>;
+
+#[cfg(not(test))]
+fn state_mutex_diagnostic_sender() -> &'static mpsc::SyncSender<StateMutexDiagnostic> {
+    static SENDER: LazyLock<mpsc::SyncSender<StateMutexDiagnostic>> = LazyLock::new(|| {
+        let (sender, receiver) = mpsc::sync_channel(STATE_MUTEX_DIAGNOSTIC_QUEUE_CAPACITY);
+        if let Err(err) = std::thread::Builder::new()
+            .name("termal-state-lock-diagnostics".to_owned())
+            .spawn(move || {
+                while let Ok(diagnostic) = receiver.recv() {
+                    match diagnostic {
+                        StateMutexDiagnostic::Waited {
+                            waited,
+                            file,
+                            line,
+                            column,
+                        } => eprintln!(
+                            "state lock> waited {:.0}ms at {file}:{line}:{column}",
+                            waited.as_secs_f64() * 1_000.0,
+                        ),
+                        StateMutexDiagnostic::Held {
+                            held,
+                            waited,
+                            file,
+                            line,
+                            column,
+                        } => eprintln!(
+                            "state lock> held {:.0}ms by {file}:{line}:{column} (acquisition wait {:.0}ms)",
+                            held.as_secs_f64() * 1_000.0,
+                            waited.as_secs_f64() * 1_000.0,
+                        ),
+                    }
+                }
+            })
+        {
+            eprintln!("state lock> failed to start diagnostic reporter: {err}");
+        }
+        sender
+    });
+    &SENDER
+}
+
+#[cfg(not(test))]
+fn report_state_mutex_diagnostic(diagnostic: StateMutexDiagnostic) {
+    // Diagnostics must never extend a state-lock convoy. A saturated or
+    // unavailable reporter deliberately drops the warning instead of waiting.
+    let _ = try_queue_state_mutex_diagnostic(state_mutex_diagnostic_sender(), diagnostic);
+}
+
+fn try_queue_state_mutex_diagnostic(
+    sender: &mpsc::SyncSender<StateMutexDiagnostic>,
+    diagnostic: StateMutexDiagnostic,
+) -> bool {
+    sender.try_send(diagnostic).is_ok()
+}
+
+fn default_state_mutex_diagnostic_reporter() -> StateMutexDiagnosticReporter {
+    #[cfg(not(test))]
+    {
+        let _ = state_mutex_diagnostic_sender();
+        return Arc::new(report_state_mutex_diagnostic);
+    }
+
+    #[cfg(test)]
+    Arc::new(|_| {})
+}
+
+struct StateMutex<T> {
+    inner: Mutex<T>,
+    diagnostic_reporter: StateMutexDiagnosticReporter,
+    warn_after: Duration,
+}
+
+impl<T> StateMutex<T> {
+    fn new(value: T) -> Self {
+        Self {
+            inner: Mutex::new(value),
+            diagnostic_reporter: default_state_mutex_diagnostic_reporter(),
+            warn_after: STATE_MUTEX_WARN_AFTER,
+        }
+    }
+
+    #[cfg(test)]
+    fn new_with_diagnostic_reporter(
+        value: T,
+        warn_after: Duration,
+        diagnostic_reporter: StateMutexDiagnosticReporter,
+    ) -> Self {
+        Self {
+            inner: Mutex::new(value),
+            diagnostic_reporter,
+            warn_after,
+        }
+    }
+
+    #[track_caller]
+    fn lock(&self) -> std::sync::LockResult<StateMutexGuard<'_, T>> {
+        let requested_at = std::time::Instant::now();
+        let caller = std::panic::Location::caller();
+        match self.inner.lock() {
+            Ok(guard) => Ok(StateMutexGuard::new(
+                guard,
+                requested_at,
+                caller,
+                self.warn_after,
+                Arc::clone(&self.diagnostic_reporter),
+            )),
+            Err(err) => Err(std::sync::PoisonError::new(StateMutexGuard::new(
+                err.into_inner(),
+                requested_at,
+                caller,
+                self.warn_after,
+                Arc::clone(&self.diagnostic_reporter),
+            ))),
+        }
+    }
+}
+
+struct StateMutexGuard<'a, T> {
+    guard: Option<std::sync::MutexGuard<'a, T>>,
+    acquired_at: std::time::Instant,
+    caller: &'static std::panic::Location<'static>,
+    diagnostic_reporter: StateMutexDiagnosticReporter,
+    waited: Duration,
+    warn_after: Duration,
+}
+
+impl<'a, T> StateMutexGuard<'a, T> {
+    fn new(
+        guard: std::sync::MutexGuard<'a, T>,
+        requested_at: std::time::Instant,
+        caller: &'static std::panic::Location<'static>,
+        warn_after: Duration,
+        diagnostic_reporter: StateMutexDiagnosticReporter,
+    ) -> Self {
+        let acquired_at = std::time::Instant::now();
+        let waited = acquired_at.saturating_duration_since(requested_at);
+        if waited >= warn_after {
+            diagnostic_reporter(StateMutexDiagnostic::Waited {
+                waited,
+                file: caller.file(),
+                line: caller.line(),
+                column: caller.column(),
+            });
+        }
+        Self {
+            guard: Some(guard),
+            acquired_at,
+            caller,
+            diagnostic_reporter,
+            waited,
+            warn_after,
+        }
+    }
+}
+
+impl<T> std::ops::Deref for StateMutexGuard<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.guard
+            .as_deref()
+            .expect("state mutex guard accessed after release")
+    }
+}
+
+impl<T> std::ops::DerefMut for StateMutexGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.guard
+            .as_deref_mut()
+            .expect("state mutex guard accessed after release")
+    }
+}
+
+impl<T> Drop for StateMutexGuard<'_, T> {
+    fn drop(&mut self) {
+        let held = self.acquired_at.elapsed();
+        let waited = self.waited;
+        let file = self.caller.file();
+        let line = self.caller.line();
+        let column = self.caller.column();
+        drop(self.guard.take());
+        if held >= self.warn_after {
+            (self.diagnostic_reporter)(StateMutexDiagnostic::Held {
+                held,
+                waited,
+                file,
+                line,
+                column,
+            });
+        }
+    }
 }
 
 enum StateBroadcastWork {
@@ -650,7 +872,7 @@ struct AppState {
     terminal_remote_command_semaphore: Arc<tokio::sync::Semaphore>,
     stopping_orchestrator_ids: Arc<Mutex<HashSet<String>>>,
     stopping_orchestrator_session_ids: Arc<Mutex<HashMap<String, HashSet<String>>>>,
-    inner: Arc<Mutex<StateInner>>,
+    inner: Arc<StateMutex<StateInner>>,
 }
 
 const SESSION_NOT_RUNNING_CONFLICT_MESSAGE: &str = "session is not currently running";

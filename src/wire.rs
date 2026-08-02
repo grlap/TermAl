@@ -1060,6 +1060,10 @@ struct DelegationRecord {
     completed_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     result: Option<DelegationResult>,
+    /// Version of the result parser that last examined this terminal record.
+    /// Zero denotes a record persisted before versioned repair existed.
+    #[serde(default)]
+    result_parser_version: u32,
 }
 
 /// Determines when a delegation wait resumes its parent session.

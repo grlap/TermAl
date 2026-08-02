@@ -9,6 +9,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type RefObject,
@@ -28,9 +29,16 @@ const EMPTY_OVERVIEW_VIEWPORT: ConversationOverviewViewport = {
   endPosition: 1,
 };
 const CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX = 24;
+// Streaming turns can advance message count and mutation metadata several
+// times in one paint burst. Keep the first rail load immediate, then collapse
+// those follow-up invalidations so one active pane never fans out duplicate
+// overview requests while the user is typing or switching tabs.
+const CONVERSATION_OVERVIEW_REFRESH_DEBOUNCE_MS = 120;
+const CONVERSATION_OVERVIEW_REFRESH_MAX_WAIT_MS = 500;
 
 type ConversationOverviewRailFrame = {
   heightPx: number;
+  portalTarget: HTMLElement;
   rightPx: number;
   topPx: number;
 };
@@ -56,6 +64,10 @@ export function useConversationOverviewController({
   const virtualizerHandleRef =
     useRef<VirtualizedConversationMessageListHandle | null>(null);
   const navigationFrameIdsRef = useRef<Set<number>>(new Set());
+  const overviewRequestSessionIdRef = useRef<string | null>(null);
+  const overviewRefreshBurstStartedAtRef = useRef<number | null>(null);
+  const overviewRefreshTimerRef = useRef<number | null>(null);
+  const overviewRequestIdRef = useRef(0);
   const sessionIdRef = useRef(sessionId);
   const messageStartIndexRef = useRef(messageStartIndex);
   const renderedMessageCountRef = useRef(renderedMessageCount);
@@ -68,6 +80,40 @@ export function useConversationOverviewController({
   sessionIdRef.current = sessionId;
   messageStartIndexRef.current = messageStartIndex;
   renderedMessageCountRef.current = renderedMessageCount;
+
+  const cancelOverviewRefreshTimer = useCallback(() => {
+    if (overviewRefreshTimerRef.current !== null) {
+      window.clearTimeout(overviewRefreshTimerRef.current);
+      overviewRefreshTimerRef.current = null;
+    }
+  }, []);
+
+  const requestOverview = useCallback((expectedSessionId: string) => {
+    const requestId = overviewRequestIdRef.current + 1;
+    overviewRequestIdRef.current = requestId;
+    overviewRefreshBurstStartedAtRef.current = null;
+    overviewRefreshTimerRef.current = null;
+    void fetchSessionOverview(expectedSessionId).then(
+      (response) => {
+        if (
+          overviewRequestIdRef.current !== requestId ||
+          sessionIdRef.current !== expectedSessionId ||
+          response.sessionId !== expectedSessionId
+        ) {
+          return;
+        }
+        setOverview(response);
+      },
+      () => {
+        if (
+          overviewRequestIdRef.current === requestId &&
+          sessionIdRef.current === expectedSessionId
+        ) {
+          setOverview(null);
+        }
+      },
+    );
+  }, []);
 
   const refreshViewport = useCallback(() => {
     const scrollNode = scrollContainerRef.current;
@@ -92,66 +138,93 @@ export function useConversationOverviewController({
 
   const refreshRailFrame = useCallback(() => {
     const scrollNode = scrollContainerRef.current;
-    if (scrollNode && scrollNode.clientHeight > 0) {
+    const portalTarget = scrollNode?.closest(".workspace-pane");
+    if (
+      scrollNode &&
+      scrollNode.clientHeight > 0 &&
+      portalTarget instanceof HTMLElement
+    ) {
       const bounds = scrollNode.getBoundingClientRect();
+      const portalBounds = portalTarget.getBoundingClientRect();
       const insetPx = CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX / 2;
       const nextRailFrame = {
         heightPx: Math.max(
           0,
           scrollNode.clientHeight - CONVERSATION_OVERVIEW_VIEWPORT_PADDING_PX,
         ),
-        rightPx: Math.max(0, window.innerWidth - bounds.right + insetPx),
-        topPx: Math.max(0, bounds.top + insetPx),
+        portalTarget,
+        rightPx: Math.max(0, portalBounds.right - bounds.right + insetPx),
+        topPx: Math.max(0, bounds.top - portalBounds.top + insetPx),
       };
       setRailFrame((current) =>
         current?.heightPx === nextRailFrame.heightPx &&
+        current.portalTarget === nextRailFrame.portalTarget &&
         current.rightPx === nextRailFrame.rightPx &&
         current.topPx === nextRailFrame.topPx
           ? current
           : nextRailFrame,
       );
+      return;
     }
+    setRailFrame(null);
   }, [scrollContainerRef]);
 
   useEffect(() => {
     if (!isActive || !shouldRender) {
+      cancelOverviewRefreshTimer();
+      overviewRefreshBurstStartedAtRef.current = null;
+      overviewRequestSessionIdRef.current = null;
       setOverview(null);
-      return undefined;
+      return;
     }
-    let canceled = false;
     const expectedSessionId = sessionId;
+    const isInitialRequestForSession =
+      overviewRequestSessionIdRef.current !== expectedSessionId;
+    overviewRequestSessionIdRef.current = expectedSessionId;
     setOverview((current) =>
       current?.sessionId === expectedSessionId ? current : null,
     );
-    void fetchSessionOverview(sessionId).then(
-      (response) => {
-        if (
-          canceled ||
-          sessionIdRef.current !== expectedSessionId ||
-          response.sessionId !== expectedSessionId
-        ) {
-          return;
-        }
-        setOverview(response);
-      },
-      () => {
-        if (!canceled && sessionIdRef.current === expectedSessionId) {
-          setOverview(null);
-        }
-      },
+    cancelOverviewRefreshTimer();
+    if (isInitialRequestForSession) {
+      requestOverview(expectedSessionId);
+      return;
+    }
+
+    const now = performance.now();
+    const burstStartedAt =
+      overviewRefreshBurstStartedAtRef.current ?? now;
+    overviewRefreshBurstStartedAtRef.current = burstStartedAt;
+    const remainingMaxWait = Math.max(
+      0,
+      CONVERSATION_OVERVIEW_REFRESH_MAX_WAIT_MS - (now - burstStartedAt),
     );
-    return () => {
-      canceled = true;
-    };
+    if (remainingMaxWait <= 0) {
+      requestOverview(expectedSessionId);
+      return;
+    }
+    overviewRefreshTimerRef.current = window.setTimeout(
+      () => requestOverview(expectedSessionId),
+      Math.min(CONVERSATION_OVERVIEW_REFRESH_DEBOUNCE_MS, remainingMaxWait),
+    );
   }, [
+    cancelOverviewRefreshTimer,
     isActive,
     messageCount,
+    requestOverview,
     sessionId,
     sessionMutationStamp,
     shouldRender,
   ]);
 
-  useEffect(() => {
+  useEffect(
+    () => () => {
+      cancelOverviewRefreshTimer();
+      overviewRequestIdRef.current += 1;
+    },
+    [cancelOverviewRefreshTimer],
+  );
+
+  useLayoutEffect(() => {
     if (!isActive || !shouldRender) {
       setViewport(EMPTY_OVERVIEW_VIEWPORT);
       setRailFrame(null);
@@ -274,6 +347,7 @@ export function useConversationOverviewController({
     navigate,
     overview,
     railHeightPx: railFrame?.heightPx ?? null,
+    railPortalTarget: railFrame?.portalTarget ?? null,
     railRightPx: railFrame?.rightPx ?? null,
     railTopPx: railFrame?.topPx ?? null,
     shouldRenderRail: isActive && shouldRender,

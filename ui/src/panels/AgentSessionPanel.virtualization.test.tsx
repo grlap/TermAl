@@ -253,7 +253,23 @@ function createAgentSessionPanelHarness(
   } = {},
 ) {
   const { activeSession = null, ...panelProps } = props;
-  const scrollContainerRef = { current: document.createElement("section") };
+  const suppliedScrollContainer =
+    panelProps.scrollContainerRef?.current instanceof HTMLElement
+      ? panelProps.scrollContainerRef.current
+      : null;
+  const portalTarget = document.createElement("section");
+  portalTarget.className = "workspace-pane panel";
+  portalTarget.dataset.testConversationOverviewPortalTarget = "true";
+  const scrollContainer = suppliedScrollContainer ?? document.createElement("section");
+  if (!suppliedScrollContainer) {
+    Object.defineProperty(scrollContainer, "clientHeight", {
+      configurable: true,
+      value: 600,
+    });
+  }
+  portalTarget.append(scrollContainer);
+  document.body.append(portalTarget);
+  const scrollContainerRef = { current: scrollContainer };
   const conversationSearchMatchedItemKeys = new Set<string>();
 
   syncComposerSessionsStore({
@@ -324,6 +340,9 @@ afterEach(() => {
   });
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  document
+    .querySelectorAll("[data-test-conversation-overview-portal-target]")
+    .forEach((node) => node.remove());
 });
 
 function stubResolvedAgentCommand(response: {
@@ -527,7 +546,7 @@ describe("AgentSessionPanel virtualization", () => {
       expect(container.querySelector(".virtualized-message-list")).toBe(
         virtualizedListBefore,
       );
-      expect(rail.parentElement).toBe(document.body);
+      expect(rail.parentElement).toHaveClass("workspace-pane");
       expect(container.querySelector(".activity-card-live")).toBeInTheDocument();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
@@ -549,6 +568,7 @@ describe("AgentSessionPanel virtualization", () => {
       "utf8",
     );
     const messages = makeTextMessages(40);
+    stubConversationOverview("wide-session", messages.length);
     const paneClientWidth = 689;
     const blownOutPaneScrollWidth = 1_175;
     const { container } = renderSessionPanelWithDefaults({
@@ -569,6 +589,7 @@ describe("AgentSessionPanel virtualization", () => {
         </article>
       ),
     });
+    await screen.findByLabelText(/^Conversation overview,/);
 
     const pane = container.querySelector<HTMLElement>(
       ".session-conversation-page.has-conversation-overview-scroll",
@@ -659,7 +680,7 @@ describe("AgentSessionPanel virtualization", () => {
     }
   });
 
-  it("keeps explicit live command activity after the prompt leaves the bounded tail", async () => {
+  it("keeps the latest prompt visible after it leaves the bounded tail", async () => {
     const assistantOnlyTail: Message[] = Array.from(
       { length: 40 },
       (_, index) => ({
@@ -687,12 +708,12 @@ describe("AgentSessionPanel virtualization", () => {
     });
 
     expect(
-      await screen.findByText("Executing an agent command..."),
+      await screen.findByText("Fix the paging bug", {
+        selector: ".activity-card-prompt",
+      }),
     ).toBeInTheDocument();
-    expect(screen.getByText("cargo test session_history")).toBeInTheDocument();
-    expect(
-      screen.queryByText("Fix the paging bug"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("cargo test session_history")).toBeNull();
+    expect(screen.queryByText("Agent command")).toBeNull();
   });
 
   it("navigates the virtualized transcript from conversation overview items", async () => {

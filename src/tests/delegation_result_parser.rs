@@ -16,6 +16,166 @@ fn delegation_result_packet_accepts_preamble_and_case_drift() {
 }
 
 #[test]
+fn delegation_result_packet_accepts_inline_summary_and_nested_review_sections() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+Summary: Reviewed the current changes through every configured lens.\n\n\
+# Code Review\n\n\
+## Findings\n\n\
+### Actionable\n\n\
+#### Medium\n\n\
+- **[Medium]** [src/state.rs:108](/repo/src/state.rs:108) — Lock diagnostics must not block the mutex owner.\n\n\
+### Informational\n\n\
+- **[High]** `ignored.rs:1` — This is explicitly non-actionable.\n\n\
+## Commands Run\n\n\
+- `git diff`",
+    )
+    .expect("semantic packet sections should parse independently of heading depth");
+
+    assert_eq!(
+        parsed.summary,
+        "Reviewed the current changes through every configured lens."
+    );
+    assert_eq!(
+        parsed.findings,
+        vec![DelegationFinding {
+            severity: "Medium".to_owned(),
+            file: Some("src/state.rs".to_owned()),
+            line: Some(108),
+            message: "Lock diagnostics must not block the mutex owner.".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn delegation_result_packet_keeps_the_first_summary_section_canonical() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+Summary: Canonical parent-card summary.\n\n\
+## Findings\n\n\
+### Actionable\n\n\
+- **[Low]** `src/state.rs:1` — Real finding.\n\n\
+## Summary\n\n\
+This later review summary must not be appended to the packet summary.\n\n\
+## Commands Run\n\n\
+- `git diff`",
+    )
+    .expect("repeated summary headings should not corrupt the canonical summary");
+
+    assert_eq!(parsed.summary, "Canonical parent-card summary.");
+    assert_eq!(parsed.findings.len(), 1);
+    assert_eq!(parsed.findings[0].severity, "Low");
+}
+
+#[test]
+fn delegation_review_findings_reject_nonseverity_links_and_unrelated_tables() {
+    let findings = parse_delegation_review_findings(
+        "## Findings\n\n\
+### Actionable\n\n\
+- **[docs/guide.md](https://example.test/guide)** — Documentation changed.\n\n\
+| File | Measurement | Result |\n\
+|---|---|---|\n\
+| src/state.rs | 42ms | stable |\n\n\
+- **[Low]** `src/state.rs:108` — Real finding.",
+    );
+
+    assert_eq!(
+        findings,
+        vec![DelegationFinding {
+            severity: "Low".to_owned(),
+            file: Some("src/state.rs".to_owned()),
+            line: Some(108),
+            message: "Real finding.".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn delegation_result_packet_parses_markdown_headed_table_review() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+### Summary\n\n\
+Reviewed 26 files and found three actionable issues.\n\n\
+### Findings: Code Review — 2026-08-02\n\n\
+#### Changes Reviewed\n\n\
+- 26 unstaged files.\n\n\
+#### Actionable\n\n\
+| Severity | Location | Finding |\n\
+|---|---|---|\n\
+| High | [data-inventory-schema.json:288](/repo/data-inventory-schema.json:288) | Coverage metadata is not verified. |\n\
+| Medium | [attestation_docket.py:556](/repo/attestation_docket.py:556) | Docket trust differs from the engine. |\n\n\
+#### Informational\n\n\
+- This informational bullet is not actionable.\n\n\
+### Commands Run\n\n\
+- `git diff --check`",
+    )
+    .expect("Markdown-headed table result should parse");
+
+    assert_eq!(
+        parsed.summary,
+        "Reviewed 26 files and found three actionable issues."
+    );
+    assert_eq!(
+        parsed.findings,
+        vec![
+            DelegationFinding {
+                severity: "High".to_owned(),
+                file: Some("data-inventory-schema.json".to_owned()),
+                line: Some(288),
+                message: "Coverage metadata is not verified.".to_owned(),
+            },
+            DelegationFinding {
+                severity: "Medium".to_owned(),
+                file: Some("attestation_docket.py".to_owned()),
+                line: Some(556),
+                message: "Docket trust differs from the engine.".to_owned(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn delegation_result_packet_parses_markdown_headed_bullet_review() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+## Summary:\n\
+Reviewed the legal conformance changes.\n\n\
+## Findings:\n\n\
+### Actionable\n\n\
+- **[MEDIUM] M1 — committed site embeds a stale test count** — `legal/site/index.html` embeds 3262 tests.\n\
+- **[LOW]** `legal/tooling/conformance/attestation_docket.py:556` — Fact and record identifiers can diverge.\n\n\
+### Informational\n\n\
+- **[HIGH]** `ignored.rs:1` — Informational text must not become a finding.\n\n\
+## Files Inspected:\n\
+- legal/site/index.html",
+    )
+    .expect("Markdown-headed bullet result should parse");
+
+    assert_eq!(parsed.summary, "Reviewed the legal conformance changes.");
+    assert_eq!(parsed.findings.len(), 2);
+    assert_eq!(parsed.findings[0].severity, "MEDIUM");
+    assert_eq!(
+        parsed.findings[0].file.as_deref(),
+        Some("legal/site/index.html")
+    );
+    assert!(
+        parsed.findings[0]
+            .message
+            .contains("committed site embeds a stale test count")
+    );
+    assert_eq!(parsed.findings[1].severity, "LOW");
+    assert_eq!(
+        parsed.findings[1].file.as_deref(),
+        Some("legal/tooling/conformance/attestation_docket.py")
+    );
+    assert_eq!(parsed.findings[1].line, Some(556));
+}
+
+#[test]
 fn delegation_result_packet_summary_allows_colon_terminated_text_lines() {
     let parsed = parse_delegation_result_packet(
         "## Result\n\nStatus: completed\n\nSummary:\nThe issue is here:\n  detail\n\nNotes:\nignored",

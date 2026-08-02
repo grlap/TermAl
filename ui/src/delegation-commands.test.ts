@@ -53,6 +53,7 @@ function makeDelegation(
     startedAt: "2026-05-02 10:00:00",
     completedAt: null,
     result: null,
+    resultParserVersion: 0,
     ...overrides,
   };
 }

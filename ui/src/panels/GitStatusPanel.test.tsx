@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -39,6 +40,60 @@ describe("GitStatusPanel", () => {
     applyGitFileActionMock.mockReset();
     commitGitChangesMock.mockReset();
     fetchGitStatusMock.mockReset();
+  });
+
+  it("keeps tree actions keyboard reachable without reserving filename width", async () => {
+    const user = userEvent.setup();
+    fetchGitStatusMock.mockResolvedValue(
+      makeStatusResponse([
+        {
+          path: "long-file-name-that-needs-the-full-row.tsx",
+          worktreeStatus: "M",
+        },
+      ]),
+    );
+    applyGitFileActionMock.mockResolvedValue(makeStatusResponse([]));
+
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    const openButton = await screen.findByRole("button", {
+      name: "long-file-name-that-needs-the-full-row.tsx",
+    });
+    const revertButton = screen.getByRole("button", {
+      name: "Revert long-file-name-that-needs-the-full-row.tsx",
+    });
+    const stageButton = screen.getByRole("button", {
+      name: "Stage long-file-name-that-needs-the-full-row.tsx",
+    });
+
+    for (let index = 0; index < 20 && document.activeElement !== openButton; index += 1) {
+      await user.tab();
+    }
+    expect(openButton).toHaveFocus();
+    await user.tab();
+    expect(revertButton).toHaveFocus();
+    await user.tab();
+    expect(stageButton).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    await waitFor(() => {
+      expect(applyGitFileActionMock).toHaveBeenCalledWith({
+        action: "stage",
+        originalPath: undefined,
+        path: "long-file-name-that-needs-the-full-row.tsx",
+        projectId: null,
+        sessionId: SESSION_ID,
+        statusCode: "M",
+        workdir: "/repo",
+      });
+    });
   });
 
   it("renders staged and unstaged trees and opens diff previews from git rows", async () => {

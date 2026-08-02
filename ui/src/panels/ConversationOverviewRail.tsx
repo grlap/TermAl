@@ -32,6 +32,7 @@ export function ConversationOverviewRail({
   heightPx = null,
   rightPx = null,
   topPx = null,
+  portalTarget,
   minMessages = CONVERSATION_OVERVIEW_MIN_MESSAGES,
   onNavigate,
 }: {
@@ -40,6 +41,7 @@ export function ConversationOverviewRail({
   heightPx?: number | null;
   rightPx?: number | null;
   topPx?: number | null;
+  portalTarget: HTMLElement | null;
   minMessages?: number;
   onNavigate: (position: number) => void;
 }) {
@@ -211,6 +213,14 @@ export function ConversationOverviewRail({
   if (overview && messageCount < minMessages) {
     return null;
   }
+  if (
+    !portalTarget ||
+    heightPx === null ||
+    rightPx === null ||
+    topPx === null
+  ) {
+    return null;
+  }
 
   const rail = (
     <div
@@ -236,11 +246,11 @@ export function ConversationOverviewRail({
       onPointerUp={finishPointerDrag}
       role="slider"
       style={{
-        position: "fixed",
+        position: "absolute",
         zIndex: "var(--z-pane-overlay)",
-        ...(heightPx === null ? null : { height: `${heightPx}px` }),
-        ...(rightPx === null ? null : { right: `${rightPx}px` }),
-        ...(topPx === null ? null : { top: `${topPx}px` }),
+        height: `${heightPx}px`,
+        right: `${rightPx}px`,
+        top: `${topPx}px`,
       }}
       tabIndex={overview ? 0 : -1}
     >
@@ -302,13 +312,12 @@ export function ConversationOverviewRail({
     </div>
   );
 
-  // The rail is a viewport overlay whose geometry is measured from this
-  // session's transcript pane. Keeping it under the scroll container lets
-  // ancestor overflow/stacking contexts clip a `position: fixed` descendant,
-  // leaving the grid column visible while the rail itself disappears. Portal
-  // it to the document overlay layer so transcript scrolling cannot move or
-  // clip it. React still preserves the logical owner/event tree.
-  return createPortal(rail, document.body);
+  // The rail is a pane-local overlay whose geometry is measured from this
+  // session's transcript viewport. Portaling to the owning workspace pane
+  // keeps it outside the scroll container without letting stale body-relative
+  // coordinates escape over a neighboring/control-panel pane when the layout
+  // moves. React still preserves the logical owner/event tree.
+  return createPortal(rail, portalTarget);
 }
 
 function conversationOverviewMarkerColor(kind: ConversationMarkerKind) {

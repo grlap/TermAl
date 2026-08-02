@@ -115,6 +115,124 @@ fn delegation_idle_child_without_result_packet_preserves_final_assistant_output(
 }
 
 #[test]
+fn completed_delegation_repairs_degraded_legacy_result_once_and_refreshes_parent_card() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Return a Markdown review packet.".to_owned(),
+                title: Some("Markdown Review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &created.delegation.child_session_id,
+        "## Result\n\nStatus: completed\n\n### Summary\nReviewed.\n\n### Findings: Code Review — 2026-08-02\n\n#### Actionable\n\n| Severity | Location | Finding |\n|---|---|---|\n| High | [src/delegations.rs:3790](/repo/src/delegations.rs:3790) | Markdown headings dropped findings. |",
+    );
+    state
+        .refresh_delegation_for_child_session(&created.delegation.child_session_id)
+        .expect("delegation should complete");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let delegation = inner
+            .delegations
+            .iter_mut()
+            .find(|delegation| delegation.id == created.delegation.id)
+            .expect("delegation should exist");
+        let result = delegation
+            .result
+            .as_mut()
+            .expect("completed delegation should have a result");
+        result.summary = "Delegation completed.".to_owned();
+        result.findings = vec![DelegationFinding {
+            severity: "Note".to_owned(),
+            file: None,
+            line: None,
+            message: "**[High]** Markdown headings dropped findings.".to_owned(),
+        }];
+        delegation.result_parser_version = 0;
+        let parent = inner
+            .sessions
+            .iter_mut()
+            .find(|record| record.session.id == parent_session_id)
+            .expect("parent session should exist");
+        for message in parent.session.messages.iter_mut().rev() {
+            let Message::ParallelAgents { agents, .. } = message else {
+                continue;
+            };
+            if let Some(agent) = agents
+                .iter_mut()
+                .find(|agent| agent.id == created.delegation.id)
+            {
+                agent.detail = Some("Delegation completed.".to_owned());
+                break;
+            }
+        }
+        state
+            .commit_locked(&mut inner)
+            .expect("simulated old result should persist");
+    }
+
+    let revision_before_repair = state.snapshot().revision;
+
+    let response = state
+        .get_delegation_result(&parent_session_id, &created.delegation.id)
+        .expect("result polling should repair the stored packet");
+
+    assert!(response.revision > revision_before_repair);
+    assert_eq!(response.result.summary, "Reviewed.");
+    assert_eq!(response.result.findings.len(), 1);
+    assert_eq!(response.result.findings[0].severity, "High");
+    assert_eq!(
+        response.result.findings[0].message,
+        "Markdown headings dropped findings."
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let delegation = inner
+            .delegations
+            .iter()
+            .find(|delegation| delegation.id == created.delegation.id)
+            .expect("delegation should exist");
+        assert_eq!(
+            delegation.result_parser_version,
+            DELEGATION_RESULT_PARSER_VERSION
+        );
+        let parent_detail = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == parent_session_id)
+            .and_then(|record| {
+                record.session.messages.iter().rev().find_map(|message| {
+                    let Message::ParallelAgents { agents, .. } = message else {
+                        return None;
+                    };
+                    agents
+                        .iter()
+                        .find(|agent| agent.id == created.delegation.id)
+                        .and_then(|agent| agent.detail.as_deref())
+                })
+            });
+        assert_eq!(parent_detail, Some("Reviewed."));
+    }
+
+    let second_response = state
+        .get_delegation_result(&parent_session_id, &created.delegation.id)
+        .expect("subsequent result polling should reuse the repaired packet");
+    assert_eq!(second_response.revision, response.revision);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn delegation_idle_child_error_like_plain_output_is_completed() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);

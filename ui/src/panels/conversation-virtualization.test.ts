@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { estimateConversationMessageHeight } from "./conversation-virtualization";
+import {
+  buildMessagePages,
+  estimatePageHeight,
+} from "./virtualized-conversation-measurement";
 import type { Message } from "../types";
 
 function makeTextMessage(overrides: Partial<Extract<Message, { type: "text" }>> = {}) {
@@ -10,6 +14,21 @@ function makeTextMessage(overrides: Partial<Extract<Message, { type: "text" }>> 
     author: "you" as const,
     timestamp: "10:00",
     text: "",
+    ...overrides,
+  };
+}
+
+function makeCommandMessage(
+  overrides: Partial<Extract<Message, { type: "command" }>> = {},
+) {
+  return {
+    id: "message-command-1",
+    type: "command" as const,
+    author: "assistant" as const,
+    timestamp: "10:00",
+    command: "npm test",
+    output: "all tests passed",
+    status: "success" as const,
     ...overrides,
   };
 }
@@ -92,5 +111,54 @@ describe("estimateConversationMessageHeight", () => {
         expandedPromptOpen: false,
       }),
     );
+  });
+
+  it("estimates successful commands from their collapsed summary instead of hidden details", () => {
+    const shortCommand = makeCommandMessage();
+    const veryLargeCommand = makeCommandMessage({
+      command: Array.from({ length: 80 }, (_, index) => `echo command-${index}`).join("\n"),
+      output: Array.from({ length: 700 }, (_, index) => `output-${index}`).join("\n"),
+    });
+
+    expect(estimateConversationMessageHeight(shortCommand)).toBe(120);
+    expect(estimateConversationMessageHeight(veryLargeCommand)).toBe(120);
+  });
+
+  it("keeps expanded running and failed command estimates within the CSS shell caps", () => {
+    const shortRunningCommand = makeCommandMessage({
+      output: "",
+      status: "running",
+    });
+    const veryLargeFailedCommand = makeCommandMessage({
+      command: "long command segment ".repeat(200),
+      output: Array.from({ length: 700 }, (_, index) => `error-${index}`).join("\n"),
+      status: "error",
+    });
+
+    expect(estimateConversationMessageHeight(shortRunningCommand)).toBeGreaterThan(180);
+    expect(
+      estimateConversationMessageHeight(veryLargeFailedCommand, {
+        availableWidthPx: 520,
+      }),
+    ).toBe(376);
+  });
+
+  it("keeps an unseen page of collapsed successful commands close to measured UI height", () => {
+    const commands = Array.from({ length: 8 }, (_, index) =>
+      makeCommandMessage({
+        id: `message-command-${index}`,
+        command: `command-${index}\n${"long input ".repeat(40)}`,
+        output: Array.from({ length: 100 }, (_, line) => `output-${line}`).join("\n"),
+      }),
+    );
+    const [page] = buildMessagePages(commands);
+    const estimatedPageHeight = estimatePageHeight(page!, (message) =>
+      estimateConversationMessageHeight(message, { availableWidthPx: 560 }),
+    );
+    // Live compact-density cards measure 117.7 px and this terminal page owns
+    // seven 12 px gaps, for 1025.6 px total. Keep the unseen estimate within two
+    // message gaps instead of the previous multi-thousand-pixel overshoot.
+    expect(estimatedPageHeight).toBe(1044);
+    expect(Math.abs(estimatedPageHeight - 1025.6)).toBeLessThan(20);
   });
 });

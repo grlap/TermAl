@@ -463,7 +463,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       expect(screen.getByText("Codex needs approval")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
@@ -475,7 +475,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(0);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -631,7 +631,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "Cancel queued prompt" }),
@@ -650,7 +650,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       // This recovery snapshot keeps the session active; the live-turn
       // affordance should remain visible until the turn settles.
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "Cancel queued prompt" }),
@@ -811,7 +811,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "Cancel queued prompt" }),
@@ -827,7 +827,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
         screen.getByRole("button", { name: "Cancel queued prompt" }),
       ).toBeInTheDocument();
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -972,7 +972,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "Cancel queued prompt" }),
@@ -990,7 +990,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Current turn finished.")).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
       expect(
         screen.queryByRole("button", { name: "Cancel queued prompt" }),
@@ -1105,7 +1105,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
@@ -1120,7 +1120,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Here after clock jump.")).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -1329,7 +1329,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
@@ -1425,7 +1425,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Recovered after wake.")).toHaveLength(2);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -1523,7 +1523,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
@@ -1619,7 +1619,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Recovered from live state.")).toHaveLength(2);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -1717,7 +1717,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
@@ -1801,7 +1801,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
         screen.getAllByText("Recovered from live delta.").length,
       ).toBeGreaterThan(0);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -1923,7 +1923,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
@@ -1932,7 +1932,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(1);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
 
       await advanceTimers(1000);
@@ -1940,7 +1940,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(1);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
 
       await advanceTimers(
@@ -1951,7 +1951,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       expect(stateFetchCallCount()).toBe(2);
       expect(screen.getAllByText("Here after retry.")).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -2100,7 +2100,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
@@ -2110,7 +2110,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(1);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
 
       // One tick short of the cooldown boundary: watchdog must stay quiet.
@@ -2121,7 +2121,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(1);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
 
       // Crossing the next 1s tick moves the watchdog past the cooldown boundary.
@@ -2133,7 +2133,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
         2,
       );
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -2279,7 +2279,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
       stateRequestCount = 0;
@@ -2290,7 +2290,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(1);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
 
       // A fresh SSE state payload should clear the residual watchdog cooldown and
@@ -2334,7 +2334,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(1);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
 
       // The next 1s watchdog tick should fire immediately once transport is stale again.
@@ -2346,7 +2346,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
         2,
       );
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();

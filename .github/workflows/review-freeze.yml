@@ -1,4 +1,4 @@
-name: Review freeze fingerprint
+name: Review integrity helpers
 
 on:
   pull_request:
@@ -22,5 +22,5 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Test review freeze fingerprint
-        run: node --test scripts/review-freeze-fingerprint.test.mjs
+      - name: Test review integrity helpers
+        run: node --test scripts/review-freeze-fingerprint.test.mjs scripts/vitest-resource-preflight.test.mjs

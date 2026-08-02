@@ -141,6 +141,7 @@ function makeDelegationSummary(
     startedAt: "10:00",
     completedAt: null,
     result: null,
+    resultParserVersion: 0,
     ...overrides,
   };
 }

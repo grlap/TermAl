@@ -841,7 +841,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("follows the latest user prompt immediately while a send is in flight", async () => {
+  it("smoothly reattaches to the latest prompt while a send is in flight", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -929,13 +929,14 @@ describe("App scroll behaviour", () => {
         const settledBottomCallCount = filterScrollToCallsAt(
           scrollToMock,
           800,
-          "auto",
+          "smooth",
         ).length;
         expect(settledBottomCallCount).toBeGreaterThan(0);
+        expect(filterScrollToCallsAt(scrollToMock, 800, "auto")).toEqual([]);
 
         context.cleanup();
         await flushUiWork();
-        expect(filterScrollToCallsAt(scrollToMock, 800, "auto").length).toBe(
+        expect(filterScrollToCallsAt(scrollToMock, 800, "smooth").length).toBe(
           settledBottomCallCount,
         );
       } finally {
@@ -944,7 +945,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("does not smooth-scroll to the old bottom while a near-bottom send is pending", async () => {
+  it("keeps a growing near-bottom send inside one smooth follow", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -1032,7 +1033,11 @@ describe("App scroll behaviour", () => {
         scrollHeight = 1120;
         await settleAsyncUi();
 
-        expect(filterScrollToCallsAt(scrollToMock, 800, "smooth")).toEqual([]);
+        expect(
+          filterScrollToCallsAt(scrollToMock, 800, "smooth").length,
+        ).toBeGreaterThan(0);
+        expect(filterScrollToCallsAt(scrollToMock, 800, "auto")).toEqual([]);
+        expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
       } finally {
         context.cleanup();
         restoreScrollGeometry();
@@ -1040,7 +1045,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("scrolls before paint to make room when the live turn appears at the bottom", async () => {
+  it("smoothly makes room when the first agent card appears above the live turn", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -1125,8 +1130,9 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         expect(screen.getByText("Live turn")).toBeInTheDocument();
+        expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
         expect(
-          filterScrollToCallsAt(scrollToMock, 920, "auto").length,
+          filterScrollToCallsAt(scrollToMock, 920, "smooth").length,
         ).toBeGreaterThan(0);
         expect(messageStack.scrollTop).toBe(920);
       } finally {
@@ -1327,8 +1333,9 @@ describe("App scroll behaviour", () => {
 
         expect(sessionPane).toHaveClass("active");
         expect(
-          filterScrollToCallsAt(scrollToMock, 920, "auto").length,
+          filterScrollToCallsAt(scrollToMock, 920, "smooth").length,
         ).toBeGreaterThan(0);
+        expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
         expect(messageStack.scrollTop).toBe(920);
       } finally {
         restoreScrollGeometry();
@@ -1422,8 +1429,9 @@ describe("App scroll behaviour", () => {
 
         expect(screen.getByText("Live turn")).toBeInTheDocument();
         expect(
-          filterScrollToCallsAt(scrollToMock, 920, "auto").length,
+          filterScrollToCallsAt(scrollToMock, 920, "smooth").length,
         ).toBeGreaterThan(0);
+        expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
         expect(messageStack.scrollTop).toBe(920);
 
         scrollToMock.mockClear();
@@ -1640,15 +1648,51 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("smoothly follows new assistant messages while pinned to the bottom", async () => {
+  it("keeps measured command-card growth inside the smooth bottom follow", async () => {
     await withVerifiedNoReactActWarnings(async () => {
+      const resizeCallbacksByTarget = new Map<
+        Element,
+        Set<ResizeObserverCallback>
+      >();
+      class ResizeObserverHarness {
+        private readonly callback: ResizeObserverCallback;
+        private readonly targets = new Set<Element>();
+
+        constructor(callback: ResizeObserverCallback) {
+          this.callback = callback;
+        }
+
+        observe(target: Element) {
+          this.targets.add(target);
+          const callbacks = resizeCallbacksByTarget.get(target) ?? new Set();
+          callbacks.add(this.callback);
+          resizeCallbacksByTarget.set(target, callbacks);
+        }
+
+        unobserve(target: Element) {
+          this.targets.delete(target);
+          const callbacks = resizeCallbacksByTarget.get(target);
+          callbacks?.delete(this.callback);
+          if (callbacks?.size === 0) {
+            resizeCallbacksByTarget.delete(target);
+          }
+        }
+
+        disconnect() {
+          this.targets.forEach((target) => this.unobserve(target));
+        }
+      }
+
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
         scrollHeight: () => scrollHeight,
       });
       const scrollToMock = mockScrollToAndApplyTop();
-      const context = await renderAppWithProjectAndSession();
+      const context = await renderAppWithProjectAndSession({
+        resizeObserver:
+          ResizeObserverHarness as unknown as typeof ResizeObserver,
+      });
       // Keep the production bottom-follow cooldown active while this test
       // advances the simulated scroll sequence. Under full-suite CPU load,
       // more than the real 1.2-second window can elapse between assertions,
@@ -1700,6 +1744,16 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
+        const conversationPage = messageStack.querySelector(
+          ".session-conversation-page:not([hidden])",
+        );
+        if (!(conversationPage instanceof HTMLElement)) {
+          throw new Error("Active conversation content not found");
+        }
+        let conversationPageHeight = 240;
+        conversationPage.getBoundingClientRect = () =>
+          ({ height: conversationPageHeight }) as DOMRect;
+
         messageStack.scrollTop = 800;
         expect(
           messageStack.scrollHeight -
@@ -1711,9 +1765,10 @@ describe("App scroll behaviour", () => {
           await flushUiWork();
         });
         scrollToMock.mockClear();
-        let growSecondAssistantAfterFirstFollow = true;
+        let growCommandCardAfterFirstFollow = true;
         // This test needs a stateful scroll mock after the initial setup:
-        // the second assistant message grows after the first follow scroll.
+        // the command card gains its measured height after the first follow
+        // scroll, then delivers the same ResizeObserver callback as production.
         // Keep later assertions in this `it` aware that the standard
         // apply-top mock is intentionally replaced from this point on.
         scrollToMock.mockImplementation(function (
@@ -1730,12 +1785,28 @@ describe("App scroll behaviour", () => {
             // Simulate rendered message content measuring taller after the
             // first follow scroll.
             if (
-              growSecondAssistantAfterFirstFollow &&
+              growCommandCardAfterFirstFollow &&
               options.behavior === "smooth" &&
               options.top === 900
             ) {
-              growSecondAssistantAfterFirstFollow = false;
+              growCommandCardAfterFirstFollow = false;
               scrollHeight = 1200;
+              conversationPageHeight = 340;
+              queueMicrotask(() => {
+                resizeCallbacksByTarget
+                  .get(conversationPage)
+                  ?.forEach((callback) =>
+                    callback(
+                      [
+                        {
+                          target: conversationPage,
+                          contentRect: conversationPage.getBoundingClientRect(),
+                        } as unknown as ResizeObserverEntry,
+                      ],
+                      {} as ResizeObserver,
+                    ),
+                  );
+              });
             }
             return;
           }
@@ -1760,7 +1831,7 @@ describe("App scroll behaviour", () => {
               name: "Session 1",
               projectId: "project-termal",
               workdir: "/projects/termal",
-              preview: "Second assistant response.",
+              preview: "Running cargo check.",
               messages: [
                 {
                   id: "message-assistant-1",
@@ -1770,11 +1841,13 @@ describe("App scroll behaviour", () => {
                   text: "First assistant response.",
                 },
                 {
-                  id: "message-assistant-2",
-                  type: "text",
+                  id: "message-command-2",
+                  type: "command",
                   timestamp: "10:02",
                   author: "assistant",
-                  text: "Second assistant response.",
+                  command: "cargo check",
+                  output: "",
+                  status: "running",
                 },
               ],
             }),
@@ -1788,6 +1861,7 @@ describe("App scroll behaviour", () => {
         expect(
           filterScrollToCallsAt(scrollToMock, 1000, "smooth").length,
         ).toBeGreaterThan(0);
+        expect(filterScrollToCallsAt(scrollToMock, 1000, "auto")).toEqual([]);
         expect(
           screen.queryByRole("button", { name: "New response" }),
         ).not.toBeInTheDocument();
@@ -2810,7 +2884,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("keeps a bottom-pinned transcript attached while a sibling composer resizes", async () => {
+  it("re-pins content, viewport, and active-page changes without observing composer resize frames", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const resizeCallbacksByTarget = new Map<
         Element,
@@ -2871,9 +2945,10 @@ describe("App scroll behaviour", () => {
           configurable: true,
           get: () => clientHeight,
         });
+        let scrollHeight = 1000;
         Object.defineProperty(messageStack, "scrollHeight", {
           configurable: true,
-          get: () => 1000,
+          get: () => scrollHeight,
         });
         messageStack.scrollTop = 800;
         await act(async () => {
@@ -2885,29 +2960,123 @@ describe("App scroll behaviour", () => {
         messageStack.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, (event) => {
           authorityScrollWrites.push(event as CustomEvent);
         });
+
+        // The composer owns the one height mutation and requests one
+        // synchronous correction. SessionPaneView must not observe the message
+        // stack itself: a CSS height transition previously delivered several
+        // observer callbacks (and scroll writes) for one keyboard edit.
+        expect(resizeCallbacksByTarget.get(messageStack)).toBeUndefined();
         messageStack.scrollTop = 790;
         requestMessageStackBottomRepin(messageStack);
         expect(authorityScrollWrites).not.toHaveLength(0);
         expect(messageStack.scrollTop).toBe(800);
 
-        const notifyMessageStackResize = async () => {
-          const callbacks = resizeCallbacksByTarget.get(messageStack);
-          expect(callbacks?.size).toBeGreaterThan(0);
-          await act(async () => {
-            callbacks?.forEach((callback) =>
+        const conversationPage = messageStack.querySelector(
+          ".session-conversation-page:not([hidden]), .empty-state",
+        );
+        if (!(conversationPage instanceof HTMLElement)) {
+          throw new Error("Active conversation content not found");
+        }
+        expect(
+          resizeCallbacksByTarget.get(conversationPage)?.size,
+        ).toBeGreaterThan(0);
+        const conversationPageGeometry = vi.fn(
+          () => ({ height: 240 }) as DOMRect,
+        );
+        conversationPage.getBoundingClientRect = conversationPageGeometry;
+        scrollHeight = 1120;
+        messageStack.scrollTop = 800;
+        await act(async () => {
+          resizeCallbacksByTarget
+            .get(conversationPage)
+            ?.forEach((callback) =>
               callback(
                 [
                   {
-                    target: messageStack,
-                    contentRect: messageStack.getBoundingClientRect(),
+                    target: conversationPage,
+                    contentRect: conversationPage.getBoundingClientRect(),
                   } as unknown as ResizeObserverEntry,
                 ],
                 {} as ResizeObserver,
               ),
             );
-            await flushUiWork();
-          });
-        };
+          await flushUiWork();
+        });
+        expect(messageStack.scrollTop).toBe(920);
+
+        // Streaming mutates descendants of the active page for every chunk.
+        // Those mutations must not run the structural page-rebind path or force
+        // another synchronous geometry read.
+        conversationPageGeometry.mockClear();
+        const streamedChunk = document.createElement("span");
+        await act(async () => {
+          conversationPage.append(streamedChunk);
+          streamedChunk.textContent = "streamed token";
+          await flushUiWork();
+        });
+        expect(conversationPageGeometry).not.toHaveBeenCalled();
+        expect(messageStack.scrollTop).toBe(920);
+
+        const paneFrame = messageStack.closest(".workspace-pane");
+        if (!(paneFrame instanceof HTMLElement)) {
+          throw new Error("Workspace pane frame not found");
+        }
+        expect(resizeCallbacksByTarget.get(paneFrame)?.size).toBeGreaterThan(0);
+        clientHeight = 260;
+        await act(async () => {
+          resizeCallbacksByTarget
+            .get(paneFrame)
+            ?.forEach((callback) =>
+              callback(
+                [
+                  {
+                    target: paneFrame,
+                    contentRect: paneFrame.getBoundingClientRect(),
+                  } as unknown as ResizeObserverEntry,
+                ],
+                {} as ResizeObserver,
+              ),
+            );
+          await flushUiWork();
+        });
+        expect(messageStack.scrollTop).toBe(860);
+
+        const replacementPage = document.createElement("div");
+        replacementPage.className = "session-conversation-page";
+        replacementPage.getBoundingClientRect = () =>
+          ({ height: 300 }) as DOMRect;
+        scrollHeight = 1_200;
+        await act(async () => {
+          conversationPage.hidden = true;
+          messageStack.append(replacementPage);
+          await flushUiWork();
+        });
+        expect(resizeCallbacksByTarget.get(conversationPage)).toBeUndefined();
+        expect(
+          resizeCallbacksByTarget.get(replacementPage)?.size,
+        ).toBeGreaterThan(0);
+        expect(messageStack.scrollTop).toBe(940);
+
+        replacementPage.getBoundingClientRect = () =>
+          ({ height: 360 }) as DOMRect;
+        scrollHeight = 1_260;
+        await act(async () => {
+          resizeCallbacksByTarget
+            .get(replacementPage)
+            ?.forEach((callback) =>
+              callback(
+                [
+                  {
+                    target: replacementPage,
+                    contentRect: replacementPage.getBoundingClientRect(),
+                  } as unknown as ResizeObserverEntry,
+                ],
+                {} as ResizeObserver,
+              ),
+            );
+          await flushUiWork();
+        });
+        expect(messageStack.scrollTop).toBe(1_000);
 
         fireEvent.change(composer, {
           target: { value: "first line\nsecond line\nthird line" },
@@ -2915,21 +3084,7 @@ describe("App scroll behaviour", () => {
         await act(async () => {
           await flushUiWork();
         });
-        for (const nextClientHeight of [190, 180, 170, 160]) {
-          clientHeight = nextClientHeight;
-          await notifyMessageStackResize();
-          expect(messageStack.scrollTop).toBe(1000 - nextClientHeight);
-        }
-
-        fireEvent.change(composer, { target: { value: "first line" } });
-        await act(async () => {
-          await flushUiWork();
-        });
-        for (const nextClientHeight of [170, 180, 190, 200]) {
-          clientHeight = nextClientHeight;
-          await notifyMessageStackResize();
-          expect(messageStack.scrollTop).toBe(1000 - nextClientHeight);
-        }
+        expect(resizeCallbacksByTarget.get(messageStack)).toBeUndefined();
       } finally {
         teardown();
       }

@@ -29,6 +29,10 @@ const MAX_DELEGATION_RESULT_SUMMARY_CHARS: usize = 8000;
 const MAX_DELEGATION_RESULT_FINDINGS: usize = 100;
 // Result packets are expected near the end of long assistant output.
 const DELEGATION_RESULT_PACKET_SEARCH_BYTES: usize = 32 * 1024;
+// Persisted terminal results are reparsed once when this version increases.
+// This lets parser upgrades repair old packets without rescanning clean child
+// transcripts on every result/status poll.
+const DELEGATION_RESULT_PARSER_VERSION: u32 = 1;
 // Phase 1 starts children immediately but still enforces simple fan-out limits.
 const MAX_RUNNING_DELEGATIONS_PER_PARENT: usize = 4;
 // Keep nesting shallow until delegation ownership/scheduling is explicit.
@@ -614,6 +618,7 @@ impl AppState {
             started_at: Some(now),
             completed_at: None,
             result: None,
+            result_parser_version: 0,
         };
         let delegation_index = inner.delegations.len();
         inner.delegations.push(record.clone());
@@ -2394,7 +2399,7 @@ fn refresh_delegation_from_child_locked(
 ) -> Option<DelegationLifecycleDelta> {
     let delegation = inner.delegations.get(delegation_index)?.clone();
     if delegation_is_terminal(delegation.status) {
-        return None;
+        return repair_terminal_delegation_result_locked(inner, delegation_index, &delegation);
     }
 
     let child_outcome = delegation_child_outcome(inner, &delegation.child_session_id);
@@ -2469,6 +2474,7 @@ fn refresh_delegation_from_child_locked(
                 record.status = DelegationStatus::Completed;
                 record.completed_at = Some(completed_at.clone());
                 record.result = Some(result.clone());
+                record.result_parser_version = DELEGATION_RESULT_PARSER_VERSION;
             }
             inner.sync_running_read_only_delegation_index(delegation_index);
             inner.mark_delegation_mutated(delegation_index);
@@ -2507,6 +2513,71 @@ fn refresh_delegation_from_child_locked(
     }
 }
 
+/// Reparse a completed child's retained transcript once after a parser upgrade.
+/// The version stamp is persisted even when the current parser produces the
+/// same result, so clean reviews never become an unbounded poll-time scan.
+fn repair_terminal_delegation_result_locked(
+    inner: &mut StateInner,
+    delegation_index: usize,
+    delegation: &DelegationRecord,
+) -> Option<DelegationLifecycleDelta> {
+    let existing = delegation.result.as_ref()?;
+    if delegation.status != DelegationStatus::Completed
+        || existing.status != DelegationStatus::Completed
+        || delegation.result_parser_version >= DELEGATION_RESULT_PARSER_VERSION
+    {
+        return None;
+    }
+    let reparsed = match delegation_child_outcome(inner, &delegation.child_session_id) {
+        DelegationChildOutcome::Completed {
+            summary,
+            findings,
+            changed_files,
+            commands_run,
+            notes,
+        } => Some(DelegationResult {
+            delegation_id: delegation.id.clone(),
+            child_session_id: delegation.child_session_id.clone(),
+            status: DelegationStatus::Completed,
+            summary,
+            findings,
+            changed_files,
+            commands_run,
+            notes,
+        }),
+        _ => None,
+    };
+    let result_changed = reparsed
+        .as_ref()
+        .is_some_and(|reparsed| reparsed != existing);
+    {
+        let record = inner.delegations.get_mut(delegation_index)?;
+        record.result_parser_version = DELEGATION_RESULT_PARSER_VERSION;
+        if let Some(reparsed) = reparsed.filter(|_| result_changed) {
+            record.result = Some(reparsed);
+        }
+    }
+    inner.mark_delegation_mutated(delegation_index);
+    let parent_card_delta = if result_changed {
+        let repaired = inner.delegations.get(delegation_index)?.result.as_ref()?;
+        let public_summary = compact_delegation_public_summary(&repaired.summary);
+        update_parent_delegation_card_locked(
+            inner,
+            delegation,
+            ParallelAgentStatus::Completed,
+            public_summary,
+        )
+    } else {
+        None
+    };
+    Some(DelegationLifecycleDelta::Updated {
+        delegation_id: delegation.id.clone(),
+        status: DelegationStatus::Completed,
+        updated_at: stamp_now(),
+        parent_card_delta,
+    })
+}
+
 /// Re-arms a terminal delegation back to Running for a follow-up turn.
 ///
 /// `refresh_delegation_from_child_locked` deliberately skips terminal delegations, so a
@@ -2526,6 +2597,7 @@ fn rearm_terminal_delegation_for_followup_locked(
         record.status = DelegationStatus::Running;
         record.completed_at = None;
         record.result = None;
+        record.result_parser_version = 0;
         record.started_at = Some(updated_at.clone());
     }
     inner.sync_running_read_only_delegation_index(delegation_index);
@@ -3684,23 +3756,54 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
     let mut finding_lines = Vec::new();
     let mut note_lines: Vec<String> = Vec::new();
     let mut section: Option<DelegationResultSection> = None;
+    let mut saw_summary_section = false;
     for line in lines {
         let cleaned = line.trim();
         if section.is_none() {
             if let Some((label, value)) = cleaned.split_once(':') {
-                if label.trim().eq_ignore_ascii_case("status") {
-                    status = match value.trim().to_ascii_lowercase().as_str() {
-                        "completed" => Some(DelegationStatus::Completed),
-                        "failed" => Some(DelegationStatus::Failed),
-                        _ => None,
-                    };
-                    continue;
+                match label.trim().to_ascii_lowercase().as_str() {
+                    "status" => {
+                        status = match value.trim().to_ascii_lowercase().as_str() {
+                            "completed" => Some(DelegationStatus::Completed),
+                            "failed" => Some(DelegationStatus::Failed),
+                            _ => None,
+                        };
+                        continue;
+                    }
+                    "summary" => {
+                        saw_summary_section = true;
+                        section = Some(DelegationResultSection::Summary);
+                        if !value.trim().is_empty() {
+                            summary_lines.push(value.trim());
+                        }
+                        continue;
+                    }
+                    _ => {}
                 }
             }
         }
 
         if let Some(next_section) = delegation_result_section_heading(cleaned) {
+            if next_section == DelegationResultSection::Summary {
+                if saw_summary_section {
+                    // The first Summary is the packet's canonical summary.
+                    // Nested review prose can contain another Summary heading;
+                    // reopening capture there concatenates unrelated text into
+                    // the compact parent-card result.
+                    section = Some(DelegationResultSection::Ignored);
+                    continue;
+                }
+                saw_summary_section = true;
+            }
             section = Some(next_section);
+            continue;
+        }
+        if cleaned.starts_with('#') {
+            if section == Some(DelegationResultSection::Findings) {
+                finding_lines.push(line);
+            } else {
+                section = Some(DelegationResultSection::Ignored);
+            }
             continue;
         }
 
@@ -3729,10 +3832,22 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
         summary
     };
 
-    let mut findings = finding_lines
-        .iter()
-        .filter_map(|line| parse_delegation_finding_line(line))
-        .collect::<Vec<_>>();
+    // Reviewer agents commonly keep their full Markdown review inside the
+    // packet's Findings section (Actionable/Informational subsections, tables,
+    // bold severities, and so on). Prefer that structured review parser before
+    // falling back to the compact one-line packet format.
+    let findings_review = format!("## Findings\n{}", finding_lines.join("\n"));
+    let mut findings = parse_delegation_review_findings(&findings_review);
+    if findings.is_empty() {
+        findings = finding_lines
+            .iter()
+            .filter(|line| {
+                let cleaned = line.trim();
+                !cleaned.starts_with('#') && !cleaned.starts_with('|')
+            })
+            .filter_map(|line| parse_delegation_finding_line(line))
+            .collect::<Vec<_>>();
+    }
     let findings_explicitly_empty = delegation_result_findings_explicitly_empty(&finding_lines);
     let findings_refer_to_prior_sections = delegation_findings_refer_to_prior_sections(&findings);
     if !findings_explicitly_empty && (findings.is_empty() || findings_refer_to_prior_sections) {
@@ -3778,10 +3893,20 @@ fn is_delegation_stop_marker(text: &str) -> bool {
 }
 
 fn delegation_result_section_heading(cleaned: &str) -> Option<DelegationResultSection> {
-    let Some(label) = cleaned.strip_suffix(':') else {
+    // Accept both the compact packet contract (`Summary:`) and the Markdown
+    // headings reviewers actually emit (`### Summary`, `## Findings:`, or
+    // `### Findings: Code Review — 2026-08-02`). A prose line ending in a
+    // colon is still only a section when its complete label is known.
+    let is_markdown_heading = cleaned.starts_with('#');
+    if !is_markdown_heading && !cleaned.ends_with(':') {
         return None;
-    };
-    match label.trim().to_ascii_lowercase().as_str() {
+    }
+    let label = delegation_review_section_label(cleaned)?;
+    let section_label = label
+        .split_once(':')
+        .map(|(prefix, _)| prefix.trim())
+        .unwrap_or(label.as_str());
+    match section_label {
         "summary" => Some(DelegationResultSection::Summary),
         "findings" => Some(DelegationResultSection::Findings),
         "notes" => Some(DelegationResultSection::Notes),
@@ -3861,7 +3986,9 @@ fn parse_delegation_review_findings(text: &str) -> Vec<DelegationFinding> {
         if !in_findings || line.chars().next().is_some_and(char::is_whitespace) {
             continue;
         }
-        if let Some(finding) = parse_delegation_review_actionable_finding_line(line) {
+        if let Some(finding) = parse_delegation_review_actionable_finding_line(line)
+            .or_else(|| parse_delegation_review_actionable_table_row(line))
+        {
             findings.push(finding);
         }
     }
@@ -3895,6 +4022,10 @@ fn delegation_review_findings_section_heading(cleaned: &str) -> Option<bool> {
         | "informational" | "notes" | "reviewer summaries" | "summary" | "verification" => {
             Some(false)
         }
+        _ if label.starts_with("findings:") => Some(true),
+        // Severity headings refine the current Actionable/Informational
+        // section; they must not independently switch capture on or off.
+        _ if is_delegation_review_severity(&label) => None,
         _ if cleaned.starts_with('#') => Some(false),
         _ => None,
     }
@@ -3924,6 +4055,16 @@ fn parse_delegation_review_actionable_finding_line(line: &str) -> Option<Delegat
         return None;
     }
     let (severity, rest) = parse_delegation_review_severity(text)?;
+    if let Some((headline, details)) = split_delegation_review_bold_headline(rest) {
+        let (file, line) = leading_delegation_review_location(details)
+            .unwrap_or((None, None));
+        return Some(DelegationFinding {
+            severity: severity.to_owned(),
+            file,
+            line,
+            message: format!("{headline} — {details}"),
+        });
+    }
     let (location, message) = split_delegation_review_location_and_message(rest)?;
     let (file, line) = parse_delegation_review_location(location);
     Some(DelegationFinding {
@@ -3937,18 +4078,81 @@ fn parse_delegation_review_actionable_finding_line(line: &str) -> Option<Delegat
 fn parse_delegation_review_severity(text: &str) -> Option<(&str, &str)> {
     let text = text.trim();
     if let Some(rest) = text.strip_prefix("**[") {
-        let (severity, rest) = rest.split_once("]**")?;
-        return Some((severity.trim(), rest.trim()));
+        let (severity, rest) = rest.split_once(']')?;
+        if !is_delegation_review_severity(severity) {
+            return None;
+        }
+        let rest = rest.trim();
+        let rest = rest.strip_prefix("**").unwrap_or(rest).trim();
+        return Some((severity.trim(), rest));
     }
     if let Some(rest) = text.strip_prefix("**") {
         let (severity, rest) = rest.split_once("**")?;
+        if !is_delegation_review_severity(severity) {
+            return None;
+        }
         return Some((severity.trim(), rest.trim()));
     }
     if let Some(rest) = text.strip_prefix('[') {
         let (severity, rest) = rest.split_once(']')?;
+        if !is_delegation_review_severity(severity) {
+            return None;
+        }
         return Some((severity.trim(), rest.trim()));
     }
     None
+}
+
+fn is_delegation_review_severity(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "critical" | "high" | "medium" | "low" | "note"
+    )
+}
+
+fn split_delegation_review_bold_headline(text: &str) -> Option<(&str, &str)> {
+    ["** — ", "** - ", "** – "]
+        .iter()
+        .find_map(|separator| text.split_once(separator))
+        .map(|(headline, details)| (headline.trim(), details.trim()))
+        .filter(|(headline, details)| !headline.is_empty() && !details.is_empty())
+}
+
+fn leading_delegation_review_location(text: &str) -> Option<(Option<String>, Option<u32>)> {
+    let text = text.trim();
+    if text.starts_with('[') {
+        return Some(parse_delegation_review_location(text));
+    }
+    let rest = text.strip_prefix('`')?;
+    let end = rest.find('`')?;
+    Some(parse_delegation_review_location(&rest[..end]))
+}
+
+fn parse_delegation_review_actionable_table_row(line: &str) -> Option<DelegationFinding> {
+    let line = line.trim();
+    let row = line.strip_prefix('|')?.strip_suffix('|')?;
+    let cells = row.split('|').map(str::trim).collect::<Vec<_>>();
+    if cells.len() < 3 {
+        return None;
+    }
+    let severity = cells[0]
+        .trim_matches(|ch| matches!(ch, '*' | '`' | '[' | ']'))
+        .trim();
+    if !is_delegation_review_severity(severity) {
+        return None;
+    }
+    let location = cells[1];
+    let message = cells[2..].join(" | ");
+    if location.is_empty() || message.trim().is_empty() {
+        return None;
+    }
+    let (file, line) = parse_delegation_review_location(location);
+    Some(DelegationFinding {
+        severity: severity.to_owned(),
+        file,
+        line,
+        message: message.trim().to_owned(),
+    })
 }
 
 fn split_delegation_review_location_and_message(text: &str) -> Option<(&str, &str)> {

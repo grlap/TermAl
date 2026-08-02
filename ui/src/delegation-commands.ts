@@ -1025,6 +1025,7 @@ function delegationSummary(record: DelegationRecord): DelegationSummary {
     createdAt: record.createdAt,
     startedAt: record.startedAt ?? null,
     completedAt: record.completedAt ?? null,
+    resultParserVersion: record.resultParserVersion,
   };
   if (record.result) {
     summary.result = {

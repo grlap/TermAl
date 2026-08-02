@@ -79,6 +79,60 @@ describe("useConversationOverviewController", () => {
     expect(fetchSessionOverview).toHaveBeenCalledTimes(2);
   });
 
+  it("coalesces a burst of overview freshness changes", async () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = renderHook(
+        (props) => useConversationOverviewController(props),
+        { initialProps: controllerProps() },
+      );
+
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync();
+      });
+      expect(fetchSessionOverview).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        rerender(controllerProps({ sessionMutationStamp: 2 }));
+        rerender(controllerProps({ sessionMutationStamp: 3 }));
+        rerender(controllerProps({ sessionMutationStamp: 4 }));
+      });
+      expect(fetchSessionOverview).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120);
+      });
+      expect(fetchSessionOverview).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refreshes within the max wait during continuous streaming", async () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = renderHook(
+        (props) => useConversationOverviewController(props),
+        { initialProps: controllerProps() },
+      );
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync();
+      });
+      expect(fetchSessionOverview).toHaveBeenCalledTimes(1);
+
+      for (let stamp = 2; stamp <= 6; stamp += 1) {
+        act(() => rerender(controllerProps({ sessionMutationStamp: stamp })));
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(100);
+        });
+      }
+
+      expect(fetchSessionOverview).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("maps the resident scroll fraction into global positions", () => {
     expect(
       conversationOverviewViewportFromResidentWindow({
@@ -98,7 +152,10 @@ describe("useConversationOverviewController", () => {
   });
 
   it("keeps the rail frame anchored to the scroll viewport across wheel scrolls", async () => {
+    const pane = document.createElement("section");
+    pane.className = "workspace-pane";
     const scrollNode = document.createElement("section");
+    pane.append(scrollNode);
     let scrollTop = 0;
     Object.defineProperties(scrollNode, {
       clientHeight: { configurable: true, value: 600 },
@@ -123,17 +180,30 @@ describe("useConversationOverviewController", () => {
         y: 100,
         toJSON: () => ({}),
       }) as DOMRect;
+    pane.getBoundingClientRect = () =>
+      ({
+        bottom: 760,
+        height: 740,
+        left: 40,
+        right: 1_000,
+        top: 20,
+        width: 960,
+        x: 40,
+        y: 20,
+        toJSON: () => ({}),
+      }) as DOMRect;
 
     const { result } = renderHook(() =>
       useConversationOverviewController(
         controllerProps({ scrollContainerRef: { current: scrollNode } }),
       ),
     );
-    const expectedRight = Math.max(0, window.innerWidth - 900 + 12);
+    const expectedRight = 112;
     await waitFor(() => {
       expect(result.current.railHeightPx).toBe(576);
+      expect(result.current.railPortalTarget).toBe(pane);
       expect(result.current.railRightPx).toBe(expectedRight);
-      expect(result.current.railTopPx).toBe(112);
+      expect(result.current.railTopPx).toBe(92);
     });
 
     act(() => {
@@ -143,7 +213,37 @@ describe("useConversationOverviewController", () => {
 
     expect(result.current.railHeightPx).toBe(576);
     expect(result.current.railRightPx).toBe(expectedRight);
-    expect(result.current.railTopPx).toBe(112);
+    expect(result.current.railTopPx).toBe(92);
+  });
+
+  it("clears pane-local rail geometry as soon as the transcript deactivates", async () => {
+    const pane = document.createElement("section");
+    pane.className = "workspace-pane";
+    const scrollNode = document.createElement("section");
+    pane.append(scrollNode);
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      value: 600,
+    });
+
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      {
+        initialProps: controllerProps({
+          scrollContainerRef: { current: scrollNode },
+        }),
+      },
+    );
+
+    await waitFor(() => expect(result.current.railPortalTarget).toBe(pane));
+    rerender(
+      controllerProps({
+        isActive: false,
+        scrollContainerRef: { current: scrollNode },
+      }),
+    );
+    expect(result.current.railPortalTarget).toBeNull();
+    expect(result.current.shouldRenderRail).toBe(false);
   });
 
   it("jumps resident positions without loading history", async () => {

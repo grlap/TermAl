@@ -692,21 +692,23 @@ const GitStatusDirectoryNode = memo(function GitStatusDirectoryNode({
             <span className="git-status-tree-name">{node.name}</span>
           </span>
         </button>
-        <div className="git-status-tree-actions">
-          <button
-            className="git-status-action-button"
-            type="button"
-            onClick={() => onDirectoryAction(sectionId, node, action)}
-            aria-label={actionLabel}
-            title={actionLabel}
-            disabled={isPending}
-          >
-            {isStaged ? <UnstageIcon /> : <StageIcon />}
-          </button>
+        <div className="git-status-tree-tail">
+          <div className="git-status-tree-actions">
+            <button
+              className="git-status-action-button"
+              type="button"
+              onClick={() => onDirectoryAction(sectionId, node, action)}
+              aria-label={actionLabel}
+              title={actionLabel}
+              disabled={isPending}
+            >
+              {isStaged ? <UnstageIcon /> : <StageIcon />}
+            </button>
+          </div>
+          <span className="git-status-tree-count" aria-hidden="true">
+            {node.fileCount}
+          </span>
         </div>
-        <span className="git-status-tree-count" aria-hidden="true">
-          {node.fileCount}
-        </span>
       </div>
 
       {isExpanded ? (
@@ -766,38 +768,40 @@ const GitStatusFileRow = memo(function GitStatusFileRow({
         </span>
       </button>
 
-      <div className="git-status-tree-actions">
-        {!isStaged ? (
+      <div className="git-status-tree-tail">
+        <div className="git-status-tree-actions">
+          {!isStaged ? (
+            <button
+              className="git-status-action-button"
+              type="button"
+              onClick={() => onAction(sectionId, node, "revert")}
+              aria-label={`Revert ${node.name}`}
+              title={`Revert ${node.name}`}
+              disabled={isPending}
+            >
+              <RevertIcon />
+            </button>
+          ) : null}
           <button
             className="git-status-action-button"
             type="button"
-            onClick={() => onAction(sectionId, node, "revert")}
-            aria-label={`Revert ${node.name}`}
-            title={`Revert ${node.name}`}
+            onClick={() => onAction(sectionId, node, isStaged ? "unstage" : "stage")}
+            aria-label={stageActionLabel}
+            title={stageActionLabel}
             disabled={isPending}
           >
-            <RevertIcon />
+            {isStaged ? <UnstageIcon /> : <StageIcon />}
           </button>
-        ) : null}
-        <button
-          className="git-status-action-button"
-          type="button"
-          onClick={() => onAction(sectionId, node, isStaged ? "unstage" : "stage")}
-          aria-label={stageActionLabel}
-          title={stageActionLabel}
-          disabled={isPending}
-        >
-          {isStaged ? <UnstageIcon /> : <StageIcon />}
-        </button>
-      </div>
+        </div>
 
-      <span
-        className={`git-status-tree-status git-status-tree-status-${tone}`}
-        title={node.statusLabel}
-        aria-label={node.statusLabel}
-      >
-        {node.statusCode}
-      </span>
+        <span
+          className={`git-status-tree-status git-status-tree-status-${tone}`}
+          title={node.statusLabel}
+          aria-label={node.statusLabel}
+        >
+          {node.statusCode}
+        </span>
+      </div>
     </div>
   );
 });

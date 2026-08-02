@@ -1,5 +1,5 @@
 // Owns marker grouping, ordering, mounted-slot lookup, marker floating-window
-// and navigation rendering, and local marker action menus for
+// and navigation rendering, and local message action menus for
 // AgentSessionPanel conversations. Does not own marker fetching, mutation
 // requests, overview-rail projection, or transcript virtualization.
 // Split out of AgentSessionPanel.tsx during the round-39 marker extraction.
@@ -530,6 +530,7 @@ export function useConversationMarkerContextMenu({
   markersByMessageId,
   onCreateConversationMarker,
   onDeleteConversationMarker,
+  onPinResponseBoardMessage,
   onSetMarkerPanelVisible,
   scrollContainerRef,
   sessionId,
@@ -544,6 +545,7 @@ export function useConversationMarkerContextMenu({
     options?: CreateConversationMarkerOptions,
   ) => void;
   onDeleteConversationMarker: (sessionId: string, markerId: string) => void;
+  onPinResponseBoardMessage: (sessionId: string, messageId: string) => void;
   onSetMarkerPanelVisible: (isVisible: boolean) => void;
   scrollContainerRef: RefObject<HTMLElement | null>;
   sessionId: string;
@@ -894,6 +896,18 @@ export function useConversationMarkerContextMenu({
                 }}
               >
                 {isMarkerPanelVisible ? "Hide markers window" : "Show markers window"}
+              </button>
+              <div className="conversation-marker-context-menu-separator" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                className="context-menu-item conversation-marker-context-menu-item"
+                onClick={() => {
+                  onPinResponseBoardMessage(sessionId, contextMenu.messageId);
+                  closeContextMenu({ restoreFocus: true });
+                }}
+              >
+                Pin to board
               </button>
             </>
           )}

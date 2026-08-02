@@ -1950,6 +1950,7 @@ textarea {
   min-width: 0;
   min-height: 0;
   align-self: stretch;
+  position: relative;
 }
 
 .workspace-pane.active {
@@ -4376,7 +4377,7 @@ textarea {
   --conversation-overview-lane-width: calc(100% - 0.9rem);
   --conversation-overview-sticky-inset: 0.5rem;
 
-  position: fixed;
+  position: absolute;
   top: var(--conversation-overview-sticky-inset);
   width: var(--conversation-overview-rail-width);
   height: min(32rem, calc(100vh - (var(--conversation-overview-sticky-inset) * 2)));
@@ -4736,6 +4737,12 @@ textarea {
 .activity-card-live p {
   font-size: 0.92rem;
   line-height: 1.08;
+}
+
+.activity-card-live .activity-card-prompt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .activity-card-live .card-label {
@@ -7317,7 +7324,7 @@ textarea {
 
 .git-status-tree-file-row,
 .git-status-tree-directory-row {
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .git-status-tree-open-button,
@@ -7425,13 +7432,24 @@ textarea {
   white-space: nowrap;
 }
 
+.git-status-tree-tail,
 .git-status-tree-actions {
   display: inline-flex;
   align-items: center;
+}
+
+.git-status-tree-tail {
+  gap: 0.42rem;
+  min-width: 0;
+  position: relative;
+}
+
+.git-status-tree-actions {
+  position: absolute;
+  right: calc(100% + 0.12rem);
   gap: 0.08rem;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 140ms ease;
 }
 
 .git-status-tree-file-row:hover .git-status-tree-actions,
@@ -8760,7 +8778,6 @@ textarea {
   padding: 0.95rem 1rem;
   color: var(--ink);
   transition:
-    height 140ms ease,
     background 180ms ease,
     border-color 180ms ease,
     color 180ms ease,
@@ -8966,6 +8983,15 @@ textarea {
   padding: 0.9rem 1.1rem;
   min-width: 6.5rem;
   font-weight: 700;
+}
+
+.send-button.composer-queue-button {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--signal-gold) 52%, #4d3300),
+    color-mix(in srgb, var(--signal-gold) 34%, #3b2700)
+  );
+  box-shadow: 0 14px 28px color-mix(in srgb, var(--signal-gold) 30%, transparent);
 }
 
 .composer-stop-button {
@@ -10844,36 +10870,6 @@ textarea {
 .message-stack.response-board-panel-stack {
   padding: 0;
   overflow: hidden;
-}
-
-.response-board-pin-message {
-  position: absolute;
-  top: 0.45rem;
-  right: 3.9rem;
-  z-index: 4;
-  min-height: 1.8rem;
-  padding: 0.2rem 0.55rem;
-  border: 1px solid var(--line);
-  border-radius: 0.45rem;
-  background: color-mix(in srgb, var(--surface-card) 94%, transparent);
-  color: var(--muted);
-  font-size: 0.7rem;
-  font-weight: 700;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-
-.conversation-message-marker-shell:hover > .response-board-pin-message,
-.conversation-message-marker-shell:focus-within > .response-board-pin-message,
-.response-board-pin-message:focus-visible {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.response-board-pin-message:hover {
-  border-color: var(--accent-blue-border);
-  color: var(--signal-blue);
 }
 
 .response-board-panel {

@@ -377,7 +377,7 @@ describe("App live state - visibility and wake recovery", () => {
         }
 
         await clickAndSettle(sessionRowButton);
-        await screen.findByText("Waiting for the next chunk of output...");
+        await screen.findByText("Working on the current turn...");
         fetchMock.mockClear();
 
         act(() => {
@@ -407,7 +407,7 @@ describe("App live state - visibility and wake recovery", () => {
           expect(screen.getAllByText("Here while hidden.")).toHaveLength(2);
         });
         expect(
-          screen.queryByText("Waiting for the next chunk of output..."),
+          screen.queryByText("Working on the current turn..."),
         ).not.toBeInTheDocument();
       } finally {
         setDocumentVisibilityState(originalVisibilityState);
@@ -791,7 +791,7 @@ describe("App live state - visibility and wake recovery", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
@@ -829,7 +829,7 @@ describe("App live state - visibility and wake recovery", () => {
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Here after wake.")).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -945,7 +945,7 @@ describe("App live state - visibility and wake recovery", () => {
 
       await clickAndSettle(sessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
       stateRequestCount = 0;
@@ -979,7 +979,7 @@ describe("App live state - visibility and wake recovery", () => {
 
       expect(stateFetchCallCount()).toBe(0);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -1150,7 +1150,7 @@ describe("App live state - visibility and wake recovery", () => {
       expect(screen.getByText("Codex needs approval")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
       stateRequestCount = 0;
@@ -1166,7 +1166,7 @@ describe("App live state - visibility and wake recovery", () => {
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Here after approval wake.")).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -1320,7 +1320,7 @@ describe("App live state - visibility and wake recovery", () => {
 
       await clickAndSettle(quietSessionRowButton);
       expect(
-        screen.getByText("Waiting for the next chunk of output..."),
+        screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
       fetchMock.mockClear();
       stateRequestCount = 0;
@@ -1359,7 +1359,7 @@ describe("App live state - visibility and wake recovery", () => {
         screen.getAllByText("Recovered quiet session after wake."),
       ).toHaveLength(2);
       expect(
-        screen.queryByText("Waiting for the next chunk of output..."),
+        screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();

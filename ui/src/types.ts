@@ -416,6 +416,7 @@ export type DelegationRecord = {
   startedAt?: string | null;
   completedAt?: string | null;
   result?: DelegationResult | null;
+  resultParserVersion: number;
 };
 
 export type DelegationSummary = Omit<

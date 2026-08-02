@@ -1072,7 +1072,7 @@ export const SessionComposer = memo(function SessionComposer({
             </button>
           ) : null}
           <button
-            className="send-button"
+            className={`send-button${isSessionBusy ? " composer-queue-button" : ""}`}
             type="button"
             onMouseDown={(event) => {
               event.preventDefault();

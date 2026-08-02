@@ -67,6 +67,7 @@ mod session_stop;
 mod session_stop_runtime;
 mod shared_codex;
 mod shared_codex_events;
+mod state_mutex;
 mod telegram;
 mod telegram_forwarding;
 mod telegram_relay_lifecycle;
@@ -734,7 +735,7 @@ fn test_app_state() -> AppState {
         )),
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
         stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
-        inner: Arc::new(Mutex::new(StateInner::new())),
+        inner: Arc::new(StateMutex::new(StateInner::new())),
     }
 }
 

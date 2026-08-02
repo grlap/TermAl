@@ -2,10 +2,13 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  isFirstAgentOutputForObservedPrompt,
+  resolveLatestTurnOutputState,
   resolveNewResponseIndicatorVisibility,
   resolveSessionPageScrollDistance,
   useSessionPaneScrollState,
 } from "./SessionPaneView.scroll";
+import { MESSAGE_STACK_SCROLL_WRITE_EVENT } from "./message-stack-scroll-sync";
 import {
   addSessionHistoryPageDemandListener,
   completeSessionHistoryPageDemand,
@@ -73,6 +76,310 @@ afterEach(() => {
 });
 
 describe("session pane historical-window tail state", () => {
+  it("identifies the first agent output for the latest prompt", () => {
+    const prompt: Message = {
+      id: "prompt-2",
+      type: "text",
+      timestamp: "12:01",
+      author: "you",
+      text: "Current prompt",
+    };
+    const reply: Message = {
+      id: "reply-2",
+      type: "text",
+      timestamp: "12:02",
+      author: "assistant",
+      text: "First reply",
+    };
+
+    expect(resolveLatestTurnOutputState([prompt])).toEqual({
+      hasAgentOutput: false,
+      promptMessageId: "prompt-2",
+    });
+    expect(resolveLatestTurnOutputState([prompt, reply])).toEqual({
+      hasAgentOutput: true,
+      promptMessageId: "prompt-2",
+    });
+    expect(
+      resolveLatestTurnOutputState([
+        {
+          ...reply,
+          id: "assistant-only-tail",
+        },
+      ]),
+    ).toEqual({
+      hasAgentOutput: true,
+      promptMessageId: null,
+    });
+  });
+
+  it("does not treat an older-history prepend that reveals the prompt as new output", () => {
+    expect(
+      isFirstAgentOutputForObservedPrompt(
+        {
+          hasAgentOutput: true,
+          promptMessageId: null,
+        },
+        {
+          hasAgentOutput: true,
+          promptMessageId: "prompt-outside-old-tail",
+        },
+      ),
+    ).toBe(false);
+  });
+
+  it("does not re-pin when older history reveals the prompt behind resident output", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    let scrollHeight = 1_000;
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, writable: true, value: 620 },
+    });
+    const scrollTo = vi.fn(
+      (optionsOrX?: ScrollToOptions | number, y?: number) => {
+        const top =
+          typeof optionsOrX === "number" ? y : optionsOrX?.top;
+        if (typeof top === "number") {
+          scrollNode.scrollTop = top;
+        }
+      },
+    );
+    Object.defineProperty(scrollNode, "scrollTo", {
+      configurable: true,
+      value: scrollTo as HTMLElement["scrollTo"],
+    });
+    const reply: Message = {
+      id: "reply-resident",
+      type: "text",
+      timestamp: "12:02",
+      author: "assistant",
+      text: "Already resident reply",
+    };
+    const assistantOnlyTail: Session = {
+      ...session(false),
+      messages: [reply],
+      messageCount: 1_000,
+      hasOlderHistory: true,
+    };
+    const paneShouldStickToBottomRef = { current: { "pane-1": false } };
+    const sharedParams = {
+      ...params(assistantOnlyTail),
+      isActive: true,
+      isSessionTabActive: true,
+      paneShouldStickToBottomRef,
+    };
+    const hook = renderHook(
+      ({ currentSession, contentSignature }) =>
+        useSessionPaneScrollState({
+          ...sharedParams,
+          activeSession: currentSession,
+          visibleContentSignature: contentSignature,
+          visibleMessageContentSignature: contentSignature,
+          visibleLastMessageAuthor:
+            currentSession.messages[currentSession.messages.length - 1]?.author,
+        }),
+      {
+        initialProps: {
+          currentSession: assistantOnlyTail,
+          contentSignature: "reply-resident",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+    scrollTo.mockClear();
+
+    scrollHeight = 1_120;
+    hook.rerender({
+      currentSession: {
+        ...assistantOnlyTail,
+        messages: [
+          {
+            id: "prompt-revealed-by-prepend",
+            type: "text",
+            timestamp: "12:01",
+            author: "you",
+            text: "Prompt loaded from older history",
+          },
+          reply,
+        ],
+      },
+      contentSignature: "prompt-revealed-by-prepend:reply-resident",
+    });
+
+    expect(scrollNode.scrollTop).toBe(620);
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("smoothly follows when the first agent reply displaces the live-turn tail", () => {
+    let nextAnimationFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      const frameId = nextAnimationFrameId;
+      nextAnimationFrameId += 1;
+      animationFrames.set(frameId, callback);
+      return frameId;
+    });
+    vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((frameId: number) => animationFrames.delete(frameId)),
+    );
+    let scrollHeight = 1_000;
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const scrollTo = vi.fn(
+      (optionsOrX?: ScrollToOptions | number, y?: number) => {
+        const top =
+          typeof optionsOrX === "number" ? y : optionsOrX?.top;
+        if (typeof top === "number") {
+          scrollNode.scrollTop = top;
+        }
+      },
+    );
+    Object.defineProperty(scrollNode, "scrollTo", {
+      configurable: true,
+      value: scrollTo as HTMLElement["scrollTo"],
+    });
+    const scrollWrites: CustomEvent[] = [];
+    scrollNode.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, (event) => {
+      scrollWrites.push(event as CustomEvent);
+    });
+    const prompt: Message = {
+      id: "prompt-current",
+      type: "text",
+      timestamp: "12:01",
+      author: "you",
+      text: "Current prompt",
+    };
+    const activeSession: Session = {
+      ...session(false),
+      messages: [prompt],
+      messageCount: 1,
+    };
+    const paneShouldStickToBottomRef = { current: { "pane-1": true } };
+    const sharedParams = {
+      ...params(activeSession),
+      defaultScrollToBottom: true,
+      isActive: true,
+      isSessionTabActive: true,
+      paneShouldStickToBottomRef,
+      showWaitingIndicator: true,
+    };
+    const hook = renderHook(
+      ({ currentSession, contentSignature }) =>
+        useSessionPaneScrollState({
+          ...sharedParams,
+          activeSession: currentSession,
+          visibleContentSignature: contentSignature,
+          visibleMessageContentSignature: contentSignature,
+          visibleLastMessageAuthor:
+            currentSession.messages[currentSession.messages.length - 1]?.author,
+        }),
+      {
+        initialProps: {
+          currentSession: activeSession,
+          contentSignature: "prompt-current",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+    requestAnimationFrame.mockClear();
+
+    scrollHeight = 1_120;
+    hook.rerender({
+      currentSession: {
+        ...activeSession,
+        messages: [
+          prompt,
+          {
+            id: "reply-current",
+            type: "text",
+            timestamp: "12:02",
+            author: "assistant",
+            text: "First reply",
+          },
+        ],
+        messageCount: 2,
+      },
+      contentSignature: "reply-current",
+    });
+
+    expect(scrollNode.scrollTop).toBe(800);
+    expect(scrollTo).not.toHaveBeenCalled();
+    const firstFrame = animationFrames.entries().next().value;
+    if (!firstFrame) {
+      throw new Error("Expected a scheduled bottom-follow frame");
+    }
+    animationFrames.delete(firstFrame[0]);
+    act(() => firstFrame[1](performance.now()));
+
+    expect(scrollNode.scrollTop).toBe(920);
+    expect(scrollTo).toHaveBeenCalledWith({
+      behavior: "smooth",
+      top: 920,
+    });
+    expect(
+      scrollWrites[scrollWrites.length - 1]?.detail.scrollKind,
+    ).toBe("bottom_follow");
+
+    const firstReply: Message = {
+      id: "reply-current",
+      type: "text",
+      timestamp: "12:02",
+      author: "assistant",
+      text: "First reply",
+    };
+    const nextPrompt: Message = {
+      id: "prompt-next",
+      type: "text",
+      timestamp: "12:03",
+      author: "you",
+      text: "Next prompt",
+    };
+    hook.rerender({
+      currentSession: {
+        ...activeSession,
+        messages: [prompt, firstReply, nextPrompt],
+        messageCount: 3,
+      },
+      contentSignature: "prompt-next",
+    });
+
+    paneShouldStickToBottomRef.current["pane-1"] = false;
+    scrollNode.scrollTop = 700;
+    scrollHeight = 1_240;
+    scrollTo.mockClear();
+    hook.rerender({
+      currentSession: {
+        ...activeSession,
+        messages: [
+          prompt,
+          firstReply,
+          nextPrompt,
+          {
+            id: "reply-next",
+            type: "text",
+            timestamp: "12:04",
+            author: "assistant",
+            text: "Next reply",
+          },
+        ],
+        messageCount: 4,
+      },
+      contentSignature: "reply-next",
+    });
+
+    expect(scrollNode.scrollTop).toBe(700);
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
   it("uses one viewport-relative distance for every session PageUp/PageDown path", () => {
     expect(resolveSessionPageScrollDistance(1_000)).toBe(850);
     expect(resolveSessionPageScrollDistance(100)).toBe(160);

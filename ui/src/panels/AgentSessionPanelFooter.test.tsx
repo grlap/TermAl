@@ -483,10 +483,10 @@ describe("AgentSessionPanelFooter", () => {
 
     expect(screen.queryByText("Agent command")).not.toBeInTheDocument();
     expect(screen.getByText("Current prompt")).toBeInTheDocument();
-    expect(screen.getByText("Waiting for the next chunk of output...")).toBeInTheDocument();
+    expect(screen.getAllByText("/review-code")).toHaveLength(2);
   });
 
-  it("shows explicit agent command activity independently from the user prompt", () => {
+  it("keeps the live turn anchored to the user prompt while an agent command runs", () => {
     render(
       <RunningIndicator
         agent="Codex"
@@ -499,9 +499,29 @@ describe("AgentSessionPanelFooter", () => {
       />,
     );
 
-    expect(screen.getAllByText("Agent command")).toHaveLength(2);
-    expect(screen.getByText("Executing an agent command...")).toBeInTheDocument();
-    expect(screen.getByText("cargo test --workspace")).toBeInTheDocument();
+    expect(screen.queryByText("Agent command")).not.toBeInTheDocument();
+    expect(screen.queryByText("Executing an agent command...")).not.toBeInTheDocument();
+    expect(screen.queryByText("cargo test --workspace")).not.toBeInTheDocument();
+    expect(screen.getAllByText("/review-code")).toHaveLength(2);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("/review-code");
+  });
+
+  it("uses neutral live-turn copy when no user prompt is available", () => {
+    render(
+      <RunningIndicator
+        agent="Codex"
+        activity={{
+          prompt: "",
+          command: "cargo test --workspace",
+          commandStatus: "running",
+        }}
+        lastPrompt={null}
+      />,
+    );
+
+    expect(screen.getByText("Working on the current turn...")).toBeInTheDocument();
+    expect(screen.queryByText("cargo test --workspace")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
   it("marks the real composer input for overview focus deferral", () => {
@@ -825,6 +845,30 @@ describe("AgentSessionPanelFooter", () => {
     expect(delegateButton).toBeDisabled();
     fireEvent.click(delegateButton);
     expect(onSpawnDelegation).not.toHaveBeenCalled();
+  });
+
+  it("gives Queue a distinct visual treatment while a session is busy", () => {
+    const { rerender } = render(
+      renderFooter({
+        session: makeSession("session-a"),
+        isSessionBusy: true,
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "Queue" })).toHaveClass(
+      "composer-queue-button",
+    );
+
+    rerender(
+      renderFooter({
+        session: makeSession("session-a"),
+        isSessionBusy: false,
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "Send" })).not.toHaveClass(
+      "composer-queue-button",
+    );
   });
 
   it("delegates a selected prompt-template agent command with expanded content", async () => {
@@ -2402,9 +2446,12 @@ describe("AgentSessionPanelFooter", () => {
 
     try {
       ({ unmount } = render(
-        renderFooter({
-          session: makeSession("session-a"),
-        }),
+        <div className="workspace-pane">
+          <div className="message-stack" />
+          {renderFooter({
+            session: makeSession("session-a"),
+          })}
+        </div>,
       ));
       drainAnimationFrames();
 
@@ -2413,6 +2460,15 @@ describe("AgentSessionPanelFooter", () => {
         throw new Error("Composer textarea not found");
       }
       restoreHeightWrites = recordTextareaHeightWrites(textarea, heightWrites);
+      const messageStack = document.querySelector<HTMLElement>(".message-stack");
+      if (!messageStack) {
+        throw new Error("Message stack not found");
+      }
+      const bottomRepinRequests: Event[] = [];
+      messageStack.addEventListener(
+        MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
+        (event) => bottomRepinRequests.push(event),
+      );
 
       act(() => {
         fireEvent.change(textarea, {
@@ -2423,6 +2479,7 @@ describe("AgentSessionPanelFooter", () => {
       expect(textarea.style.height).toBe("96px");
 
       heightWrites.length = 0;
+      bottomRepinRequests.length = 0;
       act(() => {
         fireEvent.change(textarea, {
           target: { value: "line one\nline tw\nline three" },
@@ -2442,6 +2499,7 @@ describe("AgentSessionPanelFooter", () => {
         },
       ]);
       expect(offsetHeightReads).toBe(0);
+      expect(bottomRepinRequests).toHaveLength(0);
     } finally {
       act(() => {
         unmount?.();

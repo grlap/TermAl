@@ -46,6 +46,7 @@ fn delegation_prompt_marker_stays_in_sync_with_review_code_command() {
         started_at: Some(stamp_now()),
         completed_at: None,
         result: None,
+        result_parser_version: 0,
     };
     let prompt = build_delegation_prompt(&record);
     let review_code = include_str!(concat!(
@@ -81,6 +82,7 @@ fn delegation_prompt_tells_child_to_fail_fast_on_blocking_tooling() {
         started_at: Some(stamp_now()),
         completed_at: None,
         result: None,
+        result_parser_version: 0,
     };
     let prompt = build_delegation_prompt(&record);
 
@@ -2351,6 +2353,7 @@ fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
             started_at: Some(now.clone()),
             completed_at: Some(now),
             result: None,
+            result_parser_version: 0,
         });
         state.commit_locked(&mut inner).unwrap();
         (delegation_id, child_session_id)

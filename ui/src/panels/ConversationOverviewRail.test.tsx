@@ -21,45 +21,71 @@ function overview(): SessionOverviewResponse {
 }
 
 describe("ConversationOverviewRail", () => {
-  it("mounts a stable loading rail before the overview arrives", () => {
-    render(
+  it("waits for complete pane-local geometry before mounting a loading rail", () => {
+    const { rerender } = render(
       <ConversationOverviewRail
         overview={null}
+        portalTarget={document.body}
         viewport={{ startPosition: 0, endPosition: 1 }}
         onNavigate={() => {}}
       />,
     );
 
+    expect(screen.queryByTestId("conversation-overview-rail")).toBeNull();
+
+    rerender(
+      <ConversationOverviewRail
+        heightPx={480}
+        rightPx={28}
+        topPx={96}
+        overview={null}
+        portalTarget={document.body}
+        viewport={{ startPosition: 0, endPosition: 1 }}
+        onNavigate={() => {}}
+      />,
+    );
     const rail = screen.getByTestId("conversation-overview-rail");
     expect(rail).toHaveClass("is-pending");
     expect(rail).toHaveAttribute("aria-label", "Loading conversation overview");
-    expect(rail).toHaveStyle({ position: "fixed" });
+    expect(rail).toHaveStyle({ position: "absolute" });
   });
 
-  it("anchors the rail to the transcript viewport instead of scroll content", () => {
+  it("anchors the rail inside its owning pane instead of the global body", () => {
+    const portalTarget = document.createElement("section");
+    portalTarget.className = "workspace-pane";
+    document.body.append(portalTarget);
+    const { unmount } = render(
+      <ConversationOverviewRail
+        heightPx={480}
+        rightPx={28}
+        topPx={96}
+        overview={overview()}
+        portalTarget={portalTarget}
+        viewport={{ startPosition: 40, endPosition: 60 }}
+        onNavigate={() => {}}
+      />,
+    );
+
+    const rail = screen.getByTestId("conversation-overview-rail");
+    expect(portalTarget.contains(rail)).toBe(true);
+    expect(rail).toHaveStyle({
+      position: "absolute",
+      height: "480px",
+      right: "28px",
+      top: "96px",
+    });
+    unmount();
+    portalTarget.remove();
+  });
+
+  it("renders server buckets, markers, and viewport in one position scale", () => {
     render(
       <ConversationOverviewRail
         heightPx={480}
         rightPx={28}
         topPx={96}
         overview={overview()}
-        viewport={{ startPosition: 40, endPosition: 60 }}
-        onNavigate={() => {}}
-      />,
-    );
-
-    expect(screen.getByTestId("conversation-overview-rail")).toHaveStyle({
-      position: "fixed",
-      height: "480px",
-      right: "28px",
-      top: "96px",
-    });
-  });
-
-  it("renders server buckets, markers, and viewport in one position scale", () => {
-    render(
-      <ConversationOverviewRail
-        overview={overview()}
+        portalTarget={document.body}
         viewport={{ startPosition: 40, endPosition: 60 }}
         onNavigate={() => {}}
       />,
@@ -88,7 +114,11 @@ describe("ConversationOverviewRail", () => {
     const onNavigate = vi.fn();
     render(
       <ConversationOverviewRail
+        heightPx={480}
+        rightPx={28}
+        topPx={96}
         overview={overview()}
+        portalTarget={document.body}
         viewport={{ startPosition: 0, endPosition: 20 }}
         onNavigate={onNavigate}
       />,
@@ -120,7 +150,11 @@ describe("ConversationOverviewRail", () => {
     const onNavigate = vi.fn();
     render(
       <ConversationOverviewRail
+        heightPx={480}
+        rightPx={28}
+        topPx={96}
         overview={overview()}
+        portalTarget={document.body}
         viewport={{ startPosition: 40, endPosition: 60 }}
         onNavigate={onNavigate}
       />,
