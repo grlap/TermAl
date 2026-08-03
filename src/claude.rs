@@ -174,6 +174,15 @@ fn claude_bash_command_is_read_only(command: &str, cwd: &str) -> bool {
         return false;
     }
 
+    // Reviewers commonly inspect the same reader-owned path for a short list of
+    // literal names. Support that one bounded loop shape by statically expanding
+    // it and sending every resulting body command back through this checker. This
+    // is deliberately not a general Bash interpreter: dynamic loop values,
+    // nested control flow, unknown variables, and trailing commands fail closed.
+    if command.trim_start().starts_with("for ") {
+        return claude_bash_literal_for_loop_is_read_only(command, cwd);
+    }
+
     let normalized = command
         .replace("2> /dev/null", "")
         .replace("2>/dev/null", "");
@@ -256,6 +265,220 @@ fn claude_bash_command_is_read_only(command: &str, cwd: &str) -> bool {
     }
 
     true
+}
+
+fn claude_bash_literal_for_loop_is_read_only(command: &str, cwd: &str) -> bool {
+    const MAX_LOOP_VALUES: usize = 64;
+    const MAX_BODY_COMMANDS: usize = 16;
+
+    let Some(clauses) = claude_bash_top_level_semicolon_clauses(command) else {
+        return false;
+    };
+    if clauses.len() < 3 || clauses.last().map(String::as_str) != Some("done") {
+        return false;
+    }
+
+    let Some(header_tokens) = claude_bash_segment_tokens(&clauses[0]) else {
+        return false;
+    };
+    if header_tokens.len() < 4 || header_tokens[0] != "for" || header_tokens[2] != "in" {
+        return false;
+    }
+    let variable = header_tokens[1].as_str();
+    if !claude_bash_loop_identifier_is_safe(variable) {
+        return false;
+    }
+    let values = &header_tokens[3..];
+    if values.is_empty()
+        || values.len() > MAX_LOOP_VALUES
+        || values
+            .iter()
+            .any(|value| !claude_bash_loop_literal_is_safe(value))
+    {
+        return false;
+    }
+
+    let Some(first_body) = claude_bash_strip_keyword(&clauses[1], "do") else {
+        return false;
+    };
+    let mut body = Vec::new();
+    if !first_body.is_empty() {
+        body.push(first_body);
+    }
+    body.extend(
+        clauses[2..clauses.len() - 1]
+            .iter()
+            .map(String::as_str),
+    );
+    if body.is_empty()
+        || body.len() > MAX_BODY_COMMANDS
+        || body.iter().any(|command| command.trim().is_empty())
+    {
+        return false;
+    }
+
+    values.iter().all(|value| {
+        let expanded = body
+            .iter()
+            .map(|body_command| {
+                claude_expand_bash_loop_variable(body_command, variable, value)
+            })
+            .collect::<Option<Vec<_>>>();
+        expanded.is_some_and(|commands| {
+            // Validate the body as one shell sequence, not isolated commands.
+            // Directory changes persist between `;` clauses and iterations, so
+            // separate checks would miss `cd other; git status` retargeting Git.
+            claude_bash_command_is_read_only(&commands.join(" && "), cwd)
+        })
+    })
+}
+
+fn claude_bash_top_level_semicolon_clauses(command: &str) -> Option<Vec<String>> {
+    let mut clauses = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut characters = command.chars();
+
+    while let Some(character) = characters.next() {
+        if let Some(active_quote) = quote {
+            current.push(character);
+            if active_quote == '"' && character == '\\' {
+                current.push(characters.next()?);
+            } else if character == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+
+        match character {
+            '\\' => {
+                current.push(character);
+                current.push(characters.next()?);
+            }
+            '\'' | '"' => {
+                quote = Some(character);
+                current.push(character);
+            }
+            ';' => {
+                let clause = current.trim();
+                if clause.is_empty() {
+                    return None;
+                }
+                clauses.push(clause.to_owned());
+                current.clear();
+            }
+            '\n' | '\r' | '`' => return None,
+            _ => current.push(character),
+        }
+    }
+
+    if quote.is_some() {
+        return None;
+    }
+    let final_clause = current.trim();
+    if final_clause.is_empty() {
+        return None;
+    }
+    clauses.push(final_clause.to_owned());
+    Some(clauses)
+}
+
+fn claude_bash_strip_keyword<'a>(clause: &'a str, keyword: &str) -> Option<&'a str> {
+    let rest = clause.strip_prefix(keyword)?;
+    if rest.is_empty() {
+        return Some(rest);
+    }
+    rest.chars()
+        .next()
+        .is_some_and(char::is_whitespace)
+        .then(|| rest.trim_start())
+}
+
+fn claude_bash_loop_identifier_is_safe(identifier: &str) -> bool {
+    let mut characters = identifier.chars();
+    characters
+        .next()
+        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn claude_bash_loop_literal_is_safe(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.')
+        })
+}
+
+fn claude_expand_bash_loop_variable(
+    command: &str,
+    variable: &str,
+    value: &str,
+) -> Option<String> {
+    let mut expanded = String::with_capacity(command.len());
+    let mut quote: Option<char> = None;
+    let mut characters = command.chars().peekable();
+
+    while let Some(character) = characters.next() {
+        if quote == Some('\'') {
+            expanded.push(character);
+            if character == '\'' {
+                quote = None;
+            }
+            continue;
+        }
+
+        match character {
+            '\\' => {
+                expanded.push(character);
+                expanded.push(characters.next()?);
+            }
+            '\'' => {
+                quote = Some(character);
+                expanded.push(character);
+            }
+            '"' => {
+                quote = if quote == Some('"') {
+                    None
+                } else {
+                    Some(character)
+                };
+                expanded.push(character);
+            }
+            '$' => {
+                if characters.peek() == Some(&'{') {
+                    characters.next();
+                    let mut name = String::new();
+                    let mut closed = false;
+                    for next in characters.by_ref() {
+                        if next == '}' {
+                            closed = true;
+                            break;
+                        }
+                        name.push(next);
+                    }
+                    if !closed || name != variable {
+                        return None;
+                    }
+                    expanded.push_str(value);
+                } else {
+                    let mut name = String::new();
+                    while characters.peek().is_some_and(|next| {
+                        *next == '_' || next.is_ascii_alphanumeric()
+                    }) {
+                        name.push(characters.next().expect("peeked loop variable character"));
+                    }
+                    if name != variable {
+                        return None;
+                    }
+                    expanded.push_str(value);
+                }
+            }
+            '`' | '\n' | '\r' => return None,
+            _ => expanded.push(character),
+        }
+    }
+
+    quote.is_none().then_some(expanded)
 }
 
 /// Whether a `cd <target>` segment is a no-op into the delegation's own `cwd`.

@@ -677,6 +677,48 @@ fn claude_bash_is_read_only_for_test(command: &str, cwd: &str) -> bool {
 }
 
 #[test]
+fn claude_read_only_auto_approve_allows_literal_read_only_for_loop() {
+    let command = "for f in architecture core legal platform security testing; do echo \"=== $f ===\"; head -30 /Users/greg/GitHub/Personal/rincon-common/.claude/reviewers/$f.md; done";
+
+    assert!(
+        claude_bash_is_read_only_for_test(command, "/Users/greg/GitHub/Personal/rincon-common"),
+        "a bounded loop over literal values should be approved when every expanded body command is read-only"
+    );
+}
+
+#[test]
+fn claude_read_only_auto_approve_denies_unsafe_for_loop_shapes() {
+    let cwd = "/Users/greg/GitHub/Personal/rincon-common";
+    for command in [
+        "for f in architecture core; do touch $f; done",
+        "for f in architecture core; do echo $f > out.txt; done",
+        "for f in architecture; do echo $(touch victim); done",
+        "for f in architecture; do echo $other; done",
+        "for f in 'architecture; touch victim'; do echo $f; done",
+        "for f in --output=/tmp/out; do git diff $f; done",
+        "for f in other; do cd $f; git status; done",
+        "for f in architecture; do echo $f; done; touch victim",
+        "for f in architecture; do for g in core; do echo $g; done; done",
+        "for f in architecture; do echo ${f; done",
+    ] {
+        assert!(
+            !claude_bash_is_read_only_for_test(command, cwd),
+            "unsafe or dynamic loop shape must fail closed: {command}"
+        );
+    }
+
+    let too_many_values = (0..65)
+        .map(|index| format!("value{index}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let command = format!("for f in {too_many_values}; do echo $f; done");
+    assert!(
+        !claude_bash_is_read_only_for_test(&command, cwd),
+        "literal loops must retain an explicit expansion bound"
+    );
+}
+
+#[test]
 fn read_only_git_content_checker_allows_reviewer_git_and_hashers() {
     // The reviewer child's own working directory, pre-normalized exactly as the runtime
     // does before handing it to the classifier.
