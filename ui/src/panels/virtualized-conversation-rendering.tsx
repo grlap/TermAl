@@ -47,6 +47,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
     pageIndex: number,
     nextHeight: number,
     pageNode?: HTMLElement | null,
+    flushLayout?: boolean,
   ) => void;
 }) {
   const pageRef = useRef<HTMLDivElement | null>(null);
@@ -62,7 +63,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
     }
 
     let frameId = 0;
-    const measure = () => {
+    const measure = (flushLayout = false) => {
       frameId = 0;
       const slotNodes = Array.from(
         node.querySelectorAll<HTMLElement>(".virtualized-message-slot"),
@@ -89,7 +90,13 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
       if (measuredSlotCount === 0) {
         return;
       }
-      onHeightChange(page.key, page.pageIndex, totalHeight, node);
+      onHeightChange(
+        page.key,
+        page.pageIndex,
+        totalHeight,
+        node,
+        flushLayout,
+      );
     };
 
     measure();
@@ -100,7 +107,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
             if (frameId !== 0) {
               return;
             }
-            frameId = window.requestAnimationFrame(measure);
+            frameId = window.requestAnimationFrame(() => measure(true));
           })
         : null;
     resizeObserver?.observe(node);

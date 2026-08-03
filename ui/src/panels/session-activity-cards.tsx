@@ -38,7 +38,7 @@
 // Split out of `ui/src/panels/AgentSessionPanel.tsx`. Same class
 // names and the same queued-prompt behavior.
 
-import { memo } from "react";
+import { memo, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   DELEGATION_FAN_IN_AUTHOR_LABEL,
   isDelegationFanInText,
@@ -52,18 +52,127 @@ import {
   PEER_MESSAGE_BATCH_AUTHOR_LABEL,
 } from "../long-peer-message";
 import { MailboxMessageLink } from "../mailbox-message-link";
-import { renderHighlightedText, type SearchHighlightTone } from "../search-highlight";
-import type {
-  PendingPrompt,
-  Session,
-  SessionLiveActivity,
-} from "../types";
+import {
+  renderHighlightedText,
+  type SearchHighlightTone,
+} from "../search-highlight";
+import type { PendingPrompt, Session, SessionLiveActivity } from "../types";
 import {
   MessageAttachmentList,
   MessageMeta,
   imageAttachmentSummaryLabel,
   promptCommandMetaLabel,
 } from "./session-message-leaves";
+
+export function ConversationTailEntry({ children }: { children: ReactNode }) {
+  const [expanded, setExpanded] = useState(false);
+
+  useLayoutEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      setExpanded(true);
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
+
+  return (
+    <div
+      className={`conversation-tail-entry-shell${expanded ? "" : " is-entering"}`}
+    >
+      <div className="conversation-tail-entry-shell-content">{children}</div>
+    </div>
+  );
+}
+
+type ConversationTailPresencePhase =
+  | "hidden"
+  | "entering"
+  | "visible"
+  | "exiting";
+
+export function ConversationTailPresence({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: ReactNode;
+}) {
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const lastActiveHeightRef = useRef(0);
+  const [phase, setPhase] = useState<ConversationTailPresencePhase>(() =>
+    active ? "entering" : "hidden",
+  );
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    const ResizeObserverCtor = globalThis.ResizeObserver;
+    if (!active || !content) {
+      return;
+    }
+    // Capture the initial active height once. Subsequent streamed renders are
+    // tracked by ResizeObserver so they do not force a synchronous layout read
+    // on every parent commit.
+    lastActiveHeightRef.current = content.getBoundingClientRect().height;
+    if (typeof ResizeObserverCtor !== "function") {
+      return;
+    }
+    const observer = new ResizeObserverCtor(() => {
+      lastActiveHeightRef.current = content.getBoundingClientRect().height;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [active]);
+
+  useLayoutEffect(() => {
+    if (active) {
+      if (phase === "visible") {
+        return;
+      }
+      if (phase === "exiting") {
+        setPhase("visible");
+        return;
+      }
+      const frameId = window.requestAnimationFrame(() => {
+        setPhase("visible");
+      });
+      return () => window.cancelAnimationFrame(frameId);
+    }
+
+    if (phase === "hidden") {
+      return;
+    }
+    if (phase !== "exiting") {
+      const frameId = window.requestAnimationFrame(() => {
+        setPhase("exiting");
+      });
+      return () => window.cancelAnimationFrame(frameId);
+    }
+    const timeoutId = window.setTimeout(() => {
+      setPhase("hidden");
+    }, 240);
+    return () => window.clearTimeout(timeoutId);
+  }, [active, phase]);
+
+  if (!active && phase === "hidden") {
+    return null;
+  }
+
+  return (
+    <div
+      className={`conversation-tail-entry-shell${phase === "visible" ? "" : " is-entering"}`}
+    >
+      <div ref={contentRef} className="conversation-tail-entry-shell-content">
+        {active ? (
+          children
+        ) : (
+          <div
+            aria-hidden="true"
+            style={{ height: `${lastActiveHeightRef.current}px` }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function RunningIndicator({
   agent,
@@ -104,111 +213,156 @@ export function RunningIndicator({
   );
 }
 
-export const PendingPromptCard = memo(function PendingPromptCard({
+export function QueuedTurnHandoffIndicator({
+  agent,
   prompt,
-  sessionId,
-  onCancel,
-  onOpenMailbox,
-  searchQuery = "",
-  searchHighlightTone = "match",
 }: {
-  prompt: PendingPrompt;
-  sessionId: string;
-  onCancel?: () => void;
-  onOpenMailbox: (mailboxId: string) => void;
-  searchQuery?: string;
-  searchHighlightTone?: SearchHighlightTone;
+  agent: Session["agent"];
+  prompt: string;
 }) {
-  const commandLabel = promptCommandMetaLabel(prompt.text, prompt.expandedText);
-  const isDelegationFanIn =
-    !prompt.source && isDelegationFanInText(prompt.text);
-  const isPeerBatch = isPeerMessageBatch(prompt.source);
-  const mailboxSource =
-    prompt.source?.kind === "mailbox" ? prompt.source.mailbox : null;
-  const shouldCollapsePeerMessage =
-    (Boolean(prompt.source) || isPeerBatch) && isLongPeerMessage(prompt.text);
+  const normalizedPrompt = prompt.trim();
 
   return (
-    <article className="message-card bubble bubble-you pending-prompt-card">
-      <div className="pending-prompt-header">
-        <MessageMeta
-          author="you"
-          timestamp={prompt.timestamp}
-          sourceName={
-            isDelegationFanIn
-              ? DELEGATION_FAN_IN_AUTHOR_LABEL
-              : isPeerBatch
-                ? PEER_MESSAGE_BATCH_AUTHOR_LABEL
-              : prompt.source?.name
-          }
-          trailing={
-            commandLabel ? <span className="message-meta-tag">{commandLabel}</span> : undefined
-          }
-        />
-        {onCancel ? (
-          <button
-            className="pending-prompt-dismiss"
-            type="button"
-            onClick={onCancel}
-            aria-label="Cancel queued prompt"
-          >
-            x
-          </button>
-        ) : null}
+    <article
+      className="activity-card activity-card-live activity-card-queue-handoff has-tooltip"
+      role="status"
+      aria-live="polite"
+      tabIndex={0}
+    >
+      <div className="activity-spinner" aria-hidden="true" />
+      <div className="activity-card-copy">
+        <div className="activity-card-heading">
+          <div className="card-label">Queue</div>
+        </div>
+        <h3>{agent} is starting the next turn</h3>
+        <p className="activity-card-prompt">{normalizedPrompt}</p>
       </div>
-      {prompt.attachments && prompt.attachments.length > 0 ? (
-        <MessageAttachmentList
-          attachments={prompt.attachments}
-          searchQuery={searchQuery}
-          searchHighlightTone={searchHighlightTone}
-        />
-      ) : null}
-      {mailboxSource ? (
-        <MailboxMessageLink
-          senderName={prompt.source?.name ?? "Mailbox"}
-          sessionId={sessionId}
-          source={mailboxSource}
-          onOpenMailbox={onOpenMailbox}
-        />
-      ) : prompt.text ? (
-        isDelegationFanIn ? (
-          <DelegationFanInMessage
-            text={prompt.text}
-            storageKey={prompt.id}
-            searchQuery={searchQuery}
-            searchHighlightTone={searchHighlightTone}
-          />
-        ) : shouldCollapsePeerMessage ? (
-          <LongPeerMessage
-            text={prompt.text}
-            storageKey={prompt.id}
-            searchQuery={searchQuery}
-            searchHighlightTone={searchHighlightTone}
-          />
-        ) : (
-          <>
-            <p className="plain-text-copy">
-              {renderHighlightedText(prompt.text, searchQuery, searchHighlightTone)}
-            </p>
-            {prompt.expandedText ? (
-              <ExpandedPromptPanel
-                expandedText={prompt.expandedText}
-                storageKey={prompt.id}
-                searchQuery={searchQuery}
-                searchHighlightTone={searchHighlightTone}
-              />
-            ) : null}
-          </>
-        )
-      ) : (
-        <p className="support-copy">{imageAttachmentSummaryLabel(prompt.attachments?.length ?? 0)}</p>
-      )}
+      <div className="activity-tooltip" role="tooltip">
+        <div className="activity-tooltip-label">Queued prompt</div>
+        <p>{normalizedPrompt}</p>
+      </div>
     </article>
   );
-}, (previous, next) =>
-  previous.prompt === next.prompt &&
-  previous.sessionId === next.sessionId &&
-  previous.onOpenMailbox === next.onOpenMailbox &&
-  previous.searchQuery === next.searchQuery &&
-  previous.searchHighlightTone === next.searchHighlightTone
+}
+
+export const PendingPromptCard = memo(
+  function PendingPromptCard({
+    prompt,
+    sessionId,
+    onCancel,
+    onOpenMailbox,
+    searchQuery = "",
+    searchHighlightTone = "match",
+  }: {
+    prompt: PendingPrompt;
+    sessionId: string;
+    onCancel?: () => void;
+    onOpenMailbox: (mailboxId: string) => void;
+    searchQuery?: string;
+    searchHighlightTone?: SearchHighlightTone;
+  }) {
+    const commandLabel = promptCommandMetaLabel(
+      prompt.text,
+      prompt.expandedText,
+    );
+    const isDelegationFanIn =
+      !prompt.source && isDelegationFanInText(prompt.text);
+    const isPeerBatch = isPeerMessageBatch(prompt.source);
+    const mailboxSource =
+      prompt.source?.kind === "mailbox" ? prompt.source.mailbox : null;
+    const shouldCollapsePeerMessage =
+      (Boolean(prompt.source) || isPeerBatch) && isLongPeerMessage(prompt.text);
+
+    return (
+      <article className="message-card bubble bubble-you pending-prompt-card">
+        <div className="pending-prompt-header">
+          <MessageMeta
+            author="you"
+            timestamp={prompt.timestamp}
+            sourceName={
+              isDelegationFanIn
+                ? DELEGATION_FAN_IN_AUTHOR_LABEL
+                : isPeerBatch
+                  ? PEER_MESSAGE_BATCH_AUTHOR_LABEL
+                  : prompt.source?.name
+            }
+            trailing={
+              commandLabel ? (
+                <span className="message-meta-tag">{commandLabel}</span>
+              ) : undefined
+            }
+          />
+          {onCancel ? (
+            <button
+              className="pending-prompt-dismiss"
+              type="button"
+              onClick={onCancel}
+              aria-label="Cancel queued prompt"
+            >
+              x
+            </button>
+          ) : null}
+        </div>
+        {prompt.attachments && prompt.attachments.length > 0 ? (
+          <MessageAttachmentList
+            attachments={prompt.attachments}
+            searchQuery={searchQuery}
+            searchHighlightTone={searchHighlightTone}
+          />
+        ) : null}
+        {mailboxSource ? (
+          <MailboxMessageLink
+            senderName={prompt.source?.name ?? "Mailbox"}
+            sessionId={sessionId}
+            source={mailboxSource}
+            onOpenMailbox={onOpenMailbox}
+          />
+        ) : prompt.text ? (
+          isDelegationFanIn ? (
+            <DelegationFanInMessage
+              text={prompt.text}
+              storageKey={prompt.id}
+              searchQuery={searchQuery}
+              searchHighlightTone={searchHighlightTone}
+            />
+          ) : shouldCollapsePeerMessage ? (
+            <LongPeerMessage
+              text={prompt.text}
+              storageKey={prompt.id}
+              searchQuery={searchQuery}
+              searchHighlightTone={searchHighlightTone}
+            />
+          ) : (
+            <>
+              <p className="plain-text-copy">
+                {renderHighlightedText(
+                  prompt.text,
+                  searchQuery,
+                  searchHighlightTone,
+                )}
+              </p>
+              {prompt.expandedText ? (
+                <ExpandedPromptPanel
+                  expandedText={prompt.expandedText}
+                  storageKey={prompt.id}
+                  searchQuery={searchQuery}
+                  searchHighlightTone={searchHighlightTone}
+                />
+              ) : null}
+            </>
+          )
+        ) : (
+          <p className="support-copy">
+            {imageAttachmentSummaryLabel(prompt.attachments?.length ?? 0)}
+          </p>
+        )}
+      </article>
+    );
+  },
+  (previous, next) =>
+    previous.prompt === next.prompt &&
+    previous.sessionId === next.sessionId &&
+    previous.onOpenMailbox === next.onOpenMailbox &&
+    previous.searchQuery === next.searchQuery &&
+    previous.searchHighlightTone === next.searchHighlightTone,
 );

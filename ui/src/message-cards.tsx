@@ -1,8 +1,4 @@
-import {
-  memo,
-  useEffect,
-  useState,
-} from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ExpandedPromptPanel } from "./ExpandedPromptPanel";
 import {
   CheckIcon,
@@ -69,9 +65,7 @@ import {
 import { ConnectionRetryCard } from "./connection-retry-card";
 import { ParallelAgentsCard } from "./parallel-agents-card";
 import type { MonacoAppearance } from "./monaco";
-import {
-  MessageNavigationButtons,
-} from "./panels/conversation-navigation";
+import { MessageNavigationButtons } from "./panels/conversation-navigation";
 
 // Stable no-op defaults for the optional callback props on
 // `MessageCard`. NOTE: React's `memo` comparator receives the
@@ -188,7 +182,8 @@ export const MessageCard = memo(
           isLongPeerMessage(message.text);
         // One chip slot: a fan-in is never also a slash command, so `commandLabel`
         // wins if both somehow matched.
-        const metaTag = commandLabel ?? (isDelegationFanIn ? "Delegation" : null);
+        const metaTag =
+          commandLabel ?? (isDelegationFanIn ? "Delegation" : null);
         // Assistant text uses one stable render pipeline:
         // `<DeferredMarkdownContent>` wraps `<MarkdownContent>` for both
         // streaming and settled messages, regardless of whether the body is
@@ -242,7 +237,7 @@ export const MessageCard = memo(
                   ? DELEGATION_FAN_IN_AUTHOR_LABEL
                   : isPeerBatch
                     ? PEER_MESSAGE_BATCH_AUTHOR_LABEL
-                  : message.source?.name
+                    : message.source?.name
               }
               trailing={
                 <>
@@ -458,7 +453,8 @@ export const MessageCard = memo(
       previous.message.type !== "parallelAgents" ||
       (!previousParallelActionsEnabled && !nextParallelActionsEnabled) ||
       (previousParallelActionsEnabled === nextParallelActionsEnabled &&
-        previous.onOpenParallelAgentSession === next.onOpenParallelAgentSession &&
+        previous.onOpenParallelAgentSession ===
+          next.onOpenParallelAgentSession &&
         previous.onInsertParallelAgentResult ===
           next.onInsertParallelAgentResult &&
         previous.onCancelParallelAgent === next.onCancelParallelAgent);
@@ -539,8 +535,15 @@ export function CommandCard({
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
+  const cardRef = useRef<HTMLElement | null>(null);
+  const pendingAutomaticCollapseHeightRef = useRef<number | null>(null);
+  const automaticCollapseAnimationRef = useRef<Animation | null>(null);
+  const lastObservedCardHeightRef = useRef<number | null>(null);
   const [detailsExpanded, setDetailsExpanded] = useState(
     () => message.status !== "success",
+  );
+  const [entryExpanded, setEntryExpanded] = useState(
+    () => message.status !== "running",
   );
   const [detailsToggled, setDetailsToggled] = useState(false);
   const [inputExpanded, setInputExpanded] = useState(false);
@@ -574,17 +577,136 @@ export function CommandCard({
       : "No output",
   ].join(" \u00b7 ");
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (entryExpanded) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      setEntryExpanded(true);
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [entryExpanded]);
+
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    if (!card) {
+      return;
+    }
+
+    const rememberHeight = () => {
+      if (automaticCollapseAnimationRef.current === null) {
+        lastObservedCardHeightRef.current = card.getBoundingClientRect().height;
+      }
+    };
+    rememberHeight();
+    const ResizeObserverCtor = globalThis.ResizeObserver;
+    const resizeObserver =
+      typeof ResizeObserverCtor === "function"
+        ? new ResizeObserverCtor(rememberHeight)
+        : null;
+    resizeObserver?.observe(card);
+    return () => resizeObserver?.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
     if (message.status !== "success") {
       setDetailsExpanded(true);
       setDetailsToggled(false);
       return;
     }
 
-    if (!detailsToggled) {
+    if (!detailsToggled && detailsExpanded) {
+      const card = cardRef.current;
+      const startHeight =
+        lastObservedCardHeightRef.current ??
+        card?.getBoundingClientRect().height ??
+        null;
+      pendingAutomaticCollapseHeightRef.current = startHeight;
+      if (card && startHeight !== null) {
+        // Freeze the last height Chrome actually painted, not the transient
+        // success payload height from this commit. The nested layout update
+        // can then replace the expanded panel before paint without moving the
+        // bottom-pinned transcript up and back down.
+        card.style.height = `${startHeight}px`;
+        card.style.overflow = "hidden";
+      }
       setDetailsExpanded(false);
     }
-  }, [detailsToggled, message.status]);
+  }, [detailsExpanded, detailsToggled, message.status]);
+
+  useLayoutEffect(() => {
+    if (detailsExpanded) {
+      if (pendingAutomaticCollapseHeightRef.current === null) {
+        cardRef.current?.style.removeProperty("height");
+        cardRef.current?.style.removeProperty("overflow");
+      }
+      return;
+    }
+
+    const card = cardRef.current;
+    const startHeight = pendingAutomaticCollapseHeightRef.current;
+    pendingAutomaticCollapseHeightRef.current = null;
+    if (!card || startHeight === null) {
+      return;
+    }
+
+    const scrollContainer = card.closest<HTMLElement>(".message-stack");
+    const previousScrollTop = scrollContainer?.scrollTop ?? null;
+    card.style.height = "";
+    card.style.overflow = "";
+    const endHeight = card.getBoundingClientRect().height;
+    card.style.height = `${startHeight}px`;
+    card.style.overflow = "hidden";
+    if (scrollContainer && previousScrollTop !== null) {
+      scrollContainer.scrollTop = previousScrollTop;
+    }
+    const reducedMotion =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (
+      reducedMotion ||
+      Math.abs(startHeight - endHeight) <= 1 ||
+      typeof card.animate !== "function"
+    ) {
+      card.style.height = "";
+      card.style.overflow = "";
+      return;
+    }
+
+    automaticCollapseAnimationRef.current?.cancel();
+    const animation = card.animate(
+      [
+        { height: `${startHeight}px`, overflow: "hidden" },
+        { height: `${endHeight}px`, overflow: "hidden" },
+      ],
+      {
+        duration: 220,
+        easing: "cubic-bezier(0.4, 0, 0.2, 1)",
+      },
+    );
+    automaticCollapseAnimationRef.current = animation;
+    animation.addEventListener(
+      "finish",
+      () => {
+        if (automaticCollapseAnimationRef.current === animation) {
+          automaticCollapseAnimationRef.current = null;
+          card.style.height = "";
+          card.style.overflow = "";
+        }
+      },
+      { once: true },
+    );
+
+    return () => {
+      if (automaticCollapseAnimationRef.current === animation) {
+        automaticCollapseAnimationRef.current = null;
+        animation.cancel();
+      }
+      card.style.height = "";
+      card.style.overflow = "";
+    };
+  }, [detailsExpanded]);
 
   useEffect(() => {
     if (!copiedSection) {
@@ -615,147 +737,174 @@ export function CommandCard({
   }
 
   return (
-    <article className="message-card utility-card command-card">
-      <MessageMeta
-        author={message.author}
-        timestamp={message.timestamp}
-        trailing={
-          <span
-            className={`chip chip-status chip-status-${statusTone} command-status-chip`}
-          >
-            {message.status}
-          </span>
-        }
-      />
-      <div className="command-card-header">
-        <div className="card-label command-card-label">Command</div>
-        {canCollapseDetails && !isSearchExpanded ? (
-          <button
-            className="command-icon-button command-card-details-toggle"
-            type="button"
-            onClick={handleToggleDetails}
-            aria-label={
-              isDetailsExpanded ? "Hide command details" : "Show command details"
+    <div
+      className={`command-card-entry-shell${entryExpanded ? "" : " is-entering"}`}
+    >
+      <div className="command-card-entry-shell-content">
+        <article
+          ref={cardRef}
+          className="message-card utility-card command-card"
+        >
+          <MessageMeta
+            author={message.author}
+            timestamp={message.timestamp}
+            trailing={
+              <span
+                className={`chip chip-status chip-status-${statusTone} command-status-chip`}
+              >
+                {message.status}
+              </span>
             }
-            aria-expanded={isDetailsExpanded}
-            title={
-              isDetailsExpanded ? "Hide command details" : "Show command details"
-            }
-          >
-            {isDetailsExpanded ? <CollapseIcon /> : <ExpandIcon />}
-          </button>
-        ) : null}
+          />
+          <div className="command-card-header">
+            <div className="card-label command-card-label">Command</div>
+            {canCollapseDetails && !isSearchExpanded ? (
+              <button
+                className="command-icon-button command-card-details-toggle"
+                type="button"
+                onClick={handleToggleDetails}
+                aria-label={
+                  isDetailsExpanded
+                    ? "Hide command details"
+                    : "Show command details"
+                }
+                aria-expanded={isDetailsExpanded}
+                title={
+                  isDetailsExpanded
+                    ? "Hide command details"
+                    : "Show command details"
+                }
+              >
+                {isDetailsExpanded ? <CollapseIcon /> : <ExpandIcon />}
+              </button>
+            ) : null}
+          </div>
+
+          {isDetailsExpanded ? (
+            <div className="command-panel">
+              <div className="command-row">
+                <div className="command-row-label">IN</div>
+                <div className="command-row-body">
+                  <div
+                    className={`command-input-shell ${isInputExpanded ? "expanded" : "collapsed"}`}
+                  >
+                    <DeferredHighlightedCodeBlock
+                      className="command-text command-text-input"
+                      code={message.command}
+                      language={message.commandLanguage ?? "bash"}
+                      preferImmediateRender={preferImmediateHeavyRender}
+                      searchQuery={searchQuery}
+                      searchHighlightTone={searchHighlightTone}
+                    />
+                  </div>
+                </div>
+                <div className="command-row-actions">
+                  <button
+                    className={`command-icon-button${copiedSection === "command" ? " copied" : ""}`}
+                    type="button"
+                    onClick={() => void handleCopy("command", message.command)}
+                    aria-label={
+                      copiedSection === "command"
+                        ? "Command copied"
+                        : "Copy command"
+                    }
+                    title={
+                      copiedSection === "command" ? "Copied" : "Copy command"
+                    }
+                  >
+                    {copiedSection === "command" ? <CheckIcon /> : <CopyIcon />}
+                  </button>
+                  {canExpandCommand ? (
+                    <button
+                      className="command-icon-button"
+                      type="button"
+                      onClick={() => setInputExpanded((open) => !open)}
+                      aria-label={
+                        isInputExpanded ? "Collapse command" : "Expand command"
+                      }
+                      aria-pressed={isInputExpanded}
+                      title={
+                        isInputExpanded ? "Collapse command" : "Expand command"
+                      }
+                    >
+                      {isInputExpanded ? <CollapseIcon /> : <ExpandIcon />}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="command-row command-row-output">
+                <div className="command-row-label">OUT</div>
+                <div className="command-row-body">
+                  <div
+                    className={`command-output-shell ${isOutputExpanded ? "expanded" : "collapsed"} ${hasOutput ? "has-output" : "empty"}`}
+                  >
+                    {hasOutput ? (
+                      <DeferredHighlightedCodeBlock
+                        className="command-text command-text-output"
+                        code={displayOutput}
+                        language={message.outputLanguage ?? null}
+                        commandHint={message.output ? message.command : null}
+                        preferImmediateRender={preferImmediateHeavyRender}
+                        searchQuery={searchQuery}
+                        searchHighlightTone={searchHighlightTone}
+                      />
+                    ) : (
+                      <pre className="command-text command-text-output command-text-placeholder">
+                        {displayOutput}
+                      </pre>
+                    )}
+                  </div>
+                </div>
+                <div className="command-row-actions">
+                  <button
+                    className={`command-icon-button${copiedSection === "output" ? " copied" : ""}`}
+                    type="button"
+                    onClick={() => void handleCopy("output", message.output)}
+                    aria-label={
+                      copiedSection === "output"
+                        ? "Output copied"
+                        : "Copy output"
+                    }
+                    title={
+                      copiedSection === "output" ? "Copied" : "Copy output"
+                    }
+                    disabled={!message.output}
+                  >
+                    {copiedSection === "output" ? <CheckIcon /> : <CopyIcon />}
+                  </button>
+                  {canExpandOutput ? (
+                    <button
+                      className="command-icon-button"
+                      type="button"
+                      onClick={() => setOutputExpanded((open) => !open)}
+                      aria-label={
+                        isOutputExpanded ? "Collapse output" : "Expand output"
+                      }
+                      aria-pressed={isOutputExpanded}
+                      title={
+                        isOutputExpanded ? "Collapse output" : "Expand output"
+                      }
+                    >
+                      {isOutputExpanded ? <CollapseIcon /> : <ExpandIcon />}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="command-success-summary">
+              <code className="command-success-summary-command">
+                {commandSummary}
+              </code>
+              <span className="command-success-summary-meta">
+                {summaryMeta}
+              </span>
+            </div>
+          )}
+        </article>
       </div>
-
-      {isDetailsExpanded ? (
-        <div className="command-panel">
-          <div className="command-row">
-            <div className="command-row-label">IN</div>
-            <div className="command-row-body">
-              <div
-                className={`command-input-shell ${isInputExpanded ? "expanded" : "collapsed"}`}
-              >
-                <DeferredHighlightedCodeBlock
-                  className="command-text command-text-input"
-                  code={message.command}
-                  language={message.commandLanguage ?? "bash"}
-                  preferImmediateRender={preferImmediateHeavyRender}
-                  searchQuery={searchQuery}
-                  searchHighlightTone={searchHighlightTone}
-                />
-              </div>
-            </div>
-            <div className="command-row-actions">
-              <button
-                className={`command-icon-button${copiedSection === "command" ? " copied" : ""}`}
-                type="button"
-                onClick={() => void handleCopy("command", message.command)}
-                aria-label={
-                  copiedSection === "command" ? "Command copied" : "Copy command"
-                }
-                title={copiedSection === "command" ? "Copied" : "Copy command"}
-              >
-                {copiedSection === "command" ? <CheckIcon /> : <CopyIcon />}
-              </button>
-              {canExpandCommand ? (
-                <button
-                  className="command-icon-button"
-                  type="button"
-                  onClick={() => setInputExpanded((open) => !open)}
-                  aria-label={
-                    isInputExpanded ? "Collapse command" : "Expand command"
-                  }
-                  aria-pressed={isInputExpanded}
-                  title={isInputExpanded ? "Collapse command" : "Expand command"}
-                >
-                  {isInputExpanded ? <CollapseIcon /> : <ExpandIcon />}
-                </button>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="command-row command-row-output">
-            <div className="command-row-label">OUT</div>
-            <div className="command-row-body">
-              <div
-                className={`command-output-shell ${isOutputExpanded ? "expanded" : "collapsed"} ${hasOutput ? "has-output" : "empty"}`}
-              >
-                {hasOutput ? (
-                  <DeferredHighlightedCodeBlock
-                    className="command-text command-text-output"
-                    code={displayOutput}
-                    language={message.outputLanguage ?? null}
-                    commandHint={message.output ? message.command : null}
-                    preferImmediateRender={preferImmediateHeavyRender}
-                    searchQuery={searchQuery}
-                    searchHighlightTone={searchHighlightTone}
-                  />
-                ) : (
-                  <pre className="command-text command-text-output command-text-placeholder">
-                    {displayOutput}
-                  </pre>
-                )}
-              </div>
-            </div>
-            <div className="command-row-actions">
-              <button
-                className={`command-icon-button${copiedSection === "output" ? " copied" : ""}`}
-                type="button"
-                onClick={() => void handleCopy("output", message.output)}
-                aria-label={
-                  copiedSection === "output" ? "Output copied" : "Copy output"
-                }
-                title={copiedSection === "output" ? "Copied" : "Copy output"}
-                disabled={!message.output}
-              >
-                {copiedSection === "output" ? <CheckIcon /> : <CopyIcon />}
-              </button>
-              {canExpandOutput ? (
-                <button
-                  className="command-icon-button"
-                  type="button"
-                  onClick={() => setOutputExpanded((open) => !open)}
-                  aria-label={
-                    isOutputExpanded ? "Collapse output" : "Expand output"
-                  }
-                  aria-pressed={isOutputExpanded}
-                  title={isOutputExpanded ? "Collapse output" : "Expand output"}
-                >
-                  {isOutputExpanded ? <CollapseIcon /> : <ExpandIcon />}
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="command-success-summary">
-          <code className="command-success-summary-command">
-            {commandSummary}
-          </code>
-          <span className="command-success-summary-meta">{summaryMeta}</span>
-        </div>
-      )}
-    </article>
+    </div>
   );
 }
 
@@ -943,9 +1092,7 @@ function ApprovalCard({
           <button
             className={`approval-button${chosen("acceptedForSession")}`}
             type="button"
-            onClick={() =>
-              onApprovalDecision(message.id, "acceptedForSession")
-            }
+            onClick={() => onApprovalDecision(message.id, "acceptedForSession")}
             disabled={decided || !actionsEnabled}
           >
             Approve for session

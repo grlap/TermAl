@@ -592,6 +592,134 @@ describe("MessageCard", () => {
     ).toBeInTheDocument();
   });
 
+  it("expands a newly mounted running command over animation frames", () => {
+    let entryFrame: FrameRequestCallback | null = null;
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        entryFrame ??= callback;
+        return 1;
+      });
+
+    try {
+      const { container } = render(
+        <MessageCard
+          message={{
+            id: "message-command-entry",
+            type: "command",
+            author: "assistant",
+            timestamp: "10:10",
+            command: "npm test",
+            output: "running tests\n",
+            status: "running",
+          }}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+        />,
+      );
+
+      const shell = container.querySelector(".command-card-entry-shell");
+      expect(shell).toHaveClass("is-entering");
+
+      act(() => {
+        entryFrame?.(performance.now());
+      });
+
+      expect(shell).not.toHaveClass("is-entering");
+    } finally {
+      requestAnimationFrameSpy.mockRestore();
+    }
+  });
+
+  it("collapses a completed command from its last painted height", () => {
+    const originalAnimate = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "animate",
+    );
+    const animation = {
+      addEventListener: vi.fn(),
+      cancel: vi.fn(),
+    } as unknown as Animation;
+    const animateSpy = vi.fn(() => animation);
+    Object.defineProperty(HTMLElement.prototype, "animate", {
+      configurable: true,
+      value: animateSpy,
+    });
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const height =
+          this.classList.contains("command-card") &&
+          this.querySelector(".command-success-summary")
+            ? 80
+            : 240;
+        return {
+          bottom: height,
+          height,
+          left: 0,
+          right: 320,
+          top: 0,
+          width: 320,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        };
+      });
+    const runningMessage: CommandMessage = {
+      id: "message-command-painted-height",
+      type: "command",
+      author: "assistant",
+      timestamp: "10:10",
+      command: "npm test",
+      output: "running tests\n",
+      status: "running",
+    };
+
+    try {
+      const { rerender } = render(
+        <MessageCard
+          message={runningMessage}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+        />,
+      );
+
+      rerender(
+        <MessageCard
+          message={{
+            ...runningMessage,
+            output: "all tests passed\n",
+            status: "success",
+          }}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+        />,
+      );
+
+      expect(animateSpy).toHaveBeenCalledWith(
+        [
+          { height: "240px", overflow: "hidden" },
+          { height: "80px", overflow: "hidden" },
+        ],
+        {
+          duration: 220,
+          easing: "cubic-bezier(0.4, 0, 0.2, 1)",
+        },
+      );
+    } finally {
+      rectSpy.mockRestore();
+      if (originalAnimate) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "animate",
+          originalAnimate,
+        );
+      } else {
+        delete (HTMLElement.prototype as { animate?: unknown }).animate;
+      }
+    }
+  });
+
   it("keeps failed command details expanded by default", () => {
     const message: CommandMessage = {
       id: "message-command-error",

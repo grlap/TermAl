@@ -158,7 +158,10 @@ fn completed_delegation_repairs_degraded_legacy_result_once_and_refreshes_parent
             line: None,
             message: "**[High]** Markdown headings dropped findings.".to_owned(),
         }];
-        delegation.result_parser_version = 0;
+        // Version 1 produced the stale packet shape above. A semantic parser
+        // upgrade must advance the version so this retained transcript is
+        // reparsed exactly once.
+        delegation.result_parser_version = 1;
         let parent = inner
             .sessions
             .iter_mut()

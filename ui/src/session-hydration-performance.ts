@@ -6,6 +6,7 @@
 import type { Session } from "./types";
 
 const SESSION_TRANSCRIPT_COMMIT_WARN_AFTER_MS = 500;
+const SESSION_TRANSCRIPT_COMMIT_EXPIRE_AFTER_MS = 30_000;
 const MAX_PENDING_SESSION_TRANSCRIPT_COMMITS = 64;
 
 type PendingSessionTranscriptCommit = {
@@ -63,15 +64,14 @@ export function noteSessionTranscriptCommitted(
   reportWarning = reportSessionHydrationWarning,
 ) {
   const pending = pendingSessionTranscriptCommits.get(sessionId);
-  if (
-    !pending ||
-    pending.token !== token ||
-    messageCount < pending.messageCount
-  ) {
+  if (!pending || pending.token !== token) {
     return null;
   }
   pendingSessionTranscriptCommits.delete(sessionId);
   const elapsedMs = Math.max(0, now - pending.adoptedAt);
+  if (elapsedMs > SESSION_TRANSCRIPT_COMMIT_EXPIRE_AFTER_MS) {
+    return null;
+  }
   if (elapsedMs >= SESSION_TRANSCRIPT_COMMIT_WARN_AFTER_MS) {
     reportWarning(
       `session hydration> transcript commit delayed ${elapsedMs.toFixed(0)}ms ` +

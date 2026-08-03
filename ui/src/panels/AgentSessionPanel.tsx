@@ -16,12 +16,12 @@ import {
   type PendingCreatedConversationMarker,
 } from "./agent-session-panel-helpers";
 import { SessionComposer } from "./AgentSessionPanel.composer";
+import { MessageSlot, PanelEmptyState } from "./session-message-leaves";
 import {
-  MessageSlot,
-  PanelEmptyState,
-} from "./session-message-leaves";
-import {
+  ConversationTailEntry,
+  ConversationTailPresence,
   PendingPromptCard,
+  QueuedTurnHandoffIndicator,
   RunningIndicator,
 } from "./session-activity-cards";
 import {
@@ -63,9 +63,7 @@ import {
   commandMessagesForPaneViewMode,
   diffMessagesForPaneViewMode,
 } from "../SessionPaneView.messages";
-import {
-  shouldShowAgentSessionWaitingIndicator,
-} from "./AgentSessionPanel.waiting-indicator";
+import { shouldShowAgentSessionWaitingIndicator } from "./AgentSessionPanel.waiting-indicator";
 import { useSessionRecordSnapshot } from "../session-store";
 import { useStableEvent } from "./use-stable-event";
 import {
@@ -142,9 +140,7 @@ export function AgentSessionPanel({
   const stableOnApprovalDecision = useStableEvent(onApprovalDecision);
   const stableOnUserInputSubmit = useStableEvent(onUserInputSubmit);
   const stableOnMcpElicitationSubmit = useStableEvent(onMcpElicitationSubmit);
-  const stableOnCodexAppRequestSubmit = useStableEvent(
-    onCodexAppRequestSubmit,
-  );
+  const stableOnCodexAppRequestSubmit = useStableEvent(onCodexAppRequestSubmit);
   const stableOnCancelQueuedPrompt = useStableEvent(onCancelQueuedPrompt);
   const stableOnCreateConversationMarker = useStableEvent(
     onCreateConversationMarker,
@@ -264,204 +260,229 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
   return (
     <footer className="pane-footer-note">
       <p className="composer-hint">
-        This tile is in {footerModeLabel.toLowerCase()} mode. Use the Session tab to send prompts.
+        This tile is in {footerModeLabel.toLowerCase()} mode. Use the Session
+        tab to send prompts.
       </p>
     </footer>
   );
 });
 
-const SessionBody = memo(function SessionBody({
-  paneId,
-  viewMode,
-  scrollContainerRef,
-  activeSessionId,
-  liveTailPinned,
-  isLoading,
-  isUpdating,
-  showWaitingIndicator,
-  waitingIndicatorKind,
-  waitingIndicatorPrompt,
-  commandMessages: fallbackCommandMessages,
-  diffMessages: fallbackDiffMessages,
-  onApprovalDecision,
-  onUserInputSubmit,
-  onMcpElicitationSubmit,
-  onCodexAppRequestSubmit,
-  onCancelQueuedPrompt,
-  onCreateConversationMarker,
-  onDeleteConversationMarker,
-  onPinResponseBoardMessage,
-  onOpenMailbox,
-  onSessionSettingsChange,
-  conversationSearchQuery,
-  conversationSearchMatchedItemKeys,
-  conversationSearchActiveItemKey,
-  onConversationSearchItemMount,
-  renderCommandCard,
-  renderDiffCard,
-  renderMessageCard,
-  renderPromptSettings,
-}: SessionBodyProps): JSX.Element | null {
-  const activeSession = useSessionRecordSnapshot(activeSessionId);
-  const activeSessionStatus = activeSession?.status;
-  const commandMessages = useMemo(
-    () =>
-      activeSession
-        ? commandMessagesForPaneViewMode(viewMode, activeSession)
-        : fallbackCommandMessages,
-    [activeSession, fallbackCommandMessages, viewMode],
-  );
-  const diffMessages = useMemo(
-    () =>
-      activeSession
-        ? diffMessagesForPaneViewMode(viewMode, activeSession)
-        : fallbackDiffMessages,
-    [activeSession, fallbackDiffMessages, viewMode],
-  );
-  const shouldResolveLiveWaitingActivity =
-    showWaitingIndicator &&
-    waitingIndicatorKind === "liveTurn" &&
-    activeSessionStatus === "active";
-  const resolvedWaitingIndicatorActivity: SessionLiveActivity | null =
-    shouldResolveLiveWaitingActivity
-      ? (activeSession?.liveActivity ?? null)
-      : waitingIndicatorPrompt
-        ? { prompt: waitingIndicatorPrompt }
-        : null;
-
-  if (!activeSession) {
-    return (
-      <PanelEmptyState
-        title="Ready for a session"
-        body="Click a session on the left to open it in the active tile."
-      />
+const SessionBody = memo(
+  function SessionBody({
+    paneId,
+    viewMode,
+    scrollContainerRef,
+    activeSessionId,
+    liveTailPinned,
+    isLoading,
+    isUpdating,
+    showWaitingIndicator,
+    waitingIndicatorKind,
+    waitingIndicatorPrompt,
+    commandMessages: fallbackCommandMessages,
+    diffMessages: fallbackDiffMessages,
+    onApprovalDecision,
+    onUserInputSubmit,
+    onMcpElicitationSubmit,
+    onCodexAppRequestSubmit,
+    onCancelQueuedPrompt,
+    onCreateConversationMarker,
+    onDeleteConversationMarker,
+    onPinResponseBoardMessage,
+    onOpenMailbox,
+    onSessionSettingsChange,
+    conversationSearchQuery,
+    conversationSearchMatchedItemKeys,
+    conversationSearchActiveItemKey,
+    onConversationSearchItemMount,
+    renderCommandCard,
+    renderDiffCard,
+    renderMessageCard,
+    renderPromptSettings,
+  }: SessionBodyProps): JSX.Element | null {
+    const activeSession = useSessionRecordSnapshot(activeSessionId);
+    const activeSessionStatus = activeSession?.status;
+    const commandMessages = useMemo(
+      () =>
+        activeSession
+          ? commandMessagesForPaneViewMode(viewMode, activeSession)
+          : fallbackCommandMessages,
+      [activeSession, fallbackCommandMessages, viewMode],
     );
-  }
+    const diffMessages = useMemo(
+      () =>
+        activeSession
+          ? diffMessagesForPaneViewMode(viewMode, activeSession)
+          : fallbackDiffMessages,
+      [activeSession, fallbackDiffMessages, viewMode],
+    );
+    const shouldResolveLiveWaitingActivity =
+      showWaitingIndicator &&
+      waitingIndicatorKind === "liveTurn" &&
+      activeSessionStatus === "active";
+    const resolvedWaitingIndicatorActivity: SessionLiveActivity | null =
+      shouldResolveLiveWaitingActivity
+        ? (activeSession?.liveActivity ?? null)
+        : waitingIndicatorPrompt
+          ? { prompt: waitingIndicatorPrompt }
+          : null;
 
-  if (viewMode === "session") {
-    const activePendingPrompts =
-      activeSession.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
-    if (activeSession.messages.length === 0 && activePendingPrompts.length === 0 && !showWaitingIndicator) {
+    if (!activeSession) {
       return (
         <PanelEmptyState
-          title={isLoading ? "Connecting to backend" : "Live session is ready"}
-          body={
-            isLoading
-              ? "Fetching session state from the Rust backend."
-              : `Send a prompt to ${activeSession.agent} and this tile will fill with live cards.`
-          }
+          title="Ready for a session"
+          body="Click a session on the left to open it in the active tile."
         />
       );
     }
 
-    return (
-      <>
-        <SessionConversationPage
-          key={activeSession.id}
-          renderMessageCard={renderMessageCard}
-          session={activeSession}
-          liveTailPinned={liveTailPinned}
-          scrollContainerRef={scrollContainerRef}
-          isActive
-          isLoading={isLoading}
-          showWaitingIndicator={showWaitingIndicator}
-          waitingIndicatorKind={waitingIndicatorKind}
-          waitingIndicatorPrompt={
-            resolvedWaitingIndicatorActivity?.prompt ?? waitingIndicatorPrompt
-          }
-          waitingIndicatorActivity={resolvedWaitingIndicatorActivity}
-          onApprovalDecision={onApprovalDecision}
-          onUserInputSubmit={onUserInputSubmit}
-          onMcpElicitationSubmit={onMcpElicitationSubmit}
-          onCodexAppRequestSubmit={onCodexAppRequestSubmit}
-          onCancelQueuedPrompt={onCancelQueuedPrompt}
-          onCreateConversationMarker={onCreateConversationMarker}
-          onDeleteConversationMarker={onDeleteConversationMarker}
-          onPinResponseBoardMessage={onPinResponseBoardMessage}
-          onOpenMailbox={onOpenMailbox}
-          conversationSearchQuery={conversationSearchQuery}
-          conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
-          conversationSearchActiveItemKey={conversationSearchActiveItemKey}
-          onConversationSearchItemMount={onConversationSearchItemMount}
+    if (viewMode === "session") {
+      const activePendingPrompts =
+        activeSession.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
+      if (
+        activeSession.messages.length === 0 &&
+        activePendingPrompts.length === 0 &&
+        !showWaitingIndicator
+      ) {
+        return (
+          <PanelEmptyState
+            title={
+              isLoading ? "Connecting to backend" : "Live session is ready"
+            }
+            body={
+              isLoading
+                ? "Fetching session state from the Rust backend."
+                : `Send a prompt to ${activeSession.agent} and this tile will fill with live cards.`
+            }
+          />
+        );
+      }
+
+      return (
+        <>
+          <SessionConversationPage
+            key={activeSession.id}
+            renderMessageCard={renderMessageCard}
+            session={activeSession}
+            liveTailPinned={liveTailPinned}
+            scrollContainerRef={scrollContainerRef}
+            isActive
+            isLoading={isLoading}
+            showWaitingIndicator={showWaitingIndicator}
+            waitingIndicatorKind={waitingIndicatorKind}
+            waitingIndicatorPrompt={
+              resolvedWaitingIndicatorActivity?.prompt ?? waitingIndicatorPrompt
+            }
+            waitingIndicatorActivity={resolvedWaitingIndicatorActivity}
+            onApprovalDecision={onApprovalDecision}
+            onUserInputSubmit={onUserInputSubmit}
+            onMcpElicitationSubmit={onMcpElicitationSubmit}
+            onCodexAppRequestSubmit={onCodexAppRequestSubmit}
+            onCancelQueuedPrompt={onCancelQueuedPrompt}
+            onCreateConversationMarker={onCreateConversationMarker}
+            onDeleteConversationMarker={onDeleteConversationMarker}
+            onPinResponseBoardMessage={onPinResponseBoardMessage}
+            onOpenMailbox={onOpenMailbox}
+            conversationSearchQuery={conversationSearchQuery}
+            conversationSearchMatchedItemKeys={
+              conversationSearchMatchedItemKeys
+            }
+            conversationSearchActiveItemKey={conversationSearchActiveItemKey}
+            onConversationSearchItemMount={onConversationSearchItemMount}
+          />
+        </>
+      );
+    }
+
+    if (viewMode === "prompt") {
+      return (
+        renderPromptSettings(
+          paneId,
+          activeSession,
+          isUpdating,
+          onSessionSettingsChange,
+        ) ?? (
+          <PanelEmptyState
+            title="No prompt settings"
+            body="Prompt controls are only available for supported agent sessions."
+          />
+        )
+      );
+    }
+
+    if (viewMode === "commands") {
+      return commandMessages.length > 0 ? (
+        <>
+          {commandMessages.map((message) => (
+            <MessageSlot key={message.id}>
+              {renderCommandCard(message)}
+            </MessageSlot>
+          ))}
+        </>
+      ) : (
+        <PanelEmptyState
+          title="No commands yet"
+          body="This tile is filtered to command executions. Send a prompt that runs tools and they will show up here."
         />
-      </>
-    );
-  }
+      );
+    }
 
-  if (viewMode === "prompt") {
-    return renderPromptSettings(paneId, activeSession, isUpdating, onSessionSettingsChange) ?? (
-      <PanelEmptyState
-        title="No prompt settings"
-        body="Prompt controls are only available for supported agent sessions."
-      />
-    );
-  }
+    if (viewMode === "diffs") {
+      return diffMessages.length > 0 ? (
+        <>
+          {diffMessages.map((message) => (
+            <MessageSlot key={message.id}>
+              {renderDiffCard(message)}
+            </MessageSlot>
+          ))}
+        </>
+      ) : (
+        <PanelEmptyState
+          title="No diffs yet"
+          body="This tile is filtered to file changes. When the agent edits or creates files, the diffs will appear here."
+        />
+      );
+    }
 
-  if (viewMode === "commands") {
-    return commandMessages.length > 0 ? (
-      <>
-        {commandMessages.map((message) => (
-          <MessageSlot key={message.id}>{renderCommandCard(message)}</MessageSlot>
-        ))}
-      </>
-    ) : (
-      <PanelEmptyState
-        title="No commands yet"
-        body="This tile is filtered to command executions. Send a prompt that runs tools and they will show up here."
-      />
-    );
-  }
-
-  if (viewMode === "diffs") {
-    return diffMessages.length > 0 ? (
-      <>
-        {diffMessages.map((message) => (
-          <MessageSlot key={message.id}>{renderDiffCard(message)}</MessageSlot>
-        ))}
-      </>
-    ) : (
-      <PanelEmptyState
-        title="No diffs yet"
-        body="This tile is filtered to file changes. When the agent edits or creates files, the diffs will appear here."
-      />
-    );
-  }
-
-  return null;
-}, (previous, next) =>
-  previous.paneId === next.paneId &&
-  previous.viewMode === next.viewMode &&
-  previous.scrollContainerRef === next.scrollContainerRef &&
-  previous.activeSessionId === next.activeSessionId &&
-  previous.liveTailPinned === next.liveTailPinned &&
-  previous.isLoading === next.isLoading &&
-  previous.isUpdating === next.isUpdating &&
-  previous.showWaitingIndicator === next.showWaitingIndicator &&
-  previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
-  previous.commandMessages === next.commandMessages &&
-  previous.diffMessages === next.diffMessages &&
-  previous.onApprovalDecision === next.onApprovalDecision &&
-  previous.onUserInputSubmit === next.onUserInputSubmit &&
-  previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
-  previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
-  previous.onPinResponseBoardMessage === next.onPinResponseBoardMessage &&
-  previous.onOpenMailbox === next.onOpenMailbox &&
-  previous.onCancelQueuedPrompt === next.onCancelQueuedPrompt &&
-  previous.onCreateConversationMarker === next.onCreateConversationMarker &&
-  previous.onDeleteConversationMarker === next.onDeleteConversationMarker &&
-  previous.onSessionSettingsChange === next.onSessionSettingsChange &&
-  previous.conversationSearchQuery === next.conversationSearchQuery &&
-  previous.conversationSearchMatchedItemKeys === next.conversationSearchMatchedItemKeys &&
-  previous.conversationSearchActiveItemKey === next.conversationSearchActiveItemKey &&
-  previous.onConversationSearchItemMount === next.onConversationSearchItemMount &&
-  (previous.viewMode !== "commands" ||
-    previous.renderCommandCard === next.renderCommandCard) &&
-  (previous.viewMode !== "diffs" ||
-    previous.renderDiffCard === next.renderDiffCard) &&
-  (previous.viewMode !== "session" ||
-    previous.renderMessageCard === next.renderMessageCard) &&
-  (previous.viewMode !== "prompt" ||
-    previous.renderPromptSettings === next.renderPromptSettings)
+    return null;
+  },
+  (previous, next) =>
+    previous.paneId === next.paneId &&
+    previous.viewMode === next.viewMode &&
+    previous.scrollContainerRef === next.scrollContainerRef &&
+    previous.activeSessionId === next.activeSessionId &&
+    previous.liveTailPinned === next.liveTailPinned &&
+    previous.isLoading === next.isLoading &&
+    previous.isUpdating === next.isUpdating &&
+    previous.showWaitingIndicator === next.showWaitingIndicator &&
+    previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
+    previous.commandMessages === next.commandMessages &&
+    previous.diffMessages === next.diffMessages &&
+    previous.onApprovalDecision === next.onApprovalDecision &&
+    previous.onUserInputSubmit === next.onUserInputSubmit &&
+    previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
+    previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
+    previous.onPinResponseBoardMessage === next.onPinResponseBoardMessage &&
+    previous.onOpenMailbox === next.onOpenMailbox &&
+    previous.onCancelQueuedPrompt === next.onCancelQueuedPrompt &&
+    previous.onCreateConversationMarker === next.onCreateConversationMarker &&
+    previous.onDeleteConversationMarker === next.onDeleteConversationMarker &&
+    previous.onSessionSettingsChange === next.onSessionSettingsChange &&
+    previous.conversationSearchQuery === next.conversationSearchQuery &&
+    previous.conversationSearchMatchedItemKeys ===
+      next.conversationSearchMatchedItemKeys &&
+    previous.conversationSearchActiveItemKey ===
+      next.conversationSearchActiveItemKey &&
+    previous.onConversationSearchItemMount ===
+      next.onConversationSearchItemMount &&
+    (previous.viewMode !== "commands" ||
+      previous.renderCommandCard === next.renderCommandCard) &&
+    (previous.viewMode !== "diffs" ||
+      previous.renderDiffCard === next.renderDiffCard) &&
+    (previous.viewMode !== "session" ||
+      previous.renderMessageCard === next.renderMessageCard) &&
+    (previous.viewMode !== "prompt" ||
+      previous.renderPromptSettings === next.renderPromptSettings),
   // Render callbacks are invoked during render, so they stay in normal React
   // dataflow. Compare only the renderer that can affect the active view mode;
   // event handlers above are committed stable callbacks. In session view the
@@ -470,759 +491,817 @@ const SessionBody = memo(function SessionBody({
   // visible message list before rendering heavy message content.
 );
 
-const SessionConversationPage = memo(function SessionConversationPage({
-  renderMessageCard,
-  session,
-  liveTailPinned,
-  scrollContainerRef,
-  isActive,
-  isLoading,
-  showWaitingIndicator,
-  waitingIndicatorKind,
-  waitingIndicatorPrompt,
-  waitingIndicatorActivity,
-  onApprovalDecision,
-  onUserInputSubmit,
-  onMcpElicitationSubmit,
-  onCodexAppRequestSubmit,
-  onCancelQueuedPrompt,
-  onCreateConversationMarker,
-  onDeleteConversationMarker,
-  onPinResponseBoardMessage,
-  onOpenMailbox,
-  conversationSearchQuery,
-  conversationSearchMatchedItemKeys,
-  conversationSearchActiveItemKey,
-  onConversationSearchItemMount,
-}: SessionConversationPageProps) {
-  const stableOnPinResponseBoardMessage = useStableEvent(
-    onPinResponseBoardMessage,
-  );
-  const pendingPrompts = session.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
-  const deferredMessages = useDeferredValue(session.messages);
-  const visibleMarkers = session.markers ?? EMPTY_CONVERSATION_MARKERS;
-  const baseVisibleMessages = isActive
-    ? includeUndeferredMessageTail(deferredMessages, session.messages)
-    : session.messages;
-  const {
-    hasOlderHistory,
-    hasNewerHistory,
-    messages: visibleMessages,
-    requestOlderTranscriptPage,
-  } = useInitialActiveTranscriptMessages({
-    isActive,
-    // Summary count, not `baseVisibleMessages.length`: while a large session is
-    // tail-hydrated the latter is only the 20-message window (tm-jfx/tm-2po).
-    messageCount: session.messageCount,
-    messages: baseVisibleMessages,
-    messagesLoaded: session.messagesLoaded,
-    hasOlderHistory: session.hasOlderHistory,
-    hasNewerHistory: session.hasNewerHistory,
+const SessionConversationPage = memo(
+  function SessionConversationPage({
+    renderMessageCard,
+    session,
+    liveTailPinned,
     scrollContainerRef,
-    sessionId: session.id,
-  });
-  const transcriptCommitToken = sessionTranscriptCommitToken(session);
-  useLayoutEffect(() => {
-    if (
-      isActive &&
-      transcriptCommitToken !== null &&
-      visibleMessages.length > 0
-    ) {
-      noteSessionTranscriptCommitted(
-        session.id,
-        transcriptCommitToken,
-        visibleMessages.length,
-      );
-    }
-  }, [
     isActive,
-    session.id,
-    transcriptCommitToken,
-    visibleMessages.length,
-  ]);
-  useEffect(() => {
-    if (!isActive) {
-      cancelPendingSessionTranscriptCommit(session.id);
-      return;
-    }
-    return () => cancelPendingSessionTranscriptCommit(session.id);
-  }, [isActive, session.id]);
-  const overviewMessages = visibleMessages;
-  // Pending prompts are the live tail's queued follow-ups, NOT bulk history — keep
-  // them undeferred. The message list defers its bulk for streaming perf but always
-  // splices the undeferred tail back in (`includeUndeferredMessageTail` below); the
-  // pending queue had no such escape hatch, so the old `useDeferredValue(pendingPrompts)`
-  // was starved by the continuous message-stream updates during an active turn and the
-  // queued prompt stayed invisible until the turn stopped. The queue is tiny and only
-  // changes on queue/dequeue (never per streamed token), so rendering it immediately
-  // costs nothing. Regression from 089e9ed; do not re-defer this.
-  // A bounded historical window is not the live tail. Do not splice live-only
-  // cards beneath stale history; the pane-level "Jump to latest" affordance
-  // owns reattachment to a bounded current tail.
-  const visiblePendingPromptsBase = hasNewerHistory
-    ? EMPTY_PENDING_PROMPTS
-    : pendingPrompts;
-  const visibleMessageIds = useMemo(
-    () => new Set(visibleMessages.map((message) => message.id)),
-    [visibleMessages],
-  );
-  const visiblePendingPrompts = useMemo(() => {
-    if (visiblePendingPromptsBase.length === 0 || visibleMessages.length === 0) {
-      return visiblePendingPromptsBase;
-    }
-
-    const filteredPendingPrompts = visiblePendingPromptsBase.filter(
-      (prompt) => !visibleMessageIds.has(prompt.id),
-    );
-    return filteredPendingPrompts.length === visiblePendingPromptsBase.length
-      ? visiblePendingPromptsBase
-      : filteredPendingPrompts;
-  }, [visibleMessages.length, visibleMessageIds, visiblePendingPromptsBase]);
-  const effectiveShowWaitingIndicator =
-    !hasNewerHistory &&
-    shouldShowAgentSessionWaitingIndicator({
-      showWaitingIndicator,
-      waitingIndicatorKind,
-      sessionStatus: session.status,
-      visibleMessages,
-    });
-  const overviewMessageCount = Math.max(
-    session.messageCount ?? 0,
-    overviewMessages.length,
-  );
-  const overviewMessageStartIndex =
-    session.messageStartIndex ??
-    (hasNewerHistory && !hasOlderHistory
-      ? 0
-      : Math.max(0, overviewMessageCount - overviewMessages.length));
-  const conversationOverview = useConversationOverviewController({
-    isActive,
-    messageCount: overviewMessageCount,
-    messageStartIndex: overviewMessageStartIndex,
-    renderedMessageCount: overviewMessages.length,
-    scrollContainerRef,
-    sessionId: session.id,
-    sessionMutationStamp: session.sessionMutationStamp ?? 0,
-  });
-  const markersByMessageId = useMemo(
-    () => groupConversationMarkersByMessageId(visibleMarkers),
-    [visibleMarkers],
-  );
-  const sortedMarkers = useMemo(
-    () => sortConversationMarkersForNavigation(visibleMarkers, visibleMessages),
-    [visibleMarkers, visibleMessages],
-  );
-  // activeMarkerId selects a persisted marker in the rail; activeMarkerMessageId
-  // drives the message-shell highlight immediately, including the create flow
-  // before the backend emits the new marker. pendingCreatedMarkers tie that
-  // immediate highlight to markers that appear after create so color follows the
-  // newest create instead of an older marker on the same message.
-  const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
-  const [activeMarkerMessageId, setActiveMarkerMessageId] = useState<
-    string | null
-  >(null);
-  const [pendingCreatedMarkers, setPendingCreatedMarkers] = useState<
-    PendingCreatedConversationMarker[]
-  >([]);
-  const pendingCreatedMarkersRef = useRef<PendingCreatedConversationMarker[]>([]);
-  const pendingCreatedMarkerSequenceRef = useRef(0);
-  const [markerPanelVisibilityOverride, setMarkerPanelVisibilityOverride] =
-    useState<boolean | null>(null);
-  const conversationPageRef = useRef<HTMLDivElement | null>(null);
-  const markerPanelFocusRestoreFrameRef = useRef<number | null>(null);
-  // null follows the auto-show heuristic; explicit booleans come from the
-  // message-header context menu.
-  const isMarkerPanelVisible =
-    markerPanelVisibilityOverride ?? sortedMarkers.length > 0;
-  const setPendingConversationMarkerCreates = useCallback(
-    (nextPendingMarkers: PendingCreatedConversationMarker[]) => {
-      pendingCreatedMarkersRef.current = nextPendingMarkers;
-      setPendingCreatedMarkers(nextPendingMarkers);
-    },
-    [],
-  );
-  const clearPendingConversationMarkerCreate = useCallback(
-    (localId: number) => {
-      const currentPendingMarkers = pendingCreatedMarkersRef.current;
-      const failedMarker = currentPendingMarkers.find(
-        (marker) => marker.localId === localId,
-      );
-      if (!failedMarker) {
-        return;
-      }
-      const nextPendingMarkers = currentPendingMarkers.filter(
-        (marker) => marker.localId !== localId,
-      );
-      setPendingConversationMarkerCreates(nextPendingMarkers);
-      if (
-        currentPendingMarkers[currentPendingMarkers.length - 1]?.localId ===
-        localId
-      ) {
-        setActiveMarkerMessageId(
-          nextPendingMarkers[nextPendingMarkers.length - 1]?.messageId ?? null,
-        );
-      }
-    },
-    [setPendingConversationMarkerCreates],
-  );
-  const handleCreateConversationMarker = useCallback(
-    (
-      targetSessionId: string,
-      messageId: string,
-      options?: CreateConversationMarkerOptions,
-    ) => {
-      let localPendingMarkerId: number | null = null;
-      if (targetSessionId === session.id) {
-        const messageMarkers = markersByMessageId.get(messageId) ?? [];
-        pendingCreatedMarkerSequenceRef.current += 1;
-        localPendingMarkerId = pendingCreatedMarkerSequenceRef.current;
-        setActiveMarkerId(null);
-        setActiveMarkerMessageId(messageId);
-        setPendingConversationMarkerCreates([
-          ...pendingCreatedMarkersRef.current,
-          {
-            localId: localPendingMarkerId,
-            messageId,
-            name: options?.name?.trim() || null,
-            existingMarkerIds: new Set(
-              messageMarkers.map((marker) => marker.id),
-            ),
-          },
-        ]);
-      }
-      const createResult = onCreateConversationMarker(
-        targetSessionId,
-        messageId,
-        options,
-      );
-      if (localPendingMarkerId !== null) {
-        void Promise.resolve(createResult).then(
-          (accepted) => {
-            if (accepted === false) {
-              clearPendingConversationMarkerCreate(localPendingMarkerId);
-            }
-          },
-          () => clearPendingConversationMarkerCreate(localPendingMarkerId),
-        );
-      }
-    },
-    [
-      clearPendingConversationMarkerCreate,
-      markersByMessageId,
-      onCreateConversationMarker,
-      session.id,
-      setPendingConversationMarkerCreates,
-    ],
-  );
-  const {
-    contextMenuNode: markerContextMenuNode,
-    openContextMenu: openMarkerContextMenu,
-  } = useConversationMarkerContextMenu({
-    isActive,
-    isMarkerPanelVisible,
-    markersByMessageId,
-    onCreateConversationMarker: handleCreateConversationMarker,
+    isLoading,
+    showWaitingIndicator,
+    waitingIndicatorKind,
+    waitingIndicatorPrompt,
+    waitingIndicatorActivity,
+    onApprovalDecision,
+    onUserInputSubmit,
+    onMcpElicitationSubmit,
+    onCodexAppRequestSubmit,
+    onCancelQueuedPrompt,
+    onCreateConversationMarker,
     onDeleteConversationMarker,
-    onPinResponseBoardMessage: stableOnPinResponseBoardMessage,
-    onSetMarkerPanelVisible: setMarkerPanelVisibilityOverride,
-    scrollContainerRef,
-    sessionId: session.id,
-    visibleMessageIds,
-  });
-  const {
-    handleConversationItemMount,
-    jumpToMarker: jumpToConversationMarker,
-    jumpToMessageId,
-  } = useConversationMarkerJump({
-    historyWindowKey: `${visibleMessages[0]?.id ?? ""}:${visibleMessages[visibleMessages.length - 1]?.id ?? ""}:${hasOlderHistory}`,
-    onMissingMessageJump: requestOlderTranscriptPage,
+    onPinResponseBoardMessage,
+    onOpenMailbox,
+    conversationSearchQuery,
+    conversationSearchMatchedItemKeys,
+    conversationSearchActiveItemKey,
     onConversationSearchItemMount,
-    scrollContainerRef,
-    sessionId: session.id,
-    virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
-  });
-  useEffect(
-    () =>
-      subscribeResponseBoardSourceNavigation(session.id, (request) => {
-        void requestSessionHistoryAroundPage(
-          request.sessionId,
-          request.messagePosition,
-        ).then((accepted) => {
-          if (!accepted) {
-            return;
-          }
-          window.requestAnimationFrame(() => jumpToMessageId(request.messageId));
-        });
-      }, conversationPageRef),
-    [jumpToMessageId, session.id],
-  );
-  const requestOlderPromptNavigationPage = useCallback(
-    () => requestSessionHistoryOlderPage(session.id),
-    [session.id],
-  );
-  const requestNewerPromptNavigationPage = useCallback(
-    () => requestSessionHistoryNewerPage(session.id),
-    [session.id],
-  );
-  const messageNavigationContextValue: MessageNavigationContextValue =
-    usePagedMessageNavigation({
-      hasNewerHistory,
+  }: SessionConversationPageProps) {
+    const stableOnPinResponseBoardMessage = useStableEvent(
+      onPinResponseBoardMessage,
+    );
+    const pendingPrompts = session.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
+    const deferredMessages = useDeferredValue(session.messages);
+    const visibleMarkers = session.markers ?? EMPTY_CONVERSATION_MARKERS;
+    const baseVisibleMessages = isActive
+      ? includeUndeferredMessageTail(deferredMessages, session.messages)
+      : session.messages;
+    const {
       hasOlderHistory,
-      jumpToMessageId,
-      messages: session.messages,
-      requestNewerPage: requestNewerPromptNavigationPage,
-      requestOlderPage: requestOlderPromptNavigationPage,
+      hasNewerHistory,
+      messages: visibleMessages,
+      requestOlderTranscriptPage,
+    } = useInitialActiveTranscriptMessages({
+      isActive,
+      // Summary count, not `baseVisibleMessages.length`: while a large session is
+      // tail-hydrated the latter is only the 20-message window (tm-jfx/tm-2po).
+      messageCount: session.messageCount,
+      messages: baseVisibleMessages,
+      messagesLoaded: session.messagesLoaded,
+      hasOlderHistory: session.hasOlderHistory,
+      hasNewerHistory: session.hasNewerHistory,
+      scrollContainerRef,
       sessionId: session.id,
     });
+    const transcriptCommitToken = sessionTranscriptCommitToken(session);
+    useLayoutEffect(() => {
+      if (
+        isActive &&
+        transcriptCommitToken !== null &&
+        visibleMessages.length > 0
+      ) {
+        noteSessionTranscriptCommitted(
+          session.id,
+          transcriptCommitToken,
+          visibleMessages.length,
+        );
+      }
+    }, [isActive, session.id, transcriptCommitToken, visibleMessages.length]);
+    useEffect(() => {
+      if (!isActive) {
+        cancelPendingSessionTranscriptCommit(session.id);
+        return;
+      }
+      return () => cancelPendingSessionTranscriptCommit(session.id);
+    }, [isActive, session.id]);
+    const overviewMessages = visibleMessages;
+    // Pending prompts are the live tail's queued follow-ups, NOT bulk history — keep
+    // them undeferred. The message list defers its bulk for streaming perf but always
+    // splices the undeferred tail back in (`includeUndeferredMessageTail` below); the
+    // pending queue had no such escape hatch, so the old `useDeferredValue(pendingPrompts)`
+    // was starved by the continuous message-stream updates during an active turn and the
+    // queued prompt stayed invisible until the turn stopped. The queue is tiny and only
+    // changes on queue/dequeue (never per streamed token), so rendering it immediately
+    // costs nothing. Regression from 089e9ed; do not re-defer this.
+    // A bounded historical window is not the live tail. Do not splice live-only
+    // cards beneath stale history; the pane-level "Jump to latest" affordance
+    // owns reattachment to a bounded current tail.
+    const visiblePendingPromptsBase = hasNewerHistory
+      ? EMPTY_PENDING_PROMPTS
+      : pendingPrompts;
+    const visibleMessageIds = useMemo(
+      () => new Set(visibleMessages.map((message) => message.id)),
+      [visibleMessages],
+    );
+    const visiblePendingPrompts = useMemo(() => {
+      if (
+        visiblePendingPromptsBase.length === 0 ||
+        visibleMessages.length === 0
+      ) {
+        return visiblePendingPromptsBase;
+      }
 
-  useEffect(() => {
-    if (
-      activeMarkerId &&
-      !visibleMarkers.some((marker) => marker.id === activeMarkerId)
-    ) {
+      const filteredPendingPrompts = visiblePendingPromptsBase.filter(
+        (prompt) => !visibleMessageIds.has(prompt.id),
+      );
+      return filteredPendingPrompts.length === visiblePendingPromptsBase.length
+        ? visiblePendingPromptsBase
+        : filteredPendingPrompts;
+    }, [visibleMessages.length, visibleMessageIds, visiblePendingPromptsBase]);
+    const effectiveShowWaitingIndicator =
+      !hasNewerHistory &&
+      shouldShowAgentSessionWaitingIndicator({
+        showWaitingIndicator,
+        waitingIndicatorKind,
+        sessionStatus: session.status,
+        visibleMessages,
+      });
+    const overviewMessageCount = Math.max(
+      session.messageCount ?? 0,
+      overviewMessages.length,
+    );
+    const overviewMessageStartIndex =
+      session.messageStartIndex ??
+      (hasNewerHistory && !hasOlderHistory
+        ? 0
+        : Math.max(0, overviewMessageCount - overviewMessages.length));
+    const conversationOverview = useConversationOverviewController({
+      isActive,
+      messageCount: overviewMessageCount,
+      messageStartIndex: overviewMessageStartIndex,
+      renderedMessageCount: overviewMessages.length,
+      scrollContainerRef,
+      sessionId: session.id,
+      sessionMutationStamp: session.sessionMutationStamp ?? 0,
+    });
+    const markersByMessageId = useMemo(
+      () => groupConversationMarkersByMessageId(visibleMarkers),
+      [visibleMarkers],
+    );
+    const sortedMarkers = useMemo(
+      () =>
+        sortConversationMarkersForNavigation(visibleMarkers, visibleMessages),
+      [visibleMarkers, visibleMessages],
+    );
+    // activeMarkerId selects a persisted marker in the rail; activeMarkerMessageId
+    // drives the message-shell highlight immediately, including the create flow
+    // before the backend emits the new marker. pendingCreatedMarkers tie that
+    // immediate highlight to markers that appear after create so color follows the
+    // newest create instead of an older marker on the same message.
+    const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
+    const [activeMarkerMessageId, setActiveMarkerMessageId] = useState<
+      string | null
+    >(null);
+    const [pendingCreatedMarkers, setPendingCreatedMarkers] = useState<
+      PendingCreatedConversationMarker[]
+    >([]);
+    const pendingCreatedMarkersRef = useRef<PendingCreatedConversationMarker[]>(
+      [],
+    );
+    const pendingCreatedMarkerSequenceRef = useRef(0);
+    const [markerPanelVisibilityOverride, setMarkerPanelVisibilityOverride] =
+      useState<boolean | null>(null);
+    const conversationPageRef = useRef<HTMLDivElement | null>(null);
+    const markerPanelFocusRestoreFrameRef = useRef<number | null>(null);
+    // null follows the auto-show heuristic; explicit booleans come from the
+    // message-header context menu.
+    const isMarkerPanelVisible =
+      markerPanelVisibilityOverride ?? sortedMarkers.length > 0;
+    const setPendingConversationMarkerCreates = useCallback(
+      (nextPendingMarkers: PendingCreatedConversationMarker[]) => {
+        pendingCreatedMarkersRef.current = nextPendingMarkers;
+        setPendingCreatedMarkers(nextPendingMarkers);
+      },
+      [],
+    );
+    const clearPendingConversationMarkerCreate = useCallback(
+      (localId: number) => {
+        const currentPendingMarkers = pendingCreatedMarkersRef.current;
+        const failedMarker = currentPendingMarkers.find(
+          (marker) => marker.localId === localId,
+        );
+        if (!failedMarker) {
+          return;
+        }
+        const nextPendingMarkers = currentPendingMarkers.filter(
+          (marker) => marker.localId !== localId,
+        );
+        setPendingConversationMarkerCreates(nextPendingMarkers);
+        if (
+          currentPendingMarkers[currentPendingMarkers.length - 1]?.localId ===
+          localId
+        ) {
+          setActiveMarkerMessageId(
+            nextPendingMarkers[nextPendingMarkers.length - 1]?.messageId ??
+              null,
+          );
+        }
+      },
+      [setPendingConversationMarkerCreates],
+    );
+    const handleCreateConversationMarker = useCallback(
+      (
+        targetSessionId: string,
+        messageId: string,
+        options?: CreateConversationMarkerOptions,
+      ) => {
+        let localPendingMarkerId: number | null = null;
+        if (targetSessionId === session.id) {
+          const messageMarkers = markersByMessageId.get(messageId) ?? [];
+          pendingCreatedMarkerSequenceRef.current += 1;
+          localPendingMarkerId = pendingCreatedMarkerSequenceRef.current;
+          setActiveMarkerId(null);
+          setActiveMarkerMessageId(messageId);
+          setPendingConversationMarkerCreates([
+            ...pendingCreatedMarkersRef.current,
+            {
+              localId: localPendingMarkerId,
+              messageId,
+              name: options?.name?.trim() || null,
+              existingMarkerIds: new Set(
+                messageMarkers.map((marker) => marker.id),
+              ),
+            },
+          ]);
+        }
+        const createResult = onCreateConversationMarker(
+          targetSessionId,
+          messageId,
+          options,
+        );
+        if (localPendingMarkerId !== null) {
+          void Promise.resolve(createResult).then(
+            (accepted) => {
+              if (accepted === false) {
+                clearPendingConversationMarkerCreate(localPendingMarkerId);
+              }
+            },
+            () => clearPendingConversationMarkerCreate(localPendingMarkerId),
+          );
+        }
+      },
+      [
+        clearPendingConversationMarkerCreate,
+        markersByMessageId,
+        onCreateConversationMarker,
+        session.id,
+        setPendingConversationMarkerCreates,
+      ],
+    );
+    const {
+      contextMenuNode: markerContextMenuNode,
+      openContextMenu: openMarkerContextMenu,
+    } = useConversationMarkerContextMenu({
+      isActive,
+      isMarkerPanelVisible,
+      markersByMessageId,
+      onCreateConversationMarker: handleCreateConversationMarker,
+      onDeleteConversationMarker,
+      onPinResponseBoardMessage: stableOnPinResponseBoardMessage,
+      onSetMarkerPanelVisible: setMarkerPanelVisibilityOverride,
+      scrollContainerRef,
+      sessionId: session.id,
+      visibleMessageIds,
+    });
+    const {
+      handleConversationItemMount,
+      jumpToMarker: jumpToConversationMarker,
+      jumpToMessageId,
+    } = useConversationMarkerJump({
+      historyWindowKey: `${visibleMessages[0]?.id ?? ""}:${visibleMessages[visibleMessages.length - 1]?.id ?? ""}:${hasOlderHistory}`,
+      onMissingMessageJump: requestOlderTranscriptPage,
+      onConversationSearchItemMount,
+      scrollContainerRef,
+      sessionId: session.id,
+      virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
+    });
+    useEffect(
+      () =>
+        subscribeResponseBoardSourceNavigation(
+          session.id,
+          (request) => {
+            void requestSessionHistoryAroundPage(
+              request.sessionId,
+              request.messagePosition,
+            ).then((accepted) => {
+              if (!accepted) {
+                return;
+              }
+              window.requestAnimationFrame(() =>
+                jumpToMessageId(request.messageId),
+              );
+            });
+          },
+          conversationPageRef,
+        ),
+      [jumpToMessageId, session.id],
+    );
+    const requestOlderPromptNavigationPage = useCallback(
+      () => requestSessionHistoryOlderPage(session.id),
+      [session.id],
+    );
+    const requestNewerPromptNavigationPage = useCallback(
+      () => requestSessionHistoryNewerPage(session.id),
+      [session.id],
+    );
+    const messageNavigationContextValue: MessageNavigationContextValue =
+      usePagedMessageNavigation({
+        hasNewerHistory,
+        hasOlderHistory,
+        jumpToMessageId,
+        messages: session.messages,
+        requestNewerPage: requestNewerPromptNavigationPage,
+        requestOlderPage: requestOlderPromptNavigationPage,
+        sessionId: session.id,
+      });
+
+    useEffect(() => {
+      if (
+        activeMarkerId &&
+        !visibleMarkers.some((marker) => marker.id === activeMarkerId)
+      ) {
+        setActiveMarkerId(null);
+        setActiveMarkerMessageId(null);
+        setPendingConversationMarkerCreates([]);
+      }
+    }, [activeMarkerId, setPendingConversationMarkerCreates, visibleMarkers]);
+
+    useEffect(() => {
+      if (pendingCreatedMarkers.length === 0 || activeMarkerId) {
+        return;
+      }
+      const usedMarkerIds = new Set<string>();
+      let changed = false;
+      const nextPendingMarkers = pendingCreatedMarkers.map((pendingMarker) => {
+        if (pendingMarker.resolvedMarkerId) {
+          usedMarkerIds.add(pendingMarker.resolvedMarkerId);
+          return pendingMarker;
+        }
+        const messageMarkers =
+          markersByMessageId.get(pendingMarker.messageId) ?? [];
+        const createdMarker = findNewPendingCreatedConversationMarker(
+          messageMarkers,
+          pendingMarker,
+          usedMarkerIds,
+        );
+        if (!createdMarker) {
+          return pendingMarker;
+        }
+        usedMarkerIds.add(createdMarker.id);
+        changed = true;
+        return {
+          ...pendingMarker,
+          resolvedMarkerId: createdMarker.id,
+        };
+      });
+      const latestPendingMarker =
+        nextPendingMarkers[nextPendingMarkers.length - 1] ?? null;
+      if (latestPendingMarker?.resolvedMarkerId) {
+        setActiveMarkerId(latestPendingMarker.resolvedMarkerId);
+        setActiveMarkerMessageId(latestPendingMarker.messageId);
+        setPendingConversationMarkerCreates([]);
+        return;
+      }
+      if (changed) {
+        setPendingConversationMarkerCreates(nextPendingMarkers);
+      }
+    }, [
+      activeMarkerId,
+      markersByMessageId,
+      pendingCreatedMarkers,
+      setPendingConversationMarkerCreates,
+    ]);
+
+    useEffect(() => {
       setActiveMarkerId(null);
       setActiveMarkerMessageId(null);
       setPendingConversationMarkerCreates([]);
-    }
-  }, [activeMarkerId, setPendingConversationMarkerCreates, visibleMarkers]);
+      setMarkerPanelVisibilityOverride(null);
+    }, [session.id, setPendingConversationMarkerCreates]);
 
-  useEffect(() => {
-    if (pendingCreatedMarkers.length === 0 || activeMarkerId) {
-      return;
-    }
-    const usedMarkerIds = new Set<string>();
-    let changed = false;
-    const nextPendingMarkers = pendingCreatedMarkers.map((pendingMarker) => {
-      if (pendingMarker.resolvedMarkerId) {
-        usedMarkerIds.add(pendingMarker.resolvedMarkerId);
-        return pendingMarker;
+    const cancelMarkerPanelFocusRestore = useCallback(() => {
+      if (markerPanelFocusRestoreFrameRef.current !== null) {
+        window.cancelAnimationFrame(markerPanelFocusRestoreFrameRef.current);
+        markerPanelFocusRestoreFrameRef.current = null;
       }
-      const messageMarkers =
-        markersByMessageId.get(pendingMarker.messageId) ?? [];
-      const createdMarker = findNewPendingCreatedConversationMarker(
-        messageMarkers,
-        pendingMarker,
-        usedMarkerIds,
+    }, []);
+
+    useEffect(() => {
+      return cancelMarkerPanelFocusRestore;
+    }, [cancelMarkerPanelFocusRestore, session.id]);
+
+    const hideMarkerPanelAndRestoreFocus = useCallback(() => {
+      setMarkerPanelVisibilityOverride(false);
+      cancelMarkerPanelFocusRestore();
+      markerPanelFocusRestoreFrameRef.current = window.requestAnimationFrame(
+        () => {
+          markerPanelFocusRestoreFrameRef.current = null;
+          conversationPageRef.current?.focus({ preventScroll: true });
+        },
       );
-      if (!createdMarker) {
-        return pendingMarker;
-      }
-      usedMarkerIds.add(createdMarker.id);
-      changed = true;
-      return {
-        ...pendingMarker,
-        resolvedMarkerId: createdMarker.id,
-      };
-    });
-    const latestPendingMarker =
-      nextPendingMarkers[nextPendingMarkers.length - 1] ?? null;
-    if (latestPendingMarker?.resolvedMarkerId) {
-      setActiveMarkerId(latestPendingMarker.resolvedMarkerId);
-      setActiveMarkerMessageId(latestPendingMarker.messageId);
-      setPendingConversationMarkerCreates([]);
-      return;
-    }
-    if (changed) {
-      setPendingConversationMarkerCreates(nextPendingMarkers);
-    }
-  }, [
-    activeMarkerId,
-    markersByMessageId,
-    pendingCreatedMarkers,
-    setPendingConversationMarkerCreates,
-  ]);
+    }, [cancelMarkerPanelFocusRestore]);
 
-  useEffect(() => {
-    setActiveMarkerId(null);
-    setActiveMarkerMessageId(null);
-    setPendingConversationMarkerCreates([]);
-    setMarkerPanelVisibilityOverride(null);
-  }, [session.id, setPendingConversationMarkerCreates]);
+    const jumpToMarker = useCallback(
+      (marker: ConversationMarker) => {
+        setActiveMarkerId(marker.id);
+        setActiveMarkerMessageId(marker.messageId);
+        setPendingConversationMarkerCreates([]);
+        jumpToConversationMarker(marker);
+      },
+      [jumpToConversationMarker, setPendingConversationMarkerCreates],
+    );
 
-  const cancelMarkerPanelFocusRestore = useCallback(() => {
-    if (markerPanelFocusRestoreFrameRef.current !== null) {
-      window.cancelAnimationFrame(markerPanelFocusRestoreFrameRef.current);
-      markerPanelFocusRestoreFrameRef.current = null;
-    }
-  }, []);
+    const navigateMarkerByOffset = useCallback(
+      (offset: -1 | 1) => {
+        if (sortedMarkers.length === 0) {
+          return;
+        }
+        const currentIndex =
+          activeMarkerId === null
+            ? -1
+            : sortedMarkers.findIndex((marker) => marker.id === activeMarkerId);
+        const fallbackIndex = offset > 0 ? 0 : sortedMarkers.length - 1;
+        const nextIndex =
+          currentIndex === -1
+            ? fallbackIndex
+            : (currentIndex + offset + sortedMarkers.length) %
+              sortedMarkers.length;
+        jumpToMarker(sortedMarkers[nextIndex]);
+      },
+      [activeMarkerId, jumpToMarker, sortedMarkers],
+    );
 
-  useEffect(() => {
-    return cancelMarkerPanelFocusRestore;
-  }, [cancelMarkerPanelFocusRestore, session.id]);
-
-  const hideMarkerPanelAndRestoreFocus = useCallback(() => {
-    setMarkerPanelVisibilityOverride(false);
-    cancelMarkerPanelFocusRestore();
-    markerPanelFocusRestoreFrameRef.current = window.requestAnimationFrame(() => {
-      markerPanelFocusRestoreFrameRef.current = null;
-      conversationPageRef.current?.focus({ preventScroll: true });
-    });
-  }, [cancelMarkerPanelFocusRestore]);
-
-  const jumpToMarker = useCallback(
-    (marker: ConversationMarker) => {
-      setActiveMarkerId(marker.id);
-      setActiveMarkerMessageId(marker.messageId);
-      setPendingConversationMarkerCreates([]);
-      jumpToConversationMarker(marker);
-    },
-    [jumpToConversationMarker, setPendingConversationMarkerCreates],
-  );
-
-  const navigateMarkerByOffset = useCallback(
-    (offset: -1 | 1) => {
-      if (sortedMarkers.length === 0) {
-        return;
-      }
-      const currentIndex =
-        activeMarkerId === null
-          ? -1
-          : sortedMarkers.findIndex((marker) => marker.id === activeMarkerId);
-      const fallbackIndex = offset > 0 ? 0 : sortedMarkers.length - 1;
-      const nextIndex =
-        currentIndex === -1
-          ? fallbackIndex
-          : (currentIndex + offset + sortedMarkers.length) %
-            sortedMarkers.length;
-      jumpToMarker(sortedMarkers[nextIndex]);
-    },
-    [activeMarkerId, jumpToMarker, sortedMarkers],
-  );
-
-  const renderMarkedMessageCard = useCallback<RenderMessageCard>(
-    (
-      message,
-      preferImmediateHeavyRender,
-      onMessageApprovalDecision,
-      onMessageUserInputSubmit,
-      onMessageMcpElicitationSubmit,
-      onMessageCodexAppRequestSubmit,
-    ) => {
-      const rendered = renderMessageCard(
+    const renderMarkedMessageCard = useCallback<RenderMessageCard>(
+      (
         message,
         preferImmediateHeavyRender,
         onMessageApprovalDecision,
         onMessageUserInputSubmit,
         onMessageMcpElicitationSubmit,
         onMessageCodexAppRequestSubmit,
-      );
-      if (!rendered) {
-        return null;
-      }
-      const messageMarkers = markersByMessageId.get(message.id) ?? [];
-      const latestPendingCreatedMarker =
-        pendingCreatedMarkers[pendingCreatedMarkers.length - 1] ?? null;
-      const pendingActiveMessageMarker =
-        !activeMarkerId &&
-        latestPendingCreatedMarker?.messageId === message.id &&
-        latestPendingCreatedMarker.resolvedMarkerId
-          ? messageMarkers.find(
-              (marker) =>
-                marker.id === latestPendingCreatedMarker.resolvedMarkerId,
-            ) ?? null
-          : null;
-      const activeMessageMarker = activeMarkerId
-        ? messageMarkers.find((marker) => marker.id === activeMarkerId) ?? null
-        : pendingActiveMessageMarker;
-      const isActiveMarkerMessage =
-        activeMessageMarker !== null || activeMarkerMessageId === message.id;
-      const activeMarkerColor = activeMessageMarker?.color ?? null;
-      const markerShellStyle = isActiveMarkerMessage
-        ? ({
-            "--conversation-active-marker-color":
-              normalizeConversationMarkerColor(activeMarkerColor),
-          } as CSSProperties)
-        : undefined;
-      // Markers are message-scoped, so all rendered message authors are
-      // eligible. Nested native controls still keep their own context menu.
-      const handleMarkerContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
-        if (!shouldOpenConversationMarkerContextMenu(event)) {
-          return;
-        }
-        const trigger = findConversationMarkerContextMenuTrigger(
-          event.currentTarget,
-          event.target,
-        );
-        if (!trigger) {
-          return;
-        }
-        event.preventDefault();
-        openMarkerContextMenu({
-          messageId: message.id,
-          clientX: event.clientX,
-          clientY: event.clientY,
-          trigger,
-        });
-      };
-      const openMarkerMenuFromTrigger = (
-        trigger: HTMLElement,
-        clientX: number,
-        clientY: number,
       ) => {
-        openMarkerContextMenu({
-          messageId: message.id,
-          clientX,
-          clientY,
-          trigger,
-        });
-      };
-      const handleMarkerTriggerClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-        if (event.button !== 0) {
-          return;
-        }
-        const trigger = findActivatableConversationMarkerContextMenuTrigger(
-          event.currentTarget,
-          event.target,
+        const rendered = renderMessageCard(
+          message,
+          preferImmediateHeavyRender,
+          onMessageApprovalDecision,
+          onMessageUserInputSubmit,
+          onMessageMcpElicitationSubmit,
+          onMessageCodexAppRequestSubmit,
         );
-        if (!trigger) {
-          return;
+        if (!rendered) {
+          return null;
         }
-        event.preventDefault();
-        openMarkerMenuFromTrigger(trigger, event.clientX, event.clientY);
-      };
-      const handleMarkerTriggerKeyDown = (
-        event: ReactKeyboardEvent<HTMLDivElement>,
-      ) => {
-        if (
-          event.key !== "Enter" &&
-          event.key !== " " &&
-          event.key !== "ContextMenu"
-        ) {
-          return;
-        }
-        const trigger = findActivatableConversationMarkerContextMenuTrigger(
-          event.currentTarget,
-          event.target,
+        const messageMarkers = markersByMessageId.get(message.id) ?? [];
+        const latestPendingCreatedMarker =
+          pendingCreatedMarkers[pendingCreatedMarkers.length - 1] ?? null;
+        const pendingActiveMessageMarker =
+          !activeMarkerId &&
+          latestPendingCreatedMarker?.messageId === message.id &&
+          latestPendingCreatedMarker.resolvedMarkerId
+            ? (messageMarkers.find(
+                (marker) =>
+                  marker.id === latestPendingCreatedMarker.resolvedMarkerId,
+              ) ?? null)
+            : null;
+        const activeMessageMarker = activeMarkerId
+          ? (messageMarkers.find((marker) => marker.id === activeMarkerId) ??
+            null)
+          : pendingActiveMessageMarker;
+        const isActiveMarkerMessage =
+          activeMessageMarker !== null || activeMarkerMessageId === message.id;
+        const activeMarkerColor = activeMessageMarker?.color ?? null;
+        const markerShellStyle = isActiveMarkerMessage
+          ? ({
+              "--conversation-active-marker-color":
+                normalizeConversationMarkerColor(activeMarkerColor),
+            } as CSSProperties)
+          : undefined;
+        // Markers are message-scoped, so all rendered message authors are
+        // eligible. Nested native controls still keep their own context menu.
+        const handleMarkerContextMenu = (
+          event: ReactMouseEvent<HTMLDivElement>,
+        ) => {
+          if (!shouldOpenConversationMarkerContextMenu(event)) {
+            return;
+          }
+          const trigger = findConversationMarkerContextMenuTrigger(
+            event.currentTarget,
+            event.target,
+          );
+          if (!trigger) {
+            return;
+          }
+          event.preventDefault();
+          openMarkerContextMenu({
+            messageId: message.id,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            trigger,
+          });
+        };
+        const openMarkerMenuFromTrigger = (
+          trigger: HTMLElement,
+          clientX: number,
+          clientY: number,
+        ) => {
+          openMarkerContextMenu({
+            messageId: message.id,
+            clientX,
+            clientY,
+            trigger,
+          });
+        };
+        const handleMarkerTriggerClick = (
+          event: ReactMouseEvent<HTMLDivElement>,
+        ) => {
+          if (event.button !== 0) {
+            return;
+          }
+          const trigger = findActivatableConversationMarkerContextMenuTrigger(
+            event.currentTarget,
+            event.target,
+          );
+          if (!trigger) {
+            return;
+          }
+          event.preventDefault();
+          openMarkerMenuFromTrigger(trigger, event.clientX, event.clientY);
+        };
+        const handleMarkerTriggerKeyDown = (
+          event: ReactKeyboardEvent<HTMLDivElement>,
+        ) => {
+          if (
+            event.key !== "Enter" &&
+            event.key !== " " &&
+            event.key !== "ContextMenu"
+          ) {
+            return;
+          }
+          const trigger = findActivatableConversationMarkerContextMenuTrigger(
+            event.currentTarget,
+            event.target,
+          );
+          if (!trigger) {
+            return;
+          }
+          event.preventDefault();
+          const rect = trigger.getBoundingClientRect();
+          openMarkerMenuFromTrigger(trigger, rect.left, rect.bottom);
+        };
+        return (
+          <div
+            className={`conversation-message-marker-shell can-open-marker-menu${isActiveMarkerMessage ? " is-active-marker" : ""}`}
+            style={markerShellStyle}
+            tabIndex={-1}
+            onClick={handleMarkerTriggerClick}
+            onContextMenu={handleMarkerContextMenu}
+            onKeyDown={handleMarkerTriggerKeyDown}
+          >
+            <MessageMetaMarkerMenuProvider
+              onResponseBoardDragStart={(event) => {
+                writeResponseBoardMessageDragData(event.dataTransfer, {
+                  sessionId: session.id,
+                  messageId: message.id,
+                });
+                const messageShell = event.currentTarget.closest<HTMLElement>(
+                  ".conversation-message-marker-shell",
+                );
+                if (messageShell) {
+                  const bounds = messageShell.getBoundingClientRect();
+                  event.dataTransfer.setDragImage(
+                    messageShell,
+                    Math.min(
+                      Math.max(event.clientX - bounds.left, 0),
+                      bounds.width,
+                    ),
+                    Math.min(
+                      Math.max(event.clientY - bounds.top, 0),
+                      bounds.height,
+                    ),
+                  );
+                }
+              }}
+            >
+              {rendered}
+            </MessageMetaMarkerMenuProvider>
+          </div>
         );
-        if (!trigger) {
-          return;
-        }
-        event.preventDefault();
-        const rect = trigger.getBoundingClientRect();
-        openMarkerMenuFromTrigger(trigger, rect.left, rect.bottom);
-      };
+      },
+      [
+        // The marker menu owns session/create/delete state internally; keep this
+        // callback keyed only to the rendered card and marker lookup surfaces.
+        activeMarkerId,
+        activeMarkerMessageId,
+        markersByMessageId,
+        openMarkerContextMenu,
+        pendingCreatedMarkers,
+        renderMessageCard,
+        session.id,
+      ],
+    );
+
+    if (
+      visibleMessages.length === 0 &&
+      visiblePendingPrompts.length === 0 &&
+      !effectiveShowWaitingIndicator
+    ) {
       return (
         <div
-          className={`conversation-message-marker-shell can-open-marker-menu${isActiveMarkerMessage ? " is-active-marker" : ""}`}
-          style={markerShellStyle}
+          ref={conversationPageRef}
+          className={`session-conversation-page${isActive ? " is-active" : ""}`}
+          hidden={!isActive}
           tabIndex={-1}
-          onClick={handleMarkerTriggerClick}
-          onContextMenu={handleMarkerContextMenu}
-          onKeyDown={handleMarkerTriggerKeyDown}
         >
-          <MessageMetaMarkerMenuProvider
-            onResponseBoardDragStart={(event) => {
-              writeResponseBoardMessageDragData(event.dataTransfer, {
-                sessionId: session.id,
-                messageId: message.id,
-              });
-              const messageShell = event.currentTarget.closest<HTMLElement>(
-                ".conversation-message-marker-shell",
-              );
-              if (messageShell) {
-                const bounds = messageShell.getBoundingClientRect();
-                event.dataTransfer.setDragImage(
-                  messageShell,
-                  Math.min(Math.max(event.clientX - bounds.left, 0), bounds.width),
-                  Math.min(Math.max(event.clientY - bounds.top, 0), bounds.height),
-                );
-              }
-            }}
-          >
-            {rendered}
-          </MessageMetaMarkerMenuProvider>
+          <PanelEmptyState
+            title={
+              isLoading ? "Connecting to backend" : "Live session is ready"
+            }
+            body={
+              isLoading
+                ? "Fetching session state from the Rust backend."
+                : `Send a prompt to ${session.agent} and this tile will fill with live cards.`
+            }
+          />
         </div>
       );
-    },
-    [
-      // The marker menu owns session/create/delete state internally; keep this
-      // callback keyed only to the rendered card and marker lookup surfaces.
-      activeMarkerId,
-      activeMarkerMessageId,
-      markersByMessageId,
-      openMarkerContextMenu,
-      pendingCreatedMarkers,
-      renderMessageCard,
-      session.id,
-    ],
-  );
+    }
 
-  if (visibleMessages.length === 0 && visiblePendingPrompts.length === 0 && !effectiveShowWaitingIndicator) {
-    return (
-      <div
-        ref={conversationPageRef}
-        className={`session-conversation-page${isActive ? " is-active" : ""}`}
-        hidden={!isActive}
-        tabIndex={-1}
-      >
-        <PanelEmptyState
-          title={isLoading ? "Connecting to backend" : "Live session is ready"}
-          body={
-            isLoading
-              ? "Fetching session state from the Rust backend."
-              : `Send a prompt to ${session.agent} and this tile will fill with live cards.`
-          }
-        />
-      </div>
-    );
-  }
-
-  const isConversationVirtualized =
-    hasOlderHistory ||
-    hasNewerHistory ||
-    visibleMessages.length >= CONVERSATION_VIRTUALIZATION_MIN_MESSAGES;
-  const conversationMessages = (
-    <ConversationMessageList
-      renderMessageCard={renderMarkedMessageCard}
-      sessionId={session.id}
-      messages={visibleMessages}
-      scrollContainerRef={scrollContainerRef}
-      tailFollowIntent={liveTailPinned}
-      virtualizerHandleRef={
-        // Marker jumps need the virtualizer handle whenever the transcript is
-        // virtualized, even while the overview rail is still deferred.
-        isConversationVirtualized
-          ? conversationOverview.virtualizerHandleRef
-          : undefined
-      }
-      isActive={isActive}
-      onApprovalDecision={onApprovalDecision}
-      onUserInputSubmit={onUserInputSubmit}
-      onMcpElicitationSubmit={onMcpElicitationSubmit}
-      onCodexAppRequestSubmit={onCodexAppRequestSubmit}
-      conversationSearchQuery={conversationSearchQuery}
-      conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
-      conversationSearchActiveItemKey={conversationSearchActiveItemKey}
-      onConversationSearchItemMount={handleConversationItemMount}
-      forceVirtualized={hasOlderHistory || hasNewerHistory}
-    />
-  );
-  const liveTurnCard = effectiveShowWaitingIndicator ? (
-    <RunningIndicator
-      agent={session.agent}
-      activity={waitingIndicatorActivity}
-      lastPrompt={waitingIndicatorPrompt}
-    />
-  ) : null;
-  const pendingPromptCards = visiblePendingPrompts.map((prompt) => (
-    <MessageSlot
-      key={prompt.id}
-      itemKey={isActive ? `pendingPrompt:${prompt.id}` : undefined}
-      isSearchMatch={conversationSearchMatchedItemKeys.has(`pendingPrompt:${prompt.id}`)}
-      isSearchActive={conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`}
-      onSearchItemMount={onConversationSearchItemMount}
-    >
-      <PendingPromptCard
-        prompt={prompt}
+    const isConversationVirtualized =
+      hasOlderHistory ||
+      hasNewerHistory ||
+      visibleMessages.length >= CONVERSATION_VIRTUALIZATION_MIN_MESSAGES;
+    const conversationMessages = (
+      <ConversationMessageList
+        renderMessageCard={renderMarkedMessageCard}
         sessionId={session.id}
-        onOpenMailbox={onOpenMailbox}
-        onCancel={
-          prompt.localOnly
-            ? undefined
-            : () => onCancelQueuedPrompt(session.id, prompt.id)
+        messageStartIndex={overviewMessageStartIndex}
+        messages={visibleMessages}
+        scrollContainerRef={scrollContainerRef}
+        tailFollowIntent={liveTailPinned}
+        virtualizerHandleRef={
+          // Marker jumps need the virtualizer handle whenever the transcript is
+          // virtualized, even while the overview rail is still deferred.
+          isConversationVirtualized
+            ? conversationOverview.virtualizerHandleRef
+            : undefined
         }
-        searchQuery={
-          conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? conversationSearchQuery : ""
-        }
-        searchHighlightTone={
-          conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? "active" : "match"
-        }
+        isActive={isActive}
+        onApprovalDecision={onApprovalDecision}
+        onUserInputSubmit={onUserInputSubmit}
+        onMcpElicitationSubmit={onMcpElicitationSubmit}
+        onCodexAppRequestSubmit={onCodexAppRequestSubmit}
+        conversationSearchQuery={conversationSearchQuery}
+        conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}
+        conversationSearchActiveItemKey={conversationSearchActiveItemKey}
+        onConversationSearchItemMount={handleConversationItemMount}
+        forceVirtualized={hasOlderHistory || hasNewerHistory}
       />
-    </MessageSlot>
-  ));
-  const pendingPromptQueue =
-    pendingPromptCards.length > 0 ? (
-      <div className="conversation-pending-prompts">
-        {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
-        {pendingPromptCards}
-      </div>
+    );
+    const queueHandoffPrompt =
+      !effectiveShowWaitingIndicator &&
+      session.status === "idle" &&
+      visibleMessages.length > 0
+        ? (visiblePendingPrompts[0]?.text ?? null)
+        : null;
+    const liveTurnCard = effectiveShowWaitingIndicator ? (
+      <RunningIndicator
+        agent={session.agent}
+        activity={waitingIndicatorActivity}
+        lastPrompt={waitingIndicatorPrompt}
+      />
+    ) : queueHandoffPrompt ? (
+      <QueuedTurnHandoffIndicator
+        agent={session.agent}
+        prompt={queueHandoffPrompt}
+      />
     ) : null;
-  const liveTail =
-    liveTurnCard ? (
-      <div className={`conversation-live-tail${liveTailPinned ? " is-pinned" : ""}`}>
-        {/* Keep queued follow-ups pinned with the live status card; otherwise
-           they scroll away while the active turn remains sticky. */}
-        {pendingPromptQueue}
-        {liveTurnCard}
-      </div>
-    ) : null;
-  const markerNavigation = isMarkerPanelVisible ? (
-    <ConversationMarkerFloatingWindow
-      markers={sortedMarkers}
-      activeMarkerId={activeMarkerId}
-      onClose={hideMarkerPanelAndRestoreFocus}
-      onJump={jumpToMarker}
-      onNavigatePrevious={() => navigateMarkerByOffset(-1)}
-      onNavigateNext={() => navigateMarkerByOffset(1)}
-    />
-  ) : null;
-  const conversationContent = (
-    <>
-      {markerNavigation}
-      {conversationMessages}
-      {markerContextMenuNode}
-      {liveTail ? null : pendingPromptQueue}
-      {liveTail}
-    </>
-  );
-  const conversationPageClassName = `session-conversation-page${isActive ? " is-active" : ""}${conversationOverview.shouldRender ? " has-conversation-overview-scroll" : ""}`;
-
-  return (
-    <MessageNavigationProvider value={messageNavigationContextValue}>
-      <div
-        ref={conversationPageRef}
-        className={conversationPageClassName}
-        hidden={!isActive}
-        tabIndex={-1}
-      >
-        {conversationOverview.shouldRender ? (
-          <div className="conversation-with-overview">
-            <div className="conversation-overview-content">
-              {conversationContent}
-            </div>
-            {conversationOverview.shouldRenderRail ? (
-              <ConversationOverviewRail
-                heightPx={conversationOverview.railHeightPx}
-                portalTarget={conversationOverview.railPortalTarget}
-                rightPx={conversationOverview.railRightPx}
-                topPx={conversationOverview.railTopPx}
-                overview={conversationOverview.overview}
-                viewport={conversationOverview.viewport}
-                onNavigate={conversationOverview.navigate}
-              />
-            ) : null}
-          </div>
-        ) : (
-          conversationContent
+    const pendingPromptCards = visiblePendingPrompts.map((prompt) => (
+      <MessageSlot
+        key={prompt.id}
+        itemKey={isActive ? `pendingPrompt:${prompt.id}` : undefined}
+        isSearchMatch={conversationSearchMatchedItemKeys.has(
+          `pendingPrompt:${prompt.id}`,
         )}
-      </div>
-    </MessageNavigationProvider>
-  );
-}, (previous, next) =>
-  previous.renderMessageCard === next.renderMessageCard &&
-  previous.session === next.session &&
-  previous.liveTailPinned === next.liveTailPinned &&
-  previous.scrollContainerRef === next.scrollContainerRef &&
-  previous.isActive === next.isActive &&
-  previous.isLoading === next.isLoading &&
-  previous.showWaitingIndicator === next.showWaitingIndicator &&
-  previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
-  previous.waitingIndicatorActivity === next.waitingIndicatorActivity &&
-  previous.onUserInputSubmit === next.onUserInputSubmit &&
-  previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
-  previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
-  previous.onCreateConversationMarker === next.onCreateConversationMarker &&
-  previous.onDeleteConversationMarker === next.onDeleteConversationMarker &&
-  previous.onOpenMailbox === next.onOpenMailbox &&
-  previous.conversationSearchQuery === next.conversationSearchQuery &&
-  previous.conversationSearchMatchedItemKeys === next.conversationSearchMatchedItemKeys &&
-  previous.conversationSearchActiveItemKey === next.conversationSearchActiveItemKey &&
-  previous.onConversationSearchItemMount === next.onConversationSearchItemMount
+        isSearchActive={
+          conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
+        }
+        onSearchItemMount={onConversationSearchItemMount}
+      >
+        <ConversationTailEntry>
+          <PendingPromptCard
+            prompt={prompt}
+            sessionId={session.id}
+            onOpenMailbox={onOpenMailbox}
+            onCancel={
+              prompt.localOnly
+                ? undefined
+                : () => onCancelQueuedPrompt(session.id, prompt.id)
+            }
+            searchQuery={
+              conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
+                ? conversationSearchQuery
+                : ""
+            }
+            searchHighlightTone={
+              conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
+                ? "active"
+                : "match"
+            }
+          />
+        </ConversationTailEntry>
+      </MessageSlot>
+    ));
+    const pendingPromptQueue =
+      pendingPromptCards.length > 0 ? (
+        <div className="conversation-pending-prompts">
+          {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
+          {pendingPromptCards}
+        </div>
+      ) : null;
+    const liveTail = (
+      <ConversationTailPresence active={liveTurnCard !== null}>
+        <div
+          className={`conversation-live-tail${liveTailPinned ? " is-pinned" : ""}`}
+        >
+          {liveTurnCard}
+        </div>
+      </ConversationTailPresence>
+    );
+    const markerNavigation = isMarkerPanelVisible ? (
+      <ConversationMarkerFloatingWindow
+        markers={sortedMarkers}
+        activeMarkerId={activeMarkerId}
+        onClose={hideMarkerPanelAndRestoreFocus}
+        onJump={jumpToMarker}
+        onNavigatePrevious={() => navigateMarkerByOffset(-1)}
+        onNavigateNext={() => navigateMarkerByOffset(1)}
+      />
+    ) : null;
+    const conversationContent = (
+      <>
+        {markerNavigation}
+        {conversationMessages}
+        {markerContextMenuNode}
+        {/* Queued prompts keep one stable parent across live-card transitions.
+        Only the departing live card reserves exit height, so queue content
+        is never double-counted or remounted when a turn finishes. */}
+        {pendingPromptQueue}
+        {liveTail}
+      </>
+    );
+    const conversationPageClassName = `session-conversation-page${isActive ? " is-active" : ""}${conversationOverview.shouldRender ? " has-conversation-overview-scroll" : ""}`;
+
+    return (
+      <MessageNavigationProvider value={messageNavigationContextValue}>
+        <div
+          ref={conversationPageRef}
+          className={conversationPageClassName}
+          hidden={!isActive}
+          tabIndex={-1}
+        >
+          {conversationOverview.shouldRender ? (
+            <div className="conversation-with-overview">
+              <div className="conversation-overview-content">
+                {conversationContent}
+              </div>
+              {conversationOverview.shouldRenderRail ? (
+                <ConversationOverviewRail
+                  heightPx={conversationOverview.railHeightPx}
+                  portalTarget={conversationOverview.railPortalTarget}
+                  rightPx={conversationOverview.railRightPx}
+                  topPx={conversationOverview.railTopPx}
+                  overview={conversationOverview.overview}
+                  viewport={conversationOverview.viewport}
+                  onNavigate={conversationOverview.navigate}
+                />
+              ) : null}
+            </div>
+          ) : (
+            conversationContent
+          )}
+        </div>
+      </MessageNavigationProvider>
+    );
+  },
+  (previous, next) =>
+    previous.renderMessageCard === next.renderMessageCard &&
+    previous.session === next.session &&
+    previous.liveTailPinned === next.liveTailPinned &&
+    previous.scrollContainerRef === next.scrollContainerRef &&
+    previous.isActive === next.isActive &&
+    previous.isLoading === next.isLoading &&
+    previous.showWaitingIndicator === next.showWaitingIndicator &&
+    previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
+    previous.waitingIndicatorActivity === next.waitingIndicatorActivity &&
+    previous.onUserInputSubmit === next.onUserInputSubmit &&
+    previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
+    previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
+    previous.onCreateConversationMarker === next.onCreateConversationMarker &&
+    previous.onDeleteConversationMarker === next.onDeleteConversationMarker &&
+    previous.onOpenMailbox === next.onOpenMailbox &&
+    previous.conversationSearchQuery === next.conversationSearchQuery &&
+    previous.conversationSearchMatchedItemKeys ===
+      next.conversationSearchMatchedItemKeys &&
+    previous.conversationSearchActiveItemKey ===
+      next.conversationSearchActiveItemKey &&
+    previous.onConversationSearchItemMount ===
+      next.onConversationSearchItemMount,
 );
 
 function ConversationMessageList({
   renderMessageCard,
   sessionId,
+  messageStartIndex,
   messages,
   scrollContainerRef,
   tailFollowIntent,
@@ -1238,7 +1317,10 @@ function ConversationMessageList({
   onConversationSearchItemMount,
   forceVirtualized = false,
 }: ConversationMessageListProps) {
-  if (!forceVirtualized && messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES) {
+  if (
+    !forceVirtualized &&
+    messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES
+  ) {
     return (
       <>
         {/* Only the active mounted page exposes find anchors so cached hidden pages cannot hijack scroll targets. */}
@@ -1246,18 +1328,25 @@ function ConversationMessageList({
           <MessageSlot
             key={message.id}
             itemKey={isActive ? `message:${message.id}` : undefined}
-            isSearchMatch={conversationSearchMatchedItemKeys.has(`message:${message.id}`)}
-            isSearchActive={conversationSearchActiveItemKey === `message:${message.id}`}
+            isSearchMatch={conversationSearchMatchedItemKeys.has(
+              `message:${message.id}`,
+            )}
+            isSearchActive={
+              conversationSearchActiveItemKey === `message:${message.id}`
+            }
             onSearchItemMount={onConversationSearchItemMount}
           >
             {renderMessageCard(
               message,
               isActive && index >= messages.length - 2,
-              (messageId, decision) => onApprovalDecision(sessionId, messageId, decision),
-              (messageId, answers) => onUserInputSubmit(sessionId, messageId, answers),
+              (messageId, decision) =>
+                onApprovalDecision(sessionId, messageId, decision),
+              (messageId, answers) =>
+                onUserInputSubmit(sessionId, messageId, answers),
               (messageId, action, content) =>
                 onMcpElicitationSubmit(sessionId, messageId, action, content),
-              (messageId, result) => onCodexAppRequestSubmit(sessionId, messageId, result),
+              (messageId, result) =>
+                onCodexAppRequestSubmit(sessionId, messageId, result),
             )}
           </MessageSlot>
         ))}
@@ -1279,6 +1368,7 @@ function ConversationMessageList({
       isActive={isActive}
       renderMessageCard={renderMessageCard}
       sessionId={sessionId}
+      messageStartIndex={messageStartIndex}
       messages={messages}
       scrollContainerRef={scrollContainerRef}
       tailFollowIntent={tailFollowIntent}

@@ -45,7 +45,7 @@ cd ui && npx tsc --noEmit
 cd .. && node --test scripts/review-freeze-fingerprint.test.mjs scripts/vitest-resource-preflight.test.mjs
 ```
 
-If either command reports errors, stop and fix those first. Warnings can be
+If any command reports errors, stop and fix those first. Warnings can be
 reported and triaged with the review.
 
 For higher-confidence changes, also run:

@@ -17,6 +17,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { isExpandedPromptOpen } from "../ExpandedPromptPanel";
+import { requestMessageStackBottomRepin } from "../message-stack-scroll-sync";
 import {
   DEFERRED_RENDER_RESUME_EVENT,
   DEFERRED_RENDER_SUSPENDED_ATTRIBUTE,
@@ -39,6 +40,7 @@ import {
   estimatePageHeight,
   findMountedMessageSlotById,
   getMountedSlotViewportOffsetPx,
+  pageExtendsMountedMeasurement,
   pageMatchesMeasurement,
   resolvePageCoverageHeight,
   resolveRenderedPageCoverageHeight,
@@ -209,6 +211,7 @@ export function VirtualizedConversationMessageList({
   isActive,
   renderMessageCard,
   sessionId,
+  messageStartIndex = 0,
   messages,
   scrollContainerRef,
   tailFollowIntent = false,
@@ -226,6 +229,7 @@ export function VirtualizedConversationMessageList({
   isActive: boolean;
   renderMessageCard: RenderMessageCard;
   sessionId: string;
+  messageStartIndex?: number;
   messages: Message[];
   scrollContainerRef: RefObject<HTMLElement | null>;
   tailFollowIntent?: boolean;
@@ -686,7 +690,10 @@ export function VirtualizedConversationMessageList({
     [viewportWidth],
   );
 
-  const pages = useMemo(() => buildMessagePages(messages), [messages]);
+  const pages = useMemo(
+    () => buildMessagePages(messages, messageStartIndex),
+    [messageStartIndex, messages],
+  );
   const pageKeys = useMemo(
     () => new Set(pages.map((page) => page.key)),
     [pages],
@@ -730,6 +737,52 @@ export function VirtualizedConversationMessageList({
           )
         ) {
           return measuredHeight;
+        }
+        const measuredIdentity = measuredPageIdentityRef.current[page.key];
+        if (measuredHeight !== undefined && measuredIdentity) {
+          const pageIsMounted = Array.from(
+            renderedListRef.current?.querySelectorAll<HTMLElement>(
+              ".virtualized-message-page[data-page-key]",
+            ) ?? [],
+          ).some((pageNode) => pageNode.dataset.pageKey === page.key);
+          const preservesMountedAppend = pageExtendsMountedMeasurement(
+            page,
+            measuredIdentity,
+          );
+          const preservesSingleCommandUpdate = (() => {
+            if (measuredIdentity.messages.length !== page.messages.length) {
+              return false;
+            }
+            let replacementCount = 0;
+            for (let index = 0; index < page.messages.length; index += 1) {
+              const previousMessage = measuredIdentity.messages[index];
+              const currentMessage = page.messages[index];
+              if (previousMessage === currentMessage) {
+                continue;
+              }
+              if (
+                previousMessage?.id !== currentMessage?.id ||
+                previousMessage?.type !== "command" ||
+                currentMessage?.type !== "command"
+              ) {
+                return false;
+              }
+              replacementCount += 1;
+            }
+            return replacementCount === 1;
+          })();
+          if (
+            pageIsMounted &&
+            (preservesMountedAppend || preservesSingleCommandUpdate)
+          ) {
+            // Mounted DOM already contains an appended message or the updated
+            // command card. Keep the last real page measurement until the page's
+            // layout effect/ResizeObserver publishes its new real height. Swapping
+            // the whole mounted page to estimates moves every existing card, then
+            // moves it back one frame later. Other replacements still invalidate
+            // immediately instead of retaining an unrelated tall measurement.
+            return measuredHeight;
+          }
         }
         delete pageHeightsRef.current[page.key];
         delete measuredPageIdentityRef.current[page.key];
@@ -1992,8 +2045,14 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
-    const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-    writeScrollTopAndSyncViewport(node, target);
+    // Bottom-follow motion belongs to the pane scroll authority. Writing the
+    // new virtualized bottom here runs in a child layout effect before the
+    // pane can start its settled follow, so a newly appended prompt moves the
+    // visible transcript by its full height in one frame.
+    if (!requestMessageStackBottomRepin(node)) {
+      const target = Math.max(node.scrollHeight - node.clientHeight, 0);
+      writeScrollTopAndSyncViewport(node, target);
+    }
   }, [
     isActive,
     layoutVersion,

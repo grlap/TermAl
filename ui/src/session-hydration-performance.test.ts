@@ -78,12 +78,7 @@ describe("session hydration performance diagnostics", () => {
       replacementToken,
     );
     expect(
-      noteSessionTranscriptCommitted(
-        "session-replaced",
-        firstToken,
-        4,
-        1_100,
-      ),
+      noteSessionTranscriptCommitted("session-replaced", firstToken, 4, 1_100),
     ).toBeNull();
     expect(
       noteSessionTranscriptCommitted(
@@ -93,5 +88,39 @@ describe("session hydration performance diagnostics", () => {
         1_120,
       ),
     ).toBe(70);
+  });
+
+  it("consumes the exact adoption token for a bounded resident window", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const adoptedSession = session(
+      "session-windowed",
+      Array.from({ length: 20 }, (_, index) => message(`tail-${index}`)),
+    );
+    const token = noteSessionTailAdopted(adoptedSession, 1_000);
+
+    expect(
+      noteSessionTranscriptCommitted("session-windowed", token, 8, 1_025),
+    ).toBe(25);
+    expect(warn).not.toHaveBeenCalled();
+    expect(
+      noteSessionTranscriptCommitted("session-windowed", token, 20, 10_000),
+    ).toBeNull();
+  });
+
+  it("expires abandoned adoptions instead of reporting stale latency", () => {
+    const warn = vi.fn();
+    const adoptedSession = session("session-abandoned", [message("tail")]);
+    const token = noteSessionTailAdopted(adoptedSession, 1_000);
+
+    expect(
+      noteSessionTranscriptCommitted(
+        "session-abandoned",
+        token,
+        1,
+        31_001,
+        warn,
+      ),
+    ).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
   });
 });

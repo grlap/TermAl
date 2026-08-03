@@ -7,6 +7,8 @@ import {
   type MutableRefObject,
   type RefObject,
 } from "react";
+import { flushSync } from "react-dom";
+import { requestMessageStackBottomRepin } from "../message-stack-scroll-sync";
 import { isScrollContainerNearBottom } from "./conversation-virtualization";
 import {
   doesMountedPageIntersectViewport,
@@ -70,10 +72,17 @@ export function useVirtualizedConversationPageHeightChange({
       pageIndex: number,
       nextHeight: number,
       pageNode?: HTMLElement | null,
+      flushLayout?: boolean,
     ) => void) | null
   >(null);
 
-  handlePageHeightChangeRef.current = (pageKey, pageIndex, nextHeight, pageNode) => {
+  handlePageHeightChangeRef.current = (
+    pageKey,
+    pageIndex,
+    nextHeight,
+    pageNode,
+    flushLayout = false,
+  ) => {
     if (!Number.isFinite(nextHeight) || nextHeight <= 0) {
       return;
     }
@@ -87,6 +96,7 @@ export function useVirtualizedConversationPageHeightChange({
     }
     const previousHeight = pageHeightsRef.current[pageKey];
     if (previousHeight !== undefined && Math.abs(previousHeight - roundedHeight) < 1) {
+      measuredPageIdentityRef.current[pageKey] = currentPageIdentity;
       return;
     }
 
@@ -139,8 +149,10 @@ export function useVirtualizedConversationPageHeightChange({
         ) {
           return;
         }
-        const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-        writeScrollTopAndSyncViewport(node, target);
+        if (!requestMessageStackBottomRepin(node)) {
+          const target = Math.max(node.scrollHeight - node.clientHeight, 0);
+          writeScrollTopAndSyncViewport(node, target);
+        }
       });
     };
 
@@ -198,7 +210,20 @@ export function useVirtualizedConversationPageHeightChange({
       node !== null && doesMountedPageIntersectViewport(node, pageNode);
     if (isVisiblePage || intersectsViewport) {
       clearPendingDeferredLayoutTimer();
-      bumpLayoutVersion();
+      if (
+        flushLayout &&
+        shouldKeepBottom &&
+        !hasUserScrollInteractionRef.current &&
+        !isInUserScrollCooldown()
+      ) {
+        // ResizeObserver measurements arrive in an animation frame before
+        // paint. Commit the refined spacer and the layout-effect bottom write
+        // in that same frame; exposing the new spacer for one paint first
+        // creates a visible blank gap followed by an anchor jump.
+        flushSync(bumpLayoutVersion);
+      } else {
+        bumpLayoutVersion();
+      }
       restoreBottomAfterLayout();
       return;
     }
@@ -222,8 +247,15 @@ export function useVirtualizedConversationPageHeightChange({
       pageIndex: number,
       nextHeight: number,
       pageNode?: HTMLElement | null,
+      flushLayout?: boolean,
     ) => {
-      handlePageHeightChangeRef.current?.(pageKey, pageIndex, nextHeight, pageNode);
+      handlePageHeightChangeRef.current?.(
+        pageKey,
+        pageIndex,
+        nextHeight,
+        pageNode,
+        flushLayout,
+      );
     },
     [],
   );

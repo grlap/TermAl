@@ -45,12 +45,60 @@ import type { PaneViewMode } from "./workspace";
 
 const SESSION_PAGE_SCROLL_VIEWPORT_FACTOR = 0.85;
 const SESSION_PAGE_SCROLL_MINIMUM_PX = 160;
+const SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS = 1000 / 60;
+const SESSION_BOTTOM_FOLLOW_FRAME_FACTOR = 0.18;
+const SESSION_BOTTOM_FOLLOW_MAX_FRAME_MS = 100;
+const SESSION_BOTTOM_FOLLOW_STABLE_MS =
+  SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS * 2;
+
+export function resolveSessionBottomFollowFrame(
+  currentScrollTop: number,
+  targetScrollTop: number,
+  elapsedMs = SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS,
+) {
+  const distance = targetScrollTop - currentScrollTop;
+  if (Math.abs(distance) <= 1) {
+    return targetScrollTop;
+  }
+  const normalizedElapsedMs =
+    Number.isFinite(elapsedMs) && elapsedMs > 0
+      ? Math.min(elapsedMs, SESSION_BOTTOM_FOLLOW_MAX_FRAME_MS)
+      : SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS;
+  const frameFactor =
+    1 -
+    Math.pow(
+      1 - SESSION_BOTTOM_FOLLOW_FRAME_FACTOR,
+      normalizedElapsedMs / SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS,
+    );
+  return currentScrollTop + distance * frameFactor;
+}
+
+export function shouldSnapSessionBottomFollowAtCompletion(
+  behavior: ScrollBehavior,
+  bottomGap: number,
+): boolean {
+  return behavior === "smooth" && bottomGap > 0.5;
+}
 
 export function resolveSessionPageScrollDistance(clientHeight: number) {
   return Math.max(
     Math.round(Math.max(0, clientHeight) * SESSION_PAGE_SCROLL_VIEWPORT_FACTOR),
     SESSION_PAGE_SCROLL_MINIMUM_PX,
   );
+}
+
+export function claimMessageStackBottomRepinAuthority(
+  detail: { authorityPresent?: boolean } | undefined,
+  currentScrollStateKey: string,
+  authorityScrollStateKey: string,
+) {
+  if (currentScrollStateKey !== authorityScrollStateKey) {
+    return false;
+  }
+  if (detail) {
+    detail.authorityPresent = true;
+  }
+  return true;
 }
 
 type NewResponseIndicatorKind = "activity" | "response";
@@ -64,10 +112,7 @@ export function resolveNewResponseIndicatorVisibility({
   indicatorKind: NewResponseIndicatorKind | null;
   liveTailPinned: boolean;
 }) {
-  return (
-    hasUnloadedNewerHistory ||
-    (!liveTailPinned && indicatorKind !== null)
-  );
+  return hasUnloadedNewerHistory || (!liveTailPinned && indicatorKind !== null);
 }
 
 type PaneScrollPosition = {
@@ -182,6 +227,8 @@ export function useSessionPaneScrollState({
 }: UseSessionPaneScrollStateParams) {
   const messageStackRef = useRef<HTMLElement | null>(null);
   const settledScrollToBottomCancelRef = useRef<(() => void) | null>(null);
+  const settledScrollToBottomKindRef =
+    useRef<MessageStackScrollWriteKind | null>(null);
   const previousShowWaitingIndicatorByKeyRef = useRef<
     Record<string, boolean | undefined>
   >({});
@@ -234,12 +281,11 @@ export function useSessionPaneScrollState({
   const hasUnloadedNewerHistory = activeSession?.hasNewerHistory === true;
   const newResponseIndicatorKind =
     newResponseIndicatorByKey[scrollStateKey] ?? null;
-  const newResponseIndicatorLabel =
-    hasUnloadedNewerHistory
-      ? "Jump to latest"
-      : newResponseIndicatorKind === "activity"
-        ? "New activity"
-        : "New response";
+  const newResponseIndicatorLabel = hasUnloadedNewerHistory
+    ? "Jump to latest"
+    : newResponseIndicatorKind === "activity"
+      ? "New activity"
+      : "New response";
 
   function getTailFollowIntent() {
     if (hasUnloadedNewerHistory) {
@@ -320,6 +366,13 @@ export function useSessionPaneScrollState({
     );
   }
 
+  function isSettledProgrammaticBottomFollowActive() {
+    return (
+      settledScrollToBottomKindRef.current === "bottom_follow" &&
+      settledScrollToBottomCancelRef.current !== null
+    );
+  }
+
   useEffect(() => {
     if (paneProgrammaticBottomFollowRef.current.key !== scrollStateKey) {
       paneProgrammaticBottomFollowRef.current = {
@@ -379,6 +432,7 @@ export function useSessionPaneScrollState({
     behavior: ScrollBehavior,
     force = false,
     scrollKind?: MessageStackScrollWriteKind,
+    frameDurationMs = SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS,
   ) {
     const node = messageStackRef.current;
     if (!node) {
@@ -386,10 +440,22 @@ export function useSessionPaneScrollState({
     }
 
     const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-    if (Math.abs(node.scrollTop - nextScrollTop) > (force ? 0.5 : 1)) {
+    const writeScrollTop =
+      behavior === "smooth"
+        ? resolveSessionBottomFollowFrame(
+            node.scrollTop,
+            nextScrollTop,
+            frameDurationMs,
+          )
+        : nextScrollTop;
+    if (Math.abs(node.scrollTop - writeScrollTop) > (force ? 0.5 : 1)) {
       node.scrollTo({
-        top: nextScrollTop,
-        behavior,
+        top: writeScrollTop,
+        // Retargeting native smooth scrolling on every streamed resize makes
+        // Chrome reverse an in-flight animation before moving to the new
+        // bottom. The settled rAF loop owns interpolation, so each individual
+        // write must be immediate and monotonic.
+        behavior: behavior === "smooth" ? "auto" : behavior,
       });
       if (scrollKind === "bottom_follow") {
         beginPaneProgrammaticBottomFollow();
@@ -454,17 +520,27 @@ export function useSessionPaneScrollState({
     // paint. It requests that correction instead of writing scrollTop itself;
     // this handler remains the authority and rejects the request once explicit
     // tail-follow intent has been released by user navigation.
-    const handleBottomRepinRequest = () => {
+    const handleBottomRepinRequest = (event: Event) => {
+      const detail =
+        event instanceof CustomEvent
+          ? (event.detail as { authorityPresent?: boolean } | undefined)
+          : undefined;
       if (
-        currentScrollStateKeyRef.current !== scrollStateKey ||
-        !getTailFollowIntent()
+        !claimMessageStackBottomRepinAuthority(
+          detail,
+          currentScrollStateKeyRef.current,
+          scrollStateKey,
+        )
       ) {
+        return;
+      }
+      if (!getTailFollowIntent()) {
         return;
       }
       // A settled smooth follow already re-reads the bottom geometry on each
       // animation frame. A synchronous `auto` write here would cancel that
       // native animation and make composer/card growth appear as a snap.
-      if (isPaneProgrammaticBottomFollowActive()) {
+      if (isSettledProgrammaticBottomFollowActive()) {
         return;
       }
       if (liveFlowActiveRef.current) {
@@ -488,11 +564,9 @@ export function useSessionPaneScrollState({
     activeSession?.id,
     hasUnloadedNewerHistory,
     isActive,
-    isSending,
     isSessionTabActive,
     paneViewMode,
     scrollStateKey,
-    showWaitingIndicator,
   ]);
 
   useLayoutEffect(() => {
@@ -531,7 +605,8 @@ export function useSessionPaneScrollState({
       }
       pageVisibilityObserver?.disconnect();
       conversationPage = nextPage;
-      previousContentHeight = conversationPage?.getBoundingClientRect().height ?? 0;
+      previousContentHeight =
+        conversationPage?.getBoundingClientRect().height ?? 0;
       if (conversationPage) {
         resizeObserver.observe(conversationPage);
         pageVisibilityObserver?.observe(conversationPage, {
@@ -566,7 +641,7 @@ export function useSessionPaneScrollState({
       // bottom-follow has started. The settled loop will target that new
       // bottom on its next frame; a second synchronous writer here would
       // interrupt the animation and produce the visible up/down jump.
-      if (isPaneProgrammaticBottomFollowActive()) {
+      if (isSettledProgrammaticBottomFollowActive()) {
         return;
       }
       if (liveFlowActiveRef.current) {
@@ -742,9 +817,12 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    scrollMessageStackByDelta(resolveSessionPageScrollDistance(node.clientHeight) * direction, {
-      scrollKind: "page_jump",
-    });
+    scrollMessageStackByDelta(
+      resolveSessionPageScrollDistance(node.clientHeight) * direction,
+      {
+        scrollKind: "page_jump",
+      },
+    );
   }
 
   function scrollSessionMessageStackByPageJump(direction: -1 | 1) {
@@ -788,9 +866,7 @@ export function useSessionPaneScrollState({
             return;
           }
           requestAnimationFrame(() => {
-            if (
-              currentScrollStateKeyRef.current === requestedScrollStateKey
-            ) {
+            if (currentScrollStateKeyRef.current === requestedScrollStateKey) {
               applyBottomBoundary();
             }
           });
@@ -941,9 +1017,7 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    scrollSessionMessageStackByPageJump(
-      command.direction === "up" ? -1 : 1,
-    );
+    scrollSessionMessageStackByPageJump(command.direction === "up" ? -1 : 1);
   };
 
   useEffect(() => {
@@ -976,14 +1050,18 @@ export function useSessionPaneScrollState({
     let cancelled = false;
     let completed = false;
     const maxAttempts = options.maxAttempts ?? 12;
-    let remainingAttempts = maxAttempts;
     const minimumAttempts = resolveSettledScrollMinimumAttempts(
       maxAttempts,
       options.minAttempts,
     );
-    let attemptCount = 0;
+    const maximumDurationMs =
+      maxAttempts * SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS;
+    const minimumDurationMs =
+      minimumAttempts * SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS;
     let previousScrollHeight = -1;
-    let stableFrameCount = 0;
+    let elapsedMs = 0;
+    let stableDurationMs = 0;
+    let previousFrameTimestamp: number | null = null;
 
     function complete() {
       if (cancelled || completed) {
@@ -993,17 +1071,30 @@ export function useSessionPaneScrollState({
       completed = true;
       if (settledScrollToBottomCancelRef.current === cancel) {
         settledScrollToBottomCancelRef.current = null;
+        settledScrollToBottomKindRef.current = null;
       }
       options.onComplete?.();
     }
 
-    const tick = () => {
+    const tick = (frameTimestamp: number) => {
       frameId = 0;
-      attemptCount += 1;
+      const measuredFrameDurationMs =
+        previousFrameTimestamp === null
+          ? SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS
+          : frameTimestamp - previousFrameTimestamp;
+      const frameDurationMs =
+        Number.isFinite(measuredFrameDurationMs) &&
+        measuredFrameDurationMs > 0
+          ? Math.min(
+              measuredFrameDurationMs,
+              SESSION_BOTTOM_FOLLOW_MAX_FRAME_MS,
+            )
+          : SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS;
+      previousFrameTimestamp = frameTimestamp;
+      elapsedMs += frameDurationMs;
       const node = messageStackRef.current;
       if (!node) {
-        remainingAttempts -= 1;
-        if (remainingAttempts > 0) {
+        if (elapsedMs < maximumDurationMs) {
           frameId = window.requestAnimationFrame(tick);
         } else {
           complete();
@@ -1021,8 +1112,9 @@ export function useSessionPaneScrollState({
 
       scrollToLatestMessage(
         behavior,
-        attemptCount <= minimumAttempts,
+        elapsedMs <= minimumDurationMs,
         options.scrollKind,
+        frameDurationMs,
       );
 
       const bottomGap = Math.max(
@@ -1033,19 +1125,31 @@ export function useSessionPaneScrollState({
         previousScrollHeight >= 0 &&
         Math.abs(node.scrollHeight - previousScrollHeight) <= 16;
       if (bottomGap <= 4 && heightStable) {
-        stableFrameCount += 1;
+        stableDurationMs += frameDurationMs;
       } else {
-        stableFrameCount = 0;
+        stableDurationMs = 0;
       }
 
       previousScrollHeight = node.scrollHeight;
-      remainingAttempts -= 1;
       if (
-        remainingAttempts > 0 &&
-        (attemptCount < minimumAttempts || stableFrameCount < 2)
+        elapsedMs < maximumDurationMs &&
+        (elapsedMs < minimumDurationMs ||
+          stableDurationMs < SESSION_BOTTOM_FOLLOW_STABLE_MS)
       ) {
         frameId = window.requestAnimationFrame(tick);
       } else {
+        if (
+          shouldSnapSessionBottomFollowAtCompletion(
+            behavior,
+            bottomGap,
+          )
+        ) {
+          // The interpolation budget and stable-gap threshold keep this loop
+          // bounded, but either completion path can retain a small residual
+          // gap. Finish at the authority's current bottom. Explicit user
+          // intent cancels this loop before the completion branch can run.
+          scrollToLatestMessage("auto", true, options.scrollKind);
+        }
         complete();
       }
     };
@@ -1057,10 +1161,12 @@ export function useSessionPaneScrollState({
       }
       if (settledScrollToBottomCancelRef.current === cancel) {
         settledScrollToBottomCancelRef.current = null;
+        settledScrollToBottomKindRef.current = null;
       }
     };
 
     settledScrollToBottomCancelRef.current = cancel;
+    settledScrollToBottomKindRef.current = options.scrollKind ?? null;
     frameId = window.requestAnimationFrame(tick);
     return cancel;
   }
@@ -1081,6 +1187,7 @@ export function useSessionPaneScrollState({
   function cancelSettledScrollToBottom() {
     const cancel = settledScrollToBottomCancelRef.current;
     settledScrollToBottomCancelRef.current = null;
+    settledScrollToBottomKindRef.current = null;
     cancel?.();
   }
 

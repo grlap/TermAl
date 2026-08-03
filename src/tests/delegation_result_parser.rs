@@ -70,6 +70,24 @@ This later review summary must not be appended to the packet summary.\n\n\
 }
 
 #[test]
+fn delegation_result_packet_ignores_decorated_code_review_heading() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+Summary: Canonical parent-card summary.\n\n\
+# Code Review \u{2014} 2026-08-03\n\n\
+This review-title prose must not leak into the packet summary.\n\n\
+## Findings\n\n\
+- Low src/state.rs:1 - Real finding.",
+    )
+    .expect("decorated review headings should remain structural");
+
+    assert_eq!(parsed.summary, "Canonical parent-card summary.");
+    assert_eq!(parsed.findings.len(), 1);
+    assert_eq!(parsed.findings[0].message, "Real finding.");
+}
+
+#[test]
 fn delegation_review_findings_reject_nonseverity_links_and_unrelated_tables() {
     let findings = parse_delegation_review_findings(
         "## Findings\n\n\
@@ -176,6 +194,74 @@ Reviewed the legal conformance changes.\n\n\
 }
 
 #[test]
+fn delegation_result_packet_merges_structured_and_compact_actionable_findings() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+Summary: Mixed reviewer output.\n\n\
+## Findings\n\n\
+### Actionable\n\n\
+- **[Medium]** `src/state.rs:108` — Structured finding.\n\
+- Low src/delegations.rs:3839 - Compact finding.\n\n\
+### Informational\n\n\
+- High ignored.rs:1 - Informational text is not actionable.",
+    )
+    .expect("mixed finding syntax should parse semantically");
+
+    assert_eq!(parsed.findings.len(), 2);
+    assert_eq!(parsed.findings[0].severity, "Medium");
+    assert_eq!(parsed.findings[0].file.as_deref(), Some("src/state.rs"));
+    assert_eq!(parsed.findings[1].severity, "Low");
+    assert_eq!(
+        parsed.findings[1].file.as_deref(),
+        Some("src/delegations.rs")
+    );
+}
+
+#[test]
+fn delegation_result_packet_ignores_prose_between_mixed_actionable_findings() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+Summary: Mixed reviewer output with explanatory prose.\n\n\
+## Findings\n\n\
+### Actionable\n\n\
+Both reviewers agreed on the following:\n\
+- **[Medium]** `src/state.rs:108` — Structured finding.\n\
+Why it matters: this prose explains the finding but is not one itself.\n\
+- Low src/delegations.rs:3839 - Compact finding.\n\
+Suggested direction: keep the parser semantic.\n\n\
+### Informational\n\n\
+No other issues found.",
+    )
+    .expect("mixed finding syntax should ignore explanatory prose");
+
+    assert_eq!(parsed.findings.len(), 2);
+    assert_eq!(parsed.findings[0].severity, "Medium");
+    assert_eq!(parsed.findings[0].file.as_deref(), Some("src/state.rs"));
+    assert_eq!(parsed.findings[1].severity, "Low");
+    assert_eq!(
+        parsed.findings[1].file.as_deref(),
+        Some("src/delegations.rs")
+    );
+}
+
+#[test]
+fn delegation_result_packet_does_not_promote_informational_only_bullets() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+Summary: Nothing actionable.\n\n\
+## Findings\n\n\
+### Informational\n\n\
+- High docs/example.md:1 - Context only.",
+    )
+    .expect("informational-only review should remain a clean result");
+
+    assert!(parsed.findings.is_empty());
+}
+
+#[test]
 fn delegation_result_packet_summary_allows_colon_terminated_text_lines() {
     let parsed = parse_delegation_result_packet(
         "## Result\n\nStatus: completed\n\nSummary:\nThe issue is here:\n  detail\n\nNotes:\nignored",
@@ -197,6 +283,33 @@ fn delegation_result_packet_summary_preserves_status_labeled_text() {
     assert_eq!(
         parsed.summary,
         "Status: the inspected path is stable.\nNo changes needed."
+    );
+}
+
+#[test]
+fn delegation_result_packet_preserves_unknown_markdown_headings_in_prose_sections() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+Summary:\n\
+# User-visible outcome\n\
+The transcript stays pinned.\n\n\
+Notes:\n\
+### Diagnostic context\n\
+- Verified with a bounded transcript window.",
+    )
+    .expect("unknown prose headings must not terminate summary or notes capture");
+
+    assert_eq!(
+        parsed.summary,
+        "# User-visible outcome\nThe transcript stays pinned."
+    );
+    assert_eq!(
+        parsed.notes,
+        vec![
+            "### Diagnostic context".to_owned(),
+            "Verified with a bounded transcript window.".to_owned(),
+        ]
     );
 }
 
@@ -335,6 +448,52 @@ Files Inspected:\n\
 }
 
 #[test]
+fn delegation_result_packet_keeps_genuine_findings_beside_an_unresolved_cross_reference() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+Summary: The packet contains one concrete finding.\n\n\
+Findings:\n\
+- High src/delegations.rs:35 - Parser upgrades must advance the repair version.\n\
+- Note - See the Actionable section above for any additional context.",
+    )
+    .expect("a cross-reference must not invalidate genuine packet findings");
+
+    assert_eq!(
+        parsed.findings,
+        vec![DelegationFinding {
+            severity: "High".to_owned(),
+            file: Some("src/delegations.rs".to_owned()),
+            line: Some(35),
+            message: "Parser upgrades must advance the repair version.".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn delegation_result_packet_keeps_findings_that_discuss_review_sections() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+Summary: Two concrete parser findings.\n\n\
+Findings:\n\
+- Low src/delegation_result_parser.rs:235 - The Actionable section filter drops genuine findings.\n\
+- Low ui/src/review.tsx:42 - Rendering sections above the current viewport loses their labels.",
+    )
+    .expect("section terminology inside a genuine finding is not a cross-reference");
+
+    assert_eq!(parsed.findings.len(), 2);
+    assert_eq!(
+        parsed.findings[0].message,
+        "The Actionable section filter drops genuine findings."
+    );
+    assert_eq!(
+        parsed.findings[1].message,
+        "Rendering sections above the current viewport loses their labels."
+    );
+}
+
+#[test]
 fn delegation_result_packet_recovers_alternative_actionable_finding_shapes() {
     let parsed = parse_delegation_result_packet(
         "# Code Review\n\n\
@@ -438,55 +597,31 @@ fn delegation_result_packet_filters_none_findings() {
 }
 
 #[test]
-fn delegation_result_packet_no_separator_finding_uses_note_fallback() {
+fn delegation_result_packet_ignores_unstructured_prose_without_a_separator() {
     let parsed = parse_delegation_result_packet(
         "## Result\n\nStatus: completed\n\nSummary:\nReady.\n\nFindings:\n- Missing separator but still useful.",
     )
-    .expect("packet with fallback finding should parse");
+    .expect("packet with explanatory prose should remain parseable");
 
-    assert_eq!(
-        parsed.findings,
-        vec![DelegationFinding {
-            severity: "Note".to_owned(),
-            file: None,
-            line: None,
-            message: "Missing separator but still useful.".to_owned(),
-        }]
-    );
+    assert!(parsed.findings.is_empty());
 }
 
 #[test]
-fn delegation_result_packet_parses_multi_word_finding_severity() {
+fn delegation_result_packet_rejects_unrecognized_compact_severity() {
     let parsed = parse_delegation_result_packet(
         "## Result\n\nStatus: completed\n\nSummary:\nReady.\n\nFindings:\n- Code Style src/foo.rs:42 - Use repo formatting.",
     )
-    .expect("packet with multi-word finding severity should parse");
+    .expect("packet with an unrecognized severity should remain parseable");
 
-    assert_eq!(
-        parsed.findings,
-        vec![DelegationFinding {
-            severity: "Code Style".to_owned(),
-            file: Some("src/foo.rs".to_owned()),
-            line: Some(42),
-            message: "Use repo formatting.".to_owned(),
-        }]
-    );
+    assert!(parsed.findings.is_empty());
 }
 
 #[test]
-fn delegation_result_packet_parses_multi_word_severity_with_backticked_location() {
+fn delegation_result_packet_does_not_promote_path_like_prose() {
     let parsed = parse_delegation_result_packet(
-        "## Result\n\nStatus: completed\n\nSummary:\nReady.\n\nFindings:\n- Code Style `src/foo.rs:42` - Use repo formatting.",
+        "## Result\n\nStatus: completed\n\nSummary:\nReady.\n\nFindings:\n- The change in src/foo.rs:42 - is described here for context.",
     )
-    .expect("packet with backticked multi-word finding location should parse");
+    .expect("path-like prose should not invalidate the packet");
 
-    assert_eq!(
-        parsed.findings,
-        vec![DelegationFinding {
-            severity: "Code Style".to_owned(),
-            file: Some("src/foo.rs".to_owned()),
-            line: Some(42),
-            message: "Use repo formatting.".to_owned(),
-        }]
-    );
+    assert!(parsed.findings.is_empty());
 }

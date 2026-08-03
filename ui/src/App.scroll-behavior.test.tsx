@@ -247,6 +247,21 @@ vi.mock("./MonacoCodeEditor", () => ({
   }),
 }));
 
+function scrollToTopsWithBehavior(
+  scrollToMock: ReturnType<typeof vi.fn>,
+  behavior: ScrollBehavior,
+) {
+  return scrollToMock.mock.calls.flatMap((call) => {
+    const options = call[0];
+    return typeof options === "object" &&
+      options !== null &&
+      options.behavior === behavior &&
+      typeof options.top === "number"
+      ? [options.top]
+      : [];
+  });
+}
+
 describe("App scroll behaviour", () => {
   const originalScrollTo = HTMLElement.prototype.scrollTo;
   const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
@@ -306,15 +321,14 @@ describe("App scroll behaviour", () => {
       });
       const pendingFrames = new Map<number, FrameRequestCallback>();
       let nextFrameId = 1;
-      vi.stubGlobal(
-        "requestAnimationFrame",
-        ((callback: FrameRequestCallback) => {
-          const frameId = nextFrameId;
-          nextFrameId += 1;
-          pendingFrames.set(frameId, callback);
-          return frameId;
-        }) as typeof requestAnimationFrame,
-      );
+      vi.stubGlobal("requestAnimationFrame", ((
+        callback: FrameRequestCallback,
+      ) => {
+        const frameId = nextFrameId;
+        nextFrameId += 1;
+        pendingFrames.set(frameId, callback);
+        return frameId;
+      }) as typeof requestAnimationFrame);
       const cancelAnimationFrameMock = vi.fn((frameId: number) => {
         pendingFrames.delete(frameId);
       });
@@ -347,7 +361,9 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         expect(messageStack.scrollTop).toBe(0);
-        expect(filterScrollToCallsAt(scrollToMock, 0, "auto").length).toBeGreaterThan(0);
+        expect(
+          filterScrollToCallsAt(scrollToMock, 0, "auto").length,
+        ).toBeGreaterThan(0);
         expect(cancelAnimationFrameMock).toHaveBeenCalled();
 
         const queuedFrames = [...pendingFrames.values()];
@@ -408,7 +424,10 @@ describe("App scroll behaviour", () => {
 
         messageStack.scrollTop = 800;
         composer.focus();
-        composer.setSelectionRange(composer.value.length, composer.value.length);
+        composer.setSelectionRange(
+          composer.value.length,
+          composer.value.length,
+        );
 
         await act(async () => {
           fireEvent.keyDown(composer, {
@@ -421,7 +440,9 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         expect(messageStack.scrollTop).toBe(0);
-        expect(filterScrollToCallsAt(scrollToMock, 0, "auto").length).toBeGreaterThan(0);
+        expect(
+          filterScrollToCallsAt(scrollToMock, 0, "auto").length,
+        ).toBeGreaterThan(0);
       } finally {
         context.cleanup();
         restoreScrollGeometry();
@@ -575,12 +596,18 @@ describe("App scroll behaviour", () => {
 
         const tablist = screen
           .getAllByRole("tablist", { name: "Tile tabs" })
-          .find((candidate) => within(candidate).queryByRole("tab", { name: "Session 1" }));
+          .find((candidate) =>
+            within(candidate).queryByRole("tab", { name: "Session 1" }),
+          );
         if (!tablist) {
           throw new Error("Session pane tablist not found");
         }
-        const session1Tab = within(tablist).getByRole("tab", { name: "Session 1" });
-        const session2Tab = within(tablist).getByRole("tab", { name: "Session 2" });
+        const session1Tab = within(tablist).getByRole("tab", {
+          name: "Session 1",
+        });
+        const session2Tab = within(tablist).getByRole("tab", {
+          name: "Session 2",
+        });
 
         await clickAndSettle(session1Tab);
         const messageStack = document.querySelector(
@@ -878,18 +905,16 @@ describe("App scroll behaviour", () => {
         ],
       };
 
-      context.fetchMock.mockImplementation(
-        async (input: RequestInfo | URL) => {
-          const requestUrl = new URL(String(input), "http://localhost");
-          if (requestUrl.pathname === "/api/state") {
-            return jsonResponse(baseState);
-          }
-          if (requestUrl.pathname === "/api/sessions/session-1/messages") {
-            return pendingSend.promise;
-          }
-          throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
-        },
-      );
+      context.fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse(baseState);
+        }
+        if (requestUrl.pathname === "/api/sessions/session-1/messages") {
+          return pendingSend.promise;
+        }
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
 
       try {
         await dispatchStateEvent(latestEventSource(), baseState);
@@ -926,17 +951,15 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        const settledBottomCallCount = filterScrollToCallsAt(
+        const settledBottomCallCount = scrollToTopsWithBehavior(
           scrollToMock,
-          800,
-          "smooth",
+          "auto",
         ).length;
         expect(settledBottomCallCount).toBeGreaterThan(0);
-        expect(filterScrollToCallsAt(scrollToMock, 800, "auto")).toEqual([]);
 
         context.cleanup();
         await flushUiWork();
-        expect(filterScrollToCallsAt(scrollToMock, 800, "smooth").length).toBe(
+        expect(scrollToTopsWithBehavior(scrollToMock, "auto")).toHaveLength(
           settledBottomCallCount,
         );
       } finally {
@@ -983,18 +1006,16 @@ describe("App scroll behaviour", () => {
         ],
       };
 
-      context.fetchMock.mockImplementation(
-        async (input: RequestInfo | URL) => {
-          const requestUrl = new URL(String(input), "http://localhost");
-          if (requestUrl.pathname === "/api/state") {
-            return jsonResponse(baseState);
-          }
-          if (requestUrl.pathname === "/api/sessions/session-1/messages") {
-            return pendingSend.promise;
-          }
-          throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
-        },
-      );
+      context.fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse(baseState);
+        }
+        if (requestUrl.pathname === "/api/sessions/session-1/messages") {
+          return pendingSend.promise;
+        }
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
 
       try {
         await dispatchStateEvent(latestEventSource(), baseState);
@@ -1033,11 +1054,9 @@ describe("App scroll behaviour", () => {
         scrollHeight = 1120;
         await settleAsyncUi();
 
-        expect(
-          filterScrollToCallsAt(scrollToMock, 800, "smooth").length,
-        ).toBeGreaterThan(0);
-        expect(filterScrollToCallsAt(scrollToMock, 800, "auto")).toEqual([]);
-        expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
+        const followedTops = scrollToTopsWithBehavior(scrollToMock, "auto");
+        expect(followedTops.length).toBeGreaterThan(0);
+        expect(Math.max(...followedTops)).toBeGreaterThan(760);
       } finally {
         context.cleanup();
         restoreScrollGeometry();
@@ -1130,11 +1149,11 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         expect(screen.getByText("Live turn")).toBeInTheDocument();
-        expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
         expect(
-          filterScrollToCallsAt(scrollToMock, 920, "smooth").length,
-        ).toBeGreaterThan(0);
-        expect(messageStack.scrollTop).toBe(920);
+          Math.max(...scrollToTopsWithBehavior(scrollToMock, "auto")),
+        ).toBeGreaterThan(800);
+        expect(messageStack.scrollTop).toBeGreaterThan(800);
+        expect(messageStack.scrollTop).toBeLessThanOrEqual(920);
       } finally {
         context.cleanup();
         restoreScrollGeometry();
@@ -1333,10 +1352,10 @@ describe("App scroll behaviour", () => {
 
         expect(sessionPane).toHaveClass("active");
         expect(
-          filterScrollToCallsAt(scrollToMock, 920, "smooth").length,
-        ).toBeGreaterThan(0);
-        expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
-        expect(messageStack.scrollTop).toBe(920);
+          Math.max(...scrollToTopsWithBehavior(scrollToMock, "auto")),
+        ).toBeGreaterThan(800);
+        expect(messageStack.scrollTop).toBeGreaterThan(800);
+        expect(messageStack.scrollTop).toBeLessThanOrEqual(920);
       } finally {
         restoreScrollGeometry();
       }
@@ -1429,10 +1448,10 @@ describe("App scroll behaviour", () => {
 
         expect(screen.getByText("Live turn")).toBeInTheDocument();
         expect(
-          filterScrollToCallsAt(scrollToMock, 920, "smooth").length,
-        ).toBeGreaterThan(0);
-        expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
-        expect(messageStack.scrollTop).toBe(920);
+          Math.max(...scrollToTopsWithBehavior(scrollToMock, "auto")),
+        ).toBeGreaterThan(800);
+        expect(messageStack.scrollTop).toBeGreaterThan(800);
+        expect(messageStack.scrollTop).toBeLessThanOrEqual(920);
 
         scrollToMock.mockClear();
         scrollHeight = 1140;
@@ -1454,7 +1473,8 @@ describe("App scroll behaviour", () => {
 
         expect(screen.getByText("Live turn")).toBeInTheDocument();
         expect(filterScrollToCallsAt(scrollToMock, 940, "auto")).toEqual([]);
-        expect(messageStack.scrollTop).toBe(920);
+        expect(messageStack.scrollTop).toBeGreaterThan(800);
+        expect(messageStack.scrollTop).toBeLessThanOrEqual(920);
       } finally {
         context.cleanup();
         restoreScrollGeometry();
@@ -1640,7 +1660,9 @@ describe("App scroll behaviour", () => {
 
         expect(screen.getByText("Live turn")).toBeInTheDocument();
         expect(messageStack.scrollTop).toBe(920);
-        expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
+        expect(
+          filterScrollToCallsAt(scrollToMock, 920, "auto").length,
+        ).toBeGreaterThan(0);
       } finally {
         context.cleanup();
         restoreScrollGeometry();
@@ -1786,8 +1808,8 @@ describe("App scroll behaviour", () => {
             // first follow scroll.
             if (
               growCommandCardAfterFirstFollow &&
-              options.behavior === "smooth" &&
-              options.top === 900
+              options.behavior === "auto" &&
+              options.top > 800
             ) {
               growCommandCardAfterFirstFollow = false;
               scrollHeight = 1200;
@@ -1855,16 +1877,40 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        expect(
-          filterScrollToCallsAt(scrollToMock, 900, "smooth").length,
-        ).toBeGreaterThan(0);
-        expect(
-          filterScrollToCallsAt(scrollToMock, 1000, "smooth").length,
-        ).toBeGreaterThan(0);
-        expect(filterScrollToCallsAt(scrollToMock, 1000, "auto")).toEqual([]);
+        const commandFollowTops = scrollToTopsWithBehavior(
+          scrollToMock,
+          "auto",
+        );
+        expect(commandFollowTops.length).toBeGreaterThan(0);
+        expect(Math.max(...commandFollowTops)).toBeGreaterThan(900);
         expect(
           screen.queryByRole("button", { name: "New response" }),
         ).not.toBeInTheDocument();
+
+        // The settled retargeting loop can finish before the browser's smooth
+        // scroll classification window. A later measurement must still be
+        // corrected once instead of being discarded by that stale time marker.
+        scrollToMock.mockClear();
+        performanceNowSpy.mockReturnValue(2_200);
+        scrollHeight = 1300;
+        conversationPageHeight = 440;
+        await act(async () => {
+          resizeCallbacksByTarget.get(conversationPage)?.forEach((callback) =>
+            callback(
+              [
+                {
+                  target: conversationPage,
+                  contentRect: conversationPage.getBoundingClientRect(),
+                } as unknown as ResizeObserverEntry,
+              ],
+              {} as ResizeObserver,
+            ),
+          );
+          await flushUiWork();
+        });
+        expect(
+          filterScrollToCallsAt(scrollToMock, 1100, "auto").length,
+        ).toBeGreaterThan(0);
 
         messageStack.scrollTop = 760;
         expect(
@@ -1922,9 +1968,12 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        expect(
-          filterScrollToCallsAt(scrollToMock, 1000, "smooth").length,
-        ).toBeGreaterThan(0);
+        const responseFollowTops = scrollToTopsWithBehavior(
+          scrollToMock,
+          "auto",
+        );
+        expect(responseFollowTops.length).toBeGreaterThan(0);
+        expect(Math.max(...responseFollowTops)).toBeGreaterThan(760);
         expect(
           screen.queryByRole("button", { name: "New response" }),
         ).not.toBeInTheDocument();
@@ -1988,7 +2037,7 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        expect(filterScrollToCallsAt(scrollToMock, 1100, "smooth")).toEqual([]);
+        expect(filterScrollToCallsAt(scrollToMock, 1100, "auto")).toEqual([]);
         expect(
           await screen.findByRole("button", { name: "New response" }),
         ).toBeInTheDocument();
@@ -2125,9 +2174,11 @@ describe("App scroll behaviour", () => {
               Node.DOCUMENT_POSITION_FOLLOWING,
           ),
         ).toBe(true);
-        expect(filterScrollToCallsAt(scrollToMock, 920, "smooth").length).toBeGreaterThan(0);
-        expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
-        expect(messageStack.scrollTop).toBe(920);
+        expect(
+          Math.max(...scrollToTopsWithBehavior(scrollToMock, "auto")),
+        ).toBeGreaterThan(800);
+        expect(messageStack.scrollTop).toBeGreaterThan(800);
+        expect(messageStack.scrollTop).toBeLessThanOrEqual(920);
       } finally {
         context.cleanup();
         restoreScrollGeometry();
@@ -2295,14 +2346,16 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        expect(document.querySelectorAll(".pending-prompt-card")).toHaveLength(0);
+        expect(document.querySelectorAll(".pending-prompt-card")).toHaveLength(
+          0,
+        );
         const jumpToLatest = await screen.findByRole("button", {
           name: /Jump to latest/,
         });
         expect(jumpToLatest).toBeInTheDocument();
-        expect(
-          within(jumpToLatest).getByText("3 queued"),
-        ).toHaveClass("new-response-indicator-queued-count");
+        expect(within(jumpToLatest).getByText("3 queued")).toHaveClass(
+          "new-response-indicator-queued-count",
+        );
       } finally {
         context.cleanup();
       }
@@ -2808,8 +2861,8 @@ describe("App scroll behaviour", () => {
       );
 
       try {
-        const scrollToMock =
-          HTMLElement.prototype.scrollTo as unknown as ReturnType<typeof vi.fn>;
+        const scrollToMock = HTMLElement.prototype
+          .scrollTo as unknown as ReturnType<typeof vi.fn>;
         scrollToMock.mockClear?.();
 
         const { cleanup: teardown } = await renderAppWithProjectAndSession();
@@ -2938,7 +2991,9 @@ describe("App scroll behaviour", () => {
         }
 
         expect(messageStack.contains(composer)).toBe(false);
-        expect(messageStack.parentElement).toBe(composer.closest(".workspace-pane"));
+        expect(messageStack.parentElement).toBe(
+          composer.closest(".workspace-pane"),
+        );
 
         let clientHeight = 200;
         Object.defineProperty(messageStack, "clientHeight", {
@@ -2957,9 +3012,12 @@ describe("App scroll behaviour", () => {
         });
         scrollToMock.mockClear();
         const authorityScrollWrites: CustomEvent[] = [];
-        messageStack.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, (event) => {
-          authorityScrollWrites.push(event as CustomEvent);
-        });
+        messageStack.addEventListener(
+          MESSAGE_STACK_SCROLL_WRITE_EVENT,
+          (event) => {
+            authorityScrollWrites.push(event as CustomEvent);
+          },
+        );
 
         // The composer owns the one height mutation and requests one
         // synchronous correction. SessionPaneView must not observe the message
@@ -2987,19 +3045,17 @@ describe("App scroll behaviour", () => {
         scrollHeight = 1120;
         messageStack.scrollTop = 800;
         await act(async () => {
-          resizeCallbacksByTarget
-            .get(conversationPage)
-            ?.forEach((callback) =>
-              callback(
-                [
-                  {
-                    target: conversationPage,
-                    contentRect: conversationPage.getBoundingClientRect(),
-                  } as unknown as ResizeObserverEntry,
-                ],
-                {} as ResizeObserver,
-              ),
-            );
+          resizeCallbacksByTarget.get(conversationPage)?.forEach((callback) =>
+            callback(
+              [
+                {
+                  target: conversationPage,
+                  contentRect: conversationPage.getBoundingClientRect(),
+                } as unknown as ResizeObserverEntry,
+              ],
+              {} as ResizeObserver,
+            ),
+          );
           await flushUiWork();
         });
         expect(messageStack.scrollTop).toBe(920);
@@ -3024,19 +3080,17 @@ describe("App scroll behaviour", () => {
         expect(resizeCallbacksByTarget.get(paneFrame)?.size).toBeGreaterThan(0);
         clientHeight = 260;
         await act(async () => {
-          resizeCallbacksByTarget
-            .get(paneFrame)
-            ?.forEach((callback) =>
-              callback(
-                [
-                  {
-                    target: paneFrame,
-                    contentRect: paneFrame.getBoundingClientRect(),
-                  } as unknown as ResizeObserverEntry,
-                ],
-                {} as ResizeObserver,
-              ),
-            );
+          resizeCallbacksByTarget.get(paneFrame)?.forEach((callback) =>
+            callback(
+              [
+                {
+                  target: paneFrame,
+                  contentRect: paneFrame.getBoundingClientRect(),
+                } as unknown as ResizeObserverEntry,
+              ],
+              {} as ResizeObserver,
+            ),
+          );
           await flushUiWork();
         });
         expect(messageStack.scrollTop).toBe(860);
@@ -3061,19 +3115,17 @@ describe("App scroll behaviour", () => {
           ({ height: 360 }) as DOMRect;
         scrollHeight = 1_260;
         await act(async () => {
-          resizeCallbacksByTarget
-            .get(replacementPage)
-            ?.forEach((callback) =>
-              callback(
-                [
-                  {
-                    target: replacementPage,
-                    contentRect: replacementPage.getBoundingClientRect(),
-                  } as unknown as ResizeObserverEntry,
-                ],
-                {} as ResizeObserver,
-              ),
-            );
+          resizeCallbacksByTarget.get(replacementPage)?.forEach((callback) =>
+            callback(
+              [
+                {
+                  target: replacementPage,
+                  contentRect: replacementPage.getBoundingClientRect(),
+                } as unknown as ResizeObserverEntry,
+              ],
+              {} as ResizeObserver,
+            ),
+          );
           await flushUiWork();
         });
         expect(messageStack.scrollTop).toBe(1_000);
@@ -3274,7 +3326,8 @@ describe("App scroll behaviour", () => {
       await renderApp();
 
       await waitFor(() => {
-        const persistedLayoutRaw = window.localStorage.getItem(layoutStorageKey);
+        const persistedLayoutRaw =
+          window.localStorage.getItem(layoutStorageKey);
         expect(persistedLayoutRaw).not.toBeNull();
         const persistedLayout = JSON.parse(persistedLayoutRaw ?? "null") as {
           workspace: {

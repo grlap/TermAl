@@ -4,6 +4,7 @@ import { estimateConversationMessageHeight } from "./conversation-virtualization
 import {
   buildMessagePages,
   estimatePageHeight,
+  pageExtendsMountedMeasurement,
 } from "./virtualized-conversation-measurement";
 import type { Message } from "../types";
 
@@ -160,5 +161,61 @@ describe("estimateConversationMessageHeight", () => {
     // message gaps instead of the previous multi-thousand-pixel overshoot.
     expect(estimatedPageHeight).toBe(1044);
     expect(Math.abs(estimatedPageHeight - 1025.6)).toBeLessThan(20);
+  });
+});
+
+describe("pageExtendsMountedMeasurement", () => {
+  it("reuses a mounted page measurement only for an identity-preserving append", () => {
+    const originalMessages = [
+      makeTextMessage({ id: "message-1", text: "first" }),
+      makeTextMessage({ id: "message-2", text: "second" }),
+    ];
+    const [originalPage] = buildMessagePages(originalMessages);
+    const [appendedPage] = buildMessagePages([
+      ...originalMessages.map((message) => ({ ...message })),
+      makeTextMessage({ id: "message-3", text: "third" }),
+    ]);
+    const [differentPrefixPage] = buildMessagePages([
+      makeTextMessage({ id: "replacement-1", text: "replaced" }),
+      { ...originalMessages[1]! },
+      makeTextMessage({ id: "message-3", text: "third" }),
+    ]);
+    const identity = {
+      hasTrailingGap: originalPage!.hasTrailingGap,
+      messages: originalPage!.messages,
+    };
+
+    expect(pageExtendsMountedMeasurement(appendedPage!, identity)).toBe(true);
+    expect(pageExtendsMountedMeasurement(differentPrefixPage!, identity)).toBe(
+      false,
+    );
+    expect(pageExtendsMountedMeasurement(originalPage!, identity)).toBe(false);
+  });
+});
+
+describe("buildMessagePages", () => {
+  it("keeps global page bands stable while a bounded tail window advances", () => {
+    const messages = Array.from({ length: 20 }, (_, index) =>
+      makeTextMessage({ id: `message-${100 + index}` }),
+    );
+    const advancedMessages = [
+      ...messages.slice(1),
+      makeTextMessage({ id: "message-120" }),
+    ];
+
+    const initialPages = buildMessagePages(messages, 100);
+    const advancedPages = buildMessagePages(advancedMessages, 101);
+
+    expect(initialPages.map((page) => page.key)).toEqual([
+      "100:104:message-100:message-103",
+      "104:112:message-104:message-111",
+      "112:120:message-112:message-119",
+    ]);
+    expect(advancedPages.map((page) => page.key)).toEqual([
+      "101:104:message-101:message-103",
+      "104:112:message-104:message-111",
+      "112:120:message-112:message-119",
+      "120:121:message-120:message-120",
+    ]);
   });
 });

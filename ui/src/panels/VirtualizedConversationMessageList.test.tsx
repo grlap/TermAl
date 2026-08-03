@@ -357,6 +357,34 @@ async function advanceIdleMountedRangeCompaction() {
 }
 
 describe("VirtualizedConversationMessageList foundation", () => {
+  it("only scans mounted pages that have a reusable measurement", () => {
+    const harness = renderVirtualizedHarness({
+      messages: makeTextMessages(8),
+    });
+    const querySelectorAllSpy = vi.spyOn(
+      Element.prototype,
+      "querySelectorAll",
+    );
+    querySelectorAllSpy.mockClear();
+
+    try {
+      harness.rerenderWithMessages(makeTextMessages(16));
+
+      const mountedPageScans = querySelectorAllSpy.mock.calls.filter(
+        ([selector]) =>
+          selector === ".virtualized-message-page[data-page-key]",
+      );
+      // The former last page has a real measurement whose trailing-gap
+      // identity changed, so it legitimately checks whether that measurement
+      // can survive the append. The newly created unmeasured page must not add
+      // a second DOM scan.
+      expect(mountedPageScans).toHaveLength(1);
+    } finally {
+      querySelectorAllSpy.mockRestore();
+      harness.restore();
+    }
+  });
+
   describe("resolvePrependedMessageCount", () => {
     it.each([
       {

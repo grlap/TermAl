@@ -2,9 +2,12 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  claimMessageStackBottomRepinAuthority,
   isFirstAgentOutputForObservedPrompt,
   resolveLatestTurnOutputState,
   resolveNewResponseIndicatorVisibility,
+  resolveSessionBottomFollowFrame,
+  shouldSnapSessionBottomFollowAtCompletion,
   resolveSessionPageScrollDistance,
   useSessionPaneScrollState,
 } from "./SessionPaneView.scroll";
@@ -76,6 +79,74 @@ afterEach(() => {
 });
 
 describe("session pane historical-window tail state", () => {
+  it("does not let a stale scroll-state listener claim bottom-repin authority", () => {
+    const detail = { authorityPresent: false };
+
+    expect(
+      claimMessageStackBottomRepinAuthority(
+        detail,
+        "pane-1:session-new",
+        "pane-1:session-old",
+      ),
+    ).toBe(false);
+    expect(detail.authorityPresent).toBe(false);
+
+    expect(
+      claimMessageStackBottomRepinAuthority(
+        detail,
+        "pane-1:session-new",
+        "pane-1:session-new",
+      ),
+    ).toBe(true);
+    expect(detail.authorityPresent).toBe(true);
+  });
+
+  it("moves each bottom-follow frame monotonically toward its current target", () => {
+    expect(resolveSessionBottomFollowFrame(800, 1_000)).toBe(836);
+    expect(resolveSessionBottomFollowFrame(1_000, 800)).toBe(964);
+    expect(resolveSessionBottomFollowFrame(999.5, 1_000)).toBe(1_000);
+    expect(resolveSessionBottomFollowFrame(800.5, 800)).toBe(800);
+  });
+
+  it("keeps bottom-follow convergence stable across display refresh rates", () => {
+    const sixtyHertzFrameMs = 1000 / 60;
+    const oneSixtyHertzFrame = resolveSessionBottomFollowFrame(
+      0,
+      1_000,
+      sixtyHertzFrameMs,
+    );
+    const oneThirtyHertzFrame = resolveSessionBottomFollowFrame(
+      0,
+      1_000,
+      sixtyHertzFrameMs * 2,
+    );
+    const firstHalfFrame = resolveSessionBottomFollowFrame(
+      0,
+      1_000,
+      sixtyHertzFrameMs / 2,
+    );
+    const twoHalfFrames = resolveSessionBottomFollowFrame(
+      firstHalfFrame,
+      1_000,
+      sixtyHertzFrameMs / 2,
+    );
+    const twoSixtyHertzFrames = resolveSessionBottomFollowFrame(
+      oneSixtyHertzFrame,
+      1_000,
+      sixtyHertzFrameMs,
+    );
+
+    expect(twoHalfFrames).toBeCloseTo(oneSixtyHertzFrame, 8);
+    expect(oneThirtyHertzFrame).toBeCloseTo(twoSixtyHertzFrames, 8);
+  });
+
+  it("snaps a completed smooth follow to the exact bottom", () => {
+    expect(shouldSnapSessionBottomFollowAtCompletion("smooth", 8)).toBe(true);
+    expect(shouldSnapSessionBottomFollowAtCompletion("smooth", 1)).toBe(true);
+    expect(shouldSnapSessionBottomFollowAtCompletion("smooth", 0.5)).toBe(false);
+    expect(shouldSnapSessionBottomFollowAtCompletion("auto", 8)).toBe(false);
+  });
+
   it("identifies the first agent output for the latest prompt", () => {
     const prompt: Message = {
       id: "prompt-2",
@@ -129,7 +200,10 @@ describe("session pane historical-window tail state", () => {
   });
 
   it("does not re-pin when older history reveals the prompt behind resident output", () => {
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 1),
+    );
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     let scrollHeight = 1_000;
     const scrollNode = document.createElement("section");
@@ -140,8 +214,7 @@ describe("session pane historical-window tail state", () => {
     });
     const scrollTo = vi.fn(
       (optionsOrX?: ScrollToOptions | number, y?: number) => {
-        const top =
-          typeof optionsOrX === "number" ? y : optionsOrX?.top;
+        const top = typeof optionsOrX === "number" ? y : optionsOrX?.top;
         if (typeof top === "number") {
           scrollNode.scrollTop = top;
         }
@@ -236,8 +309,7 @@ describe("session pane historical-window tail state", () => {
     });
     const scrollTo = vi.fn(
       (optionsOrX?: ScrollToOptions | number, y?: number) => {
-        const top =
-          typeof optionsOrX === "number" ? y : optionsOrX?.top;
+        const top = typeof optionsOrX === "number" ? y : optionsOrX?.top;
         if (typeof top === "number") {
           scrollNode.scrollTop = top;
         }
@@ -320,14 +392,14 @@ describe("session pane historical-window tail state", () => {
     animationFrames.delete(firstFrame[0]);
     act(() => firstFrame[1](performance.now()));
 
-    expect(scrollNode.scrollTop).toBe(920);
+    expect(scrollNode.scrollTop).toBe(821.6);
     expect(scrollTo).toHaveBeenCalledWith({
-      behavior: "smooth",
-      top: 920,
+      behavior: "auto",
+      top: 821.6,
     });
-    expect(
-      scrollWrites[scrollWrites.length - 1]?.detail.scrollKind,
-    ).toBe("bottom_follow");
+    expect(scrollWrites[scrollWrites.length - 1]?.detail.scrollKind).toBe(
+      "bottom_follow",
+    );
 
     const firstReply: Message = {
       id: "reply-current",
@@ -404,13 +476,12 @@ describe("session pane historical-window tail state", () => {
 
   it("does not replay a stale detached position after tail-follow re-enters", () => {
     const animationFrames: FrameRequestCallback[] = [];
-    vi.stubGlobal(
-      "requestAnimationFrame",
-      ((callback: FrameRequestCallback) => {
-        animationFrames.push(callback);
-        return animationFrames.length;
-      }) as typeof requestAnimationFrame,
-    );
+    vi.stubGlobal("requestAnimationFrame", ((
+      callback: FrameRequestCallback,
+    ) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    }) as typeof requestAnimationFrame);
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const liveSession = session(false);
     const scrollStateKey = "pane-1:session-history";
@@ -509,20 +580,21 @@ describe("session pane historical-window tail state", () => {
     );
     expect(hook.result.current.liveTailPinned).toBe(false);
     expect(hook.result.current.showNewResponseIndicator).toBe(true);
-    expect(hook.result.current.newResponseIndicatorLabel).toBe("Jump to latest");
+    expect(hook.result.current.newResponseIndicatorLabel).toBe(
+      "Jump to latest",
+    );
 
     removeListener();
   });
 
   it("reattaches a historical window only on the explicit send transition", async () => {
     const animationFrames: FrameRequestCallback[] = [];
-    vi.stubGlobal(
-      "requestAnimationFrame",
-      ((callback: FrameRequestCallback) => {
-        animationFrames.push(callback);
-        return animationFrames.length;
-      }) as typeof requestAnimationFrame,
-    );
+    vi.stubGlobal("requestAnimationFrame", ((
+      callback: FrameRequestCallback,
+    ) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    }) as typeof requestAnimationFrame);
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const demands: SessionHistoryPageDemand[] = [];
     const removeListener = addSessionHistoryPageDemandListener((demand) => {
@@ -538,7 +610,7 @@ describe("session pane historical-window tail state", () => {
         useSessionPaneScrollState({
           ...sharedParams,
           isSending,
-      }),
+        }),
       { initialProps: { isSending: false } },
     );
 
@@ -567,13 +639,12 @@ describe("session pane historical-window tail state", () => {
 
   it("keeps history unpinned and reattaches through one bounded tail demand", async () => {
     const animationFrames: FrameRequestCallback[] = [];
-    vi.stubGlobal(
-      "requestAnimationFrame",
-      ((callback: FrameRequestCallback) => {
-        animationFrames.push(callback);
-        return animationFrames.length;
-      }) as typeof requestAnimationFrame,
-    );
+    vi.stubGlobal("requestAnimationFrame", ((
+      callback: FrameRequestCallback,
+    ) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    }) as typeof requestAnimationFrame);
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const scrollNode = document.createElement("section");
     scrollNode.innerHTML = '<div class="virtualized-message-list"></div>';
@@ -600,7 +671,9 @@ describe("session pane historical-window tail state", () => {
 
     expect(hook.result.current.liveTailPinned).toBe(false);
     expect(hook.result.current.showNewResponseIndicator).toBe(true);
-    expect(hook.result.current.newResponseIndicatorLabel).toBe("Jump to latest");
+    expect(hook.result.current.newResponseIndicatorLabel).toBe(
+      "Jump to latest",
+    );
 
     await act(async () => {
       hook.result.current.scrollMessageStackToBoundary("bottom");
@@ -629,13 +702,12 @@ describe("session pane historical-window tail state", () => {
 
   it("honors jump-to-start against the resident window when page adoption fails", async () => {
     const animationFrames: FrameRequestCallback[] = [];
-    vi.stubGlobal(
-      "requestAnimationFrame",
-      ((callback: FrameRequestCallback) => {
-        animationFrames.push(callback);
-        return animationFrames.length;
-      }) as typeof requestAnimationFrame,
-    );
+    vi.stubGlobal("requestAnimationFrame", ((
+      callback: FrameRequestCallback,
+    ) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    }) as typeof requestAnimationFrame);
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const scrollNode = document.createElement("section");
     Object.defineProperties(scrollNode, {
@@ -698,7 +770,10 @@ describe("session pane historical-window tail state", () => {
   });
 
   it("does not let a stale same-key boundary demand block or clear a newer request", async () => {
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 1),
+    );
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const scrollNode = document.createElement("section");
     Object.defineProperties(scrollNode, {

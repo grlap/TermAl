@@ -322,6 +322,7 @@ export type SessionConversationPageProps = {
 export type ConversationMessageListProps = {
   renderMessageCard: RenderMessageCard;
   sessionId: string;
+  messageStartIndex: number;
   messages: Message[];
   scrollContainerRef: RefObject<HTMLElement | null>;
   tailFollowIntent: boolean;

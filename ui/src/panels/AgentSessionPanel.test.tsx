@@ -23,7 +23,10 @@ import {
   splitAgentCommandResolverTail,
 } from "./AgentSessionPanel";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
-import { RunningIndicator } from "./session-activity-cards";
+import {
+  ConversationTailPresence,
+  RunningIndicator,
+} from "./session-activity-cards";
 import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
 import { MessageCard } from "../message-cards";
 import {
@@ -116,9 +119,7 @@ describe("AgentSessionPanel response-board actions", () => {
       setData: (type: string, value: string) => values.set(type, value),
       setDragImage,
     } as unknown as DataTransfer;
-    const shell = container.querySelector(
-      ".conversation-message-marker-shell",
-    );
+    const shell = container.querySelector(".conversation-message-marker-shell");
     const header = container.querySelector(".message-meta");
     expect(shell).toBeTruthy();
     expect(header).toBeTruthy();
@@ -132,11 +133,17 @@ describe("AgentSessionPanel response-board actions", () => {
     expect(values.has(RESPONSE_BOARD_MESSAGE_MIME)).toBe(false);
 
     fireEvent.dragStart(header as Element, { dataTransfer });
-    expect(JSON.parse(values.get(RESPONSE_BOARD_MESSAGE_MIME) ?? "null")).toEqual({
+    expect(
+      JSON.parse(values.get(RESPONSE_BOARD_MESSAGE_MIME) ?? "null"),
+    ).toEqual({
       sessionId: "session-board-source",
       messageId: "message-board-source",
     });
-    expect(setDragImage).toHaveBeenCalledWith(shell, expect.any(Number), expect.any(Number));
+    expect(setDragImage).toHaveBeenCalledWith(
+      shell,
+      expect.any(Number),
+      expect.any(Number),
+    );
   });
 });
 
@@ -151,8 +158,7 @@ function makeTextMessages(count: number): Message[] {
 }
 
 function installLongTranscriptScrollNodeMocks(scrollNode: HTMLElement) {
-  const originalGetBoundingClientRect =
-    Element.prototype.getBoundingClientRect;
+  const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
   let scrollTop = 20_000;
   let scrollHeight = 24_000;
 
@@ -260,7 +266,8 @@ function makeDiffMessages(count: number): DiffMessage[] {
 }
 
 function makeConversationMarker(
-  input: Partial<ConversationMarker> & Pick<ConversationMarker, "id" | "messageId" | "name">,
+  input: Partial<ConversationMarker> &
+    Pick<ConversationMarker, "id" | "messageId" | "name">,
 ): ConversationMarker {
   const { id, messageId, name, ...overrides } = input;
   return {
@@ -367,6 +374,7 @@ afterEach(() => {
   act(() => {
     resetSessionStoreForTesting();
   });
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -383,20 +391,28 @@ function stubResolvedAgentCommand(response: {
     writePolicy?:
       | { kind: "readOnly" }
       | { kind: "sharedWorktree"; ownedPaths: string[] }
-      | { kind: "isolatedWorktree"; ownedPaths: string[]; worktreePath?: string };
+      | {
+          kind: "isolatedWorktree";
+          ownedPaths: string[];
+          worktreePath?: string;
+        };
   } | null;
 }) {
-  const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
-    return new Response(JSON.stringify(response), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  });
+  const fetchMock = vi.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      return new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  );
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
 
-function lastJsonRequestBody(fetchMock: ReturnType<typeof stubResolvedAgentCommand>) {
+function lastJsonRequestBody(
+  fetchMock: ReturnType<typeof stubResolvedAgentCommand>,
+) {
   const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
   const init = lastCall?.[1] as RequestInit | undefined;
   return JSON.parse(String(init?.body ?? "{}")) as unknown;
@@ -425,17 +441,58 @@ describe("splitAgentCommandResolverTail", () => {
       { argumentsText: "", noteText: "Please add tests." },
     ],
     ["empty trailing note", "3 --", { argumentsText: "3" }],
-    [
-      "attached dash is an argument",
-      "3 --flag",
-      { argumentsText: "3 --flag" },
-    ],
+    ["attached dash is an argument", "3 --flag", { argumentsText: "3 --flag" }],
   ])("splits %s separators", (_caseName, input, expected) => {
     expect(splitAgentCommandResolverTail(input)).toEqual(expected);
   });
 });
 
 describe("AgentSessionPanel conversation caching", () => {
+  it("measures an active live tail once and relies on ResizeObserver afterward", () => {
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    }
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({
+        bottom: 72,
+        height: 72,
+        left: 0,
+        right: 320,
+        top: 0,
+        width: 320,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect);
+
+    try {
+      const { rerender } = render(
+        <ConversationTailPresence active>
+          <span>First streamed state</span>
+        </ConversationTailPresence>,
+      );
+      expect(rectSpy).toHaveBeenCalledTimes(1);
+
+      rerender(
+        <ConversationTailPresence active>
+          <span>Second streamed state</span>
+        </ConversationTailPresence>,
+      );
+
+      expect(screen.getByText("Second streamed state")).toBeInTheDocument();
+      expect(rectSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      rectSpy.mockRestore();
+    }
+  });
+
   it("does not render a queued prompt once the matching message is visible", () => {
     const activeSession = makeSession("session-a", {
       messages: [
@@ -582,9 +639,11 @@ describe("AgentSessionPanel conversation caching", () => {
           waitingIndicatorPrompt={null}
           commandMessages={[]}
           diffMessages={[]}
-          scrollContainerRef={{
-            current: scrollNode,
-          } as RefObject<HTMLElement | null>}
+          scrollContainerRef={
+            {
+              current: scrollNode,
+            } as RefObject<HTMLElement | null>
+          }
           onApprovalDecision={() => {}}
           onUserInputSubmit={() => {}}
           onMcpElicitationSubmit={() => {}}
@@ -615,10 +674,14 @@ describe("AgentSessionPanel conversation caching", () => {
       const { container } = render(renderPanel());
 
       await waitFor(() => {
-        expect(container.querySelector(".virtualized-message-list")).not.toBeNull();
+        expect(
+          container.querySelector(".virtualized-message-list"),
+        ).not.toBeNull();
         expect(screen.getByText("Old streamed answer")).toBeInTheDocument();
       });
-      expect(screen.queryByText("Queued prompt duplicate")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Queued prompt duplicate"),
+      ).not.toBeInTheDocument();
 
       act(() => {
         syncComposerSessionsStore({
@@ -634,8 +697,12 @@ describe("AgentSessionPanel conversation caching", () => {
         ).toBeInTheDocument();
       });
       expect(screen.queryByText("Old streamed answer")).not.toBeInTheDocument();
-      expect(screen.queryByText("Queued prompt duplicate")).not.toBeInTheDocument();
-      expect(container.querySelector(".virtualized-message-list")).not.toBeNull();
+      expect(
+        screen.queryByText("Queued prompt duplicate"),
+      ).not.toBeInTheDocument();
+      expect(
+        container.querySelector(".virtualized-message-list"),
+      ).not.toBeNull();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       scrollNodeMocks.cleanup();
@@ -675,6 +742,57 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(
       within(queuedPromptCard as HTMLElement).getByText("You"),
     ).toBeInTheDocument();
+  });
+
+  it("keeps a stable tail while an idle session advances a queued turn", () => {
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        status: "idle",
+        messages: [
+          {
+            id: "message-user",
+            type: "text",
+            timestamp: "10:00",
+            author: "you",
+            text: "First prompt",
+          },
+          {
+            id: "message-assistant",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "First response",
+          },
+        ],
+        pendingPrompts: [
+          {
+            id: "pending-prompt-a",
+            timestamp: "10:02",
+            text: "Queued follow-up",
+          },
+        ],
+      }),
+      showWaitingIndicator: false,
+    });
+
+    const handoffCard = screen
+      .getByText("Queue")
+      .closest(".activity-card-queue-handoff");
+    const queuedPromptCard = document.querySelector(".pending-prompt-card");
+    const liveTail = handoffCard?.closest(".conversation-live-tail");
+
+    expect(handoffCard).not.toBeNull();
+    expect(
+      screen.getByText("Codex is starting the next turn"),
+    ).toBeInTheDocument();
+    expect(liveTail).not.toBeNull();
+    expect(liveTail).not.toContainElement(queuedPromptCard as HTMLElement);
+    expect(
+      Boolean(
+        queuedPromptCard!.compareDocumentPosition(liveTail!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
   });
 
   it("labels a queued peer prompt with its sender session name", () => {
@@ -740,7 +858,9 @@ describe("AgentSessionPanel conversation caching", () => {
       showWaitingIndicator: true,
     });
 
-    expect(screen.queryByText(/termal_list_mailboxes/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/termal_list_mailboxes/i),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Mailbox notification #7")).toBeInTheDocument();
     expect(screen.getAllByText("Termal::Fable").length).toBeGreaterThan(0);
     expect(screen.getByText("2 unread")).toBeInTheDocument();
@@ -748,7 +868,9 @@ describe("AgentSessionPanel conversation caching", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open mailbox →" }));
     expect(onOpenMailbox).toHaveBeenCalledWith("mailbox-queued");
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel queued prompt" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Cancel queued prompt" }),
+    );
     expect(onCancelQueuedPrompt).toHaveBeenCalledWith(
       "session-a",
       "pending-mailbox-wakeup",
@@ -787,7 +909,9 @@ describe("AgentSessionPanel conversation caching", () => {
       .closest(".pending-prompt-card") as HTMLElement;
 
     expect(within(queuedPromptCard).getByText("Investor")).toBeInTheDocument();
-    expect(within(queuedPromptCard).queryByText(finalFinding)).not.toBeInTheDocument();
+    expect(
+      within(queuedPromptCard).queryByText(finalFinding),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(
       within(queuedPromptCard).getByRole("button", {
@@ -798,9 +922,9 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(
       queuedPromptCard.querySelector(".expandable-session-message"),
     ).toHaveClass("is-expanded");
-    expect(queuedPromptCard.querySelector(".long-peer-message-copy")).toHaveTextContent(
-      finalFinding,
-    );
+    expect(
+      queuedPromptCard.querySelector(".long-peer-message-copy"),
+    ).toHaveTextContent(finalFinding);
   });
 
   it("labels and collapses a mixed-sender queued peer batch", () => {
@@ -831,8 +955,12 @@ describe("AgentSessionPanel conversation caching", () => {
       .getByText("[TermAl cross-session message batch]")
       .closest(".pending-prompt-card") as HTMLElement;
 
-    expect(within(queuedPromptCard).getByText("Peer queue")).toBeInTheDocument();
-    expect(within(queuedPromptCard).queryByText(finalFinding)).not.toBeInTheDocument();
+    expect(
+      within(queuedPromptCard).getByText("Peer queue"),
+    ).toBeInTheDocument();
+    expect(
+      within(queuedPromptCard).queryByText(finalFinding),
+    ).not.toBeInTheDocument();
     expect(
       within(queuedPromptCard).getByRole("button", {
         name: "Show full message",
@@ -877,7 +1005,9 @@ describe("AgentSessionPanel conversation caching", () => {
 
     expect(within(queuedPromptCard).getByText("Fan-in")).toBeInTheDocument();
     expect(within(queuedPromptCard).queryByText("You")).not.toBeInTheDocument();
-    expect(within(queuedPromptCard).queryByText("No findings.")).not.toBeInTheDocument();
+    expect(
+      within(queuedPromptCard).queryByText("No findings."),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(
       within(queuedPromptCard).getByRole("button", {
@@ -1016,17 +1146,12 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(pendingPromptQueue).not.toBeNull();
     expect(liveTail).toHaveClass("is-pinned");
     expect(liveTurnCard).not.toBeNull();
-    const liveTailChildren = Array.from((liveTail as HTMLElement).children);
-    expect(liveTailChildren[liveTailChildren.length - 1]).toHaveTextContent(
-      "Live turn",
-    );
-    expect(pendingPromptQueue?.closest(".conversation-live-tail")).toBe(
-      liveTail,
-    );
+    expect(pendingPromptQueue?.closest(".conversation-live-tail")).toBeNull();
     expect(
       Boolean(
-        firstQueuedPromptCard!.compareDocumentPosition(secondQueuedPromptCard!) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
+        firstQueuedPromptCard!.compareDocumentPosition(
+          secondQueuedPromptCard!,
+        ) & Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true);
     expect(
@@ -1035,8 +1160,10 @@ describe("AgentSessionPanel conversation caching", () => {
           Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true);
-    expect(liveTail).toContainElement(firstQueuedPromptCard as HTMLElement);
-    expect(liveTail).toContainElement(secondQueuedPromptCard as HTMLElement);
+    expect(liveTail).not.toContainElement(firstQueuedPromptCard as HTMLElement);
+    expect(liveTail).not.toContainElement(
+      secondQueuedPromptCard as HTMLElement,
+    );
     expect(liveTail).toContainElement(liveTurnCard as HTMLElement);
     expect(pendingPromptQueue).toContainElement(
       firstQueuedPromptCard as HTMLElement,
@@ -1070,9 +1197,9 @@ describe("AgentSessionPanel conversation caching", () => {
       });
     });
 
-    expect(
-      screen.getByText("Live turn").closest(".activity-card-live"),
-    ).toBe(liveTurnCard);
+    expect(screen.getByText("Live turn").closest(".activity-card-live")).toBe(
+      liveTurnCard,
+    );
     expect(scrollTop).toBe(120);
     expect(scrollWrites).toEqual([]);
   });
@@ -1133,13 +1260,16 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
-    expect(screen.queryByText("Queued at the live tail")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Queued at the live tail"),
+    ).not.toBeInTheDocument();
     expect(
       document.querySelector(".conversation-live-tail"),
     ).not.toBeInTheDocument();
   });
 
-  it("removes the live-turn tail when the waiting indicator clears", () => {
+  it("smoothly removes the live-turn tail when the waiting indicator clears", async () => {
+    vi.useFakeTimers();
     const activeSession = makeSession("session-a", {
       status: "active",
       messages: [
@@ -1173,7 +1303,11 @@ describe("AgentSessionPanel conversation caching", () => {
       .getByText("Queued follow-up after current turn")
       .closest(".pending-prompt-card");
     expect(liveTail).not.toBeNull();
-    expect(liveTail).toContainElement(queuedPromptCard as HTMLElement);
+    expect(liveTail).not.toContainElement(queuedPromptCard as HTMLElement);
+
+    await act(async () => {
+      await vi.advanceTimersToNextTimerAsync();
+    });
 
     rerender(
       renderPanel({
@@ -1181,6 +1315,25 @@ describe("AgentSessionPanel conversation caching", () => {
         waitingIndicatorPrompt: null,
       }),
     );
+
+    expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
+    expect(
+      screen
+        .getByText("Queued follow-up after current turn")
+        .closest(".pending-prompt-card"),
+    ).toBe(queuedPromptCard);
+
+    await act(async () => {
+      await vi.advanceTimersToNextTimerAsync();
+    });
+
+    expect(
+      document.querySelector(".conversation-tail-entry-shell.is-entering"),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(240);
+    });
 
     expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
     expect(
@@ -1292,7 +1445,9 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     expect(screen.getByText("Live turn")).toBeInTheDocument();
-    expect(screen.getByText("Working on the current turn...")).toBeInTheDocument();
+    expect(
+      screen.getByText("Working on the current turn..."),
+    ).toBeInTheDocument();
   });
 
   it("keeps send waiting feedback visible during an active turn after file output", () => {
@@ -1325,7 +1480,9 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     expect(screen.getByText("Live turn")).toBeInTheDocument();
-    expect(screen.getByText("Working on the current turn...")).toBeInTheDocument();
+    expect(
+      screen.getByText("Working on the current turn..."),
+    ).toBeInTheDocument();
   });
 
   it("keeps the live-turn indicator visible while active, even after file-change output", () => {
@@ -1427,8 +1584,9 @@ describe("AgentSessionPanel conversation caching", () => {
           .getByText("message-1")
           .closest(".conversation-message-marker-shell"),
       ).toHaveStyle({
-        "--conversation-active-marker-color":
-          normalizeConversationMarkerColor(DEFAULT_CONVERSATION_MARKER_COLOR),
+        "--conversation-active-marker-color": normalizeConversationMarkerColor(
+          DEFAULT_CONVERSATION_MARKER_COLOR,
+        ),
       });
       expect(
         screen
@@ -1439,7 +1597,8 @@ describe("AgentSessionPanel conversation caching", () => {
       if (originalScrollIntoView) {
         Element.prototype.scrollIntoView = originalScrollIntoView;
       } else {
-        delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+        delete (Element.prototype as { scrollIntoView?: unknown })
+          .scrollIntoView;
       }
     }
   });
@@ -1583,7 +1742,8 @@ describe("AgentSessionPanel conversation caching", () => {
         scrollTop = nextValue;
       },
     });
-    window.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    window.ResizeObserver =
+      ResizeObserverMock as unknown as typeof ResizeObserver;
 
     const activeSession = makeSession("session-1", {
       messages: makeTextMessages(96),
@@ -1614,7 +1774,9 @@ describe("AgentSessionPanel conversation caching", () => {
         expect(scrollIntoViewTargets).toContain("message:message-1");
       });
       expect(
-        scrollIntoViewTargets.filter((target) => target === "message:message-1"),
+        scrollIntoViewTargets.filter(
+          (target) => target === "message:message-1",
+        ),
       ).toHaveLength(1);
       await act(async () => {
         await new Promise<void>((resolve) => {
@@ -1624,7 +1786,9 @@ describe("AgentSessionPanel conversation caching", () => {
         });
       });
       expect(
-        scrollIntoViewTargets.filter((target) => target === "message:message-1"),
+        scrollIntoViewTargets.filter(
+          (target) => target === "message:message-1",
+        ),
       ).toHaveLength(1);
       expect(screen.getByText("message-1")).toBeInTheDocument();
     } finally {
@@ -2090,8 +2254,9 @@ describe("AgentSessionPanel conversation caching", () => {
 
     expect(messageShell()).toHaveClass("is-active-marker");
     expect(messageShell()).not.toHaveStyle({
-      "--conversation-active-marker-color":
-        normalizeConversationMarkerColor(existingMarker.color),
+      "--conversation-active-marker-color": normalizeConversationMarkerColor(
+        existingMarker.color,
+      ),
     });
 
     const createdMarker = makeConversationMarker({
@@ -2412,7 +2577,8 @@ describe("AgentSessionPanel conversation caching", () => {
   });
 
   it("validates and submits trimmed marker labels without closing on resize", () => {
-    const { onCreateConversationMarker, trigger } = renderMarkerCreationHarness();
+    const { onCreateConversationMarker, trigger } =
+      renderMarkerCreationHarness();
     const { markerLabelInput, submitButton } = openMarkerCreateDialog(trigger);
 
     fireEvent.change(markerLabelInput, { target: { value: "🙂".repeat(121) } });
@@ -2446,7 +2612,8 @@ describe("AgentSessionPanel conversation caching", () => {
   });
 
   it("restores marker trigger focus after canceling marker label creation", async () => {
-    const { onCreateConversationMarker, trigger } = renderMarkerCreationHarness();
+    const { onCreateConversationMarker, trigger } =
+      renderMarkerCreationHarness();
     openMarkerCreateDialog(trigger);
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -2689,7 +2856,9 @@ describe("AgentSessionPanel conversation caching", () => {
       screen.queryByRole("navigation", { name: "Conversation markers" }),
     ).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(container.querySelector(".session-conversation-page")).toHaveFocus();
+      expect(
+        container.querySelector(".session-conversation-page"),
+      ).toHaveFocus();
     });
   });
 
@@ -2770,7 +2939,9 @@ describe("AgentSessionPanel conversation caching", () => {
       name: "Conversation markers",
     });
     expect(within(markerWindow).getByText("0")).toBeInTheDocument();
-    expect(within(markerWindow).getByText("No markers yet.")).toBeInTheDocument();
+    expect(
+      within(markerWindow).getByText("No markers yet."),
+    ).toBeInTheDocument();
     expect(
       within(markerWindow).getByRole("button", { name: "Previous marker" }),
     ).toBeDisabled();
@@ -2912,11 +3083,13 @@ describe("AgentSessionPanel conversation caching", () => {
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
     let nextFrameId = 0;
     const frameCallbacks = new Map<number, FrameRequestCallback>();
-    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
-      const frameId = ++nextFrameId;
-      frameCallbacks.set(frameId, callback);
-      return frameId;
-    });
+    const requestAnimationFrameMock = vi.fn(
+      (callback: FrameRequestCallback) => {
+        const frameId = ++nextFrameId;
+        frameCallbacks.set(frameId, callback);
+        return frameId;
+      },
+    );
     const cancelAnimationFrameMock = vi.fn((frameId: number) => {
       frameCallbacks.delete(frameId);
     });
@@ -2970,8 +3143,7 @@ describe("AgentSessionPanel conversation caching", () => {
         );
       });
       expect(requestAnimationFrameMock).toHaveBeenCalledTimes(1);
-      const latestFrameResult =
-        requestAnimationFrameMock.mock.results[0];
+      const latestFrameResult = requestAnimationFrameMock.mock.results[0];
       const focusRestoreFrameId = latestFrameResult?.value;
 
       expect(typeof focusRestoreFrameId).toBe("number");
@@ -3015,10 +3187,7 @@ describe("AgentSessionPanel conversation caching", () => {
       onCreateConversationMarker,
       renderMessageCard: () => (
         <article className="message-card">
-          <div
-            className="message-meta"
-            data-conversation-marker-menu-trigger
-          >
+          <div className="message-meta" data-conversation-marker-menu-trigger>
             <span>Agent header</span>
             <span>10:00</span>
           </div>
@@ -3108,10 +3277,7 @@ describe("AgentSessionPanel conversation caching", () => {
       "data-conversation-marker-menu-trigger",
       "true",
     );
-    expect(userMeta).toHaveAttribute(
-      "aria-label",
-      "You, open marker actions",
-    );
+    expect(userMeta).toHaveAttribute("aria-label", "You, open marker actions");
     expect(assistantMeta).toHaveAttribute(
       "aria-label",
       "Agent, open marker actions",
@@ -3270,7 +3436,9 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(
       screen.queryByRole("menu", { name: "Conversation marker actions" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Show tasks" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show tasks" }),
+    ).toBeInTheDocument();
 
     const showTasksAgain = screen.getByRole("button", { name: "Show tasks" });
     showTasksAgain.focus();
@@ -3279,7 +3447,9 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(
       screen.queryByRole("menu", { name: "Conversation marker actions" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Hide tasks" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Hide tasks" }),
+    ).toBeInTheDocument();
   });
 
   it("does not render the removed right-side marker toolbar", () => {
@@ -3539,10 +3709,11 @@ describe("AgentSessionPanel conversation caching", () => {
   it("reclamps the marker create dialog from rect dimensions on viewport resize", async () => {
     const originalInnerWidth = window.innerWidth;
     const originalInnerHeight = window.innerHeight;
-    const originalGetBoundingClientRectDescriptor = Object.getOwnPropertyDescriptor(
-      HTMLElement.prototype,
-      "getBoundingClientRect",
-    );
+    const originalGetBoundingClientRectDescriptor =
+      Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        "getBoundingClientRect",
+      );
     const originalGetBoundingClientRect =
       HTMLElement.prototype.getBoundingClientRect;
     const originalOffsetWidth = Object.getOwnPropertyDescriptor(
@@ -3806,7 +3977,9 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     const renderPanel = (
-      onApprovalDecision: Parameters<typeof AgentSessionPanel>[0]["onApprovalDecision"],
+      onApprovalDecision: Parameters<
+        typeof AgentSessionPanel
+      >[0]["onApprovalDecision"],
     ) => (
       <AgentSessionPanel
         paneId="pane-1"
@@ -3832,10 +4005,7 @@ describe("AgentSessionPanel conversation caching", () => {
         renderCommandCard={() => null}
         renderDiffCard={() => null}
         renderMessageCard={(message, _isLive, approve) => (
-          <button
-            type="button"
-            onClick={() => approve(message.id, "accepted")}
-          >
+          <button type="button" onClick={() => approve(message.id, "accepted")}>
             Approve latest
           </button>
         )}
@@ -3881,7 +4051,9 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     const renderPanel = (
-      onSessionSettingsChange: Parameters<typeof AgentSessionPanel>[0]["onSessionSettingsChange"],
+      onSessionSettingsChange: Parameters<
+        typeof AgentSessionPanel
+      >[0]["onSessionSettingsChange"],
     ) => (
       <AgentSessionPanel
         paneId="pane-1"
@@ -3930,7 +4102,9 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Apply latest settings" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Apply latest settings" }),
+      );
       await Promise.resolve();
     });
 
@@ -3965,7 +4139,9 @@ describe("AgentSessionPanel conversation caching", () => {
       await Promise.resolve();
     });
 
-    expect(screen.queryByText("Initial prompt renderer")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Initial prompt renderer"),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Latest prompt renderer")).toBeInTheDocument();
   });
 
@@ -3988,15 +4164,21 @@ describe("AgentSessionPanel conversation caching", () => {
       });
 
     const { rerender } = render(renderPanel("Initial command renderer"));
-    expect(screen.getByText("Initial command renderer: command-1")).toBeInTheDocument();
+    expect(
+      screen.getByText("Initial command renderer: command-1"),
+    ).toBeInTheDocument();
 
     await act(async () => {
       rerender(renderPanel("Latest command renderer"));
       await Promise.resolve();
     });
 
-    expect(screen.queryByText("Initial command renderer: command-1")).not.toBeInTheDocument();
-    expect(screen.getByText("Latest command renderer: command-1")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Initial command renderer: command-1"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Latest command renderer: command-1"),
+    ).toBeInTheDocument();
   });
 
   it("refreshes diff cards when only the diff renderer changes", async () => {
@@ -4018,15 +4200,21 @@ describe("AgentSessionPanel conversation caching", () => {
       });
 
     const { rerender } = render(renderPanel("Initial diff renderer"));
-    expect(screen.getByText("Initial diff renderer: diff-1")).toBeInTheDocument();
+    expect(
+      screen.getByText("Initial diff renderer: diff-1"),
+    ).toBeInTheDocument();
 
     await act(async () => {
       rerender(renderPanel("Latest diff renderer"));
       await Promise.resolve();
     });
 
-    expect(screen.queryByText("Initial diff renderer: diff-1")).not.toBeInTheDocument();
-    expect(screen.getByText("Latest diff renderer: diff-1")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Initial diff renderer: diff-1"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Latest diff renderer: diff-1"),
+    ).toBeInTheDocument();
   });
 
   it("uses the latest message renderer after a renderer-only parent rerender", async () => {
@@ -4119,7 +4307,9 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     expect(screen.getByText("Latest renderer: message-2")).toBeInTheDocument();
-    expect(screen.queryByText("Initial renderer: message-1")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Initial renderer: message-1"),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Latest renderer: message-1")).toBeInTheDocument();
   });
 
@@ -4146,7 +4336,9 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     const renderPanel = (
-      onCodexAppRequestSubmit: Parameters<typeof AgentSessionPanel>[0]["onCodexAppRequestSubmit"],
+      onCodexAppRequestSubmit: Parameters<
+        typeof AgentSessionPanel
+      >[0]["onCodexAppRequestSubmit"],
     ) => (
       <AgentSessionPanel
         paneId="pane-1"
@@ -4171,10 +4363,19 @@ describe("AgentSessionPanel conversation caching", () => {
         onConversationSearchItemMount={() => {}}
         renderCommandCard={() => null}
         renderDiffCard={() => null}
-        renderMessageCard={(message, _isLive, _approve, _input, _elicitation, submitAppRequest) => (
+        renderMessageCard={(
+          message,
+          _isLive,
+          _approve,
+          _input,
+          _elicitation,
+          submitAppRequest,
+        ) => (
           <button
             type="button"
-            onClick={() => submitAppRequest(message.id, { decision: "accepted" })}
+            onClick={() =>
+              submitAppRequest(message.id, { decision: "accepted" })
+            }
           >
             Submit app request
           </button>
@@ -4193,7 +4394,9 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Submit app request" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Submit app request" }),
+      );
       await Promise.resolve();
     });
 
@@ -4226,7 +4429,9 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     const renderPanel = (
-      onCancelQueuedPrompt: Parameters<typeof AgentSessionPanel>[0]["onCancelQueuedPrompt"],
+      onCancelQueuedPrompt: Parameters<
+        typeof AgentSessionPanel
+      >[0]["onCancelQueuedPrompt"],
     ) => (
       <AgentSessionPanel
         paneId="pane-1"
@@ -4268,7 +4473,9 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Cancel queued prompt" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Cancel queued prompt" }),
+      );
       await Promise.resolve();
     });
 
@@ -4334,7 +4541,6 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent("new prompt");
     expect(screen.getByRole("tooltip")).not.toHaveTextContent("old prompt");
   });
-
 });
 
 describe("getAdjustedVirtualizedScrollTopForHeightChange", () => {
@@ -4532,11 +4738,7 @@ describe("getScrollContainerBottomGap", () => {
   // "clientHeight" | "scrollHeight" | "scrollTop">` for exactly this
   // reason, so the boundary tests can pin behavior without touching
   // jsdom geometry.
-  function node(
-    scrollHeight: number,
-    clientHeight: number,
-    scrollTop: number,
-  ) {
+  function node(scrollHeight: number, clientHeight: number, scrollTop: number) {
     return { scrollHeight, clientHeight, scrollTop };
   }
 
@@ -4557,11 +4759,7 @@ describe("getScrollContainerBottomGap", () => {
 });
 
 describe("isScrollContainerNearBottom", () => {
-  function node(
-    scrollHeight: number,
-    clientHeight: number,
-    scrollTop: number,
-  ) {
+  function node(scrollHeight: number, clientHeight: number, scrollTop: number) {
     return { scrollHeight, clientHeight, scrollTop };
   }
 

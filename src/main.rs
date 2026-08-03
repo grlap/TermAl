@@ -651,6 +651,7 @@ include!("state_accessors.rs");
 include!("state_boot.rs");
 include!("state_inner.rs");
 include!("delegations.rs");
+include!("delegation_result_parser.rs");
 include!("ids.rs");
 include!("app_boot.rs");
 include!("telegram_settings.rs");

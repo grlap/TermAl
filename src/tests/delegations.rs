@@ -65,6 +65,33 @@ fn delegation_prompt_marker_stays_in_sync_with_review_code_command() {
 }
 
 #[test]
+fn delegation_summary_serializes_the_result_parser_version() {
+    let record = DelegationRecord {
+        id: "delegation-summary-parser-version".to_owned(),
+        parent_session_id: "session-parent".to_owned(),
+        child_session_id: "session-child".to_owned(),
+        mode: DelegationMode::Reviewer,
+        status: DelegationStatus::Completed,
+        title: "Parser version".to_owned(),
+        prompt: "/review-code".to_owned(),
+        cwd: "/tmp/termal-parser-version".to_owned(),
+        agent: Agent::Codex,
+        model: None,
+        write_policy: DelegationWritePolicy::ReadOnly,
+        created_at: stamp_now(),
+        started_at: Some(stamp_now()),
+        completed_at: Some(stamp_now()),
+        result: None,
+        result_parser_version: 7,
+    };
+
+    let summary = delegation_summary_from_record(&record);
+    let json = serde_json::to_value(summary).expect("summary should serialize");
+
+    assert_eq!(json["resultParserVersion"], 7);
+}
+
+#[test]
 fn delegation_prompt_tells_child_to_fail_fast_on_blocking_tooling() {
     let record = DelegationRecord {
         id: "delegation-tooling-test".to_owned(),

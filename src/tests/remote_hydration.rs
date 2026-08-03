@@ -2315,6 +2315,7 @@ fn remote_delegation_delta_advances_revision_without_local_record() {
         created_at: "2026-04-05 10:00:00".to_owned(),
         started_at: Some("2026-04-05 10:00:01".to_owned()),
         completed_at: None,
+        result_parser_version: 0,
         result: None,
     };
     let result = DelegationResultSummary {

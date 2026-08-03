@@ -20,6 +20,10 @@ export type MessageStackScrollWriteDetail = {
   scrollSource?: MessageStackScrollWriteSource;
 };
 
+type MessageStackBottomRepinRequestDetail = {
+  authorityPresent: boolean;
+};
+
 // Shared seam between pane-owned transcript scroll intent and the virtualizer's
 // reconciliation path. Producers normally dispatch this immediately after any
 // direct message-stack `scrollTop` / `scrollTo` write. `bottom_pin` tells the
@@ -51,5 +55,14 @@ export function notifyMessageStackScrollWrite(
 // handles the request through its scroll authority, including explicit
 // tail-follow intent, saved pane position, and virtualizer notification.
 export function requestMessageStackBottomRepin(node: HTMLElement) {
-  node.dispatchEvent(new Event(MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT));
+  const detail: MessageStackBottomRepinRequestDetail = {
+    authorityPresent: false,
+  };
+  node.dispatchEvent(
+    new CustomEvent<MessageStackBottomRepinRequestDetail>(
+      MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
+      { detail },
+    ),
+  );
+  return detail.authorityPresent;
 }

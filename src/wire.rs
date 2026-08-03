@@ -1107,6 +1107,8 @@ struct DelegationSummary {
     started_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     completed_at: Option<String>,
+    #[serde(default)]
+    result_parser_version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     result: Option<DelegationResultSummary>,
 }

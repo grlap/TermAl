@@ -172,6 +172,7 @@ export function useConversationOverviewController({
   useEffect(() => {
     if (!isActive || !shouldRender) {
       cancelOverviewRefreshTimer();
+      overviewRequestIdRef.current += 1;
       overviewRefreshBurstStartedAtRef.current = null;
       overviewRequestSessionIdRef.current = null;
       setOverview(null);

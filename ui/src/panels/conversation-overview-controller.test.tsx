@@ -38,7 +38,9 @@ function overview(stamp = 1): SessionOverviewResponse {
 }
 
 function controllerProps(
-  overrides: Partial<Parameters<typeof useConversationOverviewController>[0]> = {},
+  overrides: Partial<
+    Parameters<typeof useConversationOverviewController>[0]
+  > = {},
 ) {
   return {
     isActive: true,
@@ -243,6 +245,29 @@ describe("useConversationOverviewController", () => {
       }),
     );
     expect(result.current.railPortalTarget).toBeNull();
+    expect(result.current.shouldRenderRail).toBe(false);
+  });
+
+  it("ignores an overview response that resolves after deactivation", async () => {
+    let resolveOverview: ((value: SessionOverviewResponse) => void) | null =
+      null;
+    fetchSessionOverview.mockImplementationOnce(
+      () =>
+        new Promise<SessionOverviewResponse>((resolve) => {
+          resolveOverview = resolve;
+        }),
+    );
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      { initialProps: controllerProps() },
+    );
+
+    await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(1));
+    rerender(controllerProps({ isActive: false }));
+    act(() => resolveOverview?.(overview()));
+    await act(async () => Promise.resolve());
+
+    expect(result.current.overview).toBeNull();
     expect(result.current.shouldRenderRail).toBe(false);
   });
 

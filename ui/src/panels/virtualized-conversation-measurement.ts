@@ -64,29 +64,50 @@ export function pageMatchesMeasurement(
   );
 }
 
-export function buildMessagePages(messages: Message[]) {
+export function pageExtendsMountedMeasurement(
+  page: MessagePage,
+  identity: PageMeasurementIdentity | undefined,
+) {
+  return (
+    identity !== undefined &&
+    page.hasTrailingGap === identity.hasTrailingGap &&
+    identity.messages.length < page.messages.length &&
+    identity.messages.every(
+      (message, index) =>
+        message.id === page.messages[index]?.id &&
+        message.type === page.messages[index]?.type,
+    )
+  );
+}
+
+export function buildMessagePages(
+  messages: Message[],
+  messageStartIndex = 0,
+) {
   const pages: MessagePage[] = [];
-  for (
-    let startIndex = 0;
-    startIndex < messages.length;
-    startIndex += VIRTUALIZED_MESSAGES_PER_PAGE
-  ) {
+  for (let startIndex = 0; startIndex < messages.length; ) {
+    const globalStartIndex = messageStartIndex + startIndex;
+    const remainingInGlobalPage =
+      VIRTUALIZED_MESSAGES_PER_PAGE -
+      (globalStartIndex % VIRTUALIZED_MESSAGES_PER_PAGE);
     const endIndex = Math.min(
-      startIndex + VIRTUALIZED_MESSAGES_PER_PAGE,
+      startIndex + remainingInGlobalPage,
       messages.length,
     );
+    const globalEndIndex = messageStartIndex + endIndex;
     const pageMessages = messages.slice(startIndex, endIndex);
     const firstMessageId = pageMessages[0]?.id ?? `page-${startIndex}`;
     const lastMessageId =
       pageMessages[pageMessages.length - 1]?.id ?? firstMessageId;
     pages.push({
-      key: `${startIndex}:${endIndex}:${firstMessageId}:${lastMessageId}`,
+      key: `${globalStartIndex}:${globalEndIndex}:${firstMessageId}:${lastMessageId}`,
       pageIndex: pages.length,
       startIndex,
       endIndex,
       hasTrailingGap: endIndex < messages.length,
       messages: pageMessages,
     });
+    startIndex = endIndex;
   }
   return pages;
 }
