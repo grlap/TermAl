@@ -301,17 +301,16 @@ fn claude_bash_literal_for_loop_is_read_only(command: &str, cwd: &str) -> bool {
     let Some(first_body) = claude_bash_strip_keyword(&clauses[1], "do") else {
         return false;
     };
-    let mut body = Vec::new();
-    if !first_body.is_empty() {
-        body.push(first_body);
+    if first_body.is_empty() {
+        return false;
     }
+    let mut body = vec![first_body];
     body.extend(
         clauses[2..clauses.len() - 1]
             .iter()
             .map(String::as_str),
     );
-    if body.is_empty()
-        || body.len() > MAX_BODY_COMMANDS
+    if body.len() > MAX_BODY_COMMANDS
         || body.iter().any(|command| command.trim().is_empty())
     {
         return false;
@@ -433,7 +432,12 @@ fn claude_expand_bash_loop_variable(
                 expanded.push(characters.next()?);
             }
             '\'' => {
-                quote = Some(character);
+                // A single quote inside an active double-quoted string is a
+                // literal character in Bash; it must not replace that quote
+                // state and swallow the later closing double quote.
+                if quote.is_none() {
+                    quote = Some(character);
+                }
                 expanded.push(character);
             }
             '"' => {

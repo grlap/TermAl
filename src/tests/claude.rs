@@ -678,11 +678,27 @@ fn claude_bash_is_read_only_for_test(command: &str, cwd: &str) -> bool {
 
 #[test]
 fn claude_read_only_auto_approve_allows_literal_read_only_for_loop() {
-    let command = "for f in architecture core legal platform security testing; do echo \"=== $f ===\"; head -30 /Users/greg/GitHub/Personal/rincon-common/.claude/reviewers/$f.md; done";
+    let cwd = "/Users/greg/GitHub/Personal/rincon-common";
+    for command in [
+        "for f in architecture core legal platform security testing; do echo \"=== $f ===\"; head -30 /Users/greg/GitHub/Personal/rincon-common/.claude/reviewers/$f.md; done",
+        "for f in architecture core; do echo \"${f}\"; done",
+        "for f in architecture; do echo \"it's $f\"; done",
+        "for f in architecture; do echo '$f'; done",
+        "for f in architecture; do cd .; git status; echo $f; done",
+    ] {
+        assert!(
+            claude_bash_is_read_only_for_test(command, cwd),
+            "a bounded loop over literal values should be approved when every expanded body command is read-only: {command}"
+        );
+    }
 
+    let maximum_body = std::iter::repeat_n("echo $f", 16)
+        .collect::<Vec<_>>()
+        .join("; ");
+    let command = format!("for f in architecture; do {maximum_body}; done");
     assert!(
-        claude_bash_is_read_only_for_test(command, "/Users/greg/GitHub/Personal/rincon-common"),
-        "a bounded loop over literal values should be approved when every expanded body command is read-only"
+        claude_bash_is_read_only_for_test(&command, cwd),
+        "literal loops should accept the documented body-command limit"
     );
 }
 
@@ -700,6 +716,7 @@ fn claude_read_only_auto_approve_denies_unsafe_for_loop_shapes() {
         "for f in architecture; do echo $f; done; touch victim",
         "for f in architecture; do for g in core; do echo $g; done; done",
         "for f in architecture; do echo ${f; done",
+        "for f in architecture; do; echo $f; done",
     ] {
         assert!(
             !claude_bash_is_read_only_for_test(command, cwd),
@@ -715,6 +732,15 @@ fn claude_read_only_auto_approve_denies_unsafe_for_loop_shapes() {
     assert!(
         !claude_bash_is_read_only_for_test(&command, cwd),
         "literal loops must retain an explicit expansion bound"
+    );
+
+    let too_many_body_commands = std::iter::repeat_n("echo $f", 17)
+        .collect::<Vec<_>>()
+        .join("; ");
+    let command = format!("for f in architecture; do {too_many_body_commands}; done");
+    assert!(
+        !claude_bash_is_read_only_for_test(&command, cwd),
+        "literal loops must retain an explicit body-command bound"
     );
 }
 
