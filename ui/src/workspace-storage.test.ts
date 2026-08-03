@@ -140,6 +140,7 @@ describe("workspace storage", () => {
               },
             ],
             activeTabId: "tab-source",
+            tabVisitHistory: ["tab-source", "tab-session"],
             activeSessionId: "session-1",
             viewMode: "source",
             lastSessionViewMode: "session",
@@ -196,7 +197,8 @@ describe("workspace storage", () => {
                   sectionId: "unstaged",
                   workdir: "/repo",
                 },
-                gitDiffRequestKey: "git-preview:pane-diff:/repo:unstaged::README.md",
+                gitDiffRequestKey:
+                  "git-preview:pane-diff:/repo:unstaged::README.md",
                 language: "markdown",
                 originSessionId: "session-1",
                 summary: "Updated README",
@@ -215,10 +217,13 @@ describe("workspace storage", () => {
 
     persistWorkspaceLayout(workspaceViewId, layout);
 
-    const stored = window.localStorage.getItem(`${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`);
+    const stored = window.localStorage.getItem(
+      `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+    );
     expect(stored).not.toContain("secret before");
     expect(stored).not.toContain("secret after");
-    const parsedTab = getStoredWorkspaceLayout(workspaceViewId)?.workspace.panes[0]?.tabs[0];
+    const parsedTab =
+      getStoredWorkspaceLayout(workspaceViewId)?.workspace.panes[0]?.tabs[0];
     expect(parsedTab?.id).toBe("tab-diff");
     expect(parsedTab).toEqual(
       expect.not.objectContaining({
@@ -731,6 +736,90 @@ describe("workspace storage", () => {
       },
     });
   });
+
+  it.each([
+    {
+      label: "duplicate ids",
+      activeTabId: "tab-a",
+      tabVisitHistory: ["tab-a", "tab-a"],
+    },
+    {
+      label: "unknown ids",
+      activeTabId: "tab-a",
+      tabVisitHistory: ["tab-a", "tab-missing"],
+    },
+    {
+      label: "non-string entries",
+      activeTabId: "tab-a",
+      tabVisitHistory: ["tab-a", 42],
+    },
+    {
+      label: "a non-active first entry",
+      activeTabId: "tab-a",
+      tabVisitHistory: ["tab-b", "tab-a"],
+    },
+    {
+      label: "a null active tab with non-empty history",
+      activeTabId: null,
+      tabVisitHistory: ["tab-a"],
+    },
+    {
+      label: "an active tab with empty history",
+      activeTabId: "tab-a",
+      tabVisitHistory: [],
+    },
+  ])(
+    "drops tab visit history with $label",
+    ({ activeTabId, tabVisitHistory }) => {
+      const malformed = {
+        controlPanelSide: "left",
+        workspace: {
+          root: {
+            type: "pane",
+            paneId: "pane-a",
+          },
+          panes: [
+            {
+              id: "pane-a",
+              tabs: [
+                {
+                  id: "tab-a",
+                  kind: "controlPanel",
+                  originSessionId: null,
+                },
+                {
+                  id: "tab-b",
+                  kind: "controlPanel",
+                  originSessionId: null,
+                },
+              ],
+              activeTabId,
+              tabVisitHistory,
+              activeSessionId: null,
+              viewMode: "controlPanel",
+              lastSessionViewMode: "session",
+              sourcePath: null,
+            },
+          ],
+          activePaneId: "pane-a",
+        },
+      };
+
+      window.localStorage.setItem(
+        `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+        JSON.stringify(malformed),
+      );
+
+      const restored = getStoredWorkspaceLayout(workspaceViewId);
+
+      expect(restored?.workspace.panes[0]).toMatchObject({
+        id: "pane-a",
+      });
+      expect(restored?.workspace.panes[0]?.tabs).toHaveLength(2);
+      expect(restored?.workspace.panes[0]?.tabVisitHistory).toBeUndefined();
+    },
+  );
+
   it("rejects malformed canvas tabs", () => {
     const malformed = {
       controlPanelSide: "left",

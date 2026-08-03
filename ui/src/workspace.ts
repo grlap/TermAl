@@ -35,6 +35,11 @@ import {
   createSourceTab,
   createTerminalTab,
 } from "./workspace-tabs";
+import {
+  selectActiveTabAfterRemoval,
+  withActivatedPaneTab,
+  withPrunedPaneTabVisitHistory,
+} from "./workspace-tab-history";
 export {
   createCanvasTab,
   createControlPanelTab,
@@ -488,7 +493,12 @@ export function reconcileWorkspaceState(
     });
     const activeTabId = tabs.some((tab) => tab.id === pane.activeTabId)
       ? pane.activeTabId
-      : (tabs[0]?.id ?? null);
+      : selectActiveTabAfterRemoval(
+          pane,
+          tabs,
+          pane.activeTabId,
+          tabs[0]?.id ?? null,
+        );
     const activeSessionId =
       pane.activeSessionId && availableSessionIds.has(pane.activeSessionId)
         ? pane.activeSessionId
@@ -853,7 +863,8 @@ export function openMailboxInWorkspaceState(
   originProjectId: string | null = null,
 ): WorkspaceState {
   const normalizedMailboxId = normalizeWorkspaceIdentifier(mailboxId);
-  const normalizedOriginSessionId = normalizeWorkspaceIdentifier(originSessionId);
+  const normalizedOriginSessionId =
+    normalizeWorkspaceIdentifier(originSessionId);
   if (!normalizedMailboxId || !normalizedOriginSessionId) {
     return workspace;
   }
@@ -862,20 +873,24 @@ export function openMailboxInWorkspaceState(
   if (existing) {
     const panes = workspace.panes.map((pane) =>
       pane.id === existing.paneId
-        ? syncPaneState({
-            ...pane,
-            tabs: pane.tabs.map((tab) =>
-              tab.id === existing.tab.id && tab.kind === "mailbox"
-                ? {
-                    ...tab,
-                    originSessionId: normalizedOriginSessionId,
-                    ...projectOriginProps(normalizeWorkspaceIdentifier(originProjectId)),
-                    refreshToken: crypto.randomUUID(),
-                  }
-                : tab,
+        ? syncPaneState(
+            withActivatedPaneTab(
+              pane,
+              existing.tab.id,
+              pane.tabs.map((tab) =>
+                tab.id === existing.tab.id && tab.kind === "mailbox"
+                  ? {
+                      ...tab,
+                      originSessionId: normalizedOriginSessionId,
+                      ...projectOriginProps(
+                        normalizeWorkspaceIdentifier(originProjectId),
+                      ),
+                      refreshToken: crypto.randomUUID(),
+                    }
+                  : tab,
+              ),
             ),
-            activeTabId: existing.tab.id,
-          })
+          )
         : pane,
     );
     return {
@@ -887,7 +902,11 @@ export function openMailboxInWorkspaceState(
 
   return openTabInWorkspaceState(
     workspace,
-    createMailboxTab(normalizedMailboxId, normalizedOriginSessionId, originProjectId),
+    createMailboxTab(
+      normalizedMailboxId,
+      normalizedOriginSessionId,
+      originProjectId,
+    ),
     preferredPaneId,
   );
 }
@@ -902,22 +921,25 @@ export function openResponseBoardInWorkspaceState(
   if (existing) {
     const panes = workspace.panes.map((pane) =>
       pane.id === existing.paneId
-        ? syncPaneState({
-            ...pane,
-            tabs: pane.tabs.map((tab) =>
-              tab.id === existing.tab.id && tab.kind === "responseBoard"
-                ? {
-                    ...tab,
-                    originSessionId: normalizeWorkspaceIdentifier(originSessionId),
-                    ...projectOriginProps(
-                      normalizeWorkspaceIdentifier(originProjectId),
-                    ),
-                    refreshToken: crypto.randomUUID(),
-                  }
-                : tab,
+        ? syncPaneState(
+            withActivatedPaneTab(
+              pane,
+              existing.tab.id,
+              pane.tabs.map((tab) =>
+                tab.id === existing.tab.id && tab.kind === "responseBoard"
+                  ? {
+                      ...tab,
+                      originSessionId:
+                        normalizeWorkspaceIdentifier(originSessionId),
+                      ...projectOriginProps(
+                        normalizeWorkspaceIdentifier(originProjectId),
+                      ),
+                      refreshToken: crypto.randomUUID(),
+                    }
+                  : tab,
+              ),
             ),
-            activeTabId: existing.tab.id,
-          })
+          )
         : pane,
     );
     return { ...workspace, panes, activePaneId: existing.paneId };
@@ -1477,10 +1499,11 @@ export function activatePane(
           ? tabId
           : (pane.activeTabId ?? pane.tabs[0]?.id ?? null);
 
-      return syncPaneState({
-        ...pane,
-        activeTabId,
-      });
+      return syncPaneState(
+        activeTabId === pane.activeTabId
+          ? pane
+          : withActivatedPaneTab(pane, activeTabId),
+      );
     }),
     activePaneId: paneId,
   };
@@ -1517,6 +1540,16 @@ export function closeWorkspaceTab(
     };
   }
 
+  const adjacentTabId =
+    nextTabs[Math.min(Math.max(closedTabIndex, 0), nextTabs.length - 1)]?.id ??
+    null;
+  const nextActiveTabId = selectActiveTabAfterRemoval(
+    pane,
+    nextTabs,
+    tabId,
+    adjacentTabId,
+  );
+
   return {
     ...workspace,
     panes: workspace.panes.map((candidate) => {
@@ -1524,16 +1557,9 @@ export function closeWorkspaceTab(
         return candidate;
       }
 
-      return syncPaneState({
-        ...candidate,
-        tabs: nextTabs,
-        activeTabId:
-          candidate.activeTabId === tabId
-            ? (nextTabs[
-                Math.min(Math.max(closedTabIndex, 0), nextTabs.length - 1)
-              ]?.id ?? null)
-            : candidate.activeTabId,
-      });
+      return syncPaneState(
+        withActivatedPaneTab(candidate, nextActiveTabId, nextTabs),
+      );
     }),
     activePaneId: paneId,
   };
@@ -1558,14 +1584,19 @@ export function splitPane(
       return candidate;
     }
 
-    return syncPaneState({
-      ...candidate,
-      tabs: candidate.tabs.filter((tab) => tab.id !== tabToMove.id),
-      activeTabId:
-        candidate.activeTabId === tabToMove.id
-          ? (candidate.tabs.find((tab) => tab.id !== tabToMove.id)?.id ?? null)
-          : candidate.activeTabId,
-    });
+    const remainingTabs = candidate.tabs.filter(
+      (tab) => tab.id !== tabToMove.id,
+    );
+    const nextActiveTabId = selectActiveTabAfterRemoval(
+      candidate,
+      remainingTabs,
+      tabToMove.id,
+      remainingTabs[0]?.id ?? null,
+    );
+
+    return syncPaneState(
+      withActivatedPaneTab(candidate, nextActiveTabId, remainingTabs),
+    );
   });
 
   return {
@@ -1917,11 +1948,13 @@ export function addWorkspaceTabToPane(
         return pane;
       }
 
-      return syncPaneState({
-        ...pane,
-        tabs: insertTabAtIndex(pane.tabs, tab, tabIndex ?? pane.tabs.length),
-        activeTabId: tab.id,
-      });
+      return syncPaneState(
+        withActivatedPaneTab(
+          pane,
+          tab.id,
+          insertTabAtIndex(pane.tabs, tab, tabIndex ?? pane.tabs.length),
+        ),
+      );
     }),
     activePaneId: paneId,
   };
@@ -1950,13 +1983,15 @@ function replaceActiveViewerTabInPane(
         return candidate;
       }
 
-      return syncPaneState({
-        ...candidate,
-        tabs: candidate.tabs.map((entry) =>
-          entry.id === activeTab.id ? tab : entry,
+      return syncPaneState(
+        withActivatedPaneTab(
+          candidate,
+          tab.id,
+          candidate.tabs.map((entry) =>
+            entry.id === activeTab.id ? tab : entry,
+          ),
         ),
-        activeTabId: tab.id,
-      });
+      );
     }),
     activePaneId: paneId,
   };
@@ -2257,9 +2292,13 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     pane.tabs.find((tab) => tab.id === pane.activeTabId) ??
     pane.tabs[0] ??
     null;
+  const paneWithVisitHistory = withPrunedPaneTabVisitHistory(
+    pane,
+    activeTab?.id ?? null,
+  );
   if (!activeTab) {
     return {
-      ...pane,
+      ...paneWithVisitHistory,
       activeTabId: null,
       activeSessionId: null,
       viewMode: pane.lastSessionViewMode,
@@ -2275,7 +2314,7 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
       pane.lastSessionViewMode,
     );
     return {
-      ...pane,
+      ...paneWithVisitHistory,
       activeTabId: activeTab.id,
       activeSessionId: activeTab.sessionId,
       viewMode: nextSessionViewMode,
@@ -2286,7 +2325,7 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
 
   if (activeTab.kind === "source") {
     return {
-      ...pane,
+      ...paneWithVisitHistory,
       activeTabId: activeTab.id,
       activeSessionId: resolveOriginSessionId(
         activeTab.originSessionId,
@@ -2300,7 +2339,7 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
 
   if (activeTab.kind === "canvas") {
     return {
-      ...pane,
+      ...paneWithVisitHistory,
       activeTabId: activeTab.id,
       activeSessionId: resolveOriginSessionId(
         activeTab.originSessionId,
@@ -2314,7 +2353,7 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
 
   if (activeTab.kind === "orchestratorCanvas") {
     return {
-      ...pane,
+      ...paneWithVisitHistory,
       activeTabId: activeTab.id,
       activeSessionId: resolveOriginSessionId(
         activeTab.originSessionId,
@@ -2328,7 +2367,7 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
 
   if (activeTab.kind === "filesystem") {
     return {
-      ...pane,
+      ...paneWithVisitHistory,
       activeTabId: activeTab.id,
       activeSessionId: resolveOriginSessionId(
         activeTab.originSessionId,
@@ -2346,12 +2385,12 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     activeTab.kind === "sessionList" ||
     activeTab.kind === "projectList"
   ) {
-    return syncOriginOnlyPaneState(pane, activeTab);
+    return syncOriginOnlyPaneState(paneWithVisitHistory, activeTab);
   }
 
   if (activeTab.kind === "instructionDebugger") {
     return {
-      ...pane,
+      ...paneWithVisitHistory,
       activeTabId: activeTab.id,
       activeSessionId: resolveOriginSessionId(
         activeTab.originSessionId,
@@ -2365,7 +2404,7 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
 
   if (activeTab.kind === "terminal") {
     return {
-      ...pane,
+      ...paneWithVisitHistory,
       activeTabId: activeTab.id,
       activeSessionId: resolveOriginSessionId(
         activeTab.originSessionId,
@@ -2379,7 +2418,7 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
 
   if (activeTab.kind === "mailbox") {
     return {
-      ...pane,
+      ...paneWithVisitHistory,
       activeTabId: activeTab.id,
       activeSessionId: resolveOriginSessionId(
         activeTab.originSessionId,
@@ -2393,7 +2432,7 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
 
   if (activeTab.kind === "responseBoard") {
     return {
-      ...pane,
+      ...paneWithVisitHistory,
       activeTabId: activeTab.id,
       activeSessionId: resolveOriginSessionId(
         activeTab.originSessionId,
@@ -2406,7 +2445,7 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
   }
 
   return {
-    ...pane,
+    ...paneWithVisitHistory,
     activeTabId: activeTab.id,
     activeSessionId: resolveOriginSessionId(
       activeTab.originSessionId,
@@ -2535,7 +2574,8 @@ function findMailboxTab(workspace: WorkspaceState, mailboxId: string) {
     const tab = pane.tabs.find(
       (candidate): candidate is WorkspaceMailboxTab =>
         candidate.kind === "mailbox" &&
-        normalizeWorkspaceIdentifier(candidate.mailboxId) === normalizedMailboxId,
+        normalizeWorkspaceIdentifier(candidate.mailboxId) ===
+          normalizedMailboxId,
     );
     if (tab) {
       return { paneId: pane.id, tab };

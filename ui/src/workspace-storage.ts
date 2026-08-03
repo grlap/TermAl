@@ -60,7 +60,9 @@ export function ensureWorkspaceViewId(): string {
   }
 
   const url = new URL(window.location.href);
-  const existing = normalizeWorkspaceViewId(url.searchParams.get(WORKSPACE_VIEW_QUERY_PARAM));
+  const existing = normalizeWorkspaceViewId(
+    url.searchParams.get(WORKSPACE_VIEW_QUERY_PARAM),
+  );
   if (existing) {
     return existing;
   }
@@ -71,7 +73,9 @@ export function ensureWorkspaceViewId(): string {
   return generated;
 }
 
-export function getStoredWorkspaceLayout(workspaceViewId: string): StoredWorkspaceLayout | null {
+export function getStoredWorkspaceLayout(
+  workspaceViewId: string,
+): StoredWorkspaceLayout | null {
   if (typeof window === "undefined") {
     return null;
   }
@@ -80,7 +84,10 @@ export function getStoredWorkspaceLayout(workspaceViewId: string): StoredWorkspa
   return parseStoredWorkspaceLayout(window.localStorage.getItem(storageKey));
 }
 
-export function persistWorkspaceLayout(workspaceViewId: string, layout: StoredWorkspaceLayout) {
+export function persistWorkspaceLayout(
+  workspaceViewId: string,
+  layout: StoredWorkspaceLayout,
+) {
   if (typeof window === "undefined") {
     return;
   }
@@ -106,13 +113,17 @@ export function deleteStoredWorkspaceLayout(workspaceViewId: string) {
   window.localStorage.removeItem(getWorkspaceLayoutStorageKey(workspaceViewId));
 }
 
-export function parseStoredWorkspaceLayout(raw: string | null | undefined): StoredWorkspaceLayout | null {
+export function parseStoredWorkspaceLayout(
+  raw: string | null | undefined,
+): StoredWorkspaceLayout | null {
   if (!raw) {
     return null;
   }
 
   try {
-    const parsed = normalizeStoredWorkspaceLayoutPreferences(JSON.parse(raw));
+    const parsed = normalizeStoredWorkspaceTabVisitHistories(
+      normalizeStoredWorkspaceLayoutPreferences(JSON.parse(raw)),
+    );
     if (!isStoredWorkspaceLayout(parsed)) {
       return null;
     }
@@ -126,6 +137,44 @@ export function parseStoredWorkspaceLayout(raw: string | null | undefined): Stor
   } catch {
     return null;
   }
+}
+
+function normalizeStoredWorkspaceTabVisitHistories(value: unknown): unknown {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.workspace) ||
+    !Array.isArray(value.workspace.panes)
+  ) {
+    return value;
+  }
+
+  let changed = false;
+  const panes = value.workspace.panes.map((pane) => {
+    if (
+      !isRecord(pane) ||
+      typeof pane.tabVisitHistory === "undefined" ||
+      hasValidPaneTabVisitHistory(pane)
+    ) {
+      return pane;
+    }
+
+    const normalizedPane = { ...pane };
+    delete normalizedPane.tabVisitHistory;
+    changed = true;
+    return normalizedPane;
+  });
+
+  if (!changed) {
+    return value;
+  }
+
+  return {
+    ...value,
+    workspace: {
+      ...value.workspace,
+      panes,
+    },
+  };
 }
 
 function normalizeStoredWorkspaceLayoutPreferences(value: unknown): unknown {
@@ -145,12 +194,17 @@ function normalizeStoredWorkspaceLayoutPreferences(value: unknown): unknown {
   return normalized;
 }
 
-function isStoredWorkspaceLayout(value: unknown): value is StoredWorkspaceLayout {
+function isStoredWorkspaceLayout(
+  value: unknown,
+): value is StoredWorkspaceLayout {
   if (!isRecord(value)) {
     return false;
   }
 
-  if (!isControlPanelSide(value.controlPanelSide) || !isWorkspaceState(value.workspace)) {
+  if (
+    !isControlPanelSide(value.controlPanelSide) ||
+    !isWorkspaceState(value.workspace)
+  ) {
     return false;
   }
 
@@ -193,13 +247,22 @@ function isStoredWorkspaceLayout(value: unknown): value is StoredWorkspaceLayout
   }
 
   // Numeric UI settings are optional - accept absent, reject non-finite
-  if (value.fontSizePx !== undefined && !isOptionalFiniteNumber(value.fontSizePx)) {
+  if (
+    value.fontSizePx !== undefined &&
+    !isOptionalFiniteNumber(value.fontSizePx)
+  ) {
     return false;
   }
-  if (value.editorFontSizePx !== undefined && !isOptionalFiniteNumber(value.editorFontSizePx)) {
+  if (
+    value.editorFontSizePx !== undefined &&
+    !isOptionalFiniteNumber(value.editorFontSizePx)
+  ) {
     return false;
   }
-  if (value.densityPercent !== undefined && !isOptionalFiniteNumber(value.densityPercent)) {
+  if (
+    value.densityPercent !== undefined &&
+    !isOptionalFiniteNumber(value.densityPercent)
+  ) {
     return false;
   }
 
@@ -222,7 +285,11 @@ function normalizeWorkspaceViewId(value: string | null | undefined) {
 }
 
 function isWorkspaceState(value: unknown): value is WorkspaceState {
-  if (!isRecord(value) || !Array.isArray(value.panes) || !isNullableString(value.activePaneId)) {
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value.panes) ||
+    !isNullableString(value.activePaneId)
+  ) {
     return false;
   }
 
@@ -257,6 +324,7 @@ function isWorkspacePane(value: unknown): value is WorkspacePane {
   return (
     isNullableString(value.activeTabId) &&
     (value.activeTabId === null || tabIds.has(value.activeTabId)) &&
+    hasValidPaneTabVisitHistory(value) &&
     isNullableString(value.activeSessionId) &&
     isPaneViewMode(value.viewMode) &&
     isSessionPaneViewMode(value.lastSessionViewMode) &&
@@ -264,7 +332,36 @@ function isWorkspacePane(value: unknown): value is WorkspacePane {
   );
 }
 
-function isWorkspaceNode(value: unknown, paneIds: ReadonlySet<string>): value is WorkspaceNode {
+// Keep this persisted boundary contract aligned with the history producers in
+// `workspace-tab-history.ts`.
+function hasValidPaneTabVisitHistory(pane: Record<string, unknown>): boolean {
+  const tabVisitHistory = pane.tabVisitHistory;
+  if (typeof tabVisitHistory === "undefined") {
+    return true;
+  }
+  if (!Array.isArray(pane.tabs)) {
+    return false;
+  }
+
+  const tabIds = new Set(
+    pane.tabs.flatMap((tab) =>
+      isRecord(tab) && isString(tab.id) ? [tab.id] : [],
+    ),
+  );
+  return (
+    Array.isArray(tabVisitHistory) &&
+    tabVisitHistory.every((tabId) => isString(tabId) && tabIds.has(tabId)) &&
+    new Set(tabVisitHistory).size === tabVisitHistory.length &&
+    (pane.activeTabId === null
+      ? tabVisitHistory.length === 0
+      : tabVisitHistory[0] === pane.activeTabId)
+  );
+}
+
+function isWorkspaceNode(
+  value: unknown,
+  paneIds: ReadonlySet<string>,
+): value is WorkspaceNode {
   if (!isRecord(value) || !isString(value.type)) {
     return false;
   }
@@ -287,7 +384,12 @@ function isWorkspaceNode(value: unknown, paneIds: ReadonlySet<string>): value is
 }
 
 function isValidSplitRatio(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 && value < 1;
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value > 0 &&
+    value < 1
+  );
 }
 
 function isNullableString(value: unknown): value is string | null {

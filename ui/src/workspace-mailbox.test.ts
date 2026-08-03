@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { openMailboxInWorkspaceState, type WorkspaceState } from "./workspace";
+import {
+  activatePane,
+  openMailboxInWorkspaceState,
+  type WorkspaceState,
+} from "./workspace";
 import { isWorkspaceTab } from "./workspace-tab-validation";
 
 function workspace(): WorkspaceState {
@@ -61,6 +65,7 @@ describe("mailbox workspace tabs", () => {
     );
     expect(mailboxTab).toBeTruthy();
 
+    const returnedToSession = activatePane(opened, "pane-1", "session-tab");
     const afterThreeCards = [1, 2].reduce(
       (current) =>
         openMailboxInWorkspaceState(
@@ -70,7 +75,7 @@ describe("mailbox workspace tabs", () => {
           "session-codex",
           "project-1",
         ),
-      opened,
+      returnedToSession,
     );
 
     expect(
@@ -79,6 +84,10 @@ describe("mailbox workspace tabs", () => {
       ),
     ).toHaveLength(1);
     expect(afterThreeCards.panes[0]?.activeTabId).toBe(mailboxTab?.id);
+    expect(afterThreeCards.panes[0]?.tabVisitHistory).toEqual([
+      mailboxTab?.id,
+      "session-tab",
+    ]);
     const refreshedMailboxTab = afterThreeCards.panes[0]?.tabs.find(
       (tab) => tab.kind === "mailbox",
     );

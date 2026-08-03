@@ -194,6 +194,8 @@ export type WorkspacePane = {
   id: string;
   tabs: WorkspaceTab[];
   activeTabId: string | null;
+  /** Most-recently visited tab ids, with the active tab first. */
+  tabVisitHistory?: string[];
   activeSessionId: string | null;
   viewMode: PaneViewMode;
   lastSessionViewMode: SessionPaneViewMode;

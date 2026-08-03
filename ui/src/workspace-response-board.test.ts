@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  activatePane,
   openResponseBoardInWorkspaceState,
   type WorkspaceState,
 } from "./workspace";
@@ -28,7 +29,9 @@ function splitWorkspace(): WorkspaceState {
       },
       {
         id: "pane-board",
-        tabs: [{ id: "session-tab-2", kind: "session", sessionId: "session-2" }],
+        tabs: [
+          { id: "session-tab-2", kind: "session", sessionId: "session-2" },
+        ],
         activeTabId: "session-tab-2",
         activeSessionId: "session-2",
         viewMode: "session",
@@ -52,13 +55,18 @@ describe("response-board workspace tab", () => {
       pane.tabs.filter((tab) => tab.kind === "responseBoard"),
     );
     expect(boardTabs).toHaveLength(1);
-    expect(opened.panes.find((pane) => pane.id === "pane-board")?.viewMode).toBe(
-      "responseBoard",
-    );
+    expect(
+      opened.panes.find((pane) => pane.id === "pane-board")?.viewMode,
+    ).toBe("responseBoard");
     expect(isWorkspaceTab(boardTabs[0])).toBe(true);
 
-    const reopened = openResponseBoardInWorkspaceState(
+    const returnedToSession = activatePane(
       opened,
+      "pane-board",
+      "session-tab-2",
+    );
+    const reopened = openResponseBoardInWorkspaceState(
+      returnedToSession,
       "pane-session",
       "session-2",
       "project-2",
@@ -68,5 +76,8 @@ describe("response-board workspace tab", () => {
         pane.tabs.filter((tab) => tab.kind === "responseBoard"),
       ),
     ).toHaveLength(1);
+    expect(
+      reopened.panes.find((pane) => pane.id === "pane-board")?.tabVisitHistory,
+    ).toEqual([boardTabs[0]?.id, "session-tab-2"]);
   });
 });

@@ -245,6 +245,7 @@ function makePane(
   tabs: WorkspaceTab[],
   options?: {
     activeTabId?: string | null;
+    tabVisitHistory?: string[];
     activeSessionId?: string | null;
     viewMode?: WorkspacePane["viewMode"];
     lastSessionViewMode?: WorkspacePane["lastSessionViewMode"];
@@ -255,6 +256,9 @@ function makePane(
     id,
     tabs,
     activeTabId: options?.activeTabId ?? tabs[0]?.id ?? null,
+    ...(options?.tabVisitHistory
+      ? { tabVisitHistory: options.tabVisitHistory }
+      : {}),
     activeSessionId: options?.activeSessionId ?? firstSessionId(tabs),
     viewMode: options?.viewMode ?? "session",
     lastSessionViewMode: options?.lastSessionViewMode ?? "session",
@@ -1714,6 +1718,128 @@ describe("workspace helpers", () => {
     expect(next.panes[0].activeSessionId).toBe("session-c");
   });
 
+  it("closeWorkspaceTab returns to the most recently visited surviving tab", () => {
+    const initial = makeSinglePaneWorkspace(
+      makePane(
+        "pane-a",
+        [
+          makeSessionTab("tab-a", "session-a"),
+          makeSessionTab("tab-b", "session-b"),
+          makeSessionTab("tab-c", "session-c"),
+          makeSessionTab("tab-d", "session-d"),
+        ],
+        {
+          activeTabId: "tab-a",
+          activeSessionId: "session-a",
+        },
+      ),
+    );
+
+    const visitedC = activatePane(initial, "pane-a", "tab-c");
+    const visitedD = activatePane(visitedC, "pane-a", "tab-d");
+    const closedD = closeWorkspaceTab(visitedD, "pane-a", "tab-d");
+    const closedC = closeWorkspaceTab(closedD, "pane-a", "tab-c");
+
+    expect(closedD.panes[0].activeTabId).toBe("tab-c");
+    expect(closedD.panes[0].tabVisitHistory).toEqual(["tab-c", "tab-a"]);
+    expect(closedC.panes[0].activeTabId).toBe("tab-a");
+    expect(closedC.panes[0].activeSessionId).toBe("session-a");
+    expect(closedC.panes[0].tabVisitHistory).toEqual(["tab-a"]);
+  });
+
+  it("closeWorkspaceTab prunes inactive and stale history entries", () => {
+    const workspace = makeSinglePaneWorkspace(
+      makePane(
+        "pane-a",
+        [
+          makeSessionTab("tab-a", "session-a"),
+          makeSessionTab("tab-b", "session-b"),
+          makeSessionTab("tab-c", "session-c"),
+        ],
+        {
+          activeTabId: "tab-c",
+          activeSessionId: "session-c",
+          tabVisitHistory: ["tab-c", "tab-a", "tab-stale", "tab-b"],
+        },
+      ),
+    );
+
+    const next = closeWorkspaceTab(workspace, "pane-a", "tab-a");
+
+    expect(next.panes[0].activeTabId).toBe("tab-c");
+    expect(next.panes[0].tabVisitHistory).toEqual(["tab-c", "tab-b"]);
+  });
+
+  it("keeps tab visit history isolated per pane", () => {
+    const paneA = makePane(
+      "pane-a",
+      [
+        makeSessionTab("tab-a1", "session-a1"),
+        makeSessionTab("tab-a2", "session-a2"),
+        makeSessionTab("tab-a3", "session-a3"),
+      ],
+      { activeTabId: "tab-a1", activeSessionId: "session-a1" },
+    );
+    const paneB = makePane(
+      "pane-b",
+      [
+        makeSessionTab("tab-b1", "session-b1"),
+        makeSessionTab("tab-b2", "session-b2"),
+      ],
+      { activeTabId: "tab-b1", activeSessionId: "session-b1" },
+    );
+    const workspace: WorkspaceState = {
+      root: {
+        id: "split-root",
+        type: "split",
+        direction: "row",
+        ratio: 0.5,
+        first: { type: "pane", paneId: "pane-a" },
+        second: { type: "pane", paneId: "pane-b" },
+      },
+      panes: [paneA, paneB],
+      activePaneId: "pane-a",
+    };
+
+    const visitedA3 = activatePane(workspace, "pane-a", "tab-a3");
+    const visitedB2 = activatePane(visitedA3, "pane-b", "tab-b2");
+    const next = closeWorkspaceTab(visitedB2, "pane-a", "tab-a3");
+
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.activeTabId).toBe(
+      "tab-a1",
+    );
+    expect(
+      next.panes.find((pane) => pane.id === "pane-b")?.tabVisitHistory,
+    ).toEqual(["tab-b2", "tab-b1"]);
+  });
+
+  it("returns to the most recently visited tab when the active tab moves into a split", () => {
+    const workspace = makeSinglePaneWorkspace(
+      makePane(
+        "pane-a",
+        [
+          makeSessionTab("tab-a", "session-a"),
+          makeSessionTab("tab-b", "session-b"),
+          makeSessionTab("tab-c", "session-c"),
+        ],
+        {
+          activeTabId: "tab-c",
+          activeSessionId: "session-c",
+          tabVisitHistory: ["tab-c", "tab-b", "tab-a"],
+        },
+      ),
+    );
+
+    const next = splitPane(workspace, "pane-a", "row");
+    const sourcePane = next.panes.find((pane) => pane.id === "pane-a");
+    const splitPaneState = next.panes.find((pane) => pane.id !== "pane-a");
+
+    expect(sourcePane?.activeTabId).toBe("tab-b");
+    expect(sourcePane?.tabVisitHistory).toEqual(["tab-b", "tab-a"]);
+    expect(splitPaneState?.activeTabId).toBe("tab-c");
+    expect(splitPaneState?.tabVisitHistory).toBeUndefined();
+  });
+
   it("closeWorkspaceTab removes the pane when its last tab closes", () => {
     const next = closeWorkspaceTab(
       makeSinglePaneWorkspace(
@@ -3135,6 +3261,7 @@ describe("workspace helpers", () => {
           [makeDiffPreviewTab("diff-tab-a", "diff-a", "/tmp/app.ts", null)],
           {
             activeTabId: "diff-tab-a",
+            tabVisitHistory: ["diff-tab-a"],
             activeSessionId: null,
             viewMode: "diffPreview",
           },
@@ -3172,6 +3299,12 @@ describe("workspace helpers", () => {
         summary: "Updated next.ts",
       },
     ]);
+    const replacementTabId = next.panes.find((pane) => pane.id === "pane-b")
+      ?.tabs[0]?.id;
+    expect(replacementTabId).not.toBe("diff-tab-a");
+    expect(
+      next.panes.find((pane) => pane.id === "pane-b")?.tabVisitHistory,
+    ).toEqual([replacementTabId]);
   });
 
   it("openDiffPreviewInWorkspaceState replaces the active source tab when opened from git status", () => {
@@ -3715,6 +3848,54 @@ describe("workspace helpers", () => {
     });
   });
 
+  it("placeDraggedTab preserves source and target pane visit histories", () => {
+    const sourcePane = makePane(
+      "pane-a",
+      [
+        makeSessionTab("tab-a1", "session-a1"),
+        makeSessionTab("tab-a2", "session-a2"),
+        makeSessionTab("tab-a3", "session-a3"),
+      ],
+      {
+        activeTabId: "tab-a3",
+        activeSessionId: "session-a3",
+        tabVisitHistory: ["tab-a3", "tab-a2", "tab-a1"],
+      },
+    );
+    const targetPane = makePane(
+      "pane-b",
+      [
+        makeSessionTab("tab-b1", "session-b1"),
+        makeSessionTab("tab-b2", "session-b2"),
+      ],
+      {
+        activeTabId: "tab-b1",
+        activeSessionId: "session-b1",
+        tabVisitHistory: ["tab-b1", "tab-b2"],
+      },
+    );
+
+    const next = placeDraggedTab(
+      makeSplitWorkspace(sourcePane, targetPane),
+      "pane-a",
+      "tab-a3",
+      "pane-b",
+      "tabs",
+      1,
+    );
+
+    expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
+      activeTabId: "tab-a2",
+      activeSessionId: "session-a2",
+      tabVisitHistory: ["tab-a2", "tab-a1"],
+    });
+    expect(next.panes.find((pane) => pane.id === "pane-b")).toMatchObject({
+      activeTabId: "tab-a3",
+      activeSessionId: "session-a3",
+      tabVisitHistory: ["tab-a3", "tab-b1", "tab-b2"],
+    });
+  });
+
   it("placeDraggedTab rejects vertical control panel placement", () => {
     const workspace = makeSplitWorkspace(
       makePane("pane-a", [makeControlPanelTab("control-a", null)], {
@@ -3877,6 +4058,31 @@ describe("workspace helpers", () => {
       type: "pane",
       paneId: rebuilt.panes[0].id,
     });
+  });
+
+  it("reconcileWorkspaceState returns to the most recently visited surviving tab", () => {
+    const next = reconcileWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane(
+          "pane-a",
+          [
+            makeSessionTab("tab-a", "session-a"),
+            makeSessionTab("tab-b", "session-b"),
+            makeSessionTab("tab-c", "session-c"),
+          ],
+          {
+            activeTabId: "tab-c",
+            activeSessionId: "session-c",
+            tabVisitHistory: ["tab-c", "tab-b", "tab-a"],
+          },
+        ),
+      ),
+      [makeSession("session-a"), makeSession("session-b")],
+    );
+
+    expect(next.panes[0].activeTabId).toBe("tab-b");
+    expect(next.panes[0].activeSessionId).toBe("session-b");
+    expect(next.panes[0].tabVisitHistory).toEqual(["tab-b", "tab-a"]);
   });
 
   it("reconcileWorkspaceState prunes missing canvas cards and normalizes canvas origin metadata", () => {
