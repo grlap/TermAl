@@ -30,6 +30,7 @@ export type SessionSettingsPayload = {
   cursorMode?: CursorMode;
   claudeApprovalMode?: ClaudeApprovalMode;
   geminiApprovalMode?: GeminiApprovalMode;
+  opencodeEffort?: string;
   opencodeMode?: string;
 };
 
@@ -97,6 +98,9 @@ export function buildSessionSettingsPayload(
     case "OpenCode":
       if (field === "model") {
         return { model: normalizedModelValue ?? (value as string) };
+      }
+      if (field === "opencodeEffort") {
+        return { opencodeEffort: value as string };
       }
       if (field === "opencodeMode") {
         return { opencodeMode: value as string };

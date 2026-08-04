@@ -422,11 +422,17 @@ fn apply_remote_session_to_record(
         preserve_cached_messages.then(|| record.session.messages.clone());
     let previous_message_start_index = record.message_start_index;
     let previous_messages_loaded = record.session.messages_loaded;
+    let previous_prompt_history = record.session.prompt_history.clone();
     let previous_remote_mutation_stamp = record.session.session_mutation_stamp;
     record.session =
         localize_remote_session(remote_id, &local_session_id, local_project_id, remote_session);
     if remote_session.session_mutation_stamp.is_none() {
         record.session.session_mutation_stamp = previous_remote_mutation_stamp;
+    }
+    if remote_session.prompt_history_redacted {
+        record.session.prompt_history = previous_prompt_history;
+    } else if record.session.prompt_history != previous_prompt_history {
+        record.prompt_history_mutation_stamp = record.mutation_stamp;
     }
     if let Some(messages) = previous_messages {
         let count_matches = record.session.message_count
@@ -566,6 +572,7 @@ fn upsert_remote_proxy_session_record(
         // Freshly created records start unstamped; subsequent edits
         // flow through `session_mut*` which stamps them on access.
         mutation_stamp: 0,
+        prompt_history_mutation_stamp: 0,
         session,
     };
     sync_codex_thread_state(&mut record);
@@ -617,6 +624,13 @@ fn localize_remote_session(
     // stores proxy ownership, and `wire_session_from_record` /
     // `wire_session_summary_from_record` re-project it for local clients.
     session.remote_id = None;
+    session.prompt_history = if remote_session.prompt_history.is_empty() {
+        prompt_history_from_messages(&remote_session.messages)
+    } else {
+        normalize_prompt_history(remote_session.prompt_history.clone())
+    };
+    // Projection-only wire metadata must never become durable session state.
+    session.prompt_history_redacted = false;
     session.markers = remote_session
         .markers
         .iter()

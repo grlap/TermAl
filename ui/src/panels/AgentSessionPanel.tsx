@@ -330,8 +330,12 @@ const SessionBody = memo(
     if (!activeSession) {
       return (
         <PanelEmptyState
-          title="Ready for a session"
-          body="Click a session on the left to open it in the active tile."
+          title={isLoading ? "Connecting to backend" : "Ready for a session"}
+          body={
+            isLoading
+              ? "Fetching session state from the Rust backend."
+              : "Click a session on the left to open it in the active tile."
+          }
         />
       );
     }

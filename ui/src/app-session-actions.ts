@@ -831,14 +831,22 @@ export function useAppSessionActions(
       }
 
       await openCreatedSession(created, targetPaneId, session.agent);
-      if (
-        session.agent === "OpenCode" &&
-        session.opencodeMode &&
-        session.opencodeMode !== "auto"
-      ) {
-        const state = await updateSessionSettings(created.sessionId, {
-          opencodeMode: session.opencodeMode,
-        });
+      const clonedOpenCodeSettings =
+        session.agent === "OpenCode"
+          ? {
+              ...(session.opencodeEffort && session.opencodeEffort !== "auto"
+                ? { opencodeEffort: session.opencodeEffort }
+                : {}),
+              ...(session.opencodeMode && session.opencodeMode !== "auto"
+                ? { opencodeMode: session.opencodeMode }
+                : {}),
+            }
+          : {};
+      if (Object.keys(clonedOpenCodeSettings).length > 0) {
+        const state = await updateSessionSettings(
+          created.sessionId,
+          clonedOpenCodeSettings,
+        );
         if (!isMountedRef.current) {
           return false;
         }

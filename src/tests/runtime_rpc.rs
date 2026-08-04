@@ -33,6 +33,7 @@ fn acp_dispatch_publishes_queued_turn_before_writer_consumption() {
                 cwd: "/tmp".to_owned(),
                 cursor_mode: None,
                 model: OPENCODE_CONFIG_AUTO.to_owned(),
+                opencode_effort: None,
                 opencode_mode: Some(OPENCODE_CONFIG_AUTO.to_owned()),
                 prompt: "queued before stop".to_owned(),
                 resume_session_id: None,
@@ -271,6 +272,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
         current_session_id: Some("cursor-session-1".to_owned()),
         is_loading_history: false,
         opencode_reconcile_fingerprints: VecDeque::new(),
+        opencode_config_notification_tx: None,
         capabilities: Some(AcpCapabilities {
             supports_session_load: Some(true),
             supports_session_resume: None,
@@ -327,6 +329,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
             cwd: "/tmp".to_owned(),
             cursor_mode: Some(CursorMode::Ask),
             model: "auto".to_owned(),
+            opencode_effort: None,
             opencode_mode: None,
             prompt: "review-code".to_owned(),
             resume_session_id: Some("cursor-session-1".to_owned()),

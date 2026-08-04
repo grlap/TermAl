@@ -71,10 +71,16 @@ palette.
 
 ### OpenCode
 
-- Model and mode options come from OpenCode ACP session config.
+- Model, reasoning-variant (`effort`), and mode options come from OpenCode ACP
+  session config. Variants remain dynamic because they are model-specific.
 - Auto is OpenCode-authoritative and follows its current effective value.
-- Explicit TermAl choices are re-applied in model-then-mode order and
-  acknowledged after session new/resume/load before the next prompt.
+- Explicit TermAl choices are re-applied in model-then-variant-then-mode order
+  and acknowledged after session new/resume/load before the next prompt.
+- A live model change waits for model-specific variant and mode options. If a
+  carried dependent choice is no longer offered, is rejected, or cannot be
+  validated because refreshed options do not arrive, only that choice resets
+  to Auto; the accepted model change remains in place and TermAl shows a
+  recovery notice.
 - If an explicit saved choice disappears, TermAl persists Auto, adopts the
   current OpenCode value, and shows a visible recovery notice.
 - See [OpenCode ACP Integration](./opencode-acp-integration.md) for the

@@ -38,7 +38,7 @@
 // Split out of `ui/src/panels/AgentSessionPanel.tsx`. Same class
 // names and the same queued-prompt behavior.
 
-import { memo, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useLayoutEffect, useState, type ReactNode } from "react";
 import {
   DELEGATION_FAN_IN_AUTHOR_LABEL,
   isDelegationFanInText,
@@ -83,12 +83,6 @@ export function ConversationTailEntry({ children }: { children: ReactNode }) {
   );
 }
 
-type ConversationTailPresencePhase =
-  | "hidden"
-  | "entering"
-  | "visible"
-  | "exiting";
-
 export function ConversationTailPresence({
   active,
   children,
@@ -96,80 +90,33 @@ export function ConversationTailPresence({
   active: boolean;
   children: ReactNode;
 }) {
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const lastActiveHeightRef = useRef(0);
-  const [phase, setPhase] = useState<ConversationTailPresencePhase>(() =>
-    active ? "entering" : "hidden",
-  );
+  const [expanded, setExpanded] = useState(false);
 
   useLayoutEffect(() => {
-    const content = contentRef.current;
-    const ResizeObserverCtor = globalThis.ResizeObserver;
-    if (!active || !content) {
+    if (!active) {
+      setExpanded(false);
       return;
     }
-    // Capture the initial active height once. Subsequent streamed renders are
-    // tracked by ResizeObserver so they do not force a synchronous layout read
-    // on every parent commit.
-    lastActiveHeightRef.current = content.getBoundingClientRect().height;
-    if (typeof ResizeObserverCtor !== "function") {
-      return;
-    }
-    const observer = new ResizeObserverCtor(() => {
-      lastActiveHeightRef.current = content.getBoundingClientRect().height;
+    const frameId = window.requestAnimationFrame(() => {
+      setExpanded(true);
     });
-    observer.observe(content);
-    return () => observer.disconnect();
+    return () => window.cancelAnimationFrame(frameId);
   }, [active]);
 
-  useLayoutEffect(() => {
-    if (active) {
-      if (phase === "visible") {
-        return;
-      }
-      if (phase === "exiting") {
-        setPhase("visible");
-        return;
-      }
-      const frameId = window.requestAnimationFrame(() => {
-        setPhase("visible");
-      });
-      return () => window.cancelAnimationFrame(frameId);
-    }
-
-    if (phase === "hidden") {
-      return;
-    }
-    if (phase !== "exiting") {
-      const frameId = window.requestAnimationFrame(() => {
-        setPhase("exiting");
-      });
-      return () => window.cancelAnimationFrame(frameId);
-    }
-    const timeoutId = window.setTimeout(() => {
-      setPhase("hidden");
-    }, 240);
-    return () => window.clearTimeout(timeoutId);
-  }, [active, phase]);
-
-  if (!active && phase === "hidden") {
+  // A completed turn can insert its final transcript card in the same commit
+  // that removes this live card. Keeping an exiting height placeholder would
+  // make those two layout changes pull the bottom-follow target in opposite
+  // directions across animation frames. Remove the footprint atomically; only
+  // entry is allowed to animate layout height.
+  if (!active) {
     return null;
   }
 
   return (
     <div
-      className={`conversation-tail-entry-shell${phase === "visible" ? "" : " is-entering"}`}
+      className={`conversation-tail-entry-shell${expanded ? "" : " is-entering"}`}
     >
-      <div ref={contentRef} className="conversation-tail-entry-shell-content">
-        {active ? (
-          children
-        ) : (
-          <div
-            aria-hidden="true"
-            style={{ height: `${lastActiveHeightRef.current}px` }}
-          />
-        )}
-      </div>
+      <div className="conversation-tail-entry-shell-content">{children}</div>
     </div>
   );
 }

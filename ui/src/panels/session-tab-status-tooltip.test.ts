@@ -127,15 +127,21 @@ describe("session tab status tooltip location", () => {
     );
   });
 
-  it("shows OpenCode Auto mode together with its effective live mode", () => {
+  it("shows OpenCode Auto variant and mode with their effective live values", () => {
     const session = createSessionSummary({
       agent: "OpenCode",
       model: "opencode/big-pickle",
       opencodeModel: "auto",
+      opencodeEffort: "auto",
+      opencodeCurrentEffort: "high",
       opencodeMode: "auto",
       opencodeCurrentMode: "build",
     });
 
+    expect(buildSessionTooltipRows(session, new Map(), remoteLookup)).toContainEqual({
+      key: "Variant",
+      value: "Auto (High)",
+    });
     expect(buildSessionTooltipRows(session, new Map(), remoteLookup)).toContainEqual({
       key: "Mode",
       value: "Auto (Build)",

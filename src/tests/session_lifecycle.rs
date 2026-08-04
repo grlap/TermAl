@@ -353,6 +353,54 @@ fn create_session_promotes_matching_hidden_claude_spare_and_replenishes_pool() {
     assert_ne!(hidden_spares[0].session.id, hidden_session_id);
 }
 
+#[test]
+fn promoted_hidden_claude_spare_does_not_leak_prompt_history() {
+    let state = test_app_state();
+    let workdir = resolve_session_workdir("/tmp").expect("test workdir should resolve");
+    let hidden_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let hidden_session_id = inner
+            .ensure_hidden_claude_spare(
+                workdir.clone(),
+                None,
+                Agent::Claude.default_model().to_owned(),
+                ClaudeApprovalMode::Ask,
+                ClaudeEffortLevel::Default,
+            )
+            .expect("hidden Claude spare should be created");
+        let record = inner
+            .sessions
+            .iter_mut()
+            .find(|record| record.session.id == hidden_session_id)
+            .expect("hidden Claude spare record should exist");
+        record.session.prompt_history = vec!["prompt from prior owner".to_owned()];
+        hidden_session_id
+    };
+
+    let response = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Visible Claude".to_owned()),
+            workdir: Some(workdir),
+            project_id: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("matching hidden Claude spare should be promoted");
+
+    assert_eq!(response.session_id, hidden_session_id);
+    assert!(
+        response.session.prompt_history.is_empty(),
+        "promoted hidden Claude spare must not expose prompt history from its prior lifecycle"
+    );
+}
+
 // pins that spare matching keys on all four dimensions, not just
 // workdir: a `(claude-custom, Plan, High)` spare is promoted by a
 // request with the same model/approval/effort, and a new spare is

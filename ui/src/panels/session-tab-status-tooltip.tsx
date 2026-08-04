@@ -308,6 +308,17 @@ export function buildSessionTooltipRows(
   }
 
   if (session.agent === "OpenCode") {
+    const selectedEffort = session.opencodeEffort;
+    const effectiveEffort = session.opencodeCurrentEffort;
+    if (selectedEffort || effectiveEffort) {
+      rows.push({
+        key: "Variant",
+        value:
+          selectedEffort === "auto" && effectiveEffort
+            ? `Auto (${formatTooltipEnumLabel(effectiveEffort)})`
+            : formatTooltipEnumLabel(selectedEffort ?? effectiveEffort ?? "auto"),
+      });
+    }
     const selectedMode = session.opencodeMode;
     const effectiveMode = session.opencodeCurrentMode;
     if (selectedMode || effectiveMode) {

@@ -343,17 +343,19 @@ describe("useAppSessionActions", () => {
     );
   });
 
-  it("preserves OpenCode authority and mode when cloning a session", async () => {
+  it("preserves OpenCode authority, reasoning variant, and mode when cloning a session", async () => {
     const source = makeSession("session-opencode-source", {
       agent: "OpenCode",
       model: "openai/gpt-5.6-sol",
       opencodeModel: "auto",
+      opencodeEffort: "high",
       opencodeMode: "plan",
     });
     const clone = makeSession("session-opencode-clone", {
       agent: "OpenCode",
       model: "default",
       opencodeModel: "auto",
+      opencodeEffort: "high",
       opencodeMode: "plan",
     });
     const createSessionSpy = vi.spyOn(api, "createSession").mockResolvedValue({
@@ -388,6 +390,7 @@ describe("useAppSessionActions", () => {
       }),
     );
     expect(updateSessionSettingsSpy).toHaveBeenCalledWith(clone.id, {
+      opencodeEffort: "high",
       opencodeMode: "plan",
     });
   });

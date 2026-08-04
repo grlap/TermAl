@@ -61,7 +61,10 @@ export type SlashPaletteSession = Pick<
   | "claudeEffort"
   | "cursorMode"
   | "geminiApprovalMode"
+  | "opencodeCurrentEffort"
   | "opencodeCurrentMode"
+  | "opencodeEffort"
+  | "opencodeEffortOptions"
   | "opencodeMode"
   | "opencodeModeOptions"
   | "opencodeModel"
@@ -168,7 +171,7 @@ export const SLASH_COMMANDS: ReadonlyArray<{
     detail: "Change the effort for the next prompt",
     id: "effort",
     label: "/effort",
-    supports: ["Claude", "Codex"],
+    supports: ["Claude", "Codex", "OpenCode"],
   },
 ] as const;
 
@@ -685,6 +688,33 @@ export function claudeEffortSlashState(session: SlashPaletteSession, query: stri
   };
 }
 
+export function opencodeEffortSlashState(
+  session: SlashPaletteSession,
+  query: string,
+): SlashChoiceState {
+  const currentValue = session.opencodeEffort ?? "auto";
+  const definitions: SlashChoiceDefinition[] = [
+    {
+      detail: "Use OpenCode's default variant for the selected model",
+      label: "Auto",
+      value: "auto",
+    },
+    ...(session.opencodeEffortOptions ?? [])
+      .filter((option) => option.value !== "auto")
+      .map((option) => ({
+        detail: option.description ?? option.label,
+        label: option.label,
+        value: option.value,
+      })),
+  ];
+  return {
+    emptyMessage: `No OpenCode reasoning variants match "${query}".`,
+    hint: "Enter to select a model-specific OpenCode reasoning variant.",
+    items: makeSlashChoices(definitions, "opencodeEffort", currentValue, query),
+    title: "OpenCode reasoning variants",
+  };
+}
+
 export function sessionModelSlashState(
   session: SlashPaletteSession,
   query: string,
@@ -868,6 +898,8 @@ export function buildSlashPaletteState(
                 ? codexReasoningEffortSlashState(session, rawOptionQuery)
                 : session.agent === "Claude"
                   ? claudeEffortSlashState(session, rawOptionQuery)
+                  : session.agent === "OpenCode"
+                    ? opencodeEffortSlashState(session, rawOptionQuery)
                   : null
             : null;
 

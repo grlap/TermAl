@@ -359,6 +359,7 @@ export default function App() {
       // Write the ref eagerly so same-tick online/offline handlers observe the
       // next connection state before React commits.
       backendConnectionStateRef.current = next;
+      appTestHooks?.onBackendConnectionStateChange?.(next);
       setBackendConnectionStateRaw(next);
     },
     [],

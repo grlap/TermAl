@@ -156,6 +156,9 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.claudeApprovalMode === next.claudeApprovalMode &&
     previous.geminiApprovalMode === next.geminiApprovalMode &&
     previous.opencodeModel === next.opencodeModel &&
+    previous.opencodeEffort === next.opencodeEffort &&
+    previous.opencodeCurrentEffort === next.opencodeCurrentEffort &&
+    sameModelOptions(previous.opencodeEffortOptions, next.opencodeEffortOptions) &&
     previous.opencodeMode === next.opencodeMode &&
     previous.opencodeCurrentMode === next.opencodeCurrentMode &&
     sameModelOptions(previous.opencodeModeOptions, next.opencodeModeOptions) &&
@@ -171,6 +174,8 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.sessionMutationStamp === next.sessionMutationStamp &&
     previous.status === next.status &&
     previous.preview === next.preview &&
+    sameOptionalStringArray(previous.promptHistory, next.promptHistory) &&
+    previous.promptHistoryRedacted === next.promptHistoryRedacted &&
     previous.parentDelegationId === next.parentDelegationId &&
     (previous.messageCount ?? null) === (next.messageCount ?? null) &&
     sameConversationMarkers(previous.markers, next.markers)
@@ -193,12 +198,29 @@ function preserveExistingParentDelegationId(
   };
 }
 
+function preserveExistingPromptHistory(previous: Session, next: Session): Session {
+  // Metadata summaries explicitly mark their omission. Any unmarked omission
+  // comes from a targeted/full projection and authoritatively means empty.
+  if (next.promptHistoryRedacted === true) {
+    return previous.promptHistory === undefined
+      ? next
+      : { ...next, promptHistory: previous.promptHistory };
+  }
+  if (next.promptHistory !== undefined || previous.promptHistory === undefined) {
+    return next;
+  }
+  return { ...next, promptHistory: [] };
+}
+
 function reconcileSession(
   previous: Session,
   next: Session,
   options?: ReconcileSessionsOptions,
 ): Session {
-  const nextSession = preserveExistingParentDelegationId(previous, next);
+  const nextSession = preserveExistingPromptHistory(
+    previous,
+    preserveExistingParentDelegationId(previous, next),
+  );
 
   if (nextSession.messagesLoaded === false) {
     return reconcileSummarySession(previous, nextSession, options);
@@ -210,6 +232,7 @@ function reconcileSession(
     previous.sessionMutationStamp !== undefined &&
     previous.sessionMutationStamp === nextSession.sessionMutationStamp &&
     previous.remoteId === nextSession.remoteId &&
+    sameOptionalStringArray(previous.promptHistory, nextSession.promptHistory) &&
     (nextSession.messagesLoaded !== true || previous.messagesLoaded === true)
   ) {
     return previous;
@@ -254,7 +277,8 @@ function reconcileSummarySession(
     previous.sessionMutationStamp !== null &&
     previous.sessionMutationStamp !== undefined &&
     previous.sessionMutationStamp === next.sessionMutationStamp &&
-    previous.remoteId === next.remoteId
+    previous.remoteId === next.remoteId &&
+    sameOptionalStringArray(previous.promptHistory, next.promptHistory)
   ) {
     return previous;
   }
@@ -340,6 +364,19 @@ function reconcileSummarySession(
 
   const { pendingPrompts: _discard, ...rest } = base;
   return rest;
+}
+
+function sameOptionalStringArray(
+  previous: readonly string[] | undefined,
+  next: readonly string[] | undefined,
+) {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next || previous.length !== next.length) {
+    return false;
+  }
+  return previous.every((value, index) => value === next[index]);
 }
 
 function sameModelOptions(

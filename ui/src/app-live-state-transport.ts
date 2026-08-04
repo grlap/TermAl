@@ -62,6 +62,7 @@ import {
   type BackendConnectionState,
 } from "./backend-connection";
 import {
+  INITIAL_STATE_RESYNC_DELAY_MS,
   LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,
   RECONNECT_STATE_RESYNC_DELAY_MS,
   RECONNECT_STATE_RESYNC_MAX_DELAY_MS,
@@ -228,6 +229,26 @@ export function useAppLiveStateTransport(
       initialStateResyncRetryTimeoutId = null;
     }
 
+    function scheduleInitialStateFallbackResync() {
+      clearInitialStateResyncRetryTimeout();
+      initialStateResyncRetryTimeoutId = window.setTimeout(() => {
+        initialStateResyncRetryTimeoutId = null;
+        if (
+          cancelled ||
+          !readNavigatorOnline() ||
+          latestStateRevisionRef.current !== null
+        ) {
+          return;
+        }
+
+        // The initial SSE response is not returned until the backend has built
+        // its first state snapshot. If that connection remains stuck in
+        // CONNECTING (or the initial event is lost), recover through the same
+        // coalesced /api/state loop instead of requiring a page refresh.
+        requestStateResync({ rearmOnFailure: true });
+      }, INITIAL_STATE_RESYNC_DELAY_MS);
+    }
+
     function clearReconnectStateResyncTimeout() {
       if (reconnectStateResyncTimeoutId === null) {
         return;
@@ -281,11 +302,7 @@ export function useAppLiveStateTransport(
 
     function scheduleFallbackStateResyncRetry(
       requestedRevision: number | null,
-      options: {
-        allowAuthoritativeRollback?: boolean;
-        preserveReconnectFallback?: boolean;
-        preserveWatchdogCooldown?: boolean;
-      },
+      options: RequestStateResyncOptions,
     ) {
       clearInitialStateResyncRetryTimeout();
       const delayMs = consumeReconnectStateResyncDelayMs();
@@ -835,7 +852,18 @@ export function useAppLiveStateTransport(
                 } else if (
                   rearmOnFailure &&
                   reconnectStateResyncTimeoutId === null &&
-                  requestedRevision !== null
+                  requestedRevision === null
+                ) {
+                  // Before the first authoritative snapshot there is no
+                  // revision for the reconnect poller to key off. Reuse the
+                  // initial retry timer so transient /api/state failures keep
+                  // recovering without overlapping requests.
+                  scheduleFallbackStateResyncRetry(requestedRevision, {
+                    rearmOnFailure: true,
+                  });
+                } else if (
+                  rearmOnFailure &&
+                  reconnectStateResyncTimeoutId === null
                 ) {
                   // Re-arm reconnect polling so a failed one-shot probe (e.g.
                   // manual retry) does not leave the client without any automatic
@@ -848,7 +876,7 @@ export function useAppLiveStateTransport(
               break;
             } finally {
               if (!cancelled) {
-                setIsLoading(false);
+                setIsLoading(latestStateRevisionRef.current === null);
               }
             }
           }
@@ -1198,7 +1226,7 @@ export function useAppLiveStateTransport(
       }
 
       if (!hasHydratedState) {
-        requestStateResync();
+        requestStateResync({ rearmOnFailure: true });
         return;
       }
 
@@ -1218,6 +1246,7 @@ export function useAppLiveStateTransport(
         scheduleReconnectStateResync();
       }
     };
+    scheduleInitialStateFallbackResync();
     liveSessionResumeWatchdogIntervalId = window.setInterval(
       handleLiveSessionResumeWatchdogTick,
       LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,

@@ -10,6 +10,7 @@
 // exists.
 
 const OPENCODE_CONFIG_AUTO: &str = "auto";
+const MAX_OPENCODE_EFFORT_CHARS: usize = 128;
 const MAX_OPENCODE_MODE_CHARS: usize = 128;
 const MAX_OPENCODE_MODEL_CHARS: usize = 200;
 
@@ -27,6 +28,26 @@ fn normalize_opencode_model(value: &str) -> Result<String> {
         bail!("OpenCode model cannot contain control characters");
     }
     Ok(model.to_owned())
+}
+
+/// Normalizes an OpenCode model variant advertised through ACP's `effort`
+/// config option. Values are model/provider-defined (including custom
+/// variants), so TermAl keeps them dynamic while bounding the persisted and
+/// wire representation.
+fn normalize_opencode_effort(value: &str) -> Result<String> {
+    let effort = value.trim();
+    if effort.is_empty() {
+        bail!("OpenCode reasoning variant cannot be empty");
+    }
+    if effort.chars().count() > MAX_OPENCODE_EFFORT_CHARS {
+        bail!(
+            "OpenCode reasoning variant must be at most {MAX_OPENCODE_EFFORT_CHARS} characters"
+        );
+    }
+    if effort.chars().any(char::is_control) {
+        bail!("OpenCode reasoning variant cannot contain control characters");
+    }
+    Ok(effort.to_owned())
 }
 
 /// Normalizes a persisted/user-supplied OpenCode mode. Dynamic primary-agent

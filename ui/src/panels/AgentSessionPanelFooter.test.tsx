@@ -303,6 +303,33 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("navigates projected prompt history from an empty composer and restores the draft", async () => {
+  render(
+    renderFooter({
+      session: makeSession("session-a", {
+        messages: [],
+        messagesLoaded: false,
+        promptHistory: ["First prompt", "Second prompt"],
+      }),
+    }),
+  );
+
+  const textarea = screen.getByLabelText("Message session-a");
+  expect(textarea).toHaveValue("");
+
+  fireEvent.keyDown(textarea, { key: "ArrowUp" });
+  expect(textarea).toHaveValue("Second prompt");
+  await act(settleNextAnimationFrame);
+  fireEvent.keyDown(textarea, { key: "ArrowUp" });
+  expect(textarea).toHaveValue("First prompt");
+  await act(settleNextAnimationFrame);
+  fireEvent.keyDown(textarea, { key: "ArrowDown" });
+  expect(textarea).toHaveValue("Second prompt");
+  await act(settleNextAnimationFrame);
+  fireEvent.keyDown(textarea, { key: "ArrowDown" });
+  expect(textarea).toHaveValue("");
+});
+
 function stubResolvedAgentCommand(response: {
   name: string;
   source: string;

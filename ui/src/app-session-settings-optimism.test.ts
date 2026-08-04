@@ -15,6 +15,8 @@ function makeOpenCodeSession(overrides: Partial<Session> = {}): Session {
     workdir: "/tmp",
     model: "opencode/big-pickle",
     opencodeModel: "auto",
+    opencodeEffort: "auto",
+    opencodeCurrentEffort: "medium",
     opencodeMode: "auto",
     opencodeCurrentMode: "build",
     status: "idle",
@@ -25,7 +27,7 @@ function makeOpenCodeSession(overrides: Partial<Session> = {}): Session {
 }
 
 describe("OpenCode optimistic session settings", () => {
-  it("projects explicit model and dynamic-mode selections immediately", () => {
+  it("projects explicit model, reasoning-variant, and dynamic-mode selections immediately", () => {
     const session = makeOpenCodeSession();
 
     expect(
@@ -47,6 +49,12 @@ describe("OpenCode optimistic session settings", () => {
       opencodeModel: "auto",
       opencodeMode: "plan",
       opencodeCurrentMode: "plan",
+    });
+    expect(
+      buildOptimisticSessionSettingsUpdate(session, "opencodeEffort", "high"),
+    ).toMatchObject({
+      opencodeEffort: "high",
+      opencodeCurrentEffort: "high",
     });
   });
 
@@ -83,6 +91,19 @@ describe("OpenCode optimistic session settings", () => {
         optimisticMode,
         previous,
         optimisticMode,
+      ),
+    ).toEqual(previous);
+
+    const optimisticEffort = buildOptimisticSessionSettingsUpdate(
+      previous,
+      "opencodeEffort",
+      "high",
+    );
+    expect(
+      rollbackOptimisticSessionSettingsUpdate(
+        optimisticEffort,
+        previous,
+        optimisticEffort,
       ),
     ).toEqual(previous);
   });

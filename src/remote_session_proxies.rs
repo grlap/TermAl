@@ -47,7 +47,12 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let remote_state: StateResponse = self.remote_registry.request_json(
+        // Serialize the wire request itself instead of maintaining a second
+        // hand-written field allowlist here. New settings must proxy unchanged.
+        let body = serde_json::to_value(request).map_err(|err| {
+            ApiError::internal(format!("failed to encode remote session settings: {err}"))
+        })?;
+        let remote_state: StateResponse = self.remote_registry.request_json_with_timeout(
             &target.remote,
             Method::POST,
             &format!(
@@ -55,17 +60,8 @@ impl AppState {
                 encode_uri_component(&target.remote_session_id)
             ),
             &[],
-            Some(json!({
-                "name": request.name,
-                "model": request.model,
-                "approvalPolicy": request.approval_policy,
-                "reasoningEffort": request.reasoning_effort,
-                "sandboxMode": request.sandbox_mode,
-                "cursorMode": request.cursor_mode,
-                "claudeApprovalMode": request.claude_approval_mode,
-                "claudeEffort": request.claude_effort,
-                "geminiApprovalMode": request.gemini_approval_mode,
-            })),
+            Some(body),
+            REMOTE_SESSION_SETTINGS_TIMEOUT,
         )?;
         self.sync_remote_state_for_target(&target, remote_state)?;
         Ok(self.snapshot())

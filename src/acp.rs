@@ -76,7 +76,6 @@
 const ACP_CANCEL_GRACE: Duration = Duration::from_secs(2);
 const MAX_ACP_OPTION_LABEL_CHARS: usize = 200;
 const MAX_ACP_OPTION_DESCRIPTION_CHARS: usize = 1_000;
-const MAX_OPENCODE_RECONCILE_FINGERPRINTS: usize = 8;
 
 /// Spawns ACP runtime.
 fn spawn_acp_runtime(
@@ -229,8 +228,8 @@ fn spawn_acp_runtime(
                         }
                     }
                     AcpRuntimeCommand::ApplyOpenCodeConfig {
-                        model_selection,
-                        mode_selection,
+                        selections,
+                        execution_deadline,
                         started_tx,
                         proceed_rx,
                         response_tx,
@@ -241,8 +240,8 @@ fn spawn_acp_runtime(
                         &writer_session_id,
                         &writer_runtime_state,
                         agent,
-                        model_selection,
-                        mode_selection,
+                        selections,
+                        execution_deadline,
                         started_tx,
                         proceed_rx,
                         response_tx,
@@ -1036,615 +1035,6 @@ fn configure_acp_session(
     Ok(())
 }
 
-/// Reconciles OpenCode's dynamic model/mode choices before prompt dispatch.
-///
-/// `auto` is agent-authoritative and therefore never emits a set request.
-/// Explicit TermAl choices are re-applied in deterministic model-then-mode
-/// order. If a previously selected value disappeared, TermAl visibly resets
-/// that one selection to `auto` and adopts the agent's current value.
-fn reconcile_opencode_config(
-    writer: &mut impl Write,
-    pending_requests: &AcpPendingRequestMap,
-    state: &AppState,
-    termal_session_id: &str,
-    agent: AcpAgent,
-    external_session_id: &str,
-    command: &AcpPromptCommand,
-    config_result: &Value,
-) -> Result<()> {
-    let requested_model = normalize_opencode_model(&command.model)?;
-    let requested_mode = normalize_opencode_mode(
-        command
-            .opencode_mode
-            .as_deref()
-            .unwrap_or(OPENCODE_CONFIG_AUTO),
-    )?;
-    let mut notices = Vec::new();
-
-    let model_update =
-        has_acp_config_option_list(config_result, "model").then(|| {
-            let model_options = acp_model_options(config_result, agent);
-            reconcile_opencode_config_option(
-                writer,
-                pending_requests,
-                agent,
-                external_session_id,
-                "model",
-                &requested_model,
-                current_opencode_config_option_value(config_result, "model", &mut notices),
-                &model_options,
-                &mut notices,
-            )
-            .map(|(selection, current)| (selection, current, model_options))
-        });
-    let model_update = model_update.transpose()?;
-    let mode_update = has_acp_config_option_list(config_result, "mode").then(|| {
-        let mode_options = acp_opencode_mode_options(config_result);
-        reconcile_opencode_config_option(
-            writer,
-            pending_requests,
-            agent,
-            external_session_id,
-            "mode",
-            &requested_mode,
-            current_opencode_config_option_value(config_result, "mode", &mut notices),
-            &mode_options,
-            &mut notices,
-        )
-        .map(|(selection, current)| (selection, current, mode_options))
-    });
-    let mode_update = mode_update.transpose()?;
-
-    if model_update.is_none() && mode_update.is_none() && notices.is_empty() {
-        return Ok(());
-    }
-    state.sync_session_opencode_config(
-        termal_session_id,
-        model_update,
-        mode_update,
-        notices,
-    )
-}
-
-/// Applies one OpenCode config selection and returns persisted/effective state.
-fn reconcile_opencode_config_option(
-    writer: &mut impl Write,
-    pending_requests: &AcpPendingRequestMap,
-    agent: AcpAgent,
-    external_session_id: &str,
-    option_id: &str,
-    requested_selection: &str,
-    current_value: Option<String>,
-    options: &[SessionModelOption],
-    notices: &mut Vec<String>,
-) -> Result<(String, Option<String>)> {
-    if requested_selection == OPENCODE_CONFIG_AUTO {
-        return Ok((OPENCODE_CONFIG_AUTO.to_owned(), current_value));
-    }
-
-    let requested_normalized = requested_selection.to_ascii_lowercase();
-    let matching_value = options.iter().find_map(|option| {
-        let value_matches = option.value.to_ascii_lowercase() == requested_normalized;
-        let label_matches = option.label.to_ascii_lowercase() == requested_normalized;
-        (value_matches || label_matches).then(|| option.value.clone())
-    });
-    let Some(matching_value) = matching_value else {
-        let adopted = current_value
-            .as_deref()
-            .map(|value| format!(" and adopted OpenCode's current value `{value}`"))
-            .unwrap_or_default();
-        notices.push(format!(
-            "OpenCode no longer offers {option_id} `{requested_selection}`. TermAl switched this session's {option_id} selection to `auto`{adopted}."
-        ));
-        return Ok((OPENCODE_CONFIG_AUTO.to_owned(), current_value));
-    };
-
-    if current_value.as_deref() != Some(matching_value.as_str()) {
-        let set_result = send_acp_json_rpc_request(
-            writer,
-            pending_requests,
-            "session/set_config_option",
-            json!({
-                "sessionId": external_session_id,
-                // `configId`, not `optionId` — see the note on the model option.
-                "configId": option_id,
-                "value": matching_value,
-            }),
-            Duration::from_secs(15),
-            agent,
-        );
-        if let Err(err) = set_result {
-            if acp_json_rpc_response_error(&err).is_none() {
-                return Err(err);
-            }
-            let fallback_selection = current_value
-                .clone()
-                .unwrap_or_else(|| OPENCODE_CONFIG_AUTO.to_owned());
-            let fallback_display = current_value.as_deref().unwrap_or(OPENCODE_CONFIG_AUTO);
-            notices.push(format!(
-                "OpenCode rejected {option_id} `{requested_selection}`: {err}. \
-                 The session continues on `{fallback_display}`."
-            ));
-            return Ok((fallback_selection, current_value));
-        }
-    }
-    Ok((matching_value.clone(), Some(matching_value)))
-}
-
-/// Applies a live OpenCode config-options update on the ACP writer thread.
-fn reconcile_opencode_session_config(
-    writer: &mut impl Write,
-    pending_requests: &AcpPendingRequestMap,
-    state: &AppState,
-    session_id: &str,
-    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
-    agent: AcpAgent,
-    command: &AcpPromptCommand,
-    config_result: &Value,
-) -> Result<()> {
-    if agent != AcpAgent::OpenCode {
-        bail!("only OpenCode supports dynamic ACP config reconciliation");
-    }
-    let external_session_id = runtime_state
-        .lock()
-        .expect("ACP runtime state mutex poisoned")
-        .current_session_id
-        .clone()
-        .ok_or_else(|| anyhow!("OpenCode ACP session is not ready for config reconciliation"))?;
-    reconcile_opencode_config(
-        writer,
-        pending_requests,
-        state,
-        session_id,
-        agent,
-        &external_session_id,
-        command,
-        config_result,
-    )
-}
-
-/// Applies an unsolicited OpenCode config update without making the auxiliary
-/// reconciliation path runtime-fatal. A late update, rejected saved selection,
-/// or transient config request must remain visible and recoverable while the
-/// active ACP prompt and process continue independently.
-fn handle_opencode_config_reconcile_command(
-    writer: &mut impl Write,
-    pending_requests: &AcpPendingRequestMap,
-    state: &AppState,
-    session_id: &str,
-    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
-    agent: AcpAgent,
-    config_result: &Value,
-) -> Result<()> {
-    let command = match state.opencode_config_command(session_id) {
-        Ok(command) => command,
-        Err(err) => {
-            // Config notifications are auxiliary to the active prompt. A
-            // deletion/teardown race must not make the ACP writer fatal.
-            eprintln!(
-                "runtime state warning> ignored late OpenCode config update for \
-                 session `{session_id}`: {err:#}"
-            );
-            return Ok(());
-        }
-    };
-    let reconcile_fingerprint = json!({
-        "requestedModel": command.model.clone(),
-        "requestedMode": command.opencode_mode.clone(),
-        "config": config_result.clone(),
-    });
-    if runtime_state
-        .lock()
-        .expect("ACP runtime state mutex poisoned")
-        .opencode_reconcile_fingerprints
-        .contains(&reconcile_fingerprint)
-    {
-        return Ok(());
-    }
-    let reconcile_result = reconcile_opencode_session_config(
-        writer,
-        pending_requests,
-        state,
-        session_id,
-        runtime_state,
-        agent,
-        &command,
-        config_result,
-    );
-    if reconcile_result.is_ok() {
-        let mut runtime = runtime_state
-            .lock()
-            .expect("ACP runtime state mutex poisoned");
-        if runtime.current_session_id.is_some() {
-            runtime
-                .opencode_reconcile_fingerprints
-                .push_back(reconcile_fingerprint);
-            while runtime.opencode_reconcile_fingerprints.len()
-                > MAX_OPENCODE_RECONCILE_FINGERPRINTS
-            {
-                runtime.opencode_reconcile_fingerprints.pop_front();
-            }
-        }
-        return Ok(());
-    }
-    let err = reconcile_result.expect_err("failed OpenCode reconciliation should carry an error");
-
-    if acp_error_is_transport_failure(&err) {
-        return Err(err);
-    }
-    let detail = format!("{err:#}");
-    eprintln!(
-        "runtime state warning> failed to reconcile OpenCode config for session \
-         `{session_id}` without stopping the runtime: {detail}"
-    );
-    if let Err(notice_err) =
-        push_opencode_config_reconciliation_failure_notice(state, session_id, &detail)
-    {
-        eprintln!(
-            "runtime state warning> failed to surface OpenCode config reconciliation \
-             warning for session `{session_id}`: {notice_err:#}"
-        );
-    }
-    Ok(())
-}
-
-/// Applies a user-requested OpenCode config change on the serialized ACP
-/// writer and reports protocol rejection without tearing down a healthy
-/// runtime. Transport failures still terminate the runtime so the next prompt
-/// must re-establish and reconcile authority before dispatch.
-#[allow(clippy::too_many_arguments)]
-fn handle_opencode_config_apply_command(
-    writer: &mut impl Write,
-    pending_requests: &AcpPendingRequestMap,
-    state: &AppState,
-    session_id: &str,
-    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
-    agent: AcpAgent,
-    model_selection: Option<String>,
-    mode_selection: Option<String>,
-    started_tx: Sender<()>,
-    proceed_rx: mpsc::Receiver<()>,
-    response_tx: Sender<std::result::Result<(), String>>,
-) -> Result<()> {
-    // The API owns the scheduling deadline. The return acknowledgement closes
-    // the edge race where `started_tx.send` succeeds just as `recv_timeout`
-    // expires: the writer applies only after the API has observed the start
-    // signal and explicitly authorized execution.
-    if started_tx.send(()).is_err() || proceed_rx.recv().is_err() {
-        return Ok(());
-    }
-    let result = apply_opencode_config_update(
-        writer,
-        pending_requests,
-        state,
-        session_id,
-        runtime_state,
-        agent,
-        model_selection,
-        mode_selection,
-    );
-    match result {
-        Ok(()) => {
-            // A user-authority change starts a new deduplication generation.
-            // Old A/B notification cycles remain suppressed within their
-            // generation, while a legitimate later A selection can recur.
-            runtime_state
-                .lock()
-                .expect("ACP runtime state mutex poisoned")
-                .opencode_reconcile_fingerprints
-                .clear();
-            let _ = response_tx.send(Ok(()));
-            Ok(())
-        }
-        Err(err) => {
-            let detail = format!("{err:#}");
-            let _ = response_tx.send(Err(detail));
-            if acp_error_is_transport_failure(&err) {
-                Err(err)
-            } else {
-                Ok(())
-            }
-        }
-    }
-}
-
-/// Sends acknowledged OpenCode model/mode changes in deterministic order and
-/// commits each selection only after the agent accepts it.
-fn apply_opencode_config_update(
-    writer: &mut impl Write,
-    pending_requests: &AcpPendingRequestMap,
-    state: &AppState,
-    session_id: &str,
-    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
-    agent: AcpAgent,
-    model_selection: Option<String>,
-    mode_selection: Option<String>,
-) -> Result<()> {
-    if agent != AcpAgent::OpenCode {
-        bail!("only OpenCode supports acknowledged dynamic config updates");
-    }
-    let external_session_id = runtime_state
-        .lock()
-        .expect("ACP runtime state mutex poisoned")
-        .current_session_id
-        .clone()
-        .ok_or_else(|| anyhow!("OpenCode ACP session is not ready for config updates"))?;
-
-    for (option_id, requested_selection) in [
-        ("model", model_selection),
-        ("mode", mode_selection),
-    ] {
-        let Some(requested_selection) = requested_selection else {
-            continue;
-        };
-        let snapshot = state.opencode_config_snapshot(session_id)?;
-        let (current_selection, current_value, options) = match option_id {
-            "model" => (
-                snapshot.model_selection,
-                Some(snapshot.effective_model),
-                snapshot.model_options,
-            ),
-            "mode" => (
-                snapshot.mode_selection,
-                snapshot.current_mode,
-                snapshot.mode_options,
-            ),
-            _ => unreachable!("OpenCode config update option is fixed"),
-        };
-        if current_selection == requested_selection {
-            continue;
-        }
-
-        let applied_selection = if requested_selection == OPENCODE_CONFIG_AUTO {
-            OPENCODE_CONFIG_AUTO.to_owned()
-        } else {
-            let matching_value =
-                matching_session_model_option_value(&requested_selection, &options).ok_or_else(
-                    || {
-                        anyhow!(
-                            "OpenCode no longer offers {option_id} `{requested_selection}`; refresh the options and choose again"
-                        )
-                    },
-                )?;
-            if current_value.as_deref() != Some(matching_value.as_str()) {
-                send_acp_json_rpc_request(
-                    writer,
-                    pending_requests,
-                    "session/set_config_option",
-                    json!({
-                        "sessionId": external_session_id,
-                        // `configId`, not `optionId` — see the note on the model option.
-                        "configId": option_id,
-                        "value": matching_value,
-                    }),
-                    Duration::from_secs(15),
-                    agent,
-                )?;
-            }
-            matching_value
-        };
-        state.sync_session_opencode_selection(session_id, option_id, applied_selection)?;
-    }
-    Ok(())
-}
-
-/// Appends a bounded, actionable transcript notice for a non-fatal OpenCode
-/// config reconciliation failure.
-fn push_opencode_config_reconciliation_failure_notice(
-    state: &AppState,
-    session_id: &str,
-    detail: &str,
-) -> Result<()> {
-    const MAX_DETAIL_CHARS: usize = 2_000;
-    let trimmed = detail.trim();
-    let mut chars = trimmed.chars();
-    let bounded = chars.by_ref().take(MAX_DETAIL_CHARS).collect::<String>();
-    let bounded = if chars.next().is_some() {
-        format!("{bounded}…")
-    } else {
-        bounded
-    };
-    let suffix = if bounded.is_empty() {
-        String::new()
-    } else {
-        format!("\n\nDetails: {bounded}")
-    };
-    state.push_message(
-        session_id,
-        Message::Text {
-            attachments: Vec::new(),
-            id: state.allocate_message_id(),
-            timestamp: stamp_now(),
-            author: Author::Assistant,
-            text: format!(
-                "OpenCode config update warning: TermAl could not reconcile the latest \
-                 model and mode options. The current session remains available; refresh \
-                 the options or choose the setting again.{suffix}"
-            ),
-            expanded_text: None,
-            source: None,
-        },
-    )
-}
-
-/// Returns whether this config payload contains a usable list for one option.
-///
-/// Some handshakes and notifications carry only the options that changed, or
-/// include a current value without the selectable list. Absence is not proof
-/// that a previously saved explicit selection disappeared; only a present list
-/// can support that conclusion.
-fn has_acp_config_option_list(config_result: &Value, option_id: &str) -> bool {
-    acp_config_options(config_result).is_some_and(|options| {
-        options.iter().any(|entry| {
-            entry.get("id").and_then(Value::as_str) == Some(option_id)
-                && entry.get("options").and_then(Value::as_array).is_some()
-        })
-    })
-}
-
-/// Returns the current ACP config option value.
-fn current_acp_config_option_value(config_result: &Value, option_id: &str) -> Option<String> {
-    acp_config_options(config_result)?
-        .iter()
-        .find(|entry| entry.get("id").and_then(Value::as_str) == Some(option_id))
-        .and_then(|entry| entry.get("currentValue").and_then(Value::as_str))
-        .map(str::to_owned)
-}
-
-/// Returns a bounded, single-line OpenCode effective config value.
-///
-/// OpenCode owns `currentValue`, but the value still crosses persistence, API,
-/// SSE, and UI boundaries. Treat malformed agent output like an absent current
-/// value and surface a bounded notice instead of persisting it.
-fn current_opencode_config_option_value(
-    config_result: &Value,
-    option_id: &str,
-    notices: &mut Vec<String>,
-) -> Option<String> {
-    let value = current_acp_config_option_value(config_result, option_id)?;
-    let normalized = match option_id {
-        "model" => normalize_opencode_model(&value),
-        "mode" => normalize_opencode_mode(&value),
-        _ => {
-            notices.push(format!(
-                "OpenCode reported an unsupported current config option `{option_id}`. \
-                 TermAl ignored it."
-            ));
-            return None;
-        }
-    };
-    match normalized {
-        Ok(value) => Some(value),
-        Err(_) => {
-            notices.push(format!(
-                "OpenCode reported an invalid current {option_id}. TermAl ignored it \
-                 to keep persisted session state bounded and single-line."
-            ));
-            None
-        }
-    }
-}
-
-/// Returns the matching ACP config option value.
-fn matching_acp_config_option_value(
-    config_result: &Value,
-    option_id: &str,
-    requested_value: &str,
-) -> Option<String> {
-    let requested = requested_value.trim();
-    if requested.is_empty() {
-        return None;
-    }
-    let requested_normalized = requested.to_ascii_lowercase();
-    let option = acp_config_options(config_result)?
-        .iter()
-        .find(|entry| entry.get("id").and_then(Value::as_str) == Some(option_id))?;
-    let options = option.get("options").and_then(Value::as_array)?;
-    options.iter().find_map(|entry| {
-        let value = entry.get("value").and_then(Value::as_str)?;
-        let name = entry
-            .get("name")
-            .or_else(|| entry.get("label"))
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let value_normalized = value.to_ascii_lowercase();
-        let name_normalized = name.to_ascii_lowercase();
-        if value_normalized == requested_normalized || name_normalized == requested_normalized {
-            Some(value.to_owned())
-        } else {
-            None
-        }
-    })
-}
-
-/// Handles ACP model options without imposing one agent's ingress contract on
-/// the others.
-fn acp_model_options(config_result: &Value, agent: AcpAgent) -> Vec<SessionModelOption> {
-    let max_value_chars = (agent == AcpAgent::OpenCode).then_some(MAX_OPENCODE_MODEL_CHARS);
-    acp_session_config_options(config_result, "model", max_value_chars)
-}
-
-/// Handles bounded OpenCode primary-agent mode options.
-fn acp_opencode_mode_options(config_result: &Value) -> Vec<SessionModelOption> {
-    acp_session_config_options(config_result, "mode", Some(MAX_OPENCODE_MODE_CHARS))
-}
-
-fn acp_session_config_options(
-    config_result: &Value,
-    option_id: &str,
-    max_value_chars: Option<usize>,
-) -> Vec<SessionModelOption> {
-    let Some(option) = acp_config_options(config_result).and_then(|entries| {
-        entries
-            .iter()
-            .find(|entry| entry.get("id").and_then(Value::as_str) == Some(option_id))
-    }) else {
-        return Vec::new();
-    };
-    option
-        .get("options")
-        .and_then(Value::as_array)
-        .map(|entries| {
-            entries
-                .iter()
-                .filter_map(|entry| {
-                    let value = entry.get("value").and_then(Value::as_str)?.trim();
-                    if value.is_empty()
-                        || max_value_chars.is_some_and(|max| {
-                            value.chars().count() > max
-                                || value.chars().any(char::is_control)
-                        })
-                    {
-                        return None;
-                    }
-                    let label = entry
-                        .get("name")
-                        .or_else(|| entry.get("label"))
-                        .and_then(Value::as_str)
-                        .and_then(|label| {
-                            bounded_acp_option_text(label, MAX_ACP_OPTION_LABEL_CHARS)
-                        })
-                        .unwrap_or(value);
-                    let description = entry
-                        .get("description")
-                        .and_then(Value::as_str)
-                        .and_then(|description| {
-                            bounded_acp_option_text(
-                                description,
-                                MAX_ACP_OPTION_DESCRIPTION_CHARS,
-                            )
-                        });
-                    Some(SessionModelOption {
-                        label: label.to_owned(),
-                        value: value.to_owned(),
-                        description: description.map(str::to_owned),
-                        badges: Vec::new(),
-                        supported_claude_effort_levels: Vec::new(),
-                        default_reasoning_effort: None,
-                        supported_reasoning_efforts: Vec::new(),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn bounded_acp_option_text(value: &str, max_chars: usize) -> Option<&str> {
-    let value = value.trim();
-    (!value.is_empty()
-        && value.chars().count() <= max_chars
-        && !value.chars().any(char::is_control))
-    .then_some(value)
-}
-
-/// Handles ACP config options.
-fn acp_config_options(config_result: &Value) -> Option<&Vec<Value>> {
-    config_result
-        .get("configOptions")
-        .or_else(|| config_result.get("config_options"))
-        .and_then(Value::as_array)
-}
-
 /// Handles ACP message.
 fn handle_acp_message(
     message: &Value,
@@ -1841,6 +1231,14 @@ fn handle_acp_notification(
                 log_unhandled_acp_event(agent, "ACP session/update missing params.update", message);
                 return Ok(());
             };
+            if agent == AcpAgent::OpenCode
+                && update
+                    .get("sessionUpdate")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_acp_config_update_kind)
+            {
+                record_opencode_config_notification(runtime_state, update);
+            }
             handle_acp_session_update(
                 update,
                 state,
@@ -1866,6 +1264,15 @@ fn handle_acp_notification(
     }
 
     Ok(())
+}
+
+/// Returns whether an ACP session update carries dynamic config options.
+///
+/// Both the reader-side OpenCode wake-up path and the writer-side dispatcher
+/// must use this predicate so a newly supported protocol spelling cannot wake
+/// only one half of the model-dependent config flow.
+fn is_acp_config_update_kind(kind: &str) -> bool {
+    matches!(kind, "config_options_update" | "config_update")
 }
 
 /// Handles ACP session update.
@@ -1928,7 +1335,7 @@ fn handle_acp_session_update(
                 }
             }
         }
-        "config_options_update" | "config_update" => {
+        kind if is_acp_config_update_kind(kind) => {
             if agent == AcpAgent::OpenCode {
                 input_tx
                     .send(AcpRuntimeCommand::ReconcileOpenCodeConfig {

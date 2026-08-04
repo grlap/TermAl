@@ -68,7 +68,10 @@ import {
   LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
   LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,
 } from "./live-updates";
-import { RECONNECT_STATE_RESYNC_DELAY_MS } from "./app-shell-internals";
+import {
+  INITIAL_STATE_RESYNC_DELAY_MS,
+  RECONNECT_STATE_RESYNC_DELAY_MS,
+} from "./app-shell-internals";
 import type { AgentReadiness, OrchestratorInstance, Session } from "./types";
 import * as workspaceStorage from "./workspace-storage";
 import { WORKSPACE_LAYOUT_STORAGE_KEY } from "./workspace-storage";
@@ -290,6 +293,214 @@ describe("App live state — reconnect", () => {
     setAppTestHooksForTests(null);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("automatically retries a failed timed initial-state fallback", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    vi.useFakeTimers();
+    let stateFetchCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/sessions/session-recovered") {
+        return new Promise<Response>(() => {});
+      }
+      if (url !== "/api/state") {
+        throw new Error(`Unexpected fetch: ${url}`);
+      }
+
+      stateFetchCount += 1;
+      if (stateFetchCount === 1) {
+        throw new Error("temporary initial state failure");
+      }
+      return jsonResponse(
+        makeStateResponse({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [
+            makeSession("session-recovered", {
+              name: "Recovered initial session",
+              preview: "Recovered without a refresh",
+            }),
+          ],
+        }),
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const scrollIntoViewSpy = stubScrollIntoView();
+
+    try {
+      await renderApp();
+
+      expect(screen.queryByText("Recovered initial session")).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(INITIAL_STATE_RESYNC_DELAY_MS);
+      });
+      await settleAsyncUi();
+
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url]) => String(url) === "/api/state",
+        ),
+      ).toHaveLength(1);
+      expect(screen.queryByText("Recovered initial session")).toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECT_STATE_RESYNC_DELAY_MS);
+      });
+      await settleAsyncUi();
+
+      expect(stateFetchCount).toBe(2);
+      await clickAndSettle(
+        screen.getByRole("button", { name: "Sessions" }),
+      );
+      expect(screen.getByText("Recovered initial session")).toBeInTheDocument();
+      expect(screen.getByText("Recovered without a refresh")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      scrollIntoViewSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("keeps a successful initial snapshot fallback connecting until live SSE recovers", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEventSource = globalThis.EventSource;
+    const originalResizeObserver = globalThis.ResizeObserver;
+    vi.useFakeTimers();
+    const connectionTransitions: string[] = [];
+    setAppTestHooksForTests({
+      onBackendConnectionStateChange: (state) => {
+        connectionTransitions.push(state);
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/sessions/session-recovered") {
+        return new Promise<Response>(() => {});
+      }
+      if (url !== "/api/state") {
+        throw new Error(`Unexpected fetch: ${url}`);
+      }
+      return jsonResponse(
+        makeStateResponse({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [
+            makeSession("session-recovered", {
+              name: "Snapshot fallback session",
+              preview: "Snapshot is not live-stream proof",
+            }),
+          ],
+        }),
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverMock as unknown as typeof ResizeObserver,
+    );
+    const scrollIntoViewSpy = stubScrollIntoView();
+
+    try {
+      await renderApp();
+      const initialEventSource = latestEventSource();
+      initialEventSource.readyState = 0;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(INITIAL_STATE_RESYNC_DELAY_MS);
+      });
+      await settleAsyncUi();
+
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url]) => String(url) === "/api/state",
+        ),
+      ).toHaveLength(1);
+      expect(screen.getByText("Snapshot fallback session")).toBeInTheDocument();
+      expect(connectionTransitions).not.toContain("connected");
+
+      // A successful snapshot must not suppress the independent watchdog for
+      // an EventSource that never reached OPEN. Two 5s health ticks detect the
+      // stale socket; the recovery backoff then creates a fresh EventSource.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8_000);
+      });
+      await settleAsyncUi();
+
+      expect(EventSourceMock.instances.length).toBeGreaterThan(1);
+      expect(connectionTransitions).not.toContain("connected");
+    } finally {
+      vi.useRealTimers();
+      scrollIntoViewSpy.mockRestore();
+      restoreGlobal("fetch", originalFetch);
+      restoreGlobal("EventSource", originalEventSource);
+      restoreGlobal("ResizeObserver", originalResizeObserver);
+    }
+  });
+
+  it("resyncs after a malformed initial SSE state event", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(
+        makeStateResponse({
+          revision: 1,
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [
+            makeSession("session-recovered", {
+              name: "Recovered malformed initial state",
+              preview: "Recovered automatically through /api/state",
+            }),
+          ],
+        }),
+      );
+
+      try {
+        await withFallbackStateHarness(async ({ eventSource, sessionList }) => {
+          await dispatchStateEvent(eventSource, "{not-valid-json");
+
+          await waitFor(() => {
+            expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+          });
+          expect(
+            await within(sessionList).findByText(
+              "Recovered malformed initial state",
+            ),
+          ).toBeInTheDocument();
+          expect(
+            within(sessionList).getByText(
+              "Recovered automatically through /api/state",
+            ),
+          ).toBeInTheDocument();
+        });
+      } finally {
+        fetchStateSpy.mockRestore();
+      }
+    });
   });
 
   it("keeps newer SSE state when a reconnect resync returns an older snapshot", async () => {

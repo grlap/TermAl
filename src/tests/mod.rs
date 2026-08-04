@@ -44,6 +44,7 @@ mod http_routes;
 mod instruction_search;
 mod json_rpc;
 mod mailboxes;
+mod opencode_config;
 mod orchestrator;
 pub use orchestrator::{
     sample_deadlocked_orchestrator_template_draft, sample_orchestrator_template_draft,
@@ -1054,6 +1055,11 @@ fn sample_remote_orchestrator_state(
                 opencode_model: agent
                     .supports_opencode_settings()
                     .then(|| OPENCODE_CONFIG_AUTO.to_owned()),
+                opencode_effort: agent
+                    .supports_opencode_settings()
+                    .then(|| OPENCODE_CONFIG_AUTO.to_owned()),
+                opencode_current_effort: None,
+                opencode_effort_options: Vec::new(),
                 opencode_mode: agent
                     .supports_opencode_settings()
                     .then(|| OPENCODE_CONFIG_AUTO.to_owned()),
@@ -1066,6 +1072,8 @@ fn sample_remote_orchestrator_state(
                 status: SessionStatus::Idle,
                 preview: format!("Remote {} ready.", template_session.name),
                 messages: Vec::new(),
+                prompt_history: Vec::new(),
+                prompt_history_redacted: false,
                 messages_loaded: true,
                 message_count: 0,
                 markers: Vec::new(),
@@ -1703,6 +1711,7 @@ fn gemini_invalid_session_load_falls_back_to_session_new() {
         current_session_id: None,
         is_loading_history: false,
         opencode_reconcile_fingerprints: VecDeque::new(),
+        opencode_config_notification_tx: None,
         capabilities: Some(AcpCapabilities {
             supports_session_load: Some(true),
             supports_session_resume: None,
@@ -1727,6 +1736,7 @@ fn gemini_invalid_session_load_falls_back_to_session_new() {
                 cwd: "/tmp".to_owned(),
                 cursor_mode: None,
                 model: "gemini-pro".to_owned(),
+                opencode_effort: None,
                 opencode_mode: None,
                 prompt: "Resume the prior session".to_owned(),
                 resume_session_id: Some("gemini-session-stale".to_owned()),
@@ -2283,6 +2293,7 @@ fn canonicalizes_session_model_updates_from_live_model_labels() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_effort: None,
                 opencode_mode: None,
             },
         )
@@ -2332,6 +2343,7 @@ fn revisions_increase_for_visible_state_changes() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_effort: None,
                 opencode_mode: None,
             },
         )
@@ -2351,6 +2363,7 @@ fn revisions_increase_for_visible_state_changes() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_effort: None,
                 opencode_mode: None,
             },
         )
@@ -2393,6 +2406,7 @@ fn renames_sessions_via_settings_updates() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_effort: None,
                 opencode_mode: None,
             },
         )

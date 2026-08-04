@@ -6,8 +6,7 @@ import {
   isFirstAgentOutputForObservedPrompt,
   resolveLatestTurnOutputState,
   resolveNewResponseIndicatorVisibility,
-  resolveSessionBottomFollowFrame,
-  shouldSnapSessionBottomFollowAtCompletion,
+  resolveSessionBottomFollowScrollTop,
   resolveSessionPageScrollDistance,
   useSessionPaneScrollState,
 } from "./SessionPaneView.scroll";
@@ -101,50 +100,11 @@ describe("session pane historical-window tail state", () => {
     expect(detail.authorityPresent).toBe(true);
   });
 
-  it("moves each bottom-follow frame monotonically toward its current target", () => {
-    expect(resolveSessionBottomFollowFrame(800, 1_000)).toBe(836);
-    expect(resolveSessionBottomFollowFrame(1_000, 800)).toBe(964);
-    expect(resolveSessionBottomFollowFrame(999.5, 1_000)).toBe(1_000);
-    expect(resolveSessionBottomFollowFrame(800.5, 800)).toBe(800);
-  });
-
-  it("keeps bottom-follow convergence stable across display refresh rates", () => {
-    const sixtyHertzFrameMs = 1000 / 60;
-    const oneSixtyHertzFrame = resolveSessionBottomFollowFrame(
-      0,
-      1_000,
-      sixtyHertzFrameMs,
-    );
-    const oneThirtyHertzFrame = resolveSessionBottomFollowFrame(
-      0,
-      1_000,
-      sixtyHertzFrameMs * 2,
-    );
-    const firstHalfFrame = resolveSessionBottomFollowFrame(
-      0,
-      1_000,
-      sixtyHertzFrameMs / 2,
-    );
-    const twoHalfFrames = resolveSessionBottomFollowFrame(
-      firstHalfFrame,
-      1_000,
-      sixtyHertzFrameMs / 2,
-    );
-    const twoSixtyHertzFrames = resolveSessionBottomFollowFrame(
-      oneSixtyHertzFrame,
-      1_000,
-      sixtyHertzFrameMs,
-    );
-
-    expect(twoHalfFrames).toBeCloseTo(oneSixtyHertzFrame, 8);
-    expect(oneThirtyHertzFrame).toBeCloseTo(twoSixtyHertzFrames, 8);
-  });
-
-  it("snaps a completed smooth follow to the exact bottom", () => {
-    expect(shouldSnapSessionBottomFollowAtCompletion("smooth", 8)).toBe(true);
-    expect(shouldSnapSessionBottomFollowAtCompletion("smooth", 1)).toBe(true);
-    expect(shouldSnapSessionBottomFollowAtCompletion("smooth", 0.5)).toBe(false);
-    expect(shouldSnapSessionBottomFollowAtCompletion("auto", 8)).toBe(false);
+  it("pins live bottom-follow immediately without issuing an upward correction", () => {
+    expect(resolveSessionBottomFollowScrollTop(800, 1_000)).toBe(1_000);
+    expect(resolveSessionBottomFollowScrollTop(1_000, 800)).toBe(1_000);
+    expect(resolveSessionBottomFollowScrollTop(999.5, 1_000)).toBe(1_000);
+    expect(resolveSessionBottomFollowScrollTop(800.5, 800)).toBe(800.5);
   });
 
   it("identifies the first agent output for the latest prompt", () => {
@@ -286,7 +246,7 @@ describe("session pane historical-window tail state", () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  it("smoothly follows when the first agent reply displaces the live-turn tail", () => {
+  it("pins immediately when the first agent reply displaces the live-turn tail", () => {
     let nextAnimationFrameId = 1;
     const animationFrames = new Map<number, FrameRequestCallback>();
     const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
@@ -392,10 +352,10 @@ describe("session pane historical-window tail state", () => {
     animationFrames.delete(firstFrame[0]);
     act(() => firstFrame[1](performance.now()));
 
-    expect(scrollNode.scrollTop).toBe(821.6);
+    expect(scrollNode.scrollTop).toBe(920);
     expect(scrollTo).toHaveBeenCalledWith({
       behavior: "auto",
-      top: 821.6,
+      top: 920,
     });
     expect(scrollWrites[scrollWrites.length - 1]?.detail.scrollKind).toBe(
       "bottom_follow",

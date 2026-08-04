@@ -469,6 +469,17 @@ impl Message {
         )
     }
 
+    fn user_prompt_text(&self) -> Option<&str> {
+        match self {
+            Self::Text {
+                author: Author::You,
+                text,
+                ..
+            } => Some(text),
+            _ => None,
+        }
+    }
+
     fn pending_interaction_request(&self) -> Option<PendingInteractionRequest<'_>> {
         match self {
             Self::Approval {

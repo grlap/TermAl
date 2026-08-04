@@ -215,6 +215,59 @@ describe("reconcileSessions", () => {
     expect(merged[0].preview).toBe("Completed");
   });
 
+  it("preserves targeted prompt history when a metadata summary omits it", () => {
+    const promptHistory = ["First prompt", "Second prompt"];
+    const previous = [
+      makeSession("session-a", {
+        messages: [
+          {
+            id: "assistant-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Latest response",
+          },
+        ],
+        messagesLoaded: false,
+        promptHistory,
+        sessionMutationStamp: 4,
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messageCount: 1,
+        messagesLoaded: false,
+        promptHistoryRedacted: true,
+        sessionMutationStamp: 5,
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].promptHistory).toBe(promptHistory);
+  });
+
+  it("clears targeted prompt history when a full response omits an empty list", () => {
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: true,
+        promptHistory: ["Prompt removed by rollback"],
+        sessionMutationStamp: 4,
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messageCount: 0,
+        messagesLoaded: true,
+        sessionMutationStamp: 5,
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].promptHistory).toEqual([]);
+  });
+
   it("restores delegated child ownership from state delegation summaries", () => {
     const parent = makeSession("parent-session");
     const child = makeSession("child-session");

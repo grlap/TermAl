@@ -1252,6 +1252,70 @@ fn persisted_state_requires_opencode_settings() {
 }
 
 #[test]
+fn sqlite_startup_backfills_pre_effort_opencode_session_to_auto() {
+    let state_root = PersistTestRoot::new("opencode-effort-backfill");
+    let path = state_root.path().join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::OpenCode,
+            Some("Pre-effort OpenCode".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    persist_state(&path, &inner).expect("OpenCode fixture should persist");
+
+    let mut encoded: Value = serde_json::from_str(
+        &sqlite_row_json(&path, "sessions", &session_id)
+            .expect("persisted OpenCode row should exist"),
+    )
+    .expect("persisted OpenCode row should decode");
+    encoded["session"]
+        .as_object_mut()
+        .expect("persisted session should be an object")
+        .remove("opencodeEffort");
+    let connection = rusqlite::Connection::open(&path).expect("fixture database should reopen");
+    connection
+        .execute(
+            "UPDATE sessions SET value_json = ?2 WHERE id = ?1",
+            rusqlite::params![
+                session_id,
+                serde_json::to_string(&encoded).expect("legacy fixture should encode")
+            ],
+        )
+        .expect("legacy OpenCode row should update");
+    drop(connection);
+
+    let loaded = load_state(&path)
+        .expect("pre-effort OpenCode state should load")
+        .expect("pre-effort OpenCode state should exist");
+    let loaded_index = loaded
+        .find_session_index(&session_id)
+        .expect("pre-effort OpenCode session must not be quarantined");
+    assert_eq!(
+        loaded.sessions[loaded_index]
+            .session
+            .opencode_effort
+            .as_deref(),
+        Some(OPENCODE_CONFIG_AUTO)
+    );
+
+    persist_state(&path, &loaded).expect("backfilled state should persist");
+    let healed: Value = serde_json::from_str(
+        &sqlite_row_json(&path, "sessions", &session_id)
+            .expect("healed OpenCode row should remain"),
+    )
+    .expect("healed OpenCode row should decode");
+    assert_eq!(
+        healed["session"]["opencodeEffort"],
+        Value::String(OPENCODE_CONFIG_AUTO.to_owned())
+    );
+}
+
+#[test]
 fn persisted_state_rejects_unbounded_opencode_effective_values() {
     let mut inner = StateInner::new();
     inner.create_session(
@@ -1270,6 +1334,25 @@ fn persisted_state_rejects_unbounded_opencode_effective_values() {
     assert!(
         invalid_model.contains("OpenCode model cannot contain control characters"),
         "unexpected load_state error: {invalid_model}"
+    );
+
+    let mut inner = StateInner::new();
+    inner.create_session(
+        Agent::OpenCode,
+        Some("OpenCode".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
+    );
+    let invalid_effort = persisted_state_load_error_after_mutation(inner, |encoded| {
+        encoded["sessions"]
+            .as_array_mut()
+            .expect("persisted sessions should be an array")[0]["session"]["opencodeCurrentEffort"] =
+            json!("high\u{7}");
+    });
+    assert!(
+        invalid_effort.contains("OpenCode reasoning variant cannot contain control characters"),
+        "unexpected load_state error: {invalid_effort}"
     );
 
     let mut inner = StateInner::new();
@@ -2460,6 +2543,19 @@ fn sqlite_row_json(path: &FsPath, table: &str, id: &str) -> Option<String> {
     }
 }
 
+fn sqlite_prompt_history_json(path: &FsPath, session_id: &str) -> Option<String> {
+    let connection = rusqlite::Connection::open(path).expect("sqlite state should open");
+    match connection.query_row(
+        "SELECT value_json FROM session_prompt_histories WHERE session_id = ?1",
+        rusqlite::params![session_id],
+        |row| row.get(0),
+    ) {
+        Ok(value) => Some(value),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(err) => panic!("sqlite prompt-history query should succeed: {err}"),
+    }
+}
+
 fn sqlite_table_ids(path: &FsPath, table: &str) -> Vec<String> {
     let connection = rusqlite::Connection::open(path).expect("sqlite state should open");
     let sql = format!("SELECT id FROM {table} ORDER BY id");
@@ -3077,6 +3173,386 @@ fn sqlite_startup_retains_only_the_latest_page_and_reads_older_history_by_index(
     );
 
     let _ = fs::remove_dir_all(state_root);
+}
+
+#[test]
+fn prompt_history_outlives_the_retained_transcript_window() {
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Prompt history".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let session_index = inner
+        .find_session_index(&session_id)
+        .expect("created session should exist");
+    for index in 0..70 {
+        let record = inner
+            .session_mut_by_index(session_index)
+            .expect("created session should remain mutable");
+        push_message_on_record(
+            record,
+            Message::Text {
+                attachments: Vec::new(),
+                id: format!("user-{index:03}"),
+                timestamp: stamp_now(),
+                author: Author::You,
+                text: format!("prompt {index}"),
+                expanded_text: None,
+                source: None,
+            },
+        );
+        trim_retained_session_messages(record, 1);
+    }
+
+    let record = &inner.sessions[session_index];
+    assert_eq!(record.session.messages.len(), 1);
+    assert_eq!(
+        record.session.prompt_history.len(),
+        SESSION_PROMPT_HISTORY_LIMIT
+    );
+    assert_eq!(
+        record.session.prompt_history.first().map(String::as_str),
+        Some("prompt 6")
+    );
+    assert_eq!(
+        record.session.prompt_history.last().map(String::as_str),
+        Some("prompt 69")
+    );
+}
+
+#[test]
+fn appended_assistant_message_preserves_bounded_prompt_history_allocations() {
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Prompt history append".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let session_index = inner
+        .find_session_index(&session_id)
+        .expect("created session should exist");
+    let record = inner
+        .session_mut_by_index(session_index)
+        .expect("created session should remain mutable");
+    push_message_on_record(
+        record,
+        Message::Text {
+            attachments: Vec::new(),
+            id: "prompt".to_owned(),
+            timestamp: stamp_now(),
+            author: Author::You,
+            text: "remember this".to_owned(),
+            expanded_text: None,
+            source: None,
+        },
+    );
+    let retained_prompt_allocation = record.session.prompt_history[0].as_ptr();
+
+    push_message_on_record(
+        record,
+        Message::Text {
+            attachments: Vec::new(),
+            id: "reply".to_owned(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: "streamed reply".to_owned(),
+            expanded_text: None,
+            source: None,
+        },
+    );
+
+    assert_eq!(record.session.prompt_history, ["remember this"]);
+    assert_eq!(
+        record.session.prompt_history[0].as_ptr(),
+        retained_prompt_allocation,
+        "assistant appends must not rebuild and reallocate prompt history"
+    );
+}
+
+#[test]
+fn non_tail_insert_into_partial_transcript_preserves_authoritative_prompt_history() {
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Partial prompt history".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let session_index = inner
+        .find_session_index(&session_id)
+        .expect("created session should exist");
+    let record = inner
+        .session_mut_by_index(session_index)
+        .expect("created session should remain mutable");
+    record.session.prompt_history = vec!["authoritative older prompt".to_owned()];
+    record.message_start_index = 10;
+    record.session.messages_loaded = false;
+    record.session.messages.push(Message::Text {
+        attachments: Vec::new(),
+        id: "resident-reply".to_owned(),
+        timestamp: stamp_now(),
+        author: Author::Assistant,
+        text: "resident partial tail".to_owned(),
+        expanded_text: None,
+        source: None,
+    });
+    record.message_positions = build_message_positions(&record.session.messages);
+
+    insert_message_on_record(
+        record,
+        0,
+        Message::Text {
+            attachments: Vec::new(),
+            id: "late-user-card".to_owned(),
+            timestamp: stamp_now(),
+            author: Author::You,
+            text: "cannot be canonically ordered".to_owned(),
+            expanded_text: None,
+            source: None,
+        },
+    );
+
+    assert!(!record.session.messages_loaded);
+    assert_eq!(
+        record.session.prompt_history,
+        ["authoritative older prompt"]
+    );
+}
+
+#[test]
+fn sqlite_startup_migrates_embedded_prompt_history_beyond_the_retained_transcript_tail() {
+    let state_root = PersistTestRoot::new("prompt-history-backfill");
+    let path = state_root.path().join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Prompt history".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let session_index = inner
+        .find_session_index(&session_id)
+        .expect("created session should exist");
+    for index in 0..80 {
+        let record = inner
+            .session_mut_by_index(session_index)
+            .expect("created session should remain mutable");
+        push_message_on_record(
+            record,
+            Message::Text {
+                attachments: Vec::new(),
+                id: format!("user-{index:03}"),
+                timestamp: stamp_now(),
+                author: Author::You,
+                text: format!("prompt {index}"),
+                expanded_text: None,
+                source: None,
+            },
+        );
+        push_message_on_record(
+            record,
+            Message::Text {
+                attachments: Vec::new(),
+                id: format!("assistant-{index:03}"),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: format!("response {index}"),
+                expanded_text: None,
+                source: None,
+            },
+        );
+    }
+    persist_state(&path, &inner).expect("prompt-history fixture should persist");
+
+    let mut encoded: Value = serde_json::from_str(
+        &sqlite_row_json(&path, "sessions", &session_id)
+            .expect("persisted session row should exist"),
+    )
+    .expect("persisted session row should decode");
+    assert!(
+        encoded["session"].get("promptHistory").is_none(),
+        "hot session metadata must not embed composer history"
+    );
+    encoded["session"]["promptHistory"] = Value::Array(
+        (16..80)
+            .map(|index| Value::String(format!("prompt {index}")))
+            .collect(),
+    );
+    let connection = rusqlite::Connection::open(&path).expect("fixture database should reopen");
+    connection
+        .execute(
+            "DELETE FROM session_prompt_histories WHERE session_id = ?1",
+            rusqlite::params![session_id],
+        )
+        .expect("current prompt-history row should delete");
+    connection
+        .execute(
+            "DELETE FROM meta WHERE key = ?1",
+            rusqlite::params![SQLITE_PROMPT_HISTORY_STORAGE_KEY],
+        )
+        .expect("migration marker should delete");
+    connection
+        .execute(
+            "UPDATE sessions SET value_json = ?2 WHERE id = ?1",
+            rusqlite::params![
+                session_id,
+                serde_json::to_string(&encoded).expect("legacy fixture should encode")
+            ],
+        )
+        .expect("legacy session row should update");
+    drop(connection);
+
+    let loaded = load_state(&path)
+        .expect("legacy prompt-history state should load")
+        .expect("legacy prompt-history state should exist");
+    let record = &loaded.sessions[loaded
+        .find_session_index(&session_id)
+        .expect("session should survive startup")];
+    assert_eq!(record.session.messages.len(), SQLITE_SESSION_TAIL_MESSAGES);
+    assert_eq!(
+        record.session.prompt_history.len(),
+        SESSION_PROMPT_HISTORY_LIMIT
+    );
+    assert_eq!(
+        record.session.prompt_history.first().map(String::as_str),
+        Some("prompt 16")
+    );
+    assert_eq!(
+        record.session.prompt_history.last().map(String::as_str),
+        Some("prompt 79")
+    );
+
+    let migrated_metadata: Value = serde_json::from_str(
+        &sqlite_row_json(&path, "sessions", &session_id)
+            .expect("migrated session row should remain"),
+    )
+    .expect("migrated session row should decode");
+    assert!(migrated_metadata["session"].get("promptHistory").is_none());
+    let migrated_history: Vec<String> = serde_json::from_str(
+        &sqlite_prompt_history_json(&path, &session_id)
+            .expect("migrated prompt-history row should exist"),
+    )
+    .expect("migrated prompt-history row should decode");
+    assert_eq!(migrated_history.len(), SESSION_PROMPT_HISTORY_LIMIT);
+    assert_eq!(
+        migrated_history.first().map(String::as_str),
+        Some("prompt 16")
+    );
+    assert_eq!(
+        migrated_history.last().map(String::as_str),
+        Some("prompt 79")
+    );
+}
+
+#[test]
+fn prompt_history_uses_an_independent_persist_delta_watermark() {
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("Prompt history delta".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let session_index = inner
+        .find_session_index(&session_id)
+        .expect("created session should exist");
+    push_message_on_record(
+        inner
+            .session_mut_by_index(session_index)
+            .expect("created session should be mutable"),
+        Message::Text {
+            attachments: Vec::new(),
+            id: "user-prompt".to_owned(),
+            timestamp: stamp_now(),
+            author: Author::You,
+            text: "remember this".to_owned(),
+            expanded_text: None,
+            source: None,
+        },
+    );
+    let watermark = inner.last_mutation_stamp;
+
+    push_message_on_record(
+        inner
+            .session_mut_by_index(session_index)
+            .expect("created session should remain mutable"),
+        Message::Text {
+            attachments: Vec::new(),
+            id: "assistant-response".to_owned(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: "streamed response".to_owned(),
+            expanded_text: None,
+            source: None,
+        },
+    );
+    let assistant_delta = inner.collect_persist_delta(watermark);
+    let assistant_record = assistant_delta
+        .changed_sessions
+        .first()
+        .expect("assistant message should change session metadata");
+    assert!(
+        !assistant_record.persist_prompt_history,
+        "assistant streaming must not rewrite the independent history row"
+    );
+    let serialized =
+        serialize_persisted_session(assistant_record).expect("assistant delta should serialize");
+    assert!(serialized.prompt_history_value_json.is_none());
+    let metadata: Value =
+        serde_json::from_str(&serialized.value_json).expect("metadata should decode");
+    assert!(metadata["session"].get("promptHistory").is_none());
+
+    let assistant_watermark = inner.last_mutation_stamp;
+    push_message_on_record(
+        inner
+            .session_mut_by_index(session_index)
+            .expect("created session should remain mutable"),
+        Message::Text {
+            attachments: Vec::new(),
+            id: "next-user-prompt".to_owned(),
+            timestamp: stamp_now(),
+            author: Author::You,
+            text: "and this".to_owned(),
+            expanded_text: None,
+            source: None,
+        },
+    );
+    let user_delta = inner.collect_persist_delta(assistant_watermark);
+    let user_record = user_delta
+        .changed_sessions
+        .first()
+        .expect("user prompt should change the session");
+    assert!(user_record.persist_prompt_history);
+    assert_eq!(
+        serialize_persisted_session(user_record)
+            .expect("user delta should serialize")
+            .prompt_history_value_json
+            .as_deref(),
+        Some("[\"remember this\",\"and this\"]")
+    );
 }
 
 #[test]

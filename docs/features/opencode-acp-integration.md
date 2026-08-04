@@ -74,46 +74,58 @@ settle within the bounded grace, TermAl terminates it but retains the external
 session id: local process termination does not prove the agent-side session is
 invalid.
 
-## Model and mode authority
+## Model, reasoning-variant, and mode authority
 
-OpenCode advertises dynamic `model` and `mode` config options in its ACP session
-response and config-update notifications. TermAl stores both the selected
-authority and the effective value:
+OpenCode advertises dynamic `model`, reasoning-variant (`effort`), and `mode`
+config options in its ACP session response and config-update notifications.
+TermAl stores both the selected authority and the effective value. Reasoning
+variants are never hard-coded because their available values depend on the
+selected model:
 
 - `auto` is OpenCode-authoritative. TermAl adopts the current value and does not
   emit `session/set_config_option`.
 - An explicit TermAl selection is TermAl-authoritative. After every new,
   resume, or load handshake, TermAl re-applies the model first, waits for its
-  acknowledgement, then re-applies mode and waits again before allowing the
-  prompt.
-- If OpenCode rejects an explicit model or mode, TermAl adopts the agent's
-  current value, emits a visible session notice, and keeps the session running.
-  Transport failure remains runtime-fatal.
+  acknowledgement, then re-applies the reasoning variant and mode in order,
+  waiting for each acknowledgement before allowing the prompt.
+- If OpenCode rejects an explicit model, reasoning variant, or mode, TermAl
+  adopts the agent's current value, emits a visible session notice, and keeps
+  the session running. Transport failure remains runtime-fatal.
 - Every handshake or live config-options payload reconciles only the option
   lists it actually includes. OpenCode-side drift therefore cannot silently
   replace an explicit TermAl choice, while a model-only payload preserves the
-  absent mode authority and option list (and vice versa).
+  absent reasoning-variant and mode authority and option lists (and vice
+  versa).
 - `Refresh models` performs a controlled local ACP runtime restart and resumes
   the same persisted OpenCode session. ACP has no standalone config-query
   method, so the fresh resume/load handshake is the authoritative way to fetch
   updated option lists; refresh is disabled during active interactions.
 - A user-initiated live change uses the same serialized writer, waits for the
   tracked `session/set_config_option` response, and commits the selected
-  authority only after OpenCode accepts it. Protocol rejection leaves the
-  prior authority intact; transport failure tears down the runtime so the next
-  prompt must reconcile before dispatch. Scheduling admission and protocol
-  acknowledgement share one 40-second request deadline, with scheduling
-  bounded to the first five seconds. If scheduling expires while a prompt still
-  owns the writer, the queued change is discarded so it cannot land after the
-  API has told the caller to retry.
+  authority only after OpenCode accepts it. A standalone option rejection
+  leaves the prior authority intact. After a model has already been accepted,
+  however, a dependent reasoning variant or mode that disappears, is rejected,
+  or cannot be validated because refreshed options do not arrive is reset
+  individually to `auto`; TermAl keeps the model change, adopts the latest
+  reported effective value when available, and emits a visible session notice.
+  If the post-model option refresh times out, the unavailable option list is
+  cleared rather than presented as authoritative and the notice directs the
+  user to `Refresh models`, whose controlled resume handshake reloads the
+  model-specific choices.
+  Transport failure tears down the runtime so the next prompt must reconcile
+  before dispatch. Scheduling admission and protocol acknowledgement share one
+  55-second request deadline, with scheduling bounded to the first five seconds
+  and four seconds reserved for post-model option discovery. If scheduling
+  expires while a prompt still owns the writer, the queued change is discarded
+  so it cannot land after the API has told the caller to retry.
 - If an explicit saved value disappears from the live option list, TermAl
   switches that selection to `auto`, adopts OpenCode's current value, persists
   the recovery, and adds a visible assistant notice.
 
-The Prompt tab and slash palette expose the live model and mode options,
-including explicit Auto entries and the effective values reported by OpenCode.
-The app-level OpenCode model default applies to new sessions; `default` leaves
-new sessions on OpenCode Auto.
+The Prompt tab and slash palette expose the live model, reasoning-variant, and
+mode options, including explicit Auto entries and the effective values reported
+by OpenCode. The app-level OpenCode model default applies to new sessions;
+`default` leaves new sessions on OpenCode Auto.
 
 ## Permissions
 

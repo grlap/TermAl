@@ -446,6 +446,7 @@ impl AppState {
                             .opencode_model
                             .clone()
                             .unwrap_or_else(|| record.session.model.clone()),
+                        opencode_effort: record.session.opencode_effort.clone(),
                         opencode_mode: record.session.opencode_mode.clone(),
                         prompt: runtime_prompt.to_owned(),
                         resume_session_id: record.external_session_id.clone(),

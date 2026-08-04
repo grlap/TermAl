@@ -132,8 +132,11 @@ export function buildOptimisticSessionSettingsUpdate(
           : (session.opencodeModel ?? "auto");
       const nextMode =
         field === "opencodeMode" ? (value as string) : (session.opencodeMode ?? "auto");
+      const nextEffort =
+        field === "opencodeEffort" ? (value as string) : (session.opencodeEffort ?? "auto");
       if (
         nextModelSelection === (session.opencodeModel ?? "auto") &&
+        nextEffort === (session.opencodeEffort ?? "auto") &&
         nextMode === (session.opencodeMode ?? "auto")
       ) {
         return session;
@@ -141,8 +144,10 @@ export function buildOptimisticSessionSettingsUpdate(
       return {
         ...session,
         opencodeModel: nextModelSelection,
+        opencodeEffort: nextEffort,
         opencodeMode: nextMode,
         ...(nextModelSelection === "auto" ? {} : { model: nextModelSelection }),
+        ...(nextEffort === "auto" ? {} : { opencodeCurrentEffort: nextEffort }),
         ...(nextMode === "auto" ? {} : { opencodeCurrentMode: nextMode }),
       };
     }
@@ -176,6 +181,20 @@ export function rollbackOptimisticSessionSettingsUpdate(
     currentSession.opencodeMode !== previousSession.opencodeMode
   ) {
     nextSession.opencodeMode = previousSession.opencodeMode;
+    changed = true;
+  }
+  if (
+    currentSession.opencodeEffort === optimisticSession.opencodeEffort &&
+    currentSession.opencodeEffort !== previousSession.opencodeEffort
+  ) {
+    nextSession.opencodeEffort = previousSession.opencodeEffort;
+    changed = true;
+  }
+  if (
+    currentSession.opencodeCurrentEffort === optimisticSession.opencodeCurrentEffort &&
+    currentSession.opencodeCurrentEffort !== previousSession.opencodeCurrentEffort
+  ) {
+    nextSession.opencodeCurrentEffort = previousSession.opencodeCurrentEffort;
     changed = true;
   }
   if (

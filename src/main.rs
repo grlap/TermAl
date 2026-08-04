@@ -44,6 +44,7 @@ use notify::{
     Config as NotifyConfig, Event as NotifyEvent, EventKind as NotifyEventKind, RecommendedWatcher,
     RecursiveMode, Watcher,
 };
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -625,6 +626,7 @@ include!("codex_home.rs");
 include!("claude_args.rs");
 include!("codex_bin.rs");
 include!("acp.rs");
+include!("acp_opencode_config.rs");
 include!("codex.rs");
 include!("codex_events.rs");
 include!("codex_notices.rs");

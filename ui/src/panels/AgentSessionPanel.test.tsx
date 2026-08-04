@@ -348,6 +348,18 @@ function createAgentSessionPanelHarness(
   );
 }
 
+describe("AgentSessionPanel initial loading state", () => {
+  it("shows connecting instead of an empty ready state before sessions arrive", () => {
+    render(createAgentSessionPanelHarness()({ isLoading: true }));
+
+    expect(screen.getByText("Connecting to backend")).toBeInTheDocument();
+    expect(
+      screen.getByText("Fetching session state from the Rust backend."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Ready for a session")).toBeNull();
+  });
+});
+
 function renderSessionPanelWithDefaults(
   props: Partial<AgentSessionPanelProps> & {
     activeSession?: Session | null;
@@ -448,49 +460,28 @@ describe("splitAgentCommandResolverTail", () => {
 });
 
 describe("AgentSessionPanel conversation caching", () => {
-  it("measures an active live tail once and relies on ResizeObserver afterward", () => {
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-      unobserve() {}
-    }
-    vi.stubGlobal(
-      "ResizeObserver",
-      ResizeObserverMock as unknown as typeof ResizeObserver,
+  it("keeps the active live-tail shell stable while streamed content changes", () => {
+    const { rerender } = render(
+      <ConversationTailPresence active>
+        <span>First streamed state</span>
+      </ConversationTailPresence>,
     );
-    const rectSpy = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockReturnValue({
-        bottom: 72,
-        height: 72,
-        left: 0,
-        right: 320,
-        top: 0,
-        width: 320,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
-      } as DOMRect);
+    const shell = screen
+      .getByText("First streamed state")
+      .closest(".conversation-tail-entry-shell");
 
-    try {
-      const { rerender } = render(
-        <ConversationTailPresence active>
-          <span>First streamed state</span>
-        </ConversationTailPresence>,
-      );
-      expect(rectSpy).toHaveBeenCalledTimes(1);
+    rerender(
+      <ConversationTailPresence active>
+        <span>Second streamed state</span>
+      </ConversationTailPresence>,
+    );
 
-      rerender(
-        <ConversationTailPresence active>
-          <span>Second streamed state</span>
-        </ConversationTailPresence>,
-      );
-
-      expect(screen.getByText("Second streamed state")).toBeInTheDocument();
-      expect(rectSpy).toHaveBeenCalledTimes(1);
-    } finally {
-      rectSpy.mockRestore();
-    }
+    expect(screen.getByText("Second streamed state")).toBeInTheDocument();
+    expect(
+      screen
+        .getByText("Second streamed state")
+        .closest(".conversation-tail-entry-shell"),
+    ).toBe(shell);
   });
 
   it("does not render a queued prompt once the matching message is visible", () => {
@@ -790,7 +781,7 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(
       Boolean(
         queuedPromptCard!.compareDocumentPosition(liveTail!) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
+        Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true);
   });
@@ -1157,7 +1148,7 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(
       Boolean(
         secondQueuedPromptCard!.compareDocumentPosition(liveTurnCard!) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
+        Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true);
     expect(liveTail).not.toContainElement(firstQueuedPromptCard as HTMLElement);
@@ -1268,7 +1259,7 @@ describe("AgentSessionPanel conversation caching", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("smoothly removes the live-turn tail when the waiting indicator clears", async () => {
+  it("removes the live-turn layout footprint atomically when the waiting indicator clears", async () => {
     vi.useFakeTimers();
     const activeSession = makeSession("session-a", {
       status: "active",
@@ -1299,10 +1290,14 @@ describe("AgentSessionPanel conversation caching", () => {
     const liveTail = screen
       .getByText("Live turn")
       .closest(".conversation-live-tail");
+    const liveTailPresence = liveTail?.closest(
+      ".conversation-tail-entry-shell",
+    );
     const queuedPromptCard = screen
       .getByText("Queued follow-up after current turn")
       .closest(".pending-prompt-card");
     expect(liveTail).not.toBeNull();
+    expect(liveTailPresence).not.toBeNull();
     expect(liveTail).not.toContainElement(queuedPromptCard as HTMLElement);
 
     await act(async () => {
@@ -1322,23 +1317,7 @@ describe("AgentSessionPanel conversation caching", () => {
         .getByText("Queued follow-up after current turn")
         .closest(".pending-prompt-card"),
     ).toBe(queuedPromptCard);
-
-    await act(async () => {
-      await vi.advanceTimersToNextTimerAsync();
-    });
-
-    expect(
-      document.querySelector(".conversation-tail-entry-shell.is-entering"),
-    ).toBeInTheDocument();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(240);
-    });
-
-    expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
-    expect(
-      document.querySelector(".conversation-live-tail"),
-    ).not.toBeInTheDocument();
+    expect(liveTailPresence).not.toBeInTheDocument();
     expect(
       screen.getByText("Queued follow-up after current turn"),
     ).toBeInTheDocument();

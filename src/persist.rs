@@ -27,6 +27,8 @@ const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLITE_SESSION_TAIL_MESSAGES: usize = 64;
 const SQLITE_TRANSCRIPT_MIGRATION_SESSION_BATCH: usize = 16;
 const SQLITE_TRANSCRIPT_MIGRATION_MESSAGE_BATCH: usize = 64;
+const SQLITE_PROMPT_HISTORY_STORAGE_KEY: &str = "prompt_history_storage_version";
+const SQLITE_PROMPT_HISTORY_STORAGE_VERSION: &str = "1";
 
 /// Per-database writer locks shared by every in-process SQLite write path.
 ///
@@ -914,6 +916,12 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
               FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
             ) WITHOUT ROWID;
 
+            CREATE TABLE IF NOT EXISTS session_prompt_histories (
+              session_id TEXT PRIMARY KEY,
+              value_json TEXT NOT NULL,
+              FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            ) WITHOUT ROWID;
+
             CREATE TABLE IF NOT EXISTS delegations (
               id TEXT PRIMARY KEY,
               value_json TEXT NOT NULL
@@ -937,6 +945,7 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
     if stored_schema_version.as_deref() == Some(SQLITE_PREVIOUS_SCHEMA_VERSION) {
         migrate_sqlite_state_schema_v1_to_v2(connection)?;
     }
+    migrate_embedded_sqlite_prompt_histories(connection)?;
     backfill_missing_sqlite_session_overviews(connection)?;
     connection
         .execute(
@@ -946,6 +955,97 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
         )
         .context("failed to record SQLite state schema version")?;
     Ok(())
+}
+
+/// Moves the legacy embedded `session.promptHistory` projection into its own
+/// row. The marker makes this a one-time upgrade while the transaction keeps a
+/// failed migration retryable on the next startup. Invalid session JSON stays
+/// untouched so the normal row-isolation loader can quarantine it.
+fn migrate_embedded_sqlite_prompt_histories(
+    connection: &rusqlite::Connection,
+) -> Result<()> {
+    let migration_complete = connection
+        .query_row(
+            "SELECT value FROM meta WHERE key = ?1",
+            rusqlite::params![SQLITE_PROMPT_HISTORY_STORAGE_KEY],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .context("failed to read SQLite prompt-history storage version")?
+        .as_deref()
+        == Some(SQLITE_PROMPT_HISTORY_STORAGE_VERSION);
+    if migration_complete {
+        return Ok(());
+    }
+
+    let tx = connection
+        .unchecked_transaction()
+        .context("failed to start SQLite prompt-history migration")?;
+    let encoded_sessions = {
+        let mut statement = tx
+            .prepare(
+                "SELECT id, value_json
+                 FROM sessions
+                 WHERE typeof(id) = 'text' AND typeof(value_json) = 'text'",
+            )
+            .context("failed to prepare embedded prompt-history migration")?;
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .context("failed to query embedded prompt histories")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("failed to read embedded prompt histories")?
+    };
+    for (session_id, encoded) in encoded_sessions {
+        let Ok(mut value) = serde_json::from_str::<Value>(&encoded) else {
+            continue;
+        };
+        let Some(session) = value.get_mut("session").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        let Some(prompt_history) = session.remove("promptHistory") else {
+            continue;
+        };
+        let Some(prompt_history) = prompt_history.as_array() else {
+            // Leave malformed current-schema rows unchanged so strict session
+            // validation, rather than this compatibility migration, owns the
+            // resulting quarantine decision.
+            session.insert("promptHistory".to_owned(), prompt_history);
+            continue;
+        };
+        let history_json = serde_json::to_string(prompt_history)
+            .context("failed to serialize migrated prompt history")?;
+        let metadata_json = serde_json::to_string(&value)
+            .context("failed to serialize migrated session metadata")?;
+        tx.execute(
+            "INSERT INTO session_prompt_histories(session_id, value_json)
+             VALUES(?1, ?2)
+             ON CONFLICT(session_id) DO NOTHING",
+            rusqlite::params![session_id, history_json],
+        )
+        .with_context(|| {
+            format!("failed to migrate prompt history for session `{session_id}`")
+        })?;
+        tx.execute(
+            "UPDATE sessions SET value_json = ?2 WHERE id = ?1",
+            rusqlite::params![session_id, metadata_json],
+        )
+        .with_context(|| {
+            format!("failed to remove embedded prompt history for session `{session_id}`")
+        })?;
+    }
+    tx.execute(
+        "INSERT INTO meta(key, value) VALUES(?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        rusqlite::params![
+            SQLITE_PROMPT_HISTORY_STORAGE_KEY,
+            SQLITE_PROMPT_HISTORY_STORAGE_VERSION
+        ],
+    )
+    .context("failed to record SQLite prompt-history storage version")?;
+    tx.commit()
+        .context("failed to commit SQLite prompt-history migration")
 }
 
 include!("persist_sqlite_overview.rs");
@@ -1053,7 +1153,7 @@ fn migrate_sqlite_v1_session_transcript(
             |row| row.get(0),
         )
         .with_context(|| format!("failed to normalize legacy session `{session_id}` metadata"))?;
-    let record: PersistedSessionRecord = serde_json::from_str(&metadata_json)
+    let mut record: PersistedSessionRecord = serde_json::from_str(&metadata_json)
         .with_context(|| format!("failed to parse session `{session_id}` metadata"))?;
     if record.session.id != session_id {
         bail!(
@@ -1061,6 +1161,7 @@ fn migrate_sqlite_v1_session_transcript(
             record.session.id
         );
     }
+    backfill_persisted_session_defaults(&mut record.session);
     validate_persisted_session_fields(&record.session, record.external_session_id.as_deref())
         .with_context(|| format!("persisted session `{session_id}` failed validation"))?;
     validate_remote_proxy_identity(
@@ -1820,6 +1921,7 @@ fn load_session_records_from_sqlite_with_skipped(
                     record.session.id
                 );
             }
+            backfill_persisted_session_defaults(&mut record.session);
             validate_persisted_session_fields(
                 &record.session,
                 record.external_session_id.as_deref(),
@@ -1833,6 +1935,7 @@ fn load_session_records_from_sqlite_with_skipped(
                 format!("persisted session `{session_id}` has invalid remote proxy identity")
             })?;
             load_persisted_session_tail(connection, path, &mut record)?;
+            load_persisted_prompt_history(connection, path, &mut record)?;
             Ok(record)
         })();
         match loaded_record {
@@ -1845,6 +1948,110 @@ fn load_session_records_from_sqlite_with_skipped(
         }
     }
     Ok((records, quarantined_ids, skipped))
+}
+
+fn load_persisted_prompt_history(
+    connection: &rusqlite::Connection,
+    path: &FsPath,
+    record: &mut PersistedSessionRecord,
+) -> Result<()> {
+    let stored_history = connection
+        .query_row(
+            "SELECT value_json
+             FROM session_prompt_histories
+             WHERE session_id = ?1",
+            rusqlite::params![record.session.id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .with_context(|| {
+            format!(
+                "failed to load persisted prompt history for `{}` from `{}`",
+                record.session.id,
+                path.display()
+            )
+        })?;
+    if let Some(encoded) = stored_history {
+        let prompts = serde_json::from_str::<Vec<String>>(&encoded).with_context(|| {
+            format!(
+                "failed to parse persisted prompt history for `{}`",
+                record.session.id
+            )
+        })?;
+        record.session.prompt_history = normalize_prompt_history(prompts);
+        return Ok(());
+    }
+
+    // Compatibility fallback for a database created before the separate
+    // history row was introduced. The schema migration normally moves this
+    // value first, but keeping the fallback makes isolated row loads robust.
+    if !record.session.prompt_history.is_empty() {
+        record.session.prompt_history =
+            normalize_prompt_history(std::mem::take(&mut record.session.prompt_history));
+        return Ok(());
+    }
+
+    let mut statement = connection
+        .prepare(
+            "SELECT value_json
+             FROM messages
+             WHERE session_id = ?1 AND is_user = 1
+             ORDER BY position DESC
+             LIMIT ?2",
+        )
+        .with_context(|| {
+            format!(
+                "failed to prepare persisted prompt history for `{}`",
+                record.session.id
+            )
+        })?;
+    let rows = statement
+        .query_map(
+            rusqlite::params![
+                record.session.id,
+                i64::try_from(SESSION_PROMPT_HISTORY_LIMIT)
+                    .context("prompt history limit exceeds SQLite integer range")?
+            ],
+            |row| row.get::<_, String>(0),
+        )
+        .with_context(|| {
+            format!(
+                "failed to query persisted prompt history for `{}`",
+                record.session.id
+            )
+        })?;
+
+    let mut prompts = Vec::new();
+    for row in rows {
+        let encoded = row.with_context(|| {
+            format!(
+                "failed to read persisted prompt history for `{}` from `{}`",
+                record.session.id,
+                path.display()
+            )
+        })?;
+        match serde_json::from_str::<Message>(&encoded) {
+            Ok(message) => {
+                if let Some(prompt) = message.user_prompt_text() {
+                    prompts.push(prompt.to_owned());
+                }
+            }
+            Err(err) => {
+                // Prompt history is advisory. A malformed older row outside
+                // the validated startup tail must not quarantine an otherwise
+                // usable session; normal transcript paging will still surface
+                // the row-level failure if the user reaches that history.
+                eprintln!(
+                    "persist> skipping unreadable prompt-history message for `{}` from `{}`: {err:#}",
+                    record.session.id,
+                    path.display()
+                );
+            }
+        }
+    }
+    prompts.reverse();
+    record.session.prompt_history = normalize_prompt_history(prompts);
+    Ok(())
 }
 
 fn load_persisted_session_tail(
@@ -2229,6 +2436,7 @@ struct SerializedPersistedSession {
     message_start_index: usize,
     message_count: usize,
     write_overview: bool,
+    prompt_history_value_json: Option<String>,
     value_json: String,
     messages: Vec<SerializedPersistedMessage>,
 }
@@ -2259,7 +2467,17 @@ fn serialize_persisted_session(
                 .context("persisted transcript count does not fit this platform")?,
         )
     };
+    let prompt_history_value_json = record
+        .persist_prompt_history
+        .then(|| {
+            serde_json::to_string(&record.session.prompt_history)
+                .context("failed to serialize persisted prompt history")
+        })
+        .transpose()?;
     metadata.session.messages.clear();
+    // Prompt history has an independent mutation watermark and SQLite row. It
+    // must not inflate the metadata JSON rewritten by every streaming commit.
+    metadata.session.prompt_history.clear();
     metadata.session.message_count =
         u32::try_from(total_message_count).context("persisted transcript exceeds wire limit")?;
     metadata.session.messages_loaded = total_message_count == 0;
@@ -2295,6 +2513,7 @@ fn serialize_persisted_session(
         message_start_index: record.message_start_index,
         message_count: total_message_count,
         write_overview: remote_proxy_identity.is_none(),
+        prompt_history_value_json,
         value_json,
         messages,
     })
@@ -2340,6 +2559,20 @@ fn write_serialized_persisted_session(
             session.session_id
         )
     })?;
+    if let Some(prompt_history_value_json) = &session.prompt_history_value_json {
+        tx.execute(
+            "INSERT INTO session_prompt_histories(session_id, value_json)
+             VALUES(?1, ?2)
+             ON CONFLICT(session_id) DO UPDATE SET value_json = excluded.value_json",
+            rusqlite::params![session.session_id, prompt_history_value_json],
+        )
+        .with_context(|| {
+            format!(
+                "failed to write persisted prompt history for `{}`",
+                session.session_id
+            )
+        })?;
+    }
     tx.execute(
         "DELETE FROM messages WHERE session_id = ?1 AND position >= ?2",
         rusqlite::params![

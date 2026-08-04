@@ -18,6 +18,15 @@
 // and must not land on a session whose Codex runtime has since been
 // replaced.
 
+fn ensure_opencode_sync_deadline(
+    execution_deadline: Option<std::time::Instant>,
+) -> Result<()> {
+    if execution_deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+        bail!("OpenCode config request deadline expired before committing session state");
+    }
+    Ok(())
+}
+
 impl AppState {
     /// Builds the persisted OpenCode selection used when a live runtime
     /// reports changed config options. The ACP reader cannot write protocol
@@ -43,6 +52,7 @@ impl AppState {
                 .opencode_model
                 .clone()
                 .unwrap_or_else(|| OPENCODE_CONFIG_AUTO.to_owned()),
+            opencode_effort: record.session.opencode_effort.clone(),
             opencode_mode: record.session.opencode_mode.clone(),
             prompt: String::new(),
             resume_session_id: record.external_session_id.clone(),
@@ -73,6 +83,13 @@ impl AppState {
                 .unwrap_or_else(|| OPENCODE_CONFIG_AUTO.to_owned()),
             effective_model: record.session.model.clone(),
             model_options: record.session.model_options.clone(),
+            effort_selection: record
+                .session
+                .opencode_effort
+                .clone()
+                .unwrap_or_else(|| OPENCODE_CONFIG_AUTO.to_owned()),
+            current_effort: record.session.opencode_current_effort.clone(),
+            effort_options: record.session.opencode_effort_options.clone(),
             mode_selection: record
                 .session
                 .opencode_mode
@@ -83,16 +100,34 @@ impl AppState {
         })
     }
 
-    /// Commits one agent-acknowledged OpenCode authority change. Explicit
-    /// choices become both selected and effective; `auto` changes only the
-    /// selected authority and preserves the agent-reported effective value.
-    fn sync_session_opencode_selection(
+    /// Commits one agent-acknowledged OpenCode authority change before the
+    /// owning API request expires. Explicit choices become both selected and
+    /// effective; `auto` changes only the selected authority and preserves the
+    /// agent-reported effective value.
+    fn sync_session_opencode_selection_before_deadline(
         &self,
         session_id: &str,
         option_id: &str,
         selection: String,
+        execution_deadline: std::time::Instant,
+    ) -> Result<()> {
+        self.sync_session_opencode_selection_with_deadline(
+            session_id,
+            option_id,
+            selection,
+            Some(execution_deadline),
+        )
+    }
+
+    fn sync_session_opencode_selection_with_deadline(
+        &self,
+        session_id: &str,
+        option_id: &str,
+        selection: String,
+        execution_deadline: Option<std::time::Instant>,
     ) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        ensure_opencode_sync_deadline(execution_deadline)?;
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
@@ -110,6 +145,12 @@ impl AppState {
                 record.session.opencode_model = Some(selection.clone());
                 if selection != OPENCODE_CONFIG_AUTO {
                     record.session.model = selection;
+                }
+            }
+            "effort" => {
+                record.session.opencode_effort = Some(selection.clone());
+                if selection != OPENCODE_CONFIG_AUTO {
+                    record.session.opencode_current_effort = Some(selection);
                 }
             }
             "mode" => {
@@ -175,7 +216,7 @@ impl AppState {
         Ok(())
     }
 
-    /// Reconciles OpenCode's dynamic model/mode config after new, resume,
+    /// Reconciles OpenCode's dynamic model/effort/mode config after new, resume,
     /// load, or a config-options update. The selected values preserve the
     /// TermAl authority boundary (`auto` delegates to the agent; an explicit
     /// live value is TermAl-authoritative), while the effective fields mirror
@@ -183,35 +224,74 @@ impl AppState {
     fn sync_session_opencode_config(
         &self,
         session_id: &str,
-        model_update: Option<(String, Option<String>, Vec<SessionModelOption>)>,
-        mode_update: Option<(String, Option<String>, Vec<SessionModelOption>)>,
-        notices: Vec<String>,
+        update: OpenCodeConfigUpdate,
     ) -> Result<()> {
-        let model_update = model_update
-            .map(|(selection, current, options)| {
-                Ok::<_, anyhow::Error>((
-                    normalize_opencode_model(&selection)?,
-                    current
+        self.sync_session_opencode_config_with_deadline(session_id, update, None)
+    }
+
+    fn sync_session_opencode_config_before_deadline(
+        &self,
+        session_id: &str,
+        update: OpenCodeConfigUpdate,
+        execution_deadline: std::time::Instant,
+    ) -> Result<()> {
+        self.sync_session_opencode_config_with_deadline(
+            session_id,
+            update,
+            Some(execution_deadline),
+        )
+    }
+
+    fn sync_session_opencode_config_with_deadline(
+        &self,
+        session_id: &str,
+        update: OpenCodeConfigUpdate,
+        execution_deadline: Option<std::time::Instant>,
+    ) -> Result<()> {
+        let model_update = update
+            .model
+            .map(|update| {
+                Ok::<_, anyhow::Error>(OpenCodeConfigOptionUpdate {
+                    selection: normalize_opencode_model(&update.selection)?,
+                    current: update
+                        .current
                         .as_deref()
                         .map(normalize_opencode_model)
                         .transpose()?,
-                    options,
-                ))
+                    options: update.options,
+                })
             })
             .transpose()?;
-        let mode_update = mode_update
-            .map(|(selection, current, options)| {
-                Ok::<_, anyhow::Error>((
-                    normalize_opencode_mode(&selection)?,
-                    current
+        let effort_update = update
+            .effort
+            .map(|update| {
+                Ok::<_, anyhow::Error>(OpenCodeConfigOptionUpdate {
+                    selection: normalize_opencode_effort(&update.selection)?,
+                    current: update
+                        .current
+                        .as_deref()
+                        .map(normalize_opencode_effort)
+                        .transpose()?,
+                    options: update.options,
+                })
+            })
+            .transpose()?;
+        let mode_update = update
+            .mode
+            .map(|update| {
+                Ok::<_, anyhow::Error>(OpenCodeConfigOptionUpdate {
+                    selection: normalize_opencode_mode(&update.selection)?,
+                    current: update
+                        .current
                         .as_deref()
                         .map(normalize_opencode_mode)
                         .transpose()?,
-                    options,
-                ))
+                    options: update.options,
+                })
             })
             .transpose()?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        ensure_opencode_sync_deadline(execution_deadline)?;
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
@@ -224,22 +304,27 @@ impl AppState {
             ));
         }
 
-        if let Some((model_selection, effective_model, model_options)) = model_update {
-            record.session.opencode_model = Some(model_selection);
-            if let Some(effective_model) = effective_model {
+        if let Some(update) = model_update {
+            record.session.opencode_model = Some(update.selection);
+            if let Some(effective_model) = update.current {
                 record.session.model = effective_model;
             }
-            record.session.model_options = model_options;
+            record.session.model_options = update.options;
         }
-        if let Some((mode_selection, current_mode, mode_options)) = mode_update {
-            record.session.opencode_mode = Some(mode_selection);
-            record.session.opencode_current_mode = current_mode;
-            record.session.opencode_mode_options = mode_options;
+        if let Some(update) = effort_update {
+            record.session.opencode_effort = Some(update.selection);
+            record.session.opencode_current_effort = update.current;
+            record.session.opencode_effort_options = update.options;
+        }
+        if let Some(update) = mode_update {
+            record.session.opencode_mode = Some(update.selection);
+            record.session.opencode_current_mode = update.current;
+            record.session.opencode_mode_options = update.options;
         }
         self.commit_locked(&mut inner)?;
         drop(inner);
 
-        for notice in notices {
+        for notice in update.notices {
             self.push_message(
                 session_id,
                 Message::Text {

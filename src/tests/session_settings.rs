@@ -28,6 +28,31 @@
 
 use super::*;
 
+// Remote settings proxy the typed request instead of maintaining a parallel
+// field allowlist. Pin the two OpenCode-dependent fields and the transport
+// budget required by the acknowledged 55-second owner-side update path.
+#[test]
+fn remote_session_settings_payload_includes_opencode_dependents_and_timeout_slack() {
+    let payload = serde_json::to_value(UpdateSessionSettingsRequest {
+        name: None,
+        model: Some("provider/model".to_owned()),
+        approval_policy: None,
+        reasoning_effort: None,
+        sandbox_mode: None,
+        cursor_mode: None,
+        claude_approval_mode: None,
+        claude_effort: None,
+        gemini_approval_mode: None,
+        opencode_effort: Some("xhigh".to_owned()),
+        opencode_mode: Some("build".to_owned()),
+    })
+    .expect("session settings request should serialize");
+
+    assert_eq!(payload["opencodeEffort"], "xhigh");
+    assert_eq!(payload["opencodeMode"], "build");
+    assert!(REMOTE_SESSION_SETTINGS_TIMEOUT > Duration::from_secs(55));
+}
+
 // Pins the cross-language app-preference key. `OpenCode` contains an internal
 // capital letter, so serde's generic camelCase conversion would otherwise
 // produce `defaultOpencodeModel` while the TypeScript contract uses
@@ -55,6 +80,55 @@ fn opencode_default_model_uses_explicit_wire_key() {
         request.default_opencode_model.as_deref(),
         Some("openai/gpt-5.6-sol")
     );
+}
+
+#[test]
+fn non_opencode_sessions_reject_opencode_effort() {
+    let cases = [
+        (
+            Agent::Codex,
+            "Claude/OpenCode settings can only be changed for their matching sessions",
+        ),
+        (
+            Agent::Claude,
+            "Claude sessions only support model, mode, and effort settings",
+        ),
+        (
+            Agent::Cursor,
+            "Cursor sessions only support model and mode settings",
+        ),
+        (
+            Agent::Gemini,
+            "Gemini sessions only support model and approval mode settings",
+        ),
+    ];
+
+    for (agent, expected_message) in cases {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, agent);
+        let error = match state.update_session_settings(
+            &session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: None,
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: Some("high".to_owned()),
+                opencode_mode: None,
+            },
+        ) {
+            Ok(_) => panic!("{agent:?} should reject OpenCode reasoning variants"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST, "{agent:?}");
+        assert_eq!(error.message, expected_message, "{agent:?}");
+    }
 }
 
 #[test]
@@ -123,22 +197,31 @@ fn opencode_model_refresh_restarts_ready_runtime_before_handshake() {
 }
 
 #[test]
-fn offline_opencode_mode_change_does_not_claim_agent_effective_state() {
+fn offline_opencode_effort_and_mode_changes_do_not_claim_agent_effective_state() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::OpenCode);
     state
         .sync_session_opencode_config(
             &session_id,
-            None,
-            Some((
-                OPENCODE_CONFIG_AUTO.to_owned(),
-                Some("build".to_owned()),
-                vec![
-                    SessionModelOption::plain("Build", "build"),
-                    SessionModelOption::plain("Plan", "plan"),
-                ],
-            )),
-            Vec::new(),
+            OpenCodeConfigUpdate {
+                effort: Some(OpenCodeConfigOptionUpdate {
+                    selection: OPENCODE_CONFIG_AUTO.to_owned(),
+                    current: Some("medium".to_owned()),
+                    options: vec![
+                        SessionModelOption::plain("Medium", "medium"),
+                        SessionModelOption::plain("High", "high"),
+                    ],
+                }),
+                mode: Some(OpenCodeConfigOptionUpdate {
+                    selection: OPENCODE_CONFIG_AUTO.to_owned(),
+                    current: Some("build".to_owned()),
+                    options: vec![
+                        SessionModelOption::plain("Build", "build"),
+                        SessionModelOption::plain("Plan", "plan"),
+                    ],
+                }),
+                ..OpenCodeConfigUpdate::default()
+            },
         )
         .expect("initial agent-reported mode should sync");
 
@@ -155,6 +238,7 @@ fn offline_opencode_mode_change_does_not_claim_agent_effective_state() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_effort: Some("high".to_owned()),
                 opencode_mode: Some("plan".to_owned()),
             },
         )
@@ -165,10 +249,75 @@ fn offline_opencode_mode_change_does_not_claim_agent_effective_state() {
         .find(|session| session.id == session_id)
         .expect("OpenCode session should remain visible");
     assert_eq!(session.opencode_mode.as_deref(), Some("plan"));
+    assert_eq!(session.opencode_effort.as_deref(), Some("high"));
+    assert_eq!(
+        session.opencode_current_effort.as_deref(),
+        Some("medium"),
+        "offline authority changes must not impersonate agent acknowledgement"
+    );
     assert_eq!(
         session.opencode_current_mode.as_deref(),
         Some("build"),
         "offline authority changes must not impersonate agent acknowledgement"
+    );
+}
+
+#[test]
+fn offline_opencode_model_and_effort_change_defers_effort_membership_validation() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::OpenCode);
+    state
+        .sync_session_opencode_config(
+            &session_id,
+            OpenCodeConfigUpdate {
+                model: Some(OpenCodeConfigOptionUpdate {
+                    selection: "openai/old-model".to_owned(),
+                    current: Some("openai/old-model".to_owned()),
+                    options: vec![
+                        SessionModelOption::plain("Old model", "openai/old-model"),
+                        SessionModelOption::plain("New model", "openai/new-model"),
+                    ],
+                }),
+                effort: Some(OpenCodeConfigOptionUpdate {
+                    selection: "low".to_owned(),
+                    current: Some("low".to_owned()),
+                    options: vec![SessionModelOption::plain("Low", "low")],
+                }),
+                ..OpenCodeConfigUpdate::default()
+            },
+        )
+        .expect("initial model-specific OpenCode options should sync");
+
+    let updated = state
+        .update_session_settings(
+            &session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: Some("openai/new-model".to_owned()),
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: Some("xhigh".to_owned()),
+                opencode_mode: None,
+            },
+        )
+        .expect("new-model effort must not be rejected against old-model options");
+    let session = updated
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("OpenCode session should remain visible");
+    assert_eq!(session.model, "openai/new-model");
+    assert_eq!(session.opencode_model.as_deref(), Some("openai/new-model"));
+    assert_eq!(session.opencode_effort.as_deref(), Some("xhigh"));
+    assert_eq!(
+        session.opencode_current_effort.as_deref(),
+        Some("low"),
+        "offline authority changes must preserve the last agent-effective effort"
     );
 }
 
@@ -929,6 +1078,7 @@ fn updates_cursor_session_model_settings() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_effort: None,
                 opencode_mode: None,
             },
         )
@@ -980,6 +1130,7 @@ fn updates_codex_session_model_settings_without_restarting_runtime() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_effort: None,
                 opencode_mode: None,
             },
         )
@@ -1039,6 +1190,7 @@ fn updates_codex_reasoning_effort_without_restarting_runtime() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_effort: None,
                 opencode_mode: None,
             },
         )
@@ -1137,6 +1289,7 @@ fn normalizes_codex_reasoning_effort_when_switching_models() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_effort: None,
                 opencode_mode: None,
             },
         )
@@ -1218,6 +1371,7 @@ fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
             claude_approval_mode: None,
             claude_effort: None,
             gemini_approval_mode: None,
+            opencode_effort: None,
             opencode_mode: None,
         },
     ) {
@@ -1295,6 +1449,7 @@ fn accepts_codex_max_and_ultra_reasoning_efforts_for_supporting_model() {
                     claude_approval_mode: None,
                     claude_effort: None,
                     gemini_approval_mode: None,
+                    opencode_effort: None,
                     opencode_mode: None,
                 },
             )
@@ -1413,6 +1568,7 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_effort: None,
                 opencode_mode: None,
             },
         )
@@ -1497,6 +1653,7 @@ fn updating_running_claude_session_to_default_model_requires_restart() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_effort: None,
                 opencode_mode: None,
             },
         )
@@ -1580,6 +1737,7 @@ fn updates_claude_effort_and_marks_runtime_for_restart() {
                 claude_approval_mode: None,
                 claude_effort: Some(ClaudeEffortLevel::High),
                 gemini_approval_mode: None,
+                opencode_effort: None,
                 opencode_mode: None,
             },
         )

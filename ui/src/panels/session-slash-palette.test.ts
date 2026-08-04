@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLAUDE_EFFORT_SLASH_OPTIONS,
   FALLBACK_CLAUDE_EFFORTS,
+  opencodeEffortSlashState,
   sessionModeSlashState,
   sessionModelSlashState,
   slashCommandsForSession,
@@ -30,6 +31,8 @@ describe("OpenCode slash choices", () => {
     agentCommandsRevision: 0,
     model: "openai/gpt-5.6-sol",
     opencodeModel: "auto",
+    opencodeEffort: "high",
+    opencodeCurrentEffort: "high",
     opencodeMode: "plan",
     opencodeCurrentMode: "plan",
     modelOptions: [
@@ -39,16 +42,30 @@ describe("OpenCode slash choices", () => {
       { value: "build", label: "Build" },
       { value: "plan", label: "Plan" },
     ],
+    opencodeEffortOptions: [
+      { value: "low", label: "Low" },
+      { value: "high", label: "High" },
+    ],
     workdir: "/tmp",
   } as SlashPaletteSession;
 
-  it("exposes model and mode commands", () => {
+  it("exposes model, reasoning-variant, and mode commands", () => {
     expect(
       slashCommandsForSession(session).map((command) => command.id),
-    ).toEqual(expect.arrayContaining(["model", "mode"]));
+    ).toEqual(expect.arrayContaining(["model", "effort", "mode"]));
     expect(sessionModeSlashState(session, "")?.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ value: "plan", isCurrent: true }),
+      ]),
+    );
+  });
+
+  it("uses the model-specific reasoning variants reported by OpenCode", () => {
+    expect(opencodeEffortSlashState(session, "").items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ value: "auto", isCurrent: false }),
+        expect.objectContaining({ value: "low", isCurrent: false }),
+        expect.objectContaining({ value: "high", isCurrent: true }),
       ]),
     );
   });

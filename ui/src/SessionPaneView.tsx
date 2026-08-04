@@ -1360,7 +1360,7 @@ export function SessionPaneView({
 
       <section
         ref={messageStackRef}
-        className={`message-stack${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}${activeTerminalTab ? " terminal-panel-stack" : ""}${activeMailboxTab ? " mailbox-panel-stack" : ""}${activeResponseBoardTab ? " response-board-panel-stack" : ""}`}
+        className={`message-stack${activeTab?.kind === "session" && pane.viewMode === "session" && liveTailPinned ? " is-tail-following" : ""}${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}${activeTerminalTab ? " terminal-panel-stack" : ""}${activeMailboxTab ? " mailbox-panel-stack" : ""}${activeResponseBoardTab ? " response-board-panel-stack" : ""}`}
         tabIndex={
           activeTab?.kind === "session" && pane.viewMode === "session"
             ? 0

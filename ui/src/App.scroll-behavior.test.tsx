@@ -262,6 +262,23 @@ function scrollToTopsWithBehavior(
   });
 }
 
+function scrollToTopsForElementWithBehavior(
+  scrollToMock: ReturnType<typeof vi.fn>,
+  element: HTMLElement,
+  behavior: ScrollBehavior,
+) {
+  return scrollToMock.mock.calls.flatMap((call, index) => {
+    const options = call[0];
+    return scrollToMock.mock.contexts[index] === element &&
+      typeof options === "object" &&
+      options !== null &&
+      options.behavior === behavior &&
+      typeof options.top === "number"
+      ? [options.top]
+      : [];
+  });
+}
+
 describe("App scroll behaviour", () => {
   const originalScrollTo = HTMLElement.prototype.scrollTo;
   const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
@@ -868,7 +885,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("smoothly reattaches to the latest prompt while a send is in flight", async () => {
+  it("reattaches to the latest prompt while a send is in flight", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -968,7 +985,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("keeps a growing near-bottom send inside one smooth follow", async () => {
+  it("keeps a growing near-bottom send inside one live follow", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -1064,7 +1081,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("smoothly makes room when the first agent card appears above the live turn", async () => {
+  it("makes room when the first agent card appears above the live turn", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -1149,6 +1166,7 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         expect(screen.getByText("Live turn")).toBeInTheDocument();
+        expect(messageStack).toHaveClass("is-tail-following");
         expect(
           Math.max(...scrollToTopsWithBehavior(scrollToMock, "auto")),
         ).toBeGreaterThan(800);
@@ -1482,6 +1500,163 @@ describe("App scroll behaviour", () => {
     });
   });
 
+  it("never reverses live follow while a final message replaces the live turn", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      let transcriptScrollHeight = 1000;
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: () =>
+          transcriptScrollHeight +
+          (document.querySelector(".conversation-tail-entry-shell") ? 120 : 0),
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+      const userMessage: Session["messages"][number] = {
+        id: "message-user-live-final",
+        type: "text",
+        timestamp: "10:00",
+        author: "you",
+        text: "Finish this turn",
+      };
+      const activeState = {
+        revision: 2,
+        projects: [
+          {
+            id: "project-termal",
+            name: "TermAl",
+            rootPath: "/projects/termal",
+          },
+        ],
+        sessions: [
+          makeSession("session-1", {
+            name: "Session 1",
+            projectId: "project-termal",
+            workdir: "/projects/termal",
+            status: "active",
+            preview: "Finish this turn",
+            messages: [userMessage],
+          }),
+        ],
+      };
+
+      try {
+        await dispatchStateEvent(latestEventSource(), activeState);
+        await settleAsyncUi();
+
+        expect(screen.getByText("Live turn")).toBeInTheDocument();
+        expect(
+          document.querySelector(".conversation-tail-entry-shell"),
+        ).toBeInTheDocument();
+
+        const messageStack = Array.from(
+          document.querySelectorAll(".message-stack"),
+        ).find(
+          (candidate): candidate is HTMLElement =>
+            candidate instanceof HTMLElement &&
+            !candidate.classList.contains("control-panel-stack"),
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+
+        messageStack.scrollTop = 920;
+        await act(async () => {
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+        scrollToMock.mockClear();
+
+        // A short final card can initially be smaller than the live-turn card
+        // it replaces. The browser owns the unavoidable layout clamp; the
+        // follow controller must not add an upward scroll write and then chase
+        // the bottom down again when Markdown finishes measuring.
+        transcriptScrollHeight = 1080;
+        await dispatchStateEvent(latestEventSource(), {
+          ...activeState,
+          revision: 3,
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              status: "idle",
+              preview: "Final response",
+              messages: [
+                userMessage,
+                {
+                  id: "message-assistant-live-final",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Final response",
+                },
+              ],
+            }),
+          ],
+        });
+        await settleAsyncUi();
+
+        expect(
+          within(messageStack).getByText("Final response"),
+        ).toBeInTheDocument();
+        expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
+        expect(
+          document.querySelector(".conversation-tail-entry-shell"),
+        ).not.toBeInTheDocument();
+
+        const replacementTops = scrollToTopsForElementWithBehavior(
+          scrollToMock,
+          messageStack,
+          "auto",
+        );
+        expect(replacementTops.every((top) => top >= 920)).toBe(true);
+
+        scrollToMock.mockClear();
+        transcriptScrollHeight = 1160;
+        await dispatchStateEvent(latestEventSource(), {
+          ...activeState,
+          revision: 4,
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              status: "idle",
+              preview: "Final response with rendered detail",
+              messages: [
+                userMessage,
+                {
+                  id: "message-assistant-live-final",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Final response with rendered detail",
+                },
+              ],
+            }),
+          ],
+        });
+        await settleAsyncUi();
+
+        const followedTops = scrollToTopsForElementWithBehavior(
+          scrollToMock,
+          messageStack,
+          "auto",
+        );
+        expect(followedTops.length).toBeGreaterThan(0);
+        expect(followedTops.every((top) => top >= 920)).toBe(true);
+        expect(
+          followedTops.every(
+            (top, index) => index === 0 || top >= followedTops[index - 1],
+          ),
+        ).toBe(true);
+      } finally {
+        context.cleanup();
+        restoreScrollGeometry();
+      }
+    });
+  });
+
   it("does not bottom-follow the live waiting indicator when far from bottom", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
@@ -1548,6 +1723,7 @@ describe("App scroll behaviour", () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
+        expect(messageStack).not.toHaveClass("is-tail-following");
         scrollToMock.mockClear();
 
         scrollHeight = 1120;
@@ -1568,6 +1744,7 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         expect(screen.getByText("Live turn")).toBeInTheDocument();
+        expect(messageStack).not.toHaveClass("is-tail-following");
         expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
         expect(messageStack.scrollTop).toBe(440);
       } finally {
@@ -1670,7 +1847,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("keeps measured command-card growth inside the smooth bottom follow", async () => {
+  it("keeps measured command-card growth inside one live bottom follow", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const resizeCallbacksByTarget = new Map<
         Element,
@@ -1718,7 +1895,7 @@ describe("App scroll behaviour", () => {
       // Keep the production bottom-follow cooldown active while this test
       // advances the simulated scroll sequence. Under full-suite CPU load,
       // more than the real 1.2-second window can elapse between assertions,
-      // which makes the test exercise cooldown expiry instead of smooth
+      // which makes the test exercise cooldown expiry instead of live
       // follow continuation. Install the spy only after potentially-throwing
       // setup so its immediately following `try` owns the full lifetime.
       const performanceNowSpy = vi
@@ -1887,7 +2064,7 @@ describe("App scroll behaviour", () => {
           screen.queryByRole("button", { name: "New response" }),
         ).not.toBeInTheDocument();
 
-        // The settled retargeting loop can finish before the browser's smooth
+        // The settled retargeting loop can finish before the programmatic
         // scroll classification window. A later measurement must still be
         // corrected once instead of being discarded by that stale time marker.
         scrollToMock.mockClear();
@@ -2171,7 +2348,7 @@ describe("App scroll behaviour", () => {
         expect(
           Boolean(
             queuedPromptCard!.compareDocumentPosition(liveTurnCard!) &
-              Node.DOCUMENT_POSITION_FOLLOWING,
+            Node.DOCUMENT_POSITION_FOLLOWING,
           ),
         ).toBe(true);
         expect(

@@ -600,7 +600,7 @@ impl AppState {
                 .sessions
                 .iter()
                 .rev()
-                .find(|record| record.session.status == SessionStatus::Error)
+                .find(|record| record.status == SessionStatus::Error)
         } else {
             None
         };
@@ -612,7 +612,7 @@ impl AppState {
                 .sessions
                 .iter()
                 .rev()
-                .find(|record| record.session.status == SessionStatus::Active)
+                .find(|record| record.status == SessionStatus::Active)
         } else {
             None
         };
@@ -628,12 +628,11 @@ impl AppState {
                     .sessions
                     .iter()
                     .rev()
-                    .find(|record| !record.session.messages.is_empty())
+                    .find(|record| record.has_messages)
             })
             .or_else(|| inputs.sessions.last());
-        let summary_session_id = summary_session.map(|record| record.session.id.clone());
-        let prompt_target_session_id =
-            prompt_target_session.map(|record| record.session.id.clone());
+        let summary_session_id = summary_session.map(|record| record.id.clone());
+        let prompt_target_session_id = prompt_target_session.map(|record| record.id.clone());
         let summary_deep_link = Some(build_project_deep_link(
             &inputs.project.id,
             summary_session_id.as_deref(),
@@ -662,7 +661,7 @@ impl AppState {
                 ],
                 deep_link: summary_deep_link,
                 pending_approval_target: Some(ProjectApprovalTarget {
-                    session_id: record.session.id.clone(),
+                    session_id: record.id.clone(),
                     message_id,
                 }),
                 source_message_ids,
@@ -688,7 +687,7 @@ impl AppState {
                     "Work is waiting on a response in TermAl.",
                 ),
                 current_status: normalize_project_text(
-                    &record.session.preview,
+                    &record.preview,
                     "Waiting on input in TermAl.",
                 ),
                 proposed_actions,
@@ -718,7 +717,7 @@ impl AppState {
                     &done_summary,
                     "The last turn ended in an error.",
                 ),
-                current_status: normalize_project_text(&record.session.preview, "Needs attention."),
+                current_status: normalize_project_text(&record.preview, "Needs attention."),
                 proposed_actions,
                 deep_link: action_target_deep_link,
                 pending_approval_target: None,
@@ -812,7 +811,7 @@ impl AppState {
             .filter(|record| {
                 !record.hidden && record.session.project_id.as_deref() == Some(project_id)
             })
-            .cloned()
+            .map(project_digest_session_from_record)
             .collect();
         Ok(ProjectDigestInputs { project, sessions })
     }
@@ -835,13 +834,14 @@ impl AppState {
     }
 }
 
-fn latest_project_prompt_target_session(sessions: &[SessionRecord]) -> Option<&SessionRecord> {
+fn latest_project_prompt_target_session(
+    sessions: &[ProjectDigestSession],
+) -> Option<&ProjectDigestSession> {
     // Keep this aligned with `find_latest_telegram_project_prompt_session`;
     // both choose the automatic Telegram prompt target when the digest primary
     // points at a delegated child or another non-promptable session.
     sessions.iter().rev().find(|record| {
-        record.session.parent_delegation_id.is_none()
-            && record.session.status != SessionStatus::Error
+        record.parent_delegation_id.is_none() && record.status != SessionStatus::Error
     })
 }
 

@@ -45,6 +45,7 @@ fn reset_hidden_claude_spare_record(record: &mut SessionRecord) {
     }
 
     record.session.messages.clear();
+    clear_prompt_history_on_record(record);
     record.message_start_index = 0;
     sync_retained_transcript_metadata(record);
     record.session.pending_prompts.clear();

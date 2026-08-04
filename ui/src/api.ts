@@ -1173,6 +1173,7 @@ export function updateSessionSettings(
     cursorMode?: CursorMode;
     claudeApprovalMode?: ClaudeApprovalMode;
     geminiApprovalMode?: GeminiApprovalMode;
+    opencodeEffort?: string;
     opencodeMode?: string;
   },
 ) {

@@ -1345,6 +1345,10 @@ struct SessionRecord {
     /// means this record has in-memory changes that have not yet reached
     /// SQLite.
     mutation_stamp: u64,
+    /// Last global mutation stamp at which the bounded composer history
+    /// changed. The persist delta uses this independent watermark to keep the
+    /// potentially large history out of hot session-metadata rewrites.
+    prompt_history_mutation_stamp: u64,
 }
 
 impl SessionRecord {

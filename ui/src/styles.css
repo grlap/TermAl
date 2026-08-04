@@ -4112,10 +4112,15 @@ textarea {
   scrollbar-width: none;
 }
 
+.message-stack.is-tail-following {
+  /* The tail-follow controller owns live layout compensation. Keep this plain
+     selector independent from :has() so older P0 browsers do not discard it. */
+  overflow-anchor: none;
+}
+
 .message-stack:has(.virtualized-message-list) {
-  /* The virtualizer compensates measured page-height changes and history
-     prepends itself. Chromium's native overflow anchoring would apply a second,
-     browser-timed correction and make the transcript drift while pages settle. */
+  /* The virtualizer compensates layout changes itself. Chromium's native
+     overflow anchoring would apply a second, browser-timed correction. */
   overflow-anchor: none;
 }
 

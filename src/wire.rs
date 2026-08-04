@@ -517,6 +517,16 @@ struct Session {
     /// after session new/resume/load before the next prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     opencode_model: Option<String>,
+    /// Persisted OpenCode model-variant authority (`auto` or an explicit
+    /// model-specific ACP `effort` value).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opencode_effort: Option<String>,
+    /// Effective live OpenCode reasoning variant reported by ACP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opencode_current_effort: Option<String>,
+    /// Dynamic model-specific OpenCode reasoning variants reported by ACP.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    opencode_effort_options: Vec<SessionModelOption>,
     /// Persisted OpenCode primary-agent selection (`auto` or a live dynamic
     /// mode value).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -540,6 +550,18 @@ struct Session {
     status: SessionStatus,
     preview: String,
     messages: Vec<Message>,
+    /// Recent user-authored prompts, ordered oldest to newest.
+    ///
+    /// This is deliberately independent of the bounded transcript window so
+    /// composer Up/Down history remains available after summary-only state
+    /// loads and targeted tail hydration.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    prompt_history: Vec<String>,
+    /// True only when a metadata projection intentionally omits prompt history.
+    /// Targeted/full projections leave this false, so an omitted empty array is
+    /// distinguishable from redaction on both local and remote clients.
+    #[serde(default, skip_serializing_if = "is_false")]
+    prompt_history_redacted: bool,
     #[serde(default = "session_messages_loaded_default", rename = "messagesLoaded")]
     messages_loaded: bool,
     #[serde(default, rename = "messageCount")]
@@ -1506,7 +1528,7 @@ struct FollowupDelegationRequest {
 }
 
 /// Represents the update session settings request payload.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateSessionSettingsRequest {
     name: Option<String>,
@@ -1518,6 +1540,7 @@ struct UpdateSessionSettingsRequest {
     claude_approval_mode: Option<ClaudeApprovalMode>,
     claude_effort: Option<ClaudeEffortLevel>,
     gemini_approval_mode: Option<GeminiApprovalMode>,
+    opencode_effort: Option<String>,
     opencode_mode: Option<String>,
 }
 

@@ -255,6 +255,9 @@ mod visible_session_hydration_error_tests {
             claude_approval_mode: None,
             gemini_approval_mode: None,
             opencode_model: None,
+            opencode_effort: None,
+            opencode_current_effort: None,
+            opencode_effort_options: Vec::new(),
             opencode_mode: None,
             opencode_current_mode: None,
             opencode_mode_options: Vec::new(),
@@ -265,6 +268,8 @@ mod visible_session_hydration_error_tests {
             status: SessionStatus::Idle,
             preview: "Remote session ready.".to_owned(),
             messages: Vec::new(),
+            prompt_history: Vec::new(),
+            prompt_history_redacted: false,
             messages_loaded: true,
             message_count: 0,
             markers: Vec::new(),
@@ -358,6 +363,8 @@ mod visible_session_hydration_error_tests {
                 expanded_text: Some("Expanded sensitive queued prompt".to_owned()),
                 source: None,
             });
+            inner.sessions[index].session.prompt_history =
+                vec!["Sensitive historical prompt".to_owned()];
         }
 
         let summary = state.summary_snapshot();
@@ -367,6 +374,8 @@ mod visible_session_hydration_error_tests {
             .find(|session| session.id == session_id)
             .expect("summary session should be present");
         assert!(summary_session.pending_prompts.is_empty());
+        assert!(summary_session.prompt_history.is_empty());
+        assert!(summary_session.prompt_history_redacted);
 
         let targeted = state.summary_snapshot_with_session_detail(&session_id);
         let targeted_session = targeted
@@ -375,6 +384,11 @@ mod visible_session_hydration_error_tests {
             .find(|session| session.id == session_id)
             .expect("targeted session should be present");
         assert_eq!(targeted_session.pending_prompts.len(), 1);
+        assert_eq!(
+            targeted_session.prompt_history,
+            ["Sensitive historical prompt"]
+        );
+        assert!(!targeted_session.prompt_history_redacted);
         assert_eq!(
             targeted_session.pending_prompts[0].text,
             "Sensitive queued prompt"
@@ -473,6 +487,7 @@ impl AppState {
         // The record owns remote-proxy identity; the wire field is a derived
         // UI/API projection and embedded session snapshots are not authoritative.
         session.remote_id = record.remote_id.clone();
+        session.prompt_history_redacted = false;
         session.messages_loaded = record.session.messages_loaded;
         session.message_count = session_message_count(record);
         session.session_mutation_stamp = Some(record.mutation_stamp);
@@ -535,6 +550,9 @@ impl AppState {
             claude_approval_mode: session.claude_approval_mode,
             gemini_approval_mode: session.gemini_approval_mode,
             opencode_model: session.opencode_model.clone(),
+            opencode_effort: session.opencode_effort.clone(),
+            opencode_current_effort: session.opencode_current_effort.clone(),
+            opencode_effort_options: session.opencode_effort_options.clone(),
             opencode_mode: session.opencode_mode.clone(),
             opencode_current_mode: session.opencode_current_mode.clone(),
             opencode_mode_options: session.opencode_mode_options.clone(),
@@ -550,6 +568,10 @@ impl AppState {
             status: session.status,
             preview: session.preview.clone(),
             messages: Vec::new(),
+            // Composer history can contain substantial user text. It is
+            // available on targeted session-tail responses, not global state.
+            prompt_history: Vec::new(),
+            prompt_history_redacted: true,
             messages_loaded: false,
             message_count: session_message_count(record),
             markers: session.markers.clone(),
@@ -587,6 +609,15 @@ impl AppState {
         debug_assert_eq!(summary.claude_approval_mode, full.claude_approval_mode);
         debug_assert_eq!(summary.gemini_approval_mode, full.gemini_approval_mode);
         debug_assert_eq!(summary.opencode_model, full.opencode_model);
+        debug_assert_eq!(summary.opencode_effort, full.opencode_effort);
+        debug_assert_eq!(
+            summary.opencode_current_effort,
+            full.opencode_current_effort
+        );
+        debug_assert_eq!(
+            summary.opencode_effort_options,
+            full.opencode_effort_options
+        );
         debug_assert_eq!(summary.opencode_mode, full.opencode_mode);
         debug_assert_eq!(
             summary.opencode_current_mode,
@@ -608,6 +639,8 @@ impl AppState {
         );
         debug_assert_eq!(summary.status, full.status);
         debug_assert_eq!(summary.preview, full.preview);
+        debug_assert!(summary.prompt_history_redacted);
+        debug_assert!(!full.prompt_history_redacted);
         debug_assert_eq!(summary.message_count, full.message_count);
         debug_assert_eq!(summary.markers, full.markers);
         debug_assert!(summary.pending_prompts.is_empty());

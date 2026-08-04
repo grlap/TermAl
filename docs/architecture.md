@@ -519,16 +519,16 @@ committed to SQLite. The expected loss bound is one un-drained mutation; once
 the backend restarts, persisted SQLite state is the source of truth.
 
 `PersistedState` is the logical projection of `StateInner` that excludes
-runtime handles, pending approval maps, and empty collections. On disk it
-splits across three SQLite tables: `app_state` (one row per schema version +
-one metadata row carrying preferences, projects, remotes, workspaces, and
-bookkeeping counters), `sessions` (one row per session keyed by id, value_json
-carrying the serialized `PersistedSessionRecord`, including conversation
-markers anchored to that session's messages), and `delegations` (one row per
-delegation keyed by id, value_json carrying the serialized `DelegationRecord`).
-This split lets the background persist thread write only the **changed**
-session rows on each commit and rewrite delegation rows only when delegation
-state changes — see `collect_persist_delta`, `persist_delta_via_cache`, and
+runtime handles and pending approval maps. On disk, `app_state` carries global
+metadata, `sessions` carries compact per-session metadata, and `delegations`
+carries delegation records. Transcript bodies, their compact overview, and
+bounded composer history live separately in `messages`, `session_overviews`,
+and `session_prompt_histories`. Prompt history has its own mutation watermark,
+so streamed assistant cards can update session metadata without repeatedly
+serializing and rewriting up to 512 KiB of user prompts; an existing embedded
+`session.promptHistory` value is migrated into the separate row on startup.
+This split lets the background persist thread write only the **changed** rows
+on each commit — see `collect_persist_delta`, `persist_delta_via_cache`, and
 `SqlitePersistConnectionCache` in `src/persist.rs`.
 
 On startup, the backend loads state from `termal.sqlite` when it exists and
@@ -917,13 +917,18 @@ opencode acp
 
 **Protocol:** ACP over stdio. One process per session.
 
-**Behavior:** OpenCode advertises dynamic model and mode config. Auto keeps the
-agent authoritative; explicit TermAl selections are re-applied in
-model-then-mode order and acknowledged after new/resume/load before prompt
-dispatch. Every handshake or live update reconciles only option lists actually
-present in that payload. User settings share one 40-second scheduling and
-acknowledgement deadline, and expired writer-queued changes are discarded
-before execution.
+**Behavior:** OpenCode advertises dynamic model, reasoning-variant (`effort`),
+and mode config. Auto keeps the agent authoritative; explicit TermAl selections
+are re-applied in model-then-effort-then-mode order and acknowledged after
+new/resume/load before prompt dispatch. Every handshake or live update
+reconciles only option lists actually present in that payload. User settings
+share one 55-second scheduling and acknowledgement deadline, and expired
+writer-queued changes are discarded before execution. A combined model and
+dependent-option update waits for OpenCode to advertise options for the
+acknowledged model before validating or applying effort and mode. Once the
+model is acknowledged, an unavailable, rejected, or unconfirmed dependent
+selection resets individually to Auto with a visible notice instead of
+reporting the already-committed model update as a wholesale failure.
 All OpenCode resume/load failures surface and preserve the exact stored
 continuity id; TermAl never invents a replacement session from an unverified
 error shape. User stop sends a bounded OpenCode-only `session/cancel` grace

@@ -266,8 +266,8 @@ enum AcpRuntimeCommand {
         response_tx: Sender<std::result::Result<(), String>>,
     },
     ApplyOpenCodeConfig {
-        model_selection: Option<String>,
-        mode_selection: Option<String>,
+        selections: OpenCodeConfigSelections,
+        execution_deadline: std::time::Instant,
         started_tx: Sender<()>,
         proceed_rx: mpsc::Receiver<()>,
         response_tx: Sender<std::result::Result<(), String>>,
@@ -289,9 +289,48 @@ struct AcpPromptCommand {
     cwd: String,
     cursor_mode: Option<CursorMode>,
     model: String,
+    opencode_effort: Option<String>,
     opencode_mode: Option<String>,
     prompt: String,
     resume_session_id: Option<String>,
+}
+
+/// Names the three independently optional OpenCode authority changes so
+/// model, effort, and mode cannot be transposed at call sites.
+#[derive(Clone, Default)]
+struct OpenCodeConfigSelections {
+    model: Option<String>,
+    effort: Option<String>,
+    mode: Option<String>,
+}
+
+/// Carries one authoritative OpenCode option-list update from ACP.
+#[derive(Clone)]
+struct OpenCodeConfigOptionUpdate {
+    selection: String,
+    current: Option<String>,
+    options: Vec<SessionModelOption>,
+}
+
+/// Groups the independently optional config lists advertised in one ACP
+/// handshake/update payload.
+#[derive(Clone, Default)]
+struct OpenCodeConfigUpdate {
+    model: Option<OpenCodeConfigOptionUpdate>,
+    effort: Option<OpenCodeConfigOptionUpdate>,
+    mode: Option<OpenCodeConfigOptionUpdate>,
+    notices: Vec<String>,
+}
+
+/// Bounded OpenCode config facts delivered directly from the ACP reader to the
+/// serialized writer while a model-dependent update is waiting. Raw agent JSON
+/// never enters runtime state; option extraction applies the normal ingress
+/// bounds before this value is constructed.
+#[derive(Clone, Default)]
+struct OpenCodeConfigNotification {
+    model: Option<String>,
+    effort: Option<(Option<String>, Vec<SessionModelOption>)>,
+    mode: Option<(Option<String>, Vec<SessionModelOption>)>,
 }
 
 /// Snapshots the OpenCode authority and live option state at writer execution.
@@ -300,6 +339,9 @@ struct OpenCodeConfigSnapshot {
     model_selection: String,
     effective_model: String,
     model_options: Vec<SessionModelOption>,
+    effort_selection: String,
+    current_effort: Option<String>,
+    effort_options: Vec<SessionModelOption>,
     mode_selection: String,
     current_mode: Option<String>,
     mode_options: Vec<SessionModelOption>,
@@ -355,6 +397,10 @@ struct AcpRuntimeState {
     /// A/B/A notification cycles without permanently suppressing a later
     /// legitimate selection after the window rolls forward.
     opencode_reconcile_fingerprints: VecDeque<Value>,
+    /// The serialized writer installs one subscriber while a model change is
+    /// awaiting model-specific effort/mode lists. The ACP reader signals it
+    /// before queuing reconciliation, avoiding both writer deadlock and polling.
+    opencode_config_notification_tx: Option<Sender<OpenCodeConfigNotification>>,
 }
 
 /// Capability bundle learned from the `initialize` response. `None`

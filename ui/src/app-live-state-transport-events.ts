@@ -297,11 +297,13 @@ export function createAppLiveStateTransportEventHandlers(
         // and re-arm fallback polling so recovery continues via /api/state.
         if (transportState.sawReconnectOpenSinceLastError) {
           beginBadLiveEventRecovery();
+        } else {
+          requestStateResync({ rearmOnFailure: true });
         }
       }
     } finally {
       if (!isCancelled()) {
-        setIsLoading(false);
+        setIsLoading(latestStateRevisionRef.current === null);
       }
       profiler?.finish({
         adopted: profiledAdopted,

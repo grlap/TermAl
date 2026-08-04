@@ -162,6 +162,7 @@ impl StateInner {
             // subsequent edits through `session_mut*`, which bumps the
             // stamp as soon as a mutation happens.
             mutation_stamp: 0,
+            prompt_history_mutation_stamp: 0,
             session: Session {
                 id: session_id,
                 name: session_name,
@@ -188,6 +189,11 @@ impl StateInner {
                     .supports_gemini_approval_mode()
                     .then_some(default_gemini_approval_mode()),
                 opencode_model,
+                opencode_effort: agent
+                    .supports_opencode_settings()
+                    .then(|| OPENCODE_CONFIG_AUTO.to_owned()),
+                opencode_current_effort: None,
+                opencode_effort_options: Vec::new(),
                 opencode_mode: agent
                     .supports_opencode_settings()
                     .then(|| OPENCODE_CONFIG_AUTO.to_owned()),
@@ -200,6 +206,8 @@ impl StateInner {
                 status: SessionStatus::Idle,
                 preview: "Ready for a prompt.".to_owned(),
                 messages: Vec::new(),
+                prompt_history: Vec::new(),
+                prompt_history_redacted: false,
                 messages_loaded: true,
                 message_count: 0,
                 markers: Vec::new(),
@@ -553,6 +561,11 @@ impl StateInner {
     fn push_session(&mut self, mut record: SessionRecord) -> usize {
         let stamp = self.next_mutation_stamp();
         record.mutation_stamp = stamp;
+        if record.prompt_history_mutation_stamp == 0
+            && !record.session.prompt_history.is_empty()
+        {
+            record.prompt_history_mutation_stamp = stamp;
+        }
         self.sessions.push(record);
         self.sessions.len() - 1
     }
@@ -626,7 +639,10 @@ impl StateInner {
                 // startup, so ensure the row is removed.
                 removed_ids.push(record.session.id.clone());
             } else {
-                changed_sessions.push(PersistedSessionRecord::from_record(record));
+                let mut persisted = PersistedSessionRecord::from_record(record);
+                persisted.persist_prompt_history =
+                    record.prompt_history_mutation_stamp > watermark;
+                changed_sessions.push(persisted);
             }
         }
         let changed_delegations = self

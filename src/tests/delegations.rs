@@ -5376,6 +5376,7 @@ fn terminal_read_only_delegations_do_not_keep_child_session_write_blocked() {
                     claude_approval_mode: None,
                     claude_effort: None,
                     gemini_approval_mode: None,
+                    opencode_effort: None,
                     opencode_mode: None,
                 },
             )

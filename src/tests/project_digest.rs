@@ -92,6 +92,291 @@ fn project_digest_surfaces_pending_approval_actions() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Project digests run frequently (including from Telegram polling), so their
+// lock-held snapshot must remain independent of transcript payload size. This
+// regression builds a deliberately large active transcript and verifies that
+// the snapshot contains only bounded summary metadata rather than a cloned
+// `SessionRecord` with every message body.
+#[test]
+fn project_digest_inputs_project_large_transcripts_to_bounded_metadata() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!(
+        "termal-project-digest-large-transcript-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    let project_id = create_test_project(&state, &root, "Large Transcript Project");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let session_index = inner.find_session_index(&session_id).unwrap();
+        let record = &mut inner.sessions[session_index];
+        record.session.status = SessionStatus::Active;
+        for index in 0..1_024 {
+            record.session.messages.push(Message::Text {
+                attachments: Vec::new(),
+                id: format!("large-transcript-message-{index}"),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "recent user message".to_owned(),
+                expanded_text: None,
+                source: None,
+            });
+        }
+    }
+
+    let inputs = state.project_digest_inputs(&project_id).unwrap();
+    let projected = inputs
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("large session should be included in digest inputs");
+    let (_, latest_summary) = projected
+        .latest_progress_summary
+        .as_ref()
+        .expect("assistant transcript should produce a progress summary");
+
+    assert_eq!(projected.status, SessionStatus::Active);
+    assert!(projected.has_messages);
+    assert!(latest_summary.len() < 1_024);
+    assert_eq!(projected.pending_prompt_count, 0);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+// Pins the CPU side of the bounded projection contract. The only progress
+// message is deliberately older than the retained-tail-sized scan window; a
+// full reverse scan would find it, while the production projection must stop
+// after a fixed amount of work under the global state mutex.
+#[test]
+fn project_digest_inputs_bound_worst_case_transcript_scan() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!(
+        "termal-project-digest-bounded-scan-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    let project_id = create_test_project(&state, &root, "Bounded Scan Project");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let session_index = inner.find_session_index(&session_id).unwrap();
+        let record = &mut inner.sessions[session_index];
+        record.session.status = SessionStatus::Active;
+        record.session.messages.push(Message::Text {
+            attachments: Vec::new(),
+            id: "old-progress-message".to_owned(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: "This summary is outside the bounded digest window.".to_owned(),
+            expanded_text: None,
+            source: None,
+        });
+        for index in 0..1_024 {
+            record.session.messages.push(Message::Text {
+                attachments: Vec::new(),
+                id: format!("recent-user-message-{index}"),
+                timestamp: stamp_now(),
+                author: Author::You,
+                text: "x".repeat(16 * 1_024),
+                expanded_text: None,
+                source: None,
+            });
+        }
+    }
+
+    let inputs = state.project_digest_inputs(&project_id).unwrap();
+    let projected = inputs
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("large session should be included in digest inputs");
+
+    assert!(projected.has_messages);
+    assert_eq!(projected.latest_progress_summary, None);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+// Live routing registries, not transcript depth, own approval and interaction
+// liveness. Both backing cards are deliberately pushed outside the digest's
+// bounded text-scan window and must still survive in the projection.
+#[test]
+fn project_digest_inputs_keep_deep_live_requests_from_routing_registries() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!(
+        "termal-project-digest-deep-live-requests-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    let project_id = create_test_project(&state, &root, "Deep Live Requests Project");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let approval_message_id = "deep-live-approval".to_owned();
+    let interaction_message_id = "deep-live-interaction".to_owned();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let session_index = inner.find_session_index(&session_id).unwrap();
+        let record = &mut inner.sessions[session_index];
+        record.session.status = SessionStatus::Active;
+        record.session.messages.push(Message::Approval {
+            id: approval_message_id.clone(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            title: "Approve deep command".to_owned(),
+            command: "cargo test".to_owned(),
+            command_language: Some(shell_language().to_owned()),
+            detail: "Approval remains live outside the digest scan window.".to_owned(),
+            decision: ApprovalDecision::Pending,
+            supported_decisions: None,
+        });
+        record.session.messages.push(Message::UserInputRequest {
+            id: interaction_message_id.clone(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            title: "Choose an option".to_owned(),
+            detail: "Interaction remains live outside the digest scan window.".to_owned(),
+            questions: Vec::new(),
+            state: InteractionRequestState::Pending,
+            submitted_answers: None,
+        });
+        for index in 0..1_024 {
+            record.session.messages.push(Message::Text {
+                attachments: Vec::new(),
+                id: format!("deep-live-tail-{index}"),
+                timestamp: stamp_now(),
+                author: Author::You,
+                text: "recent user message".to_owned(),
+                expanded_text: None,
+                source: None,
+            });
+        }
+        record.message_positions = build_message_positions(&record.session.messages);
+        record.pending_codex_approvals.insert(
+            approval_message_id.clone(),
+            CodexPendingApproval {
+                kind: CodexApprovalKind::CommandExecution,
+                request_id: json!("deep-live-approval-request"),
+            },
+        );
+        record.pending_codex_user_inputs.insert(
+            interaction_message_id.clone(),
+            CodexPendingUserInput {
+                questions: Vec::new(),
+                request_id: json!("deep-live-interaction-request"),
+            },
+        );
+    }
+
+    let inputs = state.project_digest_inputs(&project_id).unwrap();
+    let projected = inputs
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("session should be included in digest inputs");
+    assert_eq!(
+        projected.pending_approval_message_id.as_deref(),
+        Some(approval_message_id.as_str())
+    );
+    assert_eq!(
+        projected.pending_interaction_message_id.as_deref(),
+        Some(interaction_message_id.as_str())
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+// ACP approvals resolve FIFO within their protocol, but project digests must
+// still choose the newest renderable candidate across protocol families. If
+// the ACP queue head is no longer resident, fall back to a retained ACP card.
+#[test]
+fn project_digest_orders_mixed_protocol_approvals_and_skips_trimmed_acp_head() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!(
+        "termal-project-digest-mixed-approvals-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    let project_id = create_test_project(&state, &root, "Mixed Approval Project");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let approval_message = |id: &str| Message::Approval {
+        id: id.to_owned(),
+        timestamp: stamp_now(),
+        author: Author::Assistant,
+        title: format!("Approve {id}"),
+        command: "cargo test".to_owned(),
+        command_language: Some(shell_language().to_owned()),
+        detail: "Mixed-protocol ordering regression.".to_owned(),
+        decision: ApprovalDecision::Pending,
+        supported_decisions: None,
+    };
+    let acp_pending = |request_id: &str| AcpPendingApproval {
+        allow_once_option_id: Some("allow-once".to_owned()),
+        allow_always_option_id: None,
+        reject_option_id: Some("reject-once".to_owned()),
+        request_id: json!(request_id),
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let session_index = inner.find_session_index(&session_id).unwrap();
+        let record = &mut inner.sessions[session_index];
+        record.session.messages = vec![
+            approval_message("acp-head"),
+            approval_message("codex-newer"),
+            approval_message("acp-later"),
+        ];
+        record.message_positions = build_message_positions(&record.session.messages);
+        record
+            .pending_acp_approvals
+            .insert("acp-head".to_owned(), acp_pending("acp-head-request"));
+        record
+            .pending_acp_approvals
+            .insert("acp-later".to_owned(), acp_pending("acp-later-request"));
+        record
+            .pending_acp_approval_order
+            .extend(["acp-head".to_owned(), "acp-later".to_owned()]);
+        record.pending_codex_approvals.insert(
+            "codex-newer".to_owned(),
+            CodexPendingApproval {
+                kind: CodexApprovalKind::CommandExecution,
+                request_id: json!("codex-newer-request"),
+            },
+        );
+
+        assert_eq!(
+            registered_pending_approval_message_id(record).as_deref(),
+            Some("codex-newer"),
+            "newer Codex approval should beat the older ACP FIFO head"
+        );
+
+        record.session.messages = vec![
+            approval_message("codex-newer"),
+            approval_message("acp-later"),
+            approval_message("acp-head"),
+        ];
+        record.message_positions = build_message_positions(&record.session.messages);
+        assert_eq!(
+            registered_pending_approval_message_id(record).as_deref(),
+            Some("acp-head"),
+            "newer ACP FIFO head should beat other protocol candidates"
+        );
+
+        record.session.messages.remove(2);
+        record.message_positions = build_message_positions(&record.session.messages);
+        assert_eq!(
+            registered_pending_approval_message_id(record).as_deref(),
+            Some("acp-later"),
+            "a trimmed ACP head should fall back to the newest retained ACP card"
+        );
+    }
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 // Pins that for an idle project with uncommitted git changes the digest
 // reports "Changes are ready for review." and proposes review-first
 // actions (`review-in-termal`, `ask-agent-to-commit`, `keep-iterating`)
@@ -421,13 +706,17 @@ fn project_digest_prompt_target_skips_errored_parent_sessions() {
     }
     let sessions = {
         let inner = state.inner.lock().expect("state mutex poisoned");
-        inner.sessions.clone()
+        inner
+            .sessions
+            .iter()
+            .map(project_digest_session_from_record)
+            .collect::<Vec<_>>()
     };
 
     let target = latest_project_prompt_target_session(&sessions)
         .expect("healthy parent session should remain targetable");
 
-    assert_eq!(target.session.id.as_str(), healthy_session_id.as_str());
+    assert_eq!(target.id.as_str(), healthy_session_id.as_str());
 
     fs::remove_dir_all(root).unwrap();
 }

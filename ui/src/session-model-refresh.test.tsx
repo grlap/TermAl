@@ -482,7 +482,7 @@ describe("session model refresh controls", () => {
     );
   });
 
-  it("renders OpenCode's live model and mode choices with explicit Auto authority", () => {
+  it("renders OpenCode's live model, reasoning-variant, and mode choices with explicit Auto authority", () => {
     const onSessionSettingsChange = vi.fn();
 
     render(
@@ -492,6 +492,8 @@ describe("session model refresh controls", () => {
           agent: "OpenCode",
           model: "opencode/big-pickle",
           opencodeModel: "auto",
+          opencodeEffort: "auto",
+          opencodeCurrentEffort: "medium",
           opencodeMode: "auto",
           opencodeCurrentMode: "build",
           modelOptions: [
@@ -501,6 +503,10 @@ describe("session model refresh controls", () => {
           opencodeModeOptions: [
             { label: "Build", value: "build" },
             { label: "Plan", value: "plan" },
+          ],
+          opencodeEffortOptions: [
+            { label: "Low", value: "low" },
+            { label: "High", value: "high" },
           ],
         })}
         isUpdating={false}
@@ -517,6 +523,9 @@ describe("session model refresh controls", () => {
     expect(screen.getByText(/Effective mode:/u)).toHaveTextContent(
       "Effective mode: build",
     );
+    expect(screen.getByText(/Effective variant:/u)).toHaveTextContent(
+      "Effective variant: medium",
+    );
 
     fireEvent.click(screen.getByRole("combobox", { name: "OpenCode model" }));
     expect(screen.getByRole("option", { name: /Auto/u })).toBeInTheDocument();
@@ -525,6 +534,16 @@ describe("session model refresh controls", () => {
       "opencode-session",
       "model",
       "openai/gpt-5.6-sol",
+    );
+
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "OpenCode reasoning variant" }),
+    );
+    fireEvent.click(screen.getByRole("option", { name: /High/u }));
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "opencode-session",
+      "opencodeEffort",
+      "high",
     );
 
     fireEvent.click(screen.getByRole("combobox", { name: "OpenCode mode" }));

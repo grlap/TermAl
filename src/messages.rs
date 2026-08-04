@@ -24,6 +24,8 @@
 // output. Keep both call sites tied to this neutral message contract.
 const SESSION_STOPPED_BY_USER_MESSAGE: &str = "Turn stopped by user.";
 const SESSION_IN_MEMORY_MESSAGE_LIMIT: usize = 64;
+const SESSION_PROMPT_HISTORY_LIMIT: usize = 64;
+const SESSION_PROMPT_HISTORY_MAX_BYTES: usize = 512 * 1024;
 
 /// Returns the transcript count carried by session-scoped SSE deltas.
 fn session_message_count(record: &SessionRecord) -> u32 {
@@ -70,6 +72,72 @@ fn trim_retained_session_messages(record: &mut SessionRecord, limit: usize) {
     record.message_start_index = record.message_start_index.saturating_add(remove_count);
     record.message_positions = build_message_positions(&record.session.messages);
     record.session.messages_loaded = false;
+}
+
+fn normalize_prompt_history(prompts: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut history = Vec::new();
+    let mut retained_bytes = 0_usize;
+    for prompt in prompts {
+        let prompt = prompt.trim();
+        if prompt.is_empty() || prompt.len() > SESSION_PROMPT_HISTORY_MAX_BYTES {
+            continue;
+        }
+        let prompt = prompt.to_owned();
+        retained_bytes = retained_bytes.saturating_add(prompt.len());
+        history.push(prompt);
+        while history.len() > SESSION_PROMPT_HISTORY_LIMIT
+            || retained_bytes > SESSION_PROMPT_HISTORY_MAX_BYTES
+        {
+            retained_bytes = retained_bytes.saturating_sub(history.remove(0).len());
+        }
+    }
+    history
+}
+
+fn prompt_history_from_messages(messages: &[Message]) -> Vec<String> {
+    let mut history = Vec::with_capacity(SESSION_PROMPT_HISTORY_LIMIT);
+    let mut retained_bytes = 0_usize;
+    for prompt in messages
+        .iter()
+        .rev()
+        .filter_map(Message::user_prompt_text)
+    {
+        let prompt = prompt.trim();
+        if prompt.is_empty() || prompt.len() > SESSION_PROMPT_HISTORY_MAX_BYTES {
+            continue;
+        }
+        if history.len() >= SESSION_PROMPT_HISTORY_LIMIT
+            || retained_bytes.saturating_add(prompt.len()) > SESSION_PROMPT_HISTORY_MAX_BYTES
+        {
+            break;
+        }
+        retained_bytes = retained_bytes.saturating_add(prompt.len());
+        history.push(prompt.to_owned());
+    }
+    history.reverse();
+    history
+}
+
+fn set_prompt_history_on_record(record: &mut SessionRecord, prompt_history: Vec<String>) {
+    if record.session.prompt_history == prompt_history {
+        return;
+    }
+    record.session.prompt_history = prompt_history;
+    record.prompt_history_mutation_stamp = record.mutation_stamp;
+}
+
+fn clear_prompt_history_on_record(record: &mut SessionRecord) {
+    set_prompt_history_on_record(record, Vec::new());
+}
+
+fn append_prompt_history(record: &mut SessionRecord, prompt: &str) {
+    let prompts = record
+        .session
+        .prompt_history
+        .iter()
+        .cloned()
+        .chain(std::iter::once(prompt.to_owned()));
+    set_prompt_history_on_record(record, normalize_prompt_history(prompts));
 }
 
 /// Recovers interrupted session record.
@@ -356,9 +424,25 @@ fn message_index_on_record(record: &mut SessionRecord, message_id: &str) -> Opti
 
 fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: Message) -> usize {
     let index = index.min(record.session.messages.len());
+    let prompt = message.user_prompt_text().map(str::to_owned);
+    let appended = index == record.session.messages.len();
     record.session.messages.insert(index, message);
     record.message_positions = build_message_positions(&record.session.messages);
     sync_retained_transcript_metadata(record);
+    if let Some(prompt) = prompt {
+        if appended {
+            append_prompt_history(record, &prompt);
+        } else if record.session.messages_loaded {
+            set_prompt_history_on_record(
+                record,
+                prompt_history_from_messages(&record.session.messages),
+            );
+        } else {
+            // A partial resident window cannot establish the canonical prompt
+            // order. Preserve the separately hydrated/persisted history until
+            // a complete transcript replacement can rebuild it authoritatively.
+        }
+    }
     index
 }
 
@@ -454,6 +538,10 @@ fn replace_session_messages_on_record(
 ) {
     record.message_start_index = 0;
     record.session.messages = messages;
+    set_prompt_history_on_record(
+        record,
+        prompt_history_from_messages(&record.session.messages),
+    );
     record.message_positions = build_message_positions(&record.session.messages);
     sync_retained_transcript_metadata(record);
     record.session.preview = record

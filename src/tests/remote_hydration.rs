@@ -363,6 +363,7 @@ fn remote_summary_same_count_with_new_stamp_discards_stale_cached_suffix() {
     )];
     full_remote_session.messages_loaded = true;
     full_remote_session.message_count = 1;
+    full_remote_session.prompt_history = vec!["Cached remote prompt".to_owned()];
     full_remote_session.session_mutation_stamp = Some(10);
     state
         .apply_remote_delta_event(
@@ -398,6 +399,8 @@ fn remote_summary_same_count_with_new_stamp_discards_stale_cached_suffix() {
     assert!(!record.session.messages_loaded);
     assert!(record.session.messages.is_empty());
     assert_eq!(record.session.message_count, 1);
+    assert_eq!(record.session.prompt_history, ["Cached remote prompt"]);
+    assert!(!record.session.prompt_history_redacted);
     assert_eq!(record.message_start_index, 1);
     assert_eq!(
         record.session.preview,
@@ -2172,6 +2175,9 @@ fn remote_session_create_forwards_configured_default_model() {
         claude_approval_mode: None,
         gemini_approval_mode: None,
         opencode_model: None,
+        opencode_effort: None,
+        opencode_current_effort: None,
+        opencode_effort_options: Vec::new(),
         opencode_mode: None,
         opencode_current_mode: None,
         opencode_mode_options: Vec::new(),
@@ -2182,6 +2188,8 @@ fn remote_session_create_forwards_configured_default_model() {
         status: SessionStatus::Idle,
         preview: "Remote Default Model ready.".to_owned(),
         messages: Vec::new(),
+        prompt_history: Vec::new(),
+        prompt_history_redacted: false,
         messages_loaded: true,
         message_count: 0,
         markers: Vec::new(),

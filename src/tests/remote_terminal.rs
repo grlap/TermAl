@@ -896,7 +896,10 @@ fn interruptible_remote_stream_reader_observes_cancellation_between_recv_timeout
     // stalled remote parks a spawned worker inside `source.read()`. The
     // `interruptible_remote_stream_reader_spawn_unblocks_on_cancellation`
     // test below exercises the worker-thread side.
-    let (chunk_tx, chunk_rx) = std::sync::mpsc::sync_channel::<io::Result<Vec<u8>>>(1);
+    // Keep the sender alive until forwarding returns. Dropping it from the
+    // cancellation thread would race the cancellation poll against channel
+    // EOF, allowing the test to observe the unrelated "stream ended" path.
+    let (_chunk_tx, chunk_rx) = std::sync::mpsc::sync_channel::<io::Result<Vec<u8>>>(1);
     let cancellation = Arc::new(AtomicBool::new(false));
     let mut reader = InterruptibleRemoteStreamReader::new(chunk_rx, cancellation.clone());
     let (tx, _rx) = tokio::sync::mpsc::channel(TERMINAL_STREAM_EVENT_QUEUE_CAPACITY);
@@ -904,8 +907,6 @@ fn interruptible_remote_stream_reader_observes_cancellation_between_recv_timeout
     let cancel_thread = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(25));
         cancellation_for_thread.store(true, Ordering::SeqCst);
-        std::thread::sleep(Duration::from_millis(25));
-        drop(chunk_tx);
     });
 
     let err = forward_remote_terminal_stream_reader(&mut reader, &tx, &cancellation)

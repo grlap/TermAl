@@ -103,11 +103,12 @@ describe("app session settings payload helpers", () => {
     expect(buildSessionSettingsPayload(session, "claudeApprovalMode", "ask")).toBeNull();
   });
 
-  it("builds OpenCode model and dynamic-mode payloads only", () => {
+  it("builds OpenCode model, reasoning-variant, and dynamic-mode payloads only", () => {
     const session = makeSession({
       agent: "OpenCode",
       model: "opencode/big-pickle",
       opencodeModel: "auto",
+      opencodeEffort: "auto",
       opencodeMode: "auto",
     });
 
@@ -119,6 +120,9 @@ describe("app session settings payload helpers", () => {
     });
     expect(buildSessionSettingsPayload(session, "opencodeMode", "plan")).toEqual({
       opencodeMode: "plan",
+    });
+    expect(buildSessionSettingsPayload(session, "opencodeEffort", "high")).toEqual({
+      opencodeEffort: "high",
     });
     expect(buildSessionSettingsPayload(session, "cursorMode", "ask")).toBeNull();
   });

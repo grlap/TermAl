@@ -118,6 +118,116 @@ describe("session-store composer snapshots", () => {
     expect(secondSnapshot?.promptHistory).toEqual(["First prompt", "Second prompt"]);
   });
 
+  it("uses projected prompt history when the bounded transcript has no user prompts", () => {
+    const hydratedTail = createSession({
+      messages: [createTextMessage("assistant-20", "assistant", "Latest response")],
+      messagesLoaded: false,
+      promptHistory: ["First prompt", "Second prompt"],
+    });
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [hydratedTail],
+    });
+
+    expect(
+      getComposerSessionSnapshotForTesting(hydratedTail.id)?.promptHistory,
+    ).toEqual(["First prompt", "Second prompt"]);
+  });
+
+  it("extends projected history when a live user message arrives", () => {
+    const hydratedTail = createSession({
+      messages: [createTextMessage("assistant-20", "assistant", "Latest response")],
+      messagesLoaded: false,
+      promptHistory: ["First prompt", "Second prompt"],
+    });
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [hydratedTail],
+    });
+
+    const liveUpdate = createSession({
+      messages: [
+        ...hydratedTail.messages,
+        createTextMessage("user-21", "you", "Third prompt"),
+      ],
+      messagesLoaded: false,
+      promptHistory: hydratedTail.promptHistory,
+    });
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [liveUpdate],
+    });
+
+    expect(
+      getComposerSessionSnapshotForTesting(hydratedTail.id)?.promptHistory,
+    ).toEqual(["First prompt", "Second prompt", "Third prompt"]);
+  });
+
+  it("keeps a locally resident prompt when a stale targeted projection arrives", () => {
+    const liveSession = createSession({
+      messages: [
+        createTextMessage("user-1", "you", "First prompt"),
+        createTextMessage("user-2", "you", "Second prompt"),
+        createTextMessage("user-3", "you", "Third prompt"),
+      ],
+      messagesLoaded: false,
+      promptHistory: ["First prompt", "Second prompt", "Third prompt"],
+    });
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [liveSession],
+    });
+
+    const staleTargetedResponse = createSession({
+      messages: liveSession.messages,
+      messagesLoaded: false,
+      promptHistory: ["First prompt", "Second prompt"],
+    });
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [staleTargetedResponse],
+    });
+
+    expect(
+      getComposerSessionSnapshotForTesting(liveSession.id)?.promptHistory,
+    ).toEqual(["First prompt", "Second prompt", "Third prompt"]);
+  });
+
+  it("accepts an authoritative projected shrink when removed prompts are not resident", () => {
+    const initialSession = createSession({
+      messages: [
+        createTextMessage("user-1", "you", "First prompt"),
+        createTextMessage("user-2", "you", "Second prompt"),
+      ],
+      promptHistory: ["First prompt", "Second prompt"],
+    });
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [initialSession],
+    });
+
+    const rolledBackSession = createSession({
+      messages: [createTextMessage("user-1", "you", "First prompt")],
+      promptHistory: ["First prompt"],
+    });
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [rolledBackSession],
+    });
+
+    expect(
+      getComposerSessionSnapshotForTesting(initialSession.id)?.promptHistory,
+    ).toEqual(["First prompt"]);
+  });
+
   it("rebuilds prompt history when the transcript shrinks", () => {
     const initialSession = createSession({
       messages: [

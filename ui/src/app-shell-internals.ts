@@ -2,6 +2,7 @@
 //
 // What this file owns:
 //   - Timing constants (`TAB_DRAG_STALE_TIMEOUT_MS`,
+//     `INITIAL_STATE_RESYNC_DELAY_MS`,
 //     `RECONNECT_STATE_RESYNC_DELAY_MS`,
 //     `RECONNECT_STATE_RESYNC_MAX_DELAY_MS`,
 //     `LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS`,
@@ -62,6 +63,7 @@ import type { WorkspaceState } from "./workspace";
 import type { ControlPanelSide } from "./workspace-storage";
 
 export const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
+export const INITIAL_STATE_RESYNC_DELAY_MS = 3000;
 export const RECONNECT_STATE_RESYNC_DELAY_MS = 400;
 export const RECONNECT_STATE_RESYNC_MAX_DELAY_MS = 5000;
 export const LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS = 1000;

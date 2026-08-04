@@ -52,6 +52,9 @@ export type ComposerSessionSnapshot = Readonly<{
   draftAttachments: readonly ComposerDraftAttachment[];
   geminiApprovalMode?: GeminiApprovalMode | null;
   opencodeModel?: string | null;
+  opencodeEffort?: string | null;
+  opencodeCurrentEffort?: string | null;
+  opencodeEffortOptions?: readonly SessionModelOption[];
   opencodeMode?: string | null;
   opencodeCurrentMode?: string | null;
   opencodeModeOptions?: readonly SessionModelOption[];
@@ -76,6 +79,9 @@ export type SessionSummarySnapshot = Readonly<{
   externalSessionId?: string | null;
   geminiApprovalMode?: GeminiApprovalMode | null;
   opencodeModel?: string | null;
+  opencodeEffort?: string | null;
+  opencodeCurrentEffort?: string | null;
+  opencodeEffortOptions?: readonly SessionModelOption[];
   opencodeMode?: string | null;
   opencodeCurrentMode?: string | null;
   opencodeModeOptions?: readonly SessionModelOption[];
@@ -129,6 +135,7 @@ type RemoveSessionFromStoreParams = Readonly<{
 }>;
 
 const EMPTY_PROMPT_HISTORY: readonly string[] = [];
+const PROMPT_HISTORY_LIMIT = 64;
 const EMPTY_DRAFT_ATTACHMENTS: readonly ComposerDraftAttachment[] = [];
 const EMPTY_COMPOSER_SESSIONS_BY_ID: Readonly<Record<string, ComposerSessionSnapshot>> = {};
 const EMPTY_SESSION_RECORDS_BY_ID: Readonly<Record<string, Session>> = {};
@@ -301,7 +308,45 @@ function collectUserPromptHistory(messages: readonly Message[]) {
     const prompt = message.text.trim();
     return prompt ? [prompt] : [];
   });
-  return prompts.length === 0 ? EMPTY_PROMPT_HISTORY : prompts;
+  const boundedPrompts = prompts.slice(-PROMPT_HISTORY_LIMIT);
+  return boundedPrompts.length === 0 ? EMPTY_PROMPT_HISTORY : boundedPrompts;
+}
+
+function mergeProjectedPromptHistoryWithResidentMessages(
+  projected: readonly string[],
+  messages: readonly Message[],
+) {
+  const resident = collectUserPromptHistory(messages);
+  if (resident.length === 0) {
+    return projected.length === 0
+      ? EMPTY_PROMPT_HISTORY
+      : projected.slice(-PROMPT_HISTORY_LIMIT);
+  }
+
+  // The resident transcript is a suffix window. Find its longest overlap with
+  // the projected history, then append only prompts that arrived after the
+  // projection was requested. This preserves duplicate prompts and prevents a
+  // stale targeted response from dropping a just-submitted local prompt.
+  const maxOverlap = Math.min(projected.length, resident.length);
+  let overlap = maxOverlap;
+  while (overlap > 0) {
+    let matches = true;
+    for (let index = 0; index < overlap; index += 1) {
+      if (projected[projected.length - overlap + index] !== resident[index]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      break;
+    }
+    overlap -= 1;
+  }
+
+  const merged = [...projected, ...resident.slice(overlap)].slice(
+    -PROMPT_HISTORY_LIMIT,
+  );
+  return merged.length === 0 ? EMPTY_PROMPT_HISTORY : merged;
 }
 
 function collectLastResponseTimestamp(messages: readonly Message[]) {
@@ -393,6 +438,11 @@ function buildComposerSessionSnapshot(
     sameSessionModelOptions(previous.opencodeModeOptions, session.opencodeModeOptions)
       ? previous.opencodeModeOptions
       : session.opencodeModeOptions;
+  const nextOpenCodeEffortOptions =
+    previous &&
+    sameSessionModelOptions(previous.opencodeEffortOptions, session.opencodeEffortOptions)
+      ? previous.opencodeEffortOptions
+      : session.opencodeEffortOptions;
   const nextDraftAttachments = buildDraftAttachmentsSnapshot(
     draftAttachments,
     previous?.draftAttachments,
@@ -414,6 +464,9 @@ function buildComposerSessionSnapshot(
     previous.claudeApprovalMode === session.claudeApprovalMode &&
     previous.geminiApprovalMode === session.geminiApprovalMode &&
     previous.opencodeModel === session.opencodeModel &&
+    previous.opencodeEffort === session.opencodeEffort &&
+    previous.opencodeCurrentEffort === session.opencodeCurrentEffort &&
+    previous.opencodeEffortOptions === nextOpenCodeEffortOptions &&
     previous.opencodeMode === session.opencodeMode &&
     previous.opencodeCurrentMode === session.opencodeCurrentMode &&
     previous.opencodeModeOptions === nextOpenCodeModeOptions &&
@@ -436,6 +489,9 @@ function buildComposerSessionSnapshot(
     draftAttachments: nextDraftAttachments,
     geminiApprovalMode: session.geminiApprovalMode,
     opencodeModel: session.opencodeModel,
+    opencodeEffort: session.opencodeEffort,
+    opencodeCurrentEffort: session.opencodeCurrentEffort,
+    opencodeEffortOptions: nextOpenCodeEffortOptions,
     opencodeMode: session.opencodeMode,
     opencodeCurrentMode: session.opencodeCurrentMode,
     opencodeModeOptions: nextOpenCodeModeOptions,
@@ -455,11 +511,22 @@ function resolvePromptHistory(
   previousSession: Session | undefined,
   previousSnapshot: ComposerSessionSnapshot | undefined,
 ) {
+  const projectedPromptHistory = session.promptHistory;
+  const hasProjectedPromptHistory = projectedPromptHistory !== undefined;
+  if (
+    projectedPromptHistory !== undefined &&
+    projectedPromptHistory !== previousSession?.promptHistory
+  ) {
+    return mergeProjectedPromptHistoryWithResidentMessages(
+      projectedPromptHistory,
+      session.messages,
+    );
+  }
   if (!previousSnapshot) {
-    return collectUserPromptHistory(session.messages);
+    return session.promptHistory ?? collectUserPromptHistory(session.messages);
   }
   if (!previousSession) {
-    return collectUserPromptHistory(session.messages);
+    return session.promptHistory ?? collectUserPromptHistory(session.messages);
   }
   if (previousSession.messages === session.messages) {
     return previousSnapshot.promptHistory;
@@ -471,7 +538,9 @@ function resolvePromptHistory(
   const nextLength = nextMessages.length;
 
   if (nextLength < previousLength) {
-    return collectUserPromptHistory(nextMessages);
+    return hasProjectedPromptHistory
+      ? previousSnapshot.promptHistory
+      : collectUserPromptHistory(nextMessages);
   }
 
   const previousLastMessage =
@@ -482,7 +551,9 @@ function resolvePromptHistory(
     previousLastMessage &&
     nextPreviousBoundaryMessage?.id !== previousLastMessage.id
   ) {
-    return collectUserPromptHistory(nextMessages);
+    return hasProjectedPromptHistory
+      ? previousSnapshot.promptHistory
+      : collectUserPromptHistory(nextMessages);
   }
 
   if (nextLength === previousLength) {
@@ -496,7 +567,9 @@ function resolvePromptHistory(
       return previousSnapshot.promptHistory;
     }
 
-    return collectUserPromptHistory(nextMessages);
+    return hasProjectedPromptHistory
+      ? previousSnapshot.promptHistory
+      : collectUserPromptHistory(nextMessages);
   }
 
   const appendedMessages = nextMessages.slice(previousLength);
@@ -507,6 +580,16 @@ function resolvePromptHistory(
     )
   ) {
     return previousSnapshot.promptHistory;
+  }
+
+  if (hasProjectedPromptHistory) {
+    const appendedPrompts = collectUserPromptHistory(appendedMessages);
+    if (appendedPrompts.length === 0) {
+      return previousSnapshot.promptHistory;
+    }
+    return [...previousSnapshot.promptHistory, ...appendedPrompts].slice(
+      -PROMPT_HISTORY_LIMIT,
+    );
   }
 
   return collectUserPromptHistory(nextMessages);
@@ -526,6 +609,11 @@ function buildSessionSummarySnapshot(
     sameSessionModelOptions(previous.opencodeModeOptions, session.opencodeModeOptions)
       ? previous.opencodeModeOptions
       : session.opencodeModeOptions;
+  const nextOpenCodeEffortOptions =
+    previous &&
+    sameSessionModelOptions(previous.opencodeEffortOptions, session.opencodeEffortOptions)
+      ? previous.opencodeEffortOptions
+      : session.opencodeEffortOptions;
 
   if (
     previous &&
@@ -546,6 +634,9 @@ function buildSessionSummarySnapshot(
     previous.claudeApprovalMode === session.claudeApprovalMode &&
     previous.geminiApprovalMode === session.geminiApprovalMode &&
     previous.opencodeModel === session.opencodeModel &&
+    previous.opencodeEffort === session.opencodeEffort &&
+    previous.opencodeCurrentEffort === session.opencodeCurrentEffort &&
+    previous.opencodeEffortOptions === nextOpenCodeEffortOptions &&
     previous.opencodeMode === session.opencodeMode &&
     previous.opencodeCurrentMode === session.opencodeCurrentMode &&
     previous.opencodeModeOptions === nextOpenCodeModeOptions &&
@@ -568,6 +659,9 @@ function buildSessionSummarySnapshot(
     externalSessionId: session.externalSessionId,
     geminiApprovalMode: session.geminiApprovalMode,
     opencodeModel: session.opencodeModel,
+    opencodeEffort: session.opencodeEffort,
+    opencodeCurrentEffort: session.opencodeCurrentEffort,
+    opencodeEffortOptions: nextOpenCodeEffortOptions,
     opencodeMode: session.opencodeMode,
     opencodeCurrentMode: session.opencodeCurrentMode,
     opencodeModeOptions: nextOpenCodeModeOptions,

@@ -867,6 +867,20 @@ export function OpenCodePromptSettingsCard({
         description: option.description ?? undefined,
       })),
   ];
+  const effortOptions: ComboboxOption[] = [
+    {
+      label: "Auto",
+      value: "auto",
+      description: "Use OpenCode's default variant for the selected model",
+    },
+    ...(session.opencodeEffortOptions ?? [])
+      .filter((option) => option.value !== "auto")
+      .map((option) => ({
+        label: option.label,
+        value: option.value,
+        description: option.description ?? undefined,
+      })),
+  ];
 
   return (
     <article className="message-card prompt-settings-card">
@@ -903,6 +917,24 @@ export function OpenCodePromptSettingsCard({
           </p>
         </div>
         <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`opencode-effort-${paneId}`}>
+            OpenCode reasoning variant
+          </label>
+          <ThemedCombobox
+            id={`opencode-effort-${paneId}`}
+            className="prompt-settings-select"
+            value={session.opencodeEffort ?? "auto"}
+            options={effortOptions}
+            disabled={isUpdating}
+            onChange={(nextValue) =>
+              void onSessionSettingsChange(session.id, "opencodeEffort", nextValue)
+            }
+          />
+          <p className="session-model-description">
+            Effective variant: <code>{session.opencodeCurrentEffort ?? "not reported"}</code>
+          </p>
+        </div>
+        <div className="session-control-group">
           <label className="session-control-label" htmlFor={`opencode-mode-${paneId}`}>
             OpenCode mode
           </label>
@@ -921,9 +953,10 @@ export function OpenCodePromptSettingsCard({
           </p>
         </div>
         <p className="session-control-hint">
-          Auto follows OpenCode. Explicit TermAl choices are re-applied after session new,
-          resume, or load before the next prompt. OpenCode permission requests always appear as
-          ordered approval cards.
+          Auto follows OpenCode. Reasoning variants are model-specific and come from the live
+          OpenCode session. Explicit TermAl choices are re-applied after session new, resume, or
+          load before the next prompt. OpenCode permission requests always appear as ordered
+          approval cards.
         </p>
       </div>
     </article>

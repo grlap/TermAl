@@ -2329,6 +2329,8 @@ pub(super) fn remote_parallel_agents_message(
 
 pub(super) fn make_remote_session_summary_only(session: &mut Session, message_count: u32) {
     session.messages.clear();
+    session.prompt_history.clear();
+    session.prompt_history_redacted = true;
     session.messages_loaded = false;
     session.message_count = message_count;
 }

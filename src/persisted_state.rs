@@ -247,6 +247,10 @@ struct PersistedSessionRecord {
     orchestrator_auto_dispatch_blocked: bool,
     #[serde(skip)]
     message_start_index: usize,
+    /// Runtime-only instruction for the SQLite serializer. Full snapshots set
+    /// it; delta snapshots clear it unless the independent history stamp moved.
+    #[serde(skip)]
+    persist_prompt_history: bool,
     session: Session,
 }
 
@@ -301,6 +305,16 @@ fn validate_remote_proxy_identity<'a>(
     }
 }
 
+/// Applies intentionally-supported defaults from earlier persisted session
+/// shapes before strict current-schema validation. Keep this narrow: missing
+/// required fields remain corruption unless a concrete upgrade is named here.
+fn backfill_persisted_session_defaults(session: &mut Session) {
+    if session.agent.supports_opencode_settings() && session.opencode_effort.is_none() {
+        session.opencode_effort = Some(OPENCODE_CONFIG_AUTO.to_owned());
+    }
+    session.prompt_history = normalize_prompt_history(std::mem::take(&mut session.prompt_history));
+}
+
 impl PersistedSessionRecord {
     /// Builds the value from record.
     fn from_record(record: &SessionRecord) -> Self {
@@ -325,6 +339,7 @@ impl PersistedSessionRecord {
             remote_session_id: record.remote_session_id.clone(),
             orchestrator_auto_dispatch_blocked: record.orchestrator_auto_dispatch_blocked,
             message_start_index: record.message_start_index,
+            persist_prompt_history: true,
             session,
         }
     }
@@ -342,12 +357,15 @@ impl PersistedSessionRecord {
             )
         })?;
         let mut session = self.session;
+        backfill_persisted_session_defaults(&mut session);
         validate_persisted_session_fields(&session, self.external_session_id.as_deref())?;
         session.session_mutation_stamp = None;
         session.external_session_id = self.external_session_id.clone();
         session.live_activity = None;
         if session.agent.acp_runtime().is_none() {
             session.model_options.clear();
+            session.opencode_effort_options.clear();
+            session.opencode_current_effort = None;
             session.opencode_mode_options.clear();
             session.opencode_current_mode = None;
         }
@@ -389,6 +407,7 @@ impl PersistedSessionRecord {
             // Freshly loaded records start unstamped; nothing has changed
             // since the on-disk snapshot so nothing needs to be persisted.
             mutation_stamp: 0,
+            prompt_history_mutation_stamp: 0,
             session,
         };
         sync_codex_thread_state(&mut record);
@@ -527,15 +546,32 @@ fn validate_persisted_session_fields(
                 )
             })
             .and_then(normalize_opencode_mode)?;
+        let effort = session
+            .opencode_effort
+            .as_deref()
+            .ok_or_else(|| {
+                anyhow!(
+                    "persisted session `{}` is missing opencodeEffort",
+                    session.id
+                )
+            })
+            .and_then(normalize_opencode_effort)?;
         let effective_model = normalize_opencode_model(&session.model)?;
+        let current_effort = session
+            .opencode_current_effort
+            .as_deref()
+            .map(normalize_opencode_effort)
+            .transpose()?;
         let current_mode = session
             .opencode_current_mode
             .as_deref()
             .map(normalize_opencode_mode)
             .transpose()?;
         if model != session.opencode_model.as_deref().unwrap_or_default()
+            || effort != session.opencode_effort.as_deref().unwrap_or_default()
             || mode != session.opencode_mode.as_deref().unwrap_or_default()
             || effective_model != session.model
+            || current_effort.as_deref() != session.opencode_current_effort.as_deref()
             || current_mode.as_deref() != session.opencode_current_mode.as_deref()
         {
             return Err(anyhow!(
@@ -544,6 +580,9 @@ fn validate_persisted_session_fields(
             ));
         }
     } else if session.opencode_model.is_some()
+        || session.opencode_effort.is_some()
+        || session.opencode_current_effort.is_some()
+        || !session.opencode_effort_options.is_empty()
         || session.opencode_mode.is_some()
         || session.opencode_current_mode.is_some()
         || !session.opencode_mode_options.is_empty()

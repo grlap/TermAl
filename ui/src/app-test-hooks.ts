@@ -20,7 +20,8 @@
 //   - The call sites that fire hooks — those live beside the production
 //     transitions they observe or coordinate (currently: persisted-file
 //     refresh success / error, delete-project post-await resolve /
-//     reject, and the workspace-layout commit boundary). Those sites
+//     reject, backend-connection state changes, and the workspace-layout
+//     commit boundary). Those sites
 //     read `appTestHooks` directly and no-op when it's `null`.
 //
 // Split out of `ui/src/App.tsx`. Same types, same runtime, same
@@ -28,8 +29,11 @@
 // App.tsx's top scope to this file and is now exported as a live
 // binding.
 
+import type { BackendConnectionState } from "./backend-connection";
+
 export type AppTestHooks = {
   beforeWorkspaceLayoutLoadCommit?: () => Promise<void>;
+  onBackendConnectionStateChange?: (state: BackendConnectionState) => void;
   onDeleteProjectPostAwaitPath?: (path: "resolve" | "reject") => void;
   onRestoredGitDiffDocumentContentUpdate?: (
     status: "success" | "error",

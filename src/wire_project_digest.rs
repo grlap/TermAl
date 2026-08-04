@@ -3,7 +3,7 @@
 // The `projects` dashboard UI renders a compact "digest" summary for
 // each project: active action tiles, a pending-approval badge, and a
 // done-summary hint. This file owns the DTOs plus the formatters that
-// build their text from a SessionRecord / GitStatusResponse.
+// build their text from a compact SessionRecord projection / GitStatusResponse.
 
 // DTOs
 /// Enumerates project digest actions.
@@ -45,8 +45,34 @@ struct ProjectDigestResponse {
 #[derive(Clone)]
 struct ProjectDigestInputs {
     project: Project,
-    sessions: Vec<SessionRecord>,
+    sessions: Vec<ProjectDigestSession>,
 }
+
+/// Compact per-session facts needed by the project digest.
+///
+/// Keep this projection deliberately free of transcript bodies, runtime
+/// handles, and pending-request maps: `project_digest_inputs` builds it while
+/// holding the process-wide state mutex, and callers must inspect only a
+/// bounded recent tail rather than deep-cloning or fully scanning a session
+/// merely to render a small digest card.
+#[derive(Clone)]
+struct ProjectDigestSession {
+    id: String,
+    parent_delegation_id: Option<String>,
+    status: SessionStatus,
+    preview: String,
+    pending_prompt_count: usize,
+    has_messages: bool,
+    latest_progress_summary: Option<(String, String)>,
+    pending_approval_message_id: Option<String>,
+    pending_interaction_message_id: Option<String>,
+}
+
+/// Maximum recent messages inspected while the process-wide state mutex is
+/// held. Persisted idle sessions retain the same-sized tail; active sessions
+/// may temporarily be much larger, so project polling must impose its own
+/// fixed upper bound too.
+const PROJECT_DIGEST_MESSAGE_SCAN_LIMIT: usize = SESSION_IN_MEMORY_MESSAGE_LIMIT;
 
 /// Represents the project approval target.
 #[derive(Clone)]
@@ -205,8 +231,8 @@ fn normalize_project_text(value: &str, fallback: &str) -> String {
 }
 
 /// Returns the active project status text.
-fn active_project_status_text(record: &SessionRecord) -> String {
-    let queued_count = record.session.pending_prompts.len();
+fn active_project_status_text(record: &ProjectDigestSession) -> String {
+    let queued_count = record.pending_prompt_count;
     match queued_count {
         0 => "Agent is working.".to_owned(),
         1 => "Agent is working with 1 queued follow-up.".to_owned(),
@@ -216,11 +242,11 @@ fn active_project_status_text(record: &SessionRecord) -> String {
 
 /// Handles select project done summary.
 fn select_project_done_summary(
-    primary_session: Option<&SessionRecord>,
+    primary_session: Option<&ProjectDigestSession>,
     git_status: Option<&GitStatusResponse>,
     prefer_git: bool,
 ) -> (String, Vec<String>) {
-    let message_summary = primary_session.and_then(latest_project_progress_summary);
+    let message_summary = primary_session.and_then(|record| record.latest_progress_summary.clone());
     let git_summary = git_status.and_then(project_git_done_summary);
     if prefer_git {
         if let Some(summary) = git_summary.clone() {
@@ -242,11 +268,11 @@ fn select_project_done_summary(
 }
 
 /// Returns the default project done summary.
-fn default_project_done_summary(record: &SessionRecord) -> String {
-    if record.session.messages.is_empty() {
+fn default_project_done_summary(record: &ProjectDigestSession) -> String {
+    if !record.has_messages {
         return "Ready for the next prompt.".to_owned();
     }
-    let preview = record.session.preview.trim();
+    let preview = record.preview.trim();
     if preview.is_empty() {
         "Ready for the next prompt.".to_owned()
     } else {
@@ -263,14 +289,6 @@ fn project_git_done_summary(status: &GitStatusResponse) -> Option<String> {
     Some(match changed_files {
         1 => "Working tree has 1 changed file ready for review.".to_owned(),
         count => format!("Working tree has {count} changed files ready for review."),
-    })
-}
-
-/// Returns the latest project progress summary.
-fn latest_project_progress_summary(record: &SessionRecord) -> Option<(String, String)> {
-    record.session.messages.iter().rev().find_map(|message| {
-        project_progress_summary_for_message(message)
-            .map(|summary| (message.id().to_owned(), summary))
     })
 }
 
@@ -316,23 +334,13 @@ fn project_progress_summary_for_message(message: &Message) -> Option<String> {
 
 /// Finds latest project pending approval.
 fn find_latest_project_pending_approval<'a>(
-    sessions: &'a [SessionRecord],
-) -> Option<(&'a SessionRecord, String)> {
+    sessions: &'a [ProjectDigestSession],
+) -> Option<(&'a ProjectDigestSession, String)> {
     sessions.iter().rev().find_map(|record| {
         record
-            .session
-            .messages
-            .iter()
-            .rev()
-            .find_map(|message| match message {
-                Message::Approval { id, decision, .. }
-                    if *decision == ApprovalDecision::Pending
-                        && has_live_pending_approval(record, id) =>
-                {
-                    Some((record, id.clone()))
-                }
-                _ => None,
-            })
+            .pending_approval_message_id
+            .as_ref()
+            .map(|message_id| (record, message_id.clone()))
     })
 }
 
@@ -343,33 +351,145 @@ fn has_live_pending_approval(record: &SessionRecord, message_id: &str) -> bool {
         || record.pending_acp_approvals.contains_key(message_id)
 }
 
+/// Selects the latest registered message without scanning transcript bodies.
+/// Live local interactions are registered by message id and `message_positions`
+/// is maintained with every transcript mutation, so this work is bounded by
+/// the small number of simultaneous pending requests rather than transcript
+/// length.
+fn latest_registered_message<'a>(
+    record: &SessionRecord,
+    message_ids: impl Iterator<Item = &'a String>,
+) -> Option<(usize, String)> {
+    message_ids
+        .filter_map(|message_id| {
+            record
+                .message_positions
+                .get(message_id)
+                .copied()
+                .map(|position| (position, message_id))
+        })
+        .max_by_key(|(position, _)| *position)
+        .map(|(position, message_id)| (position, message_id.clone()))
+}
+
+fn latest_registered_message_id<'a>(
+    record: &SessionRecord,
+    message_ids: impl Iterator<Item = &'a String>,
+) -> Option<String> {
+    latest_registered_message(record, message_ids).map(|(_, message_id)| message_id)
+}
+
+/// Resolves the latest renderable live local approval target from routing
+/// registries. ACP uses FIFO resolution, so its queue head wins over later ACP
+/// cards while it remains resident; the resulting ACP candidate is still
+/// compared with newer Claude/Codex approvals.
+fn registered_pending_approval_message_id(record: &SessionRecord) -> Option<String> {
+    let acp_head = record
+        .pending_acp_approval_order
+        .front()
+        .filter(|message_id| record.pending_acp_approvals.contains_key(*message_id))
+        .and_then(|message_id| {
+            record
+                .message_positions
+                .get(message_id)
+                .copied()
+                .map(|position| (position, message_id.clone()))
+        });
+    let acp_candidate = acp_head.or_else(|| {
+        latest_registered_message(record, record.pending_acp_approvals.keys())
+    });
+    let other_candidate = latest_registered_message(
+        record,
+        record
+            .pending_claude_approvals
+            .keys()
+            .chain(record.pending_codex_approvals.keys()),
+    );
+
+    [acp_candidate, other_candidate]
+        .into_iter()
+        .flatten()
+        .max_by_key(|(position, _)| *position)
+        .map(|(_, message_id)| message_id)
+}
+
+/// Resolves the latest live local nonapproval interaction from its routing
+/// registries, independent of how deep the backing card is in the transcript.
+fn registered_pending_interaction_message_id(record: &SessionRecord) -> Option<String> {
+    latest_registered_message_id(
+        record,
+        record
+            .pending_codex_user_inputs
+            .keys()
+            .chain(record.pending_codex_mcp_elicitations.keys())
+            .chain(record.pending_codex_app_requests.keys()),
+    )
+}
+
 /// Finds latest project pending nonapproval interaction.
 fn find_latest_project_pending_nonapproval_interaction<'a>(
-    sessions: &'a [SessionRecord],
-) -> Option<(&'a SessionRecord, String)> {
+    sessions: &'a [ProjectDigestSession],
+) -> Option<(&'a ProjectDigestSession, String)> {
     sessions.iter().rev().find_map(|record| {
         record
-            .session
-            .messages
-            .iter()
-            .rev()
-            .find_map(|message| match message {
-                Message::UserInputRequest { id, state, .. }
-                    if *state == InteractionRequestState::Pending =>
-                {
-                    Some((record, id.clone()))
-                }
-                Message::McpElicitationRequest { id, state, .. }
-                    if *state == InteractionRequestState::Pending =>
-                {
-                    Some((record, id.clone()))
-                }
-                Message::CodexAppRequest { id, state, .. }
-                    if *state == InteractionRequestState::Pending =>
-                {
-                    Some((record, id.clone()))
-                }
-                _ => None,
-            })
+            .pending_interaction_message_id
+            .as_ref()
+            .map(|message_id| (record, message_id.clone()))
     })
+}
+
+/// Projects one session into the bounded metadata needed by project digests.
+fn project_digest_session_from_record(record: &SessionRecord) -> ProjectDigestSession {
+    let mut latest_progress_summary = None;
+    let mut pending_approval_message_id = registered_pending_approval_message_id(record);
+    let mut pending_interaction_message_id = registered_pending_interaction_message_id(record);
+
+    for message in record
+        .session
+        .messages
+        .iter()
+        .rev()
+        .take(PROJECT_DIGEST_MESSAGE_SCAN_LIMIT)
+    {
+        if latest_progress_summary.is_none() {
+            latest_progress_summary = project_progress_summary_for_message(message)
+                .map(|summary| (message.id().to_owned(), summary));
+        }
+        if pending_approval_message_id.is_none() {
+            if let Message::Approval { id, decision, .. } = message {
+                if *decision == ApprovalDecision::Pending
+                    && has_live_pending_approval(record, id)
+                {
+                    pending_approval_message_id = Some(id.clone());
+                }
+            }
+        }
+        if pending_interaction_message_id.is_none() {
+            pending_interaction_message_id = match message {
+                Message::UserInputRequest { id, state, .. }
+                | Message::McpElicitationRequest { id, state, .. }
+                | Message::CodexAppRequest { id, state, .. }
+                    if *state == InteractionRequestState::Pending => Some(id.clone()),
+                _ => None,
+            };
+        }
+        if latest_progress_summary.is_some()
+            && pending_approval_message_id.is_some()
+            && pending_interaction_message_id.is_some()
+        {
+            break;
+        }
+    }
+
+    ProjectDigestSession {
+        id: record.session.id.clone(),
+        parent_delegation_id: record.session.parent_delegation_id.clone(),
+        status: record.session.status,
+        preview: record.session.preview.clone(),
+        pending_prompt_count: record.session.pending_prompts.len(),
+        has_messages: !record.session.messages.is_empty(),
+        latest_progress_summary,
+        pending_approval_message_id,
+        pending_interaction_message_id,
+    }
 }

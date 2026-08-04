@@ -81,11 +81,7 @@ impl AppState {
         let mut claude_model_update: Option<(ClaudeRuntimeHandle, String)> = None;
         let mut claude_permission_mode_update: Option<(ClaudeRuntimeHandle, String)> = None;
         let mut acp_config_updates: Vec<(AcpRuntimeHandle, Value)> = Vec::new();
-        let mut opencode_config_update: Option<(
-            AcpRuntimeHandle,
-            Option<String>,
-            Option<String>,
-        )> = None;
+        let mut opencode_config_update: Option<(AcpRuntimeHandle, OpenCodeConfigSelections)> = None;
 
         match record.session.agent {
             agent if agent.supports_opencode_settings() => {
@@ -98,13 +94,14 @@ impl AppState {
                     || request.gemini_approval_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
-                        "OpenCode sessions only support model and mode settings",
+                        "OpenCode sessions only support model, reasoning variant, and mode settings",
                     ));
                 }
             }
             agent if agent.supports_codex_prompt_settings() => {
                 if request.claude_approval_mode.is_some()
                     || request.claude_effort.is_some()
+                    || request.opencode_effort.is_some()
                     || request.opencode_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
@@ -123,6 +120,7 @@ impl AppState {
                     || request.reasoning_effort.is_some()
                     || request.cursor_mode.is_some()
                     || request.gemini_approval_mode.is_some()
+                    || request.opencode_effort.is_some()
                     || request.opencode_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
@@ -137,6 +135,7 @@ impl AppState {
                     || request.claude_approval_mode.is_some()
                     || request.claude_effort.is_some()
                     || request.gemini_approval_mode.is_some()
+                    || request.opencode_effort.is_some()
                     || request.opencode_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
@@ -151,6 +150,7 @@ impl AppState {
                     || request.claude_approval_mode.is_some()
                     || request.claude_effort.is_some()
                     || request.cursor_mode.is_some()
+                    || request.opencode_effort.is_some()
                     || request.opencode_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
@@ -167,6 +167,7 @@ impl AppState {
                     || request.claude_effort.is_some()
                     || request.cursor_mode.is_some()
                     || request.gemini_approval_mode.is_some()
+                    || request.opencode_effort.is_some()
                     || request.opencode_mode.is_some()
                 {
                     return Err(ApiError::bad_request(format!(
@@ -225,6 +226,42 @@ impl AppState {
         } else {
             None
         };
+        let opencode_model_change_requested = requested_opencode_model
+            .as_deref()
+            .is_some_and(|model| record.session.opencode_model.as_deref() != Some(model));
+        let requested_opencode_effort = if record.session.agent.supports_opencode_settings() {
+            request
+                .opencode_effort
+                .as_deref()
+                .map(normalize_opencode_effort)
+                .transpose()
+                .map_err(|err| ApiError::bad_request(err.to_string()))?
+                .map(|value| {
+                    if value == OPENCODE_CONFIG_AUTO {
+                        return Ok(value);
+                    }
+                    // Effort lists are model-specific. A combined model+effort
+                    // request must be validated by the serialized writer only
+                    // after OpenCode advertises the new model's options.
+                    if opencode_model_change_requested
+                        || record.session.opencode_effort_options.is_empty()
+                    {
+                        return Ok(value);
+                    }
+                    matching_session_model_option_value(
+                        &value,
+                        &record.session.opencode_effort_options,
+                    )
+                    .ok_or_else(|| {
+                        ApiError::bad_request(format!(
+                            "OpenCode no longer offers reasoning variant `{value}`"
+                        ))
+                    })
+                })
+                .transpose()?
+        } else {
+            None
+        };
         let requested_opencode_mode = if record.session.agent.supports_opencode_settings() {
             request
                 .opencode_mode
@@ -236,7 +273,9 @@ impl AppState {
                     if value == OPENCODE_CONFIG_AUTO {
                         return Ok(value);
                     }
-                    if record.session.opencode_mode_options.is_empty() {
+                    if opencode_model_change_requested
+                        || record.session.opencode_mode_options.is_empty()
+                    {
                         return Ok(value);
                     }
                     matching_session_model_option_value(
@@ -263,20 +302,46 @@ impl AppState {
                 let changed_model = requested_opencode_model.filter(|model| {
                     record.session.opencode_model.as_deref() != Some(model.as_str())
                 });
-                let changed_mode = requested_opencode_mode.filter(|mode| {
+                let changed_effort = requested_opencode_effort.clone().filter(|effort| {
+                    record.session.opencode_effort.as_deref() != Some(effort.as_str())
+                });
+                let changed_mode = requested_opencode_mode.clone().filter(|mode| {
                     record.session.opencode_mode.as_deref() != Some(mode.as_str())
                 });
                 if let Some(handle) = live_handle
-                    && (changed_model.is_some() || changed_mode.is_some())
+                    && (changed_model.is_some()
+                        || changed_effort.is_some()
+                        || changed_mode.is_some())
                 {
-                    opencode_config_update =
-                        Some((handle, changed_model, changed_mode));
+                    let selections = if changed_model.is_some() {
+                        // Model changes can replace both dependent option
+                        // lists. Re-apply the existing explicit authority even
+                        // when the request did not change its stored string.
+                        OpenCodeConfigSelections {
+                            model: changed_model,
+                            effort: requested_opencode_effort.or_else(|| {
+                                record.session.opencode_effort.clone()
+                            }),
+                            mode: requested_opencode_mode
+                                .or_else(|| record.session.opencode_mode.clone()),
+                        }
+                    } else {
+                        OpenCodeConfigSelections {
+                            model: None,
+                            effort: changed_effort,
+                            mode: changed_mode,
+                        }
+                    };
+                    opencode_config_update = Some((handle, selections));
                 } else {
                     if let Some(model) = changed_model {
                         record.session.opencode_model = Some(model.clone());
                         if model != OPENCODE_CONFIG_AUTO {
                             record.session.model = model;
                         }
+                    }
+                    if let Some(effort) = changed_effort {
+                        record.session.opencode_effort = Some(effort);
                     }
                     if let Some(mode) = changed_mode {
                         record.session.opencode_mode = Some(mode.clone());
@@ -451,18 +516,26 @@ impl AppState {
                 .send(AcpRuntimeCommand::JsonRpcMessage(request));
         }
 
-        let Some((handle, model_selection, mode_selection)) = opencode_config_update else {
+        let Some((handle, selections)) = opencode_config_update else {
             return Ok(snapshot);
         };
-        let deadline = std::time::Instant::now() + Duration::from_secs(40);
+        const REQUEST_TIMEOUT_SECONDS: u64 = 55;
+        const RESPONSE_HANDOFF_SLACK_SECONDS: u64 = 1;
+        const REQUEST_TIMEOUT: Duration = Duration::from_secs(REQUEST_TIMEOUT_SECONDS);
+        const EXECUTION_TIMEOUT: Duration = Duration::from_secs(
+            REQUEST_TIMEOUT_SECONDS - RESPONSE_HANDOFF_SLACK_SECONDS,
+        );
+        let request_started_at = std::time::Instant::now();
+        let deadline = request_started_at + REQUEST_TIMEOUT;
+        let execution_deadline = request_started_at + EXECUTION_TIMEOUT;
         let (started_tx, started_rx) = mpsc::channel();
         let (proceed_tx, proceed_rx) = mpsc::channel();
         let (response_tx, response_rx) = mpsc::channel();
         handle
             .input_tx
             .send(AcpRuntimeCommand::ApplyOpenCodeConfig {
-                model_selection,
-                mode_selection,
+                selections,
+                execution_deadline,
                 started_tx,
                 proceed_rx,
                 response_tx,
@@ -495,12 +568,11 @@ impl AppState {
             }
         }
 
-        // One started update may require both a model and a mode
-        // acknowledgement. The writer gets the rest of the single 40-second
-        // request budget; its two ACP requests are independently capped at 15
-        // seconds, so a command admitted during the five-second scheduling
-        // window still has enough time to finish without landing after an API
-        // timeout.
+        // The writer receives an execution deadline one second earlier than
+        // this response deadline. Its three 15-second acknowledgements plus a
+        // four-second model-options notification fit after the bounded
+        // five-second scheduling window, while the reserved second prevents a
+        // completed/expired writer result from racing the API timeout.
         let acknowledgement_budget =
             deadline.saturating_duration_since(std::time::Instant::now());
         match response_rx.recv_timeout(acknowledgement_budget) {
@@ -833,6 +905,7 @@ impl AppState {
                 .opencode_model
                 .clone()
                 .unwrap_or_else(|| record.session.model.clone()),
+            opencode_effort: record.session.opencode_effort.clone(),
             opencode_mode: record.session.opencode_mode.clone(),
             prompt: String::new(),
             resume_session_id: record.external_session_id.clone(),

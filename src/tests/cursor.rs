@@ -896,6 +896,7 @@ fn updates_live_cursor_mode_on_active_acp_sessions() {
                 claude_approval_mode: None,
                 claude_effort: None,
                 gemini_approval_mode: None,
+                opencode_effort: None,
                 opencode_mode: None,
             },
         )

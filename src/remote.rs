@@ -22,6 +22,11 @@ const REMOTE_FORWARD_PORT_START: u16 = 47000;
 const REMOTE_FORWARD_PORT_END: u16 = 56999;
 const REMOTE_HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
 const REMOTE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Session settings can wait up to 55 seconds for acknowledged OpenCode
+/// model/effort/mode updates on the owning backend. Leave transport overhead
+/// beyond that application deadline so the proxy cannot report failure for a
+/// change the remote has already committed.
+const REMOTE_SESSION_SETTINGS_TIMEOUT: Duration = Duration::from_secs(60);
 const REMOTE_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const REMOTE_ACTION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const REMOTE_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -554,6 +559,5 @@ struct RemoteProjectBinding {
     remote: RemoteConfig,
     remote_project_id: String,
 }
-
 
 

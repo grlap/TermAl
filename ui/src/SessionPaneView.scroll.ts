@@ -46,38 +46,19 @@ import type { PaneViewMode } from "./workspace";
 const SESSION_PAGE_SCROLL_VIEWPORT_FACTOR = 0.85;
 const SESSION_PAGE_SCROLL_MINIMUM_PX = 160;
 const SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS = 1000 / 60;
-const SESSION_BOTTOM_FOLLOW_FRAME_FACTOR = 0.18;
 const SESSION_BOTTOM_FOLLOW_MAX_FRAME_MS = 100;
 const SESSION_BOTTOM_FOLLOW_STABLE_MS =
   SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS * 2;
 
-export function resolveSessionBottomFollowFrame(
+export function resolveSessionBottomFollowScrollTop(
   currentScrollTop: number,
   targetScrollTop: number,
-  elapsedMs = SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS,
 ) {
-  const distance = targetScrollTop - currentScrollTop;
-  if (Math.abs(distance) <= 1) {
-    return targetScrollTop;
-  }
-  const normalizedElapsedMs =
-    Number.isFinite(elapsedMs) && elapsedMs > 0
-      ? Math.min(elapsedMs, SESSION_BOTTOM_FOLLOW_MAX_FRAME_MS)
-      : SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS;
-  const frameFactor =
-    1 -
-    Math.pow(
-      1 - SESSION_BOTTOM_FOLLOW_FRAME_FACTOR,
-      normalizedElapsedMs / SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS,
-    );
-  return currentScrollTop + distance * frameFactor;
-}
-
-export function shouldSnapSessionBottomFollowAtCompletion(
-  behavior: ScrollBehavior,
-  bottomGap: number,
-): boolean {
-  return behavior === "smooth" && bottomGap > 0.5;
+  // Layout can briefly report a smaller bottom while the live-turn card is
+  // replaced or a virtualized card swaps its estimate for a measurement. The
+  // browser clamps scrollTop if content truly shrank; the follow authority must
+  // not add a second explicit upward write before the next growth.
+  return Math.max(currentScrollTop, targetScrollTop);
 }
 
 export function resolveSessionPageScrollDistance(clientHeight: number) {
@@ -432,7 +413,6 @@ export function useSessionPaneScrollState({
     behavior: ScrollBehavior,
     force = false,
     scrollKind?: MessageStackScrollWriteKind,
-    frameDurationMs = SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS,
   ) {
     const node = messageStackRef.current;
     if (!node) {
@@ -441,21 +421,13 @@ export function useSessionPaneScrollState({
 
     const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
     const writeScrollTop =
-      behavior === "smooth"
-        ? resolveSessionBottomFollowFrame(
-            node.scrollTop,
-            nextScrollTop,
-            frameDurationMs,
-          )
+      scrollKind === "bottom_follow"
+        ? resolveSessionBottomFollowScrollTop(node.scrollTop, nextScrollTop)
         : nextScrollTop;
     if (Math.abs(node.scrollTop - writeScrollTop) > (force ? 0.5 : 1)) {
       node.scrollTo({
         top: writeScrollTop,
-        // Retargeting native smooth scrolling on every streamed resize makes
-        // Chrome reverse an in-flight animation before moving to the new
-        // bottom. The settled rAF loop owns interpolation, so each individual
-        // write must be immediate and monotonic.
-        behavior: behavior === "smooth" ? "auto" : behavior,
+        behavior,
       });
       if (scrollKind === "bottom_follow") {
         beginPaneProgrammaticBottomFollow();
@@ -537,14 +509,14 @@ export function useSessionPaneScrollState({
       if (!getTailFollowIntent()) {
         return;
       }
-      // A settled smooth follow already re-reads the bottom geometry on each
-      // animation frame. A synchronous `auto` write here would cancel that
-      // native animation and make composer/card growth appear as a snap.
+      // A settled live follow already re-reads the bottom geometry on each
+      // animation frame. A second synchronous writer here would duplicate the
+      // correction and make composer/card growth appear as a snap.
       if (isSettledProgrammaticBottomFollowActive()) {
         return;
       }
       if (liveFlowActiveRef.current) {
-        scheduleSmoothLiveTailFollow();
+        scheduleLiveTailFollow();
         return;
       }
       scrollToLatestMessage("auto", true);
@@ -637,15 +609,15 @@ export function useSessionPaneScrollState({
       ) {
         return;
       }
-      // New command cards often gain their measured height after the smooth
-      // bottom-follow has started. The settled loop will target that new
-      // bottom on its next frame; a second synchronous writer here would
-      // interrupt the animation and produce the visible up/down jump.
+      // New command cards often gain their measured height after live follow
+      // starts. The settled loop targets that new bottom on its next frame; a
+      // second synchronous writer here would duplicate the correction and
+      // produce the visible up/down jump.
       if (isSettledProgrammaticBottomFollowActive()) {
         return;
       }
       if (liveFlowActiveRef.current) {
-        scheduleSmoothLiveTailFollow();
+        scheduleLiveTailFollow();
         return;
       }
       // ResizeObserver callbacks run before paint. Correct synchronously through
@@ -730,7 +702,7 @@ export function useSessionPaneScrollState({
     // content measurement nor composer reflow can issue a competing `auto`
     // correction. The settled loop then glides to every measured bottom instead
     // of first snapping to the estimate and correcting again.
-    return scheduleSmoothLiveTailFollow();
+    return scheduleLiveTailFollow();
   }, [
     activeSession?.messages,
     hasUnloadedNewerHistory,
@@ -802,7 +774,7 @@ export function useSessionPaneScrollState({
       return undefined;
     }
     if (getTailFollowIntent() || isMessageStackNearBottom()) {
-      return scheduleSmoothLiveTailFollow();
+      return scheduleLiveTailFollow();
     }
 
     return scheduleSettledScrollToBottom("auto", {
@@ -1083,8 +1055,7 @@ export function useSessionPaneScrollState({
           ? SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS
           : frameTimestamp - previousFrameTimestamp;
       const frameDurationMs =
-        Number.isFinite(measuredFrameDurationMs) &&
-        measuredFrameDurationMs > 0
+        Number.isFinite(measuredFrameDurationMs) && measuredFrameDurationMs > 0
           ? Math.min(
               measuredFrameDurationMs,
               SESSION_BOTTOM_FOLLOW_MAX_FRAME_MS,
@@ -1114,7 +1085,6 @@ export function useSessionPaneScrollState({
         behavior,
         elapsedMs <= minimumDurationMs,
         options.scrollKind,
-        frameDurationMs,
       );
 
       const bottomGap = Math.max(
@@ -1138,18 +1108,6 @@ export function useSessionPaneScrollState({
       ) {
         frameId = window.requestAnimationFrame(tick);
       } else {
-        if (
-          shouldSnapSessionBottomFollowAtCompletion(
-            behavior,
-            bottomGap,
-          )
-        ) {
-          // The interpolation budget and stable-gap threshold keep this loop
-          // bounded, but either completion path can retain a small residual
-          // gap. Finish at the authority's current bottom. Explicit user
-          // intent cancels this loop before the completion branch can run.
-          scrollToLatestMessage("auto", true, options.scrollKind);
-        }
         complete();
       }
     };
@@ -1171,13 +1129,15 @@ export function useSessionPaneScrollState({
     return cancel;
   }
 
-  function scheduleSmoothLiveTailFollow() {
+  function scheduleLiveTailFollow() {
     // Mark the entire live-flow transition before its first animation frame.
     // Composer measurements and ResizeObserver delivery can run in the gap
     // between the React commit and that frame; they must join this settled
-    // animation instead of issuing an intervening synchronous correction.
+    // pin instead of issuing an intervening correction. Each frame targets the
+    // exact current bottom; interpolation against a moving target made newly
+    // measured agent cards visibly lag and then jump.
     beginPaneProgrammaticBottomFollow();
-    return scheduleSettledScrollToBottom("smooth", {
+    return scheduleSettledScrollToBottom("auto", {
       maxAttempts: 24,
       minAttempts: 4,
       scrollKind: "bottom_follow",
@@ -1426,7 +1386,7 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    return scheduleSmoothLiveTailFollow();
+    return scheduleLiveTailFollow();
   }, [
     activeSession?.id,
     activeSession?.hasNewerHistory,
@@ -1569,7 +1529,7 @@ export function useSessionPaneScrollState({
         paneScrollPositions[scrollStateKey]?.shouldStick === true
       ) {
         setNewResponseIndicator(scrollStateKey, false);
-        return scheduleSmoothLiveTailFollow();
+        return scheduleLiveTailFollow();
       }
       setNewResponseIndicator(scrollStateKey, true, "activity");
       return;
@@ -1602,7 +1562,7 @@ export function useSessionPaneScrollState({
     }
 
     setNewResponseIndicator(scrollStateKey, false);
-    return scheduleSmoothLiveTailFollow();
+    return scheduleLiveTailFollow();
   }, [
     activeSession?.id,
     deferContentScrollEffects,

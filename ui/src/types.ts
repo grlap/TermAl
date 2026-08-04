@@ -321,6 +321,9 @@ export type Session = {
   claudeApprovalMode?: ClaudeApprovalMode | null;
   geminiApprovalMode?: GeminiApprovalMode | null;
   opencodeModel?: string | null;
+  opencodeEffort?: string | null;
+  opencodeCurrentEffort?: string | null;
+  opencodeEffortOptions?: SessionModelOption[];
   opencodeMode?: string | null;
   opencodeCurrentMode?: string | null;
   opencodeModeOptions?: SessionModelOption[];
@@ -331,6 +334,10 @@ export type Session = {
   status: SessionStatus;
   preview: string;
   messages: Message[];
+  /** Recent user prompts, oldest to newest; supplied by targeted hydration. */
+  promptHistory?: string[];
+  /** True when a metadata-only projection intentionally omitted promptHistory. */
+  promptHistoryRedacted?: boolean;
   messageCount?: number | null;
   messagesLoaded?: boolean | null;
   /** Global index of `messages[0]` inside the bounded transcript. */
@@ -1005,6 +1012,7 @@ export type SessionSettingsField =
   | "claudeEffort"
   | "cursorMode"
   | "geminiApprovalMode"
+  | "opencodeEffort"
   | "opencodeMode";
 export type SessionSettingsValue =
   | string
