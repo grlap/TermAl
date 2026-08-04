@@ -38,7 +38,7 @@
 // Split out of `ui/src/panels/AgentSessionPanel.tsx`. Same class
 // names and the same queued-prompt behavior.
 
-import { memo, useLayoutEffect, useState, type ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import {
   DELEGATION_FAN_IN_AUTHOR_LABEL,
   isDelegationFanInText,
@@ -65,22 +65,7 @@ import {
 } from "./session-message-leaves";
 
 export function ConversationTailEntry({ children }: { children: ReactNode }) {
-  const [expanded, setExpanded] = useState(false);
-
-  useLayoutEffect(() => {
-    const frameId = window.requestAnimationFrame(() => {
-      setExpanded(true);
-    });
-    return () => window.cancelAnimationFrame(frameId);
-  }, []);
-
-  return (
-    <div
-      className={`conversation-tail-entry-shell${expanded ? "" : " is-entering"}`}
-    >
-      <div className="conversation-tail-entry-shell-content">{children}</div>
-    </div>
-  );
+  return children;
 }
 
 export function ConversationTailPresence({
@@ -90,35 +75,17 @@ export function ConversationTailPresence({
   active: boolean;
   children: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
-
-  useLayoutEffect(() => {
-    if (!active) {
-      setExpanded(false);
-      return;
-    }
-    const frameId = window.requestAnimationFrame(() => {
-      setExpanded(true);
-    });
-    return () => window.cancelAnimationFrame(frameId);
-  }, [active]);
-
   // A completed turn can insert its final transcript card in the same commit
   // that removes this live card. Keeping an exiting height placeholder would
   // make those two layout changes pull the bottom-follow target in opposite
-  // directions across animation frames. Remove the footprint atomically; only
-  // entry is allowed to animate layout height.
+  // directions across animation frames. Entry is equally atomic: animating its
+  // grid row used to move the bottom target for 220 ms while the first response
+  // chunks were also changing transcript height.
   if (!active) {
     return null;
   }
 
-  return (
-    <div
-      className={`conversation-tail-entry-shell${expanded ? "" : " is-entering"}`}
-    >
-      <div className="conversation-tail-entry-shell-content">{children}</div>
-    </div>
-  );
+  return children;
 }
 
 export function RunningIndicator({

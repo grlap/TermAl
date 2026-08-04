@@ -105,7 +105,7 @@ function checkProgressiveEnhancement() {
   if (!/\.motion-paused\s*\{[^}]*scroll-behavior:\s*auto/.test(css)) fail("Paused motion must disable smooth scrolling");
   if (!/classList\.replace\(["']no-js["'],\s*["']js["']\)/.test(js)) fail("JavaScript must enable enhancements only after initialization");
   if (!/__termalReady\s*=\s*true/.test(js)) fail("JavaScript must expose its browser-test readiness marker");
-  if (!/dataset\.flowState/.test(js) || !/hero-approve/.test(js)) fail("The approval-driven control-room interaction is not wired");
+  if (!/dataset\.flowState/.test(js) || !/data-flow-step/.test(html)) fail("The control-room step interaction is not wired");
   if (!/data-theme-choice/.test(js)) fail("The theme preview is not wired");
 }
 

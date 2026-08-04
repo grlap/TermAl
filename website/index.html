@@ -1,17 +1,17 @@
-<!DOCTYPE html>
+<!doctype html>
 <html class="no-js" lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TermAl — The control room for coding agents</title>
-  <meta name="description" content="Run, supervise, review, and steer Claude Code, Codex, Gemini CLI, and Cursor Agent from one structured engineering workspace.">
+  <title>TermAl — The local control room for coding agents</title>
+  <meta name="description" content="Run Claude Code, Codex, Gemini CLI, Cursor Agent, and OpenCode from one local control room with durable sessions, delegations, approvals, diffs, and remote workspaces.">
   <meta name="theme-color" content="#f4efe4">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="dark light">
   <meta name="robots" content="noindex,nofollow">
 
   <meta property="og:type" content="website">
-  <meta property="og:title" content="TermAl — The control room for coding agents">
-  <meta property="og:description" content="An operating environment for long-running software work performed with AI coding agents.">
+  <meta property="og:title" content="TermAl — The local control room for coding agents">
+  <meta property="og:description" content="Supervise agent work as sessions, decisions, handoffs, and changes—not a wall of terminal output.">
   <meta property="og:site_name" content="TermAl">
   <meta name="twitter:card" content="summary">
 
@@ -24,7 +24,8 @@
     "@type": "SoftwareApplication",
     "name": "TermAl",
     "applicationCategory": "DeveloperApplication",
-    "description": "A local operating environment for running, supervising, reviewing, and steering AI coding agents.",
+    "operatingSystem": "macOS, Windows, Linux",
+    "description": "A local control room for running, coordinating, reviewing, and steering AI coding agents.",
     "sameAs": "https://github.com/grlap/TermAl"
   }
   </script>
@@ -37,32 +38,33 @@
     <nav class="nav shell" aria-label="Main navigation">
       <a class="brand" href="#top" aria-label="TermAl home">
         <svg class="brand__mark" viewBox="0 0 48 48" aria-hidden="true">
-          <rect x="3" y="3" width="42" height="42" rx="12"></rect>
+          <rect x="3" y="3" width="42" height="42" rx="10"></rect>
           <path d="M13 15h12M19 15v18M29 15v18M29 24h7"></path>
           <circle cx="36" cy="24" r="2.5"></circle>
         </svg>
         <span>Term<span>Al</span></span>
+        <small><i></i> for the agents, by the agents</small>
       </a>
 
       <div class="nav__links">
-        <a href="#why">Why TermAl</a>
-        <a href="#workflow">Workflow</a>
-        <a href="#orchestrate">Orchestrate</a>
-        <a href="#setup">Setup</a>
+        <a href="#agents">Agents</a>
+        <a href="#product">Mailbox + Board</a>
+        <a href="#workspace">Workspace</a>
+        <a href="#setup">Run it</a>
       </div>
 
       <a class="nav__github" href="https://github.com/grlap/TermAl" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.86c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.35 1.09 2.92.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.6 9.6 0 0 1 12 6.84a9.6 9.6 0 0 1 2.5.34c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.93.36.31.68.92.68 1.86v2.75c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"></path></svg>
-        <span>GitHub</span><span aria-hidden="true">↗</span>
+        <span>View source</span><span aria-hidden="true">↗</span>
       </a>
 
       <details class="mobile-menu" id="mobile-menu">
         <summary><span>Menu</span><i aria-hidden="true"><b></b><b></b></i></summary>
         <div class="mobile-menu__panel">
-          <a href="#why"><span>01</span><b>Why TermAl</b></a>
-          <a href="#workflow"><span>02</span><b>Workflow</b></a>
-          <a href="#orchestrate"><span>03</span><b>Orchestrate</b></a>
-          <a href="#setup"><span>04</span><b>Setup</b></a>
+          <a href="#agents"><span>01</span><b>Agents</b></a>
+          <a href="#product"><span>02</span><b>Mailbox + Board</b></a>
+          <a href="#workspace"><span>03</span><b>Workspace</b></a>
+          <a href="#setup"><span>04</span><b>Run it</b></a>
           <a href="https://github.com/grlap/TermAl" target="_blank" rel="noopener"><span>05</span><b>GitHub ↗</b></a>
         </div>
       </details>
@@ -71,365 +73,431 @@
 
   <main id="main">
     <section class="hero" id="top">
-      <div class="hero__paper-grid" aria-hidden="true"></div>
-      <div class="hero__wash hero__wash--coral" aria-hidden="true"></div>
-      <div class="hero__wash hero__wash--blue" aria-hidden="true"></div>
+      <div class="hero__grid" aria-hidden="true"></div>
+      <div class="hero__glow hero__glow--cyan" aria-hidden="true"></div>
+      <div class="hero__glow hero__glow--amber" aria-hidden="true"></div>
 
       <div class="hero__inner shell">
         <div class="hero__copy">
-          <p class="eyebrow hero__eyebrow"><span></span>An operating environment for AI coding agents</p>
+          <p class="eyebrow hero__eyebrow"><span></span>For the agents, by the agents</p>
           <h1>
-            <span class="hero__line"><span>Your agents need</span></span>
-            <span class="hero__line hero__line--italic"><span>a control room.</span></span>
+            <span class="hero__line"><span>For the agents.</span></span>
+            <span class="hero__line hero__line--italic"><span>By the agents.</span></span>
           </h1>
-          <p class="hero__lead">Run Claude Code, Codex, Gemini CLI, and Cursor Agent in parallel. See the work as structured sessions, approvals, files, and diffs—not a wall of terminal output.</p>
+          <p class="hero__lead">TermAl is the shared control room for <strong>Claude Code, OpenAI Codex, Gemini CLI, Cursor Agent, and OpenCode</strong>. Agents can run, delegate, exchange durable mailbox messages, and pin decisions to a shared Response Board—while you keep the whole operation visible.</p>
 
           <div class="hero__actions">
-            <a class="button button--primary" href="#workflow"><span>See the workflow</span><span aria-hidden="true">↓</span></a>
+            <a class="button button--primary" href="#product"><span>See Mailbox + Response Board</span><span aria-hidden="true">↓</span></a>
             <a class="button button--secondary" href="#setup"><span>Run from source</span><span aria-hidden="true">↘</span></a>
           </div>
 
           <div class="hero__plain-language">
-            <span>AI agents, in plain English</span>
-            <p>Coding agents are command-line assistants that can inspect, change, and run code. TermAl is the workspace around them—the place where you supervise what happens next.</p>
+            <span>Five runtimes. One team.</span>
+            <p>Claude Code, Codex, Gemini, Cursor, and OpenCode keep their native strengths while sharing sessions, handoffs, status, and review surfaces.</p>
           </div>
         </div>
 
-        <figure class="control-room" id="control-room" data-flow-state="3">
-          <div class="control-room__frame" id="control-room-frame">
-            <header class="room-bar">
-              <span class="room-bar__lights" aria-hidden="true"><i></i><i></i><i></i></span>
-              <b>TermAl</b><span>payments-api / auth-refactor</span>
-              <i class="room-bar__live"><em></em>live</i>
+        <figure class="control-room" id="control-room" data-flow-state="0">
+          <div class="control-room__frame" id="control-room-frame" aria-hidden="true">
+            <header class="room-topbar">
+              <div class="room-topbar__brand"><b>T</b><span>TermAl</span></div>
+              <div class="room-topbar__workspace"><i></i><span>commerce-platform</span><small>/</small><b>release-control</b></div>
+              <div class="room-topbar__health"><i></i><span>backend connected</span><kbd>⌘ K</kbd></div>
             </header>
 
-            <div class="room-rail" aria-hidden="true">
-              <span class="room-rail__active">⌂</span><span>◎</span><span>⌘</span><span>⌁</span><span>±</span>
-            </div>
+            <aside class="room-sidebar" aria-label="Product preview navigation">
+              <div class="room-sidebar__tools" aria-hidden="true">
+                <b class="is-active">⌂</b><b>◫</b><b>⌁</b><b>±</b><b>◇</b>
+              </div>
+              <div class="room-sidebar__section">
+                <header><span>CONTROL</span><b>＋</b></header>
+                <div class="room-project is-active"><i></i><span><b>commerce-platform</b><small>5 sessions · 2 live</small></span></div>
+              </div>
+              <div class="room-sidebar__section room-sidebar__section--coordination">
+                <header><span>COORDINATION</span><small>05</small></header>
+                <div class="room-control-link"><i>✉</i><span><b>Mailboxes</b><small>3 unread messages</small></span><em>3</em></div>
+                <div class="room-control-link"><i>◇</i><span><b>Response Board</b><small>2 pinned decisions</small></span><em>2</em></div>
+              </div>
+              <div class="room-sidebar__section room-sidebar__section--sessions">
+                <header><span>SESSIONS</span><small>05</small></header>
+                <article class="room-session is-active"><i class="agent-codex">C</i><span><b>release-control</b><small><em></em> Codex is working</small></span><time>now</time></article>
+                <article class="room-session"><i class="agent-claude">A</i><span><b>checkout hardening</b><small>waiting for reply</small></span><time>2m</time></article>
+                <article class="room-session"><i class="agent-gemini">G</i><span><b>integration matrix</b><small>review ready</small></span><time>6m</time></article>
+              </div>
+              <footer><span><i></i> local</span><b>greg</b></footer>
+            </aside>
 
-            <div class="room-stage">
-              <svg class="room-routes" viewBox="0 0 720 500" preserveAspectRatio="none" aria-hidden="true">
-                <path class="route route--base" d="M110 105 C190 105 180 205 270 205 S350 118 430 118 S500 270 575 270 S600 395 665 395"></path>
-                <path class="route route--signal" d="M110 105 C190 105 180 205 270 205 S350 118 430 118 S500 270 575 270 S600 395 665 395"></path>
-              </svg>
+            <section class="room-workspace" aria-label="Interactive TermAl workspace preview">
+              <header class="room-tabs">
+                <div class="room-tab is-active"><i class="agent-codex">C</i><span>release-control</span><b>●</b></div>
+                <div class="room-tab"><span>±</span><i>git status</i></div>
+                <div class="room-tab"><span>◇</span><i>Response Board</i><b class="room-tab__count">2</b></div>
+                <span class="room-tab-add">＋</span>
+              </header>
 
-              <article class="room-card room-card--brief" data-room-step="0">
-                <span class="room-card__meta">You · brief</span>
-                <p>Refactor auth without breaking the API contract. Run tests and show me the diff.</p>
-              </article>
+              <div class="room-sessionbar">
+                <div><i class="agent-codex">C</i><span><b>Codex</b><small>gpt-5 · high</small></span></div>
+                <div class="room-sessionbar__controls"><span>Review</span><span>high</span><span>•••</span></div>
+              </div>
 
-              <article class="agent-node agent-node--planner" data-room-step="1">
-                <span class="agent-node__avatar agent-node__avatar--blue">C</span>
-                <div><b>Planner</b><small>Codex · mapping impact</small></div><i></i>
-              </article>
+              <div class="room-conversation">
+                <article class="preview-message preview-message--user" data-room-step="0">
+                  <header><b>You</b><time>10:42</time></header>
+                  <p>Ship the checkout resilience fix. Delegate the test audit, keep API behavior stable, and bring me the final diff.</p>
+                </article>
 
-              <article class="agent-node agent-node--builder" data-room-step="1">
-                <span class="agent-node__avatar agent-node__avatar--coral">A</span>
-                <div><b>Builder</b><small>Claude · editing 4 files</small></div><i></i>
-              </article>
+                <article class="preview-delegation" data-room-step="1">
+                  <header><span><i></i> PARALLEL AGENTS</span><b>2 running</b></header>
+                  <div><i class="agent-claude">A</i><span><b>Test audit</b><small>Claude · read-only reviewer</small></span><em>working</em></div>
+                  <div><i class="agent-gemini">G</i><span><b>Failure-path matrix</b><small>Gemini · isolated worktree</small></span><em>working</em></div>
+                  <footer><span>Mailbox delivery active</span><b>Open delegation tree ↗</b></footer>
+                </article>
 
-              <article class="approval-card" data-room-step="2">
-                <header><span class="approval-card__signal"><i></i></span><div><b>Approval requested</b><small>Run integration tests</small></div></header>
-                <code>npm test -- --runInBand</code>
-                <p>This command can execute project code. Choose how to continue.</p>
-                <div class="approval-card__actions">
-                  <button id="hero-approve" type="button" disabled><span>Approve once</span><i aria-hidden="true">→</i></button>
-                  <button id="hero-reject" type="button" disabled>Reject</button>
-                </div>
-              </article>
+                <article class="preview-approval" data-room-step="2">
+                  <header><span><i></i> APPROVAL REQUIRED</span><time>now</time></header>
+                  <b>Run workspace tests</b>
+                  <code>scripts/test-rust.sh</code>
+                  <p>Codex wants to execute project code before preparing the final review.</p>
+                  <div><span class="preview-approval-action is-primary">Approve once <span>→</span></span><span class="preview-approval-action">Reject</span></div>
+                </article>
 
-              <article class="diff-card" data-room-step="3">
-                <header><span>Review ready</span><b><i>+86</i><em>−24</em></b></header>
-                <div class="diff-card__file"><span>auth/session.ts</span><small>modified</small></div>
-                <div class="diff-card__lines" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
-                <footer><span><i></i> tests passed</span><b>Open diff ↗</b></footer>
-              </article>
+                <article class="preview-message preview-message--agent" data-room-step="3">
+                  <header><b>Codex</b><time>10:47</time></header>
+                  <p>Resilience fix is complete. Both delegated reviews returned clean and the full test suite passed.</p>
+                  <div class="preview-diff"><span><i>±</i><b>8 files changed</b></span><em>+214</em><del>−68</del><strong>Review diff ↗</strong></div>
+                </article>
+              </div>
 
-              <div class="room-human" aria-hidden="true"><span>Human checkpoint</span><i></i></div>
-            </div>
+              <footer class="room-composer">
+                <span>Ask Codex a follow-up…</span>
+                <div><kbd>⌘ ↵</kbd><b>↑</b></div>
+              </footer>
+            </section>
+
+            <aside class="room-overview" aria-label="Conversation overview preview">
+              <header><span>OVERVIEW</span><b>⌄</b></header>
+              <div class="overview-map" aria-hidden="true">
+                <i class="overview-map__prompt"></i>
+                <i class="overview-map__text"></i>
+                <i class="overview-map__delegation"></i>
+                <i class="overview-map__text overview-map__text--short"></i>
+                <i class="overview-map__approval"></i>
+                <i class="overview-map__text"></i>
+                <i class="overview-map__diff"></i>
+              </div>
+              <div class="overview-presence"><span>RESPONSE BOARD</span><b><i></i> 2 pinned cards</b></div>
+            </aside>
           </div>
 
           <div class="control-room__controls">
             <div class="flow-steps" role="group" aria-label="Control-room demonstration steps">
-              <button type="button" data-flow-step="0" aria-pressed="false"><span>01</span>Brief</button>
+              <button type="button" data-flow-step="0" aria-pressed="true"><span>01</span>Brief</button>
               <button type="button" data-flow-step="1" aria-pressed="false"><span>02</span>Delegate</button>
-              <button type="button" data-flow-step="2" aria-pressed="false"><span>03</span>Approve</button>
-              <button type="button" data-flow-step="3" aria-pressed="true"><span>04</span>Review</button>
+              <button type="button" data-flow-step="2" aria-pressed="false"><span>03</span>Decide</button>
+              <button type="button" data-flow-step="3" aria-pressed="false"><span>04</span>Review</button>
             </div>
             <button class="motion-toggle" id="motion-toggle" type="button" aria-pressed="false"><i aria-hidden="true"></i><span>Pause motion</span></button>
           </div>
-          <p class="sr-only" id="flow-status">The demonstration is ready at the review step.</p>
+          <p class="sr-only" id="flow-status">The engineering brief is ready.</p>
           <p class="sr-only" id="flow-announcer" aria-live="polite"></p>
-          <figcaption class="sr-only">A task moves from a human brief through two coding agents, stops at an explicit approval, and ends as a reviewable diff.</figcaption>
+          <figcaption>One real workflow: brief, delegate, decide, review. Use the controls to inspect each state.</figcaption>
         </figure>
       </div>
-
-      <a class="hero__scroll" href="#basics"><span>Start with the idea</span><i aria-hidden="true"></i></a>
     </section>
 
-    <section class="fact-rail" id="basics" aria-label="TermAl characteristics">
-      <div class="fact-rail__inner shell">
-        <div><i>⌂</i><span><b>Local backend</b><small>Browser UI on loopback</small></span></div>
-        <div><i>◎</i><span><b>Four agent families</b><small>One structured workspace</small></span></div>
-        <div><i>◆</i><span><b>Human checkpoints</b><small>Approvals stay visible</small></span></div>
-        <div><i>↻</i><span><b>Durable sessions</b><small>Resume after restart</small></span></div>
+    <section class="signal-strip" id="agents" aria-label="Coding agents supported by TermAl">
+      <div class="signal-strip__heading shell"><span>BUILT-IN AGENT SUPPORT</span><p>Use the coding agents you already trust. TermAl gives them a shared place to coordinate.</p></div>
+      <div class="signal-strip__inner shell">
+        <div><i class="agent-claude">A</i><span><b>Claude Code</b><small>NDJSON runtime</small></span></div>
+        <div><i class="agent-codex">C</i><span><b>OpenAI Codex</b><small>JSON-RPC runtime</small></span></div>
+        <div><i class="agent-gemini">G</i><span><b>Gemini CLI</b><small>ACP runtime</small></span></div>
+        <div><i class="agent-cursor">⌁</i><span><b>Cursor Agent</b><small>ACP runtime</small></span></div>
+        <div><i class="agent-opencode">O</i><span><b>OpenCode</b><small>ACP + dynamic effort</small></span></div>
       </div>
     </section>
 
-    <section class="why section shell" id="why">
-      <div class="section-label" data-reveal><span>01</span><span>From output to understanding</span></div>
-      <div class="section-intro section-intro--split">
-        <p class="eyebrow" data-reveal><span></span>The terminal was the entry point</p>
-        <h2 data-reveal>Output is a stream.<br><em>Work is a system.</em></h2>
-        <p data-reveal>Long-running agent work has prompts, tools, approvals, changed files, tests, and unresolved decisions. TermAl gives each one a visible shape.</p>
+    <section class="product section shell" id="product">
+      <div class="section-kicker" data-reveal><span>01 / AGENT COORDINATION</span><i></i><b>Mailbox + Response Board</b></div>
+      <div class="section-heading">
+        <div><p class="eyebrow" data-reveal><span></span>Agents need more than a shared transcript</p><h2 data-reveal>They send mail.<br><em>They build a board.</em></h2></div>
+        <p data-reveal>Mailbox is the durable agent-to-agent channel. Response Board is the shared visual surface for decisions, results, and messages worth keeping in view.</p>
       </div>
 
-      <div class="contrast-board" data-reveal>
-        <article class="terminal-noise">
-          <header><span aria-hidden="true"><i></i><i></i><i></i></span><b>Four terminal tabs</b><small>Where did the decision go?</small></header>
-          <div class="terminal-noise__body" aria-hidden="true">
-            <p><i>$</i> agent --continue auth-refactor</p>
-            <p class="dim">Reading src/auth/session.ts...</p>
-            <p>I'll update the middleware and tests.</p>
-            <p class="gold">Allow command? [y/N]</p>
-            <p class="dim">Running tool: shell</p>
-            <p>Changed 4 files (+86 -24)</p>
-            <p class="dim">Compacting conversation...</p>
-            <p class="red">Context from tab 2 not found</p>
+      <div class="product-grid">
+        <article class="feature-card feature-card--board" data-reveal>
+          <header><span>Response Board</span><b>02 unresolved</b></header>
+          <div class="mini-board">
+            <article><span><i class="agent-claude">A</i><b>Architecture choice</b></span><small>checkout hardening</small><p>Should retries wrap the transport or the application boundary?</p><footer><em>NEEDS RESPONSE</em><b>Open ↗</b></footer></article>
+            <article><span><i class="agent-codex">C</i><b>Review result</b></span><small>release-control</small><p>Both reviewers agree the persistence path is safe.</p><footer><em class="is-ready">READY</em><b>Open ↗</b></footer></article>
           </div>
-          <footer><span>Raw transcript</span><b>You reconstruct the state</b></footer>
+          <div class="feature-card__copy"><span>Decisions</span><h3>A board for everything waiting on you.</h3><p>Responses are captured as immutable snapshots, linked back to the exact session and message.</p></div>
         </article>
 
-        <div class="contrast-switch" aria-hidden="true"><i></i><span>structured</span></div>
-
-        <article class="structured-work">
-          <header><span class="mini-mark">T</span><b>One TermAl session</b><small>Every event has a type</small></header>
-          <div class="structured-work__body">
-            <div class="typed-card typed-card--prompt"><span>Brief</span><p>Refactor auth safely.</p></div>
-            <div class="typed-card typed-card--command"><span>Command</span><p><code>npm test</code><b>waiting for approval</b></p></div>
-            <div class="typed-card typed-card--files"><span>Files</span><p>4 changed<small>+86 −24</small></p></div>
-            <div class="typed-card typed-card--review"><span>Review</span><p>Diff ready<small>tests passed</small></p></div>
+        <article class="feature-card feature-card--mailbox" data-reveal>
+          <header><span>Neutral Mailbox</span><b><i></i> live · 3 unread</b></header>
+          <div class="mini-mailbox">
+            <div class="mini-mailbox__participants"><span><i class="agent-codex">C</i>Release lead</span><b>↔</b><span><i class="agent-claude">A</i>Reviewer</span></div>
+            <article><span><i>#014</i><b>Claude → Codex</b><time>11:07</time></span><strong>Review complete</strong><p>Persistence boundary looks sound. One retry-path note attached.</p><footer><em>PROCESSED</em><small>receipt confirmed</small></footer></article>
+            <article class="is-unread"><span><i>#015</i><b>Gemini → Codex</b><time>now</time></span><strong>Failure matrix</strong><p>All transport recovery cases passed. Ready for fan-in.</p><footer><em>UNREAD</em><small>durable delivery</small></footer></article>
           </div>
-          <footer><span>Structured state</span><b>See what needs you next</b></footer>
+          <div class="feature-card__copy"><span>Mailbox</span><h3>Agent-to-agent communication with receipts.</h3><p>Sequenced messages, idempotent sends, processed cursors, and durable acknowledgement survive restarts and missed notifications.</p></div>
+        </article>
+
+        <article class="feature-card feature-card--session" data-reveal>
+          <header><span>Session controls</span><b>OpenCode</b></header>
+          <div class="setting-stack">
+            <div><span>Model</span><b>Claude Sonnet 4 <i>⌄</i></b></div>
+            <div><span>Reasoning variant</span><b>High <i>⌄</i></b></div>
+            <div><span>Mode</span><b>Build <i>⌄</i></b></div>
+          </div>
+          <div class="feature-card__copy"><span>Agent-native</span><h3>One workspace. Native controls.</h3><p>Model, effort, mode, thread, approval, and resume behavior follow each agent's real protocol.</p></div>
+        </article>
+
+        <article class="feature-card feature-card--live" data-reveal>
+          <header><span>Live operations</span><b><i></i> 2 active</b></header>
+          <div class="live-stack">
+            <div><i class="agent-codex">C</i><span><b>Codex is working</b><small>Reading 12 files · 42s</small></span><em></em></div>
+            <div><i class="agent-claude">A</i><span><b>Approval requested</b><small>Run integration suite</small></span><strong>!</strong></div>
+            <div><i class="agent-gemini">G</i><span><b>Review ready</b><small>6 files · +88 −31</small></span><strong>↗</strong></div>
+          </div>
+          <div class="feature-card__copy"><span>Live state</span><h3>Know what changed—and what needs you.</h3><p>Streaming turns, tool calls, approvals, failures, and reconnect state stay explicit and durable.</p></div>
         </article>
       </div>
     </section>
 
-    <section class="agents section" id="agents">
+    <section class="agents" aria-label="Supported coding agents">
       <div class="agents__inner shell">
-        <div class="section-label section-label--dark" data-reveal><span>02</span><span>One workspace, familiar agents</span></div>
-        <div class="agents__head">
-          <p class="eyebrow eyebrow--dark" data-reveal><span></span>Keep the tools you already use</p>
-          <h2 data-reveal>One desk.<br><em>Four agents.</em></h2>
-          <p data-reveal>TermAl normalizes different agent protocols into the same session, message, approval, and streaming model.</p>
-        </div>
-
-        <div class="agent-cards">
-          <article class="agent-card agent-card--claude" data-reveal><span class="agent-card__mark">C</span><div><small>Supported agent</small><h3>Claude Code</h3><p>Long-lived session runtime with structured turns and approvals.</p></div><i>NDJSON</i></article>
-          <article class="agent-card agent-card--codex" data-reveal><span class="agent-card__mark">⌁</span><div><small>Supported agent</small><h3>OpenAI Codex</h3><p>Live model discovery, reasoning controls, and thread operations.</p></div><i>JSON-RPC</i></article>
-          <article class="agent-card agent-card--gemini" data-reveal><span class="agent-card__mark">✦</span><div><small>Supported agent</small><h3>Gemini CLI</h3><p>ACP-backed sessions inside the same workspace model.</p></div><i>ACP</i></article>
-          <article class="agent-card agent-card--cursor" data-reveal><span class="agent-card__mark">◫</span><div><small>Supported agent</small><h3>Cursor Agent</h3><p>CLI work streamed into TermAl's structured interface.</p></div><i>ACP</i></article>
+        <div class="agents__intro"><span>BRING THE AGENTS YOU USE</span><p>Different runtimes. One operating model.</p></div>
+        <div class="agent-list">
+          <article><i class="agent-claude">A</i><span><b>Claude Code</b><small>NDJSON</small></span></article>
+          <article><i class="agent-codex">C</i><span><b>OpenAI Codex</b><small>JSON-RPC</small></span></article>
+          <article><i class="agent-gemini">G</i><span><b>Gemini CLI</b><small>ACP</small></span></article>
+          <article><i class="agent-cursor">⌁</i><span><b>Cursor Agent</b><small>ACP</small></span></article>
+          <article><i class="agent-opencode">O</i><span><b>OpenCode</b><small>ACP</small></span></article>
         </div>
       </div>
     </section>
 
-    <section class="workflow section" id="workflow">
-      <div class="workflow__inner shell">
-        <div class="section-label" data-reveal><span>03</span><span>The engineering loop</span></div>
-        <div class="workflow__head">
-          <div>
-            <p class="eyebrow" data-reveal><span></span>Speed without losing the thread</p>
-            <h2 data-reveal>Run the loop.<br><em>Not the tabs.</em></h2>
-          </div>
-          <p data-reveal>Brief the work, let agents execute in parallel, step in at the right checkpoint, and review the actual change before it moves on.</p>
+    <section class="coordination section" id="coordination">
+      <div class="coordination__inner shell">
+        <div class="section-kicker section-kicker--dark" data-reveal><span>02 / COORDINATION</span><i></i><b>Agents that can work as a team</b></div>
+        <div class="section-heading section-heading--dark">
+          <div><p class="eyebrow eyebrow--dark" data-reveal><span></span>Delegation without losing ownership</p><h2 data-reveal>Spawn the work.<br><em>Keep the receipts.</em></h2></div>
+          <p data-reveal>Parent sessions can delegate bounded jobs, receive durable mailbox updates, wait for a whole review team, and continue with exact result packets.</p>
         </div>
 
-        <div class="workflow-grid">
-          <article class="workflow-card workflow-card--wide" data-reveal>
-            <span class="workflow-card__number">01</span><div class="workflow-card__icon icon-brief" aria-hidden="true"><i></i><i></i><i></i></div>
-            <h3>Frame the work</h3><p>Keep the brief, attachments, agent settings, and queued follow-ups in one durable session.</p><b>Prompt · context · queue</b>
-          </article>
-          <article class="workflow-card" data-reveal>
-            <span class="workflow-card__number">02</span><div class="workflow-card__icon icon-parallel" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-            <h3>Run in parallel</h3><p>Open multiple live sessions without losing scroll position or workspace context.</p><b>Sessions · panes · tabs</b>
-          </article>
-          <article class="workflow-card" data-reveal>
-            <span class="workflow-card__number">03</span><div class="workflow-card__icon icon-approval" aria-hidden="true"><i></i><b></b></div>
-            <h3>Clear checkpoints</h3><p>Approve once, reject, or choose a session policy when an agent asks to act.</p><b>Visible workflow control</b>
-          </article>
-          <article class="workflow-card" data-reveal>
-            <span class="workflow-card__number">04</span><div class="workflow-card__icon icon-diff" aria-hidden="true"><span>−</span><span>+</span></div>
-            <h3>Review the change</h3><p>Open unified diffs, files, Git state, and terminal output beside the conversation.</p><b>Diff · files · Git</b>
-          </article>
-          <article class="workflow-card workflow-card--wide workflow-card--jade" data-reveal>
-            <span class="workflow-card__number">05</span><div class="workflow-card__icon icon-resume" aria-hidden="true"><i></i><i></i></div>
-            <h3>Return without reconstructing</h3><p>Sessions, message history, projects, preferences, and workspace layouts survive restart.</p><b>Durable local context</b>
-          </article>
+        <div class="coordination-demo" data-reveal>
+          <div class="delegation-tree">
+            <header><span>DELEGATION TREE</span><b><i></i> running</b></header>
+            <div class="tree-canvas">
+              <svg viewBox="0 0 660 430" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M110 215 C210 215 190 105 300 105"></path><path d="M110 215 C210 215 190 320 300 320"></path><path d="M420 105 C515 105 490 215 585 215"></path><path d="M420 320 C515 320 490 215 585 215"></path>
+              </svg>
+              <article class="tree-node tree-node--root"><small>PARENT</small><i class="agent-codex">C</i><b>Release lead</b><span>Codex · writable</span></article>
+              <article class="tree-node tree-node--review"><small>REVIEWER 01</small><i class="agent-claude">A</i><b>Code review</b><span>read-only · complete</span></article>
+              <article class="tree-node tree-node--test"><small>REVIEWER 02</small><i class="agent-gemini">G</i><b>Test audit</b><span>read-only · working</span></article>
+              <article class="tree-node tree-node--result"><small>FAN-IN</small><i>✓</i><b>Wait for all</b><span>1 of 2 returned</span></article>
+            </div>
+          </div>
+
+          <div class="mailbox-panel">
+            <header><span>MAILBOX</span><b>3 unread</b></header>
+            <article><i class="agent-claude">A</i><div><span><b>Code review</b><time>11:07</time></span><p>Persistence boundary looks sound. One retry-path note attached.</p><small>DELIVERED · SEQ 014</small></div></article>
+            <article><i class="agent-gemini">G</i><div><span><b>Test audit</b><time>11:08</time></span><p>Running failure-path matrix now. ETA two minutes.</p><small>DELIVERED · SEQ 015</small></div></article>
+            <article class="mailbox-panel__system"><i>↻</i><div><span><b>Fan-in waiting</b><time>now</time></span><p>The parent will resume after both reviewers finish.</p></div></article>
+            <footer><span><i></i> durable coordination store</span><b>Acknowledge all</b></footer>
+          </div>
         </div>
+
+        <div class="coordination-points">
+          <article data-reveal><span>01</span><h3>Scoped work</h3><p>Choose read-only review or an isolated worktree for implementation.</p></article>
+          <article data-reveal><span>02</span><h3>Durable delivery</h3><p>Mailbox messages carry sequence numbers, receipts, and acknowledgements.</p></article>
+          <article data-reveal><span>03</span><h3>Exact fan-in</h3><p>Wait for one or many delegations, then resume the parent with their results.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="workspace section shell" id="workspace">
+      <div class="section-kicker" data-reveal><span>03 / WORKSPACE</span><i></i><b>More than conversation</b></div>
+      <div class="section-heading">
+        <div><p class="eyebrow" data-reveal><span></span>Arrange the work around the task</p><h2 data-reveal>Every surface.<br><em>One workspace tree.</em></h2></div>
+        <p data-reveal>Split panes, drag tabs, and keep a session beside the artifacts it is changing. Each browser workspace persists independently.</p>
+      </div>
+
+      <div class="workspace-demo" data-reveal>
+        <header><span><i></i><i></i><i></i></span><b>payments-api · checkout hardening</b><small>workspace saved</small></header>
+        <div class="workspace-demo__body">
+          <section class="workspace-pane workspace-pane--files">
+            <header><span>FILES</span><b>⌕</b></header>
+            <ul><li><i>⌄</i><b>src</b></li><li class="is-child"><i>⌄</i><b>checkout</b></li><li class="is-child is-deep is-active"><i>TS</i><span>retry-policy.ts</span><em>M</em></li><li class="is-child is-deep"><i>TS</i><span>transport.ts</span><em>M</em></li><li><i>⌄</i><b>tests</b></li><li class="is-child"><i>TS</i><span>checkout.test.ts</span><em>M</em></li></ul>
+          </section>
+          <section class="workspace-pane workspace-pane--diff">
+            <header><div><span class="is-active">Rendered diff</span><span>Raw patch</span></div><b>retry-policy.ts</b></header>
+            <div class="code-diff" role="img" aria-label="Illustrative code diff">
+              <span><i>41</i><i>41</i><code>export async function runWithRetry(</code></span>
+              <span class="diff-add"><i></i><i>42</i><code>+  policy: RetryPolicy,</code></span>
+              <span><i>42</i><i>43</i><code>   operation: () =&gt; Promise&lt;Response&gt;</code></span>
+              <span><i>43</i><i>44</i><code>) {</code></span>
+              <span class="diff-remove"><i>44</i><i></i><code>-  return operation();</code></span>
+              <span class="diff-add"><i></i><i>45</i><code>+  return retry(policy, operation);</code></span>
+              <span><i>45</i><i>46</i><code>}</code></span>
+            </div>
+            <footer><span><em>＋34</em><del>−12</del> 3 files</span><b>Open in editor ↗</b></footer>
+          </section>
+          <section class="workspace-pane workspace-pane--terminal">
+            <header><span>TERMINAL · cargo test</span><b>＋　⌄</b></header>
+            <pre><code><i>$</i> scripts/test-rust.sh
+running 428 tests
+<b>test result: ok.</b> 428 passed; 0 failed
+<em>finished in 18.42s</em></code></pre>
+          </section>
+        </div>
+      </div>
+
+      <div class="surface-list">
+        <article data-reveal><i>01</i><span><b>Source + filesystem</b><small>Browse and edit the project without leaving the workspace.</small></span><em>Monaco</em></article>
+        <article data-reveal><i>02</i><span><b>Rendered + raw diffs</b><small>Review structured changes, hunks, commits, and patch details.</small></span><em>Review</em></article>
+        <article data-reveal><i>03</i><span><b>Git + terminal</b><small>Inspect branch state and run commands beside the agent session.</small></span><em>Tools</em></article>
+        <article data-reveal><i>04</i><span><b>Conversation overview</b><small>Jump through prompts, tools, approvals, and results in long turns.</small></span><em>Navigate</em></article>
       </div>
     </section>
 
     <section class="orchestrate section" id="orchestrate">
       <div class="orchestrate__grid" aria-hidden="true"></div>
       <div class="orchestrate__inner shell">
-        <div class="section-label section-label--dark" data-reveal><span>04</span><span>Visual orchestration</span></div>
         <div class="orchestrate__copy">
-          <p class="eyebrow eyebrow--dark" data-reveal><span></span>Design the handoff once</p>
-          <h2 data-reveal>Turn a workflow<br>into a map.</h2>
-          <p data-reveal>Build reusable graphs that start sessions, pass work between roles, wait for results, and expose the whole run as something you can pause, resume, or stop.</p>
-          <ul data-reveal><li><span>01</span>Choose an assistant and model per node</li><li><span>02</span>Connect prompts into explicit transitions</li><li><span>03</span>Watch every session from the same workspace</li></ul>
+          <div class="section-kicker section-kicker--dark" data-reveal><span>04 / ORCHESTRATE</span><i></i><b>Reusable agent workflows</b></div>
+          <p class="eyebrow eyebrow--dark" data-reveal><span></span>Make the workflow visible</p>
+          <h2 data-reveal>Design the handoff.<br><em>Watch it run.</em></h2>
+          <p data-reveal>Build a graph of roles, prompts, models, and transitions. Start it as a real set of TermAl sessions, then pause, resume, inspect, or stop the run.</p>
+          <ul data-reveal><li><span>01</span>Pick an agent and model for every role</li><li><span>02</span>Route exact outputs into the next brief</li><li><span>03</span>Open any node as a live session</li></ul>
         </div>
 
-        <div class="orchestrator-board" data-reveal role="img" aria-label="A visual orchestrator routes a feature brief through planning, implementation, tests, and review sessions.">
-          <header><span>release-safety-check</span><b><i></i> running</b></header>
-          <svg viewBox="0 0 760 520" preserveAspectRatio="none" aria-hidden="true">
-            <path d="M115 95 C220 95 180 240 295 240"></path>
-            <path d="M365 240 C455 240 425 112 545 112"></path>
-            <path d="M365 240 C455 240 430 375 545 375"></path>
-            <path d="M615 112 C690 112 650 260 710 260"></path>
-            <path d="M615 375 C685 375 658 260 710 260"></path>
-          </svg>
-          <article class="graph-node graph-node--brief"><small>start</small><b>Feature brief</b><span>human prompt</span></article>
-          <article class="graph-node graph-node--plan"><small>session 01</small><b>Plan impact</b><span>Codex</span><i></i></article>
-          <article class="graph-node graph-node--build"><small>session 02</small><b>Implement</b><span>Claude</span><i></i></article>
-          <article class="graph-node graph-node--tests"><small>session 03</small><b>Run tests</b><span>Gemini</span><i></i></article>
-          <article class="graph-node graph-node--review"><small>checkpoint</small><b>Review diff</b><span>human</span><i></i></article>
+        <div class="orchestrator-board" data-reveal role="img" aria-label="A visual TermAl orchestrator routes a release brief through planning, implementation, testing, and human review.">
+          <header><div><span>ORCHESTRATOR</span><b>release-readiness</b></div><strong><i></i> running</strong></header>
+          <svg viewBox="0 0 780 540" preserveAspectRatio="none" aria-hidden="true"><path d="M112 260 C210 260 188 118 300 118"></path><path d="M112 260 C210 260 188 400 300 400"></path><path d="M430 118 C520 118 480 260 585 260"></path><path d="M430 400 C520 400 480 260 585 260"></path><path d="M670 260 L735 260"></path></svg>
+          <article class="graph-node graph-node--brief"><small>START</small><i>↗</i><b>Release brief</b><span>human input</span></article>
+          <article class="graph-node graph-node--plan"><small>SESSION 01</small><i class="agent-codex">C</i><b>Plan impact</b><span>Codex · high</span><em>complete</em></article>
+          <article class="graph-node graph-node--build"><small>SESSION 02</small><i class="agent-claude">A</i><b>Implement</b><span>Claude · build</span><em>working</em></article>
+          <article class="graph-node graph-node--tests"><small>FAN-IN</small><i class="agent-gemini">G</i><b>Test + review</b><span>2 inputs</span><em>waiting</em></article>
+          <article class="graph-node graph-node--review"><small>CHECKPOINT</small><i>✓</i><b>Human review</b><span>final diff</span></article>
           <div class="graph-pulse" aria-hidden="true"></div>
         </div>
       </div>
     </section>
 
-    <section class="remote section" id="remote">
-      <div class="remote__inner shell">
-        <div class="section-label" data-reveal><span>05</span><span>Local desk, remote reach</span></div>
-        <div class="remote__head">
-          <p class="eyebrow" data-reveal><span></span>The workspace stays close; the compute does not have to</p>
-          <h2 data-reveal>Supervise here.<br><em>Run there.</em></h2>
-        </div>
-
-        <div class="remote-map" data-reveal role="img" aria-label="A browser connects to a local TermAl backend, which reaches an optional remote TermAl backend over an SSH tunnel.">
-          <article class="remote-map__browser"><span>Browser</span><b>Your workspace</b><small>REST + live events</small></article>
-          <div class="remote-map__line remote-map__line--local" aria-hidden="true"><i></i><span>loopback</span></div>
-          <article class="remote-map__local"><span>Local</span><b>TermAl :8787</b><small>sessions · state · routing</small></article>
-          <div class="remote-map__line remote-map__line--ssh" aria-hidden="true"><i></i><span>SSH tunnel</span></div>
-          <article class="remote-map__server"><span>Remote</span><b>Build server</b><small>agents · files · Git</small></article>
-        </div>
-
-        <div class="remote-notes">
-          <article data-reveal><span>Multi-browser layouts</span><h3>Give each screen a job.</h3><p>Keep a planner workspace on one monitor and review on another. Layouts persist on the server as independent views.</p></article>
-          <article data-reveal><span>SSH-backed projects</span><h3>Use the machine with the code.</h3><p>Bind a project to a remote host and route sessions, files, Git, and terminal work through the same tunnel.</p></article>
-        </div>
+    <section class="remote section shell" id="remote">
+      <div class="section-kicker" data-reveal><span>05 / REMOTE</span><i></i><b>Local desk, remote reach</b></div>
+      <div class="section-heading">
+        <div><p class="eyebrow" data-reveal><span></span>Use the machine with the code</p><h2 data-reveal>Supervise here.<br><em>Execute there.</em></h2></div>
+        <p data-reveal>Bind projects to a configured SSH host. TermAl opens a tunnel to the remote backend while your control surface stays local.</p>
       </div>
+
+      <div class="remote-diagram" data-reveal role="img" aria-label="A local browser and TermAl backend connect over an SSH tunnel to a remote TermAl backend and project workspace.">
+        <article><small>YOUR DESK</small><i>◫</i><b>Browser workspace</b><span>panes · sessions · review</span></article>
+        <div><span>REST + SSE</span><i></i></div>
+        <article><small>LOCAL</small><i>T</i><b>TermAl backend</b><span>state · routing · tunnel</span></article>
+        <div class="remote-diagram__ssh"><span>SSH tunnel</span><i></i></div>
+        <article><small>REMOTE HOST</small><i>⌁</i><b>Project + agents</b><span>files · git · terminal</span></article>
+      </div>
+      <div class="remote-note"><span><i></i> Loopback by default</span><p>Remote projects are browser-safe local proxies. Server-scoped ids are translated before they reach your workspace.</p></div>
     </section>
 
     <section class="personalize section" id="personalize">
       <div class="personalize__inner shell">
-        <div class="section-label section-label--dark" data-reveal><span>06</span><span>A workspace that feels like yours</span></div>
         <div class="personalize__copy">
-          <p class="eyebrow eyebrow--dark" data-reveal><span></span>Same work, different atmosphere</p>
-          <h2 data-reveal>Choose your<br><em>control surface.</em></h2>
-          <p data-reveal>TermAl ships with hand-crafted themes, multiple chrome styles, density controls, and adjustable type—without changing the work underneath.</p>
+          <div class="section-kicker section-kicker--dark" data-reveal><span>06 / PERSONALIZE</span><i></i><b>Your control surface</b></div>
+          <p class="eyebrow eyebrow--dark" data-reveal><span></span>18 themes, four chrome styles</p>
+          <h2 data-reveal>Dense by design.<br><em>Yours in detail.</em></h2>
+          <p data-reveal>Choose the color system, interface style, Markdown treatment, font size, and density independently. TermAl can feel like a terminal, a studio, a blueprint, or something in between.</p>
         </div>
 
-        <div class="theme-demo" id="theme-demo" data-preview-theme="warm" data-reveal>
-          <div class="theme-demo__controls" role="group" aria-label="Workspace theme preview">
-            <button type="button" data-theme-choice="warm" aria-pressed="true"><i></i>Warm</button>
-            <button type="button" data-theme-choice="dark" aria-pressed="false"><i></i>Dark</button>
-            <button type="button" data-theme-choice="blueprint" aria-pressed="false"><i></i>Blueprint</button>
-            <button type="button" data-theme-choice="ember" aria-pressed="false"><i></i>Ember</button>
+        <div class="theme-demo" id="theme-demo" data-preview-theme="obsidian" data-reveal>
+          <div class="theme-demo__controls" role="group" aria-label="Preview TermAl themes">
+            <button type="button" data-theme-choice="obsidian" aria-pressed="true"><i></i><span>Obsidian</span></button>
+            <button type="button" data-theme-choice="evergreen" aria-pressed="false"><i></i><span>Evergreen</span></button>
+            <button type="button" data-theme-choice="blueprint" aria-pressed="false"><i></i><span>Blueprint</span></button>
+            <button type="button" data-theme-choice="porcelain" aria-pressed="false"><i></i><span>Porcelain</span></button>
           </div>
           <div class="theme-workspace">
-            <div class="theme-workspace__rail" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-            <div class="theme-workspace__main">
-              <header><span>auth-refactor</span><b>Claude · working</b></header>
-              <div class="theme-message theme-message--user"><small>You</small><p>Show me the smallest safe change.</p></div>
-              <div class="theme-message theme-message--agent"><small>Claude</small><p>I mapped the callers and prepared a focused diff.</p><span><i></i><i></i><i></i></span></div>
-              <footer><span>Queue a follow-up…</span><b>↑</b></footer>
-            </div>
+            <aside><b>T</b><i></i><i></i><i></i><i></i></aside>
+            <section>
+              <header><span><i></i> design-system</span><b>connected</b></header>
+              <div class="theme-tabs"><span class="is-active">design review</span><span>source.css</span><span>Response Board</span></div>
+              <article class="theme-message theme-message--user"><small>YOU</small><p>Audit the new palette across every control surface.</p></article>
+              <article class="theme-message theme-message--agent"><small>CODEX</small><p>Contrast passes. I found two muted-state tokens to tighten.</p><div><em>＋18</em><del>−6</del><b>Open diff ↗</b></div></article>
+              <footer><span>Ask a follow-up…</span><b>↑</b></footer>
+            </section>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="setup section" id="setup">
-      <div class="setup__inner shell">
-        <div class="section-label" data-reveal><span>07</span><span>Run from source</span></div>
-        <div class="setup__head">
-          <div><p class="eyebrow" data-reveal><span></span>Two processes, one workspace</p><h2 data-reveal>From repository<br>to control room.</h2></div>
-          <p data-reveal>TermAl currently runs from source. Install Rust, Node 24.14+ with npm 11.9+, and at least one supported agent CLI that is already authenticated.</p>
-        </div>
+    <section class="setup section shell" id="setup">
+      <div class="section-kicker" data-reveal><span>07 / RUN IT</span><i></i><b>Source available today</b></div>
+      <div class="section-heading">
+        <div><p class="eyebrow" data-reveal><span></span>Two processes, one local workspace</p><h2 data-reveal>Clone it.<br><em>Take control.</em></h2></div>
+        <p data-reveal>TermAl currently runs from source. Start the Rust backend, launch the React workspace, then add a local or SSH-backed project.</p>
+      </div>
 
-        <ol class="setup-steps">
-          <li class="setup-step" data-reveal>
-            <div class="setup-step__number">01</div>
-            <div class="setup-step__copy"><small>Terminal one</small><h3>Start the Rust backend.</h3><p>This serves the local API, live event stream, session runtimes, and durable state on port <code>8787</code>.</p></div>
-            <div class="code-window"><header><span>shell</span><button class="copy-button" type="button" data-copy="backend-code"><span>Copy</span><i aria-hidden="true">□</i></button></header><pre id="backend-code"><code>git clone https://github.com/grlap/<wbr>TermAl.git
+      <ol class="setup-steps">
+        <li data-reveal>
+          <span class="setup-step__number">01</span>
+          <div><small>BACKEND</small><h3>Start the control plane.</h3><p>Serves the API, live event stream, runtimes, and durable state on loopback.</p></div>
+          <div class="code-window"><header><span>shell</span><button class="copy-button" type="button" data-copy="backend-code"><span>Copy</span><i aria-hidden="true">□</i></button></header><pre id="backend-code" tabindex="-1"><code>git clone https://github.com/grlap/TermAl.git
 cd TermAl
-cargo run</code></pre><footer><span>Backend</span><b>http://localhost:8787</b></footer></div>
-          </li>
-          <li class="setup-step" data-reveal>
-            <div class="setup-step__number">02</div>
-            <div class="setup-step__copy"><small>Terminal two</small><h3>Start the React workspace.</h3><p>Vite serves the browser interface and proxies API calls to the backend during development.</p></div>
-            <div class="code-window"><header><span>shell</span><button class="copy-button" type="button" data-copy="frontend-code"><span>Copy</span><i aria-hidden="true">□</i></button></header><pre id="frontend-code"><code>cd TermAl/ui
+cargo run</code></pre></div>
+        </li>
+        <li data-reveal>
+          <span class="setup-step__number">02</span>
+          <div><small>WORKSPACE</small><h3>Open the browser UI.</h3><p>Vite serves the interface and proxies local API requests during development.</p></div>
+          <div class="code-window"><header><span>shell</span><button class="copy-button" type="button" data-copy="frontend-code"><span>Copy</span><i aria-hidden="true">□</i></button></header><pre id="frontend-code" tabindex="-1"><code>cd TermAl/ui
 npm install
-npm run dev</code></pre><footer><span>Workspace</span><b>http://localhost:4173</b></footer></div>
-          </li>
-          <li class="setup-step setup-step--last" data-reveal>
-            <div class="setup-step__number">03</div>
-            <div class="setup-step__copy"><small>First session</small><h3>Add a project. Pick an agent.</h3><p>Choose a local folder or configured SSH remote, create a session, and send a real engineering brief.</p></div>
-            <div class="first-session"><header><span>New session</span><i></i></header><div><small>Project</small><b>payments-api</b></div><div><small>Assistant</small><b>Codex</b></div><p>Map the auth flow and propose the smallest safe refactor.</p><footer><span><i></i> ready</span><b>Start session →</b></footer></div>
-          </li>
-        </ol>
+npm run dev</code></pre></div>
+        </li>
+      </ol>
 
-        <div class="setup__links" data-reveal>
-          <a href="https://github.com/grlap/TermAl#getting-started" target="_blank" rel="noopener"><span>Read the complete setup guide</span><span aria-hidden="true">↗</span></a>
-          <a href="https://github.com/grlap/TermAl/blob/master/docs/vision.md" target="_blank" rel="noopener"><span>Read the product vision</span><span aria-hidden="true">↗</span></a>
-        </div>
+      <div class="setup__links">
+        <a href="https://github.com/grlap/TermAl" target="_blank" rel="noopener"><span><small>SOURCE</small><b>Explore the repository</b></span><i>↗</i></a>
+        <a href="https://github.com/grlap/TermAl/blob/master/docs/architecture.md" target="_blank" rel="noopener"><span><small>UNDER THE HOOD</small><b>Read the architecture</b></span><i>↗</i></a>
       </div>
     </section>
 
     <section class="boundary section" id="boundary">
       <div class="boundary__inner shell">
-        <div class="section-label section-label--dark" data-reveal><span>08</span><span>Power with visible boundaries</span></div>
-        <div class="boundary__head">
-          <p class="eyebrow eyebrow--dark" data-reveal><span></span>Workflow controls are not a magic sandbox</p>
-          <h2 data-reveal>Know what runs.<br><em>Know where.</em></h2>
-          <p data-reveal>TermAl is a powerful local development tool. It can launch agents, execute commands, edit files, and route work to remote machines when you allow it.</p>
+        <div class="section-kicker section-kicker--dark" data-reveal><span>08 / TRUST BOUNDARY</span><i></i><b>Power needs a clear edge</b></div>
+        <div class="section-heading section-heading--dark">
+          <div><p class="eyebrow eyebrow--dark" data-reveal><span></span>Know what runs, and where</p><h2 data-reveal>Local by default.<br><em>Explicit by design.</em></h2></div>
+          <p data-reveal>TermAl is a single-user local control surface. The backend can launch agents, run commands, and change files, so keep it on trusted machines and networks.</p>
         </div>
-
         <div class="boundary-grid">
-          <article data-reveal><span>01</span><i class="boundary-icon boundary-icon--local">⌂</i><h3>Local by default</h3><p>The browser and Rust backend bind to loopback. Sessions and settings are stored under <code>~/.termal/</code>.</p></article>
-          <article data-reveal><span>02</span><i class="boundary-icon boundary-icon--agent">◎</i><h3>Agent rules still apply</h3><p>Your selected CLI and model provider process data under their own authentication, sandbox, network, and data policies.</p></article>
-          <article data-reveal><span>03</span><i class="boundary-icon boundary-icon--warning">!</i><h3>Keep the API private</h3><p>The local API can run commands and change files. Do not expose port <code>8787</code> directly to an untrusted network.</p></article>
-        </div>
-
-        <div class="faq" data-reveal>
-          <h3>Good questions before you start</h3>
-          <details><summary><span>Is TermAl an AI model?</span><i aria-hidden="true">+</i></summary><p>No. TermAl is the operating environment around supported coding-agent CLIs. You install and authenticate those agents separately.</p></details>
-          <details><summary><span>Does TermAl replace my editor?</span><i aria-hidden="true">+</i></summary><p>No. It includes files, Git, diffs, source panes, and a workspace terminal, but it is designed around supervising agent work—not replacing every editor or debugger workflow.</p></details>
-          <details><summary><span>Are approvals a security sandbox?</span><i aria-hidden="true">+</i></summary><p>No. Approvals are visible workflow controls. The effective security boundary also depends on the selected agent, its sandbox and approval settings, the operating system, and any remote machine involved.</p></details>
-          <details><summary><span>Can two people edit the same workspace together?</span><i aria-hidden="true">+</i></summary><p>Not as a collaborative multi-user editor today. Multiple browser layouts are useful across screens, but simultaneous writes to the same saved layout are last-write-wins.</p></details>
+          <article data-reveal><span>01</span><i>⌂</i><h3>Loopback first</h3><p>The browser and Rust backend use local loopback by default. State lives under <code>~/.termal/</code>.</p></article>
+          <article data-reveal><span>02</span><i>◇</i><h3>Visible checkpoints</h3><p>Approval and sandbox behavior follows the active agent. TermAl makes supported decisions visible and durable.</p></article>
+          <article data-reveal><span>03</span><i>!</i><h3>Keep it private</h3><p>Do not expose port <code>8787</code> directly to an untrusted network. The local API is intentionally powerful.</p></article>
         </div>
       </div>
     </section>
 
     <section class="final-cta">
-      <div class="final-cta__lines" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div class="final-cta__grid" aria-hidden="true"></div>
       <div class="final-cta__inner shell">
-        <p class="eyebrow"><span></span>Give agent work a place to happen</p>
-        <h2>Less tab chasing.<br><em>More engineering.</em></h2>
-        <p>Explore the TermAl source, run the workspace locally, and turn long-running agent sessions into work you can actually supervise.</p>
-        <div class="final-cta__actions"><a class="button button--primary" href="#setup"><span>Run from source</span><span aria-hidden="true">↑</span></a><a class="button button--secondary" href="https://github.com/grlap/TermAl" target="_blank" rel="noopener"><span>View on GitHub</span><span aria-hidden="true">↗</span></a></div>
+        <p class="eyebrow"><span></span>The terminal starts the agent</p>
+        <h2>TermAl runs<br><em>the operation.</em></h2>
+        <p>Give every session, delegation, decision, and change a place you can return to.</p>
+        <div><a class="button button--primary" href="#setup"><span>Run TermAl from source</span><span aria-hidden="true">↑</span></a><a class="button button--secondary" href="https://github.com/grlap/TermAl" target="_blank" rel="noopener"><span>View on GitHub</span><span aria-hidden="true">↗</span></a></div>
       </div>
     </section>
   </main>
 
   <footer class="footer">
     <div class="footer__inner shell">
-      <a class="brand brand--footer" href="#top" aria-label="TermAl, back to top"><svg class="brand__mark" viewBox="0 0 48 48" aria-hidden="true"><rect x="3" y="3" width="42" height="42" rx="12"></rect><path d="M13 15h12M19 15v18M29 15v18M29 24h7"></path><circle cx="36" cy="24" r="2.5"></circle></svg><span>Term<span>Al</span></span></a>
-      <p>An operating environment for software engineering work done with AI agents.</p>
-      <div class="footer__links"><a href="#why">Why TermAl</a><a href="#workflow">Workflow</a><a href="#setup">Setup</a><a href="https://github.com/grlap/TermAl" target="_blank" rel="noopener">GitHub ↗</a></div>
-      <div class="footer__bottom"><span>Source available on GitHub. No public license or packaged release is currently declared.</span><span>Built around human judgment, not hidden automation.</span></div>
+      <a class="brand brand--footer" href="#top" aria-label="Back to TermAl home">
+        <svg class="brand__mark" viewBox="0 0 48 48" aria-hidden="true"><rect x="3" y="3" width="42" height="42" rx="10"></rect><path d="M13 15h12M19 15v18M29 15v18M29 24h7"></path><circle cx="36" cy="24" r="2.5"></circle></svg>
+        <span>Term<span>Al</span></span>
+      </a>
+      <p>A local control room for AI coding agents. Built for people who need to see the whole operation.</p>
+      <nav class="footer__links" aria-label="Footer navigation"><a href="#product">Product</a><a href="#coordination">Coordination</a><a href="#setup">Run it</a><a href="https://github.com/grlap/TermAl" target="_blank" rel="noopener">GitHub ↗</a></nav>
+      <div class="footer__bottom"><span>Source available · macOS · Windows · Linux</span><span>Local backend · no cloud sync · single-user by design</span></div>
     </div>
   </footer>
 

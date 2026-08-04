@@ -460,15 +460,13 @@ describe("splitAgentCommandResolverTail", () => {
 });
 
 describe("AgentSessionPanel conversation caching", () => {
-  it("keeps the active live-tail shell stable while streamed content changes", () => {
+  it("keeps the active live-tail content stable while streamed content changes", () => {
     const { rerender } = render(
       <ConversationTailPresence active>
         <span>First streamed state</span>
       </ConversationTailPresence>,
     );
-    const shell = screen
-      .getByText("First streamed state")
-      .closest(".conversation-tail-entry-shell");
+    const content = screen.getByText("First streamed state");
 
     rerender(
       <ConversationTailPresence active>
@@ -477,11 +475,7 @@ describe("AgentSessionPanel conversation caching", () => {
     );
 
     expect(screen.getByText("Second streamed state")).toBeInTheDocument();
-    expect(
-      screen
-        .getByText("Second streamed state")
-        .closest(".conversation-tail-entry-shell"),
-    ).toBe(shell);
+    expect(screen.getByText("Second streamed state")).toBe(content);
   });
 
   it("does not render a queued prompt once the matching message is visible", () => {
@@ -1290,14 +1284,10 @@ describe("AgentSessionPanel conversation caching", () => {
     const liveTail = screen
       .getByText("Live turn")
       .closest(".conversation-live-tail");
-    const liveTailPresence = liveTail?.closest(
-      ".conversation-tail-entry-shell",
-    );
     const queuedPromptCard = screen
       .getByText("Queued follow-up after current turn")
       .closest(".pending-prompt-card");
     expect(liveTail).not.toBeNull();
-    expect(liveTailPresence).not.toBeNull();
     expect(liveTail).not.toContainElement(queuedPromptCard as HTMLElement);
 
     await act(async () => {
@@ -1317,7 +1307,7 @@ describe("AgentSessionPanel conversation caching", () => {
         .getByText("Queued follow-up after current turn")
         .closest(".pending-prompt-card"),
     ).toBe(queuedPromptCard);
-    expect(liveTailPresence).not.toBeInTheDocument();
+    expect(liveTail).not.toBeInTheDocument();
     expect(
       screen.getByText("Queued follow-up after current turn"),
     ).toBeInTheDocument();

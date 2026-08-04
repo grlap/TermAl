@@ -4776,6 +4776,11 @@ textarea {
   contain-intrinsic-size: 1px 240px;
 }
 
+.streaming-markdown-height-floor,
+.streaming-markdown-height-content {
+  min-width: 0;
+}
+
 .new-response-indicator {
   display: flex;
   align-items: center;
@@ -4855,45 +4860,6 @@ textarea {
   display: grid;
   gap: var(--message-stack-gap);
   align-content: start;
-}
-
-.conversation-tail-entry-shell {
-  display: grid;
-  grid-template-rows: 1fr;
-  min-width: 0;
-  opacity: 1;
-  transition:
-    grid-template-rows 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 160ms ease;
-}
-
-.conversation-tail-entry-shell-content {
-  min-height: 0;
-  overflow: visible;
-}
-
-.conversation-tail-entry-shell.is-entering {
-  grid-template-rows: 0fr;
-  opacity: 0;
-}
-
-.conversation-tail-entry-shell.is-entering
-  > .conversation-tail-entry-shell-content {
-  overflow: hidden;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .conversation-tail-entry-shell,
-  .conversation-tail-entry-shell.is-entering {
-    grid-template-rows: 1fr;
-    opacity: 1;
-    transition: none;
-  }
-
-  .conversation-tail-entry-shell.is-entering
-    > .conversation-tail-entry-shell-content {
-    overflow: visible;
-  }
 }
 
 .activity-card-live {
@@ -5237,46 +5203,6 @@ textarea {
   max-width: 100%;
   justify-self: start;
   padding-block: 0.8rem 0.88rem;
-}
-
-.command-card-entry-shell {
-  display: grid;
-  grid-template-rows: 1fr;
-  width: fit-content;
-  max-width: 100%;
-  min-width: 0;
-  justify-self: start;
-  opacity: 1;
-  transition:
-    grid-template-rows 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    opacity 160ms ease;
-}
-
-.command-card-entry-shell-content {
-  min-height: 0;
-  overflow: visible;
-}
-
-.command-card-entry-shell.is-entering {
-  grid-template-rows: 0fr;
-  opacity: 0;
-}
-
-.command-card-entry-shell.is-entering > .command-card-entry-shell-content {
-  overflow: hidden;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .command-card-entry-shell,
-  .command-card-entry-shell.is-entering {
-    grid-template-rows: 1fr;
-    opacity: 1;
-    transition: none;
-  }
-
-  .command-card-entry-shell.is-entering > .command-card-entry-shell-content {
-    overflow: visible;
-  }
 }
 
 .command-card .message-meta {

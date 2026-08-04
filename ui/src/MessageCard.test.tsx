@@ -3,9 +3,7 @@ import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { DeferredHeavyContentActivationProvider } from "./deferred-heavy-content-activation";
-import {
-  MessageCard,
-} from "./message-cards";
+import { MessageCard } from "./message-cards";
 import {
   DEFERRED_RENDER_RESUME_EVENT,
   DEFERRED_RENDER_SUSPENDED_ATTRIBUTE,
@@ -32,6 +30,140 @@ vi.mock("./api", async (importOriginal) => {
 });
 
 describe("MessageCard", () => {
+  it("stabilizes transient streaming Markdown shrink through MessageCard wiring", () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let resizeCallback: ResizeObserverCallback | null = null;
+    let unmount: (() => void) | null = null;
+    class ResizeObserverHarness {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
+
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    }
+    globalThis.ResizeObserver =
+      ResizeObserverHarness as unknown as typeof ResizeObserver;
+
+    try {
+      const rendered = render(
+        <section className="message-stack">
+          <MessageCard
+            message={{
+              id: "streaming-message-1",
+              type: "text",
+              author: "assistant",
+              timestamp: "10:00",
+              text: "Streaming response",
+            }}
+            isStreamingAssistantTextMessage
+            onApprovalDecision={vi.fn()}
+            onUserInputSubmit={vi.fn()}
+          />
+        </section>,
+      );
+      unmount = rendered.unmount;
+      const floor = rendered.container.querySelector(
+        ".streaming-markdown-height-floor",
+      );
+      const content = rendered.container.querySelector(
+        ".streaming-markdown-height-content",
+      );
+      const messageStack = rendered.container.querySelector(".message-stack");
+      if (
+        !(floor instanceof HTMLElement) ||
+        !(content instanceof HTMLElement) ||
+        !(messageStack instanceof HTMLElement)
+      ) {
+        throw new Error("Streaming height test fixture did not render");
+      }
+
+      let renderedHeight = 180;
+      content.getBoundingClientRect = () =>
+        ({ height: renderedHeight }) as DOMRect;
+      act(() => {
+        resizeCallback?.([], {} as ResizeObserver);
+      });
+      expect(floor.style.minHeight).toBe("180px");
+
+      renderedHeight = 112;
+      act(() => {
+        resizeCallback?.([], {} as ResizeObserver);
+      });
+      expect(floor.style.minHeight).toBe("180px");
+
+      renderedHeight = 236;
+      act(() => {
+        resizeCallback?.([], {} as ResizeObserver);
+      });
+      expect(floor.style.minHeight).toBe("236px");
+
+      const repinRequests: Event[] = [];
+      messageStack.addEventListener(
+        "termal:message-stack-bottom-repin-request",
+        (event) => repinRequests.push(event),
+      );
+
+      // A genuinely large collapse is adopted immediately rather than held
+      // as blank space for the rest of the turn.
+      renderedHeight = 80;
+      act(() => {
+        resizeCallback?.([], {} as ResizeObserver);
+      });
+      expect(floor.style.minHeight).toBe("80px");
+      expect(repinRequests).toHaveLength(1);
+
+      // Reusing the tree position for another streaming message resets the
+      // previous message's floor instead of leaking its height.
+      renderedHeight = 44;
+      rendered.rerender(
+        <section className="message-stack">
+          <MessageCard
+            message={{
+              id: "streaming-message-2",
+              type: "text",
+              author: "assistant",
+              timestamp: "10:01",
+              text: "Different streaming response",
+            }}
+            isStreamingAssistantTextMessage
+            onApprovalDecision={vi.fn()}
+            onUserInputSubmit={vi.fn()}
+          />
+        </section>,
+      );
+      expect(floor.style.minHeight).toBe("44px");
+
+      rendered.rerender(
+        <section className="message-stack">
+          <MessageCard
+            message={{
+              id: "streaming-message-2",
+              type: "text",
+              author: "assistant",
+              timestamp: "10:01",
+              text: "Settled response",
+            }}
+            isStreamingAssistantTextMessage={false}
+            onApprovalDecision={vi.fn()}
+            onUserInputSubmit={vi.fn()}
+          />
+        </section>,
+      );
+
+      expect(floor.style.minHeight).toBe("");
+      expect(repinRequests).toHaveLength(2);
+    } finally {
+      unmount?.();
+      if (originalResizeObserver === undefined) {
+        delete (globalThis as Partial<typeof globalThis>).ResizeObserver;
+      } else {
+        globalThis.ResizeObserver = originalResizeObserver;
+      }
+    }
+  });
+
   it("disables non-head pending approval actions", () => {
     const message: ApprovalMessage = {
       id: "approval-later",
@@ -101,7 +233,13 @@ describe("MessageCard", () => {
       expandedText: "Review staged and unstaged changes.",
     };
 
-    render(<MessageCard message={message} onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />);
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
 
     expect(screen.getByText("Command")).toBeInTheDocument();
   });
@@ -115,7 +253,13 @@ describe("MessageCard", () => {
       text: "Please inspect the changes.",
     };
 
-    render(<MessageCard message={message} onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />);
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
 
     expect(screen.queryByText("Command")).not.toBeInTheDocument();
   });
@@ -213,7 +357,9 @@ describe("MessageCard", () => {
       "Investor",
     );
     expect(
-      screen.getByText("Greg asked me to review the design and send you the findings."),
+      screen.getByText(
+        "Greg asked me to review the design and send you the findings.",
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText(finalFinding)).not.toBeInTheDocument();
 
@@ -222,9 +368,9 @@ describe("MessageCard", () => {
     expect(container.querySelector(".long-peer-message")).toHaveClass(
       "is-expanded",
     );
-    expect(container.querySelector(".long-peer-message-copy")).toHaveTextContent(
-      finalFinding,
-    );
+    expect(
+      container.querySelector(".long-peer-message-copy"),
+    ).toHaveTextContent(finalFinding);
 
     fireEvent.click(
       screen.getByRole("button", {
@@ -293,9 +439,9 @@ describe("MessageCard", () => {
     expect(container.querySelector(".message-meta-author")).toHaveTextContent(
       "LegalCodex",
     );
-    expect(container.querySelector(".message-meta-author")).not.toHaveTextContent(
-      "Peer queue",
-    );
+    expect(
+      container.querySelector(".message-meta-author"),
+    ).not.toHaveTextContent("Peer queue");
   });
 
   it("falls back to 'You' when a peer source carries an empty name", () => {
@@ -390,7 +536,9 @@ describe("MessageCard", () => {
     expect(screen.queryByText(/load-bearing needle/)).not.toBeInTheDocument();
 
     // Expanding reveals the body...
-    fireEvent.click(screen.getByRole("button", { name: "Show delegation results" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show delegation results" }),
+    );
     expect(screen.getByText(/load-bearing needle/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
@@ -483,7 +631,9 @@ describe("MessageCard", () => {
     expect(screen.queryByText("OUT")).not.toBeInTheDocument();
     expect(screen.queryByText("first line")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show command details" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show command details" }),
+    );
 
     expect(screen.getByText("IN")).toBeInTheDocument();
     expect(screen.getByText("OUT")).toBeInTheDocument();
@@ -592,43 +742,25 @@ describe("MessageCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("expands a newly mounted running command over animation frames", () => {
-    let entryFrame: FrameRequestCallback | null = null;
-    const requestAnimationFrameSpy = vi
-      .spyOn(window, "requestAnimationFrame")
-      .mockImplementation((callback) => {
-        entryFrame ??= callback;
-        return 1;
-      });
+  it("mounts a running command atomically without an entry-height shell", () => {
+    const { container } = render(
+      <MessageCard
+        message={{
+          id: "message-command-entry",
+          type: "command",
+          author: "assistant",
+          timestamp: "10:10",
+          command: "npm test",
+          output: "running tests\n",
+          status: "running",
+        }}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
 
-    try {
-      const { container } = render(
-        <MessageCard
-          message={{
-            id: "message-command-entry",
-            type: "command",
-            author: "assistant",
-            timestamp: "10:10",
-            command: "npm test",
-            output: "running tests\n",
-            status: "running",
-          }}
-          onApprovalDecision={vi.fn()}
-          onUserInputSubmit={vi.fn()}
-        />,
-      );
-
-      const shell = container.querySelector(".command-card-entry-shell");
-      expect(shell).toHaveClass("is-entering");
-
-      act(() => {
-        entryFrame?.(performance.now());
-      });
-
-      expect(shell).not.toHaveClass("is-entering");
-    } finally {
-      requestAnimationFrameSpy.mockRestore();
-    }
+    expect(container.querySelector(".command-card-entry-shell")).toBeNull();
+    expect(container.querySelector(".command-card")).toBeInTheDocument();
   });
 
   it("collapses a completed command from its last painted height", () => {
@@ -763,7 +895,9 @@ describe("MessageCard", () => {
       />,
     );
 
-    const meta = container.querySelector<HTMLElement>(".message-meta-author-agent");
+    const meta = container.querySelector<HTMLElement>(
+      ".message-meta-author-agent",
+    );
     expect(meta).toBeTruthy();
     expect(meta).not.toHaveAttribute("role", "button");
     expect(meta).not.toHaveAttribute("tabindex");
@@ -877,7 +1011,9 @@ describe("MessageCard", () => {
   });
 
   it("keeps mixed-source parallel-agent rows distinct when ids collide", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
     const message: ParallelAgentsMessage = {
       id: "message-parallel-agents-same-id",
       type: "parallelAgents",
@@ -920,12 +1056,8 @@ describe("MessageCard", () => {
 
       const rows = screen.getAllByRole("listitem");
       expect(within(rows[0]!).queryByRole("button")).toBeNull();
-      fireEvent.click(
-        within(rows[1]!).getByRole("button", { name: "Cancel" }),
-      );
-      fireEvent.click(
-        within(rows[1]!).getByRole("button", { name: "Cancel" }),
-      );
+      fireEvent.click(within(rows[1]!).getByRole("button", { name: "Cancel" }));
+      fireEvent.click(within(rows[1]!).getByRole("button", { name: "Cancel" }));
 
       expect(onCancelParallelAgent).toHaveBeenCalledWith("shared-agent-id");
       expect(onCancelParallelAgent).toHaveBeenCalledTimes(1);
@@ -1266,7 +1398,9 @@ describe("MessageCard", () => {
   });
 
   it("does not update pending parallel-agent actions after unmount", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
     const message: ParallelAgentsMessage = {
       id: "message-parallel-agents-unmount-pending",
       type: "parallelAgents",
@@ -1537,12 +1671,24 @@ describe("MessageCard", () => {
       author: "assistant",
       timestamp: "10:02",
       title: "Thinking",
-      lines: ["## Summary of Changes", "1. Added markdown rendering", "- Preserved list formatting"],
+      lines: [
+        "## Summary of Changes",
+        "1. Added markdown rendering",
+        "- Preserved list formatting",
+      ],
     };
 
-    render(<MessageCard message={message} onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />);
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
 
-    expect(await screen.findByRole("heading", { name: "Summary of Changes" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Summary of Changes" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Added markdown rendering")).toBeInTheDocument();
     expect(screen.getByText("Preserved list formatting")).toBeInTheDocument();
   });
@@ -1574,7 +1720,9 @@ describe("MessageCard", () => {
     expect(screen.getByText("code").tagName).toBe("CODE");
     expect(screen.getByText("bold").tagName).toBe("STRONG");
     expect(container.querySelector(".plain-text-copy")).toBeNull();
-    expect(container.querySelector(".deferred-markdown-placeholder")).toBeNull();
+    expect(
+      container.querySelector(".deferred-markdown-placeholder"),
+    ).toBeNull();
   });
 
   it("keeps incremental streaming bug-count markdown as a list", () => {
@@ -1734,9 +1882,7 @@ describe("MessageCard", () => {
     );
 
     expect(container.contains(settledParagraph)).toBe(true);
-    expect(container.querySelector(".markdown-copy p")).toBe(
-      settledParagraph,
-    );
+    expect(container.querySelector(".markdown-copy p")).toBe(settledParagraph);
     expect(
       container.querySelector(".markdown-table-scroll table"),
     ).not.toBeNull();
@@ -1995,7 +2141,9 @@ describe("MessageCard", () => {
     expect(
       await screen.findByRole("heading", { name: "Streaming heading" }),
     ).toBeInTheDocument();
-    expect(container.querySelector(".deferred-markdown-placeholder")).toBeNull();
+    expect(
+      container.querySelector(".deferred-markdown-placeholder"),
+    ).toBeNull();
   });
 
   it("keeps heavy markdown deferred while the message stack suspends activation", async () => {
@@ -2363,16 +2511,28 @@ describe("MessageCard", () => {
     expect(screen.getByText("Agent changed 7 files")).toBeInTheDocument();
     expect(screen.queryByText("src/file-1.ts")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Expand changed files" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand changed files" }),
+    );
 
-    expect(screen.getByRole("button", { name: "Open src/file-1.ts" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy src/file-1.ts" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Collapse changed files" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open src/file-1.ts" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Copy src/file-1.ts" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Collapse changed files" }),
+    ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse changed files" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse changed files" }),
+    );
 
     expect(screen.queryByText("src/file-1.ts")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Expand changed files" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Expand changed files" }),
+    ).toBeInTheDocument();
   });
 
   it("renders six changed files expanded without a collapse control", () => {
@@ -2398,7 +2558,9 @@ describe("MessageCard", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Open src/file-1.ts" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open src/file-1.ts" }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Expand changed files" }),
     ).not.toBeInTheDocument();
@@ -2430,7 +2592,9 @@ describe("MessageCard", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Open src/file-1.ts" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open src/file-1.ts" }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /changed files/i }),
     ).not.toBeInTheDocument();
@@ -2447,7 +2611,9 @@ describe("MessageCard", () => {
     );
 
     expect(screen.queryByText("src/file-1.ts")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Expand changed files" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Expand changed files" }),
+    ).toBeInTheDocument();
   });
 
   it("shows canceled approvals as a resolved decision", () => {
@@ -2462,7 +2628,13 @@ describe("MessageCard", () => {
       decision: "canceled",
     };
 
-    render(<MessageCard message={message} onApprovalDecision={vi.fn()} onUserInputSubmit={vi.fn()} />);
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
 
     expect(screen.getByText("Decision: canceled")).toBeInTheDocument();
   });
@@ -2515,7 +2687,9 @@ describe("MessageCard", () => {
       apiToken: ["secret-123"],
     });
 
-    expect(screen.queryByText("Answer \"Environment\" before submitting.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Answer "Environment" before submitting.'),
+    ).not.toBeInTheDocument();
   });
 
   it("submits MCP elicitation form content", () => {
@@ -2526,7 +2700,8 @@ describe("MessageCard", () => {
       author: "assistant",
       timestamp: "10:05",
       title: "Codex needs MCP input",
-      detail: "MCP server deployment-helper requested additional structured input.",
+      detail:
+        "MCP server deployment-helper requested additional structured input.",
       state: "pending",
       request: {
         threadId: "thread-1",
@@ -2569,15 +2744,21 @@ describe("MessageCard", () => {
     );
 
     fireEvent.click(screen.getByRole("radio", { name: "Production" }));
-    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "3" } });
+    fireEvent.change(screen.getByRole("spinbutton"), {
+      target: { value: "3" },
+    });
     fireEvent.click(screen.getByRole("radio", { name: "Yes" }));
     fireEvent.click(screen.getByRole("button", { name: "Accept" }));
 
-    expect(onMcpElicitationSubmit).toHaveBeenCalledWith("message-mcp", "accept", {
-      environment: "production",
-      replicas: 3,
-      notify: true,
-    });
+    expect(onMcpElicitationSubmit).toHaveBeenCalledWith(
+      "message-mcp",
+      "accept",
+      {
+        environment: "production",
+        replicas: 3,
+        notify: true,
+      },
+    );
   });
 
   it("blocks MCP elicitation submission when a number is out of range", () => {
@@ -2588,7 +2769,8 @@ describe("MessageCard", () => {
       author: "assistant",
       timestamp: "10:05",
       title: "Codex needs MCP input",
-      detail: "MCP server deployment-helper requested additional structured input.",
+      detail:
+        "MCP server deployment-helper requested additional structured input.",
       state: "pending",
       request: {
         threadId: "thread-1",
@@ -2620,11 +2802,15 @@ describe("MessageCard", () => {
       />,
     );
 
-    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "1" } });
+    fireEvent.change(screen.getByRole("spinbutton"), {
+      target: { value: "1" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Accept" }));
 
     expect(onMcpElicitationSubmit).not.toHaveBeenCalled();
-    expect(screen.getByText('"Replicas" must be at least 2.')).toBeInTheDocument();
+    expect(
+      screen.getByText('"Replicas" must be at least 2.'),
+    ).toBeInTheDocument();
   });
 
   it("blocks MCP elicitation submission when string and array constraints are violated", () => {
@@ -2635,7 +2821,8 @@ describe("MessageCard", () => {
       author: "assistant",
       timestamp: "10:05",
       title: "Codex needs MCP input",
-      detail: "MCP server deployment-helper requested additional structured input.",
+      detail:
+        "MCP server deployment-helper requested additional structured input.",
       state: "pending",
       request: {
         threadId: "thread-1",
@@ -2684,13 +2871,19 @@ describe("MessageCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Accept" }));
 
     expect(onMcpElicitationSubmit).not.toHaveBeenCalled();
-    expect(screen.getByText('"Ticket" must be at least 3 characters.')).toBeInTheDocument();
+    expect(
+      screen.getByText('"Ticket" must be at least 3 characters.'),
+    ).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "abc-123" } });
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "abc-123" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Accept" }));
 
     expect(onMcpElicitationSubmit).not.toHaveBeenCalled();
-    expect(screen.getByText('"Reviewers" must include at most 1 selections.')).toBeInTheDocument();
+    expect(
+      screen.getByText('"Reviewers" must include at most 1 selections.'),
+    ).toBeInTheDocument();
   });
 
   it("submits generic Codex app request JSON results", () => {
@@ -2726,9 +2919,12 @@ describe("MessageCard", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Submit JSON result" }));
 
-    expect(onCodexAppRequestSubmit).toHaveBeenCalledWith("message-codex-request", {
-      matches: ["docs/bugs.md"],
-    });
+    expect(onCodexAppRequestSubmit).toHaveBeenCalledWith(
+      "message-codex-request",
+      {
+        matches: ["docs/bugs.md"],
+      },
+    );
   });
 
   it("opens assistant file links through the source callback", () => {
@@ -2780,7 +2976,11 @@ describe("MessageCard", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("link", { name: "route_post_processing_service.dart:469" }));
+    fireEvent.click(
+      screen.getByRole("link", {
+        name: "route_post_processing_service.dart:469",
+      }),
+    );
 
     expect(onOpenSourceLink).toHaveBeenCalledWith({
       path: "C:/github/Personal/fit_friends/lib/services/route_post_processing_service.dart",
@@ -2809,7 +3009,11 @@ describe("MessageCard", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("link", { name: "route_post_processing_service.dart:469" }));
+    fireEvent.click(
+      screen.getByRole("link", {
+        name: "route_post_processing_service.dart:469",
+      }),
+    );
 
     expect(onOpenSourceLink).toHaveBeenCalledWith({
       path: "/home/grzeg/projects/fit_friends/lib/services/route_post_processing_service.dart",
@@ -2895,12 +3099,18 @@ describe("MessageCard", () => {
     );
 
     expect(
-      screen.getByRole("heading", { name: "Reconnecting to continue this turn" }),
+      screen.getByRole("heading", {
+        name: "Reconnecting to continue this turn",
+      }),
     ).toBeInTheDocument();
     expect(screen.getByText("Attempt 2 of 5")).toBeInTheDocument();
-    expect(container.querySelector(".connection-notice-spinner")).not.toBeNull();
+    expect(
+      container.querySelector(".connection-notice-spinner"),
+    ).not.toBeNull();
     const card = container.querySelector(".connection-notice-card");
-    expect(card?.classList.contains("connection-notice-card-resolved")).toBe(false);
+    expect(card?.classList.contains("connection-notice-card-resolved")).toBe(
+      false,
+    );
     expect(card?.getAttribute("aria-live")).toBe("polite");
   });
 
@@ -2922,16 +3132,22 @@ describe("MessageCard", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Connection recovered" })).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "Reconnecting to continue this turn" }),
+      screen.getByRole("heading", { name: "Connection recovered" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", {
+        name: "Reconnecting to continue this turn",
+      }),
     ).not.toBeInTheDocument();
     expect(container.querySelector(".connection-notice-spinner")).toBeNull();
     expect(
       container.querySelector(".connection-notice-card-resolved"),
     ).not.toBeNull();
     expect(
-      container.querySelector(".connection-notice-card")?.getAttribute("aria-live"),
+      container
+        .querySelector(".connection-notice-card")
+        ?.getAttribute("aria-live"),
     ).toBe("off");
     // Past-tense detail copy references the attempt the retry recovered from.
     expect(
@@ -3100,9 +3316,13 @@ describe("MessageCard", () => {
 
     // Live render: spinner + present-tense heading, but no attempt chip.
     expect(
-      screen.getByRole("heading", { name: "Reconnecting to continue this turn" }),
+      screen.getByRole("heading", {
+        name: "Reconnecting to continue this turn",
+      }),
     ).toBeInTheDocument();
-    expect(container.querySelector(".connection-notice-spinner")).not.toBeNull();
+    expect(
+      container.querySelector(".connection-notice-spinner"),
+    ).not.toBeNull();
     expect(screen.queryByText(/^Attempt \d+ of \d+$/)).toBeNull();
 
     rerender(
@@ -3115,7 +3335,9 @@ describe("MessageCard", () => {
     );
 
     // Resolved render: generic past-tense detail, no attempt chip.
-    expect(screen.getByRole("heading", { name: "Connection recovered" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Connection recovered" }),
+    ).toBeInTheDocument();
     expect(container.querySelector(".connection-notice-spinner")).toBeNull();
     expect(screen.queryByText(/^Attempt \d+ of \d+$/)).toBeNull();
     expect(

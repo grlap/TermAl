@@ -199,19 +199,17 @@
 
   function initControlRoom() {
     const room = qs("#control-room");
-    const approve = qs("#hero-approve");
-    const reject = qs("#hero-reject");
     const status = qs("#flow-status");
     const announcer = qs("#flow-announcer");
     const stepButtons = qsa("[data-flow-step]", room || document);
     const toggle = qs("#motion-toggle");
-    if (!room || !approve || !reject || !toggle) return;
+    if (!room || !toggle) return;
 
     const labels = [
       "The engineering brief is ready.",
-      "Planner and builder agents are working in parallel.",
-      "Approval requested. The demonstration is waiting for your decision.",
-      "Approval complete. Tests passed and the diff is ready to review.",
+      "Two delegated reviewers are working in parallel and reporting through durable mailboxes.",
+      "Approval requested. Codex is waiting to run the workspace test suite.",
+      "Approval complete. Delegated reviews returned, tests passed, and the diff is ready.",
     ];
     let state = reducedMotion.matches ? 3 : 0;
     let timer = 0;
@@ -234,9 +232,6 @@
       stepButtons.forEach((button) => {
         button.setAttribute("aria-pressed", String(Number(button.dataset.flowStep) === state));
       });
-      const decisionReady = state === 2;
-      approve.disabled = !decisionReady;
-      reject.disabled = !decisionReady;
       if (status) status.textContent = labels[state];
       if (speak) announce(labels[state]);
     }
@@ -300,23 +295,6 @@
         clearFlowTimer();
         render(button.dataset.flowStep, { speak: true });
       });
-    });
-
-    approve.addEventListener("click", () => {
-      manualMode = true;
-      clearFlowTimer();
-      render(3, { speak: true });
-      qs('[data-flow-step="3"]', room)?.focus({ preventScroll: true });
-    });
-
-    reject.addEventListener("click", () => {
-      manualMode = false;
-      render(0);
-      announce("Request rejected. The task has returned to the brief.");
-      // render(0) disables this button; move focus to the brief step so it is
-      // not stranded on a now-disabled control (mirrors the approve handler).
-      qs('[data-flow-step="0"]', room)?.focus({ preventScroll: true });
-      scheduleFlow(1800);
     });
 
     if ("IntersectionObserver" in window) {

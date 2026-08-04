@@ -114,30 +114,30 @@ export function DeferredMarkdownContent({
 
   return (
     <DeferredHeavyContent
-      estimatedHeight={
-        shouldGate ? estimateMarkdownBlockHeight(metrics.lineCount) : 0
-      }
-      preferImmediateRender={effectivePreferImmediateRender}
-      placeholder={
-        shouldGate ? (
-          <div className="markdown-copy deferred-markdown-placeholder">
-            <p className="plain-text-copy">
-              {buildMarkdownPreviewText(markdown)}
-            </p>
-          </div>
-        ) : null
-      }
-    >
-      <MarkdownContent
-        appearance={appearance}
-        documentPath={documentPath}
-        isStreaming={isStreaming}
-        markdown={markdown}
-        onOpenSourceLink={onOpenSourceLink}
-        searchQuery={searchQuery}
-        searchHighlightTone={searchHighlightTone}
-        workspaceRoot={workspaceRoot}
-      />
+        estimatedHeight={
+          shouldGate ? estimateMarkdownBlockHeight(metrics.lineCount) : 0
+        }
+        preferImmediateRender={effectivePreferImmediateRender}
+        placeholder={
+          shouldGate ? (
+            <div className="markdown-copy deferred-markdown-placeholder">
+              <p className="plain-text-copy">
+                {buildMarkdownPreviewText(markdown)}
+              </p>
+            </div>
+          ) : null
+        }
+      >
+        <MarkdownContent
+          appearance={appearance}
+          documentPath={documentPath}
+          isStreaming={isStreaming}
+          markdown={markdown}
+          onOpenSourceLink={onOpenSourceLink}
+          searchQuery={searchQuery}
+          searchHighlightTone={searchHighlightTone}
+          workspaceRoot={workspaceRoot}
+        />
     </DeferredHeavyContent>
   );
 }

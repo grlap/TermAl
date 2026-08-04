@@ -1507,7 +1507,7 @@ describe("App scroll behaviour", () => {
         clientHeight: 200,
         scrollHeight: () =>
           transcriptScrollHeight +
-          (document.querySelector(".conversation-tail-entry-shell") ? 120 : 0),
+          (document.querySelector(".activity-card-live") ? 120 : 0),
       });
       const scrollToMock = mockScrollToAndApplyTop();
       const context = await renderAppWithProjectAndSession();
@@ -1544,9 +1544,7 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         expect(screen.getByText("Live turn")).toBeInTheDocument();
-        expect(
-          document.querySelector(".conversation-tail-entry-shell"),
-        ).toBeInTheDocument();
+        expect(document.querySelector(".activity-card-live")).toBeInTheDocument();
 
         const messageStack = Array.from(
           document.querySelectorAll(".message-stack"),
@@ -1600,9 +1598,7 @@ describe("App scroll behaviour", () => {
           within(messageStack).getByText("Final response"),
         ).toBeInTheDocument();
         expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
-        expect(
-          document.querySelector(".conversation-tail-entry-shell"),
-        ).not.toBeInTheDocument();
+        expect(document.querySelector(".activity-card-live")).not.toBeInTheDocument();
 
         const replacementTops = scrollToTopsForElementWithBehavior(
           scrollToMock,
