@@ -68,21 +68,11 @@ const ESTIMATED_ASSISTANT_TEXT_HORIZONTAL_CHROME_PX = 72;
 const ESTIMATED_USER_TEXT_CHARACTER_WIDTH_PX = 10.2;
 const ESTIMATED_ASSISTANT_TEXT_CHARACTER_WIDTH_PX = 9.8;
 const MAX_ESTIMATED_TEXT_MESSAGE_HEIGHT = 4800;
-// Successful command cards render as a single summary row until the reader
-// explicitly expands them. Keep this aligned with `.command-card` plus
-// `.command-success-summary`; command/output length does not affect the
-// collapsed presentation.
+// Command cards render as a single summary row from their first frame until
+// the reader explicitly expands them. Keep this aligned with `.command-card`
+// plus `.command-success-summary`; status and command/output length do not
+// affect the collapsed presentation.
 const ESTIMATED_COLLAPSED_COMMAND_HEIGHT_PX = 120;
-// Running and failed commands expose both detail rows by default, but each code
-// shell is clipped to 8.5rem in CSS. Model that bounded presentation instead of
-// treating every source/output line as resident layout.
-const ESTIMATED_EXPANDED_COMMAND_CHROME_HEIGHT_PX = 104;
-const ESTIMATED_COMMAND_SHELL_MIN_HEIGHT_PX = 42;
-const ESTIMATED_COMMAND_SHELL_MAX_HEIGHT_PX = 136;
-const ESTIMATED_COMMAND_SHELL_LINE_HEIGHT_PX = 20;
-const ESTIMATED_COMMAND_CARD_MAX_WIDTH_PX = 768;
-const ESTIMATED_COMMAND_TEXT_HORIZONTAL_CHROME_PX = 190;
-const ESTIMATED_COMMAND_TEXT_CHARACTER_WIDTH_PX = 8.4;
 
 function resolveEstimatedTextContentWidthPx(
   availableWidthPx: number | undefined,
@@ -116,32 +106,6 @@ function estimateWrappedPlainTextLineCount(text: string, charactersPerLine: numb
   return text.split("\n").reduce((count, line) => {
     return count + Math.max(1, Math.ceil(line.length / charactersPerLine));
   }, 0);
-}
-
-function estimateCommandShellHeight(text: string, availableWidthPx: number | undefined) {
-  const commandCardWidthPx = Math.min(
-    Number.isFinite(availableWidthPx) && availableWidthPx && availableWidthPx > 0
-      ? availableWidthPx
-      : ESTIMATED_COMMAND_CARD_MAX_WIDTH_PX,
-    ESTIMATED_COMMAND_CARD_MAX_WIDTH_PX,
-  );
-  const charactersPerLine = estimateCharactersPerLineForWidth(
-    resolveEstimatedTextContentWidthPx(
-      commandCardWidthPx,
-      ESTIMATED_COMMAND_TEXT_HORIZONTAL_CHROME_PX,
-    ),
-    ESTIMATED_COMMAND_TEXT_CHARACTER_WIDTH_PX,
-  );
-  const renderedLineCount = estimateWrappedPlainTextLineCount(
-    text.length > 0 ? text : "Awaiting output…",
-    charactersPerLine,
-  );
-
-  return Math.min(
-    ESTIMATED_COMMAND_SHELL_MAX_HEIGHT_PX,
-    ESTIMATED_COMMAND_SHELL_MIN_HEIGHT_PX +
-      Math.max(0, renderedLineCount - 1) * ESTIMATED_COMMAND_SHELL_LINE_HEIGHT_PX,
-  );
 }
 
 function normalizeAssistantMarkdownForHeightEstimate(markdown: string) {
@@ -390,17 +354,8 @@ export function estimateConversationMessageHeight(
     }
     case "thinking":
       return Math.min(900, Math.max(140, 112 + message.lines.length * 28));
-    case "command": {
-      if (message.status === "success") {
-        return ESTIMATED_COLLAPSED_COMMAND_HEIGHT_PX;
-      }
-
-      return (
-        ESTIMATED_EXPANDED_COMMAND_CHROME_HEIGHT_PX +
-        estimateCommandShellHeight(message.command, options.availableWidthPx) +
-        estimateCommandShellHeight(message.output, options.availableWidthPx)
-      );
-    }
+    case "command":
+      return ESTIMATED_COLLAPSED_COMMAND_HEIGHT_PX;
     case "diff": {
       const diffLineCount = message.diff.length === 0 ? 1 : message.diff.split("\n").length;
       return Math.min(1500, Math.max(180, 156 + Math.min(diffLineCount, 20) * 20));

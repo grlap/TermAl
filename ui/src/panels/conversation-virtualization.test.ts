@@ -114,34 +114,30 @@ describe("estimateConversationMessageHeight", () => {
     );
   });
 
-  it("estimates successful commands from their collapsed summary instead of hidden details", () => {
+  it("estimates every command status from its collapsed summary", () => {
     const shortCommand = makeCommandMessage();
     const veryLargeCommand = makeCommandMessage({
       command: Array.from({ length: 80 }, (_, index) => `echo command-${index}`).join("\n"),
       output: Array.from({ length: 700 }, (_, index) => `output-${index}`).join("\n"),
     });
-
-    expect(estimateConversationMessageHeight(shortCommand)).toBe(120);
-    expect(estimateConversationMessageHeight(veryLargeCommand)).toBe(120);
-  });
-
-  it("keeps expanded running and failed command estimates within the CSS shell caps", () => {
-    const shortRunningCommand = makeCommandMessage({
+    const runningCommand = makeCommandMessage({
       output: "",
       status: "running",
     });
-    const veryLargeFailedCommand = makeCommandMessage({
+    const failedCommand = makeCommandMessage({
       command: "long command segment ".repeat(200),
       output: Array.from({ length: 700 }, (_, index) => `error-${index}`).join("\n"),
       status: "error",
     });
 
-    expect(estimateConversationMessageHeight(shortRunningCommand)).toBeGreaterThan(180);
+    expect(estimateConversationMessageHeight(shortCommand)).toBe(120);
+    expect(estimateConversationMessageHeight(veryLargeCommand)).toBe(120);
+    expect(estimateConversationMessageHeight(runningCommand)).toBe(120);
     expect(
-      estimateConversationMessageHeight(veryLargeFailedCommand, {
+      estimateConversationMessageHeight(failedCommand, {
         availableWidthPx: 520,
       }),
-    ).toBe(376);
+    ).toBe(120);
   });
 
   it("keeps an unseen page of collapsed successful commands close to measured UI height", () => {

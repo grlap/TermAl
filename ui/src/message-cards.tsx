@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { ExpandedPromptPanel } from "./ExpandedPromptPanel";
 import {
   CheckIcon,
@@ -541,14 +541,11 @@ export function CommandCard({
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
-  const cardRef = useRef<HTMLElement | null>(null);
-  const pendingAutomaticCollapseHeightRef = useRef<number | null>(null);
-  const automaticCollapseAnimationRef = useRef<Animation | null>(null);
-  const lastObservedCardHeightRef = useRef<number | null>(null);
-  const [detailsExpanded, setDetailsExpanded] = useState(
-    () => message.status !== "success",
-  );
-  const [detailsToggled, setDetailsToggled] = useState(false);
+  // Agent turns can emit dozens of commands. Keep every command compact from
+  // its first frame so streaming output and completion never grow and then
+  // shrink the transcript above LIVE TURN. Search may reveal details
+  // temporarily; otherwise expansion belongs exclusively to the user.
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [inputExpanded, setInputExpanded] = useState(false);
   const [outputExpanded, setOutputExpanded] = useState(false);
   const [copiedSection, setCopiedSection] = useState<
@@ -567,9 +564,7 @@ export function CommandCard({
     (message.output.split("\n").length > 10 || message.output.length > 480);
   const statusTone = mapCommandStatus(message.status);
   const isSearchExpanded = searchQuery.trim().length > 0;
-  const canCollapseDetails = message.status === "success";
-  const isDetailsExpanded =
-    !canCollapseDetails || detailsExpanded || isSearchExpanded;
+  const isDetailsExpanded = detailsExpanded || isSearchExpanded;
   const isInputExpanded = inputExpanded || isSearchExpanded;
   const isOutputExpanded = outputExpanded || isSearchExpanded;
   const commandSummary = firstSingleLine(message.command);
@@ -579,126 +574,6 @@ export function CommandCard({
       ? lineCountLabel(countVisibleLines(message.output), "out")
       : "No output",
   ].join(" \u00b7 ");
-
-  useLayoutEffect(() => {
-    const card = cardRef.current;
-    if (!card) {
-      return;
-    }
-
-    const rememberHeight = () => {
-      if (automaticCollapseAnimationRef.current === null) {
-        lastObservedCardHeightRef.current = card.getBoundingClientRect().height;
-      }
-    };
-    rememberHeight();
-    const ResizeObserverCtor = globalThis.ResizeObserver;
-    const resizeObserver =
-      typeof ResizeObserverCtor === "function"
-        ? new ResizeObserverCtor(rememberHeight)
-        : null;
-    resizeObserver?.observe(card);
-    return () => resizeObserver?.disconnect();
-  }, []);
-
-  useLayoutEffect(() => {
-    if (message.status !== "success") {
-      setDetailsExpanded(true);
-      setDetailsToggled(false);
-      return;
-    }
-
-    if (!detailsToggled && detailsExpanded) {
-      const card = cardRef.current;
-      const startHeight =
-        lastObservedCardHeightRef.current ??
-        card?.getBoundingClientRect().height ??
-        null;
-      pendingAutomaticCollapseHeightRef.current = startHeight;
-      if (card && startHeight !== null) {
-        // Freeze the last height Chrome actually painted, not the transient
-        // success payload height from this commit. The nested layout update
-        // can then replace the expanded panel before paint without moving the
-        // bottom-pinned transcript up and back down.
-        card.style.height = `${startHeight}px`;
-        card.style.overflow = "hidden";
-      }
-      setDetailsExpanded(false);
-    }
-  }, [detailsExpanded, detailsToggled, message.status]);
-
-  useLayoutEffect(() => {
-    if (detailsExpanded) {
-      if (pendingAutomaticCollapseHeightRef.current === null) {
-        cardRef.current?.style.removeProperty("height");
-        cardRef.current?.style.removeProperty("overflow");
-      }
-      return;
-    }
-
-    const card = cardRef.current;
-    const startHeight = pendingAutomaticCollapseHeightRef.current;
-    pendingAutomaticCollapseHeightRef.current = null;
-    if (!card || startHeight === null) {
-      return;
-    }
-
-    const scrollContainer = card.closest<HTMLElement>(".message-stack");
-    const previousScrollTop = scrollContainer?.scrollTop ?? null;
-    card.style.height = "";
-    card.style.overflow = "";
-    const endHeight = card.getBoundingClientRect().height;
-    card.style.height = `${startHeight}px`;
-    card.style.overflow = "hidden";
-    if (scrollContainer && previousScrollTop !== null) {
-      scrollContainer.scrollTop = previousScrollTop;
-    }
-    const reducedMotion =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (
-      reducedMotion ||
-      Math.abs(startHeight - endHeight) <= 1 ||
-      typeof card.animate !== "function"
-    ) {
-      card.style.height = "";
-      card.style.overflow = "";
-      return;
-    }
-
-    automaticCollapseAnimationRef.current?.cancel();
-    const animation = card.animate(
-      [
-        { height: `${startHeight}px`, overflow: "hidden" },
-        { height: `${endHeight}px`, overflow: "hidden" },
-      ],
-      {
-        duration: 220,
-        easing: "cubic-bezier(0.4, 0, 0.2, 1)",
-      },
-    );
-    automaticCollapseAnimationRef.current = animation;
-    animation.addEventListener(
-      "finish",
-      () => {
-        if (automaticCollapseAnimationRef.current === animation) {
-          automaticCollapseAnimationRef.current = null;
-          card.style.height = "";
-          card.style.overflow = "";
-        }
-      },
-      { once: true },
-    );
-
-    return () => {
-      if (automaticCollapseAnimationRef.current === animation) {
-        automaticCollapseAnimationRef.current = null;
-        animation.cancel();
-      }
-      card.style.height = "";
-      card.style.overflow = "";
-    };
-  }, [detailsExpanded]);
 
   useEffect(() => {
     if (!copiedSection) {
@@ -724,12 +599,11 @@ export function CommandCard({
   }
 
   function handleToggleDetails() {
-    setDetailsToggled(true);
     setDetailsExpanded((open) => !open);
   }
 
   return (
-    <article ref={cardRef} className="message-card utility-card command-card">
+    <article className="message-card utility-card command-card">
       <MessageMeta
         author={message.author}
         timestamp={message.timestamp}
@@ -743,7 +617,7 @@ export function CommandCard({
       />
       <div className="command-card-header">
         <div className="card-label command-card-label">Command</div>
-        {canCollapseDetails && !isSearchExpanded ? (
+        {!isSearchExpanded ? (
           <button
             className="command-icon-button command-card-details-toggle"
             type="button"

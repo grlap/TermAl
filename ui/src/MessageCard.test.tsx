@@ -699,7 +699,7 @@ describe("MessageCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("collapses command details when a running command succeeds", () => {
+  it("keeps command details collapsed from running through success", () => {
     const runningMessage: CommandMessage = {
       id: "message-command-transition",
       type: "command",
@@ -718,9 +718,13 @@ describe("MessageCard", () => {
       />,
     );
 
-    expect(screen.getByText("IN")).toBeInTheDocument();
-    expect(screen.getByText("OUT")).toBeInTheDocument();
-    expect(screen.getByText(/running tests/)).toBeInTheDocument();
+    expect(screen.queryByText("IN")).not.toBeInTheDocument();
+    expect(screen.queryByText("OUT")).not.toBeInTheDocument();
+    expect(screen.queryByText(/running tests/)).not.toBeInTheDocument();
+    expect(screen.getByText("1 line in \u00b7 1 line out")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show command details" }),
+    ).toBeInTheDocument();
 
     rerender(
       <MessageCard
@@ -739,6 +743,49 @@ describe("MessageCard", () => {
     expect(screen.getByText("1 line in \u00b7 1 line out")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Show command details" }),
+    ).toBeInTheDocument();
+  });
+
+  it("preserves an explicit command expansion through completion", () => {
+    const runningMessage: CommandMessage = {
+      id: "message-command-manual-expansion",
+      type: "command",
+      author: "assistant",
+      timestamp: "10:10",
+      command: "npm test",
+      output: "running tests\n",
+      status: "running",
+    };
+    const { rerender } = render(
+      <MessageCard
+        message={runningMessage}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show command details" }),
+    );
+    expect(screen.getByText("IN")).toBeInTheDocument();
+    expect(screen.getByText(/running tests/)).toBeInTheDocument();
+
+    rerender(
+      <MessageCard
+        message={{
+          ...runningMessage,
+          output: "all tests passed\n",
+          status: "success",
+        }}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("IN")).toBeInTheDocument();
+    expect(screen.getByText(/all tests passed/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Hide command details" }),
     ).toBeInTheDocument();
   });
 
@@ -761,98 +808,12 @@ describe("MessageCard", () => {
 
     expect(container.querySelector(".command-card-entry-shell")).toBeNull();
     expect(container.querySelector(".command-card")).toBeInTheDocument();
+    expect(screen.queryByText("IN")).not.toBeInTheDocument();
+    expect(screen.queryByText("OUT")).not.toBeInTheDocument();
+    expect(screen.getByText("1 line in \u00b7 1 line out")).toBeInTheDocument();
   });
 
-  it("collapses a completed command from its last painted height", () => {
-    const originalAnimate = Object.getOwnPropertyDescriptor(
-      HTMLElement.prototype,
-      "animate",
-    );
-    const animation = {
-      addEventListener: vi.fn(),
-      cancel: vi.fn(),
-    } as unknown as Animation;
-    const animateSpy = vi.fn(() => animation);
-    Object.defineProperty(HTMLElement.prototype, "animate", {
-      configurable: true,
-      value: animateSpy,
-    });
-    const rectSpy = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockImplementation(function (this: HTMLElement) {
-        const height =
-          this.classList.contains("command-card") &&
-          this.querySelector(".command-success-summary")
-            ? 80
-            : 240;
-        return {
-          bottom: height,
-          height,
-          left: 0,
-          right: 320,
-          top: 0,
-          width: 320,
-          x: 0,
-          y: 0,
-          toJSON: () => ({}),
-        };
-      });
-    const runningMessage: CommandMessage = {
-      id: "message-command-painted-height",
-      type: "command",
-      author: "assistant",
-      timestamp: "10:10",
-      command: "npm test",
-      output: "running tests\n",
-      status: "running",
-    };
-
-    try {
-      const { rerender } = render(
-        <MessageCard
-          message={runningMessage}
-          onApprovalDecision={vi.fn()}
-          onUserInputSubmit={vi.fn()}
-        />,
-      );
-
-      rerender(
-        <MessageCard
-          message={{
-            ...runningMessage,
-            output: "all tests passed\n",
-            status: "success",
-          }}
-          onApprovalDecision={vi.fn()}
-          onUserInputSubmit={vi.fn()}
-        />,
-      );
-
-      expect(animateSpy).toHaveBeenCalledWith(
-        [
-          { height: "240px", overflow: "hidden" },
-          { height: "80px", overflow: "hidden" },
-        ],
-        {
-          duration: 220,
-          easing: "cubic-bezier(0.4, 0, 0.2, 1)",
-        },
-      );
-    } finally {
-      rectSpy.mockRestore();
-      if (originalAnimate) {
-        Object.defineProperty(
-          HTMLElement.prototype,
-          "animate",
-          originalAnimate,
-        );
-      } else {
-        delete (HTMLElement.prototype as { animate?: unknown }).animate;
-      }
-    }
-  });
-
-  it("keeps failed command details expanded by default", () => {
+  it("keeps failed command details collapsed until explicitly expanded", () => {
     const message: CommandMessage = {
       id: "message-command-error",
       type: "command",
@@ -871,12 +832,20 @@ describe("MessageCard", () => {
       />,
     );
 
+    expect(screen.queryByText("IN")).not.toBeInTheDocument();
+    expect(screen.queryByText("OUT")).not.toBeInTheDocument();
+    expect(screen.queryByText(/failed assertion/)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show command details" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show command details" }),
+    );
+
     expect(screen.getByText("IN")).toBeInTheDocument();
     expect(screen.getByText("OUT")).toBeInTheDocument();
     expect(screen.getByText(/failed assertion/)).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Show command details" }),
-    ).not.toBeInTheDocument();
   });
 
   it("does not expose marker menu button semantics outside the panel owner", () => {
