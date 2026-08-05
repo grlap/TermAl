@@ -532,6 +532,7 @@ fn run_repl(agent: Agent) -> Result<()> {
             TurnConfig {
                 codex_approval_policy: Some(default_codex_approval_policy()),
                 codex_reasoning_effort: Some(default_codex_reasoning_effort()),
+                codex_fast_mode: false,
                 codex_sandbox_mode: Some(default_codex_sandbox_mode()),
                 agent,
                 cwd: cwd.clone(),

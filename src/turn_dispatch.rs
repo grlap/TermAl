@@ -365,6 +365,11 @@ impl AppState {
                         model: record.session.model.clone(),
                         prompt: runtime_prompt.to_owned(),
                         reasoning_effort: record.codex_reasoning_effort,
+                        service_tier: codex_fast_service_tier_value(
+                            &record.session.model,
+                            &record.session.model_options,
+                            record.session.codex_fast_mode,
+                        ),
                         resume_thread_id: record.external_session_id.clone(),
                         sandbox_mode: record.codex_sandbox_mode,
                     },

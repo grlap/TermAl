@@ -26,7 +26,10 @@ import {
   sessionModelComboboxOptions,
   type ComboboxOption,
 } from "./session-model-utils";
-import { matchingSessionModelOption } from "./session-model-options";
+import {
+  codexFastServiceTier,
+  matchingSessionModelOption,
+} from "./session-model-options";
 import type {
   AgentType,
   ApprovalPolicy,
@@ -89,6 +92,19 @@ export function CodexPromptSettingsCard({
   const reasoningEffortOptions = codexReasoningEffortComboboxOptions(session);
   const currentReasoningEffort = normalizedCodexReasoningEffort(session);
   const modelCapabilityHint = codexReasoningEffortHint(session);
+  const fastServiceTier = codexFastServiceTier(session);
+  const fastModeOptions: readonly ComboboxOption[] = [
+    {
+      label: "Standard",
+      value: "off",
+      description: "Use the standard Codex service tier",
+    },
+    {
+      label: fastServiceTier?.label ?? "Fast",
+      value: "on",
+      description: fastServiceTier?.description ?? "1.5x speed, increased usage",
+    },
+  ];
   const hasLiveThread = Boolean(session.externalSessionId);
   const hasQueuedPrompts = (session.pendingPrompts?.length ?? 0) > 0;
   const threadIsArchived = hasLiveThread && session.codexThreadState === "archived";
@@ -195,6 +211,23 @@ export function CodexPromptSettingsCard({
             }
           />
         </div>
+        {fastServiceTier || session.codexFastMode ? (
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor={`codex-fast-mode-${paneId}`}>
+              Response speed
+            </label>
+            <ThemedCombobox
+              id={`codex-fast-mode-${paneId}`}
+              className="prompt-settings-select"
+              value={session.codexFastMode ? "on" : "off"}
+              options={fastModeOptions}
+              disabled={isUpdating}
+              onChange={(nextValue) =>
+                void onSessionSettingsChange(session.id, "codexFastMode", nextValue)
+              }
+            />
+          </div>
+        ) : null}
         <div className="session-control-group session-thread-controls">
           <div className="session-control-label">Thread actions</div>
           <div className="session-action-row">

@@ -2169,6 +2169,7 @@ fn remote_session_create_forwards_configured_default_model() {
         model_options: Vec::new(),
         approval_policy: Some(default_codex_approval_policy()),
         reasoning_effort: Some(default_codex_reasoning_effort()),
+        codex_fast_mode: false,
         sandbox_mode: Some(default_codex_sandbox_mode()),
         cursor_mode: None,
         claude_effort: None,

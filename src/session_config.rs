@@ -7,7 +7,7 @@
 // `src/tests/session_settings.rs` for the tier composition pins.
 //
 // Live-update vs restart-required semantics vary by agent. Codex hot-
-// swaps the model on the next `thread/resume` and applies effort,
+// swaps the model on the next `thread/resume` and applies effort, Fast mode,
 // approval_policy, and sandbox_mode to the next turn without a restart.
 // Claude has no hot reconfig path: model + effort changes flip
 // `runtime_reset_required = true` so the next `send_message` in
@@ -46,7 +46,8 @@ impl AppState {
     /// The per-agent match validates that only fields that agent
     /// supports are present, then mutates the record:
     /// - Codex: updates `model`, `codex_sandbox_mode`,
-    ///   `codex_approval_policy`, and `codex_reasoning_effort` in place;
+    ///   `codex_approval_policy`, `codex_reasoning_effort`, and catalog-gated
+    ///   Fast mode in place;
     ///   model hot-swaps on the next turn and effort is re-validated
     ///   against the target model's `supported_reasoning_efforts`.
     /// - Claude: sets `runtime_reset_required` on effort change; model
@@ -88,6 +89,7 @@ impl AppState {
                 if request.sandbox_mode.is_some()
                     || request.approval_policy.is_some()
                     || request.reasoning_effort.is_some()
+                    || request.codex_fast_mode.is_some()
                     || request.claude_approval_mode.is_some()
                     || request.claude_effort.is_some()
                     || request.cursor_mode.is_some()
@@ -118,6 +120,7 @@ impl AppState {
                 if request.sandbox_mode.is_some()
                     || request.approval_policy.is_some()
                     || request.reasoning_effort.is_some()
+                    || request.codex_fast_mode.is_some()
                     || request.cursor_mode.is_some()
                     || request.gemini_approval_mode.is_some()
                     || request.opencode_effort.is_some()
@@ -132,6 +135,7 @@ impl AppState {
                 if request.sandbox_mode.is_some()
                     || request.approval_policy.is_some()
                     || request.reasoning_effort.is_some()
+                    || request.codex_fast_mode.is_some()
                     || request.claude_approval_mode.is_some()
                     || request.claude_effort.is_some()
                     || request.gemini_approval_mode.is_some()
@@ -147,6 +151,7 @@ impl AppState {
                 if request.sandbox_mode.is_some()
                     || request.approval_policy.is_some()
                     || request.reasoning_effort.is_some()
+                    || request.codex_fast_mode.is_some()
                     || request.claude_approval_mode.is_some()
                     || request.claude_effort.is_some()
                     || request.cursor_mode.is_some()
@@ -163,6 +168,7 @@ impl AppState {
                     || request.sandbox_mode.is_some()
                     || request.approval_policy.is_some()
                     || request.reasoning_effort.is_some()
+                    || request.codex_fast_mode.is_some()
                     || request.claude_approval_mode.is_some()
                     || request.claude_effort.is_some()
                     || request.cursor_mode.is_some()
@@ -352,6 +358,35 @@ impl AppState {
                 let next_model = requested_model
                     .clone()
                     .unwrap_or_else(|| record.session.model.clone());
+                let model_changed = next_model != record.session.model;
+                let next_model_supports_fast =
+                    codex_model_supports_fast(&next_model, &record.session.model_options);
+                let actively_enabling_fast = request.codex_fast_mode == Some(true)
+                    && !record.session.codex_fast_mode;
+                let carrying_fast_to_new_model =
+                    request.codex_fast_mode == Some(true) && model_changed;
+                if (actively_enabling_fast || carrying_fast_to_new_model)
+                    && !next_model_supports_fast
+                {
+                    if record.session.model_options.is_empty() {
+                        if actively_enabling_fast {
+                            return Err(ApiError::bad_request(
+                                "refresh models before enabling Fast mode",
+                            ));
+                        }
+                    } else {
+                        return Err(ApiError::bad_request(format!(
+                            "model `{next_model}` does not advertise Codex Fast mode"
+                        )));
+                    }
+                }
+                let next_fast_mode = match request.codex_fast_mode {
+                    Some(enabled) => enabled,
+                    None if model_changed && !record.session.model_options.is_empty() => {
+                        record.session.codex_fast_mode && next_model_supports_fast
+                    }
+                    None => record.session.codex_fast_mode,
+                };
                 let next_reasoning_effort = request
                     .reasoning_effort
                     .unwrap_or(record.codex_reasoning_effort);
@@ -383,6 +418,7 @@ impl AppState {
                         record.session.model = model.to_owned();
                     }
                 }
+                record.session.codex_fast_mode = next_fast_mode;
                 if let Some(sandbox_mode) = request.sandbox_mode {
                     record.codex_sandbox_mode = sandbox_mode;
                     record.session.sandbox_mode = Some(sandbox_mode);

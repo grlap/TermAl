@@ -66,6 +66,7 @@ export type SessionSettingsField =
   | "sandboxMode"
   | "approvalPolicy"
   | "reasoningEffort"
+  | "codexFastMode"
   | "claudeApprovalMode"
   | "claudeEffort"
   | "cursorMode"

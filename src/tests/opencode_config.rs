@@ -824,6 +824,7 @@ fn opencode_config_update_queues_explicit_selection_reconciliation() {
                 model: None,
                 approval_policy: None,
                 reasoning_effort: None,
+                codex_fast_mode: None,
                 sandbox_mode: None,
                 cursor_mode: None,
                 claude_approval_mode: None,

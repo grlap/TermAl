@@ -21,3 +21,31 @@ export function matchingSessionModelOption(
     }) ?? null
   );
 }
+
+export function codexFastServiceTier(
+  session: {
+    model: string;
+    modelOptions?: readonly NonNullable<Session["modelOptions"]>[number][];
+  },
+  requestedModel = session.model,
+) {
+  const option = matchingSessionModelOption(session.modelOptions, requestedModel);
+  return (
+    option?.serviceTiers?.find(
+      (tier) =>
+        tier.label.trim().toLowerCase() === "fast" ||
+        tier.id.trim().toLowerCase() === "priority" ||
+        tier.id.trim().toLowerCase() === "fast",
+    ) ?? null
+  );
+}
+
+export function codexModelSupportsFast(
+  session: {
+    model: string;
+    modelOptions?: readonly NonNullable<Session["modelOptions"]>[number][];
+  },
+  requestedModel = session.model,
+) {
+  return codexFastServiceTier(session, requestedModel) !== null;
+}

@@ -46,8 +46,15 @@ palette.
 ### Codex
 
 - Model options come from Codex app-server `model/list`.
-- Model, sandbox, approval policy, and reasoning effort are all session-scoped.
+- Model, sandbox, approval policy, reasoning effort, and Fast mode are all
+  session-scoped.
 - Those settings apply on the next Codex prompt.
+- Fast mode appears only when the active model's `model/list` entry advertises
+  the Fast service tier. TermAl sends the tier id advertised by the catalog
+  (`priority` in the current catalog and compatibility fallback); Standard
+  sends an explicit null so a previously sticky tier is cleared.
+- `/fast` opens the same Standard/Fast choice in the composer. Switching to a
+  model that does not advertise Fast safely resets the session to Standard.
 - Reasoning-effort options are filtered by the selected model's supported
   capabilities.
 - If a model change forces reasoning effort to normalize, TermAl updates the

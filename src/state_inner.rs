@@ -175,6 +175,7 @@ impl StateInner {
                 model_options: Vec::new(),
                 approval_policy: None,
                 reasoning_effort: None,
+                codex_fast_mode: false,
                 sandbox_mode: None,
                 cursor_mode: agent
                     .supports_cursor_mode()

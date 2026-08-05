@@ -169,6 +169,7 @@ impl AppState {
                 .session
                 .approval_policy
                 .unwrap_or(record.codex_approval_policy),
+            fast_mode: record.session.codex_fast_mode,
             model: record.session.model.clone(),
             model_options: record.session.model_options.clone(),
             name: record.session.name.clone(),

@@ -47,6 +47,7 @@ export type ComposerSessionSnapshot = Readonly<{
   agentCommandsRevision?: number;
   claudeApprovalMode?: ClaudeApprovalMode | null;
   claudeEffort?: ClaudeEffortLevel | null;
+  codexFastMode?: boolean;
   committedDraft: string;
   cursorMode?: CursorMode | null;
   draftAttachments: readonly ComposerDraftAttachment[];
@@ -75,6 +76,7 @@ export type SessionSummarySnapshot = Readonly<{
   claudeApprovalMode?: ClaudeApprovalMode | null;
   claudeEffort?: ClaudeEffortLevel | null;
   codexThreadState?: Session["codexThreadState"];
+  codexFastMode?: boolean;
   cursorMode?: CursorMode | null;
   externalSessionId?: string | null;
   geminiApprovalMode?: GeminiApprovalMode | null;
@@ -291,12 +293,36 @@ function sameSessionModelOptions(
         previousOption.supportedReasoningEfforts,
         nextOption.supportedReasoningEfforts,
       ) ||
+      !sameSessionModelServiceTiers(
+        previousOption.serviceTiers,
+        nextOption.serviceTiers,
+      ) ||
       previousOption.defaultReasoningEffort !== nextOption.defaultReasoningEffort
     ) {
       return false;
     }
   }
   return true;
+}
+
+function sameSessionModelServiceTiers(
+  previous: SessionModelOption["serviceTiers"],
+  next: SessionModelOption["serviceTiers"],
+) {
+  if (previous === next) {
+    return true;
+  }
+  if ((previous?.length ?? 0) !== (next?.length ?? 0)) {
+    return false;
+  }
+  return (previous ?? []).every((tier, index) => {
+    const nextTier = next?.[index];
+    return (
+      nextTier?.id === tier.id &&
+      nextTier.label === tier.label &&
+      nextTier.description === tier.description
+    );
+  });
 }
 
 function collectUserPromptHistory(messages: readonly Message[]) {
@@ -459,6 +485,7 @@ function buildComposerSessionSnapshot(
     previous.approvalPolicy === session.approvalPolicy &&
     previous.claudeEffort === session.claudeEffort &&
     previous.reasoningEffort === session.reasoningEffort &&
+    previous.codexFastMode === session.codexFastMode &&
     previous.sandboxMode === session.sandboxMode &&
     previous.cursorMode === session.cursorMode &&
     previous.claudeApprovalMode === session.claudeApprovalMode &&
@@ -484,6 +511,7 @@ function buildComposerSessionSnapshot(
     agentCommandsRevision: session.agentCommandsRevision,
     claudeApprovalMode: session.claudeApprovalMode,
     claudeEffort: session.claudeEffort,
+    codexFastMode: session.codexFastMode,
     committedDraft,
     cursorMode: session.cursorMode,
     draftAttachments: nextDraftAttachments,
@@ -629,6 +657,7 @@ function buildSessionSummarySnapshot(
     previous.approvalPolicy === session.approvalPolicy &&
     previous.claudeEffort === session.claudeEffort &&
     previous.reasoningEffort === session.reasoningEffort &&
+    previous.codexFastMode === session.codexFastMode &&
     previous.sandboxMode === session.sandboxMode &&
     previous.cursorMode === session.cursorMode &&
     previous.claudeApprovalMode === session.claudeApprovalMode &&
@@ -655,6 +684,7 @@ function buildSessionSummarySnapshot(
     claudeApprovalMode: session.claudeApprovalMode,
     claudeEffort: session.claudeEffort,
     codexThreadState: session.codexThreadState,
+    codexFastMode: session.codexFastMode,
     cursorMode: session.cursorMode,
     externalSessionId: session.externalSessionId,
     geminiApprovalMode: session.geminiApprovalMode,

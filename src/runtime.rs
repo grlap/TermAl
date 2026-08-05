@@ -96,8 +96,43 @@ struct CodexPromptCommand {
     model: String,
     prompt: String,
     reasoning_effort: CodexReasoningEffort,
+    service_tier: Option<String>,
     resume_thread_id: Option<String>,
     sandbox_mode: CodexSandboxMode,
+}
+
+/// App-server service-tier id used when Codex Fast authority survives a
+/// restart before the model catalog has been refreshed. A live catalog tier
+/// id takes precedence over this compatibility fallback.
+const CODEX_FAST_SERVICE_TIER: &str = "priority";
+
+fn codex_fast_service_tier<'a>(
+    model: &str,
+    model_options: &'a [SessionModelOption],
+) -> Option<&'a SessionModelServiceTier> {
+    codex_model_option(model, model_options).and_then(|option| {
+        option.service_tiers.iter().find(|tier| {
+            tier.label.eq_ignore_ascii_case("fast")
+                || tier.id.eq_ignore_ascii_case(CODEX_FAST_SERVICE_TIER)
+                || tier.id.eq_ignore_ascii_case("fast")
+        })
+    })
+}
+
+fn codex_model_supports_fast(model: &str, model_options: &[SessionModelOption]) -> bool {
+    codex_fast_service_tier(model, model_options).is_some()
+}
+
+fn codex_fast_service_tier_value(
+    model: &str,
+    model_options: &[SessionModelOption],
+    fast_mode: bool,
+) -> Option<String> {
+    fast_mode.then(|| {
+        codex_fast_service_tier(model, model_options)
+            .map(|tier| tier.id.clone())
+            .unwrap_or_else(|| CODEX_FAST_SERVICE_TIER.to_owned())
+    })
 }
 
 /// Represents a Codex JSON RPC response command.
@@ -453,6 +488,7 @@ struct AcpTurnState {
 struct TurnConfig {
     codex_approval_policy: Option<CodexApprovalPolicy>,
     codex_reasoning_effort: Option<CodexReasoningEffort>,
+    codex_fast_mode: bool,
     codex_sandbox_mode: Option<CodexSandboxMode>,
     agent: Agent,
     cwd: String,
@@ -898,6 +934,60 @@ fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
                 .collect::<Vec<_>>();
             supported_reasoning_efforts.sort_by_key(|effort| codex_reasoning_effort_rank(*effort));
             supported_reasoning_efforts.dedup();
+            let mut service_tiers = entry
+                .get("serviceTiers")
+                .or_else(|| entry.get("service_tiers"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|tier| {
+                    let id = tier
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|id| !id.is_empty())?
+                        .to_owned();
+                    let label = tier
+                        .get("name")
+                        .or_else(|| tier.get("label"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|label| !label.is_empty())
+                        .unwrap_or(&id)
+                        .to_owned();
+                    let description = tier
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|description| !description.is_empty())
+                        .map(str::to_owned);
+                    Some(SessionModelServiceTier {
+                        id,
+                        label,
+                        description,
+                    })
+                })
+                .collect::<Vec<_>>();
+            if !service_tiers.iter().any(|tier| {
+                tier.label.eq_ignore_ascii_case("fast")
+                    || tier.id.eq_ignore_ascii_case(CODEX_FAST_SERVICE_TIER)
+                    || tier.id.eq_ignore_ascii_case("fast")
+            })
+                && entry
+                    .get("additionalSpeedTiers")
+                    .or_else(|| entry.get("additional_speed_tiers"))
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .any(|tier| tier.eq_ignore_ascii_case("fast"))
+            {
+                service_tiers.push(SessionModelServiceTier {
+                    id: CODEX_FAST_SERVICE_TIER.to_owned(),
+                    label: "Fast".to_owned(),
+                    description: Some("1.5x speed, increased usage".to_owned()),
+                });
+            }
             Some(SessionModelOption {
                 label,
                 value,
@@ -906,6 +996,7 @@ fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
                 supported_claude_effort_levels: Vec::new(),
                 default_reasoning_effort,
                 supported_reasoning_efforts,
+                service_tiers,
             })
         })
         .collect()

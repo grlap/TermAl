@@ -208,6 +208,17 @@ impl AppState {
                     changed = true;
                 }
             }
+            if record.session.codex_fast_mode
+                && codex_model_option(&record.session.model, &record.session.model_options)
+                    .is_some()
+                && !codex_model_supports_fast(
+                    &record.session.model,
+                    &record.session.model_options,
+                )
+            {
+                record.session.codex_fast_mode = false;
+                changed = true;
+            }
         }
 
         if changed {

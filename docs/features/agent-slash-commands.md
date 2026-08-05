@@ -11,7 +11,8 @@ Implemented for discovery and backend-owned execution. `GET
 - `.claude/commands/*.md` prompt templates from the session workdir
 
 The slash palette shows those commands alongside the existing session-control
-commands. Native Claude commands are sent as slash prompts such as `/review`,
+commands, including the catalog-gated Codex `/fast` Standard/Fast selector.
+Native Claude commands are sent as slash prompts such as `/review`,
 while markdown templates are resolved through `POST
 /api/sessions/{id}/agent-commands/{name}/resolve`. The frontend passes
 `arguments` and optional `note`; the backend applies `$ARGUMENTS`, appends any

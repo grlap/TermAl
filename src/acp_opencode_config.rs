@@ -1166,6 +1166,7 @@ fn acp_session_config_options(
                         supported_claude_effort_levels: Vec::new(),
                         default_reasoning_effort: None,
                         supported_reasoning_efforts: Vec::new(),
+                        service_tiers: Vec::new(),
                     })
                 })
                 .collect()

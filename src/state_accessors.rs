@@ -249,6 +249,7 @@ mod visible_session_hydration_error_tests {
             model_options: Vec::new(),
             approval_policy: Some(default_codex_approval_policy()),
             reasoning_effort: Some(default_codex_reasoning_effort()),
+            codex_fast_mode: false,
             sandbox_mode: Some(default_codex_sandbox_mode()),
             cursor_mode: None,
             claude_effort: None,
@@ -544,6 +545,7 @@ impl AppState {
             model_options: session.model_options.clone(),
             approval_policy: session.approval_policy,
             reasoning_effort: session.reasoning_effort,
+            codex_fast_mode: session.codex_fast_mode,
             sandbox_mode: session.sandbox_mode,
             cursor_mode: session.cursor_mode,
             claude_effort: session.claude_effort,
@@ -603,6 +605,7 @@ impl AppState {
         debug_assert_eq!(summary.model_options, full.model_options);
         debug_assert_eq!(summary.approval_policy, full.approval_policy);
         debug_assert_eq!(summary.reasoning_effort, full.reasoning_effort);
+        debug_assert_eq!(summary.codex_fast_mode, full.codex_fast_mode);
         debug_assert_eq!(summary.sandbox_mode, full.sandbox_mode);
         debug_assert_eq!(summary.cursor_mode, full.cursor_mode);
         debug_assert_eq!(summary.claude_effort, full.claude_effort);

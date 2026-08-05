@@ -17,7 +17,7 @@ TermAl gives you one place to run, supervise, review, and steer long-running sof
 - **Smart pane placement** — source, diff, terminal, files, git, instruction-debugger, and control-surface tabs open in the nearest useful pane
 - **Explicit approvals** — agents request permission for risky actions; you approve, reject, or set a session-wide policy
 - **Prompt queueing** — send follow-up prompts while an agent is working; they run automatically in order
-- **Session model controls** — Claude, Codex, Cursor, and Gemini sessions refresh live model lists, allow manual model IDs, and expose session-scoped mode/approval/effort controls
+- **Session model controls** — Claude, Codex, Cursor, Gemini, and OpenCode sessions refresh live model lists and expose session-scoped mode/approval/effort controls; Codex also exposes catalog-gated Fast mode
 - **SSH remotes** — connect to remote machines over SSH tunnels; run agents on a build server while supervising from your laptop
 - **Session persistence** — sessions and message history survive restart (`~/.termal/termal.sqlite`)
 - **Filesystem and git panels** — browse files, view git status, edit source, review diffs, and react to local file watcher updates directly from the workspace

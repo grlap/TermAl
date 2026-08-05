@@ -1170,6 +1170,7 @@ export function updateSessionSettings(
     approvalPolicy?: ApprovalPolicy;
     claudeEffort?: ClaudeEffortLevel;
     reasoningEffort?: CodexReasoningEffort;
+    codexFastMode?: boolean;
     cursorMode?: CursorMode;
     claudeApprovalMode?: ClaudeApprovalMode;
     geminiApprovalMode?: GeminiApprovalMode;

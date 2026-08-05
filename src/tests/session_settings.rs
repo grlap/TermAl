@@ -32,7 +32,7 @@ use super::*;
 // field allowlist. Pin the two OpenCode-dependent fields and the transport
 // budget required by the acknowledged 55-second owner-side update path.
 #[test]
-fn remote_session_settings_payload_includes_opencode_dependents_and_timeout_slack() {
+fn remote_session_settings_payload_includes_agent_dependents_and_timeout_slack() {
     let payload = serde_json::to_value(UpdateSessionSettingsRequest {
         name: None,
         model: Some("provider/model".to_owned()),
@@ -45,11 +45,13 @@ fn remote_session_settings_payload_includes_opencode_dependents_and_timeout_slac
         gemini_approval_mode: None,
         opencode_effort: Some("xhigh".to_owned()),
         opencode_mode: Some("build".to_owned()),
+        codex_fast_mode: Some(true),
     })
     .expect("session settings request should serialize");
 
     assert_eq!(payload["opencodeEffort"], "xhigh");
     assert_eq!(payload["opencodeMode"], "build");
+    assert_eq!(payload["codexFastMode"], true);
     assert!(REMOTE_SESSION_SETTINGS_TIMEOUT > Duration::from_secs(55));
 }
 
@@ -120,6 +122,7 @@ fn non_opencode_sessions_reject_opencode_effort() {
                 gemini_approval_mode: None,
                 opencode_effort: Some("high".to_owned()),
                 opencode_mode: None,
+                codex_fast_mode: None,
             },
         ) {
             Ok(_) => panic!("{agent:?} should reject OpenCode reasoning variants"),
@@ -240,6 +243,7 @@ fn offline_opencode_effort_and_mode_changes_do_not_claim_agent_effective_state()
                 gemini_approval_mode: None,
                 opencode_effort: Some("high".to_owned()),
                 opencode_mode: Some("plan".to_owned()),
+                codex_fast_mode: None,
             },
         )
         .expect("offline OpenCode authority should update");
@@ -303,6 +307,7 @@ fn offline_opencode_model_and_effort_change_defers_effort_membership_validation(
                 gemini_approval_mode: None,
                 opencode_effort: Some("xhigh".to_owned()),
                 opencode_mode: None,
+                codex_fast_mode: None,
             },
         )
         .expect("new-model effort must not be rejected against old-model options");
@@ -1080,6 +1085,7 @@ fn updates_cursor_session_model_settings() {
                 gemini_approval_mode: None,
                 opencode_effort: None,
                 opencode_mode: None,
+                codex_fast_mode: None,
             },
         )
         .unwrap();
@@ -1132,6 +1138,7 @@ fn updates_codex_session_model_settings_without_restarting_runtime() {
                 gemini_approval_mode: None,
                 opencode_effort: None,
                 opencode_mode: None,
+                codex_fast_mode: None,
             },
         )
         .unwrap();
@@ -1192,6 +1199,7 @@ fn updates_codex_reasoning_effort_without_restarting_runtime() {
                 gemini_approval_mode: None,
                 opencode_effort: None,
                 opencode_mode: None,
+                codex_fast_mode: None,
             },
         )
         .unwrap();
@@ -1257,6 +1265,7 @@ fn normalizes_codex_reasoning_effort_when_switching_models() {
                         CodexReasoningEffort::Medium,
                         CodexReasoningEffort::High,
                     ],
+                    service_tiers: Vec::new(),
                 },
                 SessionModelOption {
                     label: "GPT-5 Codex Mini".to_owned(),
@@ -1271,6 +1280,7 @@ fn normalizes_codex_reasoning_effort_when_switching_models() {
                         CodexReasoningEffort::Medium,
                         CodexReasoningEffort::High,
                     ],
+                    service_tiers: Vec::new(),
                 },
             ],
         )
@@ -1291,6 +1301,7 @@ fn normalizes_codex_reasoning_effort_when_switching_models() {
                 gemini_approval_mode: None,
                 opencode_effort: None,
                 opencode_mode: None,
+                codex_fast_mode: None,
             },
         )
         .unwrap();
@@ -1355,6 +1366,7 @@ fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
                     CodexReasoningEffort::Medium,
                     CodexReasoningEffort::High,
                 ],
+                service_tiers: Vec::new(),
             }],
         )
         .unwrap();
@@ -1373,6 +1385,7 @@ fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
             gemini_approval_mode: None,
             opencode_effort: None,
             opencode_mode: None,
+            codex_fast_mode: None,
         },
     ) {
         Ok(_) => panic!("unsupported Codex effort should be rejected"),
@@ -1431,6 +1444,7 @@ fn accepts_codex_max_and_ultra_reasoning_efforts_for_supporting_model() {
                     CodexReasoningEffort::Max,
                     CodexReasoningEffort::Ultra,
                 ],
+                service_tiers: Vec::new(),
             }],
         )
         .unwrap();
@@ -1451,6 +1465,7 @@ fn accepts_codex_max_and_ultra_reasoning_efforts_for_supporting_model() {
                     gemini_approval_mode: None,
                     opencode_effort: None,
                     opencode_mode: None,
+                    codex_fast_mode: None,
                 },
             )
             .unwrap_or_else(|error| panic!("{effort:?} should be accepted: {}", error.message));
@@ -1489,6 +1504,11 @@ fn codex_model_options_parses_max_and_ultra_reasoning_levels() {
                 { "effort": "max" },
                 { "effort": "ultra" },
             ],
+            "serviceTiers": [{
+                "id": "priority",
+                "name": "Fast",
+                "description": "1.5x speed, increased usage"
+            }],
         }],
     });
 
@@ -1511,6 +1531,249 @@ fn codex_model_options_parses_max_and_ultra_reasoning_levels() {
         option.default_reasoning_effort,
         Some(CodexReasoningEffort::Medium)
     );
+    assert_eq!(
+        option.service_tiers,
+        vec![SessionModelServiceTier {
+            id: "priority".to_owned(),
+            label: "Fast".to_owned(),
+            description: Some("1.5x speed, increased usage".to_owned()),
+        }]
+    );
+}
+
+#[test]
+fn codex_model_options_parses_legacy_fast_tier_fields_and_preserves_live_ids() {
+    let model_list = json!({
+        "data": [
+            {
+                "model": "camel-fast",
+                "additionalSpeedTiers": ["fast"]
+            },
+            {
+                "model": "snake-fast",
+                "additional_speed_tiers": ["FAST"]
+            },
+            {
+                "model": "custom-fast",
+                "serviceTiers": [{ "id": "turbo", "name": "Fast" }]
+            }
+        ]
+    });
+
+    let options = codex_model_options(&model_list);
+    for model in ["camel-fast", "snake-fast"] {
+        let option = codex_model_option(model, &options).expect("legacy model should parse");
+        assert_eq!(
+            option.service_tiers,
+            vec![SessionModelServiceTier {
+                id: CODEX_FAST_SERVICE_TIER.to_owned(),
+                label: "Fast".to_owned(),
+                description: Some("1.5x speed, increased usage".to_owned()),
+            }]
+        );
+    }
+    assert_eq!(
+        codex_fast_service_tier_value("custom-fast", &options, true).as_deref(),
+        Some("turbo"),
+        "dispatch must use the catalog-advertised tier id rather than hardcoding priority"
+    );
+    assert_eq!(
+        codex_fast_service_tier_value("unknown-after-restart", &[], true).as_deref(),
+        Some(CODEX_FAST_SERVICE_TIER),
+        "persisted Fast authority needs the canonical fallback until the catalog refreshes"
+    );
+    assert_eq!(
+        codex_fast_service_tier_value("custom-fast", &options, false),
+        None
+    );
+}
+
+#[test]
+fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Codex),
+            name: Some("Fast Codex".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("gpt-5.5".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("Codex session should be created");
+    let empty_catalog_error = match state.update_session_settings(
+        &created.session_id,
+        UpdateSessionSettingsRequest {
+            name: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            codex_fast_mode: Some(true),
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+            opencode_effort: None,
+            opencode_mode: None,
+        },
+    ) {
+        Ok(_) => panic!("a new Fast enable should require a loaded catalog"),
+        Err(error) => error,
+    };
+    assert_eq!(empty_catalog_error.status, StatusCode::BAD_REQUEST);
+    assert!(empty_catalog_error.message.contains("refresh models"));
+
+    let model_options = vec![
+        SessionModelOption {
+            label: "GPT-5.5".to_owned(),
+            value: "gpt-5.5".to_owned(),
+            description: None,
+            badges: Vec::new(),
+            supported_claude_effort_levels: Vec::new(),
+            default_reasoning_effort: Some(CodexReasoningEffort::Medium),
+            supported_reasoning_efforts: vec![CodexReasoningEffort::Medium],
+            service_tiers: vec![SessionModelServiceTier {
+                id: CODEX_FAST_SERVICE_TIER.to_owned(),
+                label: "Fast".to_owned(),
+                description: Some("1.5x speed, increased usage".to_owned()),
+            }],
+        },
+        SessionModelOption {
+            label: "GPT-5.4 mini".to_owned(),
+            value: "gpt-5.4-mini".to_owned(),
+            description: None,
+            badges: Vec::new(),
+            supported_claude_effort_levels: Vec::new(),
+            default_reasoning_effort: Some(CodexReasoningEffort::Medium),
+            supported_reasoning_efforts: vec![CodexReasoningEffort::Medium],
+            service_tiers: Vec::new(),
+        },
+    ];
+    state
+        .sync_session_model_options(&created.session_id, None, model_options.clone())
+        .expect("Codex model catalog should sync");
+
+    let fast = state
+        .update_session_settings(
+            &created.session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                codex_fast_mode: Some(true),
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: None,
+                opencode_mode: None,
+            },
+        )
+        .expect("advertised Fast mode should enable");
+    assert!(
+        fast.sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("Codex session should remain visible")
+            .codex_fast_mode
+    );
+
+    state
+        .sync_session_model_options(&created.session_id, None, Vec::new())
+        .expect("an empty refresh should preserve unknown Fast authority");
+    let unrelated = state
+        .update_session_settings(
+            &created.session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                codex_fast_mode: Some(true),
+                sandbox_mode: Some(CodexSandboxMode::ReadOnly),
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: None,
+                opencode_mode: None,
+            },
+        )
+        .expect("unrelated settings must preserve Fast while the catalog is unknown");
+    let unrelated_session = unrelated
+        .sessions
+        .iter()
+        .find(|session| session.id == created.session_id)
+        .expect("Codex session should remain visible");
+    assert!(unrelated_session.codex_fast_mode);
+    assert_eq!(
+        unrelated_session.sandbox_mode,
+        Some(CodexSandboxMode::ReadOnly)
+    );
+
+    state
+        .sync_session_model_options(&created.session_id, None, model_options)
+        .expect("Codex model catalog should refresh again");
+
+    let standard = state
+        .update_session_settings(
+            &created.session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: Some("gpt-5.4-mini".to_owned()),
+                approval_policy: None,
+                reasoning_effort: None,
+                codex_fast_mode: None,
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: None,
+                opencode_mode: None,
+            },
+        )
+        .expect("unsupported model switch should safely disable Fast mode");
+    assert!(
+        !standard
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("Codex session should remain visible")
+            .codex_fast_mode
+    );
+
+    let error = match state.update_session_settings(
+        &created.session_id,
+        UpdateSessionSettingsRequest {
+            name: None,
+            model: None,
+            approval_policy: None,
+            reasoning_effort: None,
+            codex_fast_mode: Some(true),
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+            opencode_effort: None,
+            opencode_mode: None,
+        },
+    ) {
+        Ok(_) => panic!("unsupported model should reject Fast mode"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("does not advertise Codex Fast mode"));
 }
 
 // pins that changing the model on a running Claude session with a
@@ -1570,6 +1833,7 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
                 gemini_approval_mode: None,
                 opencode_effort: None,
                 opencode_mode: None,
+                codex_fast_mode: None,
             },
         )
         .unwrap();
@@ -1655,6 +1919,7 @@ fn updating_running_claude_session_to_default_model_requires_restart() {
                 gemini_approval_mode: None,
                 opencode_effort: None,
                 opencode_mode: None,
+                codex_fast_mode: None,
             },
         )
         .unwrap();
@@ -1739,6 +2004,7 @@ fn updates_claude_effort_and_marks_runtime_for_restart() {
                 gemini_approval_mode: None,
                 opencode_effort: None,
                 opencode_mode: None,
+                codex_fast_mode: None,
             },
         )
         .unwrap();

@@ -92,6 +92,12 @@ export type InstructionSearchResponse = {
   workdir: string;
 };
 
+export type SessionModelServiceTier = {
+  id: string;
+  label: string;
+  description?: string | null;
+};
+
 export type SessionModelOption = {
   label: string;
   value: string;
@@ -100,6 +106,7 @@ export type SessionModelOption = {
   supportedClaudeEffortLevels?: ClaudeEffortLevel[];
   defaultReasoningEffort?: CodexReasoningEffort | null;
   supportedReasoningEfforts?: CodexReasoningEffort[];
+  serviceTiers?: SessionModelServiceTier[];
 };
 
 export type ConversationMarkerKind =
@@ -316,6 +323,7 @@ export type Session = {
   approvalPolicy?: ApprovalPolicy | null;
   claudeEffort?: ClaudeEffortLevel | null;
   reasoningEffort?: CodexReasoningEffort | null;
+  codexFastMode?: boolean;
   sandboxMode?: SandboxMode | null;
   cursorMode?: CursorMode | null;
   claudeApprovalMode?: ClaudeApprovalMode | null;
@@ -1008,6 +1016,7 @@ export type SessionSettingsField =
   | "sandboxMode"
   | "approvalPolicy"
   | "reasoningEffort"
+  | "codexFastMode"
   | "claudeApprovalMode"
   | "claudeEffort"
   | "cursorMode"

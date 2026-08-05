@@ -470,6 +470,7 @@ fn test_pending_codex_thread_setup(request_id: &str) -> PendingCodexThreadSetup 
             model: "gpt-5.4".to_owned(),
             prompt: "parked prompt".to_owned(),
             reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
         },
@@ -488,6 +489,7 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
                 model: "gpt-5.4".to_owned(),
                 prompt: "parked prompt".to_owned(),
                 reasoning_effort: CodexReasoningEffort::Medium,
+                service_tier: None,
                 resume_thread_id: None,
                 sandbox_mode: CodexSandboxMode::WorkspaceWrite,
             },
@@ -1039,6 +1041,7 @@ fn sample_remote_orchestrator_state(
                 model_options: Vec::new(),
                 approval_policy: None,
                 reasoning_effort: None,
+                codex_fast_mode: false,
                 sandbox_mode: None,
                 cursor_mode: agent
                     .supports_cursor_mode()
@@ -2295,6 +2298,7 @@ fn canonicalizes_session_model_updates_from_live_model_labels() {
                 gemini_approval_mode: None,
                 opencode_effort: None,
                 opencode_mode: None,
+                codex_fast_mode: None,
             },
         )
         .unwrap();
@@ -2345,6 +2349,7 @@ fn revisions_increase_for_visible_state_changes() {
                 gemini_approval_mode: None,
                 opencode_effort: None,
                 opencode_mode: None,
+                codex_fast_mode: None,
             },
         )
         .unwrap();
@@ -2365,6 +2370,7 @@ fn revisions_increase_for_visible_state_changes() {
                 gemini_approval_mode: None,
                 opencode_effort: None,
                 opencode_mode: None,
+                codex_fast_mode: None,
             },
         )
         .unwrap();
@@ -2408,6 +2414,7 @@ fn renames_sessions_via_settings_updates() {
                 gemini_approval_mode: None,
                 opencode_effort: None,
                 opencode_mode: None,
+                codex_fast_mode: None,
             },
         )
         .unwrap();

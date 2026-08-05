@@ -6,6 +6,7 @@ import {
   normalizedCodexReasoningEffort,
   normalizedRequestedSessionModel,
 } from "./session-model-utils";
+import { codexModelSupportsFast } from "./session-model-options";
 import type {
   AgentType,
   ApprovalPolicy,
@@ -37,6 +38,12 @@ export function buildOptimisticSessionSettingsUpdate(
         field === "reasoningEffort"
           ? (value as CodexReasoningEffort)
           : normalizedCodexReasoningEffort(session, nextModel);
+      const nextCodexFastMode =
+        field === "codexFastMode"
+          ? (value as string) === "on"
+          : field === "model" && nextModel !== session.model
+            ? Boolean(session.codexFastMode && codexModelSupportsFast(session, nextModel))
+            : Boolean(session.codexFastMode);
       const nextSandboxMode =
         field === "sandboxMode" ? (value as SandboxMode) : session.sandboxMode;
       const nextApprovalPolicy =
@@ -47,6 +54,7 @@ export function buildOptimisticSessionSettingsUpdate(
       if (
         nextModel === session.model &&
         nextReasoningEffort === session.reasoningEffort &&
+        nextCodexFastMode === Boolean(session.codexFastMode) &&
         nextSandboxMode === session.sandboxMode &&
         nextApprovalPolicy === session.approvalPolicy
       ) {
@@ -57,6 +65,7 @@ export function buildOptimisticSessionSettingsUpdate(
         ...session,
         model: nextModel,
         reasoningEffort: nextReasoningEffort,
+        codexFastMode: nextCodexFastMode,
         sandboxMode: nextSandboxMode,
         approvalPolicy: nextApprovalPolicy,
       };
@@ -216,6 +225,13 @@ export function rollbackOptimisticSessionSettingsUpdate(
     currentSession.reasoningEffort !== previousSession.reasoningEffort
   ) {
     nextSession.reasoningEffort = previousSession.reasoningEffort;
+    changed = true;
+  }
+  if (
+    currentSession.codexFastMode === optimisticSession.codexFastMode &&
+    currentSession.codexFastMode !== previousSession.codexFastMode
+  ) {
+    nextSession.codexFastMode = previousSession.codexFastMode;
     changed = true;
   }
   if (

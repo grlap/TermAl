@@ -4,6 +4,7 @@
 // Split from app-session-actions.ts to keep action orchestration smaller.
 
 import { assertNever } from "./exhaustive";
+import { codexModelSupportsFast } from "./session-model-options";
 import {
   normalizedCodexReasoningEffort,
   normalizedRequestedSessionModel,
@@ -27,6 +28,7 @@ export type SessionSettingsPayload = {
   approvalPolicy?: ApprovalPolicy;
   claudeEffort?: ClaudeEffortLevel;
   reasoningEffort?: CodexReasoningEffort;
+  codexFastMode?: boolean;
   cursorMode?: CursorMode;
   claudeApprovalMode?: ClaudeApprovalMode;
   geminiApprovalMode?: GeminiApprovalMode;
@@ -45,11 +47,19 @@ export function buildSessionSettingsPayload(
       : null;
 
   switch (session.agent) {
-    case "Codex":
+    case "Codex": {
+      const nextModel =
+        field === "model"
+          ? (normalizedModelValue ?? (value as string))
+          : session.model;
       return {
-        ...(field === "model"
-          ? { model: normalizedModelValue ?? (value as string) }
-          : {}),
+        ...(field === "model" ? { model: nextModel } : {}),
+        codexFastMode:
+          field === "codexFastMode"
+            ? (value as string) === "on"
+            : field === "model" && nextModel !== session.model
+              ? Boolean(session.codexFastMode && codexModelSupportsFast(session, nextModel))
+              : Boolean(session.codexFastMode),
         reasoningEffort:
           field === "reasoningEffort"
             ? (value as CodexReasoningEffort)
@@ -68,6 +78,7 @@ export function buildSessionSettingsPayload(
             ? (value as ApprovalPolicy)
             : (session.approvalPolicy ?? "never"),
       };
+    }
     case "Cursor":
       if (field === "model") {
         return { model: normalizedModelValue ?? (value as string) };

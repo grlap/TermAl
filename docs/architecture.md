@@ -144,7 +144,9 @@ on the primary persist worker or the boot thread, so they cannot delay
 particular, the Codex model, sandbox mode, approval policy, and reasoning effort
 are persisted through `POST /api/settings`, returned in state snapshots, and
 copied into newly created Codex sessions unless the create request supplies an
-explicit override.
+explicit override. The catalog-gated Fast service tier is separate,
+session-scoped authority persisted through `POST /api/sessions/{id}/settings`;
+new Codex sessions start on the Standard tier.
 
 `TERMAL_CODEX_SANDBOX`, `TERMAL_CODEX_APPROVAL`, and
 `TERMAL_CODEX_REASONING_EFFORT` seed those preferences only when no persisted
@@ -885,6 +887,13 @@ codex app-server   # JSON-RPC over stdin/stdout
 5. On approval or structured interaction, surface a TermAl message card and answer via JSON-RPC once the user responds
 
 **Session resume:** The persisted `external_session_id` holds the Codex thread ID. Session-scoped actions such as fork, archive, compact, and rollback are issued through the shared app-server.
+
+**Fast mode:** Codex `model/list` entries may advertise a `Fast` service tier.
+TermAl retains those tiers in `SessionModelOption`, exposes Fast only for the
+active supporting model, persists the session authority, and sends the
+catalog-advertised tier id (`priority` in the current catalog and compatibility
+fallback) on `thread/start`, `thread/resume`, and `turn/start`. Standard turns
+send `serviceTier: null` to clear a tier inherited by the thread.
 
 ### Cursor
 

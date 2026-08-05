@@ -892,6 +892,7 @@ fn updates_live_cursor_mode_on_active_acp_sessions() {
                 sandbox_mode: None,
                 approval_policy: None,
                 reasoning_effort: None,
+                codex_fast_mode: None,
                 cursor_mode: Some(CursorMode::Ask),
                 claude_approval_mode: None,
                 claude_effort: None,

@@ -1036,6 +1036,7 @@ fn handle_shared_codex_prompt_command(
                         approval_policy: command.approval_policy,
                         cwd: command.cwd.clone(),
                         model: command.model.clone(),
+                        service_tier: command.service_tier.clone(),
                         resume_thread_id: command.resume_thread_id.clone(),
                         sandbox_mode: command.sandbox_mode,
                     };
@@ -1117,6 +1118,7 @@ fn handle_shared_codex_prompt_command(
                 "excludeTurns": true,
                 "cwd": setup_request.cwd,
                 "model": setup_request.model,
+                "serviceTier": setup_request.service_tier,
                 "sandbox": setup_request.sandbox_mode.as_cli_value(),
                 "approvalPolicy": setup_request.approval_policy.as_cli_value(),
                 "config": mcp_config,
@@ -1127,6 +1129,7 @@ fn handle_shared_codex_prompt_command(
             json!({
                 "cwd": setup_request.cwd,
                 "model": setup_request.model,
+                "serviceTier": setup_request.service_tier,
                 "sandbox": setup_request.sandbox_mode.as_cli_value(),
                 "approvalPolicy": setup_request.approval_policy.as_cli_value(),
                 "personality": "pragmatic",
@@ -1559,6 +1562,9 @@ fn handle_shared_codex_start_turn(
             "approvalPolicy": command.approval_policy.as_cli_value(),
             "effort": command.reasoning_effort.as_api_value(),
             "model": command.model,
+            // Explicit null clears any sticky thread tier when the session
+            // returns from Fast to Standard.
+            "serviceTier": command.service_tier,
             "sandboxPolicy": codex_sandbox_policy_value(command.sandbox_mode),
             "input": codex_user_input_items(&command.prompt, &command.attachments),
         }),
@@ -1824,6 +1830,7 @@ struct CodexThreadSetupRequest {
     approval_policy: CodexApprovalPolicy,
     cwd: String,
     model: String,
+    service_tier: Option<String>,
     resume_thread_id: Option<String>,
     sandbox_mode: CodexSandboxMode,
 }

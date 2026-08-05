@@ -28,21 +28,25 @@ describe("app session settings payload helpers", () => {
 
     expect(buildSessionSettingsPayload(session, "model", " gpt-5.5 ")).toEqual({
       model: "gpt-5.5",
+      codexFastMode: false,
       reasoningEffort: "high",
       sandboxMode: "read-only",
       approvalPolicy: "on-request",
     });
     expect(buildSessionSettingsPayload(session, "sandboxMode", "danger-full-access")).toEqual({
+      codexFastMode: false,
       reasoningEffort: "high",
       sandboxMode: "danger-full-access",
       approvalPolicy: "on-request",
     });
     expect(buildSessionSettingsPayload(session, "approvalPolicy", "never")).toEqual({
+      codexFastMode: false,
       reasoningEffort: "high",
       sandboxMode: "read-only",
       approvalPolicy: "never",
     });
     expect(buildSessionSettingsPayload(session, "reasoningEffort", "medium")).toEqual({
+      codexFastMode: false,
       reasoningEffort: "medium",
       sandboxMode: "read-only",
       approvalPolicy: "on-request",
@@ -58,9 +62,43 @@ describe("app session settings payload helpers", () => {
     });
 
     expect(buildSessionSettingsPayload(session, "claudeApprovalMode", "ask")).toEqual({
+      codexFastMode: false,
       reasoningEffort: "medium",
       sandboxMode: "workspace-write",
       approvalPolicy: "never",
+    });
+  });
+
+  it("preserves persisted Fast authority while the model catalog is still loading", () => {
+    const session = makeSession({ codexFastMode: true, modelOptions: undefined });
+    expect(buildSessionSettingsPayload(session, "sandboxMode", "read-only")).toMatchObject({
+      codexFastMode: true,
+      sandboxMode: "read-only",
+    });
+  });
+
+  it("enables catalog-advertised Codex Fast mode and clears it on an unsupported model", () => {
+    const session = makeSession({
+      codexFastMode: true,
+      model: "gpt-5.5",
+      modelOptions: [
+        {
+          label: "GPT-5.5",
+          value: "gpt-5.5",
+          serviceTiers: [
+            { id: "priority", label: "Fast", description: "1.5x speed, increased usage" },
+          ],
+        },
+        { label: "GPT-5.4 mini", value: "gpt-5.4-mini" },
+      ],
+    });
+
+    expect(buildSessionSettingsPayload(session, "codexFastMode", "on")).toMatchObject({
+      codexFastMode: true,
+    });
+    expect(buildSessionSettingsPayload(session, "model", "gpt-5.4-mini")).toMatchObject({
+      model: "gpt-5.4-mini",
+      codexFastMode: false,
     });
   });
 

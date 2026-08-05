@@ -130,3 +130,48 @@ describe("OpenCode optimistic session settings", () => {
     ).toBe(current);
   });
 });
+
+describe("Codex Fast optimistic session settings", () => {
+  const session: Session = {
+    id: "session-codex",
+    name: "Codex",
+    emoji: "C",
+    agent: "Codex",
+    workdir: "/tmp",
+    model: "gpt-5.5",
+    modelOptions: [
+      {
+        label: "GPT-5.5",
+        value: "gpt-5.5",
+        serviceTiers: [{ id: "priority", label: "Fast" }],
+      },
+      { label: "GPT-5.4 mini", value: "gpt-5.4-mini" },
+    ],
+    codexFastMode: false,
+    status: "idle",
+    preview: "Ready",
+    messages: [],
+  };
+
+  it("projects and rolls back Fast mode", () => {
+    const optimistic = buildOptimisticSessionSettingsUpdate(
+      session,
+      "codexFastMode",
+      "on",
+    );
+    expect(optimistic.codexFastMode).toBe(true);
+    expect(
+      rollbackOptimisticSessionSettingsUpdate(optimistic, session, optimistic),
+    ).toEqual(session);
+  });
+
+  it("clears Fast mode when switching to a model without the tier", () => {
+    expect(
+      buildOptimisticSessionSettingsUpdate(
+        { ...session, codexFastMode: true },
+        "model",
+        "gpt-5.4-mini",
+      ),
+    ).toMatchObject({ model: "gpt-5.4-mini", codexFastMode: false });
+  });
+});

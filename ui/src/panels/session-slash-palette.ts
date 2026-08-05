@@ -14,7 +14,7 @@
 //     palette state, including the "no session or no leading slash"
 //     fast path, the empty-query session-command + agent-command
 //     listing, and the per-command choice tabs (`/model`, `/mode`,
-//     `/sandbox`, `/approvals`, `/effort`).
+//     `/sandbox`, `/approvals`, `/effort`, `/fast`).
 //   - Per-agent choice builders (`sessionModeSlashState`,
 //     `codexSandboxSlashState`, `codexApprovalSlashState`,
 //     `codexReasoningEffortSlashState`, `claudeEffortSlashState`,
@@ -40,7 +40,10 @@
 // same constant values, same function bodies; consumers import
 // directly from here.
 
-import { matchingSessionModelOption } from "../session-model-options";
+import {
+  codexFastServiceTier,
+  matchingSessionModelOption,
+} from "../session-model-options";
 import type { SessionSummarySnapshot } from "../session-store";
 import type {
   AgentCommand,
@@ -59,6 +62,7 @@ export type SlashPaletteSession = Pick<
   | "agentCommandsRevision"
   | "claudeApprovalMode"
   | "claudeEffort"
+  | "codexFastMode"
   | "cursorMode"
   | "geminiApprovalMode"
   | "opencodeCurrentEffort"
@@ -129,7 +133,13 @@ export const GEMINI_MODE_SLASH_OPTIONS = [
   { detail: "Stay read-only and plan", label: "plan", value: "plan" },
 ] as const;
 
-export type SlashCommandId = "model" | "mode" | "sandbox" | "approvals" | "effort";
+export type SlashCommandId =
+  | "model"
+  | "mode"
+  | "sandbox"
+  | "approvals"
+  | "effort"
+  | "fast";
 
 export const SLASH_COMMANDS: ReadonlyArray<{
   command: string;
@@ -172,6 +182,13 @@ export const SLASH_COMMANDS: ReadonlyArray<{
     id: "effort",
     label: "/effort",
     supports: ["Claude", "Codex", "OpenCode"],
+  },
+  {
+    command: "/fast",
+    detail: "Toggle Codex Fast mode (1.5x speed, increased usage)",
+    id: "fast",
+    label: "/fast",
+    supports: ["Codex"],
   },
 ] as const;
 
@@ -405,7 +422,13 @@ export function sessionModelChoiceDetail(
 }
 
 export function slashCommandsForSession(session: SlashPaletteSession) {
-  return SLASH_COMMANDS.filter((command) => command.supports.includes(session.agent));
+  return SLASH_COMMANDS.filter(
+    (command) =>
+      command.supports.includes(session.agent) &&
+      (command.id !== "fast" ||
+        codexFastServiceTier(session) !== null ||
+        Boolean(session.codexFastMode)),
+  );
 }
 
 export function supportsAgentSlashCommands(_session: SlashPaletteSession): boolean {
@@ -673,6 +696,36 @@ export function codexReasoningEffortSlashState(session: SlashPaletteSession, que
   };
 }
 
+export function codexFastSlashState(
+  session: SlashPaletteSession,
+  query: string,
+): SlashChoiceState {
+  const fastTier = codexFastServiceTier(session);
+  const choices: SlashChoiceDefinition[] = [
+    {
+      detail: "Use the standard Codex service tier",
+      label: "Standard",
+      value: "off",
+    },
+    {
+      detail: fastTier?.description ?? "1.5x speed, increased usage",
+      label: fastTier?.label ?? "Fast",
+      value: "on",
+    },
+  ];
+  return {
+    emptyMessage: `No Codex speed options match "${query}".`,
+    hint: "Enter to choose Standard or Fast for this Codex session.",
+    items: makeSlashChoices(
+      choices,
+      "codexFastMode",
+      session.codexFastMode ? "on" : "off",
+      query,
+    ),
+    title: "Codex response speed",
+  };
+}
+
 export function claudeEffortSlashState(session: SlashPaletteSession, query: string): SlashChoiceState {
   const currentValue = currentClaudeEffort(session);
   const currentModel = currentSessionModelCapabilities(session);
@@ -900,8 +953,12 @@ export function buildSlashPaletteState(
                   ? claudeEffortSlashState(session, rawOptionQuery)
                   : session.agent === "OpenCode"
                     ? opencodeEffortSlashState(session, rawOptionQuery)
+                    : null
+              : activeCommand.id === "fast"
+                ? session.agent === "Codex"
+                  ? codexFastSlashState(session, rawOptionQuery)
                   : null
-            : null;
+                : null;
 
   if (!choiceState) {
     return {

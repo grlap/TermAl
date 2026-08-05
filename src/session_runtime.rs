@@ -19,6 +19,7 @@
 /// Represents Codex thread action context.
 struct CodexThreadActionContext {
     approval_policy: CodexApprovalPolicy,
+    fast_mode: bool,
     model: String,
     model_options: Vec<SessionModelOption>,
     name: String,

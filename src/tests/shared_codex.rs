@@ -60,6 +60,7 @@ fn prompt_during_codex_thread_setup_does_not_start_a_second_thread() {
         model: "gpt-5.4".to_owned(),
         prompt: prompt.to_owned(),
         reasoning_effort: CodexReasoningEffort::Medium,
+        service_tier: Some(CODEX_FAST_SERVICE_TIER.to_owned()),
         resume_thread_id: None,
         sandbox_mode: CodexSandboxMode::WorkspaceWrite,
     };
@@ -101,6 +102,10 @@ fn prompt_during_codex_thread_setup_does_not_start_a_second_thread() {
         thread_starts, 1,
         "a prompt arriving during thread setup must not mint a second Codex thread \
          (wrote {thread_starts} thread/start requests)"
+    );
+    assert!(
+        written.contains("\"serviceTier\":\"priority\""),
+        "thread/start should include the session-scoped Fast service tier\n{written}"
     );
 
     let parked = runtime
@@ -197,6 +202,7 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
         model: "gpt-5.4".to_owned(),
         prompt: prompt.to_owned(),
         reasoning_effort: CodexReasoningEffort::Medium,
+        service_tier: None,
         resume_thread_id: resume.map(str::to_owned),
         sandbox_mode: CodexSandboxMode::WorkspaceWrite,
     };
@@ -279,9 +285,24 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
          cannot exceed the shared app-server stdout line cap"
     );
     assert_eq!(
+        resume_request.pointer("/params/serviceTier"),
+        Some(&Value::Null),
+        "Standard must explicitly clear a service tier inherited by the resumed thread"
+    );
+    assert_eq!(
         written.matches("thread/start").count(),
         1,
         "after a detach there is no setup to park on, so the next prompt starts a FRESH thread"
+    );
+    let start_request = written
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|request| request["method"] == "thread/start")
+        .expect("the start request should be valid JSON-RPC");
+    assert_eq!(
+        start_request.pointer("/params/serviceTier"),
+        Some(&Value::Null),
+        "Standard thread/start must serialize the service tier explicitly"
     );
 
     retire_pending_codex_thread_setups(&pending_requests);
@@ -345,6 +366,7 @@ fn prompt_resuming_the_thread_its_own_setup_just_started_parks_instead_of_supers
         model: "gpt-5.4".to_owned(),
         prompt: prompt.to_owned(),
         reasoning_effort: CodexReasoningEffort::Medium,
+        service_tier: None,
         resume_thread_id: resume.map(str::to_owned),
         sandbox_mode: CodexSandboxMode::WorkspaceWrite,
     };
@@ -468,6 +490,7 @@ fn failed_thread_setup_write_releases_the_setup_slot() {
             model: "gpt-5.4".to_owned(),
             prompt: "doomed prompt".to_owned(),
             reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
         },
@@ -772,6 +795,7 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
             model: "gpt-5.4".to_owned(),
             prompt: "check the repo".to_owned(),
             reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
         },
@@ -1006,11 +1030,18 @@ fn shared_codex_turn_started_notification_does_not_restore_pending_state() {
             model: "gpt-5.4".to_owned(),
             prompt: "inspect race handling".to_owned(),
             reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: Some(CODEX_FAST_SERVICE_TIER.to_owned()),
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
         },
     )
     .unwrap();
+
+    let written = String::from_utf8(writer.buffer.clone()).expect("Codex request should be UTF-8");
+    assert!(
+        written.contains("\"serviceTier\":\"priority\""),
+        "turn/start should include the session-scoped Fast service tier\n{written}"
+    );
 
     {
         let sessions = runtime
@@ -1034,6 +1065,69 @@ fn shared_codex_turn_started_notification_does_not_restore_pending_state() {
             }
         })))
         .unwrap();
+}
+
+#[test]
+fn shared_codex_standard_turn_start_serializes_explicit_null_service_tier() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-standard-turn-start");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let mut writer = Vec::new();
+    handle_shared_codex_start_turn(
+        &mut writer,
+        &pending_requests,
+        &state,
+        &runtime.runtime_id,
+        &runtime.sessions,
+        None,
+        &session_id,
+        "conversation-standard",
+        CodexPromptCommand {
+            approval_policy: CodexApprovalPolicy::Never,
+            attachments: Vec::new(),
+            cwd: "/tmp".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            prompt: "clear the sticky tier".to_owned(),
+            reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
+            resume_thread_id: None,
+            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        },
+    )
+    .expect("Standard turn should start");
+
+    let request: Value = serde_json::from_slice(&writer).expect("turn/start should be JSON-RPC");
+    assert_eq!(
+        request.pointer("/params/serviceTier"),
+        Some(&Value::Null),
+        "Standard must explicitly clear a service tier inherited by the thread"
+    );
+
+    let (_request_id, sender) =
+        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    sender
+        .send(Ok(json!({ "turn": { "id": "turn-standard" } })))
+        .expect("turn/start response should send");
 }
 
 // Pins that shared Codex thread setup includes TermAl's parent-scoped
@@ -1084,6 +1178,7 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
             model: "gpt-5.4".to_owned(),
             prompt: "start the turn".to_owned(),
             reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
         },
@@ -1102,6 +1197,15 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
             && written.contains("\"--parent-session-id\"")
             && written.contains(&format!("\"{}\"", session_id)),
         "thread/start should include the parent-scoped TermAl delegation MCP bridge\n{written}"
+    );
+    let start_request = written
+        .lines()
+        .find_map(|line| serde_json::from_str::<Value>(line).ok())
+        .expect("thread/start should be valid JSON-RPC");
+    assert_eq!(
+        start_request.pointer("/params/serviceTier"),
+        Some(&Value::Null),
+        "Standard must not omit the explicit service-tier clear"
     );
 
     let (_request_id, sender) =
@@ -1176,6 +1280,7 @@ fn shared_codex_thread_setup_handoff_failure_rolls_back_registration() {
             model: "gpt-5.4".to_owned(),
             prompt: "start the turn".to_owned(),
             reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
         },
@@ -1303,6 +1408,7 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
             model: "gpt-5.4".to_owned(),
             prompt: "start the turn".to_owned(),
             reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
         },
@@ -1452,6 +1558,7 @@ fn shared_codex_stale_start_turn_handoff_skips_runtime_config_persistence() {
             model: "gpt-5.4".to_owned(),
             prompt: "stale handoff".to_owned(),
             reasoning_effort: CodexReasoningEffort::XHigh,
+            service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::DangerFullAccess,
         },
@@ -1536,6 +1643,7 @@ fn stale_start_turn_handoff_leaves_the_setup_that_re_armed_the_session_alone() {
                 model: "gpt-5.4".to_owned(),
                 prompt: "the prompt the user just typed".to_owned(),
                 reasoning_effort: CodexReasoningEffort::Medium,
+                service_tier: None,
                 resume_thread_id: None,
                 sandbox_mode: CodexSandboxMode::WorkspaceWrite,
             },
@@ -1559,6 +1667,7 @@ fn stale_start_turn_handoff_leaves_the_setup_that_re_armed_the_session_alone() {
             model: "gpt-5.4".to_owned(),
             prompt: "stale prompt from before the detach".to_owned(),
             reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
         },
@@ -1737,6 +1846,7 @@ fn shared_codex_start_turn_persist_failure_does_not_tear_down_runtime() {
             model: "gpt-5.4".to_owned(),
             prompt: "start the turn".to_owned(),
             reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
         },
@@ -2269,6 +2379,7 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
                 model: "gpt-5.4".to_owned(),
                 prompt: "check the repo".to_owned(),
                 reasoning_effort: CodexReasoningEffort::Medium,
+                service_tier: None,
                 resume_thread_id: None,
                 sandbox_mode: CodexSandboxMode::WorkspaceWrite,
             },

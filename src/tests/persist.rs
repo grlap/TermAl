@@ -1408,6 +1408,38 @@ fn persisted_state_requires_codex_prompt_fields() {
     );
 }
 
+#[test]
+fn persisted_state_round_trips_codex_fast_mode_and_defaults_legacy_rows_off() {
+    let mut inner = StateInner::new();
+    let record = inner.create_session(
+        Agent::Codex,
+        Some("Fast Codex".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        Some("gpt-5.5".to_owned()),
+    );
+    let session_id = record.session.id;
+    let index = inner
+        .find_session_index(&session_id)
+        .expect("Codex session should exist");
+    inner.sessions[index].session.codex_fast_mode = true;
+
+    let encoded = persisted_state_value(&inner);
+    assert_eq!(encoded["sessions"][0]["session"]["codexFastMode"], true);
+    let loaded = state_inner_from_persisted_value(encoded.clone())
+        .expect("Fast-mode state should round trip");
+    assert!(loaded.sessions[0].session.codex_fast_mode);
+
+    let mut legacy = encoded;
+    legacy["sessions"][0]["session"]
+        .as_object_mut()
+        .expect("persisted session should be an object")
+        .remove("codexFastMode");
+    let loaded_legacy =
+        state_inner_from_persisted_value(legacy).expect("pre-Fast session should load");
+    assert!(!loaded_legacy.sessions[0].session.codex_fast_mode);
+}
+
 // Pins that a Codex session carrying an `externalSessionId` (a live
 // thread) fails load when `codexThreadState` is stripped, with
 // `missing codexThreadState`. Guards against a live thread coming

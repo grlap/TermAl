@@ -147,4 +147,14 @@ describe("session tab status tooltip location", () => {
       value: "Auto (Build)",
     });
   });
+
+  it("shows Codex Fast response speed", () => {
+    expect(
+      buildSessionTooltipRows(
+        createSessionSummary({ codexFastMode: true }),
+        new Map(),
+        remoteLookup,
+      ),
+    ).toContainEqual({ key: "Speed", value: "Fast" });
+  });
 });

@@ -62,6 +62,30 @@ describe("session-store composer snapshots", () => {
     resetSessionStoreForTesting();
   });
 
+  it("updates composer and summary snapshots when Codex Fast mode changes", () => {
+    const initial = createSession({ codexFastMode: false });
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [initial],
+    });
+    const initialComposer = getComposerSessionSnapshotForTesting(initial.id);
+    const initialSummary = getSessionSummarySnapshotForTesting(initial.id);
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [createSession({ codexFastMode: true })],
+    });
+    const nextComposer = getComposerSessionSnapshotForTesting(initial.id);
+    const nextSummary = getSessionSummarySnapshotForTesting(initial.id);
+
+    expect(nextComposer).not.toBe(initialComposer);
+    expect(nextSummary).not.toBe(initialSummary);
+    expect(nextComposer?.codexFastMode).toBe(true);
+    expect(nextSummary?.codexFastMode).toBe(true);
+  });
+
   it("preserves snapshot identity when only assistant transcript messages change", () => {
     const initialSession = createSession();
 

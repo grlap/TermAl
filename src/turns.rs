@@ -26,6 +26,7 @@ fn run_turn_blocking(config: TurnConfig, recorder: &mut dyn TurnRecorder) -> Res
             config
                 .codex_reasoning_effort
                 .unwrap_or_else(default_codex_reasoning_effort),
+            config.codex_fast_mode,
             &config.prompt,
             recorder,
         ),
@@ -80,10 +81,12 @@ fn run_codex_turn(
     sandbox_mode: CodexSandboxMode,
     approval_policy: CodexApprovalPolicy,
     reasoning_effort: CodexReasoningEffort,
+    fast_mode: bool,
     prompt: &str,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<String> {
     let cwd = normalize_local_user_facing_path(cwd);
+    let service_tier = codex_fast_service_tier_value(model, &[], fast_mode);
     let codex_home = prepare_termal_codex_home(&cwd, "repl")?;
     let mut command = codex_command()?;
     command
@@ -148,6 +151,7 @@ fn run_codex_turn(
                     "threadId": thread_id,
                     "cwd": cwd.as_str(),
                     "model": model,
+                    "serviceTier": service_tier,
                     "sandbox": sandbox_mode.as_cli_value(),
                     "approvalPolicy": approval_policy.as_cli_value(),
                 }),
@@ -162,6 +166,7 @@ fn run_codex_turn(
                 json!({
                     "cwd": cwd.as_str(),
                     "model": model,
+                    "serviceTier": service_tier,
                     "sandbox": sandbox_mode.as_cli_value(),
                     "approvalPolicy": approval_policy.as_cli_value(),
                     "personality": "pragmatic",
@@ -192,6 +197,7 @@ fn run_codex_turn(
                 "approvalPolicy": approval_policy.as_cli_value(),
                 "effort": reasoning_effort.as_api_value(),
                 "model": model,
+                "serviceTier": service_tier,
                 "sandboxPolicy": codex_sandbox_policy_value(sandbox_mode),
                 "input": codex_user_input_items(prompt, &[]),
             }),

@@ -5371,6 +5371,7 @@ fn terminal_read_only_delegations_do_not_keep_child_session_write_blocked() {
                     model: None,
                     approval_policy: None,
                     reasoning_effort: None,
+                    codex_fast_mode: None,
                     sandbox_mode: None,
                     cursor_mode: None,
                     claude_approval_mode: None,

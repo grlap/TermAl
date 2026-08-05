@@ -211,13 +211,29 @@ fn fork_codex_thread_creates_a_new_local_session() {
     state
         .set_external_session_id(&created.session_id, "thread-origin".to_owned())
         .unwrap();
+    let model_options = vec![
+        SessionModelOption::plain("gpt-5.4", "gpt-5.4"),
+        SessionModelOption {
+            label: "GPT-5.5".to_owned(),
+            value: "gpt-5.5".to_owned(),
+            description: None,
+            badges: Vec::new(),
+            supported_claude_effort_levels: Vec::new(),
+            default_reasoning_effort: Some(CodexReasoningEffort::Medium),
+            supported_reasoning_efforts: vec![CodexReasoningEffort::Medium],
+            service_tiers: vec![SessionModelServiceTier {
+                id: "turbo".to_owned(),
+                label: "Fast".to_owned(),
+                description: None,
+            }],
+        },
+    ];
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(&created.session_id)
             .expect("source Codex session should exist");
-        inner.sessions[index].session.model_options =
-            vec![SessionModelOption::plain("gpt-5.4", "gpt-5.4")];
+        inner.sessions[index].session.model_options = model_options.clone();
     }
 
     let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-fork");
@@ -309,6 +325,7 @@ fn fork_codex_thread_creates_a_new_local_session() {
                         "type": "workspaceWrite"
                     },
                     "reasoningEffort": "high",
+                    "serviceTier": "turbo",
                     "cwd": "/tmp/forked",
                 })));
             }
@@ -344,9 +361,10 @@ fn fork_codex_thread_creates_a_new_local_session() {
         Some(CodexThreadState::Active)
     );
     assert_eq!(forked_session.workdir, "/tmp/forked");
-    assert_eq!(
-        forked_session.model_options,
-        vec![SessionModelOption::plain("gpt-5.4", "gpt-5.4")]
+    assert_eq!(forked_session.model_options, model_options);
+    assert!(
+        forked_session.codex_fast_mode,
+        "the fork should recognize the exact catalog-advertised Fast tier id"
     );
     assert!(matches!(
         forked_session.messages.first(),

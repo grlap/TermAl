@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLAUDE_EFFORT_SLASH_OPTIONS,
   FALLBACK_CLAUDE_EFFORTS,
+  codexFastSlashState,
   opencodeEffortSlashState,
   sessionModeSlashState,
   sessionModelSlashState,
@@ -21,6 +22,52 @@ describe("Claude effort slash choices", () => {
       "max",
     ]);
     expect(FALLBACK_CLAUDE_EFFORTS).toEqual(["low", "medium", "high", "xhigh"]);
+  });
+});
+
+describe("Codex Fast slash choices", () => {
+  const session = {
+    id: "session-codex",
+    agent: "Codex",
+    agentCommandsRevision: 0,
+    model: "gpt-5.5",
+    modelOptions: [
+      {
+        value: "gpt-5.5",
+        label: "GPT-5.5",
+        serviceTiers: [
+          { id: "priority", label: "Fast", description: "1.5x speed, increased usage" },
+        ],
+      },
+    ],
+    codexFastMode: true,
+    workdir: "/tmp",
+  } as SlashPaletteSession;
+
+  it("shows /fast when advertised or already active so Standard remains reachable", () => {
+    expect(slashCommandsForSession(session).map((command) => command.id)).toContain("fast");
+    expect(
+      slashCommandsForSession({
+        ...session,
+        codexFastMode: false,
+        modelOptions: [{ value: "gpt-5.5", label: "GPT-5.5" }],
+      }).map((command) => command.id),
+    ).not.toContain("fast");
+    expect(
+      slashCommandsForSession({
+        ...session,
+        modelOptions: undefined,
+      }).map((command) => command.id),
+    ).toContain("fast");
+  });
+
+  it("marks the current Fast choice", () => {
+    expect(codexFastSlashState(session, "").items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ value: "off", isCurrent: false }),
+        expect.objectContaining({ value: "on", isCurrent: true }),
+      ]),
+    );
   });
 });
 

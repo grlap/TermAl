@@ -258,6 +258,10 @@ export function buildSessionTooltipRows(
   }
 
   if (session.agent === "Codex") {
+    rows.push({
+      key: "Speed",
+      value: session.codexFastMode ? "Fast" : "Standard",
+    });
     if (session.sandboxMode) {
       rows.push({
         key: "Sandbox",

@@ -156,6 +156,7 @@ fn claude_model_options(message: &Value) -> Option<Vec<SessionModelOption>> {
                         .unwrap_or_default(),
                     default_reasoning_effort: None,
                     supported_reasoning_efforts: Vec::new(),
+                    service_tiers: Vec::new(),
                 })
             })
             .collect(),

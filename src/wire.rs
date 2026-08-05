@@ -504,6 +504,10 @@ struct Session {
     approval_policy: Option<CodexApprovalPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reasoning_effort: Option<CodexReasoningEffort>,
+    /// Session-scoped Codex Fast-mode authority. The app-server represents
+    /// this as the catalog-advertised `priority` service tier.
+    #[serde(default, skip_serializing_if = "is_false")]
+    codex_fast_mode: bool,
     sandbox_mode: Option<CodexSandboxMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     cursor_mode: Option<CursorMode>,
@@ -1535,6 +1539,7 @@ struct UpdateSessionSettingsRequest {
     model: Option<String>,
     approval_policy: Option<CodexApprovalPolicy>,
     reasoning_effort: Option<CodexReasoningEffort>,
+    codex_fast_mode: Option<bool>,
     sandbox_mode: Option<CodexSandboxMode>,
     cursor_mode: Option<CursorMode>,
     claude_approval_mode: Option<ClaudeApprovalMode>,
@@ -1542,6 +1547,16 @@ struct UpdateSessionSettingsRequest {
     gemini_approval_mode: Option<GeminiApprovalMode>,
     opencode_effort: Option<String>,
     opencode_mode: Option<String>,
+}
+
+/// Represents a model-specific Codex service tier advertised by `model/list`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionModelServiceTier {
+    id: String,
+    label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
 }
 
 /// Represents session model option.
@@ -1560,6 +1575,8 @@ struct SessionModelOption {
     default_reasoning_effort: Option<CodexReasoningEffort>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     supported_reasoning_efforts: Vec<CodexReasoningEffort>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    service_tiers: Vec<SessionModelServiceTier>,
 }
 
 impl SessionModelOption {
@@ -1574,6 +1591,7 @@ impl SessionModelOption {
             supported_claude_effort_levels: Vec::new(),
             default_reasoning_effort: None,
             supported_reasoning_efforts: Vec::new(),
+            service_tiers: Vec::new(),
         }
     }
 }

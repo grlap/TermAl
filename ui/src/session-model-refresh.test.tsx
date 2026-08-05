@@ -121,6 +121,85 @@ describe("session model refresh controls", () => {
     expect(screen.queryByRole("option", { name: /^low/i })).not.toBeInTheDocument();
   });
 
+  it("shows Fast mode only when the active Codex model advertises it", () => {
+    const onSessionSettingsChange = vi.fn();
+    render(
+      <CodexPromptSettingsCard
+        paneId="pane-fast"
+        session={makeSession("codex-fast", {
+          agent: "Codex",
+          model: "gpt-5.5",
+          modelOptions: [
+            {
+              label: "GPT-5.5",
+              value: "gpt-5.5",
+              serviceTiers: [
+                {
+                  id: "priority",
+                  label: "Fast",
+                  description: "1.5x speed, increased usage",
+                },
+              ],
+            },
+          ],
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        sessionNotice={null}
+        onArchiveThread={noopArchiveThread}
+        onCompactThread={noopCompactThread}
+        onForkThread={noopForkThread}
+        onRequestModelOptions={() => {}}
+        onRollbackThread={noopRollbackThread}
+        onSessionSettingsChange={onSessionSettingsChange}
+        onUnarchiveThread={noopUnarchiveThread}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Response speed"));
+    fireEvent.click(screen.getByRole("option", { name: /Fast/i }));
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "codex-fast",
+      "codexFastMode",
+      "on",
+    );
+  });
+
+  it("keeps the Standard control available for persisted Fast mode before catalog refresh", () => {
+    const onSessionSettingsChange = vi.fn();
+    render(
+      <CodexPromptSettingsCard
+        paneId="pane-fast-loading"
+        session={makeSession("codex-fast-loading", {
+          agent: "Codex",
+          codexFastMode: true,
+          model: "gpt-5.5",
+          modelOptions: undefined,
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={true}
+        modelOptionsError={null}
+        sessionNotice={null}
+        onArchiveThread={noopArchiveThread}
+        onCompactThread={noopCompactThread}
+        onForkThread={noopForkThread}
+        onRequestModelOptions={() => {}}
+        onRollbackThread={noopRollbackThread}
+        onSessionSettingsChange={onSessionSettingsChange}
+        onUnarchiveThread={noopUnarchiveThread}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Response speed"));
+    fireEvent.click(screen.getByRole("option", { name: /Standard/i }));
+    expect(onSessionSettingsChange).toHaveBeenCalledWith(
+      "codex-fast-loading",
+      "codexFastMode",
+      "off",
+    );
+  });
+
   it("auto-requests Claude model options when the session card opens without a live list", async () => {
     const onRequestModelOptions = vi.fn();
 

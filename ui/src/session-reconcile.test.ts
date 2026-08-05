@@ -101,6 +101,31 @@ function expectStableMessageReference(message: Session["messages"][number]) {
 }
 
 describe("reconcileSessions", () => {
+  it("detects model service-tier catalog changes", () => {
+    const previous = [
+      makeSession("session-a", {
+        modelOptions: [{ label: "GPT-5.5", value: "gpt-5.5" }],
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        modelOptions: [
+          {
+            label: "GPT-5.5",
+            value: "gpt-5.5",
+            serviceTiers: [{ id: "priority", label: "Fast" }],
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+    expect(merged).not.toBe(previous);
+    expect(merged[0].modelOptions?.[0].serviceTiers).toEqual([
+      { id: "priority", label: "Fast" },
+    ]);
+  });
+
   it("reuses the existing session object when nothing changed", () => {
     const previous = [
       makeSession("session-a", {

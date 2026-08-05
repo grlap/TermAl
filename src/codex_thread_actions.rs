@@ -107,6 +107,16 @@ impl AppState {
             .get("reasoningEffort")
             .and_then(codex_reasoning_effort_from_json_value)
             .unwrap_or(context.reasoning_effort);
+        let reported_service_tier = fork_result
+            .get("serviceTier")
+            .or_else(|| fork_result.pointer("/thread/serviceTier"))
+            .and_then(Value::as_str);
+        let fast_mode = codex_fast_service_tier(&fork_model, &context.model_options)
+            .is_some_and(|fast_tier| {
+                reported_service_tier
+                    .map(|tier| tier.eq_ignore_ascii_case(&fast_tier.id))
+                    .unwrap_or(context.fast_mode)
+            });
         let fork_preview = fork_result
             .pointer("/thread/preview")
             .and_then(Value::as_str)
@@ -127,6 +137,7 @@ impl AppState {
             Some(fork_model),
         );
         record.session.model_options = context.model_options.clone();
+        record.session.codex_fast_mode = fast_mode;
         record.codex_approval_policy = approval_policy;
         record.session.approval_policy = Some(approval_policy);
         record.codex_sandbox_mode = sandbox_mode;

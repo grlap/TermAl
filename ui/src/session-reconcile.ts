@@ -151,6 +151,7 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.approvalPolicy === next.approvalPolicy &&
     previous.claudeEffort === next.claudeEffort &&
     previous.reasoningEffort === next.reasoningEffort &&
+    previous.codexFastMode === next.codexFastMode &&
     previous.sandboxMode === next.sandboxMode &&
     previous.cursorMode === next.cursorMode &&
     previous.claudeApprovalMode === next.claudeApprovalMode &&
@@ -405,6 +406,8 @@ function sameModelOptions(
       option.supportedReasoningEfforts ?? [];
     const nextSupportedReasoningEfforts =
       nextOption?.supportedReasoningEfforts ?? [];
+    const previousServiceTiers = option.serviceTiers ?? [];
+    const nextServiceTiers = nextOption?.serviceTiers ?? [];
     return (
       nextOption?.label === option.label &&
       nextOption.value === option.value &&
@@ -426,7 +429,16 @@ function sameModelOptions(
       previousSupportedReasoningEfforts.every(
         (effort, effortIndex) =>
           nextSupportedReasoningEfforts[effortIndex] === effort,
-      )
+      ) &&
+      previousServiceTiers.length === nextServiceTiers.length &&
+      previousServiceTiers.every((tier, tierIndex) => {
+        const nextTier = nextServiceTiers[tierIndex];
+        return (
+          nextTier?.id === tier.id &&
+          nextTier.label === tier.label &&
+          (nextTier.description ?? null) === (tier.description ?? null)
+        );
+      })
     );
   });
 }
