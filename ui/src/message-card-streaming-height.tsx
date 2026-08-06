@@ -44,7 +44,7 @@ export function StreamingMarkdownHeightGuard({
       maximumHeightRef.current = 0;
       floor.style.minHeight = "";
       if (shouldRepin) {
-        requestMessageStackBottomRepin(floor);
+        requestMessageStackBottomRepin(floor, { beforePaint: true });
       }
       return;
     }
@@ -77,7 +77,7 @@ export function StreamingMarkdownHeightGuard({
       // it immediately and let the pane authority preserve the bottom pin.
       maximumHeightRef.current = measuredHeight;
       floor.style.minHeight = `${measuredHeight}px`;
-      requestMessageStackBottomRepin(floor);
+      requestMessageStackBottomRepin(floor, { beforePaint: true });
     };
 
     preserveTransientShrink();

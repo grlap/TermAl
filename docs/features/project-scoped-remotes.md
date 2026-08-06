@@ -103,7 +103,6 @@ Project-scoped routes resolve the project first:
 - git status/diff/file actions/commit/push/sync
 - terminal run and terminal stream
 - review document load/save
-- project digest/actions
 - instruction search
 - orchestrator creation
 

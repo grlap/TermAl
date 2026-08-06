@@ -28,6 +28,7 @@ import {
   MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
   notifyMessageStackScrollWrite,
+  type MessageStackBottomRepinRequestDetail,
   type MessageStackScrollWriteKind,
 } from "./message-stack-scroll-sync";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
@@ -47,18 +48,44 @@ const SESSION_PAGE_SCROLL_VIEWPORT_FACTOR = 0.85;
 const SESSION_PAGE_SCROLL_MINIMUM_PX = 160;
 const SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS = 1000 / 60;
 const SESSION_BOTTOM_FOLLOW_MAX_FRAME_MS = 100;
+const SESSION_BOTTOM_FOLLOW_SNAP_DISTANCE_PX = 2;
+const SESSION_BOTTOM_FOLLOW_TIME_CONSTANT_MS = 36;
 const SESSION_BOTTOM_FOLLOW_STABLE_MS =
   SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS * 2;
 
 export function resolveSessionBottomFollowScrollTop(
   currentScrollTop: number,
   targetScrollTop: number,
+  frameDurationMs = SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS,
 ) {
   // Layout can briefly report a smaller bottom while the live-turn card is
   // replaced or a virtualized card swaps its estimate for a measurement. The
   // browser clamps scrollTop if content truly shrank; the follow authority must
   // not add a second explicit upward write before the next growth.
-  return Math.max(currentScrollTop, targetScrollTop);
+  if (targetScrollTop <= currentScrollTop) {
+    return currentScrollTop;
+  }
+
+  const distance = targetScrollTop - currentScrollTop;
+  if (distance <= SESSION_BOTTOM_FOLLOW_SNAP_DISTANCE_PX) {
+    return targetScrollTop;
+  }
+
+  const boundedFrameDurationMs = Number.isFinite(frameDurationMs)
+    ? Math.min(
+        Math.max(frameDurationMs, 1),
+        SESSION_BOTTOM_FOLLOW_MAX_FRAME_MS,
+      )
+    : SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS;
+  const followFactor =
+    1 -
+    Math.exp(
+      -boundedFrameDurationMs / SESSION_BOTTOM_FOLLOW_TIME_CONSTANT_MS,
+    );
+  const nextScrollTop = currentScrollTop + distance * followFactor;
+  return targetScrollTop - nextScrollTop <= SESSION_BOTTOM_FOLLOW_SNAP_DISTANCE_PX
+    ? targetScrollTop
+    : Math.min(nextScrollTop, targetScrollTop);
 }
 
 export function resolveSessionPageScrollDistance(clientHeight: number) {
@@ -169,6 +196,7 @@ type UseSessionPaneScrollStateParams = {
   >;
   paneViewMode: PaneViewMode;
   pendingScrollToBottomRequest: {
+    reattach?: boolean;
     sessionId: string;
     token: number;
   } | null;
@@ -413,6 +441,10 @@ export function useSessionPaneScrollState({
     behavior: ScrollBehavior,
     force = false,
     scrollKind?: MessageStackScrollWriteKind,
+    options: {
+      frameDurationMs?: number;
+      snapBottomFollowBeforePaint?: boolean;
+    } = {},
   ) {
     const node = messageStackRef.current;
     if (!node) {
@@ -422,7 +454,13 @@ export function useSessionPaneScrollState({
     const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
     const writeScrollTop =
       scrollKind === "bottom_follow"
-        ? resolveSessionBottomFollowScrollTop(node.scrollTop, nextScrollTop)
+        ? options.snapBottomFollowBeforePaint
+          ? nextScrollTop
+          : resolveSessionBottomFollowScrollTop(
+              node.scrollTop,
+              nextScrollTop,
+              options.frameDurationMs,
+            )
         : nextScrollTop;
     if (Math.abs(node.scrollTop - writeScrollTop) > (force ? 0.5 : 1)) {
       node.scrollTo({
@@ -495,7 +533,9 @@ export function useSessionPaneScrollState({
     const handleBottomRepinRequest = (event: Event) => {
       const detail =
         event instanceof CustomEvent
-          ? (event.detail as { authorityPresent?: boolean } | undefined)
+          ? (event.detail as
+              | Partial<MessageStackBottomRepinRequestDetail>
+              | undefined)
           : undefined;
       if (
         !claimMessageStackBottomRepinAuthority(
@@ -507,6 +547,16 @@ export function useSessionPaneScrollState({
         return;
       }
       if (!getTailFollowIntent()) {
+        return;
+      }
+      // Streaming Markdown can replace a tall source block with a much shorter
+      // rendered element in this layout effect. Correct that authoritative
+      // shrink synchronously, even while the regular follow loop is active, so
+      // the new tree and its viewport position reach the same paint together.
+      if (detail?.beforePaint) {
+        scrollToLatestMessage("auto", true, "bottom_follow", {
+          snapBottomFollowBeforePaint: true,
+        });
         return;
       }
       // A settled live follow already re-reads the bottom geometry on each
@@ -591,8 +641,10 @@ export function useSessionPaneScrollState({
 
     const repinAfterRelevantResize = () => {
       const activePageChanged = bindActiveConversationPage();
+      const priorContentHeight = previousContentHeight;
       const nextContentHeight =
         conversationPage?.getBoundingClientRect().height ?? 0;
+      const priorViewportHeight = previousViewportHeight;
       const nextViewportHeight = node.clientHeight;
       const contentChanged =
         Math.abs(nextContentHeight - previousContentHeight) > 0.5;
@@ -609,11 +661,20 @@ export function useSessionPaneScrollState({
       ) {
         return;
       }
+      const bottomMovedUpBeforePaint =
+        activePageChanged ||
+        nextContentHeight < priorContentHeight - 0.5 ||
+        nextViewportHeight > priorViewportHeight + 0.5;
       // New command cards often gain their measured height after live follow
       // starts. The settled loop targets that new bottom on its next frame; a
       // second synchronous writer here would duplicate the correction and
       // produce the visible up/down jump.
       if (isSettledProgrammaticBottomFollowActive()) {
+        if (bottomMovedUpBeforePaint) {
+          scrollToLatestMessage("auto", true, "bottom_follow", {
+            snapBottomFollowBeforePaint: true,
+          });
+        }
         return;
       }
       if (liveFlowActiveRef.current) {
@@ -1085,16 +1146,21 @@ export function useSessionPaneScrollState({
         behavior,
         elapsedMs <= minimumDurationMs,
         options.scrollKind,
+        { frameDurationMs },
       );
 
       const bottomGap = Math.max(
         node.scrollHeight - node.clientHeight - node.scrollTop,
         0,
       );
+      const settledBottomGap =
+        options.scrollKind === "bottom_follow"
+          ? SESSION_BOTTOM_FOLLOW_SNAP_DISTANCE_PX
+          : 4;
       const heightStable =
         previousScrollHeight >= 0 &&
         Math.abs(node.scrollHeight - previousScrollHeight) <= 16;
-      if (bottomGap <= 4 && heightStable) {
+      if (bottomGap <= settledBottomGap && heightStable) {
         stableDurationMs += frameDurationMs;
       } else {
         stableDurationMs = 0;
@@ -1134,8 +1200,9 @@ export function useSessionPaneScrollState({
     // Composer measurements and ResizeObserver delivery can run in the gap
     // between the React commit and that frame; they must join this settled
     // pin instead of issuing an intervening correction. Each frame targets the
-    // exact current bottom; interpolation against a moving target made newly
-    // measured agent cards visibly lag and then jump.
+    // current bottom. Time-based interpolation keeps ordinary growth smooth;
+    // authoritative pre-paint collapses use the separate synchronous repin
+    // path so the visible tree can never outrun its viewport correction.
     beginPaneProgrammaticBottomFollow();
     return scheduleSettledScrollToBottom("auto", {
       maxAttempts: 24,
@@ -1587,6 +1654,18 @@ export function useSessionPaneScrollState({
     }
 
     const requestToken = pendingScrollToBottomRequest.token;
+    const shouldReattach = pendingScrollToBottomRequest.reattach === true;
+    if (shouldReattach) {
+      // Approval resolution resumes the current turn. Publish stickiness before
+      // the first frame so waiting/working state and early output cannot race
+      // ahead while the pane still considers itself detached.
+      setTailFollowIntent(true);
+      paneScrollPositions[scrollStateKey] = {
+        top: Number.MAX_SAFE_INTEGER,
+        shouldStick: true,
+      };
+      setNewResponseIndicator(scrollStateKey, false);
+    }
     const node = messageStackRef.current;
     if (node?.querySelector(".virtualized-message-list")) {
       scrollMessageStackToBoundary("bottom");
@@ -1594,7 +1673,17 @@ export function useSessionPaneScrollState({
       return undefined;
     }
 
+    if (shouldReattach) {
+      beginPaneProgrammaticBottomFollow();
+    }
     return scheduleSettledScrollToBottom("auto", {
+      ...(shouldReattach
+        ? {
+            maxAttempts: 24,
+            minAttempts: 4,
+            scrollKind: "bottom_follow" as const,
+          }
+        : {}),
       onComplete: () => {
         onScrollToBottomRequestHandled(requestToken);
       },

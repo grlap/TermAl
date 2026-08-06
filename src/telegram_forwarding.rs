@@ -60,6 +60,7 @@ fn sync_telegram_digest(
             .forward_assistant_replies
             .then_some(digest.primary_session_id.as_deref())
             .flatten(),
+        config.forward_assistant_replies,
     ) {
         Ok((target_session_id, target_session_dirty)) => {
             dirty |= target_session_dirty;
@@ -88,25 +89,46 @@ fn sync_telegram_digest(
     Ok(dirty)
 }
 
+/// Polls only the targeted/armed sessions needed for optional assistant reply
+/// forwarding. Unlike the retired digest loop, this never builds a project
+/// projection or acquires the global state lock through `/api/projects/...`.
+fn sync_telegram_assistant_replies(
+    telegram: &impl TelegramMessageSender,
+    termal: &impl TelegramSessionReader,
+    state: &mut TelegramBotState,
+    chat_id: i64,
+) -> bool {
+    let selected_session_id = state.selected_session_id.clone();
+    forward_relevant_assistant_messages(
+        telegram,
+        termal,
+        state,
+        chat_id,
+        selected_session_id.as_deref(),
+    )
+}
+
 /// Resolves the Telegram prompt/forwarding target for a project.
 ///
 /// A persisted selected session wins when it is still a visible project-root
 /// session; explicit selections are honored even when that session is currently
 /// in Error. Stale selections are cleared, including any armed assistant
 /// forwarding state, and reported through the dirty flag. If no selected
-/// session remains, the digest primary is used when it resolves to a promptable
-/// project-root session. When that primary points at a delegated child or other
-/// non-promptable session, fall back to the latest promptable project-root
-/// session so Telegram follows the same parent-session target used by project
-/// digest actions.
+/// session remains, an optional legacy fallback is used when promptable;
+/// otherwise the latest promptable project-root session is selected. The
+/// production relay passes no digest fallback.
 fn resolve_telegram_project_prompt_session(
     termal: &impl TelegramPromptClient,
     project_id: &str,
     state: &mut TelegramBotState,
     fallback_session_id: Option<&str>,
+    select_latest_when_missing: bool,
 ) -> Result<(Option<String>, bool)> {
     let selected_session_id = state.selected_session_id.clone();
-    if selected_session_id.is_none() && fallback_session_id.is_none() {
+    if selected_session_id.is_none()
+        && fallback_session_id.is_none()
+        && !select_latest_when_missing
+    {
         return Ok((None, false));
     }
 
@@ -126,7 +148,9 @@ fn resolve_telegram_project_prompt_session(
             .map(|session| session.id.clone())
     });
     let fallback_session_id = fallback_session_id.or_else(|| {
-        find_latest_telegram_project_prompt_session(&sessions, project_id)
+        select_latest_when_missing
+            .then(|| find_latest_telegram_project_prompt_session(&sessions, project_id))
+            .flatten()
             .map(|session| session.id.clone())
     });
     Ok((fallback_session_id, dirty))

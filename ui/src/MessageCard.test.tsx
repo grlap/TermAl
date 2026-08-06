@@ -113,6 +113,9 @@ describe("MessageCard", () => {
       });
       expect(floor.style.minHeight).toBe("80px");
       expect(repinRequests).toHaveLength(1);
+      expect((repinRequests[0] as CustomEvent).detail).toMatchObject({
+        beforePaint: true,
+      });
 
       // Reusing the tree position for another streaming message resets the
       // previous message's floor instead of leaking its height.
@@ -154,6 +157,9 @@ describe("MessageCard", () => {
 
       expect(floor.style.minHeight).toBe("");
       expect(repinRequests).toHaveLength(2);
+      expect((repinRequests[1] as CustomEvent).detail).toMatchObject({
+        beforePaint: true,
+      });
     } finally {
       unmount?.();
       if (originalResizeObserver === undefined) {

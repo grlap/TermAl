@@ -20,8 +20,13 @@ export type MessageStackScrollWriteDetail = {
   scrollSource?: MessageStackScrollWriteSource;
 };
 
-type MessageStackBottomRepinRequestDetail = {
+export type MessageStackBottomRepinRequestDetail = {
   authorityPresent: boolean;
+  beforePaint: boolean;
+};
+
+export type MessageStackBottomRepinRequestOptions = {
+  beforePaint?: boolean;
 };
 
 // Shared seam between pane-owned transcript scroll intent and the virtualizer's
@@ -55,9 +60,13 @@ export function notifyMessageStackScrollWrite(
 // start on the message stack or bubble from a descendant layout owner;
 // SessionPaneView handles them through its scroll authority, including explicit
 // tail-follow intent, saved pane position, and virtualizer notification.
-export function requestMessageStackBottomRepin(node: HTMLElement) {
+export function requestMessageStackBottomRepin(
+  node: HTMLElement,
+  options: MessageStackBottomRepinRequestOptions = {},
+) {
   const detail: MessageStackBottomRepinRequestDetail = {
     authorityPresent: false,
+    beforePaint: options.beforePaint === true,
   };
   node.dispatchEvent(
     new CustomEvent<MessageStackBottomRepinRequestDetail>(

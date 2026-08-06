@@ -61,22 +61,24 @@ per configured bot token.
 
 ## Telegram Commands
 
-- `/status` shows the active project's digest and available actions.
 - `/projects` lists subscribed projects and marks the active one.
 - `/project <id>` switches the active project.
 - `/project default` returns to the saved default project.
 - `/sessions` lists sessions for the active project by name, active first and
   then by latest update.
 - `/session <name>` selects a session in the active project by exact name or id.
-- `/session clear` returns free text to the active project's current/default
-  digest target.
-- `/approve`, `/reject`, `/continue`, `/fix`, `/commit`, `/iterate`, `/stop`,
-  and `/review` dispatch project digest actions.
+- `/session clear` returns free text to the latest promptable root session in
+  the active project.
 
 Free text is sent to the selected session when one is set. Otherwise it goes to
-the active project's current digest target. The selected session is also tailed:
+the latest promptable root session in the active project. The selected session
+is also tailed:
 assistant text produced from prompts typed directly in TermAl is forwarded back
 to Telegram after the message settles.
+
+Project digests, inline digest controls, and digest action commands are
+temporarily disabled. Existing digest buttons are acknowledged as disabled and
+do not dispatch backend work.
 
 ### Assistant Forwarding Boundary
 
@@ -326,8 +328,6 @@ The relay itself uses existing TermAl routes:
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/state` | Read projects and sessions for `/projects`, `/sessions`, and selected-session validation |
-| GET | `/api/projects/{id}/digest` | Read active project digest |
-| POST | `/api/projects/{id}/actions/{action_id}` | Dispatch digest action |
 | GET | `/api/sessions/{id}` | Read settled assistant messages for forwarding |
 | POST | `/api/sessions/{id}/messages` | Forward Telegram free text into TermAl |
 

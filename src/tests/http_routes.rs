@@ -18,6 +18,29 @@
 
 use super::*;
 
+#[tokio::test]
+async fn project_digest_and_action_routes_are_disabled() {
+    let app = app_router(test_app_state());
+
+    let digest_response = request_response(
+        &app,
+        Request::get("/api/projects/project-1/digest")
+            .body(Body::empty())
+            .expect("digest request should build"),
+    )
+    .await;
+    let action_response = request_response(
+        &app,
+        Request::post("/api/projects/project-1/actions/continue")
+            .body(Body::empty())
+            .expect("action request should build"),
+    )
+    .await;
+
+    assert_eq!(digest_response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(action_response.status(), StatusCode::NOT_FOUND);
+}
+
 struct HttpRouteTestFiles {
     persistence_path: std::path::PathBuf,
     orchestrator_templates_path: std::path::PathBuf,

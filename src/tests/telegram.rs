@@ -86,6 +86,112 @@ fn telegram_command_parser_rejects_unknown_slash_commands() {
 }
 
 #[test]
+fn telegram_digest_commands_are_disabled_without_digest_reads() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    );
+    let mut config = telegram_test_config();
+    config.project_digests_enabled = false;
+    let mut state = TelegramBotState::default();
+
+    handle_telegram_message(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        telegram_text_message(42, 1, "/status"),
+    )
+    .expect("disabled status command should return guidance");
+    handle_telegram_message(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        telegram_text_message(42, 2, "/approve"),
+    )
+    .expect("disabled action command should return guidance");
+
+    assert!(termal.digest_project_ids.borrow().is_empty());
+    assert!(termal.sent_prompts.borrow().is_empty());
+    let sent = telegram.sent_texts.borrow();
+    assert_eq!(sent.len(), 2);
+    assert!(sent[0].contains("digests are temporarily disabled"));
+    assert!(sent[1].contains("digest actions are temporarily disabled"));
+}
+
+#[test]
+fn telegram_relay_without_digests_does_not_poll_project_state_when_reply_forwarding_is_off() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    );
+    let mut config = telegram_test_config();
+    config.project_digests_enabled = false;
+    config.forward_assistant_replies = false;
+    let mut state = TelegramBotState::default();
+
+    let dirty = drain_telegram_updates_then_sync_replies(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        Vec::new(),
+        &None,
+    );
+
+    assert!(!dirty);
+    assert!(termal.events.borrow().is_empty());
+    assert!(termal.digest_project_ids.borrow().is_empty());
+}
+
+#[test]
+fn telegram_old_digest_callbacks_are_inert_when_digests_are_disabled() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramActionClient::succeeded(telegram_project_digest(Some("session-1")));
+    let mut config = telegram_test_config();
+    config.project_digests_enabled = false;
+    let mut state = TelegramBotState::default();
+
+    let changed = handle_telegram_callback_query(
+        &telegram,
+        &termal,
+        &config,
+        &mut state,
+        TelegramCallbackQuery {
+            id: "old-digest-callback".to_owned(),
+            data: Some(
+                telegram_digest_callback_data("project-1", "approve")
+                    .expect("callback data should fit"),
+            ),
+            message: Some(telegram_text_message(42, 9, "Old project digest")),
+        },
+    )
+    .expect("old callback should be acknowledged without dispatch");
+
+    assert!(!changed);
+    assert!(termal.dispatches.borrow().is_empty());
+    assert_eq!(telegram.answered_callbacks.borrow().len(), 1);
+    assert!(
+        telegram.answered_callbacks.borrow()[0]
+            .1
+            .contains("temporarily disabled")
+    );
+}
+
+#[test]
 fn telegram_action_error_text_uses_safe_detail_and_points_to_status() {
     let token = telegram_redaction_token();
     let err =
@@ -831,7 +937,7 @@ fn telegram_relay_iteration_drains_updates_before_one_digest_sync() {
         }),
     }];
 
-    let dirty = drain_telegram_updates_then_sync_digest(
+    let dirty = drain_telegram_updates_then_sync_replies(
         &telegram, &termal, &config, &mut state, updates, &None,
     );
 
@@ -891,7 +997,7 @@ fn telegram_relay_iteration_caps_oversized_update_batches_and_persists_cursor() 
         })
         .collect::<Vec<_>>();
 
-    let dirty = drain_telegram_updates_then_sync_digest(
+    let dirty = drain_telegram_updates_then_sync_replies(
         &telegram, &termal, &config, &mut state, updates, &None,
     );
 
@@ -950,7 +1056,7 @@ fn telegram_relay_iteration_skips_post_update_sync_after_prompt_refresh() {
         }),
     }];
 
-    let dirty = drain_telegram_updates_then_sync_digest(
+    let dirty = drain_telegram_updates_then_sync_replies(
         &telegram, &termal, &config, &mut state, updates, &None,
     );
 
@@ -1004,7 +1110,7 @@ fn telegram_relay_iteration_runs_final_sync_after_status_digest() {
         }),
     }];
 
-    let dirty = drain_telegram_updates_then_sync_digest(
+    let dirty = drain_telegram_updates_then_sync_replies(
         &telegram, &termal, &config, &mut state, updates, &None,
     );
 
@@ -1084,7 +1190,7 @@ fn telegram_relay_iteration_resyncs_after_later_unsynced_update() {
         },
     ];
 
-    let dirty = drain_telegram_updates_then_sync_digest(
+    let dirty = drain_telegram_updates_then_sync_replies(
         &telegram, &termal, &config, &mut state, updates, &None,
     );
 
@@ -1157,7 +1263,7 @@ fn telegram_relay_iteration_resyncs_after_later_update_error() {
         },
     ];
 
-    let dirty = drain_telegram_updates_then_sync_digest(
+    let dirty = drain_telegram_updates_then_sync_replies(
         &telegram, &termal, &config, &mut state, updates, &None,
     );
 
@@ -2169,6 +2275,7 @@ fn telegram_ui_file_uses_single_subscribed_project_for_relay_config() {
 
     assert_eq!(config.project_id, "project-1");
     assert_eq!(config.subscribed_project_ids, vec!["project-1"]);
+    assert!(!config.project_digests_enabled);
 }
 
 #[test]

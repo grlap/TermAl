@@ -266,15 +266,13 @@ and relay runtime.
 
 Telegram commands:
 
-- `/status` — show the active project's digest and actions
 - `/projects` — list subscribed projects
 - `/project <id>` — switch the active project for this Telegram chat
 - `/sessions` — list sessions in the active project by name, active first and then by latest update
 - `/session <name>` — select a session inside the active project by exact name or id
-- `/session clear` — return free text to the active project's current/default session
-- `/approve`, `/reject`, `/continue`, `/fix`, `/commit`, `/iterate`, `/stop`, `/review` — dispatch project digest actions
+- `/session clear` — return free text to the latest promptable root session in the active project
 
-Free text is forwarded into the selected session, or into the active project's current digest target when no session is selected. Assistant replies from the selected session are tailed back to Telegram after they settle only when `Forward assistant replies` is enabled; that setting can send full assistant output, including code, file paths, file contents, or secrets, to Telegram.
+Project digests and digest actions are temporarily disabled. Free text is forwarded into the selected session, or into the latest promptable root session in the active project when no session is selected. Assistant replies from the selected session are tailed back to Telegram after they settle only when `Forward assistant replies` is enabled; that setting can send full assistant output, including code, file paths, file contents, or secrets, to Telegram.
 
 ## Project structure
 

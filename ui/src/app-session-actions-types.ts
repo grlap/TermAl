@@ -126,6 +126,7 @@ export type UseAppSessionActionsParams = {
     allowUnknownServerInstance?: boolean;
     sseReconnectRequestId?: number;
   }) => void;
+  requestSessionBottomFollow: (sessionId: string) => void;
   /**
    * Forces the SSE transport effect to re-run, closing the current
    * `EventSource` (which may still be pointing at a now-exited backend

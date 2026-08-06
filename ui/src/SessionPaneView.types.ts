@@ -72,6 +72,7 @@ export type SessionPaneViewProps = {
     Record<string, true | undefined>
   >;
   pendingScrollToBottomRequest: {
+    reattach?: boolean;
     sessionId: string;
     token: number;
   } | null;

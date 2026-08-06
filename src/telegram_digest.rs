@@ -762,9 +762,8 @@ fn telegram_help_text(config: &TelegramBotConfig, state: &TelegramBotState) -> S
     [
         format!("TermAl Telegram relay for project `{active_project_id}`."),
         "Commands:".to_owned(),
-        "/status, /projects, /project <id>, /sessions, /session <name>, /approve, /reject, /continue, /fix, /commit, /iterate, /stop, /review"
-            .to_owned(),
-        "Reply with free text to forward it into the selected or current project session."
+        "/projects, /project <id>, /sessions, /session <name>".to_owned(),
+        "Reply with free text to forward it into the selected or latest project session."
             .to_owned(),
     ]
     .join("\n")

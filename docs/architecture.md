@@ -260,8 +260,6 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | GET | `/api/reviews/{change_set_id}/summary` | Read review-thread summary counts |
 | POST | `/api/projects` | Create project |
 | DELETE | `/api/projects/{id}` | Remove the local project reference and return `StateResponse`. Existing sessions and orchestrator instances are detached from the project and remain visible outside project scope. Remote-backed projects are removed only from local state; this route does not delete project data on the remote backend. |
-| GET | `/api/projects/{id}/digest` | Read the project digest used by Telegram/mobile workflows |
-| POST | `/api/projects/{id}/actions/{action_id}` | Dispatch a digest action such as approve, continue, or stop |
 | POST | `/api/projects/pick` | Pick a local project root |
 | GET | `/api/telegram/status` | Read Telegram relay configuration/status -> `TelegramStatusResponse` with configured/enabled/running state, lifecycle, linked chat, masked token, subscribed projects, and default targets. Current implementation is singleton; the target multi-bot spec changes this to an aggregate profile status while keeping compatibility for the default bot. |
 | POST | `/api/telegram/config` | Update the singleton Telegram relay token in the OS credential store, enabled flag, subscribed projects, and default project/session. Returns sanitized `TelegramStatusResponse`; validation failures use the standard `{ "error": ... }` envelope. Multi-bot work should supersede this with profile-scoped create/update/delete routes. |

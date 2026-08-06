@@ -90,7 +90,7 @@ fn run_telegram_bot_with_config(
             }
         };
 
-        let dirty = drain_telegram_updates_then_sync_digest(
+        let dirty = drain_telegram_updates_then_sync_replies(
             &telegram, &termal, &config, &mut state, updates, &shutdown,
         );
 
@@ -117,7 +117,7 @@ fn telegram_relay_sleep(duration: Duration, shutdown: &Option<Arc<AtomicBool>>) 
     }
 }
 
-fn drain_telegram_updates_then_sync_digest(
+fn drain_telegram_updates_then_sync_replies(
     telegram: &impl TelegramCallbackResponder,
     termal: &(impl TelegramPromptClient + TelegramActionClient),
     config: &TelegramBotConfig,
@@ -161,9 +161,13 @@ fn drain_telegram_updates_then_sync_digest(
 
     if !final_sync_satisfied && !telegram_relay_shutdown_requested(shutdown) {
         if let Some(chat_id) = effective_telegram_chat_id(config, state) {
-            match sync_telegram_digest(telegram, termal, config, state, chat_id) {
-                Ok(changed) => dirty |= changed,
-                Err(err) => log_telegram_error("failed to sync digest", &err),
+            if config.project_digests_enabled {
+                match sync_telegram_digest(telegram, termal, config, state, chat_id) {
+                    Ok(changed) => dirty |= changed,
+                    Err(err) => log_telegram_error("failed to sync digest", &err),
+                }
+            } else if config.forward_assistant_replies {
+                dirty |= sync_telegram_assistant_replies(telegram, termal, state, chat_id);
             }
         }
     }
@@ -181,6 +185,10 @@ struct TelegramBotConfig {
     bot_token: String,
     chat_id: Option<i64>,
     forward_assistant_replies: bool,
+    /// Temporary kill switch for the project digest UI and its expensive
+    /// global-state projection. Production config keeps this false; the field
+    /// remains explicit so the old rendering code can be removed separately.
+    project_digests_enabled: bool,
     #[cfg(not(test))]
     poll_timeout_secs: u64,
     project_id: String,
@@ -225,6 +233,7 @@ impl TelegramBotConfig {
             bot_token,
             chat_id: file.state.chat_id,
             forward_assistant_replies: file.config.forward_assistant_replies,
+            project_digests_enabled: false,
             #[cfg(not(test))]
             poll_timeout_secs: TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS,
             project_id,

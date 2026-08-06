@@ -13,6 +13,40 @@ use super::telegram_support::{
 use super::*;
 
 #[test]
+fn telegram_prompt_without_digest_targets_latest_project_session() {
+    let telegram = FakeTelegramSender::new(None);
+    let termal = FakeTelegramPromptClient::new(
+        Vec::new(),
+        TelegramSessionFetchResponse {
+            session: TelegramSessionFetchSession {
+                status: TelegramSessionStatus::Idle,
+                messages: Vec::new(),
+            },
+        },
+    )
+    .with_state_sessions(telegram_state_sessions_with_project_session(
+        "session-latest",
+        None,
+    ));
+    let mut config = telegram_test_config();
+    config.project_digests_enabled = false;
+    config.forward_assistant_replies = false;
+    let mut state = TelegramBotState::default();
+
+    let changed =
+        forward_telegram_text_to_project(&telegram, &termal, &config, &mut state, 42, "from chat")
+            .expect("prompt should route without a digest");
+
+    assert!(!changed);
+    assert!(termal.digest_project_ids.borrow().is_empty());
+    assert_eq!(termal.state_session_reads.get(), 1);
+    assert_eq!(
+        termal.sent_prompts.borrow().as_slice(),
+        &[("session-latest".to_owned(), "from chat".to_owned())]
+    );
+}
+
+#[test]
 fn telegram_session_command_no_args_persists_stale_project_cleanup() {
     let telegram = FakeTelegramSender::new(None);
     let termal = FakeTelegramPromptClient::new(

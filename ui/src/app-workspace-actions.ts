@@ -61,6 +61,7 @@ import type {
 import type { AgentType, DiffMessage, Project, Session } from "./types";
 
 type PendingScrollToBottomRequest = {
+  reattach?: boolean;
   sessionId: string;
   token: number;
 } | null;

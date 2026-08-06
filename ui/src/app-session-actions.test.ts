@@ -172,6 +172,7 @@ function makeSessionActionsParams(
     applyControlPanelLayout: (workspace) => workspace,
     reportRequestError: vi.fn(),
     requestActionRecoveryResync: vi.fn(),
+    requestSessionBottomFollow: vi.fn(),
     forceSseReconnect: vi.fn(() => 42),
     ...overrides,
   };
@@ -241,6 +242,38 @@ const MODEL_PICKER_AGENT_CASES = [
 describe("useAppSessionActions", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("requests tail follow before awaiting an approval decision response", async () => {
+    let resolveApproval!: (state: StateResponse) => void;
+    const submitApprovalSpy = vi
+      .spyOn(api, "submitApproval")
+      .mockImplementation(
+        () =>
+          new Promise<StateResponse>((resolve) => {
+            resolveApproval = resolve;
+          }),
+      );
+    const params = makeSessionActionsParams({
+      adoptState: vi.fn(() => true),
+    });
+    const actions = useAppSessionActions(params);
+
+    const approval = actions.handleApprovalDecision(
+      "session-1",
+      "approval-1",
+      "accepted",
+    );
+
+    expect(params.requestSessionBottomFollow).toHaveBeenCalledWith("session-1");
+    expect(submitApprovalSpy).toHaveBeenCalledWith(
+      "session-1",
+      "approval-1",
+      "accepted",
+    );
+
+    resolveApproval(makeStateResponse(6));
+    await approval;
   });
 
   it.each(MODEL_PICKER_AGENT_CASES)(

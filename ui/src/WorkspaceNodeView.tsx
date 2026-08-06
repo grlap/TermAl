@@ -202,6 +202,7 @@ export function WorkspaceNodeView({
     Record<string, true | undefined>
   >;
   pendingScrollToBottomRequest: {
+    reattach?: boolean;
     sessionId: string;
     token: number;
   } | null;

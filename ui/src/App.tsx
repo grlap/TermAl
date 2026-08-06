@@ -450,9 +450,17 @@ export default function App() {
   ] = useState<Record<string, string[]>>({});
   const [pendingScrollToBottomRequest, setPendingScrollToBottomRequest] =
     useState<{
+      reattach?: boolean;
       sessionId: string;
       token: number;
     } | null>(null);
+  function requestSessionBottomFollow(sessionId: string) {
+    setPendingScrollToBottomRequest({
+      reattach: true,
+      sessionId,
+      token: Date.now() + Math.random(),
+    });
+  }
   const [windowId] = useState(() => crypto.randomUUID());
   const gitDiffPreviewRefreshVersionsRef = useRef<Map<string, number>>(
     new Map(),
@@ -978,6 +986,7 @@ export default function App() {
     reportRequestError,
     requestActionRecoveryResync: (options) =>
       requestActionRecoveryResyncRef.current(options),
+    requestSessionBottomFollow,
     forceSseReconnect,
   });
   const {

@@ -202,6 +202,7 @@ export function useAppSessionActions(
     applyControlPanelLayout,
     reportRequestError,
     requestActionRecoveryResync,
+    requestSessionBottomFollow,
     forceSseReconnect,
   } = params;
 
@@ -948,6 +949,10 @@ export function useAppSessionActions(
     messageId: string,
     decision: ApprovalDecision,
   ) {
+    // Resolving an approval resumes the same agent turn. Reattach before the
+    // request so the approval -> working -> first-output transition shares the
+    // same continuous tail-follow contract as an ordinary prompt send.
+    requestSessionBottomFollow(sessionId);
     try {
       const state = await submitApproval(sessionId, messageId, decision);
       if (!isMountedRef.current) {

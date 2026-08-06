@@ -1,14 +1,13 @@
 /*
 Telegram relay
-Telegram Bot API <-> TermAl project digest/actions
+Telegram Bot API <-> TermAl project/session relay
 Poll updates
   -> link chat / parse command / forward free text
-  -> GET project digest or POST project action
-  -> render digest + inline keyboard after updates have been drained
-  -> persist chat binding and digest cursor
+  -> resolve an explicit or latest promptable project-root session
+  -> optionally forward assistant replies from targeted sessions
+  -> persist chat binding and forwarding cursors
 The relay runs inside the main backend process from Settings -> Telegram. It
-reuses the same backend project action contract instead of exposing a second
-transport-specific control path.
+does not currently expose project digests or digest actions.
 */
 
 /// Handles Telegram update.
@@ -167,8 +166,17 @@ fn handle_telegram_message_for_relay(
                 Ok(TelegramUpdateHandlingOutcome::default())
             }
             TelegramIncomingCommand::Status => {
-                send_fresh_telegram_digest(telegram, termal, config, state, chat_id)
-                    .map(TelegramUpdateHandlingOutcome::unsynced)
+                if config.project_digests_enabled {
+                    send_fresh_telegram_digest(telegram, termal, config, state, chat_id)
+                        .map(TelegramUpdateHandlingOutcome::unsynced)
+                } else {
+                    telegram.send_message(
+                        chat_id,
+                        "Project digests are temporarily disabled. Use /sessions and /session to choose a target.",
+                        None,
+                    )?;
+                    Ok(TelegramUpdateHandlingOutcome::default())
+                }
             }
             TelegramIncomingCommand::Projects => {
                 send_telegram_projects(telegram, termal, config, state, chat_id)
@@ -192,23 +200,32 @@ fn handle_telegram_message_for_relay(
             )
             .map(TelegramUpdateHandlingOutcome::unsynced),
             TelegramIncomingCommand::Action(action_id) => {
-                let (project_id, mut dirty) = resolve_telegram_active_project_id(config, state);
-                match termal.dispatch_project_action(&project_id, action_id.as_str()) {
-                    Ok(digest) => {
-                        dirty |= send_fresh_telegram_digest_from_response(
-                            telegram, config, state, chat_id, &digest,
-                        )?;
-                        Ok(TelegramUpdateHandlingOutcome::unsynced(dirty))
+                if config.project_digests_enabled {
+                    let (project_id, mut dirty) = resolve_telegram_active_project_id(config, state);
+                    match termal.dispatch_project_action(&project_id, action_id.as_str()) {
+                        Ok(digest) => {
+                            dirty |= send_fresh_telegram_digest_from_response(
+                                telegram, config, state, chat_id, &digest,
+                            )?;
+                            Ok(TelegramUpdateHandlingOutcome::unsynced(dirty))
+                        }
+                        Err(err) => {
+                            log_telegram_error("failed to dispatch Telegram action", &err);
+                            telegram.send_message(
+                                chat_id,
+                                &telegram_action_error_text(action_id, &err),
+                                None,
+                            )?;
+                            Ok(TelegramUpdateHandlingOutcome::unsynced(dirty))
+                        }
                     }
-                    Err(err) => {
-                        log_telegram_error("failed to dispatch Telegram action", &err);
-                        telegram.send_message(
-                            chat_id,
-                            &telegram_action_error_text(action_id, &err),
-                            None,
-                        )?;
-                        Ok(TelegramUpdateHandlingOutcome::unsynced(dirty))
-                    }
+                } else {
+                    telegram.send_message(
+                        chat_id,
+                        "Project digest actions are temporarily disabled. Send free text to the selected session instead.",
+                        None,
+                    )?;
+                    Ok(TelegramUpdateHandlingOutcome::default())
                 }
             }
         };
@@ -261,6 +278,14 @@ fn handle_telegram_callback_query(
     let chat_id = message.chat.id;
     if effective_telegram_chat_id(config, state) != Some(chat_id) {
         let _ = telegram.answer_callback_query(&callback_query.id, "This chat is not linked.");
+        return Ok(false);
+    }
+
+    if !config.project_digests_enabled {
+        let _ = telegram.answer_callback_query(
+            &callback_query.id,
+            "Project digest controls are temporarily disabled.",
+        );
         return Ok(false);
     }
 
@@ -360,12 +385,19 @@ fn forward_telegram_text_to_project_for_relay(
     text: &str,
 ) -> Result<TelegramPromptForwardOutcome> {
     let (project_id, mut dirty) = resolve_telegram_active_project_id(config, state);
-    let digest = termal.get_project_digest(&project_id)?;
+    let digest_primary_session_id = if config.project_digests_enabled {
+        termal
+            .get_project_digest(&project_id)?
+            .primary_session_id
+    } else {
+        None
+    };
     let (session_id, session_target_dirty) = resolve_telegram_project_prompt_session(
         termal,
         &project_id,
         state,
-        digest.primary_session_id.as_deref(),
+        digest_primary_session_id.as_deref(),
+        true,
     )?;
     dirty |= session_target_dirty;
     if config.forward_assistant_replies
@@ -399,34 +431,37 @@ fn forward_telegram_text_to_project_for_relay(
     if let Some(plan) = pre_send_assistant_forwarding_plan {
         dirty |= apply_assistant_forwarding_plan(state, plan);
     }
-    let next_digest = match termal.get_project_digest(&project_id) {
-        Ok(digest) => digest,
-        Err(err) => {
-            log_telegram_error("failed to refresh digest after Telegram prompt", &err);
-            return Ok(TelegramPromptForwardOutcome {
-                dirty,
-                final_sync_satisfied: false,
-            });
-        }
-    };
-    match send_fresh_telegram_digest_from_response(telegram, config, state, chat_id, &next_digest) {
-        Ok(changed) => dirty |= changed,
-        Err(err) => {
-            log_telegram_error("failed to send digest after Telegram prompt", &err);
-            return Ok(TelegramPromptForwardOutcome {
-                dirty,
-                final_sync_satisfied: false,
-            });
+    if config.project_digests_enabled {
+        let next_digest = match termal.get_project_digest(&project_id) {
+            Ok(digest) => digest,
+            Err(err) => {
+                log_telegram_error("failed to refresh digest after Telegram prompt", &err);
+                return Ok(TelegramPromptForwardOutcome {
+                    dirty,
+                    final_sync_satisfied: false,
+                });
+            }
+        };
+        match send_fresh_telegram_digest_from_response(
+            telegram,
+            config,
+            state,
+            chat_id,
+            &next_digest,
+        ) {
+            Ok(changed) => dirty |= changed,
+            Err(err) => {
+                log_telegram_error("failed to send digest after Telegram prompt", &err);
+                return Ok(TelegramPromptForwardOutcome {
+                    dirty,
+                    final_sync_satisfied: false,
+                });
+            }
         }
     }
-    // The agent's reply usually hasn't landed by the time this
-    // immediate digest fetch fires (the agent is still working), so
-    // this branch normally finds nothing to forward and the next
-    // `sync_telegram_digest` poll iteration delivers the reply
-    // instead. Calling it here is still useful: it covers the rare
-    // case where the agent finishes synchronously, and it keeps the
-    // forward-once contract centralized at the few places digests
-    // are sent.
+    // The agent's reply usually has not landed yet. The regular relay poll
+    // checks only this armed session afterwards; it no longer builds a project
+    // digest to discover a forwarding target.
     if config.forward_assistant_replies {
         dirty |=
             forward_relevant_assistant_messages(telegram, termal, state, chat_id, Some(session_id));

@@ -380,6 +380,7 @@ pub(super) fn telegram_test_config() -> TelegramTestConfig {
             bot_username: Some("termal_bot".to_owned()),
             chat_id: Some(42),
             forward_assistant_replies: true,
+            project_digests_enabled: true,
             project_id: "project-1".to_owned(),
             public_base_url: None,
             state_path: std::env::temp_dir()

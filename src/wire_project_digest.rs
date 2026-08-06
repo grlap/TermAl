@@ -5,6 +5,11 @@
 // done-summary hint. This file owns the DTOs plus the formatters that
 // build their text from a compact SessionRecord projection / GitStatusResponse.
 
+/// Temporary operational kill switch. Digest requests previously amplified
+/// resource pressure into process-wide state-lock stalls, so both HTTP handlers
+/// return 404 before touching `StateInner` while this remains false.
+const PROJECT_DIGESTS_ENABLED: bool = false;
+
 // DTOs
 /// Enumerates project digest actions.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

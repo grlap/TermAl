@@ -1036,6 +1036,11 @@ async fn get_project_digest(
     AxumPath(project_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ProjectDigestResponse>, ApiError> {
+    if !PROJECT_DIGESTS_ENABLED {
+        return Err(ApiError::not_found(
+            "project digests are temporarily disabled",
+        ));
+    }
     let response = run_blocking_api(move || state.project_digest(&project_id)).await?;
     Ok(Json(response))
 }
@@ -1045,6 +1050,11 @@ async fn dispatch_project_action(
     AxumPath((project_id, action_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<ProjectDigestResponse>, ApiError> {
+    if !PROJECT_DIGESTS_ENABLED {
+        return Err(ApiError::not_found(
+            "project digest actions are temporarily disabled",
+        ));
+    }
     let response =
         run_blocking_api(move || state.execute_project_action(&project_id, &action_id)).await?;
     Ok(Json(response))
