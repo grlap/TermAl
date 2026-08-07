@@ -4842,20 +4842,12 @@ textarea {
 }
 
 .conversation-live-tail {
+  /* Deliberately in flow. Bottom attachment belongs to the message-stack
+     scroll controller; positioning this wrapper would overlap prior cards. */
   display: grid;
   gap: var(--message-stack-gap);
   align-content: start;
   padding-bottom: 1px;
-}
-
-/* Keep LIVE TURN visually stable while the pane owns explicit bottom-follow.
-   The wrapper still reserves its normal-flow height. User navigation removes
-   `is-pinned`, immediately returning the card to ordinary transcript flow so
-   it scrolls away with the rest of the conversation. */
-.conversation-live-tail.is-pinned {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
 }
 
 .conversation-pending-prompts {

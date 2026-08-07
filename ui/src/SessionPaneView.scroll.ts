@@ -50,6 +50,7 @@ const SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS = 1000 / 60;
 const SESSION_BOTTOM_FOLLOW_MAX_FRAME_MS = 100;
 const SESSION_BOTTOM_FOLLOW_SNAP_DISTANCE_PX = 2;
 const SESSION_BOTTOM_FOLLOW_TIME_CONSTANT_MS = 36;
+const SESSION_BOTTOM_FOLLOW_MAX_SPEED_PX_PER_MS = 2.5;
 const SESSION_BOTTOM_FOLLOW_STABLE_MS =
   SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS * 2;
 
@@ -82,7 +83,16 @@ export function resolveSessionBottomFollowScrollTop(
     Math.exp(
       -boundedFrameDurationMs / SESSION_BOTTOM_FOLLOW_TIME_CONSTANT_MS,
     );
-  const nextScrollTop = currentScrollTop + distance * followFactor;
+  // A newly inserted command/result card can move the bottom by hundreds of
+  // pixels in one commit. Pure exponential convergence applies roughly 37% of
+  // that distance on the first 60 Hz frame, which is monotonic but still looks
+  // like the whole transcript jumped. Cap travel by elapsed frame time so
+  // structural additions glide at a stable velocity while small streaming
+  // growth keeps the existing responsive easing.
+  const maximumFrameTravel =
+    boundedFrameDurationMs * SESSION_BOTTOM_FOLLOW_MAX_SPEED_PX_PER_MS;
+  const nextScrollTop =
+    currentScrollTop + Math.min(distance * followFactor, maximumFrameTravel);
   return targetScrollTop - nextScrollTop <= SESSION_BOTTOM_FOLLOW_SNAP_DISTANCE_PX
     ? targetScrollTop
     : Math.min(nextScrollTop, targetScrollTop);
@@ -244,6 +254,9 @@ export function useSessionPaneScrollState({
   const latestTurnOutputByKeyRef = useRef<
     Record<string, LatestTurnOutputState | undefined>
   >({});
+  const visibleContentSignatureByKeyRef = useRef<
+    Record<string, string | undefined>
+  >({});
   const paneProgrammaticBottomFollowRef = useRef<{
     key: string | null;
     until: number;
@@ -321,6 +334,10 @@ export function useSessionPaneScrollState({
     });
   }
 
+  // LIVE TURN attachment is a scroll-controller state, never a CSS positioning
+  // mode. While attached, this hook keeps the ordinary in-flow tail at the
+  // viewport bottom. Explicit user navigation detaches it so the whole
+  // transcript, including LIVE TURN, moves as one surface.
   const tailFollowIntent =
     liveTailPinnedByKey[scrollStateKey] ??
     savedScrollPosition?.shouldStick ??
@@ -341,9 +358,11 @@ export function useSessionPaneScrollState({
   }
 
   function markTailFollowUserEscape() {
+    // This flag wins over temporary near-bottom geometry until the user reaches
+    // the real bottom again or an explicit send/approval requests reattachment.
     paneTailFollowUserEscapeByKeyRef.current[scrollStateKey] = true;
-    setTailFollowIntent(false);
     cancelSettledScrollToBottom();
+    setTailFollowIntent(false);
   }
 
   function keepPaneScrollPositionPinned(node: HTMLElement) {
@@ -737,9 +756,13 @@ export function useSessionPaneScrollState({
   ]);
 
   useLayoutEffect(() => {
-    const currentTurnOutput = resolveLatestTurnOutputState(
-      activeSession?.messages ?? [],
-    );
+    const messages = activeSession?.messages ?? [];
+    const previousVisibleContentSignature =
+      visibleContentSignatureByKeyRef.current[scrollStateKey];
+    visibleContentSignatureByKeyRef.current[scrollStateKey] =
+      visibleContentSignature;
+
+    const currentTurnOutput = resolveLatestTurnOutputState(messages);
     const previousTurnOutput = latestTurnOutputByKeyRef.current[scrollStateKey];
     latestTurnOutputByKeyRef.current[scrollStateKey] = currentTurnOutput;
 
@@ -747,8 +770,12 @@ export function useSessionPaneScrollState({
       previousTurnOutput,
       currentTurnOutput,
     );
+    const changedLiveContent =
+      previousVisibleContentSignature !== undefined &&
+      previousVisibleContentSignature !== visibleContentSignature &&
+      (liveFlowActiveRef.current || receivedFirstOutputForPrompt);
     if (
-      !receivedFirstOutputForPrompt ||
+      (!receivedFirstOutputForPrompt && !changedLiveContent) ||
       hasUnloadedNewerHistory ||
       !isActive ||
       !isSessionTabActive ||
@@ -758,11 +785,24 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    // A new agent card is inserted immediately above the in-flow LIVE TURN
-    // tail. Enter bottom-follow mode before ResizeObserver delivery so neither
-    // content measurement nor composer reflow can issue a competing `auto`
-    // correction. The settled loop then glides to every measured bottom instead
-    // of first snapping to the estimate and correcting again.
+    // LIVE TURN remains an ordinary in-flow tail. While auto-follow owns the
+    // pane, compensate every committed conversation change before paint so
+    // the tail does not first move down and then catch up one frame later.
+    // A live-to-final replacement can briefly make the DOM shorter, so this
+    // correction must never reverse an already established bottom position.
+    if (changedLiveContent) {
+      const messageStack = messageStackRef.current;
+      const nextBottom = messageStack
+        ? Math.max(messageStack.scrollHeight - messageStack.clientHeight, 0)
+        : 0;
+      if (messageStack && nextBottom > messageStack.scrollTop + 0.5) {
+        scrollToLatestMessage("auto", true, "bottom_follow", {
+          snapBottomFollowBeforePaint: true,
+        });
+      }
+      return;
+    }
+
     return scheduleLiveTailFollow();
   }, [
     activeSession?.messages,
@@ -771,6 +811,7 @@ export function useSessionPaneScrollState({
     isSessionTabActive,
     paneViewMode,
     scrollStateKey,
+    visibleContentSignature,
   ]);
 
   function scrollMessageStackByDelta(
@@ -988,6 +1029,8 @@ export function useSessionPaneScrollState({
       return;
     }
 
+    cancelPaneProgrammaticBottomFollow();
+    markTailFollowUserEscape();
     event.preventDefault();
     scrollMessageStackByDelta(deltaY, {
       scrollKind: "incremental",
@@ -1205,7 +1248,9 @@ export function useSessionPaneScrollState({
     // path so the visible tree can never outrun its viewport correction.
     beginPaneProgrammaticBottomFollow();
     return scheduleSettledScrollToBottom("auto", {
-      maxAttempts: 24,
+      // Large command/result cards can require more than the old 400 ms window
+      // now that each frame is deliberately velocity-bounded.
+      maxAttempts: 60,
       minAttempts: 4,
       scrollKind: "bottom_follow",
     });
@@ -1222,7 +1267,7 @@ export function useSessionPaneScrollState({
     paneLastTouchClientYRef.current = event.touches[0]?.clientY ?? null;
   }
 
-  function isTailFollowEscapeInput(
+  function isManualMessageStackScrollInput(
     event:
       | ReactWheelEvent<HTMLElement>
       | ReactTouchEvent<HTMLElement>
@@ -1230,26 +1275,29 @@ export function useSessionPaneScrollState({
       | ReactMouseEvent<HTMLElement>,
   ) {
     if (event.type === "wheel" && "deltaY" in event) {
-      return event.deltaY < -0.5;
+      return Math.abs(event.deltaY) > 0.5;
     }
 
     if (event.type === "touchmove" && "touches" in event) {
       const currentTouchClientY = event.touches[0]?.clientY ?? null;
       const previousTouchClientY = paneLastTouchClientYRef.current;
       paneLastTouchClientYRef.current = currentTouchClientY;
-      return (
+      return Boolean(
         currentTouchClientY !== null &&
-        previousTouchClientY !== null &&
-        currentTouchClientY > previousTouchClientY + 0.5
+          previousTouchClientY !== null &&
+          Math.abs(currentTouchClientY - previousTouchClientY) > 0.5,
       );
     }
 
     if (event.type === "keydown" && "key" in event) {
       return (
         event.key === "PageUp" ||
+        event.key === "PageDown" ||
         event.key === "ArrowUp" ||
+        event.key === "ArrowDown" ||
         event.key === "Home" ||
-        (event.key === " " && event.shiftKey)
+        event.key === "End" ||
+        event.key === " "
       );
     }
 
@@ -1263,9 +1311,23 @@ export function useSessionPaneScrollState({
       | ReactKeyboardEvent<HTMLElement>
       | ReactMouseEvent<HTMLElement>,
   ) {
+    // Cancel follow before applying the user's movement. Nested scrollables
+    // (code/table panes) consume their own wheel input without detaching the
+    // surrounding transcript.
     cancelPaneProgrammaticBottomFollow();
-    if (isTailFollowEscapeInput(event)) {
-      markTailFollowUserEscape();
+    const node = messageStackRef.current;
+    if (
+      event.type === "wheel" &&
+      "deltaY" in event &&
+      node &&
+      canNestedScrollableConsumeWheel(event.target, node, event.deltaY)
+    ) {
+      return;
+    }
+    if (isManualMessageStackScrollInput(event)) {
+      if (!hasTailFollowUserEscape() || getTailFollowIntent()) {
+        markTailFollowUserEscape();
+      }
     }
   }
 
@@ -1312,6 +1374,7 @@ export function useSessionPaneScrollState({
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
     } else if (shouldStick) {
+      // Reaching the physical bottom is the natural reattachment action.
       setTailFollowIntent(true);
       setNewResponseIndicator(scrollStateKey, false);
     } else if (

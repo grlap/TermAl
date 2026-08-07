@@ -1214,8 +1214,14 @@ const SessionConversationPage = memo(
       ) : null;
     const liveTail = (
       <ConversationTailPresence active={liveTurnCard !== null}>
+        {/*
+          LIVE TURN must stay in normal transcript flow in both states. The
+          attribute exposes scroll-controller attachment for diagnostics and
+          tests; it must never become a sticky/fixed positioning hook.
+        */}
         <div
-          className={`conversation-live-tail${liveTailPinned ? " is-pinned" : ""}`}
+          className="conversation-live-tail"
+          data-tail-follow={liveTailPinned ? "attached" : "detached"}
         >
           {liveTurnCard}
         </div>

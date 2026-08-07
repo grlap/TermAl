@@ -116,6 +116,23 @@ describe("session pane historical-window tail state", () => {
     expect(resolveSessionBottomFollowScrollTop(800.5, 800)).toBe(800.5);
   });
 
+  it("bounds each frame of a large structural addition and still converges", () => {
+    const targetScrollTop = 1_800;
+    let currentScrollTop = 800;
+
+    for (let frame = 0; frame < 60; frame += 1) {
+      const nextScrollTop = resolveSessionBottomFollowScrollTop(
+        currentScrollTop,
+        targetScrollTop,
+      );
+      expect(nextScrollTop).toBeGreaterThanOrEqual(currentScrollTop);
+      expect(nextScrollTop - currentScrollTop).toBeLessThan(50);
+      currentScrollTop = nextScrollTop;
+    }
+
+    expect(currentScrollTop).toBe(targetScrollTop);
+  });
+
   it("identifies the first agent output for the latest prompt", () => {
     const prompt: Message = {
       id: "prompt-2",
@@ -255,7 +272,7 @@ describe("session pane historical-window tail state", () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  it("smoothly follows the first reply and corrects an authoritative shrink before paint", () => {
+  it("pins a newly inserted reply before paint and smoothly follows measured growth", () => {
     let nextAnimationFrameId = 1;
     const animationFrames = new Map<number, FrameRequestCallback>();
     const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
@@ -362,8 +379,22 @@ describe("session pane historical-window tail state", () => {
       paneActive: true,
     });
 
-    expect(scrollNode.scrollTop).toBe(800);
-    expect(scrollTo).not.toHaveBeenCalled();
+    expect(scrollNode.scrollTop).toBe(920);
+    expect(scrollTo).toHaveBeenCalledWith({
+      behavior: "auto",
+      top: 920,
+    });
+    expect(scrollWrites[scrollWrites.length - 1]?.detail.scrollKind).toBe(
+      "bottom_follow",
+    );
+
+    // Content inside the new card can grow after the structural commit. That
+    // measured growth should stay velocity-bounded instead of snapping again.
+    scrollHeight = 1_240;
+    scrollTo.mockClear();
+    act(() => {
+      requestMessageStackBottomRepin(scrollNode);
+    });
     const firstFrame = animationFrames.entries().next().value;
     if (!firstFrame) {
       throw new Error("Expected a scheduled bottom-follow frame");
@@ -373,8 +404,8 @@ describe("session pane historical-window tail state", () => {
     act(() => firstFrame[1](frameTimestamp));
 
     const firstFrameScrollTop = scrollNode.scrollTop;
-    expect(firstFrameScrollTop).toBeGreaterThan(800);
-    expect(firstFrameScrollTop).toBeLessThan(920);
+    expect(firstFrameScrollTop).toBeGreaterThan(920);
+    expect(firstFrameScrollTop).toBeLessThan(970);
     expect(scrollTo).toHaveBeenCalledWith({
       behavior: "auto",
       top: firstFrameScrollTop,

@@ -2680,7 +2680,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("unpins the live turn tail on explicit upward scroll near bottom", async () => {
+  it("detaches live-turn bottom follow on explicit transcript navigation", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -2741,41 +2741,52 @@ describe("App scroll behaviour", () => {
           .getByText("Live turn")
           .closest(".conversation-live-tail");
         expect(liveTail).not.toBeNull();
-        expect(liveTail).toHaveClass("is-pinned");
+        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
 
         messageStack.scrollTop = 800;
         await act(async () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
-        expect(liveTail).toHaveClass("is-pinned");
+        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
 
         messageStack.scrollTop = 640;
         await act(async () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
-        expect(liveTail).not.toHaveClass("is-pinned");
+        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
 
         messageStack.scrollTop = 800;
         await act(async () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
-        expect(liveTail).toHaveClass("is-pinned");
+        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
 
         await act(async () => {
           fireEvent.wheel(messageStack, { deltaY: -20 });
           await flushUiWork();
         });
-        expect(liveTail).not.toHaveClass("is-pinned");
+        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
 
         messageStack.scrollTop = 800;
         await act(async () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
-        expect(liveTail).toHaveClass("is-pinned");
+        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+
+        // Any deliberate transcript navigation switches LIVE TURN back to
+        // normal flow before the custom non-passive wheel writer moves the
+        // container. Downward navigation must obey the same mode switch as an
+        // upward escape; reaching the real bottom can attach it again later.
+        messageStack.scrollTop = 640;
+        await act(async () => {
+          fireEvent.wheel(messageStack, { deltaY: 20 });
+          await flushUiWork();
+        });
+        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
       } finally {
         context.cleanup();
         restoreScrollGeometry();
@@ -2783,7 +2794,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("keeps the live turn tail pinned when transcript growth opens a temporary bottom gap", async () => {
+  it("keeps live-turn bottom follow attached across temporary layout gaps", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -2845,7 +2856,7 @@ describe("App scroll behaviour", () => {
           .getByText("Live turn")
           .closest(".conversation-live-tail");
         expect(liveTail).not.toBeNull();
-        expect(liveTail).toHaveClass("is-pinned");
+        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
 
         messageStack.scrollTop = 800;
         await act(async () => {
@@ -2859,7 +2870,7 @@ describe("App scroll behaviour", () => {
           await flushUiWork();
         });
 
-        expect(liveTail).toHaveClass("is-pinned");
+        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
       } finally {
         context.cleanup();
         restoreScrollGeometry();

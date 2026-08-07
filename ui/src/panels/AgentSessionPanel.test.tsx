@@ -1129,7 +1129,7 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(firstQueuedPromptCard).not.toBeNull();
     expect(secondQueuedPromptCard).not.toBeNull();
     expect(pendingPromptQueue).not.toBeNull();
-    expect(liveTail).toHaveClass("is-pinned");
+    expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
     expect(liveTurnCard).not.toBeNull();
     expect(pendingPromptQueue?.closest(".conversation-live-tail")).toBeNull();
     expect(
@@ -1189,7 +1189,7 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(scrollWrites).toEqual([]);
   });
 
-  it("only pins the live-turn tail while bottom follow is active", async () => {
+  it("keeps the live-turn tail in flow while exposing bottom-follow state", async () => {
     const nodeFsModule = "node:fs";
     const { readFileSync } = (await import(nodeFsModule)) as {
       readFileSync: (path: string, encoding: "utf8") => string;
@@ -1203,11 +1203,12 @@ describe("AgentSessionPanel conversation caching", () => {
       `${runtimeProcess.cwd()}/src/styles.css`,
       "utf8",
     );
-    expect(stylesCss).toMatch(
-      /\.conversation-live-tail\.is-pinned\s*\{[^}]*position:\s*sticky;[^}]*bottom:\s*0;/s,
-    );
-    expect(stylesCss).not.toMatch(
-      /\.conversation-live-tail\s*\{[^}]*position:\s*sticky;/s,
+    const baseDeclarations = stylesCss.match(
+      /\.conversation-live-tail\s*\{([^}]*)\}/s,
+    )?.[1];
+    expect(baseDeclarations).toBeDefined();
+    expect(baseDeclarations).not.toMatch(
+      /(?:^|;)\s*position\s*:\s*(?:sticky|fixed|absolute)\s*(?:;|$)/,
     );
 
     const activeSession = makeSession("session-a", {
@@ -1233,10 +1234,11 @@ describe("AgentSessionPanel conversation caching", () => {
       .getByText("Live turn")
       .closest(".conversation-live-tail");
     expect(liveTail).not.toBeNull();
-    expect(liveTail).toHaveClass("is-pinned");
+    expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
 
     rerender(renderPanel({ liveTailPinned: false }));
-    expect(liveTail).not.toHaveClass("is-pinned");
+    expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+    expect(liveTail).toHaveClass("conversation-live-tail");
   });
 
   it("does not splice live-only cards beneath a historical window", async () => {
