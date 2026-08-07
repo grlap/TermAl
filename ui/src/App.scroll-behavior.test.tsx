@@ -2764,6 +2764,21 @@ describe("App scroll behaviour", () => {
         });
         expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
 
+        // Trackpad momentum and touch overscroll often continue after the
+        // transcript has reached its physical bottom. Those no-op gestures
+        // must not silently turn live follow off.
+        await act(async () => {
+          fireEvent.wheel(messageStack, { deltaY: 20 });
+          fireEvent.touchStart(messageStack, {
+            touches: [{ clientY: 100 }],
+          });
+          fireEvent.touchMove(messageStack, {
+            touches: [{ clientY: 80 }],
+          });
+          await flushUiWork();
+        });
+        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+
         await act(async () => {
           fireEvent.wheel(messageStack, { deltaY: -20 });
           await flushUiWork();

@@ -105,6 +105,26 @@ export function resolveSessionPageScrollDistance(clientHeight: number) {
   );
 }
 
+export function canMoveMessageStackByDelta(
+  scrollTop: number,
+  scrollHeight: number,
+  clientHeight: number,
+  deltaY: number,
+) {
+  if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.5) {
+    return false;
+  }
+
+  const maxScrollTop = Math.max(scrollHeight - clientHeight, 0);
+  if (maxScrollTop <= 0) {
+    return false;
+  }
+
+  const currentScrollTop = clamp(scrollTop, 0, maxScrollTop);
+  const nextScrollTop = clamp(currentScrollTop + deltaY, 0, maxScrollTop);
+  return Math.abs(nextScrollTop - currentScrollTop) >= 0.5;
+}
+
 export function claimMessageStackBottomRepinAuthority(
   detail: { authorityPresent?: boolean } | undefined,
   currentScrollStateKey: string,
@@ -825,16 +845,19 @@ export function useSessionPaneScrollState({
       return;
     }
 
+    if (
+      !canMoveMessageStackByDelta(
+        node.scrollTop,
+        node.scrollHeight,
+        node.clientHeight,
+        deltaY,
+      )
+    ) {
+      return;
+    }
+
     const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-    if (maxScrollTop <= 0) {
-      return;
-    }
-
     const nextScrollTop = clamp(node.scrollTop + deltaY, 0, maxScrollTop);
-    if (Math.abs(nextScrollTop - node.scrollTop) < 0.5) {
-      return;
-    }
-
     const isUpwardScroll = deltaY < -0.5;
     if (isUpwardScroll) {
       paneTailFollowUserEscapeByKeyRef.current[scrollStateKey] = true;
@@ -1026,6 +1049,20 @@ export function useSessionPaneScrollState({
     }
 
     if (canNestedScrollableConsumeWheel(event.target, node, deltaY)) {
+      return;
+    }
+
+    // A wheel gesture at the physical boundary (or in a transcript shorter
+    // than its viewport) did not navigate away from the live tail. Detaching
+    // here would turn harmless trackpad overscroll into a silent follow-off.
+    if (
+      !canMoveMessageStackByDelta(
+        node.scrollTop,
+        node.scrollHeight,
+        node.clientHeight,
+        deltaY,
+      )
+    ) {
       return;
     }
 
@@ -1274,22 +1311,49 @@ export function useSessionPaneScrollState({
       | ReactKeyboardEvent<HTMLElement>
       | ReactMouseEvent<HTMLElement>,
   ) {
+    const node = messageStackRef.current;
     if (event.type === "wheel" && "deltaY" in event) {
-      return Math.abs(event.deltaY) > 0.5;
+      return Boolean(
+        !event.defaultPrevented &&
+          node &&
+          canMoveMessageStackByDelta(
+            node.scrollTop,
+            node.scrollHeight,
+            node.clientHeight,
+            event.deltaY,
+          ),
+      );
     }
 
     if (event.type === "touchmove" && "touches" in event) {
       const currentTouchClientY = event.touches[0]?.clientY ?? null;
       const previousTouchClientY = paneLastTouchClientYRef.current;
       paneLastTouchClientYRef.current = currentTouchClientY;
+      const deltaY =
+        currentTouchClientY !== null && previousTouchClientY !== null
+          ? previousTouchClientY - currentTouchClientY
+          : 0;
       return Boolean(
-        currentTouchClientY !== null &&
-          previousTouchClientY !== null &&
-          Math.abs(currentTouchClientY - previousTouchClientY) > 0.5,
+        node &&
+          canMoveMessageStackByDelta(
+            node.scrollTop,
+            node.scrollHeight,
+            node.clientHeight,
+            deltaY,
+          ),
       );
     }
 
     if (event.type === "keydown" && "key" in event) {
+      if (
+        event.defaultPrevented ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        isInteractiveMessageStackKeyTarget(event.target, event.currentTarget)
+      ) {
+        return false;
+      }
       return (
         event.key === "PageUp" ||
         event.key === "PageDown" ||
@@ -1311,10 +1375,10 @@ export function useSessionPaneScrollState({
       | ReactKeyboardEvent<HTMLElement>
       | ReactMouseEvent<HTMLElement>,
   ) {
-    // Cancel follow before applying the user's movement. Nested scrollables
-    // (code/table panes) consume their own wheel input without detaching the
-    // surrounding transcript.
-    cancelPaneProgrammaticBottomFollow();
+    // Nested scrollables (code/table panes), transcript controls, and gestures
+    // that cannot change scrollTop do not transfer authority away from live
+    // follow. Only a real transcript-navigation intent detaches the in-flow
+    // LIVE TURN from the viewport bottom.
     const node = messageStackRef.current;
     if (
       event.type === "wheel" &&
@@ -1324,10 +1388,12 @@ export function useSessionPaneScrollState({
     ) {
       return;
     }
-    if (isManualMessageStackScrollInput(event)) {
-      if (!hasTailFollowUserEscape() || getTailFollowIntent()) {
-        markTailFollowUserEscape();
-      }
+    if (!isManualMessageStackScrollInput(event)) {
+      return;
+    }
+    cancelPaneProgrammaticBottomFollow();
+    if (!hasTailFollowUserEscape() || getTailFollowIntent()) {
+      markTailFollowUserEscape();
     }
   }
 
@@ -1742,7 +1808,10 @@ export function useSessionPaneScrollState({
     return scheduleSettledScrollToBottom("auto", {
       ...(shouldReattach
         ? {
-            maxAttempts: 24,
+            // Approval can append a large command/result card while the
+            // velocity-bounded follow is converging. Match the live-flow
+            // budget so the controller cannot stop visibly short of bottom.
+            maxAttempts: 60,
             minAttempts: 4,
             scrollKind: "bottom_follow" as const,
           }
@@ -1813,5 +1882,25 @@ function isNestedEditablePageKeyTarget(target: EventTarget | null): boolean {
     target.contentEditable === "true" ||
     target.getAttribute("contenteditable") === "" ||
     target.getAttribute("contenteditable") === "true"
+  );
+}
+
+function isInteractiveMessageStackKeyTarget(
+  target: EventTarget | null,
+  currentTarget: EventTarget | null,
+) {
+  if (
+    !(target instanceof Element) ||
+    !(currentTarget instanceof Element) ||
+    target === currentTarget
+  ) {
+    return false;
+  }
+
+  const interactiveTarget = target.closest(
+    'button, a[href], input, textarea, select, summary, [contenteditable]:not([contenteditable="false"]), [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"]',
+  );
+  return Boolean(
+    interactiveTarget && currentTarget.contains(interactiveTarget),
   );
 }

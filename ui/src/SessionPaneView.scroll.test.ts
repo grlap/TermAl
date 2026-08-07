@@ -1,7 +1,9 @@
 import { act, renderHook } from "@testing-library/react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  canMoveMessageStackByDelta,
   claimMessageStackBottomRepinAuthority,
   isFirstAgentOutputForObservedPrompt,
   resolveLatestTurnOutputState,
@@ -507,6 +509,56 @@ describe("session pane historical-window tail state", () => {
     expect(resolveSessionPageScrollDistance(100)).toBe(160);
   });
 
+  it("only treats a wheel or touch delta as navigation when scrollTop can move", () => {
+    expect(canMoveMessageStackByDelta(0, 100, 200, 20)).toBe(false);
+    expect(canMoveMessageStackByDelta(800, 1_000, 200, 20)).toBe(false);
+    expect(canMoveMessageStackByDelta(800, 1_000, 200, -20)).toBe(true);
+    expect(canMoveMessageStackByDelta(0, 1_000, 200, -20)).toBe(false);
+    expect(canMoveMessageStackByDelta(400, 1_000, 200, 20)).toBe(true);
+    expect(canMoveMessageStackByDelta(400, 1_000, 200, -20)).toBe(true);
+  });
+
+  it("does not detach live follow for navigation keys owned by transcript controls", () => {
+    const activeSession = session(false);
+    const scrollNode = document.createElement("section");
+    const button = document.createElement("button");
+    scrollNode.append(button);
+    const sharedParams = {
+      ...params(activeSession),
+      paneShouldStickToBottomRef: { current: { "pane-1": true } },
+    };
+    const hook = renderHook(() => useSessionPaneScrollState(sharedParams));
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: " ",
+        metaKey: false,
+        target: button,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    expect(hook.result.current.liveTailPinned).toBe(true);
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: true,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "PageDown",
+        metaKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    expect(hook.result.current.liveTailPinned).toBe(true);
+  });
+
   it("does not advertise phantom newer content while explicitly tail-pinned", () => {
     expect(
       resolveNewResponseIndicatorVisibility({
@@ -703,7 +755,7 @@ describe("session pane historical-window tail state", () => {
       "cancelAnimationFrame",
       vi.fn((frameId: number) => animationFrames.delete(frameId)),
     );
-    let scrollHeight = 1_000;
+    let scrollHeight = 2_000;
     const scrollNode = document.createElement("section");
     Object.defineProperties(scrollNode, {
       clientHeight: { configurable: true, value: 200 },
@@ -763,7 +815,7 @@ describe("session pane historical-window tail state", () => {
     let frameTimestamp = 1_000;
     const drainAnimationFrames = () => {
       let drainedFrames = 0;
-      while (animationFrames.size > 0 && drainedFrames < 30) {
+      while (animationFrames.size > 0 && drainedFrames < 60) {
         const nextFrame = animationFrames.entries().next().value;
         if (!nextFrame) {
           break;
@@ -773,14 +825,15 @@ describe("session pane historical-window tail state", () => {
         act(() => nextFrame[1](frameTimestamp));
         drainedFrames += 1;
       }
-      expect(drainedFrames).toBeLessThan(30);
+      expect(drainedFrames).toBeLessThan(60);
+      return drainedFrames;
     };
 
-    drainAnimationFrames();
-    expect(scrollNode.scrollTop).toBe(800);
+    expect(drainAnimationFrames()).toBeGreaterThan(24);
+    expect(scrollNode.scrollTop).toBe(1_800);
     expect(onScrollToBottomRequestHandled).toHaveBeenCalledWith(7);
 
-    scrollHeight = 1_120;
+    scrollHeight = 2_120;
     hook.rerender({
       paneActive: true,
       request: null,
@@ -789,7 +842,7 @@ describe("session pane historical-window tail state", () => {
     drainAnimationFrames();
 
     expect(hook.result.current.liveTailPinned).toBe(true);
-    expect(scrollNode.scrollTop).toBe(920);
+    expect(scrollNode.scrollTop).toBe(1_920);
   });
 
   it("keeps history unpinned and reattaches through one bounded tail demand", async () => {
