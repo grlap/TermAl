@@ -4848,13 +4848,15 @@ textarea {
   padding-bottom: 1px;
 }
 
-/* tm-7cu.20 (Greg, 2026-07-31): the live-turn card is a REGULAR message. It
-   participates in normal flow and scrolls away with the transcript — no sticky
-   bottom, no z-index overlay floating over real messages. The `is-pinned`
-   class is still applied (the liveTailPinned state feeds scroll logic and
-   tests); it deliberately carries no positioning any more. The previous
-   sticky treatment also required a :has() carve-out for expanded fan-ins —
-   a sign the overlay was fighting the content it covered. */
+/* Keep LIVE TURN visually stable while the pane owns explicit bottom-follow.
+   The wrapper still reserves its normal-flow height. User navigation removes
+   `is-pinned`, immediately returning the card to ordinary transcript flow so
+   it scrolls away with the rest of the conversation. */
+.conversation-live-tail.is-pinned {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
 
 .conversation-pending-prompts {
   display: grid;

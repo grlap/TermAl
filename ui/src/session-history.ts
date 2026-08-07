@@ -1,12 +1,13 @@
 // Pure bounded-history merge helpers.
 //
-// The server returns ascending pages before an exclusive stable message-id
-// cursor. Live SSE may append while a page is in flight, so merges preserve the
-// current retained tail and only prepend ids proven to be older than its first
-// message. Server-instance admission stays in app-live-state.ts.
+// The server returns ascending pages with stable message ids and authoritative
+// global positions. Live SSE may mutate the retained window while a page is in
+// flight, so each merge preserves only the resident ranges whose position and
+// identity remain compatible with that page. Server-instance admission stays
+// in app-live-state.ts.
 
 import type { SessionHistoryResponse } from "./api";
-import type { Message, Session } from "./types";
+import type { Session } from "./types";
 
 export type SessionHistoryMergeOutcome =
   | { kind: "applied"; session: Session }
@@ -22,7 +23,8 @@ function residentMessageStartIndex(session: Session) {
     session.messageStartIndex ??
     Math.max(
       0,
-      (session.messageCount ?? session.messages.length) - session.messages.length,
+      (session.messageCount ?? session.messages.length) -
+        session.messages.length,
     )
   );
 }
@@ -105,8 +107,7 @@ export function prependSessionHistoryPage({
       // `messagesLoaded` means the resident window spans the complete
       // transcript from the true start through the live tail. Reaching the
       // start of a detached historical window is not enough.
-      messagesLoaded:
-        !page.hasMore && current.hasNewerHistory !== true,
+      messagesLoaded: !page.hasMore && current.hasNewerHistory !== true,
       hasOlderHistory: page.hasMore,
       hasNewerHistory: current.hasNewerHistory ?? false,
       messageStartIndex: Math.max(
@@ -136,13 +137,15 @@ export function replaceSessionWithHistoryStartPage({
   if (page.hasMore || page.nextBefore) {
     return {
       kind: "protocolError",
-      message: "session history start page did not begin at the transcript start",
+      message:
+        "session history start page did not begin at the transcript start",
     };
   }
   if (page.messageCount > 0 && page.messages.length === 0) {
     return {
       kind: "protocolError",
-      message: "session history start page was empty for a non-empty transcript",
+      message:
+        "session history start page was empty for a non-empty transcript",
     };
   }
   const currentMessageCount = current.messageCount ?? current.messages.length;
@@ -236,7 +239,8 @@ export function replaceSessionWithHistoryTailPage({
   if (page.hasNewer || page.nextAfter) {
     return {
       kind: "protocolError",
-      message: "session history tail page did not end at the live transcript tail",
+      message:
+        "session history tail page did not end at the live transcript tail",
     };
   }
   if (page.messageCount > 0 && page.messages.length === 0) {
@@ -266,10 +270,7 @@ export function replaceSessionWithHistoryTailPage({
       messagesLoaded: !page.hasMore,
       hasOlderHistory: page.hasMore,
       hasNewerHistory: false,
-      messageStartIndex: Math.max(
-        0,
-        page.messageCount - page.messages.length,
-      ),
+      messageStartIndex: Math.max(0, page.messageCount - page.messages.length),
       messageCount: Math.max(page.messageCount, page.messages.length),
       sessionMutationStamp: page.sessionMutationStamp,
     },
@@ -299,7 +300,8 @@ export function replaceSessionWithHistoryAroundPage({
   ) {
     return {
       kind: "protocolError",
-      message: "session history around page did not contain its requested position",
+      message:
+        "session history around page did not contain its requested position",
     };
   }
 
@@ -350,65 +352,88 @@ export function repairSessionTailFromHistoryPage({
   ) {
     return { kind: "metadataChanged" };
   }
+  const pageStart = Math.max(
+    0,
+    page.messageStartIndex ?? page.messageCount - page.messages.length,
+  );
+  const pageEnd = pageStart + page.messages.length;
+  if (page.hasNewer === true || pageEnd !== page.messageCount) {
+    return {
+      kind: "protocolError",
+      message:
+        "session history repair page did not end at the live transcript tail",
+    };
+  }
   if (page.messages.length === 0) {
+    if (page.messageCount > 0) {
+      return {
+        kind: "protocolError",
+        message:
+          "session history repair page was empty for a non-empty transcript",
+      };
+    }
     return {
       kind: "applied",
       session: {
         ...current,
         messages: [],
         messagesLoaded: true,
+        hasOlderHistory: false,
+        hasNewerHistory: false,
+        messageStartIndex: 0,
         messageCount: 0,
       },
     };
   }
 
-  const currentIndexById = new Map(
-    current.messages.map((message, index) => [message.id, index]),
-  );
-  let firstOverlap:
-    { currentIndex: number; pageIndex: number; message: Message } | undefined;
-  for (let pageIndex = 0; pageIndex < page.messages.length; pageIndex += 1) {
-    const message = page.messages[pageIndex]!;
-    const currentIndex = currentIndexById.get(message.id);
-    if (currentIndex !== undefined) {
-      firstOverlap = { currentIndex, pageIndex, message };
-      break;
-    }
-  }
-  if (!firstOverlap) {
+  const currentStart = residentMessageStartIndex(current);
+  const currentEnd = currentStart + current.messages.length;
+  if (currentEnd < pageStart) {
+    // `cursorChanged` also covers a resident window that no longer reaches the
+    // authoritative tail page. Both cases require a silent state resync.
     return { kind: "cursorChanged" };
   }
 
-  const retainedPrefixLength = Math.max(
+  // The history response carries authoritative global positions. A missed or
+  // partially applied text delta can make ids inside the retained suffix
+  // diverge even though the response metadata still matches. Preserve only
+  // the contiguous resident prefix before the page, then replace the entire
+  // covered suffix. Requiring every overlapping id to match would turn the
+  // exact corruption this path repairs into a user-visible protocol error.
+  const retainedPrefixLength =
+    currentStart <= pageStart ? pageStart - currentStart : 0;
+  const candidateRetainedPrefix = current.messages.slice(
     0,
-    firstOverlap.currentIndex - firstOverlap.pageIndex,
+    retainedPrefixLength,
   );
-  for (
-    let pageIndex = firstOverlap.pageIndex;
-    pageIndex < page.messages.length;
-    pageIndex += 1
-  ) {
-    const currentIndex = retainedPrefixLength + pageIndex;
-    const currentMessage = current.messages[currentIndex];
-    if (currentMessage && currentMessage.id !== page.messages[pageIndex]?.id) {
-      return {
-        kind: "protocolError",
-        message:
-          "session history repair page did not align with retained messages",
-      };
-    }
-  }
-  const messages = [
-    ...current.messages.slice(0, retainedPrefixLength),
-    ...page.messages,
-  ];
+  const pageIds = new Set(page.messages.map((message) => message.id));
+  const retainedPrefixIsTrustworthy =
+    currentStart >= 0 &&
+    currentEnd <= page.messageCount &&
+    !candidateRetainedPrefix.some((message) => pageIds.has(message.id));
+  // A repeated page id or a resident window extending beyond the transcript
+  // proves that at least one retained prefix position may be corrupt. There is
+  // no safe way to represent the resulting hole, so converge on the
+  // authoritative tail page as a partial window and allow older history to be
+  // fetched again. Keeping the prefix could publish duplicate React keys or
+  // incorrectly mark a phantom-filled transcript as fully loaded.
+  const retainedPrefix = retainedPrefixIsTrustworthy
+    ? candidateRetainedPrefix
+    : [];
+  const repairedStart = retainedPrefixIsTrustworthy
+    ? Math.min(currentStart, pageStart)
+    : pageStart;
+  const messages = [...retainedPrefix, ...page.messages];
   return {
     kind: "applied",
     session: {
       ...current,
       messages,
-      messagesLoaded: current.messagesLoaded === true,
-      messageCount: Math.max(page.messageCount, messages.length),
+      messagesLoaded: repairedStart === 0,
+      hasOlderHistory: repairedStart > 0,
+      hasNewerHistory: false,
+      messageStartIndex: repairedStart,
+      messageCount: page.messageCount,
     },
   };
 }

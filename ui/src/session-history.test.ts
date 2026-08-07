@@ -187,6 +187,311 @@ describe("session history page merging", () => {
     }
   });
 
+  it("repairs a divergent retained suffix by authoritative message positions", () => {
+    const current = session([message(0), message(1), message(2), message(4)], {
+      messageCount: 5,
+      messagesLoaded: true,
+    });
+    const outcome = repairSessionTailFromHistoryPage({
+      current,
+      page: {
+        messages: [message(2), message(3), message(4)],
+        hasMore: true,
+        nextBefore: "message-2",
+        messageStartIndex: 2,
+        messageCount: 5,
+        revision: 10,
+        sessionMutationStamp: 7,
+        serverInstanceId: "server-1",
+      },
+    });
+
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind === "applied") {
+      expect(outcome.session.messages).toEqual([
+        message(0),
+        message(1),
+        message(2),
+        message(3),
+        message(4),
+      ]);
+      expect(outcome.session.messagesLoaded).toBe(true);
+      expect(outcome.session.messageStartIndex).toBe(0);
+    }
+  });
+
+  it("repairs a divergent partial window without changing its global start", () => {
+    const current = session([message(100), message(101), message(103)], {
+      hasOlderHistory: true,
+      messageCount: 104,
+      messageStartIndex: 100,
+    });
+    const outcome = repairSessionTailFromHistoryPage({
+      current,
+      page: {
+        messages: [message(101), message(102), message(103)],
+        hasMore: true,
+        nextBefore: "message-101",
+        messageStartIndex: 101,
+        messageCount: 104,
+        revision: 10,
+        sessionMutationStamp: 7,
+        serverInstanceId: "server-1",
+      },
+    });
+
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind === "applied") {
+      expect(outcome.session.messages).toEqual([
+        message(100),
+        message(101),
+        message(102),
+        message(103),
+      ]);
+      expect(outcome.session.messagesLoaded).toBe(false);
+      expect(outcome.session.hasOlderHistory).toBe(true);
+      expect(outcome.session.hasNewerHistory).toBe(false);
+      expect(outcome.session.messageStartIndex).toBe(100);
+    }
+  });
+
+  it("drops an untrusted retained prefix that duplicates the authoritative page", () => {
+    const outcome = repairSessionTailFromHistoryPage({
+      current: session(
+        [message(0), message(2), message(90), message(91), message(92)],
+        {
+          messageCount: 5,
+          messagesLoaded: true,
+        },
+      ),
+      page: {
+        messages: [message(2), message(3), message(4)],
+        hasMore: true,
+        nextBefore: "message-2",
+        messageStartIndex: 2,
+        messageCount: 5,
+        revision: 10,
+        sessionMutationStamp: 7,
+        serverInstanceId: "server-1",
+      },
+    });
+
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind === "applied") {
+      expect(outcome.session.messages).toEqual([
+        message(2),
+        message(3),
+        message(4),
+      ]);
+      expect(outcome.session.messagesLoaded).toBe(false);
+      expect(outcome.session.hasOlderHistory).toBe(true);
+      expect(outcome.session.hasNewerHistory).toBe(false);
+      expect(outcome.session.messageStartIndex).toBe(2);
+    }
+  });
+
+  it("drops a retained prefix when the resident window extends past the transcript", () => {
+    const outcome = repairSessionTailFromHistoryPage({
+      current: session(
+        [
+          message(0),
+          message(90),
+          message(1),
+          message(2),
+          message(3),
+          message(4),
+        ],
+        {
+          messageCount: 5,
+          messagesLoaded: true,
+        },
+      ),
+      page: {
+        messages: [message(2), message(3), message(4)],
+        hasMore: true,
+        nextBefore: "message-2",
+        messageStartIndex: 2,
+        messageCount: 5,
+        revision: 10,
+        sessionMutationStamp: 7,
+        serverInstanceId: "server-1",
+      },
+    });
+
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind === "applied") {
+      expect(outcome.session.messages).toEqual([
+        message(2),
+        message(3),
+        message(4),
+      ]);
+      expect(outcome.session.messagesLoaded).toBe(false);
+      expect(outcome.session.hasOlderHistory).toBe(true);
+      expect(outcome.session.messageStartIndex).toBe(2);
+    }
+  });
+
+  it("uses an authoritative page that starts before the resident window", () => {
+    const outcome = repairSessionTailFromHistoryPage({
+      current: session([message(3), message(4)], {
+        hasOlderHistory: true,
+        messageCount: 5,
+        messageStartIndex: 3,
+      }),
+      page: {
+        messages: [message(2), message(3), message(4)],
+        hasMore: true,
+        nextBefore: "message-2",
+        messageStartIndex: 2,
+        messageCount: 5,
+        revision: 10,
+        sessionMutationStamp: 7,
+        serverInstanceId: "server-1",
+      },
+    });
+
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind === "applied") {
+      expect(outcome.session.messages).toEqual([
+        message(2),
+        message(3),
+        message(4),
+      ]);
+      expect(outcome.session.messagesLoaded).toBe(false);
+      expect(outcome.session.hasOlderHistory).toBe(true);
+      expect(outcome.session.hasNewerHistory).toBe(false);
+      expect(outcome.session.messageStartIndex).toBe(2);
+    }
+  });
+
+  it("requests a resync when the repair page is separated by a position gap", () => {
+    const outcome = repairSessionTailFromHistoryPage({
+      current: session([message(0), message(1)], {
+        messageCount: 5,
+        messagesLoaded: false,
+        messageStartIndex: 0,
+      }),
+      page: {
+        messages: [message(3), message(4)],
+        hasMore: true,
+        nextBefore: "message-3",
+        messageStartIndex: 3,
+        messageCount: 5,
+        revision: 10,
+        sessionMutationStamp: 7,
+        serverInstanceId: "server-1",
+      },
+    });
+
+    expect(outcome).toEqual({ kind: "cursorChanged" });
+  });
+
+  it("rejects a repair page that reports newer messages", () => {
+    const outcome = repairSessionTailFromHistoryPage({
+      current: session([message(0), message(1), message(2)], {
+        messageCount: 3,
+        messagesLoaded: true,
+      }),
+      page: {
+        messages: [message(1), message(2)],
+        hasMore: true,
+        nextBefore: "message-1",
+        hasNewer: true,
+        nextAfter: "message-2",
+        messageStartIndex: 1,
+        messageCount: 3,
+        revision: 10,
+        sessionMutationStamp: 7,
+        serverInstanceId: "server-1",
+      },
+    });
+
+    expect(outcome).toEqual({
+      kind: "protocolError",
+      message:
+        "session history repair page did not end at the live transcript tail",
+    });
+  });
+
+  it("rejects a repair page whose positions stop before the live tail", () => {
+    const outcome = repairSessionTailFromHistoryPage({
+      current: session([message(0), message(1), message(2), message(3)], {
+        messageCount: 4,
+        messagesLoaded: true,
+      }),
+      page: {
+        messages: [message(1), message(2)],
+        hasMore: true,
+        nextBefore: "message-1",
+        messageStartIndex: 1,
+        messageCount: 4,
+        revision: 10,
+        sessionMutationStamp: 7,
+        serverInstanceId: "server-1",
+      },
+    });
+
+    expect(outcome).toEqual({
+      kind: "protocolError",
+      message:
+        "session history repair page did not end at the live transcript tail",
+    });
+  });
+
+  it("rejects an empty repair page for a non-empty transcript", () => {
+    const outcome = repairSessionTailFromHistoryPage({
+      current: session([message(0)], {
+        messageCount: 1,
+        messagesLoaded: true,
+      }),
+      page: {
+        messages: [],
+        hasMore: false,
+        messageStartIndex: 1,
+        messageCount: 1,
+        revision: 10,
+        sessionMutationStamp: 7,
+        serverInstanceId: "server-1",
+      },
+    });
+
+    expect(outcome).toEqual({
+      kind: "protocolError",
+      message:
+        "session history repair page was empty for a non-empty transcript",
+    });
+  });
+
+  it("clears stale residency metadata for an authoritative empty transcript", () => {
+    const outcome = repairSessionTailFromHistoryPage({
+      current: session([message(0)], {
+        hasOlderHistory: true,
+        hasNewerHistory: true,
+        messageCount: 0,
+        messageStartIndex: 12,
+      }),
+      page: {
+        messages: [],
+        hasMore: false,
+        messageStartIndex: 0,
+        messageCount: 0,
+        revision: 10,
+        sessionMutationStamp: 7,
+        serverInstanceId: "server-1",
+      },
+    });
+
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind === "applied") {
+      expect(outcome.session.messages).toEqual([]);
+      expect(outcome.session.messagesLoaded).toBe(true);
+      expect(outcome.session.hasOlderHistory).toBe(false);
+      expect(outcome.session.hasNewerHistory).toBe(false);
+      expect(outcome.session.messageStartIndex).toBe(0);
+      expect(outcome.session.messageCount).toBe(0);
+    }
+  });
+
   it("replaces a live tail with one bounded true-start page", () => {
     const startMessages = Array.from({ length: 64 }, (_, index) =>
       message(index + 1),

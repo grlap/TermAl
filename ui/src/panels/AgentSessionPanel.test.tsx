@@ -1189,7 +1189,27 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(scrollWrites).toEqual([]);
   });
 
-  it("only pins the live-turn tail while bottom follow is active", () => {
+  it("only pins the live-turn tail while bottom follow is active", async () => {
+    const nodeFsModule = "node:fs";
+    const { readFileSync } = (await import(nodeFsModule)) as {
+      readFileSync: (path: string, encoding: "utf8") => string;
+    };
+    const runtimeProcess = (
+      globalThis as typeof globalThis & {
+        process: { cwd: () => string };
+      }
+    ).process;
+    const stylesCss = readFileSync(
+      `${runtimeProcess.cwd()}/src/styles.css`,
+      "utf8",
+    );
+    expect(stylesCss).toMatch(
+      /\.conversation-live-tail\.is-pinned\s*\{[^}]*position:\s*sticky;[^}]*bottom:\s*0;/s,
+    );
+    expect(stylesCss).not.toMatch(
+      /\.conversation-live-tail\s*\{[^}]*position:\s*sticky;/s,
+    );
+
     const activeSession = makeSession("session-a", {
       status: "active",
       messages: [
