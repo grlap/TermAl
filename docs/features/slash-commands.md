@@ -21,6 +21,8 @@ Supported commands:
 - `/sandbox` for `Codex`
 - `/approvals` for `Codex`
 - `/effort` for `Claude` and `Codex`
+- `/fast` for `Codex`
+- `/mcp` and `/mcp verbose` for `Codex`
 
 ## Behavior
 
@@ -34,6 +36,11 @@ Supported commands:
   [OpenCode ACP Integration](./opencode-acp-integration.md).
 - For live model lists, labels resolve to canonical ids before TermAl stores
   the selection.
+- `/mcp` is a local status command, not a model prompt. It reads the owning
+  Codex app-server's configured MCP servers, authentication state, and tool
+  counts. `/mcp verbose` also shows individual tool names and descriptions.
+  Remote sessions proxy the read to the TermAl instance that owns the Codex
+  runtime.
 
 ## Live model integration
 
@@ -50,6 +57,9 @@ This is not full cross-agent slash-command parity. TermAl now discovers
 Claude's native slash commands from the live runtime when available and falls
 back to `.claude/commands` prompt templates, but it still does not have
 equivalent native-command discovery for Codex, Cursor, Gemini, or OpenCode.
+The dedicated Codex `/mcp` status surface is implemented directly against the
+documented app-server API and does not imply general Codex native-command
+discovery.
 
 Project command templates and future Claude skills are owned by the backend
 agent-command resolver, not by this session-control layer. See

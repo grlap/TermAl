@@ -4129,6 +4129,409 @@ Please add tests.`,
     });
   });
 
+  it("keeps /fast visible and fetches Codex capabilities when they are unknown", async () => {
+    const onRefreshSessionModelOptions = vi.fn();
+
+    render(
+      renderFooter({
+        onRefreshSessionModelOptions,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          codexFastMode: false,
+          model: "gpt-5.6-sol",
+          modelOptions: undefined,
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/" } });
+    expect(screen.getByRole("option", { name: /\/fast/i })).toBeInTheDocument();
+
+    fireEvent.change(textarea, { target: { value: "/fast" } });
+    await waitFor(() => {
+      expect(onRefreshSessionModelOptions).toHaveBeenCalledWith("session-a");
+    });
+    expect(
+      screen.getByText(/Fast availability .* has not loaded yet/),
+    ).toBeInTheDocument();
+  });
+
+  it("loads /mcp as local Codex status without sending it as a prompt", async () => {
+    const onSend = vi.fn(() => true);
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            servers: [
+              {
+                name: "termal",
+                authStatus: "unsupported",
+                tools: [
+                  {
+                    name: "termal_spawn_session",
+                    description: "Spawns a child session",
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      renderFooter({
+        onSend,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5.6-sol",
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/" } });
+    expect(screen.getByRole("option", { name: /\/mcp/i })).toBeInTheDocument();
+
+    fireEvent.change(textarea, { target: { value: "/mcp" } });
+    await waitFor(() => {
+      expect(
+        screen.getByRole("region", { name: "Codex MCP servers" }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("termal")).toBeInTheDocument();
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/session-a/codex/mcp-servers",
+      expect.any(Object),
+    );
+    expect(screen.getByText("1 tool")).toBeInTheDocument();
+    expect(screen.getByText("Auth unsupported")).toBeInTheDocument();
+    expect(screen.queryByText("termal_spawn_session")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onSend).not.toHaveBeenCalled();
+
+    fireEvent.change(textarea, { target: { value: "/mcp verbose" } });
+    expect(screen.getByText("termal_spawn_session")).toBeInTheDocument();
+    expect(screen.getByText("Spawns a child session")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes a loaded /mcp inventory on demand", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ servers: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5.6-sol",
+        }),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/mcp" },
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Refresh MCP status" }),
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps the last /mcp inventory visible when a manual refresh fails", async () => {
+    let requestIndex = 0;
+    const fetchMock = vi.fn(async () => {
+      requestIndex += 1;
+      return requestIndex === 1
+        ? new Response(
+            JSON.stringify({
+              servers: [
+                {
+                  name: "cached-server",
+                  authStatus: "unsupported",
+                  tools: [],
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          )
+        : new Response(JSON.stringify({ error: "Temporary MCP failure" }), {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5.6-sol",
+        }),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/mcp" },
+    });
+    expect(await screen.findByText("cached-server")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Refresh MCP status" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The TermAl backend is unavailable.",
+    );
+    expect(screen.getByText("cached-server")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows /mcp usage locally and exposes app-server failures", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ error: "Codex MCP status unavailable" }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      renderFooter({
+        session: makeSession("session-a", {
+          agent: "Codex",
+          model: "gpt-5.6-sol",
+        }),
+      }),
+    );
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/mcp details" } });
+    expect(screen.getByText("Usage: /mcp [verbose]")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.change(textarea, { target: { value: "/mcp" } });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Codex MCP status unavailable",
+    );
+    expect(
+      screen.getByRole("button", { name: "Retry MCP status" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a completed /mcp response when its session is temporarily inactive", async () => {
+    const pendingResponse = deferredValue<Response>();
+    const fetchMock = vi.fn(() => pendingResponse.promise);
+    vi.stubGlobal("fetch", fetchMock);
+    const sessionA = makeSession("session-a", {
+      agent: "Codex",
+      model: "gpt-5.6-sol",
+    });
+    const sessionB = makeSession("session-b", {
+      agent: "Codex",
+      model: "gpt-5.6-sol",
+    });
+    const { rerender } = render(
+      renderFooter({ committedDraft: "/mcp", session: sessionA }),
+    );
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      rerender(renderFooter({ session: sessionB }));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      pendingResponse.resolve(
+        new Response(
+          JSON.stringify({
+            servers: [
+              { name: "cached-server", authStatus: "unsupported", tools: [] },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      await pendingResponse.promise;
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      rerender(renderFooter({ committedDraft: "/mcp", session: sessionA }));
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("cached-server")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the newest /mcp session response when requests overlap", async () => {
+    const pendingSessionA = deferredValue<Response>();
+    const pendingSessionB = deferredValue<Response>();
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.includes("/session-a/")) {
+        return pendingSessionA.promise;
+      }
+      if (path.includes("/session-b/")) {
+        return pendingSessionB.promise;
+      }
+      throw new Error(`Unexpected MCP request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const sessionA = makeSession("session-a", {
+      agent: "Codex",
+      model: "gpt-5.6-sol",
+    });
+    const sessionB = makeSession("session-b", {
+      agent: "Codex",
+      model: "gpt-5.6-sol",
+    });
+    const { rerender } = render(
+      renderFooter({ committedDraft: "/mcp", session: sessionA }),
+    );
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      rerender(renderFooter({ committedDraft: "/mcp", session: sessionB }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      pendingSessionB.resolve(
+        new Response(
+          JSON.stringify({
+            servers: [
+              {
+                name: "session-b-server",
+                authStatus: "unsupported",
+                tools: [],
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      await pendingSessionB.promise;
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("session-b-server")).toBeInTheDocument();
+
+    await act(async () => {
+      pendingSessionA.resolve(
+        new Response(
+          JSON.stringify({
+            servers: [
+              {
+                name: "session-a-server",
+                authStatus: "unsupported",
+                tools: [],
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      await pendingSessionA.promise;
+      await Promise.resolve();
+    });
+    expect(screen.getByText("session-b-server")).toBeInTheDocument();
+    expect(
+      screen.queryByText("session-a-server"),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      rerender(renderFooter({ committedDraft: "/mcp", session: sessionA }));
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("session-a-server")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("explains when the active Codex model authoritatively lacks Fast", () => {
+    const onRefreshSessionModelOptions = vi.fn();
+
+    render(
+      renderFooter({
+        onRefreshSessionModelOptions,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          codexFastMode: false,
+          model: "gpt-5.3-codex-spark",
+          modelOptions: [
+            {
+              value: "gpt-5.3-codex-spark",
+              label: "GPT-5.3-Codex-Spark",
+              serviceTiers: [],
+            },
+          ],
+        }),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/fast" },
+    });
+
+    expect(screen.getByText(/Fast mode is not available/)).toBeInTheDocument();
+    expect(onRefreshSessionModelOptions).not.toHaveBeenCalled();
+  });
+
+  it("retries /fast after a loaded catalog omits the active Codex model", async () => {
+    const onRefreshSessionModelOptions = vi.fn();
+
+    render(
+      renderFooter({
+        onRefreshSessionModelOptions,
+        session: makeSession("session-a", {
+          agent: "Codex",
+          codexFastMode: false,
+          model: "gpt-5.6-sol",
+          modelOptions: [{ value: "other-model", label: "Other model" }],
+        }),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/fast" },
+    });
+
+    await waitFor(() => {
+      expect(onRefreshSessionModelOptions).toHaveBeenCalledTimes(1);
+    });
+    expect(
+      screen.getByText(/Codex did not report Fast availability/),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/model" },
+    });
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/fast" },
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Codex did not report Fast availability/)).toBeInTheDocument();
+    });
+    expect(onRefreshSessionModelOptions).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry live models" }));
+    expect(onRefreshSessionModelOptions).toHaveBeenCalledTimes(2);
+  });
+
   it("requests live Cursor model options when /model opens", async () => {
     const onRefreshSessionModelOptions = vi.fn();
 

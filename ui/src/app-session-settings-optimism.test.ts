@@ -174,4 +174,24 @@ describe("Codex Fast optimistic session settings", () => {
       ),
     ).toMatchObject({ model: "gpt-5.4-mini", codexFastMode: false });
   });
+
+  it("clears Fast when a loaded catalog omits the target model", () => {
+    expect(
+      buildOptimisticSessionSettingsUpdate(
+        { ...session, codexFastMode: true },
+        "model",
+        "gpt-5.6-sol",
+      ),
+    ).toMatchObject({ model: "gpt-5.6-sol", codexFastMode: false });
+  });
+
+  it("preserves Fast while the model catalog is unavailable", () => {
+    expect(
+      buildOptimisticSessionSettingsUpdate(
+        { ...session, codexFastMode: true, modelOptions: undefined },
+        "model",
+        "gpt-5.6-sol",
+      ),
+    ).toMatchObject({ model: "gpt-5.6-sol", codexFastMode: true });
+  });
 });

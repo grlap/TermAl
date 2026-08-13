@@ -2290,6 +2290,379 @@ async fn state_events_route_streams_orchestrator_creation_state_and_live_orchest
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// Pins `GET /api/sessions/{id}/codex/mcp-servers` to the app-server's
+// paginated `mcpServerStatus/list` contract. The response intentionally keeps
+// only display metadata; input schemas and other raw MCP protocol fields must
+// not leak through this composer-facing endpoint.
+#[test]
+fn codex_mcp_request_timeout_enforces_the_shared_deadline() {
+    let expired_deadline = std::time::Instant::now()
+        .checked_sub(Duration::from_millis(1))
+        .expect("test deadline should be representable");
+    assert!(
+        codex_mcp_request_timeout(expired_deadline).is_err(),
+        "an elapsed overall deadline must reject the next page"
+    );
+
+    let distant_deadline = std::time::Instant::now() + Duration::from_secs(120);
+    let timeout = codex_mcp_request_timeout(distant_deadline)
+        .expect("a future deadline should allow another request");
+    assert!(timeout > Duration::ZERO);
+    assert!(timeout <= CODEX_MCP_STATUS_TIMEOUT);
+}
+
+#[tokio::test]
+async fn codex_mcp_servers_route_paginates_and_sanitizes_status() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-mcp-status");
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+
+    std::thread::spawn(move || {
+        for expected_cursor in [None, Some("page-2")] {
+            let command = input_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("Codex MCP status request should arrive");
+            match command {
+                CodexRuntimeCommand::JsonRpcRequest {
+                    method,
+                    params,
+                    response_tx,
+                    ..
+                } => {
+                    assert_eq!(method, "mcpServerStatus/list");
+                    assert_eq!(params["detail"], "toolsAndAuthOnly");
+                    assert_eq!(params["limit"], 100);
+                    assert_eq!(
+                        params.get("cursor").and_then(Value::as_str),
+                        expected_cursor
+                    );
+                    let result = if expected_cursor.is_none() {
+                        json!({
+                            "data": [{
+                                "name": "zeta",
+                                "authStatus": "oAuth",
+                                "tools": {
+                                    "write": {
+                                        "name": "write",
+                                        "title": "Write",
+                                        "description": "Writes a value",
+                                        "inputSchema": {"type": "object"}
+                                    },
+                                    "read": {
+                                        "name": "read",
+                                        "description": "Reads a value",
+                                        "inputSchema": {"type": "object"}
+                                    }
+                                },
+                                "resources": [{"uri": "secret://not-forwarded"}]
+                            }],
+                            "nextCursor": "page-2"
+                        })
+                    } else {
+                        json!({
+                            "data": [{
+                                "name": "alpha",
+                                "authStatus": "notLoggedIn",
+                                "tools": {}
+                            }],
+                            "nextCursor": null
+                        })
+                    };
+                    let _ = response_tx.send(Ok(result));
+                }
+                _ => panic!("expected shared Codex JSON-RPC request"),
+            }
+        }
+    });
+
+    let app = app_router(state);
+    let (status, response): (StatusCode, CodexMcpServersResponse) = request_json(
+        &app,
+        Request::get(format!("/api/sessions/{session_id}/codex/mcp-servers"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response,
+        CodexMcpServersResponse {
+            servers: vec![
+                CodexMcpServerStatus {
+                    name: "alpha".to_owned(),
+                    auth_status: "notLoggedIn".to_owned(),
+                    tools: Vec::new(),
+                },
+                CodexMcpServerStatus {
+                    name: "zeta".to_owned(),
+                    auth_status: "oAuth".to_owned(),
+                    tools: vec![
+                        CodexMcpToolSummary {
+                            name: "read".to_owned(),
+                            title: None,
+                            description: Some("Reads a value".to_owned()),
+                        },
+                        CodexMcpToolSummary {
+                            name: "write".to_owned(),
+                            title: Some("Write".to_owned()),
+                            description: Some("Writes a value".to_owned()),
+                        },
+                    ],
+                },
+            ],
+        }
+    );
+}
+
+#[tokio::test]
+async fn codex_mcp_servers_route_bounds_unfinished_pagination() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-mcp-limit");
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+
+    std::thread::spawn(move || {
+        for page_index in 0..CODEX_MCP_STATUS_MAX_PAGES {
+            let command = input_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("bounded Codex MCP status request should arrive");
+            match command {
+                CodexRuntimeCommand::JsonRpcRequest {
+                    method,
+                    params,
+                    response_tx,
+                    ..
+                } => {
+                    assert_eq!(method, "mcpServerStatus/list");
+                    let expected_cursor = (page_index > 0).then(|| format!("cursor-{page_index}"));
+                    assert_eq!(
+                        params.get("cursor").and_then(Value::as_str),
+                        expected_cursor.as_deref()
+                    );
+                    let _ = response_tx.send(Ok(json!({
+                        "data": [],
+                        "nextCursor": format!("cursor-{}", page_index + 1)
+                    })));
+                }
+                _ => panic!("expected shared Codex JSON-RPC request"),
+            }
+        }
+    });
+
+    let app = app_router(state);
+    let response = request_response(
+        &app,
+        Request::get(format!("/api/sessions/{session_id}/codex/mcp-servers"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn codex_mcp_servers_route_rejects_a_repeated_pagination_cursor() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, _process) =
+        test_shared_codex_runtime("shared-codex-mcp-repeated-cursor");
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+
+    let server = std::thread::spawn(move || {
+        for expected_cursor in [None, Some("loop")] {
+            let command = input_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("Codex MCP status request should arrive");
+            match command {
+                CodexRuntimeCommand::JsonRpcRequest {
+                    method,
+                    params,
+                    response_tx,
+                    ..
+                } => {
+                    assert_eq!(method, "mcpServerStatus/list");
+                    assert_eq!(
+                        params.get("cursor").and_then(Value::as_str),
+                        expected_cursor
+                    );
+                    let _ = response_tx.send(Ok(json!({
+                        "data": [],
+                        "nextCursor": "loop"
+                    })));
+                }
+                _ => panic!("expected shared Codex JSON-RPC request"),
+            }
+        }
+    });
+
+    let app = app_router(state);
+    let (status, response): (StatusCode, Value) = request_json(
+        &app,
+        Request::get(format!("/api/sessions/{session_id}/codex/mcp-servers"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        response["error"].as_str(),
+        Some("Codex MCP status pagination repeated a cursor")
+    );
+    join_test_server(server);
+}
+
+#[tokio::test]
+async fn codex_mcp_servers_route_proxies_remote_sessions_to_their_owner() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let remote = RemoteConfig {
+        id: "ssh-mcp".to_owned(),
+        name: "SSH MCP".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let remote_session = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.agent == Agent::Codex)
+    .expect("sample remote state should contain a Codex session");
+    let remote_session_id = remote_session.id.clone();
+    let local_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let local_session_id = upsert_remote_proxy_session_record(
+            &mut inner,
+            &remote.id,
+            &remote_session,
+            Some(local_project_id),
+        );
+        state
+            .commit_locked(&mut inner)
+            .expect("remote proxy session should persist");
+        local_session_id
+    };
+
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let requests_for_server = requests.clone();
+    let expected_request_prefix = format!(
+        "GET /api/sessions/{remote_session_id}/codex/mcp-servers "
+    );
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_test_connection(&listener, "remote MCP proxy listener");
+            let request = read_test_http_request(&mut stream);
+            requests_for_server
+                .lock()
+                .expect("requests mutex poisoned")
+                .push(request.request_line.clone());
+
+            if request.request_line.starts_with("GET /api/health ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    r#"{"ok":true}"#,
+                );
+            } else if request.request_line.starts_with(&expected_request_prefix) {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    r#"{"servers":[{"name":"remote-mcp","authStatus":"oAuth","tools":[]}]}"#,
+                );
+            } else {
+                panic!("unexpected request: {}", request.request_line);
+            }
+        }
+    });
+    insert_test_remote_connection(&state, &remote, port);
+
+    let app = app_router(state);
+    let (status, response): (StatusCode, CodexMcpServersResponse) = request_json(
+        &app,
+        Request::get(format!(
+            "/api/sessions/{local_session_id}/codex/mcp-servers"
+        ))
+        .body(Body::empty())
+        .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response,
+        CodexMcpServersResponse {
+            servers: vec![CodexMcpServerStatus {
+                name: "remote-mcp".to_owned(),
+                auth_status: "oAuth".to_owned(),
+                tools: Vec::new(),
+            }],
+        }
+    );
+    let requests = requests.lock().expect("requests mutex poisoned");
+    assert!(
+        requests
+            .iter()
+            .any(|request| request.starts_with(&format!(
+                "GET /api/sessions/{remote_session_id}/codex/mcp-servers "
+            ))),
+        "expected the remote session id in proxied requests, saw {requests:?}"
+    );
+    drop(requests);
+    join_test_server(server);
+}
+
+#[tokio::test]
+async fn codex_mcp_servers_route_rejects_non_codex_sessions() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Gemini);
+    let app = app_router(state);
+
+    let response = request_response(
+        &app,
+        Request::get(format!("/api/sessions/{session_id}/codex/mcp-servers"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
 // Pins `POST /api/sessions/{id}/codex/thread/{archive,unarchive,rollback}`
 // — asserts each action returns 200 OK with a `StateResponse` whose
 // session reflects the new `codex_thread_state`, and that rollback

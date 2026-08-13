@@ -270,6 +270,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | GET | `/api/sessions/{id}/overview` | Fetch one whole-conversation position map -> `SessionOverviewResponse`. `buckets` defaults to 200 and accepts `1..=512`; repeated bucket JSON is gzip-compressed on the wire. |
 | POST | `/api/sessions/{id}/settings` | Update session config |
 | POST | `/api/sessions/{id}/model-options/refresh` | Refresh live model list/options |
+| GET | `/api/sessions/{id}/codex/mcp-servers` | List sanitized Codex MCP server/tool status |
 | POST | `/api/sessions/{id}/codex/thread/fork` | Fork the live Codex thread into a new session |
 | POST | `/api/sessions/{id}/codex/thread/archive` | Archive the live Codex thread |
 | POST | `/api/sessions/{id}/codex/thread/unarchive` | Restore an archived Codex thread |
@@ -305,6 +306,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/codex/requests/{message_id}` | Reply to a generic Codex app-server request |
 | GET | `/api/sessions/{id}/delegations/{delegation_id}` | Read delegation metadata/status -> `DelegationStatusResponse`. This read also refreshes the target child delegation from its linked session, so it can persist terminal status/result data, publish delegation/card SSE deltas, and consume backend waits that watch that delegation. Unknown delegation ids, unknown parent ids, and wrong-parent requests return `404`. |
 | GET | `/api/sessions/{id}/delegations/{delegation_id}/result` | Read a completed delegation result packet -> `DelegationResultResponse`. This read also refreshes the target child delegation from its linked session before deciding whether a result is available, so it can persist terminal status/result data, publish delegation/card SSE deltas, and consume backend waits that watch that delegation. Unknown delegation ids, unknown parent ids, and wrong-parent requests return `404`; unfinished delegations return `409`. |
+| GET | `/api/sessions/{id}/delegations/{delegation_id}/result/output` | Read a bounded UTF-8-safe page of the authoritative final child output. `offsetBytes` defaults to `0`; `limitBytes` defaults to `4096` and is bounded to `256..=8192`. Responses include `nextOffsetBytes`, `totalBytes`, and `complete`, so MCP callers can reconstruct outputs larger than model/tool transport limits without temporary-file side channels. Ownership and terminal-state errors match the compact result endpoint. |
 | POST | `/api/sessions/{id}/delegations/{delegation_id}/cancel` | Cancel a running delegation child session -> `DelegationStatusResponse`; unknown delegation ids, unknown parent ids, and wrong-parent requests return `404`. Terminal delegations are idempotent and return the current status. |
 | POST | `/api/sessions/{id}/delegations/{delegation_id}/followup` | Re-arm a terminal (Completed/Failed) delegation and dispatch another turn to its existing child session -> `DelegationStatusResponse`. A delegation that is still Running, was canceled, or whose child was removed returns `409`; unknown/wrong-parent ids return `404`. Backs the `termal_followup_session` MCP tool. |
 

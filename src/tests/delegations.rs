@@ -1196,6 +1196,84 @@ fn delegation_records_persist_and_reload_with_child_link() {
 }
 
 #[test]
+fn delegation_full_output_pages_survive_restart_via_child_transcript() {
+    let (project_root, persistence_path, templates_path) = temp_delegation_state_paths();
+    let parent_session_id;
+    let delegation_id;
+    let output = format!(
+        "{{\"artifact\":\"{}\",\"unicode\":\"gęślą 🧭\"}}",
+        "durable-result-🙂".repeat(900)
+    );
+    {
+        let state = AppState::new_with_paths(
+            project_root.to_string_lossy().into_owned(),
+            persistence_path.clone(),
+            templates_path.clone(),
+        )
+        .expect("state should boot");
+        install_delegation_codex_runtime(&state, "delegation-output-persist-runtime");
+        parent_session_id = test_session_id(&state, Agent::Codex);
+        let created = state
+            .create_read_only_delegation(
+                &parent_session_id,
+                CreateDelegationRequest {
+                    prompt: "Return a durable artifact.".to_owned(),
+                    title: Some("Durable output".to_owned()),
+                    cwd: None,
+                    agent: Some(Agent::Codex),
+                    model: None,
+                    mode: Some(DelegationMode::Reviewer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                },
+            )
+            .expect("delegation should be created");
+        delegation_id = created.delegation.id.clone();
+        finish_delegation_child_with_assistant_text(
+            &state,
+            &created.delegation.child_session_id,
+            &output,
+        );
+        state
+            .refresh_delegation_for_child_session(&created.delegation.child_session_id)
+            .expect("refresh should persist terminal result");
+        state.shutdown_persist_blocking();
+    }
+
+    let restarted = AppState::new_with_paths(
+        project_root.to_string_lossy().into_owned(),
+        persistence_path.clone(),
+        templates_path.clone(),
+    )
+    .expect("state should reload");
+    let mut reconstructed = String::new();
+    let mut offset = 0;
+    loop {
+        let page = restarted
+            .get_delegation_result_output(
+                &parent_session_id,
+                &delegation_id,
+                offset,
+                DEFAULT_DELEGATION_RESULT_OUTPUT_PAGE_BYTES,
+            )
+            .expect("persisted full-output page should be available");
+        reconstructed.push_str(&page.output);
+        match page.next_offset_bytes {
+            Some(next_offset) => offset = next_offset,
+            None => break,
+        }
+    }
+    assert_eq!(reconstructed, output);
+    restarted.shutdown_persist_blocking();
+
+    let state_root = persistence_path
+        .parent()
+        .expect("persistence path should have a parent")
+        .to_path_buf();
+    let _ = fs::remove_dir_all(project_root);
+    let _ = fs::remove_dir_all(state_root);
+}
+
+#[test]
 fn persisted_delegation_records_repair_missing_child_parent_link_on_reload() {
     let (project_root, persistence_path, templates_path) = temp_delegation_state_paths();
     let delegation_id;
@@ -4213,6 +4291,9 @@ fn delegation_status_poll_consumes_satisfied_wait_for_busy_parent() {
     let resume_prompt = &parent.queued_prompts[0].pending_prompt.text;
     assert!(resume_prompt.contains("Poll fan-in"));
     assert!(resume_prompt.contains("Polling should observe this result."));
+    assert!(resume_prompt.contains("termal_get_session_result"));
+    assert!(resume_prompt.contains("\"outputOffset\":0"));
+    assert!(resume_prompt.contains("nextOffsetBytes"));
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
@@ -4718,6 +4799,88 @@ fn delegation_public_result_summary_is_capped() {
         MAX_DELEGATION_PUBLIC_SUMMARY_CHARS + 3
     );
     assert!(public_summary.ends_with("..."));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn delegation_full_output_pages_reconstruct_large_utf8_child_result() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Return a byte-complete artifact.".to_owned(),
+                title: Some("Large output".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    let output = format!(
+        "{{\"draft\":\"{}\",\"tail\":\"zażółć 🧪\"}}",
+        "0123456789🙂".repeat(1_400)
+    );
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &created.delegation.child_session_id,
+        &output,
+    );
+    state
+        .refresh_delegation_for_child_session(&created.delegation.child_session_id)
+        .expect("refresh should complete");
+
+    let compact = state
+        .get_delegation_result(&parent_session_id, &created.delegation.id)
+        .expect("compact result should be available");
+    assert!(compact.result.summary.len() < output.len());
+    assert!(compact.result.summary.ends_with("..."));
+
+    let mut reconstructed = String::new();
+    let mut offset = 0;
+    loop {
+        let page = state
+            .get_delegation_result_output(
+                &parent_session_id,
+                &created.delegation.id,
+                offset,
+                MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES + 1,
+            )
+            .expect("full-output page should be available");
+        assert_eq!(page.offset_bytes, offset);
+        assert_eq!(page.total_bytes, output.len());
+        assert!(!page.summary_fallback);
+        reconstructed.push_str(&page.output);
+        match page.next_offset_bytes {
+            Some(next_offset) => {
+                assert!(next_offset > offset);
+                assert!(output.is_char_boundary(next_offset));
+                assert!(!page.complete);
+                offset = next_offset;
+            }
+            None => {
+                assert!(page.complete);
+                break;
+            }
+        }
+    }
+    assert_eq!(reconstructed, output);
+
+    let inside_first_emoji = output.find('🙂').expect("fixture should contain emoji") + 1;
+    let err = state
+        .get_delegation_result_output(
+            &parent_session_id,
+            &created.delegation.id,
+            inside_first_emoji,
+            DEFAULT_DELEGATION_RESULT_OUTPUT_PAGE_BYTES,
+        )
+        .expect_err("an offset inside the first emoji must be rejected");
+    assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    assert!(err.message.contains("UTF-8 boundary"));
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }

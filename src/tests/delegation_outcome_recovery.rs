@@ -115,6 +115,93 @@ fn delegation_idle_child_without_result_packet_preserves_final_assistant_output(
 }
 
 #[test]
+fn delegation_followup_plain_output_does_not_reuse_prior_turn_result_packet() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review.".to_owned(),
+                title: Some("Follow-up Result Boundary".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+
+    let parsed = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let child_index = inner
+            .find_session_index(&created.delegation.child_session_id)
+            .expect("child session should exist");
+        let old_result_id = inner.next_message_id();
+        let followup_id = inner.next_message_id();
+        let followup_result_id = inner.next_message_id();
+        let child = inner
+            .session_mut_by_index(child_index)
+            .expect("child session index should be valid");
+        push_message_on_record(
+            child,
+            Message::Text {
+                attachments: Vec::new(),
+                id: old_result_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text:
+                    "## Result\n\nStatus: completed\n\nSummary:\nOld result.\n\nFindings:\n- None"
+                        .to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+        );
+        push_message_on_record(
+            child,
+            Message::Text {
+                attachments: Vec::new(),
+                id: followup_id,
+                timestamp: stamp_now(),
+                author: Author::You,
+                text: "Return the exact missing finding.".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+        );
+        push_message_on_record(
+            child,
+            Message::Text {
+                attachments: Vec::new(),
+                id: followup_result_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "**Findings:**\n- **[Low]** `ui/src/review.test.ts:42` - Missing regression coverage."
+                    .to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+        );
+        latest_assistant_delegation_result(&child.session, true)
+            .expect("latest follow-up output should synthesize")
+    };
+
+    assert_ne!(parsed.summary, "Old result.");
+    assert_eq!(
+        parsed.findings,
+        vec![DelegationFinding {
+            severity: "Low".to_owned(),
+            file: Some("ui/src/review.test.ts".to_owned()),
+            line: Some(42),
+            message: "Missing regression coverage.".to_owned(),
+        }]
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn completed_delegation_repairs_degraded_legacy_result_once_and_refreshes_parent_card() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);

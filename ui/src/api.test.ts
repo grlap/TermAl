@@ -7,6 +7,7 @@ import {
   createOrchestratorInstance,
   deleteConversationMarker,
   fetchConversationMarkers,
+  fetchCodexMcpServers,
   fetchCoordinationBoard,
   deleteWorkspaceLayout,
   fetchDelegationResult,
@@ -28,6 +29,37 @@ import {
   updateTelegramConfig,
   upgradeRemoteTermal,
 } from "./api";
+
+describe("fetchCodexMcpServers", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  it("targets the session-scoped Codex MCP status endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ servers: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchCodexMcpServers("session/a")).resolves.toEqual({ servers: [] });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/session%2Fa/codex/mcp-servers",
+      expect.objectContaining({
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  });
+});
 
 describe("createOrchestratorInstance", () => {
   const originalFetch = globalThis.fetch;

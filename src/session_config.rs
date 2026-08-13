@@ -363,17 +363,11 @@ impl AppState {
                     codex_model_supports_fast(&next_model, &record.session.model_options);
                 let actively_enabling_fast = request.codex_fast_mode == Some(true)
                     && !record.session.codex_fast_mode;
-                let carrying_fast_to_new_model =
-                    request.codex_fast_mode == Some(true) && model_changed;
-                if (actively_enabling_fast || carrying_fast_to_new_model)
-                    && !next_model_supports_fast
-                {
+                if actively_enabling_fast && !next_model_supports_fast {
                     if record.session.model_options.is_empty() {
-                        if actively_enabling_fast {
-                            return Err(ApiError::bad_request(
-                                "refresh models before enabling Fast mode",
-                            ));
-                        }
+                        return Err(ApiError::bad_request(
+                            "refresh models before enabling Fast mode",
+                        ));
                     } else {
                         return Err(ApiError::bad_request(format!(
                             "model `{next_model}` does not advertise Codex Fast mode"
@@ -381,6 +375,15 @@ impl AppState {
                     }
                 }
                 let next_fast_mode = match request.codex_fast_mode {
+                    Some(true) if model_changed && !record.session.model_options.is_empty() => {
+                        // A client may carry a previously enabled Fast value
+                        // with a stale catalog snapshot. The current server
+                        // catalog owns model capability: switch the model and
+                        // safely clear Fast instead of rejecting the whole
+                        // settings request for an authority the user did not
+                        // explicitly change.
+                        next_model_supports_fast
+                    }
                     Some(enabled) => enabled,
                     None if model_changed && !record.session.model_options.is_empty() => {
                         record.session.codex_fast_mode && next_model_supports_fast

@@ -28,25 +28,21 @@ describe("app session settings payload helpers", () => {
 
     expect(buildSessionSettingsPayload(session, "model", " gpt-5.5 ")).toEqual({
       model: "gpt-5.5",
-      codexFastMode: false,
       reasoningEffort: "high",
       sandboxMode: "read-only",
       approvalPolicy: "on-request",
     });
     expect(buildSessionSettingsPayload(session, "sandboxMode", "danger-full-access")).toEqual({
-      codexFastMode: false,
       reasoningEffort: "high",
       sandboxMode: "danger-full-access",
       approvalPolicy: "on-request",
     });
     expect(buildSessionSettingsPayload(session, "approvalPolicy", "never")).toEqual({
-      codexFastMode: false,
       reasoningEffort: "high",
       sandboxMode: "read-only",
       approvalPolicy: "never",
     });
     expect(buildSessionSettingsPayload(session, "reasoningEffort", "medium")).toEqual({
-      codexFastMode: false,
       reasoningEffort: "medium",
       sandboxMode: "read-only",
       approvalPolicy: "on-request",
@@ -62,18 +58,24 @@ describe("app session settings payload helpers", () => {
     });
 
     expect(buildSessionSettingsPayload(session, "claudeApprovalMode", "ask")).toEqual({
-      codexFastMode: false,
       reasoningEffort: "medium",
       sandboxMode: "workspace-write",
       approvalPolicy: "never",
     });
   });
 
-  it("preserves persisted Fast authority while the model catalog is still loading", () => {
+  it("does not replay persisted Fast authority through unrelated or model edits", () => {
     const session = makeSession({ codexFastMode: true, modelOptions: undefined });
-    expect(buildSessionSettingsPayload(session, "sandboxMode", "read-only")).toMatchObject({
-      codexFastMode: true,
+    expect(buildSessionSettingsPayload(session, "sandboxMode", "read-only")).toEqual({
+      reasoningEffort: "medium",
       sandboxMode: "read-only",
+      approvalPolicy: "never",
+    });
+    expect(buildSessionSettingsPayload(session, "model", "gpt-5.6-sol")).toEqual({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      sandboxMode: "workspace-write",
+      approvalPolicy: "never",
     });
   });
 
@@ -96,10 +98,12 @@ describe("app session settings payload helpers", () => {
     expect(buildSessionSettingsPayload(session, "codexFastMode", "on")).toMatchObject({
       codexFastMode: true,
     });
-    expect(buildSessionSettingsPayload(session, "model", "gpt-5.4-mini")).toMatchObject({
-      model: "gpt-5.4-mini",
-      codexFastMode: false,
-    });
+    expect(buildSessionSettingsPayload(session, "model", "gpt-5.4-mini")).not.toHaveProperty(
+      "codexFastMode",
+    );
+    expect(buildSessionSettingsPayload(session, "model", "gpt-5.6-sol")).not.toHaveProperty(
+      "codexFastMode",
+    );
   });
 
   it("builds Cursor settings payloads only for supported fields", () => {

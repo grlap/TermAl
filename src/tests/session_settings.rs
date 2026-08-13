@@ -1724,6 +1724,55 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
         .sync_session_model_options(&created.session_id, None, model_options)
         .expect("Codex model catalog should refresh again");
 
+    let stale_carry = state
+        .update_session_settings(
+            &created.session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: Some("gpt-5.4-mini".to_owned()),
+                approval_policy: None,
+                reasoning_effort: None,
+                codex_fast_mode: Some(true),
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: None,
+                opencode_mode: None,
+            },
+        )
+        .expect("a stale carried Fast value must not reject the model switch");
+    assert!(
+        !stale_carry
+            .sessions
+            .iter()
+            .find(|session| session.id == created.session_id)
+            .expect("Codex session should remain visible")
+            .codex_fast_mode,
+        "the server catalog must clear stale carried Fast authority"
+    );
+
+    state
+        .update_session_settings(
+            &created.session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: Some("gpt-5.5".to_owned()),
+                approval_policy: None,
+                reasoning_effort: None,
+                codex_fast_mode: Some(true),
+                sandbox_mode: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: None,
+                opencode_mode: None,
+            },
+        )
+        .expect("returning to a supporting model should re-enable Fast");
+
     let standard = state
         .update_session_settings(
             &created.session_id,

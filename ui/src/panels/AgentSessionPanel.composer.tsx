@@ -5,6 +5,7 @@
 
 import {
   memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -13,6 +14,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
+  fetchCodexMcpServers,
   resolveAgentCommand,
   type ResolveAgentCommandResponse,
 } from "../api";
@@ -43,6 +45,7 @@ import type {
   PromptHistoryState,
   SessionComposerProps,
 } from "./AgentSessionPanel.types";
+import type { CodexMcpServerStatus } from "../types";
 
 const EMPTY_COMPOSER_ATTACHMENTS: readonly {
   byteSize: number;
@@ -52,6 +55,38 @@ const EMPTY_COMPOSER_ATTACHMENTS: readonly {
   previewUrl: string;
 }[] = [];
 const EMPTY_COMPOSER_PROMPT_HISTORY: readonly string[] = [];
+const EMPTY_CODEX_MCP_SERVERS: readonly CodexMcpServerStatus[] = [];
+type CodexMcpRequestState = {
+  error: string | null;
+  servers: readonly CodexMcpServerStatus[];
+  status: "idle" | "loading" | "loaded" | "error";
+};
+const EMPTY_CODEX_MCP_REQUEST_STATE: CodexMcpRequestState = {
+  error: null,
+  servers: EMPTY_CODEX_MCP_SERVERS,
+  status: "idle",
+};
+
+function formatCodexMcpAuthStatus(status: string): string {
+  switch (status) {
+    case "notLoggedIn":
+      return "Not logged in";
+    case "bearerToken":
+      return "Bearer token";
+    case "oAuth":
+      return "OAuth";
+    case "unsupported":
+      return "Auth unsupported";
+    default:
+      return status || "Auth unknown";
+  }
+}
+
+function formatCodexMcpLoadError(error: unknown): string {
+  return error instanceof Error && error.message.trim()
+    ? error.message
+    : "Failed to load Codex MCP status.";
+}
 
 export const SessionComposer = memo(function SessionComposer({
   paneId,
@@ -96,6 +131,8 @@ export const SessionComposer = memo(function SessionComposer({
   const onDraftCommitRef = useRef(onDraftCommit);
   const requestedSlashModelOptionsRef = useRef<string | null>(null);
   const requestedSlashAgentCommandsRef = useRef<string | null>(null);
+  const codexMcpRequestGenerationRef = useRef<Record<string, number>>({});
+  const codexMcpRequestInFlightRef = useRef<Set<string>>(new Set());
   const slashOptionsRef = useRef<HTMLDivElement | null>(null);
   const composerDelegateButtonRef = useRef<HTMLButtonElement | null>(null);
   const session = useComposerSessionSnapshot(sessionId);
@@ -130,6 +167,8 @@ export const SessionComposer = memo(function SessionComposer({
   const [isDelegationSpawning, setIsDelegationSpawning] = useState(false);
   const [agentCommandResolverError, setAgentCommandResolverError] =
     useState<AgentCommandResolverErrorState | null>(null);
+  const [codexMcpRequestStateBySessionId, setCodexMcpRequestStateBySessionId] =
+    useState<Record<string, CodexMcpRequestState | undefined>>({});
   const isMountedRef = useRef(true);
   const activeSessionIdRef = useRef<string | null>(null);
   const lastComposerDraftSyncPropSessionIdRef = useRef<string | null>(null);
@@ -139,6 +178,8 @@ export const SessionComposer = memo(function SessionComposer({
   // the store snapshot catches up. Callers that need capability/session fields
   // must still check `session`.
   const activeSessionId = session?.id ?? sessionId;
+  const activeCodexMcpSessionId =
+    session?.agent === "Codex" ? session.id : null;
   useLayoutEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
@@ -158,6 +199,10 @@ export const SessionComposer = memo(function SessionComposer({
   const initialComposerDraft = activeSessionId
     ? (localDraftsRef.current[activeSessionId] ?? committedDraft)
     : "";
+  const activeCodexMcpRequestState = activeSessionId
+    ? (codexMcpRequestStateBySessionId[activeSessionId] ??
+      EMPTY_CODEX_MCP_REQUEST_STATE)
+    : EMPTY_CODEX_MCP_REQUEST_STATE;
   const slashPalette = useMemo(
     () =>
       buildSlashPaletteState(
@@ -169,10 +214,16 @@ export const SessionComposer = memo(function SessionComposer({
         hasLoadedAgentCommands,
         isRefreshingAgentCommands,
         agentCommandsError,
+        activeCodexMcpRequestState.servers,
+        activeCodexMcpRequestState.status,
+        activeCodexMcpRequestState.error,
       ),
     [
       agentCommands,
       agentCommandsError,
+      activeCodexMcpRequestState.error,
+      activeCodexMcpRequestState.servers,
+      activeCodexMcpRequestState.status,
       composerDraft,
       hasLoadedAgentCommands,
       isRefreshingAgentCommands,
@@ -184,8 +235,15 @@ export const SessionComposer = memo(function SessionComposer({
   const slashPaletteResetKey = slashPalette.kind === "none" ? "none" : slashPalette.resetKey;
   const slashPaletteSupportsModelRefresh =
     slashPalette.kind === "choice" && slashPalette.supportsLiveRefresh;
+  const slashPaletteRequiresModelRefresh =
+    slashPalette.kind === "choice" && slashPalette.requiresLiveRefresh;
+  const slashModelOptionsRequestKey = session
+    ? `${session.id}:${session.model}`
+    : null;
   const slashPaletteSupportsAgentRefresh =
     slashPalette.kind === "command" && Boolean(slashPalette.supportsRefresh);
+  const slashPaletteSupportsMcpRefresh =
+    slashPalette.kind === "mcp" && slashPalette.supportsRefresh;
   const activeSlashItem =
     slashPalette.kind === "none" || slashPalette.items.length === 0
       ? null
@@ -236,6 +294,82 @@ export const SessionComposer = memo(function SessionComposer({
     }
   }
 
+  const requestCodexMcpServers = useCallback(
+    async (force = false) => {
+      if (!activeCodexMcpSessionId) {
+        return;
+      }
+
+      const requestSessionId = activeCodexMcpSessionId;
+      if (!force && codexMcpRequestInFlightRef.current.has(requestSessionId)) {
+        return;
+      }
+
+      const generation =
+        (codexMcpRequestGenerationRef.current[requestSessionId] ?? 0) + 1;
+      codexMcpRequestGenerationRef.current[requestSessionId] = generation;
+      codexMcpRequestInFlightRef.current.add(requestSessionId);
+      setCodexMcpRequestStateBySessionId((current) => ({
+        ...current,
+        [requestSessionId]: {
+          error: null,
+          servers:
+            current[requestSessionId]?.servers ?? EMPTY_CODEX_MCP_SERVERS,
+          status: "loading",
+        },
+      }));
+
+      try {
+        const response = await fetchCodexMcpServers(requestSessionId);
+        if (
+          !isMountedRef.current ||
+          codexMcpRequestGenerationRef.current[requestSessionId] !== generation
+        ) {
+          return;
+        }
+        // Cache a completed response under the session that requested it even
+        // if another tab became active while the app-server was replying. The
+        // derived palette state is session-keyed, so this cannot leak across
+        // tabs; discarding it would leave the original tab stuck in `loading`
+        // when the user returns. A newer request still wins via `generation`.
+        setCodexMcpRequestStateBySessionId((current) => ({
+          ...current,
+          [requestSessionId]: {
+            error: null,
+            servers: response.servers,
+            status: "loaded",
+          },
+        }));
+      } catch (error) {
+        if (
+          !isMountedRef.current ||
+          codexMcpRequestGenerationRef.current[requestSessionId] !== generation
+        ) {
+          return;
+        }
+        setCodexMcpRequestStateBySessionId((current) => ({
+          ...current,
+          [requestSessionId]: {
+            error: formatCodexMcpLoadError(error),
+            // A manual refresh is an update of known status, not a destructive
+            // cache invalidation. Keep the last good inventory visible beside
+            // the transient error so the user does not lose useful context.
+            servers:
+              current[requestSessionId]?.servers ?? EMPTY_CODEX_MCP_SERVERS,
+            status: "error",
+          },
+        }));
+      } finally {
+        if (
+          codexMcpRequestGenerationRef.current[requestSessionId] === generation
+        ) {
+          codexMcpRequestInFlightRef.current.delete(requestSessionId);
+        }
+      }
+    },
+    [activeCodexMcpSessionId],
+  );
+
   useEffect(() => {
     onDraftCommitRef.current = onDraftCommit;
   }, [onDraftCommit]);
@@ -254,12 +388,18 @@ export const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    if (session.modelOptions?.length) {
-      requestedSlashModelOptionsRef.current = session.id;
+    // `/fast` needs an authoritative entry for the active model, not merely a
+    // non-empty catalog. Record only actual refresh attempts in the dedupe ref:
+    // opening `/model` on an already loaded catalog must neither consume the
+    // `/fast` refresh nor replace its key and make palette toggles refetch.
+    if (session.modelOptions?.length && !slashPaletteRequiresModelRefresh) {
       return;
     }
 
-    if (isRefreshingModelOptions || requestedSlashModelOptionsRef.current === session.id) {
+    if (
+      isRefreshingModelOptions ||
+      requestedSlashModelOptionsRef.current === slashModelOptionsRequestKey
+    ) {
       return;
     }
 
@@ -269,7 +409,26 @@ export const SessionComposer = memo(function SessionComposer({
     onRefreshSessionModelOptions,
     session,
     slashPalette.kind,
+    slashPaletteRequiresModelRefresh,
     slashPaletteSupportsModelRefresh,
+    slashModelOptionsRequestKey,
+  ]);
+
+  useEffect(() => {
+    if (
+      !activeCodexMcpSessionId ||
+      !slashPaletteSupportsMcpRefresh ||
+      activeCodexMcpRequestState.status !== "idle"
+    ) {
+      return;
+    }
+
+    void requestCodexMcpServers();
+  }, [
+    activeCodexMcpSessionId,
+    activeCodexMcpRequestState.status,
+    requestCodexMcpServers,
+    slashPaletteSupportsMcpRefresh,
   ]);
 
   useEffect(() => {
@@ -496,11 +655,14 @@ export const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    if (!force && requestedSlashModelOptionsRef.current === session.id) {
+    if (
+      !force &&
+      requestedSlashModelOptionsRef.current === slashModelOptionsRequestKey
+    ) {
       return;
     }
 
-    requestedSlashModelOptionsRef.current = session.id;
+    requestedSlashModelOptionsRef.current = slashModelOptionsRequestKey;
     void onRefreshSessionModelOptions(session.id);
   }
 
@@ -954,9 +1116,10 @@ export const SessionComposer = memo(function SessionComposer({
   const slashPaletteErrorMessage =
     slashPalette.kind === "none"
       ? null
-      : (agentCommandResolverError?.sessionId === activeSessionId
-          ? agentCommandResolverError.message
-          : (slashPalette.errorMessage ?? null));
+      : slashPalette.kind !== "mcp" &&
+          agentCommandResolverError?.sessionId === activeSessionId
+        ? agentCommandResolverError.message
+        : (slashPalette.errorMessage ?? null);
   const slashPaletteIsRefreshing =
     slashPalette.kind === "none" ? false : Boolean(slashPalette.isRefreshing);
   const slashPaletteRefreshActionLabel =
@@ -966,9 +1129,13 @@ export const SessionComposer = memo(function SessionComposer({
       ? slashPalette.supportsLiveRefresh
       : slashPalette.kind === "command"
         ? Boolean(slashPalette.supportsRefresh)
-        : false;
+        : slashPalette.kind === "mcp"
+          ? slashPalette.supportsRefresh
+          : false;
   const slashPaletteStatusText =
-    slashPalette.kind === "command" ? (slashPalette.statusText ?? null) : null;
+    slashPalette.kind === "command" || slashPalette.kind === "mcp"
+      ? (slashPalette.statusText ?? null)
+      : null;
   const slashPaletteHintId = `composer-slash-hint-${paneId}`;
   const keyboardDelegationHint = "Tab moves focus to Delegate.";
   const slashPaletteHint =
@@ -1097,7 +1264,11 @@ export const SessionComposer = memo(function SessionComposer({
         </p>
       ) : null}
       {session && slashPalette.kind !== "none" ? (
-        <div className="composer-slash-menu" role="listbox" aria-label={slashPalette.title}>
+        <div
+          className="composer-slash-menu"
+          role={slashPalette.kind === "mcp" ? "region" : "listbox"}
+          aria-label={slashPalette.title}
+        >
           <div className="composer-slash-header">
             <strong className="composer-slash-title">{slashPalette.title}</strong>
             <span id={slashPaletteHintId} className="composer-slash-hint">
@@ -1142,6 +1313,8 @@ export const SessionComposer = memo(function SessionComposer({
                   onClick={() => {
                     if (slashPalette.kind === "choice") {
                       requestSlashModelOptions(true);
+                    } else if (slashPalette.kind === "mcp") {
+                      void requestCodexMcpServers(true);
                     } else {
                       requestSlashAgentCommands(true);
                     }
@@ -1149,20 +1322,74 @@ export const SessionComposer = memo(function SessionComposer({
                   disabled={
                     (slashPalette.kind === "choice"
                       ? isRefreshingModelOptions
-                      : isRefreshingAgentCommands) || isUpdating
+                      : slashPalette.kind === "mcp"
+                        ? activeCodexMcpRequestState.status === "loading"
+                        : isRefreshingAgentCommands) || isUpdating
                   }
                 >
                   {slashPaletteIsRefreshing
                     ? "Loading..."
                     : (slashPaletteRefreshActionLabel ??
-                        (slashPalette.kind === "choice"
-                          ? "Refresh live models"
+                      (slashPalette.kind === "choice"
+                        ? "Refresh live models"
+                        : slashPalette.kind === "mcp"
+                          ? "Refresh MCP status"
                           : "Refresh agent commands"))}
                 </button>
               ) : null}
             </div>
           ) : null}
-          {slashPalette.items.length > 0 ? (
+          {slashPalette.kind === "mcp" && slashPalette.servers.length > 0 ? (
+            <div className="composer-mcp-servers" role="list">
+              {slashPalette.servers.map((server) => (
+                <div
+                  className="composer-mcp-server"
+                  key={server.name}
+                  role="listitem"
+                >
+                  <div className="composer-mcp-server-header">
+                    <span className="composer-slash-option-copy">
+                      <span className="composer-slash-option-label">
+                        {server.name}
+                      </span>
+                      <span className="composer-slash-option-detail">
+                        {server.tools.length} tool
+                        {server.tools.length === 1 ? "" : "s"}
+                      </span>
+                    </span>
+                    <span className="composer-slash-option-badge">
+                      {formatCodexMcpAuthStatus(server.authStatus)}
+                    </span>
+                  </div>
+                  {slashPalette.verbose ? (
+                    server.tools.length > 0 ? (
+                      <div className="composer-mcp-tools" role="list">
+                        {server.tools.map((tool) => (
+                          <div
+                            className="composer-mcp-tool"
+                            key={tool.name}
+                            role="listitem"
+                          >
+                            <code>{tool.name}</code>
+                            <span>
+                              {tool.description ??
+                                (tool.title && tool.title !== tool.name
+                                  ? tool.title
+                                  : "No description reported.")}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="composer-mcp-empty-tools">
+                        No tools reported.
+                      </p>
+                    )
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : slashPalette.items.length > 0 ? (
             <div
               ref={slashOptionsRef}
               className={`composer-slash-options modality-${slashNavModality}`}
@@ -1222,7 +1449,9 @@ export const SessionComposer = memo(function SessionComposer({
                 ? " Live options will appear here as soon as they load."
                 : slashPalette.kind === "command" && slashPaletteIsRefreshing
                   ? " Agent commands will appear here as soon as they load."
-                  : null}
+                  : slashPalette.kind === "mcp" && slashPaletteIsRefreshing
+                    ? " MCP servers will appear here as soon as they load."
+                    : null}
             </p>
           )}
         </div>

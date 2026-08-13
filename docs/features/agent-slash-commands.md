@@ -12,6 +12,9 @@ Implemented for discovery and backend-owned execution. `GET
 
 The slash palette shows those commands alongside the existing session-control
 commands, including the catalog-gated Codex `/fast` Standard/Fast selector.
+Codex `/mcp` is also shown there, but it is a dedicated client-side status
+surface backed by `mcpServerStatus/list`, not an agent command and not a prompt
+sent to the model.
 Native Claude commands are sent as slash prompts such as `/review`,
 while markdown templates are resolved through `POST
 /api/sessions/{id}/agent-commands/{name}/resolve`. The frontend passes

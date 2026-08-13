@@ -7,8 +7,12 @@ import {
   claimMessageStackBottomRepinAuthority,
   isFirstAgentOutputForObservedPrompt,
   resolveLatestTurnOutputState,
+  resolveLatestTurnTailSignature,
   resolveNewResponseIndicatorVisibility,
+  resolvePostLiveMessageFollowTransition,
+  resolveSessionBottomFollowPersistedScrollTop,
   resolveSessionBottomFollowScrollTop,
+  resolveSessionBottomFollowWriteScrollTop,
   resolveSessionPageScrollDistance,
   useSessionPaneScrollState,
 } from "./SessionPaneView.scroll";
@@ -118,6 +122,50 @@ describe("session pane historical-window tail state", () => {
     expect(resolveSessionBottomFollowScrollTop(800.5, 800)).toBe(800.5);
   });
 
+  it("never reverses a before-paint bottom snap when shrink geometry is not clamped yet", () => {
+    expect(
+      resolveSessionBottomFollowWriteScrollTop({
+        currentScrollTop: 920,
+        snapBeforePaint: true,
+        targetScrollTop: 880,
+      }),
+    ).toBe(920);
+    expect(
+      resolveSessionBottomFollowWriteScrollTop({
+        currentScrollTop: 800,
+        snapBeforePaint: true,
+        targetScrollTop: 880,
+      }),
+    ).toBe(880);
+  });
+
+  it("persists a smooth bottom-follow destination instead of its pre-animation read", () => {
+    expect(
+      resolveSessionBottomFollowPersistedScrollTop({
+        behavior: "smooth",
+        observedScrollTop: 800,
+        writeScrollTop: 920,
+        wroteScrollTop: true,
+      }),
+    ).toBe(920);
+    expect(
+      resolveSessionBottomFollowPersistedScrollTop({
+        behavior: "auto",
+        observedScrollTop: 910,
+        writeScrollTop: 920,
+        wroteScrollTop: true,
+      }),
+    ).toBe(910);
+    expect(
+      resolveSessionBottomFollowPersistedScrollTop({
+        behavior: "smooth",
+        observedScrollTop: 800,
+        writeScrollTop: 920,
+        wroteScrollTop: false,
+      }),
+    ).toBe(800);
+  });
+
   it("bounds each frame of a large structural addition and still converges", () => {
     const targetScrollTop = 1_800;
     let currentScrollTop = 800;
@@ -185,6 +233,148 @@ describe("session pane historical-window tail state", () => {
         },
       ),
     ).toBe(false);
+  });
+
+  it("carries final-message follow across a status-only live-to-idle commit", () => {
+    const statusOnlyTransition = resolvePostLiveMessageFollowTransition({
+      awaitingPromptMessageId: undefined,
+      currentLiveFlowActive: false,
+      currentPromptMessageId: "prompt-1",
+      latestTurnContentChanged: false,
+      previousLiveFlowActive: true,
+    });
+    expect(statusOnlyTransition).toEqual({
+      awaitingPostLivePromptMessageId: "prompt-1",
+      shouldFollowPostLiveMessage: false,
+    });
+
+    expect(
+      resolvePostLiveMessageFollowTransition({
+        awaitingPromptMessageId:
+          statusOnlyTransition.awaitingPostLivePromptMessageId,
+        currentLiveFlowActive: false,
+        currentPromptMessageId: "prompt-1",
+        latestTurnContentChanged: true,
+        previousLiveFlowActive: false,
+      }),
+    ).toEqual({
+      awaitingPostLivePromptMessageId: undefined,
+      shouldFollowPostLiveMessage: true,
+    });
+  });
+
+  it("consumes a same-commit final message and discards stale state on a new live turn", () => {
+    expect(
+      resolvePostLiveMessageFollowTransition({
+        awaitingPromptMessageId: undefined,
+        currentLiveFlowActive: false,
+        currentPromptMessageId: "prompt-1",
+        latestTurnContentChanged: true,
+        previousLiveFlowActive: true,
+      }),
+    ).toEqual({
+      awaitingPostLivePromptMessageId: undefined,
+      shouldFollowPostLiveMessage: true,
+    });
+    expect(
+      resolvePostLiveMessageFollowTransition({
+        awaitingPromptMessageId: "prompt-1",
+        currentLiveFlowActive: true,
+        currentPromptMessageId: "prompt-1",
+        latestTurnContentChanged: false,
+        previousLiveFlowActive: false,
+      }),
+    ).toEqual({
+      awaitingPostLivePromptMessageId: undefined,
+      shouldFollowPostLiveMessage: false,
+    });
+  });
+
+  it("discards an aborted turn latch when a later prompt changes the turn identity", () => {
+    const abortedTurn = resolvePostLiveMessageFollowTransition({
+      awaitingPromptMessageId: undefined,
+      currentLiveFlowActive: false,
+      currentPromptMessageId: "prompt-1",
+      latestTurnContentChanged: false,
+      previousLiveFlowActive: true,
+    });
+
+    expect(
+      resolvePostLiveMessageFollowTransition({
+        awaitingPromptMessageId: abortedTurn.awaitingPostLivePromptMessageId,
+        currentLiveFlowActive: false,
+        currentPromptMessageId: "prompt-2",
+        latestTurnContentChanged: true,
+        previousLiveFlowActive: false,
+      }),
+    ).toEqual({
+      awaitingPostLivePromptMessageId: undefined,
+      shouldFollowPostLiveMessage: false,
+    });
+  });
+
+  it("keeps the post-live latch across a resident-window trim", () => {
+    const prompt: Message = {
+      id: "prompt-1",
+      type: "text",
+      timestamp: "12:00",
+      author: "you",
+      text: "Prompt",
+    };
+    const progress: Message = {
+      id: "progress-1",
+      type: "text",
+      timestamp: "12:01",
+      author: "assistant",
+      text: "Working",
+    };
+    const beforeTrim = [
+      {
+        ...progress,
+        id: "old-prefix",
+        text: "Old prefix",
+      },
+      prompt,
+      progress,
+    ];
+    const afterTrim = [prompt, progress];
+    expect(resolveLatestTurnTailSignature(afterTrim)).toBe(
+      resolveLatestTurnTailSignature(beforeTrim),
+    );
+
+    const ended = resolvePostLiveMessageFollowTransition({
+      awaitingPromptMessageId: undefined,
+      currentLiveFlowActive: false,
+      currentPromptMessageId: "prompt-1",
+      latestTurnContentChanged: false,
+      previousLiveFlowActive: true,
+    });
+    const trimmed = resolvePostLiveMessageFollowTransition({
+      awaitingPromptMessageId: ended.awaitingPostLivePromptMessageId,
+      currentLiveFlowActive: false,
+      currentPromptMessageId: "prompt-1",
+      latestTurnContentChanged:
+        resolveLatestTurnTailSignature(beforeTrim) !==
+        resolveLatestTurnTailSignature(afterTrim),
+      previousLiveFlowActive: false,
+    });
+    expect(trimmed).toEqual({
+      awaitingPostLivePromptMessageId: "prompt-1",
+      shouldFollowPostLiveMessage: false,
+    });
+
+    expect(
+      resolvePostLiveMessageFollowTransition({
+        awaitingPromptMessageId: trimmed.awaitingPostLivePromptMessageId,
+        currentLiveFlowActive: false,
+        currentPromptMessageId: "prompt-1",
+        latestTurnContentChanged: true,
+        previousLiveFlowActive: false,
+      }),
+    ).toEqual({
+      awaitingPostLivePromptMessageId: undefined,
+      shouldFollowPostLiveMessage: true,
+    });
   });
 
   it("does not re-pin when older history reveals the prompt behind resident output", () => {
@@ -324,11 +514,16 @@ describe("session pane historical-window tail state", () => {
       messageCount: 1,
     };
     const paneShouldStickToBottomRef = { current: { "pane-1": true } };
+    const paneScrollPositions: Record<
+      string,
+      { top: number; shouldStick: boolean }
+    > = {};
     const sharedParams = {
       ...params(activeSession),
       defaultScrollToBottom: true,
       isActive: true,
       isSessionTabActive: true,
+      paneScrollPositions,
       paneShouldStickToBottomRef,
       showWaitingIndicator: true,
     };
@@ -417,10 +612,12 @@ describe("session pane historical-window tail state", () => {
     );
 
     // A streaming-to-settled reparse can make the live card shorter between
-    // the follow loop's rAF and paint. Its urgent request must not be ignored
-    // merely because the smooth loop is already active.
+    // the follow loop's rAF and paint. The urgent request still claims the
+    // virtualizer authority, but it must not issue an explicit upward write
+    // while the browser has not clamped the stale geometry yet.
     scrollHeight = 980;
     scrollTo.mockClear();
+    const scrollTopBeforeShrink = scrollNode.scrollTop;
     let claimedBeforePaintAuthority = false;
     act(() => {
       claimedBeforePaintAuthority = requestMessageStackBottomRepin(scrollNode, {
@@ -428,11 +625,19 @@ describe("session pane historical-window tail state", () => {
       });
     });
     expect(claimedBeforePaintAuthority).toBe(true);
-    expect(scrollNode.scrollTop).toBe(780);
-    expect(scrollTo).toHaveBeenCalledWith({
-      behavior: "auto",
-      top: 780,
-    });
+    expect(scrollNode.scrollTop).toBe(scrollTopBeforeShrink);
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(paneScrollPositions["pane-1:session-history"]?.top).toBe(
+      scrollTopBeforeShrink,
+    );
+    expect(scrollWrites[scrollWrites.length - 1]?.detail.scrollKind).toBe(
+      "bottom_follow",
+    );
+
+    // Real browsers clamp scrollTop to the shorter physical range. The test
+    // geometry is intentionally mutable, so emulate that native clamp before
+    // the next growth commit.
+    scrollNode.scrollTop = 780;
 
     // Once content grows again, the existing loop converges smoothly rather
     // than snapping to the moving bottom.

@@ -117,7 +117,16 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
         .any(delegation_finding_refers_to_prior_sections)
         || delegation_finding_lines_refer_to_prior_sections(&finding_lines);
     findings.retain(|finding| !delegation_finding_refers_to_prior_sections(finding));
-    if !findings_explicitly_empty && (findings.is_empty() || findings_refer_to_prior_sections) {
+    // An explicit empty Findings section is authoritative unless the summary
+    // positively claims one or more findings. This avoids resurrecting stale
+    // preamble prose merely because a clean reviewer used wording outside a
+    // brittle allow-list, while still repairing the observed packet shape
+    // whose summary says that findings exist but whose compact list says None.
+    let contradictory_empty_findings =
+        findings_explicitly_empty && delegation_result_summary_reports_findings(&summary);
+    if (!findings_explicitly_empty || contradictory_empty_findings)
+        && (findings.is_empty() || findings_refer_to_prior_sections)
+    {
         let preamble_findings = parse_delegation_review_findings(preamble);
         if !preamble_findings.is_empty() {
             let mut merged_findings = preamble_findings;
@@ -137,6 +146,92 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
             .filter_map(|line| parse_delegation_note_line(line))
             .collect(),
     })
+}
+
+fn delegation_result_summary_reports_findings(summary: &str) -> bool {
+    let normalized = summary
+        .to_ascii_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>();
+    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+    let finding_nouns = [
+        "bug", "bugs", "defect", "defects", "error", "errors", "failure", "failures", "finding",
+        "findings", "flaw", "flaws", "gap", "gaps", "issue", "issues", "problem", "problems",
+        "race", "races", "regression", "regressions", "risk", "risks",
+    ];
+
+    tokens.iter().enumerate().any(|(index, token)| {
+        if !finding_nouns.contains(token) {
+            return false;
+        }
+
+        let context_start = index.saturating_sub(4);
+        let context_end = (index + 5).min(tokens.len());
+        let before = &tokens[context_start..index];
+        let after = &tokens[index + 1..context_end];
+        if before
+            .iter()
+            .any(|token| matches!(*token, "no" | "not" | "zero" | "without"))
+        {
+            return false;
+        }
+
+        let context = before.iter().chain(after.iter());
+        let reports_resolution = context.clone().any(|token| {
+            matches!(
+                *token,
+                "addressed"
+                    | "closed"
+                    | "corrected"
+                    | "eliminated"
+                    | "fixed"
+                    | "removed"
+                    | "repaired"
+                    | "resolved"
+            )
+        });
+        let reports_unresolved_work = context.clone().any(|token| {
+            matches!(
+                *token,
+                "open"
+                    | "outstanding"
+                    | "persist"
+                    | "persists"
+                    | "remain"
+                    | "remaining"
+                    | "remains"
+                    | "unresolved"
+            )
+        });
+        if reports_resolution && !reports_unresolved_work {
+            return false;
+        }
+
+        before
+            .iter()
+            .chain(after.iter())
+            .any(|token| delegation_result_token_is_positive_count(token))
+            || before.iter().any(|token| {
+                matches!(
+                    *token,
+                    "actionable" | "critical" | "high" | "low" | "medium"
+                )
+            })
+    })
+}
+
+fn delegation_result_token_is_positive_count(token: &str) -> bool {
+    matches!(
+        token,
+        "one" | "two" | "three" | "four" | "five" | "six" | "seven" | "eight" | "nine" | "ten"
+    ) || token.parse::<usize>().is_ok_and(|count| count > 0)
 }
 
 fn synthesize_delegation_result_from_assistant_output(

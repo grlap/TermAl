@@ -4,7 +4,6 @@
 // Split from app-session-actions.ts to keep action orchestration smaller.
 
 import { assertNever } from "./exhaustive";
-import { codexModelSupportsFast } from "./session-model-options";
 import {
   normalizedCodexReasoningEffort,
   normalizedRequestedSessionModel,
@@ -54,12 +53,12 @@ export function buildSessionSettingsPayload(
           : session.model;
       return {
         ...(field === "model" ? { model: nextModel } : {}),
-        codexFastMode:
-          field === "codexFastMode"
-            ? (value as string) === "on"
-            : field === "model" && nextModel !== session.model
-              ? Boolean(session.codexFastMode && codexModelSupportsFast(session, nextModel))
-              : Boolean(session.codexFastMode),
+        // Fast is independent session authority. Only the Fast control should
+        // write it; model changes are reconciled against the server's current
+        // catalog, and unrelated edits must not replay a stale client value.
+        ...(field === "codexFastMode"
+          ? { codexFastMode: (value as string) === "on" }
+          : {}),
         reasoningEffort:
           field === "reasoningEffort"
             ? (value as CodexReasoningEffort)

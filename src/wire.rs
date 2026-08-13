@@ -1196,6 +1196,37 @@ struct DelegationResultResponse {
     server_instance_id: String,
 }
 
+/// Byte-oriented page request for the authoritative final child output.
+/// Offsets returned by the server are always UTF-8 boundaries and can be fed
+/// back verbatim for the next page.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationResultOutputQuery {
+    #[serde(default)]
+    offset_bytes: usize,
+    #[serde(default = "default_delegation_result_output_page_bytes")]
+    limit_bytes: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationResultOutputResponse {
+    revision: u64,
+    delegation_id: String,
+    child_session_id: String,
+    output: String,
+    offset_bytes: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    next_offset_bytes: Option<usize>,
+    total_bytes: usize,
+    complete: bool,
+    /// True only when the child transcript no longer contains an assistant
+    /// candidate and the compact result summary had to be used instead.
+    summary_fallback: bool,
+    #[serde(default)]
+    server_instance_id: String,
+}
+
 /// Request payload for scheduling a parent resume after delegations finish.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1951,6 +1982,37 @@ struct AgentCommand {
 #[serde(rename_all = "camelCase")]
 struct AgentCommandsResponse {
     commands: Vec<AgentCommand>,
+}
+
+/// Sanitized MCP tool metadata returned by Codex's app-server.
+///
+/// The app-server also reports each tool's input schema and opaque metadata,
+/// but the composer only needs human-readable inventory information. Keeping
+/// the public response narrow avoids turning `/mcp` into a raw protocol dump.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexMcpToolSummary {
+    name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+}
+
+/// Sanitized status for one MCP server configured in the Codex app-server.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexMcpServerStatus {
+    name: String,
+    auth_status: String,
+    tools: Vec<CodexMcpToolSummary>,
+}
+
+/// Response payload for the Codex `/mcp` composer command.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexMcpServersResponse {
+    servers: Vec<CodexMcpServerStatus>,
 }
 
 /// Indicates why an agent command is being resolved.

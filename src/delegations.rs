@@ -27,12 +27,18 @@ const MAX_DELEGATION_PUBLIC_SUMMARY_CHARS: usize = 1000;
 const MAX_DELEGATION_RESULT_SUMMARY_CHARS: usize = 8000;
 // Keep parsed reviewer output bounded alongside the summary cap.
 const MAX_DELEGATION_RESULT_FINDINGS: usize = 100;
+// Full child output is intentionally separate from the compact result packet.
+// Keep pages small enough to survive MCP/tool-output limits while allowing a
+// caller to reconstruct arbitrarily large UTF-8 output via nextOffsetBytes.
+const DEFAULT_DELEGATION_RESULT_OUTPUT_PAGE_BYTES: usize = 4 * 1024;
+const MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES: usize = 256;
+const MAX_DELEGATION_RESULT_OUTPUT_PAGE_BYTES: usize = 8 * 1024;
 // Result packets are expected near the end of long assistant output.
 const DELEGATION_RESULT_PACKET_SEARCH_BYTES: usize = 32 * 1024;
 // Persisted terminal results are reparsed once when this version increases.
 // This lets parser upgrades repair old packets without rescanning clean child
 // transcripts on every result/status poll.
-const DELEGATION_RESULT_PARSER_VERSION: u32 = 2;
+const DELEGATION_RESULT_PARSER_VERSION: u32 = 4;
 // Phase 1 starts children immediately but still enforces simple fan-out limits.
 const MAX_RUNNING_DELEGATIONS_PER_PARENT: usize = 4;
 // Keep nesting shallow until delegation ownership/scheduling is explicit.
@@ -43,7 +49,7 @@ const MAX_DELEGATION_WAIT_IDS: usize = 10;
 const MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES: usize = 64 * 1024;
 // Isolated worktrees materialize dirty tracked state through binary patches.
 const MAX_ISOLATED_WORKTREE_PATCH_BYTES: usize = 16 * 1024 * 1024;
-const DELEGATION_WAIT_RESUME_TRUNCATED_MARKER: &str = "\n\n[TermAl truncated this delegation fan-in prompt. Open the child sessions for full results.]";
+const DELEGATION_WAIT_RESUME_TRUNCATED_MARKER: &str = "\n\n[TermAl truncated this compact delegation fan-in prompt. Fetch full child output with `termal_get_session_result` using `outputOffset` and `outputLimit`.]";
 const DELEGATED_CHILD_SESSION_MARKER: &str =
     "You are a delegated child session for TermAl delegation";
 // Shared conflict text for create/cancel races before child dispatch starts.
@@ -882,6 +888,73 @@ impl AppState {
         Ok(DelegationResultResponse {
             revision,
             result,
+            server_instance_id: self.server_instance_id.clone(),
+        })
+    }
+
+    fn get_delegation_result_output(
+        &self,
+        parent_session_id: &str,
+        delegation_id: &str,
+        offset_bytes: usize,
+        limit_bytes: usize,
+    ) -> Result<DelegationResultOutputResponse, ApiError> {
+        validate_delegation_result_output_page(limit_bytes)?;
+
+        // Reuse result polling's lifecycle refresh contract first. This keeps
+        // the output endpoint consistent with `/result`: unfinished children
+        // return 409, while terminal transitions are persisted and published.
+        let result_response = self.get_delegation_result(parent_session_id, delegation_id)?;
+        let (child_session_id, page, total_bytes, summary_fallback) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index =
+                find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
+            let delegation = &inner.delegations[index];
+            if !delegation_is_terminal(delegation.status) || delegation.result.is_none() {
+                return Err(ApiError::conflict(
+                    "delegation result is not available yet",
+                ));
+            }
+            let transcript_output = inner
+                .find_session_index(&delegation.child_session_id)
+                .and_then(|child_index| inner.sessions.get(child_index))
+                .and_then(|child| {
+                    delegation_child_authoritative_output(
+                        &child.session,
+                        delegation.status,
+                    )
+                });
+            let (output, summary_fallback) = match transcript_output {
+                Some(output) => (output, false),
+                None => (
+                    delegation
+                        .result
+                        .as_ref()
+                        .expect("terminal delegation result checked above")
+                        .summary
+                        .as_str(),
+                    true,
+                ),
+            };
+            let page = delegation_result_output_page(output, offset_bytes, limit_bytes)?;
+            (
+                delegation.child_session_id.clone(),
+                page,
+                output.len(),
+                summary_fallback,
+            )
+        };
+
+        Ok(DelegationResultOutputResponse {
+            revision: result_response.revision,
+            delegation_id: delegation_id.to_owned(),
+            child_session_id,
+            output: page.output,
+            offset_bytes,
+            next_offset_bytes: page.next_offset_bytes,
+            total_bytes,
+            complete: page.next_offset_bytes.is_none(),
+            summary_fallback,
             server_instance_id: self.server_instance_id.clone(),
         })
     }
@@ -2242,11 +2315,12 @@ fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
     };
 
     format!(
-        "### {} (`{}`)\n\nStatus: {}\nChild session: `{}`\n\nSummary:\n{}\n\nFindings:\n{}\n\nChanged files:\n{}\n\nCommands run:\n{}\n\nNotes:\n{}",
+        "### {} (`{}`)\n\nStatus: {}\nChild session: `{}`\nFull output: call `termal_get_session_result` with `{{\"delegationId\":\"{}\",\"outputOffset\":0,\"outputLimit\":4096}}`; use each `nextOffsetBytes` value as the next `outputOffset` until `complete` is true.\n\nSummary:\n{}\n\nFindings:\n{}\n\nChanged files:\n{}\n\nCommands run:\n{}\n\nNotes:\n{}",
         delegation.title,
         delegation.id,
         delegation_status_label(delegation.status),
         delegation.child_session_id,
+        delegation.id,
         summary,
         findings,
         changed_files,
@@ -3675,6 +3749,13 @@ fn latest_assistant_delegation_result(
     // packet.
     let mut latest_assistant_output = None;
     for message in session.messages.iter().rev() {
+        // A resumed delegation keeps its transcript. Never let a new follow-up
+        // turn fall back to an older turn's valid packet: if the current turn
+        // produced plain output, synthesize that output after reaching its
+        // user-prompt boundary instead.
+        if message.user_prompt_text().is_some() {
+            break;
+        }
         let Some(text) = assistant_delegation_result_candidate_text(message) else {
             continue;
         };
@@ -3699,6 +3780,9 @@ fn latest_assistant_message_delegation_result(session: &Session) -> Option<Parse
     // latest assistant candidate: if that latest candidate is non-result text,
     // any earlier result packet is stale relative to the terminal error.
     for message in session.messages.iter().rev() {
+        if message.user_prompt_text().is_some() {
+            break;
+        }
         let Some(text) = assistant_delegation_result_candidate_text(message) else {
             continue;
         };
@@ -3708,31 +3792,119 @@ fn latest_assistant_message_delegation_result(session: &Session) -> Option<Parse
 }
 
 fn assistant_delegation_result_candidate_text(message: &Message) -> Option<String> {
+    assistant_delegation_result_candidate_raw_text(message).and_then(non_empty_trimmed)
+}
+
+fn assistant_delegation_result_candidate_raw_text(message: &Message) -> Option<&str> {
     match message {
         Message::Text {
             author: Author::Assistant,
             text,
             ..
-        } => non_empty_trimmed(text),
+        } => Some(text.as_str()),
         Message::Markdown {
             author: Author::Assistant,
             markdown,
             title,
             ..
-        } => non_empty_trimmed(markdown).or_else(|| non_empty_trimmed(title)),
+        } => (!markdown.trim().is_empty())
+            .then_some(markdown.as_str())
+            .or_else(|| (!title.trim().is_empty()).then_some(title.as_str())),
         Message::SubagentResult {
             author: Author::Assistant,
             summary,
             title,
             ..
-        } => non_empty_trimmed(summary).or_else(|| non_empty_trimmed(title)),
+        } => (!summary.trim().is_empty())
+            .then_some(summary.as_str())
+            .or_else(|| (!title.trim().is_empty()).then_some(title.as_str())),
         Message::Diff {
             author: Author::Assistant,
             summary,
             ..
-        } => non_empty_trimmed(summary),
+        } => Some(summary.as_str()),
         _ => None,
     }
+    .filter(|value| !value.trim().is_empty())
+}
+
+/// Returns the same current-turn assistant candidate that owns the compact
+/// delegation result, but without the result-summary truncation. Failed and
+/// canceled children use only their latest candidate so an older successful
+/// packet cannot mask newer terminal output.
+fn delegation_child_authoritative_output(
+    session: &Session,
+    status: DelegationStatus,
+) -> Option<&str> {
+    let mut latest_assistant_output = None;
+    for message in session.messages.iter().rev() {
+        if message.user_prompt_text().is_some() {
+            break;
+        }
+        let Some(raw_text) = assistant_delegation_result_candidate_raw_text(message) else {
+            continue;
+        };
+        if latest_assistant_output.is_none() {
+            latest_assistant_output = Some(raw_text);
+            if matches!(status, DelegationStatus::Failed | DelegationStatus::Canceled) {
+                break;
+            }
+        }
+        if parse_delegation_result_packet(raw_text).is_some() {
+            return Some(raw_text);
+        }
+    }
+    latest_assistant_output
+}
+
+fn default_delegation_result_output_page_bytes() -> usize {
+    DEFAULT_DELEGATION_RESULT_OUTPUT_PAGE_BYTES
+}
+
+struct DelegationResultOutputPage {
+    output: String,
+    next_offset_bytes: Option<usize>,
+}
+
+fn validate_delegation_result_output_page(limit_bytes: usize) -> Result<(), ApiError> {
+    if limit_bytes < MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES {
+        return Err(ApiError::bad_request(format!(
+            "delegation result output limitBytes must be at least {MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES}"
+        )));
+    }
+    if limit_bytes > MAX_DELEGATION_RESULT_OUTPUT_PAGE_BYTES {
+        return Err(ApiError::bad_request(format!(
+            "delegation result output limitBytes must be at most {MAX_DELEGATION_RESULT_OUTPUT_PAGE_BYTES}"
+        )));
+    }
+    Ok(())
+}
+
+fn delegation_result_output_page(
+    output: &str,
+    offset_bytes: usize,
+    limit_bytes: usize,
+) -> Result<DelegationResultOutputPage, ApiError> {
+    if offset_bytes > output.len() {
+        return Err(ApiError::bad_request(format!(
+            "delegation result output offsetBytes must be at most {}",
+            output.len()
+        )));
+    }
+    if !output.is_char_boundary(offset_bytes) {
+        return Err(ApiError::bad_request(
+            "delegation result output offsetBytes must be a UTF-8 boundary",
+        ));
+    }
+    let mut end = offset_bytes.saturating_add(limit_bytes).min(output.len());
+    while end > offset_bytes && !output.is_char_boundary(end) {
+        end -= 1;
+    }
+    let next_offset_bytes = (end < output.len()).then_some(end);
+    Ok(DelegationResultOutputPage {
+        output: output[offset_bytes..end].to_owned(),
+        next_offset_bytes,
+    })
 }
 
 

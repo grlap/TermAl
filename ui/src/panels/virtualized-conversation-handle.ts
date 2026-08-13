@@ -15,8 +15,8 @@ import {
   clampVirtualizedViewportScrollTop,
 } from "./conversation-virtualization";
 import {
-  VIRTUALIZED_MESSAGES_PER_PAGE,
   estimateMessageOffsetWithinPage,
+  findPageIndexContainingMessage,
   findMountedMessageSlotById,
   type MessageLocation,
   type MessagePage,
@@ -160,13 +160,17 @@ export function useVirtualizedConversationHandle({
             ? slotRect.height
             : estimateMessageHeight(location.message);
       } else {
+        const estimatedOffsetWithinPage = estimateMessageOffsetWithinPage(
+          page,
+          location.pageLocalIndex,
+          estimateMessageHeight,
+        );
+        if (estimatedOffsetWithinPage === null) {
+          return null;
+        }
         messageTop =
           (pageLayout.tops[location.pageIndex] ?? 0) +
-          estimateMessageOffsetWithinPage(
-            page,
-            location.pageLocalIndex,
-            estimateMessageHeight,
-          );
+          estimatedOffsetWithinPage;
         messageHeight = estimateMessageHeight(location.message);
       }
 
@@ -402,9 +406,9 @@ export function useVirtualizedConversationHandle({
           return false;
         }
 
-        const pageIndex = Math.floor(messageIndex / VIRTUALIZED_MESSAGES_PER_PAGE);
+        const pageIndex = findPageIndexContainingMessage(pages, messageIndex);
         const page = pages[pageIndex];
-        if (!page || messageIndex < page.startIndex || messageIndex >= page.endIndex) {
+        if (!page) {
           return false;
         }
 

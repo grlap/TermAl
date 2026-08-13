@@ -929,6 +929,27 @@ async fn get_delegation_result(
     Ok(Json(response))
 }
 
+/// Gets one bounded UTF-8-safe page of the authoritative final child output.
+async fn get_delegation_result_output(
+    AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
+    State(state): State<AppState>,
+    query: Result<Query<DelegationResultOutputQuery>, QueryRejection>,
+) -> Result<Json<DelegationResultOutputResponse>, ApiError> {
+    let Query(query) = query.map_err(|rejection| {
+        api_query_rejection("delegation result output query", rejection)
+    })?;
+    let response = run_blocking_api(move || {
+        state.get_delegation_result_output(
+            &parent_session_id,
+            &delegation_id,
+            query.offset_bytes,
+            query.limit_bytes,
+        )
+    })
+    .await?;
+    Ok(Json(response))
+}
+
 /// Cancels a running delegation child session.
 async fn cancel_delegation(
     AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
@@ -1118,6 +1139,16 @@ async fn refresh_session_model_options(
 ) -> Result<Json<StateResponse>, ApiError> {
     let response =
         run_blocking_api(move || state.refresh_session_model_options(&session_id)).await?;
+    Ok(Json(response))
+}
+
+/// Lists the MCP servers visible to the owning Codex app-server.
+async fn list_codex_mcp_servers(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<CodexMcpServersResponse>, ApiError> {
+    let response =
+        run_blocking_api(move || state.list_codex_mcp_servers(&session_id)).await?;
     Ok(Json(response))
 }
 

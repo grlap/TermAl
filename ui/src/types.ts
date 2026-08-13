@@ -368,6 +368,18 @@ export type SessionLiveActivity = {
 
 export type CodexThreadState = "active" | "archived";
 
+export type CodexMcpToolSummary = {
+  name: string;
+  title?: string | null;
+  description?: string | null;
+};
+
+export type CodexMcpServerStatus = {
+  name: string;
+  authStatus: string;
+  tools: CodexMcpToolSummary[];
+};
+
 export type DelegationMode = "reviewer" | "explorer" | "worker";
 export type DelegationStatus =
   | "queued"

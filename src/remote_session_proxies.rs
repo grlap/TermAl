@@ -33,7 +33,8 @@
 //   `proxy_remote_submit_codex_app_request` — forward the three
 //   Codex-specific answer-back submission paths.
 // - `proxy_remote_list_agent_commands` /
-//   `proxy_remote_search_instructions` — the two read-side
+//   `proxy_remote_list_codex_mcp_servers` /
+//   `proxy_remote_search_instructions` — the read-side
 //   proxies that don't mutate remote state (pure GETs, no
 //   sync_remote_state_for_target call).
 
@@ -329,6 +330,25 @@ impl AppState {
             Method::GET,
             &format!(
                 "/api/sessions/{}/agent-commands",
+                encode_uri_component(&target.remote_session_id)
+            ),
+            &[],
+            None,
+        )
+    }
+
+    fn proxy_remote_list_codex_mcp_servers(
+        &self,
+        session_id: &str,
+    ) -> Result<CodexMcpServersResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        self.remote_registry.request_json(
+            &target.remote,
+            Method::GET,
+            &format!(
+                "/api/sessions/{}/codex/mcp-servers",
                 encode_uri_component(&target.remote_session_id)
             ),
             &[],

@@ -14,7 +14,8 @@
 //     palette state, including the "no session or no leading slash"
 //     fast path, the empty-query session-command + agent-command
 //     listing, and the per-command choice tabs (`/model`, `/mode`,
-//     `/sandbox`, `/approvals`, `/effort`, `/fast`).
+//     `/sandbox`, `/approvals`, `/effort`, `/fast`) plus the read-only
+//     Codex MCP inventory (`/mcp [verbose]`).
 //   - Per-agent choice builders (`sessionModeSlashState`,
 //     `codexSandboxSlashState`, `codexApprovalSlashState`,
 //     `codexReasoningEffortSlashState`, `claudeEffortSlashState`,
@@ -41,7 +42,7 @@
 // directly from here.
 
 import {
-  codexFastServiceTier,
+  codexFastCapability,
   matchingSessionModelOption,
 } from "../session-model-options";
 import type { SessionSummarySnapshot } from "../session-store";
@@ -49,6 +50,7 @@ import type {
   AgentCommand,
   ApprovalPolicy,
   ClaudeEffortLevel,
+  CodexMcpServerStatus,
   CodexReasoningEffort,
   SandboxMode,
   Session,
@@ -139,7 +141,8 @@ export type SlashCommandId =
   | "sandbox"
   | "approvals"
   | "effort"
-  | "fast";
+  | "fast"
+  | "mcp";
 
 export const SLASH_COMMANDS: ReadonlyArray<{
   command: string;
@@ -188,6 +191,13 @@ export const SLASH_COMMANDS: ReadonlyArray<{
     detail: "Toggle Codex Fast mode (1.5x speed, increased usage)",
     id: "fast",
     label: "/fast",
+    supports: ["Codex"],
+  },
+  {
+    command: "/mcp",
+    detail: "Inspect Codex MCP servers, authentication, and tools",
+    id: "mcp",
+    label: "/mcp",
     supports: ["Codex"],
   },
 ] as const;
@@ -253,7 +263,24 @@ export type SlashPaletteState =
       hint: string;
       isRefreshing: boolean;
       items: readonly SlashPaletteItem[];
+      kind: "mcp";
+      refreshActionLabel?: string;
+      resetKey: string;
+      servers: readonly CodexMcpServerStatus[];
+      statusText?: string;
+      supportsRefresh: boolean;
+      title: string;
+      verbose: boolean;
+    }
+  | {
+      defaultActiveIndex: number;
+      emptyMessage: string;
+      errorMessage?: string | null;
+      hint: string;
+      isRefreshing: boolean;
+      items: readonly SlashPaletteItem[];
       kind: "choice";
+      requiresLiveRefresh: boolean;
       refreshActionLabel?: string;
       resetKey: string;
       supportsLiveRefresh: boolean;
@@ -272,10 +299,13 @@ export type SlashChoiceState = {
   hint: string;
   isRefreshing?: boolean;
   items: SlashPaletteItem[];
+  requiresLiveRefresh?: boolean;
   refreshActionLabel?: string;
   supportsLiveRefresh?: boolean;
   title: string;
 };
+
+export type CodexMcpLoadStatus = "idle" | "loading" | "loaded" | "error";
 
 export function formatSessionModelLabel(model: string): string {
   if (model === "auto") {
@@ -422,13 +452,10 @@ export function sessionModelChoiceDetail(
 }
 
 export function slashCommandsForSession(session: SlashPaletteSession) {
-  return SLASH_COMMANDS.filter(
-    (command) =>
-      command.supports.includes(session.agent) &&
-      (command.id !== "fast" ||
-        codexFastServiceTier(session) !== null ||
-        Boolean(session.codexFastMode)),
-  );
+  // Command discovery must not confuse an unloaded capability catalog with an
+  // authoritative "unsupported" result. `/fast` opens a live catalog refresh
+  // and explains the result; it does not disappear while support is unknown.
+  return SLASH_COMMANDS.filter((command) => command.supports.includes(session.agent));
 }
 
 export function supportsAgentSlashCommands(_session: SlashPaletteSession): boolean {
@@ -699,30 +726,134 @@ export function codexReasoningEffortSlashState(session: SlashPaletteSession, que
 export function codexFastSlashState(
   session: SlashPaletteSession,
   query: string,
+  isRefreshingModelOptions = false,
+  modelOptionsError: string | null = null,
 ): SlashChoiceState {
-  const fastTier = codexFastServiceTier(session);
-  const choices: SlashChoiceDefinition[] = [
-    {
-      detail: "Use the standard Codex service tier",
-      label: "Standard",
-      value: "off",
-    },
-    {
-      detail: fastTier?.description ?? "1.5x speed, increased usage",
-      label: fastTier?.label ?? "Fast",
-      value: "on",
-    },
-  ];
+  const capability = codexFastCapability(session);
+  const fastTier = capability.status === "supported" ? capability.tier : null;
+  const standardChoice: SlashChoiceDefinition = {
+    detail: "Use the standard Codex service tier",
+    label: "Standard",
+    value: "off",
+  };
+  const fastChoice: SlashChoiceDefinition = {
+    detail: fastTier?.description ?? "1.5x speed, increased usage",
+    label: fastTier?.label ?? "Fast",
+    value: "on",
+  };
+  const choices: SlashChoiceDefinition[] =
+    capability.status === "supported"
+      ? [standardChoice, fastChoice]
+      : session.codexFastMode
+        ? capability.status === "unknown"
+          ? [standardChoice, fastChoice]
+          : [standardChoice]
+        : [];
+  const hasSettledUnknownCapability =
+    capability.status === "unknown" &&
+    session.modelOptions !== undefined &&
+    !isRefreshingModelOptions &&
+    !modelOptionsError;
+  const items = makeSlashChoices(
+    choices,
+    "codexFastMode",
+    session.codexFastMode ? "on" : "off",
+    query,
+  );
+  const hasQueryMismatch =
+    query.length > 0 && choices.length > 0 && items.length === 0;
+  const emptyMessage = hasQueryMismatch
+    ? `No Codex speed options match "${query}".`
+    : capability.status === "unknown"
+      ? isRefreshingModelOptions
+        ? `Loading Fast availability for ${session.model}.`
+        : modelOptionsError
+          ? `Fast availability for ${session.model} could not be loaded.`
+          : hasSettledUnknownCapability
+            ? `Codex did not report Fast availability for ${session.model}.`
+            : `Fast availability for ${session.model} has not loaded yet.`
+      : capability.status === "unsupported"
+        ? `Fast mode is not available for ${session.model}.`
+        : `No Codex speed options match "${query}".`;
+  const hint =
+    capability.status === "unknown"
+      ? isRefreshingModelOptions
+        ? "Waiting for Codex's live model catalog."
+        : "Refresh the live model catalog to check Fast support."
+      : capability.status === "unsupported"
+        ? "The active Codex model catalog does not advertise Fast mode."
+        : "Enter to choose Standard or Fast for this Codex session.";
   return {
-    emptyMessage: `No Codex speed options match "${query}".`,
-    hint: "Enter to choose Standard or Fast for this Codex session.",
-    items: makeSlashChoices(
-      choices,
-      "codexFastMode",
-      session.codexFastMode ? "on" : "off",
-      query,
-    ),
+    emptyMessage,
+    errorMessage: capability.status === "unknown" ? modelOptionsError : null,
+    hint,
+    isRefreshing: capability.status === "unknown" && isRefreshingModelOptions,
+    items,
+    requiresLiveRefresh: capability.status === "unknown",
+    refreshActionLabel: modelOptionsError || hasSettledUnknownCapability
+      ? "Retry live models"
+      : "Refresh live models",
+    supportsLiveRefresh: true,
     title: "Codex response speed",
+  };
+}
+
+export function codexMcpSlashState(
+  session: SlashPaletteSession,
+  rawQuery: string,
+  servers: readonly CodexMcpServerStatus[],
+  loadStatus: CodexMcpLoadStatus,
+  loadError: string | null,
+): Extract<SlashPaletteState, { kind: "mcp" }> {
+  const normalizedQuery = rawQuery.trim().toLowerCase();
+  const verbose = normalizedQuery === "verbose";
+  const hasValidQuery = normalizedQuery.length === 0 || verbose;
+  const isRefreshing = hasValidQuery && loadStatus === "loading";
+  const hasLoaded = hasValidQuery && loadStatus === "loaded";
+  const statusText = !hasValidQuery
+    ? undefined
+    : isRefreshing
+      ? "Loading Codex MCP servers..."
+      : hasLoaded
+        ? `${servers.length} MCP server${servers.length === 1 ? "" : "s"} configured.`
+        : loadStatus === "idle"
+          ? "Load MCP status from the active Codex app-server."
+          : undefined;
+
+  return {
+    defaultActiveIndex: 0,
+    emptyMessage: !hasValidQuery
+      ? "Usage: /mcp [verbose]"
+      : isRefreshing
+        ? "Codex MCP servers will appear here when loading completes."
+        : hasLoaded
+          ? "No MCP servers are configured in Codex."
+          : loadStatus === "error"
+            ? "Codex MCP status could not be loaded."
+            : "Open /mcp to load the configured MCP servers.",
+    errorMessage: hasValidQuery ? loadError : null,
+    hint: !hasValidQuery
+      ? "Use /mcp or /mcp verbose."
+      : verbose
+        ? "Detailed view includes every tool name and description. Esc clears the command line."
+        : "Use /mcp verbose to inspect individual tools. Esc clears the command line.",
+    isRefreshing,
+    items: [],
+    kind: "mcp",
+    refreshActionLabel:
+      loadStatus === "error"
+        ? "Retry MCP status"
+        : hasLoaded
+          ? "Refresh MCP status"
+          : "Load MCP status",
+    resetKey: `mcp:${session.id}:${normalizedQuery}:${loadStatus}:${servers
+      .map((server) => `${server.name}:${server.authStatus}:${server.tools.length}`)
+      .join("|")}:${loadError ?? ""}`,
+    servers: hasValidQuery ? servers : [],
+    statusText,
+    supportsRefresh: hasValidQuery,
+    title: verbose ? "Codex MCP servers — verbose" : "Codex MCP servers",
+    verbose,
   };
 }
 
@@ -840,6 +971,9 @@ export function buildSlashPaletteState(
   hasLoadedAgentCommands: boolean,
   isRefreshingAgentCommands: boolean,
   agentCommandsError: string | null,
+  codexMcpServers: readonly CodexMcpServerStatus[],
+  codexMcpLoadStatus: CodexMcpLoadStatus,
+  codexMcpError: string | null,
 ): SlashPaletteState {
   if (!session || !draft.startsWith("/")) {
     return { kind: "none" };
@@ -927,6 +1061,26 @@ export function buildSlashPaletteState(
     };
   }
 
+  if (activeCommand.id === "mcp") {
+    return session.agent === "Codex"
+      ? codexMcpSlashState(
+          session,
+          rawOptionQuery,
+          codexMcpServers,
+          codexMcpLoadStatus,
+          codexMcpError,
+        )
+      : {
+          defaultActiveIndex: 0,
+          emptyMessage: "/mcp is only available for Codex sessions.",
+          hint: "Choose a different slash command for this session.",
+          items: [],
+          kind: "command",
+          resetKey: `command:${commandQuery}`,
+          title: "Slash commands",
+        };
+  }
+
   const choiceState =
     activeCommand.id === "model"
       ? sessionModelSlashState(
@@ -956,7 +1110,12 @@ export function buildSlashPaletteState(
                     : null
               : activeCommand.id === "fast"
                 ? session.agent === "Codex"
-                  ? codexFastSlashState(session, rawOptionQuery)
+                  ? codexFastSlashState(
+                      session,
+                      rawOptionQuery,
+                      isRefreshingModelOptions,
+                      modelOptionsError,
+                    )
                   : null
                 : null;
 
@@ -989,6 +1148,7 @@ export function buildSlashPaletteState(
     isRefreshing: choiceState.isRefreshing ?? false,
     items: choiceState.items,
     kind: "choice",
+    requiresLiveRefresh: choiceState.requiresLiveRefresh ?? false,
     refreshActionLabel: choiceState.refreshActionLabel,
     resetKey: `${activeCommand.id}:${session.id}:${optionQuery}:${currentChoiceKeys}:${choiceState.items.map((item) => item.key).join("|")}:${choiceState.errorMessage ?? ""}:${choiceState.isRefreshing ? "loading" : "ready"}`,
     supportsLiveRefresh: choiceState.supportsLiveRefresh ?? false,

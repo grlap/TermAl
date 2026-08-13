@@ -9,6 +9,7 @@ import type {
   BoardListPage,
   ClaudeApprovalMode,
   ClaudeEffortLevel,
+  CodexMcpServerStatus,
   CodexReasoningEffort,
   CodexState,
   ConversationMarker,
@@ -495,6 +496,10 @@ type CreateProjectRequest = {
 
 export type AgentCommandsResponse = {
   commands: AgentCommand[];
+};
+
+export type CodexMcpServersResponse = {
+  servers: CodexMcpServerStatus[];
 };
 
 export type ResolveAgentCommandIntent = "send" | "delegate";
@@ -1245,6 +1250,12 @@ export function rollbackCodexThread(sessionId: string, numTurns: number) {
 export function fetchAgentCommands(sessionId: string) {
   return request<AgentCommandsResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/agent-commands`,
+  );
+}
+
+export function fetchCodexMcpServers(sessionId: string) {
+  return request<CodexMcpServersResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/codex/mcp-servers`,
   );
 }
 

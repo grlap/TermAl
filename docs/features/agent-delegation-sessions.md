@@ -224,6 +224,15 @@ When a child finishes, TermAl records a compact result packet:
 }
 ```
 
+The compact packet is deliberately bounded because it is copied into broad
+state, SSE, and fan-in prompts. It is not the transport for byte-complete child
+artifacts. The authoritative final assistant output remains in the persisted
+child transcript and is available in UTF-8-safe pages from
+`GET .../result/output`. MCP callers use the same
+`termal_get_session_result` tool with `outputOffset` and `outputLimit`, then
+repeat with `nextOffsetBytes` until `complete` is true. This keeps every tool
+response bounded without requiring children to write ad hoc temporary files.
+
 The packet is a summary for resumption, not a replacement for the child
 transcript. Command status labels use the backend vocabulary: `running`,
 `success`, or `error`.
@@ -277,7 +286,8 @@ prompt contract. Later, TermAl can add a native structured result message type.
 The parent can consume the result in one of three ways:
 - human opens the card and reads it
 - human inserts the result packet into the composer
-- agent calls `get_delegation_result` and chooses how to continue
+- agent calls `get_delegation_result` for the compact packet, or pages the full
+  output when exact bytes matter, and chooses how to continue
 
 Automatic parent prompting is opt-in through a delegation wait. A wait records a
 parent session, one or more delegation ids, and a fan-in mode:
@@ -709,6 +719,7 @@ termal_spawn_session(request) -> SpawnDelegationCommandResult
 termal_list_delegations() -> DelegationListResponse
 termal_get_session_status({ delegationId }) -> DelegationStatusCommandResult
 termal_get_session_result({ delegationId }) -> DelegationResultPacket
+termal_get_session_result({ delegationId, outputOffset, outputLimit? }) -> DelegationResultOutputPage
 termal_cancel_session({ delegationId }) -> DelegationStatusCommandResult
 termal_wait_delegations({ delegationIds, pollIntervalMs?, timeoutMs? }) -> WaitDelegationsResult
 termal_resume_after_delegations({ delegationIds, mode?, title? }) -> DelegationWaitResponse
@@ -865,6 +876,7 @@ Implementation order:
 POST /api/sessions/{parentSessionId}/delegations
 GET  /api/sessions/{parentSessionId}/delegations/{delegationId}
 GET  /api/sessions/{parentSessionId}/delegations/{delegationId}/result
+GET  /api/sessions/{parentSessionId}/delegations/{delegationId}/result/output?offsetBytes=0&limitBytes=4096
 POST /api/sessions/{parentSessionId}/delegations/{delegationId}/cancel
 POST /api/sessions/{parentSessionId}/delegations/{delegationId}/followup
 POST /api/sessions/{parentSessionId}/delegation-waits

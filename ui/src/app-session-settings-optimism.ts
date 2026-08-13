@@ -6,7 +6,7 @@ import {
   normalizedCodexReasoningEffort,
   normalizedRequestedSessionModel,
 } from "./session-model-utils";
-import { codexModelSupportsFast } from "./session-model-options";
+import { codexFastModeAfterModelChange } from "./session-model-options";
 import type {
   AgentType,
   ApprovalPolicy,
@@ -42,7 +42,7 @@ export function buildOptimisticSessionSettingsUpdate(
         field === "codexFastMode"
           ? (value as string) === "on"
           : field === "model" && nextModel !== session.model
-            ? Boolean(session.codexFastMode && codexModelSupportsFast(session, nextModel))
+            ? codexFastModeAfterModelChange(session, nextModel)
             : Boolean(session.codexFastMode);
       const nextSandboxMode =
         field === "sandboxMode" ? (value as SandboxMode) : session.sandboxMode;

@@ -112,6 +112,32 @@ export function buildMessagePages(
   return pages;
 }
 
+export function findPageIndexContainingMessage(
+  pages: readonly MessagePage[],
+  messageIndex: number,
+) {
+  if (!Number.isInteger(messageIndex) || messageIndex < 0) {
+    return -1;
+  }
+  return pages.findIndex(
+    (page) => messageIndex >= page.startIndex && messageIndex < page.endIndex,
+  );
+}
+
+export function findPageIndexContainingMessageBoundary(
+  pages: readonly MessagePage[],
+  messageBoundaryIndex: number,
+) {
+  if (!Number.isInteger(messageBoundaryIndex) || messageBoundaryIndex <= 0) {
+    return -1;
+  }
+  return pages.findIndex(
+    (page) =>
+      messageBoundaryIndex > page.startIndex &&
+      messageBoundaryIndex <= page.endIndex,
+  );
+}
+
 export function buildPageLayout(pageHeights: number[]) {
   const tops = new Array<number>(pageHeights.length);
   let totalHeight = 0;
@@ -267,6 +293,14 @@ export function estimateMessageOffsetWithinPage(
   messageLocalIndex: number,
   estimateMessageHeight: (message: Message) => number,
 ) {
+  if (
+    !Number.isInteger(messageLocalIndex) ||
+    messageLocalIndex < 0 ||
+    messageLocalIndex > page.messages.length
+  ) {
+    return null;
+  }
+
   let offset = 0;
   for (let index = 0; index < messageLocalIndex; index += 1) {
     offset += estimateMessageHeight(page.messages[index]!);

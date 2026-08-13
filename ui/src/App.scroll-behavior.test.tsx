@@ -1500,7 +1500,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("never reverses live follow while a final message replaces the live turn", async () => {
+  it("keeps the final reply visible when it replaces live turn after earlier output", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       let transcriptScrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -1518,6 +1518,15 @@ describe("App scroll behaviour", () => {
         author: "you",
         text: "Finish this turn",
       };
+      const commandMessage: Session["messages"][number] = {
+        id: "message-command-live-final",
+        type: "command",
+        timestamp: "10:00",
+        author: "assistant",
+        command: "cargo check",
+        output: "Finished successfully",
+        status: "success",
+      };
       const activeState = {
         revision: 2,
         projects: [
@@ -1534,7 +1543,7 @@ describe("App scroll behaviour", () => {
             workdir: "/projects/termal",
             status: "active",
             preview: "Finish this turn",
-            messages: [userMessage],
+            messages: [userMessage, commandMessage],
           }),
         ],
       };
@@ -1564,11 +1573,9 @@ describe("App scroll behaviour", () => {
         });
         scrollToMock.mockClear();
 
-        // A short final card can initially be smaller than the live-turn card
-        // it replaces. The browser owns the unavoidable layout clamp; the
-        // follow controller must not add an upward scroll write and then chase
-        // the bottom down again when Markdown finishes measuring.
-        transcriptScrollHeight = 1080;
+        // The backend can publish idle before the final transcript delta. This
+        // status-only commit removes LIVE TURN without changing messages, so it
+        // must arm (rather than consume) final-message synchronization.
         await dispatchStateEvent(latestEventSource(), {
           ...activeState,
           revision: 3,
@@ -1578,9 +1585,36 @@ describe("App scroll behaviour", () => {
               projectId: "project-termal",
               workdir: "/projects/termal",
               status: "idle",
+              preview: "Finishing",
+              messages: [userMessage, commandMessage],
+            }),
+          ],
+        });
+        await settleAsyncUi();
+        expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
+
+        // Emulate the browser's automatic clamp after the in-flow LIVE TURN
+        // card disappears, then isolate writes caused by the later final delta.
+        messageStack.scrollTop = 800;
+        scrollToMock.mockClear();
+
+        // This turn already has agent output (the command), so final text is not
+        // the "first output". The pending post-live latch must nevertheless snap
+        // to the final physical/virtual bottom before post-paint easing begins.
+        transcriptScrollHeight = 1080;
+        await dispatchStateEvent(latestEventSource(), {
+          ...activeState,
+          revision: 4,
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              status: "idle",
               preview: "Final response",
               messages: [
                 userMessage,
+                commandMessage,
                 {
                   id: "message-assistant-live-final",
                   type: "text",
@@ -1605,13 +1639,13 @@ describe("App scroll behaviour", () => {
           messageStack,
           "auto",
         );
-        expect(replacementTops.every((top) => top >= 920)).toBe(true);
+        expect(replacementTops[0]).toBe(880);
 
         scrollToMock.mockClear();
         transcriptScrollHeight = 1160;
         await dispatchStateEvent(latestEventSource(), {
           ...activeState,
-          revision: 4,
+          revision: 5,
           sessions: [
             makeSession("session-1", {
               name: "Session 1",
@@ -1621,6 +1655,7 @@ describe("App scroll behaviour", () => {
               preview: "Final response with rendered detail",
               messages: [
                 userMessage,
+                commandMessage,
                 {
                   id: "message-assistant-live-final",
                   type: "text",
@@ -1640,7 +1675,7 @@ describe("App scroll behaviour", () => {
           "auto",
         );
         expect(followedTops.length).toBeGreaterThan(0);
-        expect(followedTops.every((top) => top >= 920)).toBe(true);
+        expect(followedTops.every((top) => top >= 880)).toBe(true);
         expect(
           followedTops.every(
             (top, index) => index === 0 || top >= followedTops[index - 1],

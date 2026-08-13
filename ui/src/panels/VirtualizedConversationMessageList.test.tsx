@@ -94,6 +94,7 @@ type VirtualizedHarnessOptions = {
   clientHeight?: number;
   clientWidth?: number;
   initialScrollTop?: number;
+  messageStartIndex?: number;
   messages: Message[];
   renderMessageCard?: (
     message: Message,
@@ -124,6 +125,7 @@ function renderVirtualizedHarness({
   clientHeight = 500,
   clientWidth = 1000,
   initialScrollTop = 0,
+  messageStartIndex = 0,
   messages,
   renderMessageCard = (message) => (
     <article className="message-card">{message.id}</article>
@@ -155,6 +157,7 @@ function renderVirtualizedHarness({
       ),
     );
   let currentMessages = messages;
+  let currentMessageStartIndex = messageStartIndex;
   let estimatedLayout = buildEstimatedLayout(currentMessages);
   const resolvedScrollHeight =
     scrollHeight ?? (() => estimatedLayout.totalHeight);
@@ -235,8 +238,10 @@ function renderVirtualizedHarness({
       }
       if (element.classList.contains("virtualized-message-page")) {
         const [startRaw, endRaw] = (element.dataset.pageKey ?? "").split(":");
-        const startIndex = Number.parseInt(startRaw ?? "", 10);
-        const endIndex = Number.parseInt(endRaw ?? "", 10);
+        const startIndex =
+          Number.parseInt(startRaw ?? "", 10) - currentMessageStartIndex;
+        const endIndex =
+          Number.parseInt(endRaw ?? "", 10) - currentMessageStartIndex;
         if (
           Number.isFinite(startIndex) &&
           Number.isFinite(endIndex) &&
@@ -286,6 +291,7 @@ function renderVirtualizedHarness({
       isActive
       renderMessageCard={renderMessageCard}
       sessionId="session-a"
+      messageStartIndex={currentMessageStartIndex}
       messages={currentMessages}
       scrollContainerRef={scrollContainerRef}
       onApprovalDecision={() => {}}
@@ -333,6 +339,11 @@ function renderVirtualizedHarness({
     ) {
       setCurrentMessages(nextMessages);
       result.rerender(renderList(nextSearchOptions));
+    },
+    rerenderWithWindow(nextMessages: Message[], nextMessageStartIndex: number) {
+      setCurrentMessages(nextMessages);
+      currentMessageStartIndex = nextMessageStartIndex;
+      result.rerender(renderList());
     },
     rerenderWithSearch(nextSearchOptions: VirtualizedSearchOptions) {
       result.rerender(renderList(nextSearchOptions));
@@ -454,6 +465,39 @@ describe("VirtualizedConversationMessageList foundation", () => {
         ),
       ).toBe(expected);
     });
+  });
+
+  it("handles a prepend that crosses a non-aligned first page", async () => {
+    const messages = makeTextMessages(8);
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      initialScrollTop: 120,
+      messageStartIndex: 9,
+      messages: messages.slice(6),
+      virtualizerHandleRef,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(virtualizerHandleRef.current).not.toBeNull();
+      });
+
+      act(() => {
+        harness.rerenderWithWindow(messages, 3);
+      });
+
+      expect(Number.isFinite(harness.scrollTop)).toBe(true);
+      act(() => {
+        expect(virtualizerHandleRef.current!.jumpToMessageIndex(6)).toBe(true);
+      });
+      await waitFor(() => {
+        expect(screen.getByText("message-7")).toBeInTheDocument();
+      });
+    } finally {
+      harness.restore();
+    }
   });
 
   it("expires cached scroll kind after bottom re-entry", () => {

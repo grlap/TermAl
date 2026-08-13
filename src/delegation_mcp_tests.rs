@@ -310,6 +310,85 @@ fn delegation_mcp_tools_list_exposes_parent_scoped_tools_only() {
 }
 
 #[test]
+fn delegation_mcp_result_tool_advertises_bounded_full_output_paging() {
+    let tools = mcp_tools_list_result();
+    let result_tool = tools["tools"]
+        .as_array()
+        .expect("tools list should be an array")
+        .iter()
+        .find(|tool| tool["name"] == "termal_get_session_result")
+        .expect("result tool should be advertised");
+
+    assert!(result_tool["description"]
+        .as_str()
+        .expect("result tool should have a description")
+        .contains("authoritative untruncated child output"));
+    assert_eq!(
+        result_tool["inputSchema"]["properties"]["outputOffset"]["minimum"],
+        0
+    );
+    assert_eq!(
+        result_tool["inputSchema"]["properties"]["outputLimit"]["minimum"],
+        256
+    );
+    assert_eq!(
+        result_tool["inputSchema"]["properties"]["outputLimit"]["maximum"],
+        8192
+    );
+}
+
+#[test]
+fn delegation_mcp_result_tool_switches_to_paged_output_when_requested() {
+    let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
+        assert_eq!(request.method, "GET");
+        if request.path.ends_with("/result") {
+            return (200, json!({ "result": { "summary": "compact" } }));
+        }
+        assert_eq!(
+            request.path,
+            "/api/sessions/session-parent/delegations/delegation-large/result/output?offsetBytes=8192&limitBytes=4096"
+        );
+        (
+            200,
+            json!({
+                "delegationId": "delegation-large",
+                "output": "page",
+                "offsetBytes": 8192,
+                "nextOffsetBytes": 12288,
+                "totalBytes": 20000,
+                "complete": false
+            }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+
+    let compact = bridge
+        .tool_get_session_result(json!({ "delegationId": "delegation-large" }))
+        .expect("compact result should succeed");
+    assert_eq!(compact["result"]["summary"], "compact");
+
+    let page = bridge
+        .tool_get_session_result(json!({
+            "delegationId": "delegation-large",
+            "outputOffset": 8192,
+            "outputLimit": 4096
+        }))
+        .expect("paged output should succeed");
+    assert_eq!(page["output"], "page");
+    assert_eq!(page["nextOffsetBytes"], 12288);
+
+    server.join().expect("test server should join");
+    assert_eq!(
+        requests
+            .lock()
+            .expect("request log mutex poisoned")
+            .len(),
+        2
+    );
+}
+
+#[test]
 fn delegation_mcp_acknowledgement_description_teaches_idempotent_replay() {
     let tools = mcp_tools_list_result();
     let description = tools["tools"]

@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { estimateConversationMessageHeight } from "./conversation-virtualization";
 import {
   buildMessagePages,
+  estimateMessageOffsetWithinPage,
   estimatePageHeight,
+  findPageIndexContainingMessage,
+  findPageIndexContainingMessageBoundary,
   pageExtendsMountedMeasurement,
 } from "./virtualized-conversation-measurement";
 import type { Message } from "../types";
@@ -213,5 +216,34 @@ describe("buildMessagePages", () => {
       "112:120:message-112:message-119",
       "120:121:message-120:message-120",
     ]);
+  });
+
+  it("locates messages and prepend boundaries in a non-aligned first page", () => {
+    const messages = Array.from({ length: 10 }, (_, index) =>
+      makeTextMessage({ id: `message-${index + 1}` }),
+    );
+    const pages = buildMessagePages(messages, 3);
+
+    expect(pages.map((page) => [page.startIndex, page.endIndex])).toEqual([
+      [0, 5],
+      [5, 10],
+    ]);
+    expect(findPageIndexContainingMessage(pages, 6)).toBe(1);
+    expect(findPageIndexContainingMessageBoundary(pages, 6)).toBe(1);
+    expect(findPageIndexContainingMessageBoundary(pages, 5)).toBe(0);
+  });
+
+  it("rejects an out-of-range local offset without estimating undefined", () => {
+    const [page] = buildMessagePages(
+      Array.from({ length: 5 }, (_, index) =>
+        makeTextMessage({ id: `message-${index + 1}` }),
+      ),
+    );
+    const estimateMessageHeight = vi.fn(() => 80);
+
+    expect(
+      estimateMessageOffsetWithinPage(page!, 6, estimateMessageHeight),
+    ).toBeNull();
+    expect(estimateMessageHeight).not.toHaveBeenCalled();
   });
 });

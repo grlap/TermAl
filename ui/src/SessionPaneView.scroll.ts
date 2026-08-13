@@ -40,63 +40,37 @@ import {
   resolveSettledScrollMinimumAttempts,
   syncMessageStackScrollPosition,
 } from "./scroll-position";
+import {
+  SESSION_BOTTOM_FOLLOW_MAX_FRAME_MS,
+  SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS,
+  SESSION_BOTTOM_FOLLOW_SNAP_DISTANCE_PX,
+  isFirstAgentOutputForObservedPrompt,
+  resolveLatestTurnOutputState,
+  resolveLatestTurnTailSignature,
+  resolvePostLiveMessageFollowTransition,
+  resolveSessionBottomFollowPersistedScrollTop,
+  resolveSessionBottomFollowScrollTop,
+  resolveSessionBottomFollowWriteScrollTop,
+  type LatestTurnOutputState,
+} from "./session-live-tail-follow";
 import type { SessionSearchMatch } from "./session-find";
 import type { Message, Session } from "./types";
 import type { PaneViewMode } from "./workspace";
 
+export {
+  isFirstAgentOutputForObservedPrompt,
+  resolveLatestTurnOutputState,
+  resolveLatestTurnTailSignature,
+  resolvePostLiveMessageFollowTransition,
+  resolveSessionBottomFollowPersistedScrollTop,
+  resolveSessionBottomFollowScrollTop,
+  resolveSessionBottomFollowWriteScrollTop,
+} from "./session-live-tail-follow";
+
 const SESSION_PAGE_SCROLL_VIEWPORT_FACTOR = 0.85;
 const SESSION_PAGE_SCROLL_MINIMUM_PX = 160;
-const SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS = 1000 / 60;
-const SESSION_BOTTOM_FOLLOW_MAX_FRAME_MS = 100;
-const SESSION_BOTTOM_FOLLOW_SNAP_DISTANCE_PX = 2;
-const SESSION_BOTTOM_FOLLOW_TIME_CONSTANT_MS = 36;
-const SESSION_BOTTOM_FOLLOW_MAX_SPEED_PX_PER_MS = 2.5;
 const SESSION_BOTTOM_FOLLOW_STABLE_MS =
   SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS * 2;
-
-export function resolveSessionBottomFollowScrollTop(
-  currentScrollTop: number,
-  targetScrollTop: number,
-  frameDurationMs = SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS,
-) {
-  // Layout can briefly report a smaller bottom while the live-turn card is
-  // replaced or a virtualized card swaps its estimate for a measurement. The
-  // browser clamps scrollTop if content truly shrank; the follow authority must
-  // not add a second explicit upward write before the next growth.
-  if (targetScrollTop <= currentScrollTop) {
-    return currentScrollTop;
-  }
-
-  const distance = targetScrollTop - currentScrollTop;
-  if (distance <= SESSION_BOTTOM_FOLLOW_SNAP_DISTANCE_PX) {
-    return targetScrollTop;
-  }
-
-  const boundedFrameDurationMs = Number.isFinite(frameDurationMs)
-    ? Math.min(
-        Math.max(frameDurationMs, 1),
-        SESSION_BOTTOM_FOLLOW_MAX_FRAME_MS,
-      )
-    : SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS;
-  const followFactor =
-    1 -
-    Math.exp(
-      -boundedFrameDurationMs / SESSION_BOTTOM_FOLLOW_TIME_CONSTANT_MS,
-    );
-  // A newly inserted command/result card can move the bottom by hundreds of
-  // pixels in one commit. Pure exponential convergence applies roughly 37% of
-  // that distance on the first 60 Hz frame, which is monotonic but still looks
-  // like the whole transcript jumped. Cap travel by elapsed frame time so
-  // structural additions glide at a stable velocity while small streaming
-  // growth keeps the existing responsive easing.
-  const maximumFrameTravel =
-    boundedFrameDurationMs * SESSION_BOTTOM_FOLLOW_MAX_SPEED_PX_PER_MS;
-  const nextScrollTop =
-    currentScrollTop + Math.min(distance * followFactor, maximumFrameTravel);
-  return targetScrollTop - nextScrollTop <= SESSION_BOTTOM_FOLLOW_SNAP_DISTANCE_PX
-    ? targetScrollTop
-    : Math.min(nextScrollTop, targetScrollTop);
-}
 
 export function resolveSessionPageScrollDistance(clientHeight: number) {
   return Math.max(
@@ -157,51 +131,6 @@ type PaneScrollPosition = {
   top: number;
   shouldStick: boolean;
 };
-
-type LatestTurnOutputState = {
-  hasAgentOutput: boolean;
-  promptMessageId: string | null;
-};
-
-export function resolveLatestTurnOutputState(
-  messages: readonly Message[],
-): LatestTurnOutputState {
-  let hasAgentOutput = false;
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message) {
-      continue;
-    }
-    if (message.author === "you") {
-      return {
-        hasAgentOutput,
-        promptMessageId: message.id,
-      };
-    }
-    if (message.author === "assistant") {
-      hasAgentOutput = true;
-    }
-  }
-
-  return {
-    hasAgentOutput,
-    promptMessageId: null,
-  };
-}
-
-export function isFirstAgentOutputForObservedPrompt(
-  previous: LatestTurnOutputState | undefined,
-  current: LatestTurnOutputState,
-) {
-  return (
-    previous !== undefined &&
-    previous.promptMessageId !== null &&
-    previous.promptMessageId === current.promptMessageId &&
-    !previous.hasAgentOutput &&
-    current.hasAgentOutput
-  );
-}
 
 type UseSessionPaneScrollStateParams = {
   activeSession: Session | null;
@@ -274,8 +203,17 @@ export function useSessionPaneScrollState({
   const latestTurnOutputByKeyRef = useRef<
     Record<string, LatestTurnOutputState | undefined>
   >({});
+  const latestTurnTailSignatureByKeyRef = useRef<
+    Record<string, string | undefined>
+  >({});
   const visibleContentSignatureByKeyRef = useRef<
     Record<string, string | undefined>
+  >({});
+  const liveFlowActiveByKeyRef = useRef<Record<string, boolean | undefined>>(
+    {},
+  );
+  const awaitingPostLivePromptMessageIdByKeyRef = useRef<
+    Record<string, string | null | undefined>
   >({});
   const paneProgrammaticBottomFollowRef = useRef<{
     key: string | null;
@@ -493,19 +431,20 @@ export function useSessionPaneScrollState({
     const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
     const writeScrollTop =
       scrollKind === "bottom_follow"
-        ? options.snapBottomFollowBeforePaint
-          ? nextScrollTop
-          : resolveSessionBottomFollowScrollTop(
-              node.scrollTop,
-              nextScrollTop,
-              options.frameDurationMs,
-            )
+        ? resolveSessionBottomFollowWriteScrollTop({
+            currentScrollTop: node.scrollTop,
+            frameDurationMs: options.frameDurationMs,
+            snapBeforePaint: options.snapBottomFollowBeforePaint ?? false,
+            targetScrollTop: nextScrollTop,
+          })
         : nextScrollTop;
+    let wroteScrollTop = false;
     if (Math.abs(node.scrollTop - writeScrollTop) > (force ? 0.5 : 1)) {
       node.scrollTo({
         top: writeScrollTop,
         behavior,
       });
+      wroteScrollTop = true;
       if (scrollKind === "bottom_follow") {
         beginPaneProgrammaticBottomFollow();
       } else if (scrollKind) {
@@ -515,9 +454,32 @@ export function useSessionPaneScrollState({
         scrollKind,
       });
     }
+    if (
+      !wroteScrollTop &&
+      scrollKind === "bottom_follow" &&
+      options.snapBottomFollowBeforePaint
+    ) {
+      // A height collapse can make the browser clamp `scrollTop` before this
+      // layout effect reads it. There is then no numeric write to emit, but the
+      // virtualizer still needs a synchronous bottom-follow notification so it
+      // mounts the final page instead of painting a stale spacer-only range.
+      beginPaneProgrammaticBottomFollow();
+      notifyMessageStackScrollWrite(node, {
+        scrollKind,
+      });
+    }
     setTailFollowIntent(true);
     paneScrollPositions[scrollStateKey] = {
-      top: nextScrollTop,
+      // Auto writes can be read back synchronously after native clamping.
+      // Smooth writes cannot, so preserve the owned destination until their
+      // scroll events publish settled geometry instead of saving the stale
+      // pre-animation position.
+      top: resolveSessionBottomFollowPersistedScrollTop({
+        behavior,
+        observedScrollTop: node.scrollTop,
+        writeScrollTop,
+        wroteScrollTop,
+      }),
       shouldStick: true,
     };
     setNewResponseIndicator(scrollStateKey, false);
@@ -777,14 +739,41 @@ export function useSessionPaneScrollState({
 
   useLayoutEffect(() => {
     const messages = activeSession?.messages ?? [];
+    const currentLiveFlowActive = liveFlowActiveRef.current;
+    const previousLiveFlowActive =
+      liveFlowActiveByKeyRef.current[scrollStateKey] ?? false;
+    liveFlowActiveByKeyRef.current[scrollStateKey] = currentLiveFlowActive;
     const previousVisibleContentSignature =
       visibleContentSignatureByKeyRef.current[scrollStateKey];
     visibleContentSignatureByKeyRef.current[scrollStateKey] =
       visibleContentSignature;
-
     const currentTurnOutput = resolveLatestTurnOutputState(messages);
     const previousTurnOutput = latestTurnOutputByKeyRef.current[scrollStateKey];
     latestTurnOutputByKeyRef.current[scrollStateKey] = currentTurnOutput;
+    const currentTurnTailSignature = resolveLatestTurnTailSignature(messages);
+    const previousTurnTailSignature =
+      latestTurnTailSignatureByKeyRef.current[scrollStateKey];
+    latestTurnTailSignatureByKeyRef.current[scrollStateKey] =
+      currentTurnTailSignature;
+
+    const postLiveMessageTransition = resolvePostLiveMessageFollowTransition({
+      awaitingPromptMessageId:
+        awaitingPostLivePromptMessageIdByKeyRef.current[scrollStateKey],
+      currentLiveFlowActive,
+      currentPromptMessageId: currentTurnOutput.promptMessageId,
+      latestTurnContentChanged:
+        previousTurnTailSignature !== undefined &&
+        previousTurnTailSignature !== currentTurnTailSignature,
+      previousLiveFlowActive,
+    });
+    if (
+      postLiveMessageTransition.awaitingPostLivePromptMessageId !== undefined
+    ) {
+      awaitingPostLivePromptMessageIdByKeyRef.current[scrollStateKey] =
+        postLiveMessageTransition.awaitingPostLivePromptMessageId;
+    } else {
+      delete awaitingPostLivePromptMessageIdByKeyRef.current[scrollStateKey];
+    }
 
     const receivedFirstOutputForPrompt = isFirstAgentOutputForObservedPrompt(
       previousTurnOutput,
@@ -793,7 +782,9 @@ export function useSessionPaneScrollState({
     const changedLiveContent =
       previousVisibleContentSignature !== undefined &&
       previousVisibleContentSignature !== visibleContentSignature &&
-      (liveFlowActiveRef.current || receivedFirstOutputForPrompt);
+      (currentLiveFlowActive ||
+        postLiveMessageTransition.shouldFollowPostLiveMessage ||
+        receivedFirstOutputForPrompt);
     if (
       (!receivedFirstOutputForPrompt && !changedLiveContent) ||
       hasUnloadedNewerHistory ||
@@ -808,18 +799,16 @@ export function useSessionPaneScrollState({
     // LIVE TURN remains an ordinary in-flow tail. While auto-follow owns the
     // pane, compensate every committed conversation change before paint so
     // the tail does not first move down and then catch up one frame later.
-    // A live-to-final replacement can briefly make the DOM shorter, so this
-    // correction must never reverse an already established bottom position.
+    // Turn status and the final assistant message can arrive in separate SSE
+    // commits. The per-key latch survives a status-only idle commit, but stays
+    // bound to that turn's prompt identity. A later prompt clears it without
+    // following, while the matching final message still receives pre-paint
+    // synchronization even when earlier command/progress output means this is
+    // not first output.
     if (changedLiveContent) {
-      const messageStack = messageStackRef.current;
-      const nextBottom = messageStack
-        ? Math.max(messageStack.scrollHeight - messageStack.clientHeight, 0)
-        : 0;
-      if (messageStack && nextBottom > messageStack.scrollTop + 0.5) {
-        scrollToLatestMessage("auto", true, "bottom_follow", {
-          snapBottomFollowBeforePaint: true,
-        });
-      }
+      scrollToLatestMessage("auto", true, "bottom_follow", {
+        snapBottomFollowBeforePaint: true,
+      });
       return;
     }
 
@@ -831,7 +820,10 @@ export function useSessionPaneScrollState({
     isSessionTabActive,
     paneViewMode,
     scrollStateKey,
+    isSending,
+    showWaitingIndicator,
     visibleContentSignature,
+    visibleMessageContentSignature,
   ]);
 
   function scrollMessageStackByDelta(

@@ -569,6 +569,117 @@ Findings:\n\
 }
 
 #[test]
+fn delegation_result_packet_recovers_preamble_when_none_contradicts_summary() {
+    let parsed = parse_delegation_result_packet(
+        "# Code Review\n\n\
+## Actionable\n\
+- **[Low]** `ui/src/review.test.ts:42` \u{2014} The regression path lacks coverage.\n\n\
+## Result\n\n\
+Status: completed\n\n\
+Summary:\n\
+One low-severity test-quality gap was found.\n\n\
+Findings:\n\
+- None",
+    )
+    .expect("a contradictory empty packet should recover its actionable preamble");
+
+    assert_eq!(
+        parsed.findings,
+        vec![DelegationFinding {
+            severity: "Low".to_owned(),
+            file: Some("ui/src/review.test.ts".to_owned()),
+            line: Some(42),
+            message: "The regression path lacks coverage.".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn delegation_result_packet_trusts_clean_none_with_unfamiliar_summary_wording() {
+    let parsed = parse_delegation_result_packet(
+        "# Code Review\n\n\
+## Actionable\n\
+- **[Low]** `ui/src/stale.test.ts:9` \u{2014} Finding from an earlier review turn.\n\n\
+## Result\n\n\
+Status: completed\n\n\
+Summary:\n\
+The implementation is clean and ready to land.\n\n\
+Findings:\n\
+- None",
+    )
+    .expect("an unfamiliar clean summary should still trust explicit None");
+
+    assert!(parsed.findings.is_empty());
+}
+
+#[test]
+fn delegation_result_packet_recovers_positive_finding_after_partial_clean_phrase() {
+    let parsed = parse_delegation_result_packet(
+        "# Code Review\n\n\
+## Actionable\n\
+- **[Low]** `ui/src/request.ts:42` \u{2014} A request race remains.\n\n\
+## Result\n\n\
+Status: completed\n\n\
+Summary:\n\
+No issues found in the parser format, but one Low request race remains.\n\n\
+Findings:\n\
+- None",
+    )
+    .expect("a positive finding must win over a partial clean phrase");
+
+    assert_eq!(
+        parsed.findings,
+        vec![DelegationFinding {
+            severity: "Low".to_owned(),
+            file: Some("ui/src/request.ts".to_owned()),
+            line: Some(42),
+            message: "A request race remains.".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn delegation_result_packet_recovers_common_bug_and_problem_summaries() {
+    for summary in ["One bug remains.", "Two bugs detected.", "One problem remains."] {
+        let packet = format!(
+            "# Code Review\n\n\
+## Actionable\n\
+- **[Medium]** `src/parser.rs:7` \u{2014} A parser regression remains.\n\n\
+## Result\n\n\
+Status: completed\n\n\
+Summary:\n\
+{summary}\n\n\
+Findings:\n\
+- None"
+        );
+        let parsed = parse_delegation_result_packet(&packet)
+            .expect("a positive bug/problem summary should recover its actionable preamble");
+
+        assert_eq!(parsed.findings.len(), 1, "summary: {summary}");
+        assert_eq!(parsed.findings[0].severity, "Medium");
+        assert_eq!(parsed.findings[0].file.as_deref(), Some("src/parser.rs"));
+    }
+}
+
+#[test]
+fn delegation_result_packet_does_not_resurrect_resolved_findings() {
+    let parsed = parse_delegation_result_packet(
+        "# Code Review\n\n\
+## Actionable\n\
+- **[Low]** `src/stale.rs:4` \u{2014} Finding from an earlier review turn.\n\n\
+## Result\n\n\
+Status: completed\n\n\
+Summary:\n\
+Fixed 2 findings from earlier feedback.\n\n\
+Findings:\n\
+- None",
+    )
+    .expect("resolved findings should not contradict an explicit empty section");
+
+    assert!(parsed.findings.is_empty());
+}
+
+#[test]
 fn delegation_result_packet_drops_trailing_colon_from_invalid_finding_line() {
     let parsed = parse_delegation_result_packet(
         "## Result\n\nStatus: completed\n\nSummary:\nReady.\n\nFindings:\n- Low src/foo.rs: - Missing line number.",

@@ -597,6 +597,22 @@ impl TermalDelegationMcpBridge {
     fn tool_get_session_result(&self, arguments: Value) -> Result<Value> {
         let delegation_id =
             required_path_identifier(arguments.get("delegationId"), "delegationId")?;
+        let output_offset = arguments
+            .get("outputOffset")
+            .map(|value| required_u64(Some(value), "outputOffset"))
+            .transpose()?;
+        let output_limit = arguments
+            .get("outputLimit")
+            .map(|value| required_u64(Some(value), "outputLimit"))
+            .transpose()?;
+        if output_offset.is_some() || output_limit.is_some() {
+            let offset = output_offset.unwrap_or(0);
+            let limit = output_limit.unwrap_or(4 * 1024);
+            return self.get_json(&format!(
+                "/api/sessions/{}/delegations/{}/result/output?offsetBytes={offset}&limitBytes={limit}",
+                self.parent_session_id, delegation_id
+            ));
+        }
         self.get_json(&format!(
             "/api/sessions/{}/delegations/{}/result",
             self.parent_session_id, delegation_id
@@ -1640,11 +1656,24 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_get_session_result",
-                "description": "Get the compact result packet for a completed parent-scoped TermAl delegation.",
+                "description": "Get the compact result packet for a completed parent-scoped TermAl delegation. For the authoritative untruncated child output, pass outputOffset (start with 0) and outputLimit (256-8192 bytes), then use each nextOffsetBytes value as outputOffset until complete is true.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["delegationId"],
-                    "properties": { "delegationId": { "type": "string" } }
+                    "properties": {
+                        "delegationId": { "type": "string" },
+                        "outputOffset": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Byte offset for an untruncated output page. Supplying this switches the tool from the compact packet to paged full output."
+                        },
+                        "outputLimit": {
+                            "type": "integer",
+                            "minimum": 256,
+                            "maximum": 8192,
+                            "description": "Maximum UTF-8 bytes in this full-output page (default 4096)."
+                        }
+                    }
                 }
             },
             {

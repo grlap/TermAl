@@ -354,6 +354,10 @@ fn app_router(state: AppState) -> Router {
             get(get_delegation_result),
         )
         .route(
+            "/api/sessions/{id}/delegations/{delegation_id}/result/output",
+            get(get_delegation_result_output),
+        )
+        .route(
             "/api/sessions/{id}/delegations/{delegation_id}/cancel",
             post(cancel_delegation),
         )
@@ -377,6 +381,10 @@ fn app_router(state: AppState) -> Router {
         .route(
             "/api/sessions/{id}/model-options/refresh",
             post(refresh_session_model_options),
+        )
+        .route(
+            "/api/sessions/{id}/codex/mcp-servers",
+            get(list_codex_mcp_servers),
         )
         .route(
             "/api/sessions/{id}/codex/thread/fork",
@@ -636,6 +644,7 @@ include!("codex_app_requests.rs");
 include!("codex_turn_cleanup.rs");
 include!("codex_rpc.rs");
 include!("codex_thread_actions.rs");
+include!("codex_mcp.rs");
 include!("turn_lifecycle.rs");
 include!("session_lifecycle.rs");
 include!("session_messages.rs");
