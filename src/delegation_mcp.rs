@@ -1,5 +1,7 @@
 const TERMAL_DELEGATION_MCP_SERVER_NAME: &str = "termal-delegation";
 const TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME: &str = "termal_submit_review_result";
+const TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME: &str =
+    "mcp__termal-delegation__termal_submit_review_result";
 const TERMAL_SUBMIT_REVIEW_RESULT_TOOL_DESCRIPTION: &str = "Submit the current delegated review result through TermAl's strict, durable mailbox protocol. TermAl derives identity, parent routing, topic, and idempotency. The backend accepts only current reviewer children and validates the complete payload before storing it.";
 const TERMAL_DELEGATION_MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 const TERMAL_DELEGATION_MCP_DEFAULT_WAIT_INTERVAL_MS: u64 = 1000;
@@ -67,12 +69,8 @@ fn delegation_control_plane_capability_for_tool_name(
     // tool inherit the mailbox exception. Only adapter-qualified identities
     // are accepted here; Codex uses the separate server-authenticated
     // elicitation classifier below.
-    matches!(
-        tool_name,
-        "mcp__termal-delegation__termal_submit_review_result"
-            | "mcp__termal_delegation__termal_submit_review_result"
-    )
-    .then_some(DelegationControlPlaneCapability::SubmitReviewResult)
+    (tool_name == TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME)
+        .then_some(DelegationControlPlaneCapability::SubmitReviewResult)
 }
 
 fn delegation_control_plane_capability_for_acp_permission(

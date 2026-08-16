@@ -34,6 +34,7 @@ mod delegation_outcome_recovery;
 mod delegation_persistence;
 mod delegation_read_only;
 mod delegation_result_parser;
+mod delegation_review_results;
 mod delegation_support;
 mod delegation_validation;
 mod delegation_wait;

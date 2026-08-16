@@ -648,6 +648,28 @@ fn claude_reviewer_does_not_auto_approve_an_unscoped_colliding_tool_name() {
 }
 
 #[test]
+fn claude_reviewer_does_not_auto_approve_a_qualified_foreign_server_alias() {
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &claude_permission_request(
+            "mcp__termal_delegation__termal_submit_review_result",
+            json!({ "schemaVersion": 1, "status": "completed" }),
+        ),
+        &mut turn_state,
+        ClaudeApprovalMode::Ask,
+        "C:/reviewer-sandbox",
+        true,
+    )
+    .unwrap()
+    .expect("permission request should be classified");
+
+    assert!(matches!(
+        action,
+        ClaudeControlRequestAction::QueueApproval { .. }
+    ));
+}
+
+#[test]
 fn claude_read_only_auto_approve_allows_review_code_bash_shapes() {
     for command in [
         "git status",

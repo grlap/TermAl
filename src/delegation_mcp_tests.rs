@@ -334,15 +334,12 @@ fn delegation_review_result_tool_advertises_bounded_control_plane_semantics() {
 
 #[test]
 fn delegation_control_plane_tool_identity_is_shared_across_agent_protocols() {
-    for tool_name in [
-        "mcp__termal-delegation__termal_submit_review_result",
-        "mcp__termal_delegation__termal_submit_review_result",
-    ] {
-        assert_eq!(
-            delegation_control_plane_capability_for_tool_name(tool_name),
-            Some(DelegationControlPlaneCapability::SubmitReviewResult)
-        );
-    }
+    assert_eq!(
+        delegation_control_plane_capability_for_tool_name(
+            TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME
+        ),
+        Some(DelegationControlPlaneCapability::SubmitReviewResult)
+    );
     assert_eq!(
         delegation_control_plane_capability_for_acp_permission(&json!({
             "toolName": "mcp__termal-delegation__termal_submit_review_result"
@@ -352,10 +349,24 @@ fn delegation_control_plane_tool_identity_is_shared_across_agent_protocols() {
     assert_eq!(
         delegation_control_plane_capability_for_acp_permission(&json!({
             "toolCall": {
-                "toolName": "mcp__termal_delegation__termal_submit_review_result"
+                "toolName": TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME
             }
         })),
         Some(DelegationControlPlaneCapability::SubmitReviewResult)
+    );
+    assert_eq!(
+        delegation_control_plane_capability_for_tool_name(
+            "mcp__termal_delegation__termal_submit_review_result"
+        ),
+        None,
+        "a foreign server whose name resembles a normalized alias must not inherit approval"
+    );
+    assert_eq!(
+        delegation_control_plane_capability_for_acp_permission(&json!({
+            "toolName": "mcp__termal_delegation__termal_submit_review_result"
+        })),
+        None,
+        "ACP must accept only the identity emitted for TermAl's injected bridge"
     );
     assert_eq!(
         delegation_control_plane_capability_for_tool_name(

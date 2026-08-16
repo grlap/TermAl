@@ -630,6 +630,7 @@ include!("persisted_state.rs");
 include!("persist.rs");
 include!("coordination_persist.rs");
 include!("mailboxes.rs");
+include!("delegation_review_results.rs");
 include!("coordination_board.rs");
 include!("board_routes.rs");
 include!("response_board.rs");

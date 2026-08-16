@@ -1233,6 +1233,7 @@ termal/
 |   |-- # Durable coordination
 |   |-- coordination_persist.rs # coordination.sqlite schema + atomic legacy migration
 |   |-- mailboxes.rs         # durable edge-triggered peer messages + cursors
+|   |-- delegation_review_results.rs # typed review validation, projection + recovery
 |   |-- coordination_board.rs # level-triggered project facts + CAS/idempotency
 |   |-- board_routes.rs      # authorized board list/get/set HTTP handlers
 |   |-- delegation_mcp.rs    # parent-scoped delegation, mailbox, and board MCP bridge
