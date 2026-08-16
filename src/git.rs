@@ -74,9 +74,11 @@ where
     )?;
 
     if diff.trim().is_empty() {
-        return Err(ApiError::bad_request(format!(
-            "no diff available for {}",
-            current_path
+        return Err(ApiError::bad_request(explain_empty_git_diff(
+            &repo_root,
+            &current_path,
+            original_path.as_deref(),
+            request.section_id,
         )));
     }
 
@@ -351,6 +353,181 @@ fn load_git_file_diff_text(
     } else {
         Err(ApiError::internal(format!(
             "failed to load git diff: {stderr}"
+        )))
+    }
+}
+
+/// Explains an empty successful `git diff` without collapsing every cause
+/// into the same opaque error. A fresh status check is intentionally first:
+/// stale UI entries are the common case when another process commits while
+/// the Git panel is open.
+fn explain_empty_git_diff(
+    repo_root: &FsPath,
+    current_path: &str,
+    original_path: Option<&str>,
+    section_id: GitDiffSection,
+) -> String {
+    finalize_empty_git_diff_explanation(
+        current_path,
+        section_id,
+        inspect_empty_git_diff(repo_root, current_path, original_path, section_id),
+    )
+}
+
+fn finalize_empty_git_diff_explanation(
+    current_path: &str,
+    section_id: GitDiffSection,
+    inspection: Result<String, ApiError>,
+) -> String {
+    inspection.unwrap_or_else(
+        |err| {
+            eprintln!(
+                "git> auxiliary empty-diff inspection failed for `{current_path}`: {}",
+                err.message
+            );
+            empty_git_diff_reason(current_path, section_id, false, true, "", "")
+        },
+    )
+}
+
+fn inspect_empty_git_diff(
+    repo_root: &FsPath,
+    current_path: &str,
+    original_path: Option<&str>,
+    section_id: GitDiffSection,
+) -> Result<String, ApiError> {
+    let status = load_git_status_for_path(repo_root)?;
+    let selected_change_still_exists = status.files.iter().any(|file| {
+        let matches_path = file.path == current_path
+            || file.original_path.as_deref() == Some(current_path)
+            || original_path.is_some_and(|original| {
+                file.path == original || file.original_path.as_deref() == Some(original)
+            });
+        let matches_section = match section_id {
+            GitDiffSection::Staged => file.index_status.is_some(),
+            GitDiffSection::Unstaged => file.worktree_status.is_some(),
+        };
+        matches_path && matches_section
+    });
+
+    if !selected_change_still_exists {
+        return Ok(empty_git_diff_reason(
+            current_path,
+            section_id,
+            status.is_clean,
+            false,
+            "",
+            "",
+        ));
+    }
+
+    let summary = load_git_file_diff_metadata(
+        repo_root,
+        current_path,
+        original_path,
+        section_id,
+        "--summary",
+    )?;
+    let numstat = load_git_file_diff_metadata(
+        repo_root,
+        current_path,
+        original_path,
+        section_id,
+        "--numstat",
+    )?;
+
+    Ok(empty_git_diff_reason(
+        current_path,
+        section_id,
+        status.is_clean,
+        true,
+        &summary,
+        &numstat,
+    ))
+}
+
+fn empty_git_diff_reason(
+    current_path: &str,
+    section_id: GitDiffSection,
+    status_is_clean: bool,
+    selected_change_still_exists: bool,
+    summary: &str,
+    numstat: &str,
+) -> String {
+    if !selected_change_still_exists {
+        if status_is_clean {
+            return format!(
+                "`{current_path}` now matches HEAD. Refresh Git status to remove the stale entry."
+            );
+        }
+        if matches!(section_id, GitDiffSection::Staged) {
+            return format!(
+                "The staged version of `{current_path}` no longer differs from HEAD. Refresh Git status to remove the stale entry."
+            );
+        }
+        return format!(
+            "The unstaged version of `{current_path}` no longer differs from the index. Refresh Git status to remove the stale entry."
+        );
+    }
+
+    if summary
+        .lines()
+        .any(|line| line.to_ascii_lowercase().contains("mode change"))
+    {
+        return format!(
+            "Only file mode metadata changed for `{current_path}`; there is no textual diff to display."
+        );
+    }
+
+    if numstat.lines().any(|line| {
+        let mut fields = line.split('\t');
+        fields.next() == Some("-") && fields.next() == Some("-")
+    }) {
+        return format!(
+            "`{current_path}` is a binary change; there is no textual diff to display."
+        );
+    }
+
+    format!(
+        "Git still reports `{current_path}` as changed, but returned no textual diff for the {} version.",
+        section_id.as_key()
+    )
+}
+
+fn load_git_file_diff_metadata(
+    repo_root: &FsPath,
+    current_path: &str,
+    original_path: Option<&str>,
+    section_id: GitDiffSection,
+    output_flag: &str,
+) -> Result<String, ApiError> {
+    let pathspecs = collect_git_pathspecs(current_path, original_path);
+    let mut command = git_literal_pathspec_command();
+    command
+        .arg("-C")
+        .arg(repo_root)
+        .arg("diff")
+        .arg("--find-renames");
+    if matches!(section_id, GitDiffSection::Staged) {
+        command.arg("--cached");
+    }
+
+    let output = command
+        .arg(output_flag)
+        .arg("--")
+        .args(&pathspecs)
+        .output()
+        .map_err(|err| ApiError::internal(format!("failed to inspect git diff: {err}")))?;
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if stderr.is_empty() {
+        Err(ApiError::internal("failed to inspect git diff"))
+    } else {
+        Err(ApiError::internal(format!(
+            "failed to inspect git diff: {stderr}"
         )))
     }
 }

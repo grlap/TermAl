@@ -56,6 +56,7 @@ const EMPTY_COMPOSER_ATTACHMENTS: readonly {
 }[] = [];
 const EMPTY_COMPOSER_PROMPT_HISTORY: readonly string[] = [];
 const EMPTY_CODEX_MCP_SERVERS: readonly CodexMcpServerStatus[] = [];
+const CODEX_MCP_SESSION_CACHE_LIMIT = 8;
 type CodexMcpRequestState = {
   error: string | null;
   servers: readonly CodexMcpServerStatus[];
@@ -131,8 +132,10 @@ export const SessionComposer = memo(function SessionComposer({
   const onDraftCommitRef = useRef(onDraftCommit);
   const requestedSlashModelOptionsRef = useRef<string | null>(null);
   const requestedSlashAgentCommandsRef = useRef<string | null>(null);
+  const codexMcpNextRequestGenerationRef = useRef(0);
   const codexMcpRequestGenerationRef = useRef<Record<string, number>>({});
   const codexMcpRequestInFlightRef = useRef<Set<string>>(new Set());
+  const codexMcpSessionCacheOrderRef = useRef<string[]>([]);
   const slashOptionsRef = useRef<HTMLDivElement | null>(null);
   const composerDelegateButtonRef = useRef<HTMLButtonElement | null>(null);
   const session = useComposerSessionSnapshot(sessionId);
@@ -294,6 +297,43 @@ export const SessionComposer = memo(function SessionComposer({
     }
   }
 
+  const retainCodexMcpSessionCacheEntry = useCallback((requestSessionId: string) => {
+    const cacheOrder = codexMcpSessionCacheOrderRef.current.filter(
+      (cachedSessionId) => cachedSessionId !== requestSessionId,
+    );
+    cacheOrder.push(requestSessionId);
+    const evictedSessionIds = cacheOrder.splice(
+      0,
+      Math.max(0, cacheOrder.length - CODEX_MCP_SESSION_CACHE_LIMIT),
+    );
+    codexMcpSessionCacheOrderRef.current = cacheOrder;
+    if (evictedSessionIds.length === 0) {
+      return;
+    }
+
+    // Evict completed bookkeeping together with display data, but retain
+    // ownership of pending requests until they settle. Otherwise a quick
+    // revisit can launch a duplicate fetch while the original request is
+    // still in flight. Late results below are admitted only when the session
+    // has re-entered the bounded cache.
+    for (const evictedSessionId of evictedSessionIds) {
+      if (!codexMcpRequestInFlightRef.current.has(evictedSessionId)) {
+        delete codexMcpRequestGenerationRef.current[evictedSessionId];
+      }
+    }
+    setCodexMcpRequestStateBySessionId((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const evictedSessionId of evictedSessionIds) {
+        if (next[evictedSessionId] !== undefined) {
+          delete next[evictedSessionId];
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, []);
+
   const requestCodexMcpServers = useCallback(
     async (force = false) => {
       if (!activeCodexMcpSessionId) {
@@ -301,12 +341,13 @@ export const SessionComposer = memo(function SessionComposer({
       }
 
       const requestSessionId = activeCodexMcpSessionId;
+      retainCodexMcpSessionCacheEntry(requestSessionId);
       if (!force && codexMcpRequestInFlightRef.current.has(requestSessionId)) {
         return;
       }
 
-      const generation =
-        (codexMcpRequestGenerationRef.current[requestSessionId] ?? 0) + 1;
+      const generation = codexMcpNextRequestGenerationRef.current + 1;
+      codexMcpNextRequestGenerationRef.current = generation;
       codexMcpRequestGenerationRef.current[requestSessionId] = generation;
       codexMcpRequestInFlightRef.current.add(requestSessionId);
       setCodexMcpRequestStateBySessionId((current) => ({
@@ -323,7 +364,8 @@ export const SessionComposer = memo(function SessionComposer({
         const response = await fetchCodexMcpServers(requestSessionId);
         if (
           !isMountedRef.current ||
-          codexMcpRequestGenerationRef.current[requestSessionId] !== generation
+          codexMcpRequestGenerationRef.current[requestSessionId] !== generation ||
+          !codexMcpSessionCacheOrderRef.current.includes(requestSessionId)
         ) {
           return;
         }
@@ -343,7 +385,8 @@ export const SessionComposer = memo(function SessionComposer({
       } catch (error) {
         if (
           !isMountedRef.current ||
-          codexMcpRequestGenerationRef.current[requestSessionId] !== generation
+          codexMcpRequestGenerationRef.current[requestSessionId] !== generation ||
+          !codexMcpSessionCacheOrderRef.current.includes(requestSessionId)
         ) {
           return;
         }
@@ -364,10 +407,13 @@ export const SessionComposer = memo(function SessionComposer({
           codexMcpRequestGenerationRef.current[requestSessionId] === generation
         ) {
           codexMcpRequestInFlightRef.current.delete(requestSessionId);
+          if (!codexMcpSessionCacheOrderRef.current.includes(requestSessionId)) {
+            delete codexMcpRequestGenerationRef.current[requestSessionId];
+          }
         }
       }
     },
-    [activeCodexMcpSessionId],
+    [activeCodexMcpSessionId, retainCodexMcpSessionCacheEntry],
   );
 
   useEffect(() => {

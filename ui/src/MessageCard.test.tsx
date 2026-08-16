@@ -32,8 +32,12 @@ vi.mock("./api", async (importOriginal) => {
 describe("MessageCard", () => {
   it("stabilizes transient streaming Markdown shrink through MessageCard wiring", () => {
     const originalResizeObserver = globalThis.ResizeObserver;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
     let resizeCallback: ResizeObserverCallback | null = null;
     let unmount: (() => void) | null = null;
+    let nextFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
     class ResizeObserverHarness {
       constructor(callback: ResizeObserverCallback) {
         resizeCallback = callback;
@@ -45,6 +49,24 @@ describe("MessageCard", () => {
     }
     globalThis.ResizeObserver =
       ResizeObserverHarness as unknown as typeof ResizeObserver;
+    window.requestAnimationFrame = (callback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      animationFrames.set(frameId, callback);
+      return frameId;
+    };
+    window.cancelAnimationFrame = (frameId) => {
+      animationFrames.delete(frameId);
+    };
+
+    const runNextAnimationFrame = (timestamp: number) => {
+      const nextFrame = animationFrames.entries().next().value;
+      if (!nextFrame) {
+        throw new Error("Expected a pending animation frame");
+      }
+      animationFrames.delete(nextFrame[0]);
+      act(() => nextFrame[1](timestamp));
+    };
 
     try {
       const rendered = render(
@@ -86,12 +108,14 @@ describe("MessageCard", () => {
         resizeCallback?.([], {} as ResizeObserver);
       });
       expect(floor.style.minHeight).toBe("180px");
+      expect(floor).toHaveClass("is-holding-streaming-height");
 
       renderedHeight = 112;
       act(() => {
         resizeCallback?.([], {} as ResizeObserver);
       });
       expect(floor.style.minHeight).toBe("180px");
+      expect(floor).toHaveClass("is-holding-streaming-height");
 
       renderedHeight = 236;
       act(() => {
@@ -155,11 +179,88 @@ describe("MessageCard", () => {
         </section>,
       );
 
+      // Settling retains the streaming floor until two consecutive frames
+      // agree on the final height. A late final-render growth restarts that
+      // streak instead of producing an upward clamp followed by a downward
+      // bottom-follow correction.
+      expect(floor.style.minHeight).toBe("44px");
+      expect(repinRequests).toHaveLength(1);
+      runNextAnimationFrame(1_000);
+      expect(floor.style.minHeight).toBe("44px");
+
+      renderedHeight = 46;
+      act(() => {
+        resizeCallback?.([], {} as ResizeObserver);
+      });
+      runNextAnimationFrame(1_000 + 1000 / 60);
+      expect(floor.style.minHeight).toBe("46px");
+      expect(repinRequests).toHaveLength(1);
+
+      runNextAnimationFrame(1_000 + (2 * 1000) / 60);
       expect(floor.style.minHeight).toBe("");
+      expect(floor).not.toHaveClass("is-holding-streaming-height");
+      expect(animationFrames.size).toBe(0);
       expect(repinRequests).toHaveLength(2);
       expect((repinRequests[1] as CustomEvent).detail).toMatchObject({
         beforePaint: true,
       });
+
+      // A renderer that keeps reporting layout invalidations must not leave
+      // the reserved height (and its per-frame measurement loop) alive
+      // indefinitely after streaming ends.
+      renderedHeight = 52;
+      rendered.rerender(
+        <section className="message-stack">
+          <MessageCard
+            message={{
+              id: "streaming-message-3",
+              type: "text",
+              author: "assistant",
+              timestamp: "10:02",
+              text: "Another streaming response",
+            }}
+            isStreamingAssistantTextMessage
+            onApprovalDecision={vi.fn()}
+            onUserInputSubmit={vi.fn()}
+          />
+        </section>,
+      );
+      act(() => {
+        resizeCallback?.([], {} as ResizeObserver);
+      });
+      expect(floor).toHaveClass("is-holding-streaming-height");
+
+      rendered.rerender(
+        <section className="message-stack">
+          <MessageCard
+            message={{
+              id: "streaming-message-3",
+              type: "text",
+              author: "assistant",
+              timestamp: "10:02",
+              text: "Another settled response",
+            }}
+            isStreamingAssistantTextMessage={false}
+            onApprovalDecision={vi.fn()}
+            onUserInputSubmit={vi.fn()}
+          />
+        </section>,
+      );
+      for (let frame = 0; frame < 11; frame += 1) {
+        act(() => {
+          resizeCallback?.([], {} as ResizeObserver);
+        });
+        runNextAnimationFrame(2_000 + frame * (1000 / 60));
+        expect(floor).toHaveClass("is-holding-streaming-height");
+      }
+      act(() => {
+        resizeCallback?.([], {} as ResizeObserver);
+      });
+      runNextAnimationFrame(2_000 + 11 * (1000 / 60));
+      expect(floor.style.minHeight).toBe("");
+      expect(floor).not.toHaveClass("is-holding-streaming-height");
+      expect(animationFrames.size).toBe(0);
+      expect(repinRequests).toHaveLength(3);
     } finally {
       unmount?.();
       if (originalResizeObserver === undefined) {
@@ -167,6 +268,8 @@ describe("MessageCard", () => {
       } else {
         globalThis.ResizeObserver = originalResizeObserver;
       }
+      window.requestAnimationFrame = originalRequestAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
     }
   });
 

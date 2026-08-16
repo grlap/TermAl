@@ -233,9 +233,43 @@ child transcript and is available in UTF-8-safe pages from
 repeat with `nextOffsetBytes` until `complete` is true. This keeps every tool
 response bounded without requiring children to write ad hoc temporary files.
 
+For every newly spawned `mode: reviewer` delegation, the compact packet is no
+longer reconstructed from human-readable output. TermAl appends the versioned
+submission contract to the child bootstrap prompt after the repository-owned
+task text. This is host behavior: a repository may keep its own `/review-code`,
+`/review-local`, or other review command and does not need a TermAl marker or a
+submission step in that command. The child calls the child-only
+`termal_submit_review_result` tool with schema version 1. TermAl validates the
+complete typed payload, derives the delegation/child/parent identity, and
+appends a self-describing envelope to the parent-child mailbox under topic
+`delegation-review-result/v1`. The mailbox append is durable and idempotent; it
+intentionally does not wake the parent ahead of the normal delegation fan-in.
+The validated payload is held provisionally until the child turn independently
+becomes terminal, then promoted to the delegation result. Once accepted, that
+payload is the authoritative terminal truth: a later runtime error, idle teardown,
+or missing child cannot overwrite it. TermAl promotes the payload with every field
+unchanged and records any later transport failure separately in
+`postSubmissionTransportError`. An explicit user cancellation remains authoritative
+over lifecycle status and retains, but does not promote, an already accepted result.
+Recovery of the durable mailbox envelope is deliberately resilient: malformed
+JSON or mismatched envelope metadata is quarantined once for the current
+submission attempt and exposed as `reviewResultRecoveryError`. Parent
+status/result/output/cancel/follow-up APIs continue through the ordinary
+fail-closed lifecycle instead of returning a permanent recovery error. Rearming
+increments the attempt and clears the probe, so a later valid submission is not
+suppressed.
+
+This separates protocol from presentation: the final assistant Markdown stays
+available through paged full-output reads, but its headings and bullets are not
+parsed to decide whether findings exist. If the required tool submission is
+missing, the review result fails closed as unavailable and includes an explicit
+`Unavailable` finding. It is never represented as a clean empty result. Only
+older persisted delegations that predate the required structured protocol retain
+the versioned prose parser as a legacy fallback.
+
 The packet is a summary for resumption, not a replacement for the child
-transcript. Command status labels use the backend vocabulary: `running`,
-`success`, or `error`.
+transcript. Structured review submissions accept only terminal command status
+labels: `success` or `error`.
 
 ## Lifecycle
 
@@ -654,8 +688,9 @@ deferred: a bridge MAY enumerate and target **root** sessions across projects �
 and, on the roadmap, across machines — because the point is long-running
 specialist sessions on different projects consulting each other (for example,
 a Kadry coding agent requesting changes from a LegalSystem coding agent).
-Delegation **children** remain unreachable as peers: discovery and mailbox
-participant validation filter to root sessions (`parentDelegationId == null`).
+Delegation **children** remain unreachable as peers: discovery and ordinary
+mailbox participant validation filter to root sessions
+(`parentDelegationId == null`).
 On top of that root-only filter,
 `termal_send_to_session` refuses to target the caller *itself* — on both id and
 name references — so a bridge cannot message itself; `termal_list_sessions`
@@ -665,13 +700,17 @@ is the actual v2 visibility boundary.
 
 The exclusion is symmetric on the caller side: a bridge serving a delegation
 child (a reviewer, explorer, or worker, which may be processing untrusted
-content) is not given any of the six peer/mailbox tools. `tools_list_for_caller`
-removes them from that child's advertised tools, and the invocation path rejects
-them even if called directly, so a child cannot reach root sessions or their
-mailboxes *through the bridge*. That check fails closed: an unreachable backend
-or an unresolvable caller is treated as a child and denied the peer tools
-(tm-r0y). Only a root-session caller ever sees or invokes them, so the note above
-that `termal_list_sessions` lists the caller is itself scoped to a root caller.
+content) is not given any of the six general peer/mailbox tools.
+`tools_list_for_caller` removes them from that child's advertised tools, and the
+invocation path rejects them even if called directly, so a child cannot reach
+root sessions or their ordinary mailboxes *through the bridge*. That check
+fails closed: an unreachable backend or an unresolvable caller is treated as a
+child and denied the peer tools. The sole exception is
+`termal_submit_review_result`: it has no target argument, and the backend accepts
+it only from a linked, current reviewer child, routing one strict
+result envelope to that child's own coordinator. Only a root-session caller
+sees the general peer tools, so the note above that `termal_list_sessions` lists
+the caller is itself scoped to a root caller.
 
 The bridge caches a successful caller classification for its lifetime. That is
 safe because root eligibility is conjunctive: the session must have no
@@ -680,9 +719,10 @@ child index. A session that is root by both sources is never converted into a
 child under the same id by any production lifecycle path. Startup repair may
 restore a missing parent marker only for a session that the durable index
 already classified as a child, so it cannot follow a cached root grant. Hidden
-Claude spares and transient lookup failures remain uncached and fail closed.
-Any future root-to-child adoption, conversion, or id-reuse feature must replace
-the lifetime cache with revalidation before it ships (tm-487).
+prewarmed sessions are no longer created; transient lookup failures remain
+uncached and fail closed. Any future root-to-child adoption, conversion, or
+id-reuse feature must replace the lifetime cache with revalidation before it
+ships.
 
 This containment is a tool-layer guardrail, not process isolation. TermAl's
 loopback HTTP API is unauthenticated under the single-user, local-only trust
@@ -704,6 +744,7 @@ termal_cancel_session
 termal_wait_delegations
 termal_resume_after_delegations
 termal_followup_session
+termal_submit_review_result
 termal_send_to_session
 termal_list_sessions
 termal_list_mailboxes
@@ -724,6 +765,7 @@ termal_cancel_session({ delegationId }) -> DelegationStatusCommandResult
 termal_wait_delegations({ delegationIds, pollIntervalMs?, timeoutMs? }) -> WaitDelegationsResult
 termal_resume_after_delegations({ delegationIds, mode?, title? }) -> DelegationWaitResponse
 termal_followup_session({ delegationId, message }) -> DelegationStatusResponse
+termal_submit_review_result({ schemaVersion, status, summary, findings, commandsRun, filesInspected, notes, suggestedTrackerUpdates }) -> MailboxAppendReceipt
 termal_send_to_session({ sessionId, message, idempotencyKey, topic?, stateStamp?, class? }) -> { sessionId, resolvedFrom, mailboxId, messageId, sequence, unreadDepth, notificationDisposition, duplicate }
 termal_list_sessions() -> { sessions: [{ sessionId, name, agent, status, workdir, preview }] }
 termal_list_mailboxes() -> { mailboxes: [{ id, participants, latestSequence, unreadCount, latestMessagePreview, latestMessageAt }] }
@@ -1266,9 +1308,14 @@ be explicit about which guarantees are enforced and which are advisory.
   delegation, or choose another reviewer agent when exact read-only semantics
   are required. See
   [OpenCode ACP Integration](./opencode-acp-integration.md#delegation-boundary).
-- TermAl keeps the child's configured agent permission mode. This lets reviewer
-  delegations run normal inspection commands when the user's default allows it.
+- TermAl configures each supported agent adapter to allow inspection while
+  denying workspace mutation.
 - TermAl-mediated write/file/edit commands are disabled for the child.
+- The policy protects the workspace; it does not forbid TermAl control-plane
+  operations. A current reviewer child may submit its own bounded result through
+  `termal_submit_review_result`. Agent adapters map their native protocol onto
+  the same capability check, while the backend independently revalidates the
+  live reviewer link, schema, routing, and idempotency before any mailbox append.
 - While the read-only delegation is running, TermAl also blocks local
   TermAl-mediated writes from parent or sibling sessions that target the same
   project/workdir scope. This fail-closed project lock prevents bypassing a

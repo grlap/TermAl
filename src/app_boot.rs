@@ -367,7 +367,7 @@ impl AppState {
         // and any legacy import commit before either store exists, before the
         // persist worker starts, and therefore before run_server can expose an
         // HTTP listener. No append may mint sequences in an empty destination
-        // ahead of legacy history (tm-0qe).
+        // ahead of legacy history.
         bootstrap_coordination_database(&persistence_path, &coordination_path)?;
         let mailbox_store = Arc::new(MailboxStore::open(&coordination_path)?);
         // Mailboxes and the level-triggered board deliberately share the small
@@ -657,13 +657,11 @@ impl AppState {
         #[cfg(not(test))]
         state.spawn_workspace_file_watcher();
         // Runtime-resuming boot work is deferred to `run_post_listen_boot`, invoked by
-        // `run_server` only AFTER the HTTP listener is bound and the base URL is published
-        // (tm-2fc). Resuming a Codex session launches the shared app-server, and Claude
-        // spares spawn their own runtimes — each bakes a TermAl MCP bridge config from the
-        // base URL and connects back to this backend. Running it pre-listen pointed those
-        // bridges at the default URL / an unlistening backend, so Codex sessions came up with
-        // no TermAl MCP. Tests have no HTTP server or real runtimes, so they run it inline
-        // here to preserve behavior.
+        // `run_server` only AFTER the HTTP listener is bound and the base URL is published.
+        // Resuming a Codex session launches the shared app-server, which bakes a TermAl MCP
+        // bridge config from that URL and connects back to this backend. Running it
+        // pre-listen points the bridge at an unlistening backend. Tests have no HTTP server
+        // or real runtimes, so they run it inline here to preserve behavior.
         #[cfg(test)]
         state.run_post_listen_boot();
         Ok(state)
@@ -672,10 +670,14 @@ impl AppState {
     /// Boot work that RESUMES or SPAWNS session runtimes. MUST run only after the HTTP
     /// listener is bound and `set_local_http_base_url` has published the real address, so the
     /// TermAl MCP bridges these runtimes spawn are configured with the correct base URL and
-    /// can reach a listening backend (tm-2fc). All five steps self-persist / self-commit, so
-    /// deferring them past the boot persist above is safe.
+    /// can reach a listening backend. Each step self-persists / self-commits, so
+    /// deferring this work past the boot persist above is safe.
     fn run_post_listen_boot(&self) {
-        self.seed_hidden_claude_spares();
+        // Structured reviewer envelopes live in coordination.sqlite. Recover
+        // them before wait reconciliation so a restart between mailbox append
+        // and primary-state recording cannot resume a parent with a false
+        // unavailable result.
+        self.reconcile_durable_delegation_review_submissions_after_boot();
         // Materialize unread mailbox wakes before either workflow reconciler can
         // queue and dispatch a durable resume. That preserves FIFO ordering:
         // the workflow activation drains the recovered mailbox wake first.

@@ -56,6 +56,7 @@ fn classify_claude_control_request(
     state: &mut ClaudeTurnState,
     approval_mode: ClaudeApprovalMode,
     cwd: &str,
+    delegation_control_plane_access: bool,
 ) -> Result<Option<ClaudeControlRequestAction>> {
     let Some(request) = parse_claude_tool_permission_request(message) else {
         return Ok(None);
@@ -65,6 +66,17 @@ fn classify_claude_control_request(
     let key = format!("{}\n{}\n{}", request.request_id, request.title, command);
     if !state.approval_keys_this_turn.insert(key) {
         return Ok(None);
+    }
+
+    if delegation_control_plane_access
+        && delegation_control_plane_capability_for_tool_name(&request.tool_name).is_some()
+    {
+        return Ok(Some(ClaudeControlRequestAction::Respond(
+            ClaudePermissionDecision::Allow {
+                request_id: request.request_id,
+                updated_input: request.tool_input,
+            },
+        )));
     }
 
     Ok(Some(match approval_mode {
@@ -132,16 +144,16 @@ fn claude_tool_permission_request_is_read_only(
         //
         //   * `echo (Set-Content x y)` — PowerShell EVALUATES a parenthesized
         //     sub-expression. Survived only because the tokenizer happens to fail
-        //     closed on `(` (tm-mdx).
+        //     closed on `(`.
         //   * `git status 2>/dev/null` — the reader strips that literal before its
         //     `>` gate, then approves the ORIGINAL; PowerShell writes the file
-        //     `<drive>\dev\null` (tm-1ex).
+        //     `<drive>\dev\null`.
         //   * `cd (Set-Content x y)` — the `cd ` head reached `continue` before the
-        //     tokenizer ran: arbitrary-path WRITE (tm-hfh).
+        //     tokenizer ran: arbitrary-path WRITE.
         //   * `g\it status` — the tokenizer de-escapes `\` per bash, so it reads as
         //     `git`; PowerShell treats `\` as a PATH SEPARATOR and executes
         //     `.\g\it(.cmd/.ps1)` FROM THE REVIEWED TREE: arbitrary code execution
-        //     (tm-jk7).
+        //     from the reviewed tree: arbitrary code execution.
         //
         // Four defects, each a fresh denylist entry on a parser that models the
         // wrong language, and the escapes got worse each time. `&` (call operator),
@@ -152,7 +164,7 @@ fn claude_tool_permission_request_is_read_only(
         // Cost is nil — reviewers already do their work through the Bash tool (Git
         // Bash on Windows), and this arm never cleared anything beyond `git …`
         // anyway. Restoring PowerShell needs its OWN fail-closed checker, not a
-        // re-route through this one (tm-jk7 records the design).
+        // re-route through this one.
         "PowerShell" => false,
         "Bash" => request
             .tool_input
@@ -212,14 +224,14 @@ fn claude_bash_command_is_read_only(command: &str, cwd: &str) -> bool {
     // (like bash) de-quotes and unescapes, so `'git'`, `"git"`, and `g\it` all execute
     // git. Raw-text matching here would report "no git" for `cd <other> && 'git' status`
     // and skip this guard, while the approval pass below still de-quotes and approves the
-    // git command — retargeting git to another repo (tm-cnq).
+    // git command — retargeting git to another repo.
     let runs_git = segments
         .iter()
         .any(|&segment| claude_segment_invokes_git(segment));
     if runs_git {
         for &segment in &segments {
             // Decide "is this a `cd`" from TOKENS, symmetrically with `runs_git`
-            // above and for the same tm-cnq reason: raw-text matching misses
+            // above for the same reason: raw-text matching misses
             // `'cd'` / `"cd"` / `c\d`, which the tokenizer (like bash) de-quotes
             // and executes. Raw matching here skipped the guard for a quoted cd
             // while the approval pass below de-quoted and accepted it.
@@ -245,8 +257,8 @@ fn claude_bash_command_is_read_only(command: &str, cwd: &str) -> bool {
         // used to short-circuit here, so `cd (Set-Content victim.txt data)` was
         // auto-approved WITHOUT ever tokenizing — and PowerShell EVALUATES that
         // parenthesized write, giving a read-only reviewer an arbitrary-path write
-        // primitive. `runs_git` learned this in tm-cnq; the `cd`/`pwd` heads had
-        // not (tm-b9k).
+        // primitive. `runs_git` already follows this rule; the `cd`/`pwd` heads
+        // must do the same.
         let Some(tokens) = claude_bash_segment_tokens(segment) else {
             return false;
         };
@@ -538,7 +550,7 @@ fn claude_local_dir_match_key(path: &str) -> String {
 /// tokenizer — which de-quotes and unescapes exactly like the read-only approval pass —
 /// so `'git'`, `"git"`, and `g\it` are all recognized. Raw-text matching would let
 /// `cd <other-repo> && 'git' status` skip the cd-guard while the approval still runs git
-/// against the other repo (tm-cnq). A segment that fails to tokenize is not treated as
+/// against the other repo. A segment that fails to tokenize is not treated as
 /// git here; the per-segment loop denies it regardless, so the command still fails closed.
 fn claude_segment_invokes_git(segment: &str) -> bool {
     claude_bash_segment_tokens(segment)
@@ -967,7 +979,7 @@ fn claude_git_tokens_are_read_only(tokens: &[&str]) -> bool {
         // `git hash-object` is deliberately NOT allowed: it applies gitattributes clean
         // filters (`filter.<name>.clean = <cmd>`) unless `--no-filters`, so hashing a
         // tracked file in the repo under review can execute a repo-defined command — an
-        // exec sink the diff/log/show arm already blocks (tm-cnq). Diff fingerprinting uses
+        // exec sink the diff/log/show arm already blocks. Diff fingerprinting uses
         // `sha256sum` on `git diff` output instead, which reaches no such sink.
         "grep" => claude_git_grep_tokens_are_read_only(&normalized),
         // Only the listing form of `remote`; `add`/`remove`/`set-url`/`prune`

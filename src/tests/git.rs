@@ -125,6 +125,137 @@ fn git_status_file_actions_support_paths_with_spaces() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
+// Reproduces a Git panel entry becoming stale after another process commits
+// the selected change. The diff request must explain the transition and tell
+// the caller to refresh instead of returning an opaque "no diff" failure.
+#[test]
+fn git_diff_explains_when_an_external_commit_makes_a_cached_entry_stale() {
+    let repo_root = std::env::temp_dir().join(format!("termal-git-stale-diff-{}", Uuid::new_v4()));
+    let tracked_file = repo_root.join("nested").join("long-file-name.txt");
+
+    fs::create_dir_all(tracked_file.parent().unwrap()).unwrap();
+    fs::write(&tracked_file, "base\n").unwrap();
+    init_git_document_test_repo(&repo_root);
+    run_git_test_command(&repo_root, &["add", "nested/long-file-name.txt"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "initial"]);
+
+    fs::write(&tracked_file, "committed elsewhere\n").unwrap();
+    assert!(!load_git_status_for_path(&repo_root).unwrap().is_clean);
+    run_git_test_command(&repo_root, &["add", "nested/long-file-name.txt"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "external commit"]);
+
+    let error = match load_git_diff_for_request(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: None,
+            path: "nested/long-file-name.txt".to_owned(),
+            section_id: GitDiffSection::Unstaged,
+            status_code: Some("M".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    ) {
+        Ok(_) => panic!("a stale cached change should not produce a diff"),
+        Err(error) => error,
+    };
+
+    assert_eq!(
+        error.message,
+        "`nested/long-file-name.txt` now matches HEAD. Refresh Git status to remove the stale entry."
+    );
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+// A staged row can become stale while the same file still has an unstaged
+// change. The diagnostic must describe only the selected index-to-HEAD side;
+// claiming that the whole file matches HEAD would contradict Git status.
+#[test]
+fn git_diff_explains_when_only_the_cached_staged_side_disappears() {
+    let repo_root =
+        std::env::temp_dir().join(format!("termal-git-stale-staged-diff-{}", Uuid::new_v4()));
+    let tracked_file = repo_root.join("mixed.txt");
+
+    fs::create_dir_all(&repo_root).unwrap();
+    fs::write(&tracked_file, "base\n").unwrap();
+    init_git_document_test_repo(&repo_root);
+    run_git_test_command(&repo_root, &["add", "mixed.txt"]);
+    run_git_test_command(&repo_root, &["commit", "-m", "initial"]);
+
+    fs::write(&tracked_file, "staged\n").unwrap();
+    run_git_test_command(&repo_root, &["add", "mixed.txt"]);
+    fs::write(&tracked_file, "unstaged after staged row was cached\n").unwrap();
+    run_git_test_command(&repo_root, &["reset", "HEAD", "--", "mixed.txt"]);
+
+    let error = match load_git_diff_for_request(
+        &repo_root,
+        &GitDiffRequest {
+            original_path: None,
+            path: "mixed.txt".to_owned(),
+            section_id: GitDiffSection::Staged,
+            status_code: Some("M".to_owned()),
+            workdir: repo_root.to_string_lossy().into_owned(),
+            project_id: None,
+            session_id: None,
+        },
+    ) {
+        Ok(_) => panic!("a vanished staged side should not produce a diff"),
+        Err(error) => error,
+    };
+
+    assert_eq!(
+        error.message,
+        "The staged version of `mixed.txt` no longer differs from HEAD. Refresh Git status to remove the stale entry."
+    );
+
+    fs::remove_dir_all(repo_root).unwrap();
+}
+
+#[test]
+fn empty_git_diff_reasons_distinguish_mode_binary_and_selected_side_changes() {
+    assert_eq!(
+        empty_git_diff_reason(
+            "script.sh",
+            GitDiffSection::Unstaged,
+            false,
+            true,
+            " mode change 100644 => 100755 script.sh\n",
+            "0\t0\tscript.sh\n",
+        ),
+        "Only file mode metadata changed for `script.sh`; there is no textual diff to display."
+    );
+    assert_eq!(
+        empty_git_diff_reason(
+            "assets/image.bin",
+            GitDiffSection::Staged,
+            false,
+            true,
+            "",
+            "-\t-\tassets/image.bin\n",
+        ),
+        "`assets/image.bin` is a binary change; there is no textual diff to display."
+    );
+    assert_eq!(
+        empty_git_diff_reason("notes.txt", GitDiffSection::Unstaged, false, false, "", "",),
+        "The unstaged version of `notes.txt` no longer differs from the index. Refresh Git status to remove the stale entry."
+    );
+}
+
+#[test]
+fn empty_git_diff_auxiliary_probe_failure_keeps_the_generic_bad_request_reason() {
+    let reason = finalize_empty_git_diff_explanation(
+        "notes.txt",
+        GitDiffSection::Unstaged,
+        Err(ApiError::internal("auxiliary probe failed")),
+    );
+
+    assert_eq!(
+        reason,
+        "Git still reports `notes.txt` as changed, but returned no textual diff for the unstaged version."
+    );
+}
+
 // Pins that selected file paths are passed to Git as literals, not pathspec
 // globs. `docs/[ab].txt` would otherwise stage `docs/a.txt` on Git's pathspec
 // matcher instead of the selected file.

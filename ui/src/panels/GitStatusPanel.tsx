@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   applyGitFileAction,
   commitGitChanges,
@@ -34,6 +34,38 @@ type GitDiffOpenOptions = {
 };
 
 const gitStatusPanelCache = new Map<string, GitStatusPanelCacheEntry>();
+const MAX_GIT_STATUS_PANEL_CACHE_ENTRIES = 16;
+const GIT_STATUS_VISIBLE_REFRESH_MS = 10_000;
+
+function buildGitStatusPanelCacheKey(projectId: string, sessionId: string, workdir: string) {
+  return JSON.stringify([projectId, sessionId, workdir]);
+}
+
+function readGitStatusPanelCache(key: string) {
+  const entry = gitStatusPanelCache.get(key) ?? null;
+  if (entry) {
+    // Refresh insertion order so the bounded module cache behaves as an LRU.
+    gitStatusPanelCache.delete(key);
+    gitStatusPanelCache.set(key, entry);
+  }
+  return entry;
+}
+
+function writeGitStatusPanelCache(key: string, entry: GitStatusPanelCacheEntry) {
+  gitStatusPanelCache.delete(key);
+  gitStatusPanelCache.set(key, entry);
+  while (gitStatusPanelCache.size > MAX_GIT_STATUS_PANEL_CACHE_ENTRIES) {
+    const oldestKey = gitStatusPanelCache.keys().next().value;
+    if (typeof oldestKey !== "string") {
+      break;
+    }
+    gitStatusPanelCache.delete(oldestKey);
+  }
+}
+
+function gitStatusResponsesEqual(left: GitStatusResponse | null, right: GitStatusResponse) {
+  return left !== null && JSON.stringify(left) === JSON.stringify(right);
+}
 
 export function GitStatusPanel({
   onStatusChange,
@@ -55,13 +87,19 @@ export function GitStatusPanel({
   const normalizedProjectId = projectId?.trim() ?? "";
   const normalizedSessionId = sessionId?.trim() ?? "";
   const normalizedWorkdir = workdir?.trim() ?? "";
-  const cachedPanelState = normalizedWorkdir ? gitStatusPanelCache.get(normalizedWorkdir) ?? null : null;
+  const panelScopeKey = normalizedWorkdir
+    ? buildGitStatusPanelCacheKey(normalizedProjectId, normalizedSessionId, normalizedWorkdir)
+    : "";
+  const cachedPanelState = panelScopeKey ? gitStatusPanelCache.get(panelScopeKey) ?? null : null;
   const [workdirDraft, setWorkdirDraft] = useState(workdir ?? "");
   const [status, setStatus] = useState<GitStatusResponse | null>(() => cachedPanelState?.status ?? null);
-  const [statusCacheKey, setStatusCacheKey] = useState<string | null>(() => (cachedPanelState?.status ? normalizedWorkdir : null));
+  const [statusCacheKey, setStatusCacheKey] = useState<string | null>(() =>
+    cachedPanelState?.status ? panelScopeKey : null,
+  );
   const [commitMessage, setCommitMessage] = useState("");
   const [commitNotice, setCommitNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [backgroundError, setBackgroundError] = useState<string | null>(null);
   const [isCommitting, setIsCommitting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
@@ -69,17 +107,33 @@ export function GitStatusPanel({
     () => cachedPanelState?.treeExpansionByKey ?? {},
   );
   const onStatusChangeRef = useRef(onStatusChange);
+  const statusRef = useRef(status);
+  const isMountedRef = useRef(true);
   const latestLoadRequestIdRef = useRef(0);
+  const activeLoadRef = useRef<{ background: boolean; requestId: number; scopeKey: string } | null>(null);
+  const activePanelScopeKeyRef = useRef(panelScopeKey);
+  const latestDiffOperationIdRef = useRef(0);
+  const latestMutationOperationIdRef = useRef(0);
+  const gitMutationActiveRef = useRef(false);
   const previousSectionsRef = useRef<GitStatusTreeSection[] | null>(null);
   const previousSectionsWorkdirRef = useRef<string | null>(null);
   const visibleStatus = status;
+  const visibleError = error ?? backgroundError;
   const changedFiles = visibleStatus?.files ?? [];
   const hasStagedChanges = changedFiles.some((file) => Boolean(file.indexStatus));
+  const isTreeMutationPending = pendingActionKey !== null && !pendingActionKey.endsWith(":open");
+  const isGitMutationPending = isCommitting || isTreeMutationPending;
   const sections = useMemo(() => {
     const previousSections =
       previousSectionsWorkdirRef.current === normalizedWorkdir ? (previousSectionsRef.current ?? undefined) : undefined;
     return buildGitStatusTree(changedFiles, previousSections);
   }, [changedFiles, normalizedWorkdir]);
+  useLayoutEffect(() => {
+    // Publish the new scope in the same commit, before a promise callback can
+    // apply an old scope's result to the newly rendered panel.
+    activePanelScopeKeyRef.current = panelScopeKey;
+    statusRef.current = status;
+  }, [panelScopeKey, status]);
 
   useEffect(() => {
     onStatusChangeRef.current = onStatusChange;
@@ -95,7 +149,7 @@ export function GitStatusPanel({
       return;
     }
 
-    gitStatusPanelCache.set(statusCacheKey, {
+    writeGitStatusPanelCache(statusCacheKey, {
       status,
       treeExpansionByKey,
     });
@@ -106,53 +160,73 @@ export function GitStatusPanel({
   }, [workdir]);
 
   useEffect(() => {
-    latestLoadRequestIdRef.current += 1;
-    setPendingActionKey(null);
-    setCommitMessage("");
-    setCommitNotice(null);
-    if (!normalizedWorkdir) {
-      setStatus(null);
-      setStatusCacheKey(null);
-      setError(null);
-      setTreeExpansionByKey({});
-      onStatusChangeRef.current?.(null);
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      latestLoadRequestIdRef.current += 1;
+      latestDiffOperationIdRef.current += 1;
+      latestMutationOperationIdRef.current += 1;
+      activeLoadRef.current = null;
+      gitMutationActiveRef.current = false;
+    };
+  }, []);
+
+  const loadStatus = useCallback(async (options?: {
+    background?: boolean;
+    preserveVisibleStatus?: boolean;
+  }) => {
+    if (!normalizedWorkdir || !panelScopeKey) {
       return;
     }
-
-    const cachedState = gitStatusPanelCache.get(normalizedWorkdir) ?? null;
-    setTreeExpansionByKey(cachedState?.treeExpansionByKey ?? {});
-    setError(null);
-    if (cachedState?.status) {
-      setStatus(cachedState.status);
-      setStatusCacheKey(normalizedWorkdir);
-      onStatusChangeRef.current?.(cachedState.status);
-      return;
-    }
-
-    setStatus(null);
-    setStatusCacheKey(null);
-    onStatusChangeRef.current?.(null);
-    void loadStatus(normalizedWorkdir);
-  }, [normalizedWorkdir]);
-
-  async function loadStatus(path: string, options?: { preserveVisibleStatus?: boolean }) {
-    const requestId = latestLoadRequestIdRef.current + 1;
-    latestLoadRequestIdRef.current = requestId;
-    const preserveVisibleStatus = options?.preserveVisibleStatus;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = await fetchGitStatus(path, normalizedSessionId || null, {
-        projectId: normalizedProjectId || null,
-      });
-      if (latestLoadRequestIdRef.current !== requestId) {
+    const requestScopeKey = panelScopeKey;
+    const background = options?.background ?? false;
+    const activeLoad = activeLoadRef.current;
+    if (activeLoad?.scopeKey === requestScopeKey) {
+      // Background work never displaces a request already representing this
+      // scope. A user-triggered foreground refresh may supersede a background
+      // poll so recovery actions are never silently ignored.
+      if (background || !activeLoad.background) {
         return;
       }
+    }
+
+    const requestId = latestLoadRequestIdRef.current + 1;
+    latestLoadRequestIdRef.current = requestId;
+    activeLoadRef.current = { background, requestId, scopeKey: requestScopeKey };
+    const preserveVisibleStatus = options?.preserveVisibleStatus;
+    if (!background) {
+      setIsLoading(true);
+      setError(null);
+      setBackgroundError(null);
+    }
+    try {
+      const response = await fetchGitStatus(normalizedWorkdir, normalizedSessionId || null, {
+        projectId: normalizedProjectId || null,
+      });
+      if (
+        !isMountedRef.current ||
+        latestLoadRequestIdRef.current !== requestId ||
+        activePanelScopeKeyRef.current !== requestScopeKey
+      ) {
+        return;
+      }
+      if (background && gitStatusResponsesEqual(statusRef.current, response)) {
+        setBackgroundError(null);
+        return;
+      }
+      statusRef.current = response;
       setStatus(response);
-      setStatusCacheKey(path);
+      setStatusCacheKey(requestScopeKey);
+      if (background) {
+        setBackgroundError(null);
+      }
       onStatusChangeRef.current?.(response);
     } catch (nextError) {
-      if (latestLoadRequestIdRef.current !== requestId) {
+      if (
+        !isMountedRef.current ||
+        latestLoadRequestIdRef.current !== requestId ||
+        activePanelScopeKeyRef.current !== requestScopeKey
+      ) {
         return;
       }
       if (!preserveVisibleStatus) {
@@ -160,13 +234,102 @@ export function GitStatusPanel({
         setStatusCacheKey(null);
         onStatusChangeRef.current?.(null);
       }
-      setError(getErrorMessage(nextError));
+      if (background) {
+        setBackgroundError(getErrorMessage(nextError));
+      } else {
+        setError(getErrorMessage(nextError));
+      }
     } finally {
-      if (latestLoadRequestIdRef.current === requestId) {
+      if (
+        !background &&
+        isMountedRef.current &&
+        latestLoadRequestIdRef.current === requestId &&
+        activePanelScopeKeyRef.current === requestScopeKey
+      ) {
         setIsLoading(false);
       }
+      if (activeLoadRef.current?.requestId === requestId) {
+        activeLoadRef.current = null;
+      }
     }
-  }
+  }, [normalizedProjectId, normalizedSessionId, normalizedWorkdir, panelScopeKey]);
+
+  useEffect(() => {
+    latestLoadRequestIdRef.current += 1;
+    latestDiffOperationIdRef.current += 1;
+    latestMutationOperationIdRef.current += 1;
+    activeLoadRef.current = null;
+    gitMutationActiveRef.current = false;
+    setIsLoading(false);
+    setIsCommitting(false);
+    setPendingActionKey(null);
+    setCommitMessage("");
+    setCommitNotice(null);
+    if (!normalizedWorkdir || !panelScopeKey) {
+      setStatus(null);
+      setStatusCacheKey(null);
+      setError(null);
+      setBackgroundError(null);
+      setTreeExpansionByKey({});
+      onStatusChangeRef.current?.(null);
+      return;
+    }
+
+    const cachedState = readGitStatusPanelCache(panelScopeKey);
+    setTreeExpansionByKey(cachedState?.treeExpansionByKey ?? {});
+    setError(null);
+    setBackgroundError(null);
+    if (cachedState?.status) {
+      setStatus(cachedState.status);
+      setStatusCacheKey(panelScopeKey);
+      onStatusChangeRef.current?.(cachedState.status);
+    } else {
+      setStatus(null);
+      setStatusCacheKey(null);
+      onStatusChangeRef.current?.(null);
+    }
+
+    // Cached state keeps the panel visually stable, but Git remains the
+    // source of truth. Always reconcile after mounting or changing scope so
+    // commits made by another process cannot leave phantom file counts.
+    void loadStatus({
+      background: Boolean(cachedState?.status),
+      preserveVisibleStatus: Boolean(cachedState?.status),
+    });
+  }, [loadStatus, normalizedWorkdir, panelScopeKey]);
+
+  useEffect(() => {
+    if (!normalizedWorkdir) {
+      return;
+    }
+
+    const refresh = () => {
+      if (document.visibilityState === "hidden" || gitMutationActiveRef.current) {
+        return;
+      }
+      void loadStatus({ background: true, preserveVisibleStatus: true });
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && document.hasFocus()) {
+        refresh();
+      }
+    };
+    const refreshIfFocused = () => {
+      if (document.hasFocus()) {
+        refresh();
+      }
+    };
+
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    const intervalId = window.setInterval(refreshIfFocused, GIT_STATUS_VISIBLE_REFRESH_MS);
+
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.clearInterval(intervalId);
+    };
+  }, [loadStatus, normalizedWorkdir]);
 
   const handleOpenDiff = useCallback(
     async (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) => {
@@ -175,9 +338,17 @@ export function GitStatusPanel({
         return;
       }
 
+      const requestScopeKey = panelScopeKey;
+      const operationId = latestDiffOperationIdRef.current + 1;
+      latestDiffOperationIdRef.current = operationId;
+      const isCurrentOperation = () =>
+        isMountedRef.current &&
+        latestDiffOperationIdRef.current === operationId &&
+        activePanelScopeKeyRef.current === requestScopeKey;
       const actionKey = gitFileOpenKey(sectionId, node.path);
       setPendingActionKey(actionKey);
       setError(null);
+      setBackgroundError(null);
       setCommitNotice(null);
 
       try {
@@ -196,12 +367,29 @@ export function GitStatusPanel({
           await onOpenDiff(request, { sectionId });
         }
       } catch (nextError) {
-        setError(getErrorMessage(nextError));
+        if (!isCurrentOperation()) {
+          return;
+        }
+        const diffError = getErrorMessage(nextError);
+        await loadStatus({ preserveVisibleStatus: true });
+        if (isCurrentOperation()) {
+          setError(diffError);
+        }
       } finally {
-        setPendingActionKey((current) => (current === actionKey ? null : current));
+        if (isCurrentOperation()) {
+          setPendingActionKey((current) => (current === actionKey ? null : current));
+        }
       }
     },
-    [normalizedProjectId, normalizedSessionId, normalizedWorkdir, onOpenDiff, visibleStatus?.workdir],
+    [
+      loadStatus,
+      normalizedProjectId,
+      normalizedSessionId,
+      normalizedWorkdir,
+      onOpenDiff,
+      panelScopeKey,
+      visibleStatus?.workdir,
+    ],
   );
 
   const handleTreeAction = useCallback(
@@ -212,13 +400,25 @@ export function GitStatusPanel({
       action: GitFileAction,
     ) => {
       const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
-      if (!activeWorkdir || targets.length === 0) {
+      if (!activeWorkdir || targets.length === 0 || gitMutationActiveRef.current) {
         return;
       }
 
+      const requestScopeKey = panelScopeKey;
+      const operationId = latestMutationOperationIdRef.current + 1;
+      latestMutationOperationIdRef.current = operationId;
+      const isCurrentOperation = () =>
+        isMountedRef.current &&
+        latestMutationOperationIdRef.current === operationId &&
+        activePanelScopeKeyRef.current === requestScopeKey;
       const actionKey = gitFileActionKey(sectionId, actionPath, action);
+      gitMutationActiveRef.current = true;
+      latestLoadRequestIdRef.current += 1;
+      activeLoadRef.current = null;
+      setIsLoading(false);
       setPendingActionKey(actionKey);
       setError(null);
+      setBackgroundError(null);
       setCommitNotice(null);
 
       try {
@@ -234,32 +434,44 @@ export function GitStatusPanel({
             statusCode: target.statusCode,
             workdir: activeWorkdir,
           });
+          if (!isCurrentOperation()) {
+            return;
+          }
         }
 
-        if (response) {
+        if (response && isCurrentOperation()) {
           setStatus(response);
-          setStatusCacheKey(normalizedWorkdir || activeWorkdir);
+          setStatusCacheKey(requestScopeKey);
           onStatusChangeRef.current?.(response);
         }
       } catch (nextError) {
+        if (!isCurrentOperation()) {
+          return;
+        }
         setError(getErrorMessage(nextError));
         if (targets.length > 1) {
           try {
-            const refreshedStatus = await fetchGitStatus(activeWorkdir, normalizedSessionId || null, {
+            const refreshedStatus = await fetchGitStatus(normalizedWorkdir, normalizedSessionId || null, {
               projectId: normalizedProjectId || null,
             });
+            if (!isCurrentOperation()) {
+              return;
+            }
             setStatus(refreshedStatus);
-            setStatusCacheKey(normalizedWorkdir || activeWorkdir);
+            setStatusCacheKey(requestScopeKey);
             onStatusChangeRef.current?.(refreshedStatus);
           } catch {
             // Keep the action error visible if the follow-up refresh also fails.
           }
         }
       } finally {
-        setPendingActionKey((current) => (current === actionKey ? null : current));
+        if (isCurrentOperation()) {
+          gitMutationActiveRef.current = false;
+          setPendingActionKey((current) => (current === actionKey ? null : current));
+        }
       }
     },
-    [normalizedProjectId, normalizedSessionId, normalizedWorkdir, visibleStatus?.workdir],
+    [normalizedProjectId, normalizedSessionId, normalizedWorkdir, panelScopeKey, visibleStatus?.workdir],
   );
 
   const handleFileAction = useCallback(
@@ -304,22 +516,40 @@ export function GitStatusPanel({
   }
 
   function refreshCurrentStatus() {
-    if (!normalizedWorkdir || isLoading || isCommitting) {
+    if (!normalizedWorkdir || isLoading || gitMutationActiveRef.current) {
       return;
     }
 
-    void loadStatus(normalizedWorkdir, { preserveVisibleStatus: true });
+    void loadStatus({ preserveVisibleStatus: true });
   }
 
   async function submitCommit() {
     const activeWorkdir = visibleStatus?.workdir ?? normalizedWorkdir;
     const nextMessage = commitMessage.trim();
-    if (!activeWorkdir || !nextMessage || !hasStagedChanges || isCommitting) {
+    if (
+      !activeWorkdir ||
+      !nextMessage ||
+      !hasStagedChanges ||
+      isCommitting ||
+      gitMutationActiveRef.current
+    ) {
       return;
     }
 
+    const requestScopeKey = panelScopeKey;
+    const operationId = latestMutationOperationIdRef.current + 1;
+    latestMutationOperationIdRef.current = operationId;
+    const isCurrentOperation = () =>
+      isMountedRef.current &&
+      latestMutationOperationIdRef.current === operationId &&
+      activePanelScopeKeyRef.current === requestScopeKey;
+    gitMutationActiveRef.current = true;
+    latestLoadRequestIdRef.current += 1;
+    activeLoadRef.current = null;
+    setIsLoading(false);
     setIsCommitting(true);
     setError(null);
+    setBackgroundError(null);
     setCommitNotice(null);
 
     try {
@@ -329,15 +559,23 @@ export function GitStatusPanel({
         sessionId: normalizedSessionId || null,
         workdir: activeWorkdir,
       });
+      if (!isCurrentOperation()) {
+        return;
+      }
       setStatus(response.status);
-      setStatusCacheKey(normalizedWorkdir || activeWorkdir);
+      setStatusCacheKey(requestScopeKey);
       setCommitMessage("");
       setCommitNotice(response.summary);
       onStatusChangeRef.current?.(response.status);
     } catch (nextError) {
-      setError(getErrorMessage(nextError));
+      if (isCurrentOperation()) {
+        setError(getErrorMessage(nextError));
+      }
     } finally {
-      setIsCommitting(false);
+      if (isCurrentOperation()) {
+        gitMutationActiveRef.current = false;
+        setIsCommitting(false);
+      }
     }
   }
 
@@ -369,7 +607,7 @@ export function GitStatusPanel({
                 className="command-icon-button git-status-refresh-button"
                 type="button"
                 onClick={refreshCurrentStatus}
-                disabled={!normalizedWorkdir || isLoading || isCommitting}
+                disabled={!normalizedWorkdir || isLoading || isGitMutationPending}
                 aria-label="Refresh git status"
                 title="Refresh git status"
               >
@@ -402,10 +640,10 @@ export function GitStatusPanel({
         </div>
       ) : null}
 
-      {error ? (
+      {visibleError ? (
         <article className="thread-notice">
           <div className="card-label">Git</div>
-          <p>{error}</p>
+          <p>{visibleError}</p>
         </article>
       ) : null}
 
@@ -429,7 +667,7 @@ export function GitStatusPanel({
                   className="command-icon-button git-status-refresh-button"
                   type="button"
                   onClick={refreshCurrentStatus}
-                  disabled={!normalizedWorkdir || isLoading || isCommitting}
+                  disabled={!normalizedWorkdir || isLoading || isGitMutationPending}
                   aria-label="Refresh git status"
                   title="Refresh git status"
                 >
@@ -455,6 +693,7 @@ export function GitStatusPanel({
                   onOpenDiff={handleOpenDiff}
                   onSectionAction={handleSectionAction}
                   onTreeToggle={toggleTreeItem}
+                  mutationDisabled={isGitMutationPending}
                   pendingActionKey={pendingActionKey}
                   repoRoot={visibleStatus.repoRoot ?? ""}
                   section={section}
@@ -491,7 +730,7 @@ export function GitStatusPanel({
               <button
                 className="send-button git-status-commit-button"
                 type="submit"
-                disabled={!hasStagedChanges || !commitMessage.trim() || isCommitting}
+                disabled={!hasStagedChanges || !commitMessage.trim() || isGitMutationPending}
               >
                 {isCommitting ? "Committing..." : "Commit"}
               </button>
@@ -505,6 +744,7 @@ export function GitStatusPanel({
 
 const GitStatusSection = memo(function GitStatusSection({
   isExpanded,
+  mutationDisabled,
   onDirectoryAction,
   onFileAction,
   onOpenDiff,
@@ -516,6 +756,7 @@ const GitStatusSection = memo(function GitStatusSection({
   treeExpansionByKey,
 }: {
   isExpanded: boolean;
+  mutationDisabled: boolean;
   onDirectoryAction: (
     sectionId: GitStatusSectionId,
     node: GitStatusTreeDirectoryNode,
@@ -533,7 +774,6 @@ const GitStatusSection = memo(function GitStatusSection({
   const isStaged = section.id === "staged";
   const sectionAction: GitFileAction = isStaged ? "unstage" : "stage";
   const sectionActionLabel = isStaged ? "Unstage all files" : "Stage all files";
-  const isSectionActionPending = pendingActionKey === gitFileActionKey(section.id, section.id, sectionAction);
 
   return (
     <section className="git-status-section">
@@ -556,7 +796,7 @@ const GitStatusSection = memo(function GitStatusSection({
             onClick={() => onSectionAction(section.id, section.nodes, sectionAction)}
             aria-label={sectionActionLabel}
             title={sectionActionLabel}
-            disabled={isSectionActionPending}
+            disabled={mutationDisabled}
           >
             {isStaged ? <UnstageIcon /> : <StageIcon />}
           </button>
@@ -569,6 +809,7 @@ const GitStatusSection = memo(function GitStatusSection({
       {isExpanded ? (
         section.fileCount > 0 ? (
           <GitStatusTree
+            mutationDisabled={mutationDisabled}
             nodes={section.nodes}
             onDirectoryAction={onDirectoryAction}
             onFileAction={onFileAction}
@@ -588,6 +829,7 @@ const GitStatusSection = memo(function GitStatusSection({
 });
 
 const GitStatusTree = memo(function GitStatusTree({
+  mutationDisabled,
   nodes,
   onDirectoryAction,
   onFileAction,
@@ -598,6 +840,7 @@ const GitStatusTree = memo(function GitStatusTree({
   sectionId,
   treeExpansionByKey,
 }: {
+  mutationDisabled: boolean;
   nodes: GitStatusTreeNode[];
   onDirectoryAction: (
     sectionId: GitStatusSectionId,
@@ -618,6 +861,7 @@ const GitStatusTree = memo(function GitStatusTree({
         node.kind === "directory" ? (
           <GitStatusDirectoryNode
             key={`${sectionId}:${node.path}`}
+            mutationDisabled={mutationDisabled}
             node={node}
             onDirectoryAction={onDirectoryAction}
             onFileAction={onFileAction}
@@ -632,6 +876,7 @@ const GitStatusTree = memo(function GitStatusTree({
           <GitStatusFileRow
             key={`${sectionId}:${node.path}`}
             isPending={pendingActionKey !== null && pendingActionKey.startsWith(`${sectionId}:${node.path}:`)}
+            mutationDisabled={mutationDisabled}
             node={node}
             onAction={onFileAction}
             onOpenDiff={onOpenDiff}
@@ -645,6 +890,7 @@ const GitStatusTree = memo(function GitStatusTree({
 });
 
 const GitStatusDirectoryNode = memo(function GitStatusDirectoryNode({
+  mutationDisabled,
   node,
   onDirectoryAction,
   onFileAction,
@@ -655,6 +901,7 @@ const GitStatusDirectoryNode = memo(function GitStatusDirectoryNode({
   sectionId,
   treeExpansionByKey,
 }: {
+  mutationDisabled: boolean;
   node: GitStatusTreeDirectoryNode;
   onDirectoryAction: (
     sectionId: GitStatusSectionId,
@@ -700,7 +947,7 @@ const GitStatusDirectoryNode = memo(function GitStatusDirectoryNode({
               onClick={() => onDirectoryAction(sectionId, node, action)}
               aria-label={actionLabel}
               title={actionLabel}
-              disabled={isPending}
+              disabled={mutationDisabled}
             >
               {isStaged ? <UnstageIcon /> : <StageIcon />}
             </button>
@@ -714,6 +961,7 @@ const GitStatusDirectoryNode = memo(function GitStatusDirectoryNode({
       {isExpanded ? (
         <div className="git-status-tree-children">
           <GitStatusTree
+            mutationDisabled={mutationDisabled}
             nodes={node.children}
             onDirectoryAction={onDirectoryAction}
             onFileAction={onFileAction}
@@ -732,6 +980,7 @@ const GitStatusDirectoryNode = memo(function GitStatusDirectoryNode({
 
 const GitStatusFileRow = memo(function GitStatusFileRow({
   isPending,
+  mutationDisabled,
   node,
   onAction,
   onOpenDiff,
@@ -739,6 +988,7 @@ const GitStatusFileRow = memo(function GitStatusFileRow({
   sectionId,
 }: {
   isPending: boolean;
+  mutationDisabled: boolean;
   node: GitStatusTreeFileNode;
   onAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
   onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) => void;
@@ -777,7 +1027,7 @@ const GitStatusFileRow = memo(function GitStatusFileRow({
               onClick={() => onAction(sectionId, node, "revert")}
               aria-label={`Revert ${node.name}`}
               title={`Revert ${node.name}`}
-              disabled={isPending}
+              disabled={mutationDisabled}
             >
               <RevertIcon />
             </button>
@@ -788,7 +1038,7 @@ const GitStatusFileRow = memo(function GitStatusFileRow({
             onClick={() => onAction(sectionId, node, isStaged ? "unstage" : "stage")}
             aria-label={stageActionLabel}
             title={stageActionLabel}
-            disabled={isPending}
+            disabled={mutationDisabled}
           >
             {isStaged ? <UnstageIcon /> : <StageIcon />}
           </button>
@@ -997,4 +1247,8 @@ function getErrorMessage(error: unknown) {
 
 export function __resetGitStatusPanelCacheForTests() {
   gitStatusPanelCache.clear();
+}
+
+export function __getGitStatusPanelCacheSizeForTests() {
+  return gitStatusPanelCache.size;
 }

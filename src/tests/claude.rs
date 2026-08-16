@@ -561,6 +561,7 @@ fn claude_read_only_auto_approve_allows_read_only_bash_permission_request() {
         &mut turn_state,
         ClaudeApprovalMode::ReadOnlyAutoApprove,
         "C:/reviewer-sandbox",
+        false,
     )
     .unwrap()
     .expect("permission request should be classified");
@@ -578,6 +579,72 @@ fn claude_read_only_auto_approve_allows_read_only_bash_permission_request() {
         updated_input.get("command").and_then(Value::as_str),
         Some("git diff --cached -- src/delegations.rs | head -40")
     );
+}
+
+#[test]
+fn claude_reviewer_allows_authorized_delegation_control_plane_submission() {
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &claude_permission_request(
+            "mcp__termal-delegation__termal_submit_review_result",
+            json!({ "schemaVersion": 1, "status": "completed" }),
+        ),
+        &mut turn_state,
+        ClaudeApprovalMode::Ask,
+        "C:/reviewer-sandbox",
+        true,
+    )
+    .unwrap()
+    .expect("permission request should be classified");
+
+    assert!(matches!(
+        action,
+        ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Allow { .. })
+    ));
+}
+
+#[test]
+fn claude_reviewer_denies_control_plane_submission_without_delegation_authority() {
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &claude_permission_request(
+            "mcp__termal-delegation__termal_submit_review_result",
+            json!({ "schemaVersion": 1, "status": "completed" }),
+        ),
+        &mut turn_state,
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+        "C:/reviewer-sandbox",
+        false,
+    )
+    .unwrap()
+    .expect("permission request should be classified");
+
+    assert!(matches!(
+        action,
+        ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Deny { .. })
+    ));
+}
+
+#[test]
+fn claude_reviewer_does_not_auto_approve_an_unscoped_colliding_tool_name() {
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &claude_permission_request(
+            TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME,
+            json!({ "schemaVersion": 1, "status": "completed" }),
+        ),
+        &mut turn_state,
+        ClaudeApprovalMode::Ask,
+        "C:/reviewer-sandbox",
+        true,
+    )
+    .unwrap()
+    .expect("permission request should be classified");
+
+    assert!(matches!(
+        action,
+        ClaudeControlRequestAction::QueueApproval { .. }
+    ));
 }
 
 #[test]
@@ -626,6 +693,7 @@ fn claude_read_only_auto_approve_allows_review_code_bash_shapes() {
             &mut turn_state,
             ClaudeApprovalMode::ReadOnlyAutoApprove,
             "C:/reviewer-sandbox",
+            false,
         )
         .unwrap()
         .expect("permission request should be classified");
@@ -647,7 +715,7 @@ fn claude_read_only_auto_approve_allows_review_code_bash_shapes() {
 }
 
 // Exercises `claude_bash_command_is_read_only` (through the full permission classifier)
-// for read-only git *content* commands reviewers depend on. tm-9c5 fixed two over-broad
+// for read-only git *content* commands reviewers depend on. This pins two formerly over-broad
 // denials while keeping the write boundary intact:
 //   * `cd <cwd> && git …` was rejected wholesale by the cd+git exec-sink guard, even
 //     though a `cd` into the reviewer's OWN working directory is a no-op — byte-for-byte
@@ -658,7 +726,7 @@ fn claude_read_only_auto_approve_allows_review_code_bash_shapes() {
 // The security boundary is exact-cwd-only: a `cd` into a *different* repo, or into a
 // subdir (which may carry a nested `.git`), still fails closed because that genuinely
 // retargets git the way `-C` / `--git-dir` do — AND that detection is tokenized, so a
-// quoted/escaped `'git'` / `"git"` / `g\it` cannot slip past the guard (tm-cnq). `git
+// quoted/escaped `'git'` / `"git"` / `g\it` cannot slip past the guard. `git
 // hash-object` is deliberately excluded: it runs gitattributes clean filters, an exec sink.
 fn claude_bash_is_read_only_for_test(command: &str, cwd: &str) -> bool {
     let mut turn_state = ClaudeTurnState::default();
@@ -667,6 +735,7 @@ fn claude_bash_is_read_only_for_test(command: &str, cwd: &str) -> bool {
         &mut turn_state,
         ClaudeApprovalMode::ReadOnlyAutoApprove,
         cwd,
+        false,
     )
     .unwrap()
     .expect("permission request should be classified");
@@ -757,7 +826,7 @@ fn read_only_git_content_checker_allows_reviewer_git_and_hashers() {
         "git --no-pager diff --binary --no-ext-diff --no-textconv --no-color | cat",
         "git diff | wc -c",
         "git diff | cat",
-        // Hashers as pipe targets — diff fingerprinting (tm-9c5).
+        // Hashers as pipe targets — diff fingerprinting.
         "git --no-pager diff --binary --no-ext-diff --no-textconv --no-color | sha256sum",
         "git diff | md5sum",
         "git diff | cksum",
@@ -768,10 +837,10 @@ fn read_only_git_content_checker_allows_reviewer_git_and_hashers() {
         "cd \"C:/github/Personal/TermAl\" && git diff | cat",
         "cd \"C:/github/Personal/TermAl\" && git diff | sha256sum",
         // Tokenized detection routes even a quoted `git` through the cd-guard; into the
-        // OWN cwd it still passes, so the tm-cnq fix must not over-deny same-cwd quoting.
+        // OWN cwd it still passes, so the guard must not over-deny same-cwd quoting.
         "cd \"C:/github/Personal/TermAl\" && 'git' status",
         // The `cd` HEAD is tokenized too, so a quoted `cd` into the OWN cwd is the same
-        // no-op as an unquoted one and stays allowed (tm-b9k).
+        // no-op as an unquoted one and stays allowed.
         "'cd' \"C:/github/Personal/TermAl\" && git status",
         // `cd .` is always a no-op regardless of cwd.
         "cd . && git diff",
@@ -792,12 +861,12 @@ fn read_only_git_content_checker_allows_reviewer_git_and_hashers() {
         "cd && git diff",
         "cd ~ && git diff",
         // A quoted/escaped `git` after `cd <other repo>` must NOT slip past the cd-guard:
-        // the tokenizer de-quotes it to a real git command, so detection must too (tm-cnq).
+        // the tokenizer de-quotes it to a real git command, so detection must too.
         "cd \"C:/other/repo\" && 'git' status",
         "cd \"C:/other/repo\" && \"git\" status",
         "cd \"C:/other/repo\" && g\\it status",
-        // The mirror image (tm-b9k): a quoted/escaped `cd` retargeting git must ALSO be
-        // caught. The cd-guard decides "is this a cd" from tokens for exactly the tm-cnq
+        // The mirror image: a quoted/escaped `cd` retargeting git must ALSO be
+        // caught. The cd-guard decides "is this a cd" from tokens for the same
         // reason — the tokenizer de-quotes `'cd'` into a real cd — and the approval pass
         // accepts a tokenized `cd <target>`, so raw-text detection here would skip the
         // cwd check and hand back a git retargeted at another repo.
@@ -885,12 +954,12 @@ fn read_only_checker_same_folder_cd_is_case_insensitive_on_windows() {
 //
 // It used to route through the Bash reader, which implements BASH grammar. Every
 // PowerShell-specific construct that reader mis-modelled became a security defect:
-// `(...)`/`@(...)` sub-expression evaluation (tm-mdx, survived only because the
+// `(...)`/`@(...)` sub-expression evaluation (survived only because the
 // tokenizer happens to fail closed on `(`), the `2>/dev/null` strip writing
-// `<drive>\dev\null` (tm-1ex), the `cd ` head reaching `continue` before the
-// tokenizer and giving an arbitrary-path WRITE (tm-hfh), and `\` de-escaped per
+// `<drive>\dev\null`, the `cd ` head reaching `continue` before the
+// tokenizer and giving an arbitrary-path WRITE, and `\` de-escaped per
 // bash so `g\it` read as `git` while PowerShell executes `.\g\it` FROM THE
-// REVIEWED TREE — arbitrary code execution (tm-jk7).
+// REVIEWED TREE — arbitrary code execution.
 //
 // So this pins the structural rule, not another denylist: a bash parser gates only
 // bash. Each historical escape is listed as a case so that re-introducing a
@@ -908,6 +977,7 @@ fn read_only_powershell_tool_is_denied_wholesale() {
             &mut turn_state,
             ClaudeApprovalMode::ReadOnlyAutoApprove,
             cwd,
+            false,
         )
         .unwrap()
         .expect("permission request should be classified");
@@ -967,6 +1037,7 @@ fn claude_read_only_auto_approve_denies_write_permission_request() {
         &mut turn_state,
         ClaudeApprovalMode::ReadOnlyAutoApprove,
         "C:/reviewer-sandbox",
+        false,
     )
     .unwrap()
     .expect("permission request should be classified");
@@ -996,6 +1067,7 @@ fn claude_read_only_auto_approve_denies_unsafe_bash_permission_request() {
         &mut turn_state,
         ClaudeApprovalMode::ReadOnlyAutoApprove,
         "C:/reviewer-sandbox",
+        false,
     )
     .unwrap()
     .expect("permission request should be classified");
@@ -1161,6 +1233,7 @@ fn claude_read_only_auto_approve_denies_mutating_git_find_and_sed_shapes() {
             &mut turn_state,
             ClaudeApprovalMode::ReadOnlyAutoApprove,
             "C:/reviewer-sandbox",
+            false,
         )
         .unwrap()
         .expect("permission request should be classified");

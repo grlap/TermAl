@@ -2,6 +2,11 @@
 
 Cross-agent reference for TermAl adapter design.
 
+Capability details in this document were last verified on 2026-08-13. Agent
+products and ACP are evolving independently, so implementation decisions must
+be based on the capability advertised by the connected runtime rather than on
+the agent name alone.
+
 ## Protocol and transport
 
 | | Claude Code | Codex | Gemini CLI | Cursor CLI |
@@ -45,17 +50,100 @@ Cross-agent reference for TermAl adapter design.
 
 | | Claude Code | Codex | Gemini CLI | Cursor CLI |
 |---|---|---|---|---|
-| Thread forking | No | `thread/fork` | No | No |
+| Thread forking | CLI fork at the current head; Agent SDK supports `up_to_message_id` | `thread/fork`, optionally through `lastTurnId` | Saved restore points can branch earlier history | “Duplicate Chat” from a selected message in Cursor UI; not exposed by TermAl's ACP path |
 | Compaction | Auto summarization | `thread/compact/start` | Two-pass summarization | Managed internally |
-| Rollback | No | `thread/rollback` | `rewindTo(messageId)` plus shadow git restore | No |
+| Rollback | `/rewind` can restore conversation, code, or both | `thread/rollback` exists but is deprecated | `/rewind` can restore conversation, code, or both | No documented rollback method in TermAl's ACP path |
 | Archival | No | `thread/archive` and `thread/unarchive` | No | No |
 | Loop detection | Repetition detection | No | Multi-stage detection | Built-in |
 | Hooks | Pre-commit style | No | 11 lifecycle events | Session start/end, prompt, stop |
 | Sub-agents | Via tools | Single agent | Local plus remote via A2A | `cursor/task` sub-agent |
-| Checkpointing | Git optional | Git | Shadow git repo | Managed internally |
+| Checkpointing | Per-prompt conversation and edit checkpoints | Persisted thread turns and Git | Conversation snapshots plus shadow Git repo | Managed internally |
 | Mid-turn interrupt | `control_request` interrupt | Yes via JSON-RPC | No IPC path (stream-json) | `session/cancel` |
 | Agent modes | N/A | N/A | N/A | `agent`, `plan`, `ask` |
 | Cloud handoff | No | No | No | Yes (push to cloud via `&` prefix) |
+
+## Point-in-time conversation branching and rewind
+
+TermAl must distinguish two operations that can look similar in the UI:
+
+- **Branch from here** creates a new session containing history only through a
+  selected completed turn. The source session remains untouched. This is the
+  preferred, non-destructive operation.
+- **Rewind this conversation** removes later turns from the current provider
+  session. This is destructive and should only be offered when the provider has
+  an explicit native primitive.
+
+Truncating only TermAl's local message list is not a conversation rewind. The
+provider would still retain the removed turns in model-visible context, leaving
+the transcript and the live agent state inconsistent.
+
+### Capability matrix
+
+| Agent or protocol | Native capability | Current TermAl support |
+|---|---|---|
+| **Codex** | Exact non-destructive fork through `thread/fork(lastTurnId)`. The destructive `thread/rollback` method is deprecated. | Partial: TermAl can fork only from the current thread head and exposes rollback by trailing turn count. It does not yet persist the Codex turn ID needed to fork from a selected visible turn. |
+| **Claude Code** | `/rewind` can restore conversation, code, or both. The Claude Agent SDK can create an exact fork with `fork_session(..., up_to_message_id=...)`. | Not exposed. TermAl's persistent `stream-json` bridge retains the Claude session ID but does not persist native message UUIDs for visible TermAl messages. |
+| **Gemini CLI** | `/rewind` can restore conversation, code, or both. Named saved restore points can be resumed as a separate history branch. | Not exposed. TermAl runs Gemini through ACP, which does not expose Gemini's interactive rewind workflow. |
+| **OpenCode** | The native TUI supports `/undo` and `/redo`; the CLI can fork a resumed session, and the native SDK/API has message revert/unrevert operations. | Not exposed. OpenCode documents `/undo` and `/redo` as unsupported in ACP mode, which is the transport TermAl uses. |
+| **Cursor** | Cursor UI can duplicate a chat from any selected message while preserving the original. | Not exposed by Cursor's TermAl ACP connection. Cursor CLI documents resume, but no stable point-specific fork or rewind method available through this path. |
+| **Generic ACP** | `session/fork` exists as an unstable, capability-negotiated method. Point-specific fork by message ID is a future extension, not a stable cross-agent contract. | TermAl currently records only ACP `session/load` and `session/resume` capabilities and does not dispatch `session/fork`. |
+
+### TermAl implementation constraints
+
+An exact action needs a durable mapping from a TermAl turn boundary to the
+provider's native anchor:
+
+| Provider path | Required anchor |
+|---|---|
+| Codex App Server | `turnId` passed as `lastTurnId` |
+| Claude Code / Agent SDK | Claude transcript message UUID passed as `up_to_message_id` |
+| ACP | Stable `messageId` plus an advertised point-fork capability; a generic ACP message ID alone is insufficient |
+| Provider-specific fallback | The provider's documented checkpoint or revert identifier |
+
+Message array indices and “remove the last N messages” are not safe anchors.
+History paging, bounded-window trimming, transcript repair, tool cards, and
+multiple assistant items inside one provider turn can all change the number and
+position of visible TermAl messages. In particular,
+`codex_thread_messages_from_json` currently allocates fresh TermAl message IDs
+and does not retain the enclosing Codex turn ID.
+
+Conversation state and workspace state must also remain separate. The default
+action should preserve files exactly as they are. A distinct **Also restore
+files** choice may be offered only when the provider can describe what it will
+restore and after TermAl accounts for concurrent sessions and manual changes.
+Provider checkpoints generally do not cover arbitrary shell commands, remote
+side effects, or edits made by another process.
+
+An approximate fallback may create a fresh session and replay the visible
+transcript prefix, but it must be labelled approximate. Visible messages do not
+fully reproduce hidden tool results, hooks, provider compaction state, system
+context, approvals, or provider-specific reasoning items.
+
+### Recommended delivery order
+
+1. Add **Branch from here** for completed Codex turns using
+   `thread/fork(lastTurnId)`, while preserving the source TermAl session.
+2. Retire or clearly mark the Codex rollback-by-count UI as legacy because the
+   upstream `thread/rollback` method is deprecated.
+3. Persist Claude native message UUIDs and add exact Claude branching through
+   the supported Agent SDK session-fork primitive.
+4. Extend ACP capability capture to include `session/fork`, but expose it only
+   when the connected runtime advertises support. Treat point-specific fork as
+   unavailable until the runtime explicitly advertises that stronger contract.
+5. Add provider-specific Gemini, OpenCode, and Cursor actions only through
+   their documented programmatic surfaces; do not synthesize destructive
+   rewind by editing the local transcript.
+
+Primary references:
+
+- [Codex App Server protocol](https://developers.openai.com/codex/app-server/)
+- [Claude Code checkpointing](https://code.claude.com/docs/en/checkpointing)
+- [Claude Agent SDK session forking](https://platform.claude.com/cookbook/claude-agent-sdk-05-building-a-session-browser)
+- [Gemini CLI rewind](https://geminicli.com/docs/cli/rewind/)
+- [Gemini CLI session management](https://geminicli.com/docs/cli/tutorials/session-management/)
+- [OpenCode ACP limitations](https://dev.opencode.ai/docs/acp/)
+- [Cursor duplicate chat](https://docs.cursor.com/en/agent/chat/duplicate)
+- [ACP session/fork proposal](https://agentclientprotocol.com/rfds/session-fork)
 
 ## Pricing
 

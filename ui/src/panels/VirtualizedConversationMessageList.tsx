@@ -877,7 +877,26 @@ export function VirtualizedConversationMessageList({
   const mountedPageRangeRef = useRef(mountedPageRange);
   mountedPageRangeRef.current = mountedPageRange;
   const applyMountedPageRange = useCallback(
-    (nextRange: VirtualizedRange, options: { flush?: boolean } = {}) => {
+    (
+      nextRange: VirtualizedRange,
+      options: { flush?: boolean; preserveCoveringRange?: boolean } = {},
+    ) => {
+      const currentRange = mountedPageRangeRef.current;
+      if (
+        rangesEqual(currentRange, nextRange) ||
+        (options.preserveCoveringRange === true &&
+          currentRange.startIndex <= nextRange.startIndex &&
+          currentRange.endIndex >= nextRange.endIndex)
+      ) {
+        return;
+      }
+
+      // Live output can request bottom-follow after a message render even when
+      // the currently mounted page band already covers the requested bottom
+      // range. Avoiding an identical write -- or a temporary narrowing of a
+      // wider covering band -- prevents a second conversation render in the
+      // same visual update, which otherwise presents as a small jump or flash
+      // while command output is streaming.
       mountedPageRangeRef.current = nextRange;
       if (options.flush) {
         flushSync(() => {

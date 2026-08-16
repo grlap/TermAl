@@ -1,5 +1,6 @@
 use super::delegation_support::{
-    finish_delegation_child_with_assistant_text, test_app_state_with_delegation_codex_runtime,
+    finish_delegation_child_with_assistant_text, mark_delegation_as_legacy_unstructured_review,
+    test_app_state_with_delegation_codex_runtime,
     test_app_state_with_drained_delegation_codex_runtime,
 };
 use super::*;
@@ -263,6 +264,7 @@ fn stale_busy_delegation_child_without_runtime_keeps_completed_result_packet() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
     state
         .create_delegation_wait(
             &parent_session_id,
@@ -520,7 +522,7 @@ fn already_terminal_delegation_wait_reports_dispatch_for_idle_parent() {
                 cwd: None,
                 agent: Some(Agent::Codex),
                 model: None,
-                mode: Some(DelegationMode::Reviewer),
+                mode: Some(DelegationMode::Explorer),
                 write_policy: Some(DelegationWritePolicy::ReadOnly),
             },
         )

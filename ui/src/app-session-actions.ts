@@ -949,9 +949,10 @@ export function useAppSessionActions(
     messageId: string,
     decision: ApprovalDecision,
   ) {
-    // Resolving an approval resumes the same agent turn. Reattach before the
-    // request so the approval -> working -> first-output transition shares the
-    // same continuous tail-follow contract as an ordinary prompt send.
+    // Resolving an approval resumes the same agent turn. Notify the scroll
+    // controller before the request; it continues following only when the
+    // reader is already attached, otherwise it preserves the viewport and
+    // surfaces new activity through the jump indicator.
     requestSessionBottomFollow(sessionId);
     try {
       const state = await submitApproval(sessionId, messageId, decision);

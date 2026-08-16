@@ -2684,8 +2684,8 @@ fn test_pending_codex_response(
 // Pins the extension rule of the liveness-scaled waiter: a response that
 // lands AFTER the silence budget still completes as long as the app-server
 // kept emitting stdout — under the old flat wait this exact timing failed the
-// turn. This is the ~39MB-resume-behind-a-170MB-sibling incident in
-// miniature (tm-bmd.1).
+// turn. This reproduces the large-resume-behind-a-larger-sibling incident in
+// miniature.
 #[test]
 fn shared_codex_patient_wait_outlasts_silence_budget_while_server_is_active() {
     let state = test_app_state();

@@ -1035,6 +1035,82 @@ struct DelegationResult {
     notes: Vec<String>,
 }
 
+/// Strict result envelope sent by a delegated reviewer through its durable
+/// mailbox. Markdown remains available as full child output, but it is not a
+/// protocol: new review workflows use this validated envelope for compact
+/// cards and parent fan-in.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DelegationReviewMailboxResult {
+    schema_version: u32,
+    kind: String,
+    delegation_id: String,
+    child_session_id: String,
+    submission_attempt: u32,
+    status: DelegationStatus,
+    summary: String,
+    #[serde(default)]
+    findings: Vec<DelegationFinding>,
+    #[serde(default)]
+    commands_run: Vec<DelegationCommandResult>,
+    #[serde(default)]
+    files_inspected: Vec<String>,
+    #[serde(default)]
+    notes: Vec<String>,
+    #[serde(default)]
+    suggested_tracker_updates: Vec<String>,
+}
+
+/// Model-facing request accepted by `termal_submit_review_result`. Identity,
+/// routing, topic, and idempotency metadata are derived by TermAl so a review
+/// child can submit only its own result to its own coordinator.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SubmitDelegationReviewResultRequest {
+    schema_version: u32,
+    status: DelegationStatus,
+    summary: String,
+    findings: Vec<SubmitDelegationReviewFinding>,
+    commands_run: Vec<SubmitDelegationReviewCommand>,
+    files_inspected: Vec<String>,
+    notes: Vec<String>,
+    suggested_tracker_updates: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SubmitDelegationReviewFinding {
+    severity: String,
+    #[serde(default)]
+    file: Option<String>,
+    #[serde(default)]
+    line: Option<u32>,
+    message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SubmitDelegationReviewCommand {
+    command: String,
+    status: DelegationReviewCommandStatus,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum DelegationReviewCommandStatus {
+    Success,
+    Error,
+}
+
+impl DelegationReviewCommandStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Error => "error",
+        }
+    }
+}
+
 /// Summary-safe result metadata for broad state/SSE subscribers.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1086,6 +1162,45 @@ struct DelegationRecord {
     completed_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     result: Option<DelegationResult>,
+    /// Validated reviewer result submitted before the child finishes its
+    /// current turn. Once accepted, the submission is authoritative; terminal
+    /// child lifecycle observation only decides when it is promoted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    submitted_review_result: Option<DelegationResult>,
+    /// A child transport failure observed after TermAl had already accepted a
+    /// validated structured result. The submitted result remains authoritative;
+    /// this field preserves the later transport diagnostic separately.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    post_submission_transport_error: Option<String>,
+    /// Attempt for which durable recovery already proved that no usable
+    /// structured envelope exists. This is an in-process probe only: a restart
+    /// deliberately rechecks the coordination store once.
+    #[serde(skip)]
+    review_result_recovery_probe_attempt: Option<u32>,
+    /// Diagnostic for a durable envelope that recovery quarantined instead of
+    /// allowing it to break parent lifecycle APIs. It is serialized for the
+    /// current process so operators can see the reason, but ignored on reload
+    /// so recovery gets a fresh probe after restart.
+    #[serde(
+        default,
+        skip_deserializing,
+        skip_serializing_if = "Option::is_none"
+    )]
+    review_result_recovery_error: Option<String>,
+    /// Prevents later prose-parser upgrades from overwriting a result that
+    /// arrived through the strict mailbox contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    review_result_schema_version: Option<u32>,
+    /// New `/review-code` delegations fail closed when their required
+    /// structured result is missing. Older and custom reviewer sessions keep
+    /// the legacy prose-parser behavior.
+    #[serde(default)]
+    review_result_required: bool,
+    /// Backend-owned turn number for idempotent structured review submission.
+    /// Required reviewer delegations start at one; other delegations keep zero.
+    /// The value advances whenever a completed review is rearmed.
+    #[serde(default)]
+    review_result_submission_attempt: u32,
     /// Version of the result parser that last examined this terminal record.
     /// Zero denotes a record persisted before versioned repair existed.
     #[serde(default)]
@@ -1135,6 +1250,14 @@ struct DelegationSummary {
     completed_at: Option<String>,
     #[serde(default)]
     result_parser_version: u32,
+    /// Whether this child must publish a validated structured reviewer result.
+    /// Broad state exposes only the capability bit, not any provisional result.
+    #[serde(default)]
+    review_result_required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    post_submission_transport_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    review_result_recovery_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     result: Option<DelegationResultSummary>,
 }

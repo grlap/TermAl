@@ -257,7 +257,6 @@ export function useSessionPaneScrollState({
 
   const savedScrollPosition = paneScrollPositions[scrollStateKey];
   const savedScrollShouldStick = savedScrollPosition?.shouldStick === true;
-  const waitingIndicatorShouldStick = savedScrollShouldStick;
   const hasUnloadedNewerHistory = activeSession?.hasNewerHistory === true;
   const newResponseIndicatorKind =
     newResponseIndicatorByKey[scrollStateKey] ?? null;
@@ -317,7 +316,7 @@ export function useSessionPaneScrollState({
 
   function markTailFollowUserEscape() {
     // This flag wins over temporary near-bottom geometry until the user reaches
-    // the real bottom again or an explicit send/approval requests reattachment.
+    // the real bottom again or explicitly navigates back to the live tail.
     paneTailFollowUserEscapeByKeyRef.current[scrollStateKey] = true;
     cancelSettledScrollToBottom();
     setTailFollowIntent(false);
@@ -877,27 +876,20 @@ export function useSessionPaneScrollState({
     }
   }
 
-  function isMessageStackNearBottom() {
-    const node = messageStackRef.current;
-    if (!node) {
-      return true;
-    }
-    return node.scrollHeight - node.scrollTop - node.clientHeight < 72;
-  }
-
   function followLatestMessageForPromptSend() {
+    // A historical window may retain stale bottom-follow state from an older
+    // residency snapshot. Never interpret that as permission to follow the
+    // bottom of the loaded slice: keep the viewport stable and let the
+    // explicit Jump to latest action request the real tail pages.
     if (hasUnloadedNewerHistory) {
-      scrollMessageStackToBoundary("bottom");
+      setNewResponseIndicator(scrollStateKey, true, "activity");
       return undefined;
     }
-    if (getTailFollowIntent() || isMessageStackNearBottom()) {
-      return scheduleLiveTailFollow();
+    if (!getTailFollowIntent()) {
+      setNewResponseIndicator(scrollStateKey, true, "activity");
+      return undefined;
     }
-
-    return scheduleSettledScrollToBottom("auto", {
-      maxAttempts: 24,
-      minAttempts: 4,
-    });
+    return scheduleLiveTailFollow();
   }
 
   function scrollMessageStackByPage(direction: -1 | 1) {
@@ -1183,6 +1175,14 @@ export function useSessionPaneScrollState({
 
     const tick = (frameTimestamp: number) => {
       frameId = 0;
+      if (
+        options.scrollKind === "bottom_follow" &&
+        (!getTailFollowIntent() || hasTailFollowUserEscape())
+      ) {
+        cancelPaneProgrammaticBottomFollow();
+        complete();
+        return;
+      }
       const measuredFrameDurationMs =
         previousFrameTimestamp === null
           ? SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS
@@ -1268,6 +1268,10 @@ export function useSessionPaneScrollState({
   }
 
   function scheduleLiveTailFollow() {
+    if (!getTailFollowIntent()) {
+      setNewResponseIndicator(scrollStateKey, true, "activity");
+      return undefined;
+    }
     // Mark the entire live-flow transition before its first animation frame.
     // Composer measurements and ResizeObserver delivery can run in the gap
     // between the React commit and that frame; they must join this settled
@@ -1566,11 +1570,8 @@ export function useSessionPaneScrollState({
 
     previousByKey[scrollStateKey] = true;
 
-    if (
-      !getTailFollowIntent() &&
-      !waitingIndicatorShouldStick &&
-      !isMessageStackNearBottom()
-    ) {
+    if (!getTailFollowIntent()) {
+      setNewResponseIndicator(scrollStateKey, true, "activity");
       return;
     }
 
@@ -1584,7 +1585,6 @@ export function useSessionPaneScrollState({
     paneViewMode,
     scrollStateKey,
     showWaitingIndicator,
-    waitingIndicatorShouldStick,
   ]);
 
   useLayoutEffect(() => {
@@ -1712,10 +1712,7 @@ export function useSessionPaneScrollState({
       showWaitingIndicator &&
       previousMessageContentSignature === visibleMessageContentSignature;
     if (onlyPendingPromptsChanged) {
-      if (
-        getTailFollowIntent() ||
-        paneScrollPositions[scrollStateKey]?.shouldStick === true
-      ) {
+      if (getTailFollowIntent()) {
         setNewResponseIndicator(scrollStateKey, false);
         return scheduleLiveTailFollow();
       }
@@ -1735,9 +1732,7 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    const shouldScroll =
-      getTailFollowIntent() ||
-      paneScrollPositions[scrollStateKey]?.shouldStick === true;
+    const shouldScroll = getTailFollowIntent();
     if (!shouldScroll) {
       if (paneViewMode === "session") {
         setNewResponseIndicator(
@@ -1776,10 +1771,18 @@ export function useSessionPaneScrollState({
 
     const requestToken = pendingScrollToBottomRequest.token;
     const shouldReattach = pendingScrollToBottomRequest.reattach === true;
+    if (shouldReattach && !getTailFollowIntent()) {
+      // Resuming an agent turn is new activity, not explicit navigation. Keep
+      // a reader's detached viewport fixed and let the indicator offer the
+      // deliberate jump back to the live tail.
+      setNewResponseIndicator(scrollStateKey, true, "activity");
+      onScrollToBottomRequestHandled(requestToken);
+      return undefined;
+    }
     if (shouldReattach) {
-      // Approval resolution resumes the current turn. Publish stickiness before
-      // the first frame so waiting/working state and early output cannot race
-      // ahead while the pane still considers itself detached.
+      // The reader is already attached. Preserve that ownership before the
+      // first frame so waiting/working state and early output cannot race ahead
+      // of the continuous live-tail follow.
       setTailFollowIntent(true);
       paneScrollPositions[scrollStateKey] = {
         top: Number.MAX_SAFE_INTEGER,
@@ -1826,10 +1829,9 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    // A resident history window can end with a user-authored message, so its
-    // last author is not evidence that a prompt was just submitted. Only the
-    // explicit send transition may reattach a detached pane to the live tail.
-    setNewResponseIndicator(scrollStateKey, false);
+    // Sending starts new activity, but it is not a navigation command. A
+    // reader who moved away from the tail keeps the same viewport and gets an
+    // indicator instead of being pulled away from the text they are reading.
     let cleanup: (() => void) | undefined;
     const frameId = window.requestAnimationFrame(() => {
       cleanup = followLatestMessageForPromptSend();

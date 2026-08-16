@@ -538,7 +538,7 @@ const SessionConversationPage = memo(
     } = useInitialActiveTranscriptMessages({
       isActive,
       // Summary count, not `baseVisibleMessages.length`: while a large session is
-      // tail-hydrated the latter is only the 20-message window (tm-jfx/tm-2po).
+      // tail-hydrated the latter is only the 20-message window.
       messageCount: session.messageCount,
       messages: baseVisibleMessages,
       messagesLoaded: session.messagesLoaded,

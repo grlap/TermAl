@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -9,7 +10,11 @@ import {
   type GitStatusFile,
   type GitStatusResponse,
 } from "../api";
-import { __resetGitStatusPanelCacheForTests, GitStatusPanel } from "./GitStatusPanel";
+import {
+  __getGitStatusPanelCacheSizeForTests,
+  __resetGitStatusPanelCacheForTests,
+  GitStatusPanel,
+} from "./GitStatusPanel";
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual<typeof import("../api")>("../api");
@@ -247,6 +252,24 @@ describe("GitStatusPanel", () => {
     expect(screen.queryByText("/repo")).not.toBeInTheDocument();
   });
 
+  it("completes the authoritative status load after StrictMode effect replay", async () => {
+    fetchGitStatusMock.mockResolvedValue(makeStatusResponse([]));
+
+    render(
+      <StrictMode>
+        <GitStatusPanel
+          sessionId={SESSION_ID}
+          workdir="/repo"
+          onOpenDiff={() => {}}
+          onOpenWorkdir={() => {}}
+        />
+      </StrictMode>,
+    );
+
+    expect(await screen.findByText("Working tree clean.")).toBeInTheDocument();
+    expect(fetchGitStatusMock).toHaveBeenCalledTimes(2);
+  });
+
   it("refreshes the current repo from the icon button", async () => {
     fetchGitStatusMock
       .mockResolvedValueOnce(makeStatusResponse([]))
@@ -278,15 +301,18 @@ describe("GitStatusPanel", () => {
     expect(await screen.findByText("scratch.txt")).toBeInTheDocument();
   });
 
-  it("reuses cached repo status and tree expansion when remounted for the same workdir", async () => {
-    fetchGitStatusMock.mockResolvedValueOnce(
-      makeStatusResponse([
-        {
-          path: "scratch.txt",
-          worktreeStatus: "?",
-        },
-      ]),
-    );
+  it("shows cached tree state immediately but reconciles it after remount", async () => {
+    const remountRefresh = createDeferred<GitStatusResponse>();
+    fetchGitStatusMock
+      .mockResolvedValueOnce(
+        makeStatusResponse([
+          {
+            path: "scratch.txt",
+            worktreeStatus: "?",
+          },
+        ]),
+      )
+      .mockImplementationOnce(() => remountRefresh.promise);
 
     const firstRender = render(
       <GitStatusPanel
@@ -314,9 +340,324 @@ describe("GitStatusPanel", () => {
       />,
     );
 
-    expect(fetchGitStatusMock).toHaveBeenCalledTimes(1);
+    expect(fetchGitStatusMock).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: /^Unstaged\b/i })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("scratch.txt")).not.toBeInTheDocument();
+
+    remountRefresh.resolve(makeStatusResponse([]));
+
+    expect(await screen.findByText("Working tree clean.")).toBeInTheDocument();
+  });
+
+  it("refreshes a visible repo on window focus after an external commit", async () => {
+    fetchGitStatusMock
+      .mockResolvedValueOnce(
+        makeStatusResponse([
+          {
+            path: "scratch.txt",
+            worktreeStatus: "?",
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(makeStatusResponse([]));
+
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await screen.findByText("scratch.txt");
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    expect(await screen.findByText("Working tree clean.")).toBeInTheDocument();
+    expect(fetchGitStatusMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not publish an unchanged background status", async () => {
+    const unchangedStatus = makeStatusResponse([
+      { path: "unchanged.txt", worktreeStatus: "?" },
+    ]);
+    const onStatusChange = vi.fn();
+    fetchGitStatusMock
+      .mockResolvedValueOnce(unchangedStatus)
+      .mockResolvedValueOnce(structuredClone(unchangedStatus));
+
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onStatusChange={onStatusChange}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await screen.findByText("unchanged.txt");
+    onStatusChange.mockClear();
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(fetchGitStatusMock).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(onStatusChange).not.toHaveBeenCalled();
+    expect(screen.getByText("unchanged.txt")).toBeInTheDocument();
+  });
+
+  it("lets a foreground refresh supersede a background poll without disabling refresh", async () => {
+    const backgroundResponse = createDeferred<GitStatusResponse>();
+    fetchGitStatusMock
+      .mockResolvedValueOnce(
+        makeStatusResponse([{ path: "initial.txt", worktreeStatus: "?" }]),
+      )
+      .mockImplementationOnce(() => backgroundResponse.promise)
+      .mockResolvedValueOnce(
+        makeStatusResponse([{ path: "foreground.txt", worktreeStatus: "?" }]),
+      );
+
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await screen.findByText("initial.txt");
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(fetchGitStatusMock).toHaveBeenCalledTimes(2));
+
+    const refreshButton = screen.getByRole("button", { name: /Refresh git status/i });
+    expect(refreshButton).toBeEnabled();
+    await clickAndSettle(refreshButton);
+
+    expect(await screen.findByText("foreground.txt")).toBeInTheDocument();
+    expect(fetchGitStatusMock).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      backgroundResponse.resolve(
+        makeStatusResponse([{ path: "stale-background.txt", worktreeStatus: "?" }]),
+      );
+      await backgroundResponse.promise;
+    });
+    expect(screen.getByText("foreground.txt")).toBeInTheDocument();
+    expect(screen.queryByText("stale-background.txt")).not.toBeInTheDocument();
+  });
+
+  it("does not let a background refresh clear an action error", async () => {
+    const status = makeStatusResponse([
+      {
+        path: "still-changing.txt",
+        worktreeStatus: "M",
+      },
+    ]);
+    fetchGitStatusMock.mockResolvedValue(status);
+    const onOpenDiff = vi.fn().mockRejectedValue(new Error("Unable to open this diff."));
+
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={onOpenDiff}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await clickAndSettle(await screen.findByRole("button", { name: /^still-changing\.txt$/i }));
+    expect(await screen.findByText("Unable to open this diff.")).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => {
+      expect(fetchGitStatusMock).toHaveBeenCalledTimes(3);
+    });
+    expect(screen.getByText("Unable to open this diff.")).toBeInTheDocument();
+  });
+
+  it("ignores an in-flight status response after unmount", async () => {
+    const response = createDeferred<GitStatusResponse>();
+    const onStatusChange = vi.fn();
+    fetchGitStatusMock.mockImplementationOnce(() => response.promise);
+
+    const view = render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onStatusChange={onStatusChange}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchGitStatusMock).toHaveBeenCalledTimes(1);
+    });
+    onStatusChange.mockClear();
+    view.unmount();
+
+    await act(async () => {
+      response.resolve(makeStatusResponse([]));
+      await response.promise;
+    });
+
+    expect(onStatusChange).not.toHaveBeenCalled();
+  });
+
+  it("pauses interval refresh while the document is unfocused", async () => {
+    vi.useFakeTimers();
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    fetchGitStatusMock.mockResolvedValue(makeStatusResponse([]));
+
+    const view = render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    try {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(fetchGitStatusMock).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(fetchGitStatusMock).toHaveBeenCalledTimes(1);
+
+      hasFocus.mockReturnValue(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(fetchGitStatusMock).toHaveBeenCalledTimes(2);
+    } finally {
+      view.unmount();
+      hasFocus.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not reuse cached status across different session scopes", async () => {
+    fetchGitStatusMock
+      .mockResolvedValueOnce(
+        makeStatusResponse([
+          {
+            path: "first-session.txt",
+            worktreeStatus: "?",
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(makeStatusResponse([]));
+
+    const firstRender = render(
+      <GitStatusPanel
+        sessionId="session-a"
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+    await screen.findByText("first-session.txt");
+    firstRender.unmount();
+
+    render(
+      <GitStatusPanel
+        sessionId="session-b"
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    expect(screen.queryByText("first-session.txt")).not.toBeInTheDocument();
+    expect(await screen.findByText("Working tree clean.")).toBeInTheDocument();
+    expect(fetchGitStatusMock).toHaveBeenLastCalledWith("/repo", "session-b", { projectId: null });
+  });
+
+  it("evicts the least recently used session scope from the bounded cache", async () => {
+    for (let index = 0; index < 17; index += 1) {
+      const scopedWorkdir = `/repo-${index}`;
+      fetchGitStatusMock.mockResolvedValueOnce(
+        makeStatusResponse(
+          [{ path: `scope-${index}.txt`, worktreeStatus: "?" }],
+          { repoRoot: scopedWorkdir, workdir: scopedWorkdir },
+        ),
+      );
+      const view = render(
+        <GitStatusPanel
+          sessionId={`session-${index}`}
+          workdir={scopedWorkdir}
+          onOpenDiff={() => {}}
+          onOpenWorkdir={() => {}}
+        />,
+      );
+      await screen.findByText(`scope-${index}.txt`);
+      view.unmount();
+    }
+
+    expect(__getGitStatusPanelCacheSizeForTests()).toBe(16);
+
+    const revisit = createDeferred<GitStatusResponse>();
+    fetchGitStatusMock.mockImplementationOnce(() => revisit.promise);
+    render(
+      <GitStatusPanel
+        sessionId="session-0"
+        workdir="/repo-0"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    expect(screen.queryByText("scope-0.txt")).not.toBeInTheDocument();
+    await act(async () => {
+      revisit.resolve(makeStatusResponse([], { repoRoot: "/repo-0", workdir: "/repo-0" }));
+      await revisit.promise;
+    });
+    expect(await screen.findByText("Working tree clean.")).toBeInTheDocument();
+  });
+
+  it("refreshes stale status after a diff open fails", async () => {
+    fetchGitStatusMock
+      .mockResolvedValueOnce(
+        makeStatusResponse([
+          {
+            path: "already-committed.txt",
+            worktreeStatus: "M",
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(makeStatusResponse([]));
+    const onOpenDiff = vi.fn().mockRejectedValue(new Error("already-committed.txt now matches HEAD"));
+
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={onOpenDiff}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await clickAndSettle(await screen.findByRole("button", { name: /^already-committed\.txt$/i }));
+
+    expect(await screen.findByText("Working tree clean.")).toBeInTheDocument();
+    expect(screen.getByText("already-committed.txt now matches HEAD")).toBeInTheDocument();
+    expect(fetchGitStatusMock).toHaveBeenCalledTimes(2);
   });
 
   it("keeps the current tree visible while a refresh is in flight", async () => {
@@ -456,6 +797,98 @@ describe("GitStatusPanel", () => {
 
     expect(await screen.findByText("Created commit: Tighten git footer")).toBeInTheDocument();
     expect(screen.getByText("Working tree clean.")).toBeInTheDocument();
+  });
+
+  it("ignores a completed commit after the panel changes session scope", async () => {
+    const commitResponse = createDeferred<Awaited<ReturnType<typeof commitGitChanges>>>();
+    const onStatusChange = vi.fn();
+    fetchGitStatusMock
+      .mockResolvedValueOnce(
+        makeStatusResponse([{ indexStatus: "M", path: "old-session.rs" }]),
+      )
+      .mockResolvedValueOnce(makeStatusResponse([]));
+    commitGitChangesMock.mockImplementationOnce(() => commitResponse.promise);
+
+    const { rerender } = render(
+      <GitStatusPanel
+        sessionId="session-a"
+        workdir="/repo"
+        onStatusChange={onStatusChange}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await screen.findByText("old-session.rs");
+    fireEvent.change(screen.getByLabelText(/Commit/i), {
+      target: { value: "Old session commit" },
+    });
+    await clickAndSettle(screen.getByRole("button", { name: /^Commit$/i }));
+    expect(commitGitChangesMock).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <GitStatusPanel
+        sessionId="session-b"
+        workdir="/repo"
+        onStatusChange={onStatusChange}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+    expect(await screen.findByText("Working tree clean.")).toBeInTheDocument();
+    onStatusChange.mockClear();
+
+    await act(async () => {
+      commitResponse.resolve({
+        status: makeStatusResponse([{ path: "stale-commit.txt", worktreeStatus: "?" }]),
+        summary: "Created commit in old session",
+      });
+      await commitResponse.promise;
+    });
+
+    expect(screen.queryByText("stale-commit.txt")).not.toBeInTheDocument();
+    expect(screen.queryByText("Created commit in old session")).not.toBeInTheDocument();
+    expect(onStatusChange).not.toHaveBeenCalled();
+  });
+
+  it("blocks file actions until an in-flight commit settles", async () => {
+    const status = makeStatusResponse([
+      { indexStatus: "M", path: "staged.rs" },
+      { path: "working.rs", worktreeStatus: "M" },
+    ]);
+    const commitResponse = createDeferred<Awaited<ReturnType<typeof commitGitChanges>>>();
+    fetchGitStatusMock.mockResolvedValue(status);
+    commitGitChangesMock.mockImplementationOnce(() => commitResponse.promise);
+
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await screen.findByText("working.rs");
+    fireEvent.change(screen.getByLabelText(/Commit/i), {
+      target: { value: "Keep mutations serialized" },
+    });
+    await clickAndSettle(screen.getByRole("button", { name: /^Commit$/i }));
+    expect(commitGitChangesMock).toHaveBeenCalledTimes(1);
+
+    const stageButton = screen.getByRole("button", { name: /Stage working\.rs/i });
+    expect(stageButton).toBeDisabled();
+    fireEvent.click(stageButton);
+    expect(applyGitFileActionMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      commitResponse.resolve({ status, summary: "Serialized commit completed" });
+      await commitResponse.promise;
+    });
+
+    expect(await screen.findByText("Serialized commit completed")).toBeInTheDocument();
+    expect(stageButton).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Refresh git status/i })).toBeEnabled();
   });
 
   it("loads git status without a live session when a repo path is available", async () => {
@@ -726,6 +1159,94 @@ describe("GitStatusPanel", () => {
     expect(await screen.findByRole("button", { name: /Move scratch\.txt to unstaged/i })).toBeInTheDocument();
   });
 
+  it("ignores a failed file action after the panel changes session scope", async () => {
+    const actionResponse = createDeferred<GitStatusResponse>();
+    const onStatusChange = vi.fn();
+    fetchGitStatusMock
+      .mockResolvedValueOnce(
+        makeStatusResponse([{ path: "old-action.txt", worktreeStatus: "?" }]),
+      )
+      .mockResolvedValueOnce(makeStatusResponse([]));
+    applyGitFileActionMock.mockImplementationOnce(() => actionResponse.promise);
+
+    const { rerender } = render(
+      <GitStatusPanel
+        sessionId="session-a"
+        workdir="/repo"
+        onStatusChange={onStatusChange}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await screen.findByText("old-action.txt");
+    await clickAndSettle(
+      screen.getByRole("button", { name: /Stage old-action\.txt/i }),
+    );
+    expect(applyGitFileActionMock).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <GitStatusPanel
+        sessionId="session-b"
+        workdir="/repo"
+        onStatusChange={onStatusChange}
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+    expect(await screen.findByText("Working tree clean.")).toBeInTheDocument();
+    onStatusChange.mockClear();
+
+    await act(async () => {
+      actionResponse.reject(new Error("Old session action failed"));
+      await actionResponse.promise.catch(() => undefined);
+    });
+
+    expect(screen.queryByText("Old session action failed")).not.toBeInTheDocument();
+    expect(onStatusChange).not.toHaveBeenCalled();
+  });
+
+  it("blocks commits until an in-flight file action settles", async () => {
+    const status = makeStatusResponse([
+      { indexStatus: "M", path: "staged.rs" },
+      { path: "working.rs", worktreeStatus: "M" },
+    ]);
+    const actionResponse = createDeferred<GitStatusResponse>();
+    fetchGitStatusMock.mockResolvedValue(status);
+    applyGitFileActionMock.mockImplementationOnce(() => actionResponse.promise);
+
+    render(
+      <GitStatusPanel
+        sessionId={SESSION_ID}
+        workdir="/repo"
+        onOpenDiff={() => {}}
+        onOpenWorkdir={() => {}}
+      />,
+    );
+
+    await screen.findByText("working.rs");
+    fireEvent.change(screen.getByLabelText(/Commit/i), {
+      target: { value: "Wait for the action" },
+    });
+    await clickAndSettle(
+      screen.getByRole("button", { name: /Stage working\.rs/i }),
+    );
+    expect(applyGitFileActionMock).toHaveBeenCalledTimes(1);
+
+    const commitButton = screen.getByRole("button", { name: /^Commit$/i });
+    expect(commitButton).toBeDisabled();
+    fireEvent.click(commitButton);
+    expect(commitGitChangesMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      actionResponse.resolve(status);
+      await actionResponse.promise;
+    });
+
+    await waitFor(() => expect(commitButton).toBeEnabled());
+    expect(screen.getByRole("button", { name: /Refresh git status/i })).toBeEnabled();
+  });
+
   it("applies git actions from folder rows by forwarding each descendant file", async () => {
     fetchGitStatusMock.mockResolvedValue(
       makeStatusResponse([
@@ -969,14 +1490,19 @@ function makeStatusResponse(
 
 function createDeferred<T>() {
   let resolve: ((value: T) => void) | undefined;
-  const promise = new Promise<T>((nextResolve) => {
+  let reject: ((error: unknown) => void) | undefined;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
     resolve = nextResolve;
+    reject = nextReject;
   });
 
   return {
     promise,
     resolve(value: T) {
       resolve?.(value);
+    },
+    reject(error: unknown) {
+      reject?.(error);
     },
   };
 }

@@ -1139,8 +1139,8 @@ fn live_session_reactivation_uses_bounded_request_writer_admission() {
     );
 }
 
-// Pins tm-i1s: a participant cannot be unread on a message it wrote, so the
-// sender's cursor follows its own append. Before this, `unreadCount` (which
+// A participant cannot be unread on a message it wrote, so the sender's
+// cursor follows its own append. Before this, `unreadCount` (which
 // already excludes own sends) and `processedThrough` (which only moved on an
 // explicit ack) disagreed, and the natural "ack the sequence I last
 // participated in" call failed CAS with a spurious 409.

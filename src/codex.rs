@@ -868,7 +868,7 @@ fn shared_codex_session_thread_id<'a>(method: &str, message: &'a Value) -> Optio
 /// abandoned request's work still completes server-side, and the retry queues
 /// the same expensive replay on top of the very contention that caused the
 /// miss (observed live: a ~39MB resume failing at exactly 180s, twice, while
-/// a ~170MB sibling thread streamed — tm-bmd.1).
+/// a ~170MB sibling thread streamed).
 ///
 /// So instead of one `recv_timeout(limit)`, this waits in `poll_slice` steps
 /// and consults the stdout activity stamp on each miss:
@@ -1073,8 +1073,8 @@ fn handle_shared_codex_prompt_command(
             // matches the old behaviour (superseded waiters dropped their turns too),
             // but it is a deliberate design point now rather than an accident, so say
             // so out loud — a silent drop is what made the original "one prompt, eight
-            // threads" incident so hard to see. (`tm-xx3` tracks giving the user a
-            // real signal instead of a stderr line.)
+            // threads" incident so hard to see. A user-facing signal should
+            // eventually replace this stderr-only diagnostic.
             //
             // Logged out here, not in the arm above: nothing writes to stderr while
             // holding the shared-session lock, which every Codex event contends on.
@@ -1475,8 +1475,8 @@ fn handle_shared_codex_start_turn(
     // only when the slot is empty, and parks otherwise.
     //
     // NOTE: the thread this stale hand-off was carrying is now unowned — nothing
-    // suppresses it, so discovery can re-import it. That is the deeper attachment-
-    // generation gap (`tm-nqc` and its follow-up), not something this bail can fix.
+    // suppresses it, so discovery can re-import it. That deeper attachment-
+    // generation gap is not something this bail can fix.
     let superseding_setup_request_id = {
         let sessions = sessions
             .lock()

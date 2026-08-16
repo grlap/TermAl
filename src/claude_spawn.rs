@@ -7,8 +7,7 @@
 // subprocess's stdin.
 //
 // `spawn_claude_runtime` is the entry point. Called from
-// `session_crud.rs` on first-prompt dispatch for a Claude session
-// (or from `claude_spares.rs` when pre-warming a hidden spare).
+// `session_crud.rs` on first-prompt dispatch for a Claude session.
 // It builds the argv (via `claude_cli_*_args` in `claude_args.rs`),
 // spawns the child, wraps stdout in the NDJSON reader, and returns
 // a `ClaudeRuntimeHandle` the caller parks on `SessionRuntime::Claude`.
@@ -546,6 +545,10 @@ fn spawn_claude_runtime(
                         &mut turn_state,
                         approval_mode,
                         &reader_cwd,
+                        reader_state.delegation_control_plane_capability_allowed(
+                            &reader_session_id,
+                            DelegationControlPlaneCapability::SubmitReviewResult,
+                        ),
                     ) {
                         Ok(action) => action,
                         Err(err) => {

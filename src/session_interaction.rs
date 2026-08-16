@@ -7,12 +7,9 @@
 // session's in-memory state: how a pending approval moves through
 // Pending/Accepted/Rejected, how queued prompts get FIFO'd with user
 // prompts prioritized over orchestrator work, how the latest interaction
-// preview string is computed for the sidebar, and how records get reset
-// for Claude spare-pool reuse.
+// preview string is computed for the sidebar.
 //
 // Covers:
-// - Claude spare-pool reset: `reset_hidden_claude_spare_record`,
-//   `claude_spare_profile`
 // - Pending-request housekeeping: `has_pending_requests`,
 //   `clear_all_pending_requests`
 // - Agent command merge/dedupe: `merge_agent_commands`, `dedupe_agent_commands`
@@ -37,30 +34,6 @@
 //
 // Extracted from state.rs so state.rs can stay focused on `StateInner`
 // + commit_locked() + SSE broadcasting.
-
-/// Handles reset hidden Claude spare record.
-fn reset_hidden_claude_spare_record(record: &mut SessionRecord) {
-    if record.session.agent != Agent::Claude {
-        return;
-    }
-
-    record.session.messages.clear();
-    clear_prompt_history_on_record(record);
-    record.message_start_index = 0;
-    sync_retained_transcript_metadata(record);
-    record.session.pending_prompts.clear();
-    record.session.status = SessionStatus::Idle;
-    record.session.preview = "Ready for a prompt.".to_owned();
-    clear_all_pending_requests(record);
-    record.queued_prompts.clear();
-    record.queued_peer_messages.clear();
-    record.message_positions.clear();
-    record.runtime_reset_required = false;
-    record.orchestrator_auto_dispatch_blocked = false;
-    record.runtime_stop_in_progress = false;
-    record.deferred_stop_callbacks.clear();
-    clear_active_turn_file_change_tracking(record);
-}
 
 /// Returns whether pending requests.
 fn has_pending_requests(record: &SessionRecord) -> bool {
@@ -117,25 +90,6 @@ fn dedupe_agent_commands(commands: Vec<AgentCommand>) -> Vec<AgentCommand> {
             .cmp(&right.name.to_ascii_lowercase())
     });
     deduped
-}
-
-/// Handles Claude spare profile.
-fn claude_spare_profile(
-    record: &SessionRecord,
-) -> ClaudeSpareProfile {
-    (
-        record.session.workdir.clone(),
-        record.session.project_id.clone(),
-        record.session.model.clone(),
-        record
-            .session
-            .claude_approval_mode
-            .unwrap_or_else(default_claude_approval_mode),
-        record
-            .session
-            .claude_effort
-            .unwrap_or_else(default_claude_effort),
-    )
 }
 
 /// Returns the normalized Codex thread state.

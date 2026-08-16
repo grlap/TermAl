@@ -4462,6 +4462,122 @@ Please add tests.`,
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("bounds the per-session /mcp cache and refetches an evicted session", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ servers: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const sessions = Array.from({ length: 9 }, (_, index) =>
+      makeSession(`session-${index}`, {
+        agent: "Codex",
+        model: "gpt-5.6-sol",
+      }),
+    );
+    const { rerender } = render(
+      renderFooter({ committedDraft: "/mcp", session: sessions[0] }),
+    );
+
+    for (let index = 1; index < sessions.length; index += 1) {
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(index));
+      await act(async () => {
+        rerender(
+          renderFooter({ committedDraft: "/mcp", session: sessions[index] }),
+        );
+        await Promise.resolve();
+      });
+    }
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(sessions.length));
+
+    await act(async () => {
+      rerender(
+        renderFooter({ committedDraft: "/mcp", session: sessions[0] }),
+      );
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledTimes(sessions.length + 1),
+    );
+  });
+
+  it("reuses an in-flight /mcp request when an evicted session is revisited", async () => {
+    const pendingFirstSession = deferredValue<Response>();
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.includes("/session-0/")) {
+        return pendingFirstSession.promise;
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ servers: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const sessions = Array.from({ length: 9 }, (_, index) =>
+      makeSession(`session-${index}`, {
+        agent: "Codex",
+        model: "gpt-5.6-sol",
+      }),
+    );
+    const { rerender } = render(
+      renderFooter({ committedDraft: "/mcp", session: sessions[0] }),
+    );
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    for (let index = 1; index < sessions.length; index += 1) {
+      await act(async () => {
+        rerender(
+          renderFooter({ committedDraft: "/mcp", session: sessions[index] }),
+        );
+        await Promise.resolve();
+      });
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(index + 1));
+    }
+
+    await act(async () => {
+      rerender(
+        renderFooter({ committedDraft: "/mcp", session: sessions[0] }),
+      );
+      await Promise.resolve();
+    });
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes("/session-0/"),
+      ),
+    ).toHaveLength(1);
+
+    await act(async () => {
+      pendingFirstSession.resolve(
+        new Response(
+          JSON.stringify({
+            servers: [
+              {
+                name: "revisited-server",
+                authStatus: "unsupported",
+                tools: [],
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      await pendingFirstSession.promise;
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText("revisited-server")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes("/session-0/"),
+      ),
+    ).toHaveLength(1);
+  });
+
   it("explains when the active Codex model authoritatively lacks Fast", () => {
     const onRefreshSessionModelOptions = vi.fn();
 

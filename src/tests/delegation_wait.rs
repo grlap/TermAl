@@ -6,7 +6,8 @@
 
 use super::delegation_support::{
     finish_delegation_child_with_assistant_text, install_delegation_codex_runtime,
-    temp_delegation_state_paths, test_app_state_with_delegation_codex_runtime,
+    mark_delegation_as_legacy_unstructured_review, temp_delegation_state_paths,
+    test_app_state_with_delegation_codex_runtime,
     test_app_state_with_drained_delegation_codex_runtime,
 };
 use super::*;
@@ -106,6 +107,8 @@ fn delegation_wait_all_queues_consolidated_parent_resume_after_children_finish()
             },
         )
         .expect("second delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &first.delegation.id);
+    mark_delegation_as_legacy_unstructured_review(&state, &second.delegation.id);
 
     let wait = state
         .create_delegation_wait(
@@ -940,7 +943,7 @@ fn delegation_wait_dispatches_resume_prompt_to_idle_parent_runtime() {
                 cwd: None,
                 agent: Some(Agent::Codex),
                 model: None,
-                mode: Some(DelegationMode::Reviewer),
+                mode: Some(DelegationMode::Explorer),
                 write_policy: Some(DelegationWritePolicy::ReadOnly),
             },
         )

@@ -72,7 +72,7 @@ fn delegation_create_and_completion_are_included_in_persist_delta() {
                 cwd: None,
                 agent: Some(Agent::Codex),
                 model: None,
-                mode: Some(DelegationMode::Reviewer),
+                mode: Some(DelegationMode::Explorer),
                 write_policy: Some(DelegationWritePolicy::ReadOnly),
             },
         )

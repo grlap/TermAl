@@ -54,6 +54,18 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
         }
 
         if let Some(next_section) = delegation_result_section_heading(cleaned) {
+            let nested_code_review = section == Some(DelegationResultSection::Findings)
+                && next_section == DelegationResultSection::Ignored
+                && delegation_review_section_label(cleaned)
+                    .is_some_and(|label| is_decorated_code_review_heading(&label));
+            if nested_code_review {
+                // Some reviewers place their entire Markdown review directly
+                // under the packet's `Findings:` label. Keep the review title
+                // inside the captured payload so a later `## Actionable`
+                // heading can reopen actionable finding capture.
+                finding_lines.push(line);
+                continue;
+            }
             if next_section == DelegationResultSection::Summary {
                 if saw_summary_section {
                     // The first Summary is the packet's canonical summary.
@@ -132,6 +144,12 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
             let mut merged_findings = preamble_findings;
             merged_findings.extend(findings);
             findings = dedupe_delegation_findings(merged_findings);
+        } else if contradictory_empty_findings {
+            // Never turn a self-contradictory completed review into a clean
+            // result. If the reviewer omitted parseable details entirely,
+            // preserve the declared severity and direct the parent to the
+            // authoritative full output.
+            findings.push(delegation_result_summary_fallback_finding(&summary));
         } else if findings_refer_to_prior_sections && findings.is_empty() {
             return None;
         }
@@ -161,14 +179,12 @@ fn delegation_result_summary_reports_findings(summary: &str) -> bool {
         })
         .collect::<String>();
     let tokens = normalized.split_whitespace().collect::<Vec<_>>();
-    let finding_nouns = [
-        "bug", "bugs", "defect", "defects", "error", "errors", "failure", "failures", "finding",
-        "findings", "flaw", "flaws", "gap", "gaps", "issue", "issues", "problem", "problems",
-        "race", "races", "regression", "regressions", "risk", "risks",
-    ];
+    if delegation_result_summary_reported_severity(&tokens).is_some() {
+        return true;
+    }
 
     tokens.iter().enumerate().any(|(index, token)| {
-        if !finding_nouns.contains(token) {
+        if !delegation_result_token_is_finding_noun(token) {
             return false;
         }
 
@@ -225,6 +241,150 @@ fn delegation_result_summary_reports_findings(summary: &str) -> bool {
                 )
             })
     })
+}
+
+fn delegation_result_summary_reported_severity(tokens: &[&str]) -> Option<&'static str> {
+    tokens.iter().enumerate().find_map(|(severity_index, token)| {
+        let severity = delegation_result_token_severity(token)?;
+        // A severity word is meaningful only when it is attached to
+        // "severity" or a finding noun. This excludes incidental prose such
+        // as "one module with high complexity" while retaining compact
+        // declarations such as "one High-severity issue" and "one high risk".
+        let previous = severity_index.checked_sub(1).and_then(|index| tokens.get(index));
+        let next = tokens.get(severity_index + 1);
+        let is_finding_severity = previous
+            .into_iter()
+            .chain(next)
+            .any(|token| *token == "severity" || delegation_result_token_is_finding_noun(token));
+        if !is_finding_severity {
+            return None;
+        }
+
+        let count_start = severity_index.saturating_sub(4);
+        let count_end = (severity_index + 5).min(tokens.len());
+        if !tokens[count_start..count_end]
+            .iter()
+            .any(|token| delegation_result_token_is_positive_count(token))
+        {
+            return None;
+        }
+
+        let context_start = severity_index.saturating_sub(7);
+        let context_end = (severity_index + 8).min(tokens.len());
+        let context = &tokens[context_start..context_end];
+        let reports_discovery = context.iter().any(|token| {
+            matches!(
+                *token,
+                "detect"
+                    | "detected"
+                    | "discover"
+                    | "discovered"
+                    | "find"
+                    | "found"
+                    | "flag"
+                    | "flagged"
+                    | "identify"
+                    | "identified"
+                    | "report"
+                    | "reported"
+                    | "uncover"
+                    | "uncovered"
+            )
+        });
+        let reports_resolution = context.iter().any(|token| {
+            matches!(
+                *token,
+                "addressed"
+                    | "closed"
+                    | "corrected"
+                    | "eliminated"
+                    | "fixed"
+                    | "removed"
+                    | "repaired"
+                    | "resolved"
+            )
+        });
+        let reports_unresolved_work = context.iter().any(|token| {
+            matches!(
+                *token,
+                "open"
+                    | "outstanding"
+                    | "persist"
+                    | "persists"
+                    | "remain"
+                    | "remaining"
+                    | "remains"
+                    | "unresolved"
+            )
+        });
+
+        (reports_discovery && (!reports_resolution || reports_unresolved_work)).then_some(severity)
+    })
+}
+
+fn delegation_result_token_severity(token: &str) -> Option<&'static str> {
+    match token {
+        "critical" => Some("Critical"),
+        "high" => Some("High"),
+        "medium" => Some("Medium"),
+        "low" => Some("Low"),
+        _ => None,
+    }
+}
+
+fn delegation_result_token_is_finding_noun(token: &str) -> bool {
+    matches!(
+        token,
+        "bug"
+            | "bugs"
+            | "defect"
+            | "defects"
+            | "error"
+            | "errors"
+            | "failure"
+            | "failures"
+            | "finding"
+            | "findings"
+            | "flaw"
+            | "flaws"
+            | "gap"
+            | "gaps"
+            | "issue"
+            | "issues"
+            | "problem"
+            | "problems"
+            | "race"
+            | "races"
+            | "regression"
+            | "regressions"
+            | "risk"
+            | "risks"
+    )
+}
+
+fn delegation_result_summary_fallback_finding(summary: &str) -> DelegationFinding {
+    let normalized = summary
+        .to_ascii_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>();
+    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+    let severity = delegation_result_summary_reported_severity(&tokens).unwrap_or("Unspecified");
+    DelegationFinding {
+        severity: severity.to_owned(),
+        file: None,
+        line: None,
+        message: format!(
+            "Reviewer summary reports an actionable finding, but the result packet omitted its structured details. Inspect the full reviewer output. Summary: {}",
+            compact_delegation_result_summary(summary)
+        ),
+    }
 }
 
 fn delegation_result_token_is_positive_count(token: &str) -> bool {
@@ -288,7 +448,7 @@ fn is_decorated_code_review_heading(label: &str) -> bool {
         return false;
     };
     let suffix = suffix.trim_start();
-    suffix.is_empty() || matches!(suffix.chars().next(), Some('-' | '\u{2013}' | '\u{2014}'))
+    suffix.is_empty() || matches!(suffix.chars().next(), Some(':' | '-' | '\u{2013}' | '\u{2014}'))
 }
 
 fn parse_delegation_note_line(line: &str) -> Option<String> {

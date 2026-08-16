@@ -240,3 +240,5 @@
 {"id":"int-ca5bce199c436c4934270e736d5731d7","kind":"field_change","created_at":"2026-08-01T08:27:50.131024Z","actor":"Greg","issue_id":"tm-7cu.19.2","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Cursor-centered zoom, controls, persistence, and logical geometry implemented"}}
 {"id":"int-e3f451606f3b9bf51cc200338687bec0","kind":"field_change","created_at":"2026-08-02T17:33:06.78815Z","actor":"Greg","issue_id":"tm-1hz","extra":{"field":"priority","new_value":"2","old_value":"3"}}
 {"id":"int-944a87c0eb081c54e7413bd588fc6332","kind":"field_change","created_at":"2026-08-05T12:20:03.111125Z","actor":"Greg","issue_id":"tm-d8v","extra":{"field":"priority","new_value":"1","old_value":"3"}}
+{"id":"int-6a8186828f0f0597c3cea865d9abe259","kind":"field_change","created_at":"2026-08-16T12:39:08.887411Z","actor":"Greg","issue_id":"tm-vinp","extra":{"field":"priority","new_value":"1","old_value":"2"}}
+{"id":"int-8307c92428898a2aed2982ddf7f768bf","kind":"field_change","created_at":"2026-08-16T13:58:20.98252Z","actor":"Greg","issue_id":"tm-rl10","extra":{"field":"priority","new_value":"2","old_value":"3"}}

@@ -1,5 +1,5 @@
 /*
-Coordination board HTTP surface (tm-uwx.7.3).
+Coordination board HTTP surface.
 
 Owns: session-scoped board routes (list/get/set — scope deletion is
 deliberately route-less, see the comment where its handler used to live),
@@ -8,8 +8,7 @@ scope id), and store-error → ApiError mapping. Deliberately does NOT own: stor
 semantics, validation, CAS/idempotency (src/coordination_board.rs — the store
 is the single validation authority and its Validation messages pass through
 verbatim), MCP tool exposure (src/delegation_mcp.rs), or UI rendering.
-New file for the tm-uwx.7 board feature; split design mirrors
-src/mailboxes.rs' route section.
+The split design mirrors src/mailboxes.rs' route section.
 
 Wire notes:
 - `set` distinguishes "set to JSON null" from "delete": JSON cannot express
@@ -70,9 +69,7 @@ struct BoardListQuery {
 /// rejected here, before any store call). The root predicate mirrors
 /// `mailbox_peer_names` exactly: the two delegation-child sources are
 /// INDEPENDENT — rejection fires on parent marker OR durable-index
-/// membership, so root standing requires marker null AND index absence
-/// (the acceptance-side conjunction pinned by the eligibility work in
-/// tm-487's lineage).
+/// membership, so root standing requires marker null AND index absence.
 fn resolve_board_scope_for_session(
     state: &AppState,
     session_id: &str,

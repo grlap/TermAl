@@ -261,7 +261,7 @@ fn test_mcp_http_accept_watchdog_bounds_a_missing_request() {
 }
 
 #[test]
-fn delegation_mcp_tools_list_exposes_parent_scoped_tools_only() {
+fn delegation_mcp_base_tools_list_includes_role_scoped_tools() {
     let tools = mcp_tools_list_result();
     let names = tools
         .get("tools")
@@ -281,6 +281,7 @@ fn delegation_mcp_tools_list_exposes_parent_scoped_tools_only() {
             "termal_wait_delegations",
             "termal_resume_after_delegations",
             "termal_followup_session",
+            "termal_submit_review_result",
             "termal_send_to_session",
             "termal_list_sessions",
             "termal_list_mailboxes",
@@ -306,6 +307,74 @@ fn delegation_mcp_tools_list_exposes_parent_scoped_tools_only() {
             "termal_list_mailboxes",
             "termal_board_list"
         ]
+    );
+}
+
+#[test]
+fn delegation_review_result_tool_advertises_bounded_control_plane_semantics() {
+    let tools = mcp_tools_list_result();
+    let tool = tools["tools"]
+        .as_array()
+        .expect("tools list should be an array")
+        .iter()
+        .find(|tool| tool["name"] == TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME)
+        .expect("review result tool should be advertised");
+
+    assert_eq!(tool["description"], TERMAL_SUBMIT_REVIEW_RESULT_TOOL_DESCRIPTION);
+    assert_eq!(tool["annotations"]["readOnlyHint"], false);
+    assert_eq!(tool["annotations"]["destructiveHint"], false);
+    assert_eq!(tool["annotations"]["idempotentHint"], true);
+    assert_eq!(tool["annotations"]["openWorldHint"], false);
+    assert_eq!(
+        tool["inputSchema"]["properties"]["commandsRun"]["items"]["properties"]
+            ["status"]["enum"],
+        json!(["success", "error"])
+    );
+}
+
+#[test]
+fn delegation_control_plane_tool_identity_is_shared_across_agent_protocols() {
+    for tool_name in [
+        "mcp__termal-delegation__termal_submit_review_result",
+        "mcp__termal_delegation__termal_submit_review_result",
+    ] {
+        assert_eq!(
+            delegation_control_plane_capability_for_tool_name(tool_name),
+            Some(DelegationControlPlaneCapability::SubmitReviewResult)
+        );
+    }
+    assert_eq!(
+        delegation_control_plane_capability_for_acp_permission(&json!({
+            "toolName": "mcp__termal-delegation__termal_submit_review_result"
+        })),
+        Some(DelegationControlPlaneCapability::SubmitReviewResult)
+    );
+    assert_eq!(
+        delegation_control_plane_capability_for_acp_permission(&json!({
+            "toolCall": {
+                "toolName": "mcp__termal_delegation__termal_submit_review_result"
+            }
+        })),
+        Some(DelegationControlPlaneCapability::SubmitReviewResult)
+    );
+    assert_eq!(
+        delegation_control_plane_capability_for_tool_name(
+            TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME
+        ),
+        None,
+        "an unscoped leaf name cannot authenticate the TermAl MCP server"
+    );
+    assert_eq!(
+        delegation_control_plane_capability_for_acp_permission(&json!({
+            "toolName": TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME,
+            "_meta": { "serverName": TERMAL_DELEGATION_MCP_SERVER_NAME }
+        })),
+        None,
+        "agent-supplied metadata cannot upgrade an unscoped tool name"
+    );
+    assert_eq!(
+        delegation_control_plane_capability_for_tool_name("termal_send_to_session"),
+        None
     );
 }
 
@@ -502,7 +571,7 @@ fn delegation_mcp_rejects_path_unsafe_parent_and_delegation_ids() {
     };
     assert!(err
         .to_string()
-        .contains("delegation MCP parent session id must not contain"));
+        .contains("delegation MCP serving session id must not contain"));
 
     let bridge = TermalDelegationMcpBridge::new(
         "session-parent".to_owned(),
@@ -678,7 +747,13 @@ fn delegation_mcp_hides_and_rejects_peer_tools_for_delegation_child() {
             json!({
                 "sessions": [
                     { "id": "session-parent", "name": "Reviewer", "parentDelegationId": "delegation-x" }
-                ]
+                ],
+                "delegations": [{
+                    "id": "delegation-x",
+                    "childSessionId": "session-parent",
+                    "mode": "reviewer",
+                    "reviewResultRequired": true
+                }]
             }),
         )
     });
@@ -696,6 +771,12 @@ fn delegation_mcp_hides_and_rejects_peer_tools_for_delegation_child() {
         .collect::<Vec<_>>();
     assert!(!names.iter().any(|name| name == "termal_send_to_session"));
     assert!(!names.iter().any(|name| name == "termal_list_sessions"));
+    assert!(
+        names
+            .iter()
+            .any(|name| name == "termal_submit_review_result"),
+        "delegation children should receive only the dedicated result submission capability"
+    );
     assert!(
         names.iter().any(|name| name == "termal_spawn_session"),
         "delegation tools stay available to children"
@@ -731,7 +812,12 @@ fn delegation_mcp_hides_and_rejects_peer_tools_for_unlinked_durable_child() {
                     { "id": "session-parent", "name": "Reattached reviewer" }
                 ],
                 "delegations": [
-                    { "id": "delegation-x", "childSessionId": "session-parent" }
+                    {
+                        "id": "delegation-x",
+                        "childSessionId": "session-parent",
+                        "mode": "reviewer",
+                        "reviewResultRequired": true
+                    }
                 ]
             }),
         )
@@ -749,6 +835,11 @@ fn delegation_mcp_hides_and_rejects_peer_tools_for_unlinked_durable_child() {
         .collect::<Vec<_>>();
     assert!(!names.iter().any(|name| name == "termal_send_to_session"));
     assert!(!names.iter().any(|name| name == "termal_list_sessions"));
+    assert!(
+        names
+            .iter()
+            .any(|name| name == "termal_submit_review_result")
+    );
 
     let err = bridge
         .handle_tool_call(json!({
@@ -761,6 +852,102 @@ fn delegation_mcp_hides_and_rejects_peer_tools_for_unlinked_durable_child() {
         "error should explain the root-only restriction: {err}"
     );
     server.join().expect("test server should join");
+}
+
+#[test]
+fn delegation_mcp_hides_and_rejects_review_submission_for_non_reviewer_child() {
+    let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |request| {
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/api/state");
+        (
+            200,
+            json!({
+                "sessions": [
+                    { "id": "session-worker", "name": "Worker", "parentDelegationId": "delegation-worker" }
+                ],
+                "delegations": [{
+                    "id": "delegation-worker",
+                    "childSessionId": "session-worker",
+                    "mode": "worker",
+                    "reviewResultRequired": false
+                }]
+            }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-worker".to_owned(), base_url)
+        .expect("bridge should initialize");
+
+    let tools = bridge.tools_list_for_caller();
+    let names = tools["tools"]
+        .as_array()
+        .expect("tools should be an array")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect::<Vec<_>>();
+    assert!(!names.contains(&TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME));
+    let error = bridge
+        .handle_tool_call(json!({
+            "name": TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME,
+            "arguments": {}
+        }))
+        .expect_err("non-reviewer child must not invoke structured review submission");
+    assert!(error.to_string().contains("reviewer child"));
+    server.join().expect("test server should join");
+}
+
+#[test]
+fn delegation_mcp_submit_review_result_forwards_only_to_child_endpoint() {
+    let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
+        assert_eq!(request.method, "POST");
+        assert_eq!(
+            request.path,
+            "/api/sessions/session-reviewer/delegation-review-result"
+        );
+        let body: Value =
+            serde_json::from_str(&request.body).expect("review result body should parse");
+        assert_eq!(body["schemaVersion"], 1);
+        assert_eq!(body["status"], "completed");
+        assert_eq!(body["findings"][0]["severity"], "High");
+        (
+            202,
+            json!({
+                "mailboxId": "mailbox-review",
+                "messageId": "mailbox-message-review",
+                "sequence": 1,
+                "unreadDepth": 1,
+                "notificationDisposition": "durableButNotWoken",
+                "duplicate": false
+            }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new(
+        "session-reviewer".to_owned(),
+        base_url,
+    )
+    .expect("bridge should initialize");
+    let response = bridge
+        .tool_submit_review_result(json!({
+            "schemaVersion": 1,
+            "status": "completed",
+            "summary": "One high issue.",
+            "findings": [{
+                "severity": "High",
+                "file": "src/example.rs",
+                "line": 7,
+                "message": "Example finding"
+            }],
+            "commandsRun": [],
+            "filesInspected": ["src/example.rs"],
+            "notes": [],
+            "suggestedTrackerUpdates": []
+        }))
+        .expect("structured result should reach the dedicated endpoint");
+    assert_eq!(response["notificationDisposition"], "durableButNotWoken");
+    server.join().expect("test server should join");
+    assert_eq!(
+        requests.lock().expect("request log mutex poisoned").len(),
+        1
+    );
 }
 
 #[test]
@@ -817,6 +1004,12 @@ fn delegation_mcp_caller_eligibility_fails_closed_without_caching_transport_fail
                 .any(|name| name == "termal_send_to_session"),
             "a successful root classification should recover and then cache"
         );
+        assert!(
+            !recovered_names
+                .iter()
+                .any(|name| name == "termal_submit_review_result"),
+            "root sessions must not see the child-only review submission tool"
+        );
     }
 
     server.join().expect("test server should join");
@@ -828,7 +1021,7 @@ fn delegation_mcp_caller_eligibility_fails_closed_without_caching_transport_fail
 }
 
 #[test]
-fn delegation_mcp_caller_eligibility_recovers_after_hidden_spare_promotion() {
+fn delegation_mcp_caller_eligibility_recovers_after_parent_becomes_visible() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let handler_attempts = attempts.clone();
     let (base_url, requests, server) =
@@ -848,7 +1041,7 @@ fn delegation_mcp_caller_eligibility_recovers_after_hidden_spare_promotion() {
                     200,
                     json!({
                         "sessions": [
-                            { "id": "session-parent", "name": "Promoted spare" }
+                            { "id": "session-parent", "name": "Visible parent" }
                         ],
                         "delegations": []
                     }),
@@ -1234,8 +1427,8 @@ fn delegation_mcp_send_preserves_retryable_backend_details() {
     server.join().expect("test server should join");
 }
 
-// tm-88r: `sessionId` is interpolated into the request path, and the `url` crate
-// resolves dot segments — so an unvalidated `session-`-prefixed reference turned
+// `sessionId` is interpolated into the request path, and the `url` crate resolves
+// dot segments — so an unvalidated `session-`-prefixed reference turned
 // termal_send_to_session into a POST primitive against arbitrary routes. The path
 // validator must reject the traversal shape BEFORE any request is issued.
 // Neuter-verified: swapping `required_path_identifier` back to `required_string` makes

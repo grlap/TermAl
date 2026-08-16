@@ -685,7 +685,7 @@ fn test_app_state() -> AppState {
     // Mailbox tests opt into a real isolated store explicitly.
     let mailbox_store = Arc::new(MailboxStore::disabled_for_tests());
     // Same fd-cascade rule for the board store: no real SQLite connection in
-    // retained test AppStates (tm-drd); board tests opt into a real isolated
+    // retained test AppStates; board tests opt into a real isolated
     // store explicitly, exactly like mailbox tests.
     let coordination_board_store = Arc::new(CoordinationBoardStore::disabled_for_tests());
 
@@ -801,7 +801,7 @@ impl ScopedEnvVar {
     /// `HOME` is set, so overriding only `USERPROFILE` (the old
     /// `TEST_HOME_ENV_KEY`) let the Telegram tests read — and, via the
     /// config-saving tests, WRITE — the real `~/.termal/telegram-bot.json`,
-    /// seeding the fixture `chatId: 123` into production state (tm-4uj).
+    /// seeding the fixture `chatId: 123` into production state.
     /// Overriding both variables isolates home-dir resolution on every
     /// platform. Hold `TEST_HOME_ENV_MUTEX` across the guard's lifetime.
     fn set_home_dir(value: &FsPath) -> ScopedHomeDir {

@@ -746,7 +746,7 @@ struct AppState {
     /// shutdown, and committed messages must be visible before any receiver
     /// wake-up is attempted.
     mailbox_store: Arc<MailboxStore>,
-    /// Level-triggered sibling of the mailbox store (tm-uwx.7): versioned
+    /// Level-triggered sibling of the mailbox store for versioned,
     /// per-repository coordination facts. Mailbox and board each keep one
     /// long-lived connection to coordination.sqlite and share that file's FIFO
     /// writer admission, isolated from termal.sqlite session/transcript writes.

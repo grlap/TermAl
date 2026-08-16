@@ -38,7 +38,7 @@ const DELEGATION_RESULT_PACKET_SEARCH_BYTES: usize = 32 * 1024;
 // Persisted terminal results are reparsed once when this version increases.
 // This lets parser upgrades repair old packets without rescanning clean child
 // transcripts on every result/status poll.
-const DELEGATION_RESULT_PARSER_VERSION: u32 = 4;
+const DELEGATION_RESULT_PARSER_VERSION: u32 = 5;
 // Phase 1 starts children immediately but still enforces simple fan-out limits.
 const MAX_RUNNING_DELEGATIONS_PER_PARENT: usize = 4;
 // Keep nesting shallow until delegation ownership/scheduling is explicit.
@@ -52,6 +52,22 @@ const MAX_ISOLATED_WORKTREE_PATCH_BYTES: usize = 16 * 1024 * 1024;
 const DELEGATION_WAIT_RESUME_TRUNCATED_MARKER: &str = "\n\n[TermAl truncated this compact delegation fan-in prompt. Fetch full child output with `termal_get_session_result` using `outputOffset` and `outputLimit`.]";
 const DELEGATED_CHILD_SESSION_MARKER: &str =
     "You are a delegated child session for TermAl delegation";
+const DELEGATION_REVIEW_RESULT_PROTOCOL_INSTRUCTIONS: &str = r#"
+TermAl reviewer result protocol (TERMAL_STRUCTURED_REVIEW_RESULT_V1):
+- This protocol is injected by TermAl and takes precedence over conflicting result-delivery instructions in the task.
+- After completing the review, call `termal_submit_review_result` exactly once before returning the human-readable final answer.
+- The tool is TermAl control plane, not a workspace mutation. `writePolicy: readOnly` does not prohibit it.
+- The tool call is the authoritative result. Human-readable Markdown is retained only as full output and is never parsed as the compact result.
+- Submit every required array even when it is empty. Use `status: completed` after a completed review and `status: failed` only when the review could not be completed.
+- Finding severity must be exactly `Critical`, `High`, `Medium`, `Low`, or `Note`. Omit `file` and `line` only when no meaningful source location exists.
+- Command status must be exactly `success` or `error`.
+- If there are no changes or no findings, still submit a completed result with an explanatory summary and an empty findings array.
+- Do not include tracker identifiers and do not inspect or mutate the tracker.
+- If submission validation fails, correct the payload and retry. Do not replace the tool call with prose or a JSON code block.
+
+Required tool payload:
+{"schemaVersion":1,"status":"completed","summary":"Concise overall assessment.","findings":[{"severity":"Medium","file":"path/to/file","line":1,"message":"Complete finding with impact and fix direction."}],"commandsRun":[{"command":"git status --short","status":"success"}],"filesInspected":["path/to/file"],"notes":[],"suggestedTrackerUpdates":[]}
+"#;
 // Shared conflict text for create/cancel races before child dispatch starts.
 const DELEGATION_NO_LONGER_STARTABLE_MESSAGE: &str = "delegation is no longer running";
 #[cfg(test)]
@@ -219,7 +235,6 @@ struct RemovedSessionDelegationReconciliation {
     lifecycle_deltas: Vec<DelegationLifecycleDelta>,
     runtimes_to_kill: Vec<KillableRuntime>,
     codex_thread_ids_to_ignore: Vec<String>,
-    claude_spare_profiles_to_reap: Vec<ClaudeSpareProfile>,
 }
 
 #[derive(Default)]
@@ -256,19 +271,10 @@ fn killable_runtime_shared_codex_session_id(runtime: &KillableRuntime) -> Option
     }
 }
 
-type ClaudeSpareProfile = (
-    String,
-    Option<String>,
-    String,
-    ClaudeApprovalMode,
-    ClaudeEffortLevel,
-);
-
 #[derive(Default)]
 struct RemovedDelegationChildSession {
     runtime: Option<KillableRuntime>,
     codex_thread_id_to_ignore: Option<String>,
-    claude_spare_profile_to_reap: Option<ClaudeSpareProfile>,
 }
 
 impl StateInner {
@@ -608,6 +614,7 @@ impl AppState {
         let child_session = Self::wire_session_from_record(&inner.sessions[child_index]);
         let child_delta_session =
             Self::wire_session_summary_from_record(&inner.sessions[child_index]);
+        let review_result_required = mode == DelegationMode::Reviewer;
         let record = DelegationRecord {
             id: delegation_id.clone(),
             parent_session_id,
@@ -624,6 +631,17 @@ impl AppState {
             started_at: Some(now),
             completed_at: None,
             result: None,
+            submitted_review_result: None,
+            post_submission_transport_error: None,
+            review_result_recovery_probe_attempt: None,
+            review_result_recovery_error: None,
+            review_result_schema_version: None,
+            review_result_required,
+            review_result_submission_attempt: if review_result_required {
+                1
+            } else {
+                0
+            },
             result_parser_version: 0,
         };
         let delegation_index = inner.delegations.len();
@@ -750,6 +768,13 @@ impl AppState {
         parent_session_id: &str,
         delegation_id: &str,
     ) -> Result<DelegationStatusResponse, ApiError> {
+        let child_session_id = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index =
+                find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
+            inner.delegations[index].child_session_id.clone()
+        };
+        self.recover_durable_delegation_review_submission(&child_session_id)?;
         let (revision, delegation, lifecycle_delta, detached_child, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index =
@@ -845,6 +870,13 @@ impl AppState {
         parent_session_id: &str,
         delegation_id: &str,
     ) -> Result<DelegationResultResponse, ApiError> {
+        let child_session_id = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index =
+                find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
+            inner.delegations[index].child_session_id.clone()
+        };
+        self.recover_durable_delegation_review_submission(&child_session_id)?;
         let (revision, result, lifecycle_delta, detached_child, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index =
@@ -901,11 +933,38 @@ impl AppState {
     ) -> Result<DelegationResultOutputResponse, ApiError> {
         validate_delegation_result_output_page(limit_bytes)?;
 
-        // Reuse result polling's lifecycle refresh contract first. This keeps
-        // the output endpoint consistent with `/result`: unfinished children
-        // return 409, while terminal transitions are persisted and published.
-        let result_response = self.get_delegation_result(parent_session_id, delegation_id)?;
-        let (child_session_id, page, total_bytes, summary_fallback) = {
+        let child_session_id = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index =
+                find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
+            inner.delegations[index].child_session_id.clone()
+        };
+        self.recover_durable_delegation_review_submission(&child_session_id)?;
+
+        // Refresh while the result is unavailable or its parser version is
+        // stale. After terminalization and any one-time parser repair, every
+        // continuation page reads the snapshot directly instead of repeating
+        // the full child lifecycle scan. This remains independent of the
+        // requested offset so callers may begin at any valid UTF-8 boundary.
+        let needs_result_refresh = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index =
+                find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
+            let delegation = &inner.delegations[index];
+            !delegation_is_terminal(delegation.status) || delegation.result.is_none()
+                || (delegation.status == DelegationStatus::Completed
+                    && delegation
+                        .result
+                        .as_ref()
+                        .is_some_and(|result| result.status == DelegationStatus::Completed)
+                    && delegation.review_result_schema_version.is_none()
+                    && !delegation.review_result_required
+                    && delegation.result_parser_version < DELEGATION_RESULT_PARSER_VERSION)
+        };
+        if needs_result_refresh {
+            self.get_delegation_result(parent_session_id, delegation_id)?;
+        }
+        let (revision, child_session_id, page, total_bytes, summary_fallback) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
@@ -938,6 +997,11 @@ impl AppState {
             };
             let page = delegation_result_output_page(output, offset_bytes, limit_bytes)?;
             (
+                // The output page and its revision must describe the same
+                // locked snapshot. A lifecycle refresh may have returned an
+                // earlier revision before another state commit acquired this
+                // final lock.
+                inner.revision,
                 delegation.child_session_id.clone(),
                 page,
                 output.len(),
@@ -946,7 +1010,7 @@ impl AppState {
         };
 
         Ok(DelegationResultOutputResponse {
-            revision: result_response.revision,
+            revision,
             delegation_id: delegation_id.to_owned(),
             child_session_id,
             output: page.output,
@@ -1038,6 +1102,13 @@ impl AppState {
         parent_session_id: &str,
         delegation_id: &str,
     ) -> Result<DelegationStatusResponse, ApiError> {
+        let child_session_id = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index =
+                find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
+            inner.delegations[index].child_session_id.clone()
+        };
+        self.recover_durable_delegation_review_submission(&child_session_id)?;
         let (child_session_id, cancel_reason) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index =
@@ -1159,6 +1230,14 @@ impl AppState {
             return Err(ApiError::bad_request("follow-up message cannot be empty"));
         }
 
+        let child_session_id = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index =
+                find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
+            inner.delegations[index].child_session_id.clone()
+        };
+        self.recover_durable_delegation_review_submission(&child_session_id)?;
+
         // Phase 1 (atomic): refresh from the child, then gate on a RESUMABLE state — a
         // completed or failed delegation whose child session still exists — and re-arm it
         // terminal -> running in the SAME critical section. Doing the gate and the re-arm
@@ -1268,6 +1347,8 @@ impl AppState {
     }
 
     fn refresh_delegation_for_child_session(&self, child_session_id: &str) -> Result<()> {
+        self.recover_durable_delegation_review_submission(child_session_id)
+            .map_err(|err| anyhow!(err.message))?;
         let (revision, lifecycle_delta, detached_child, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_delegation_index_by_child_session_id(child_session_id)
@@ -1923,7 +2004,7 @@ fn build_delegation_prompt(record: &DelegationRecord) -> String {
     let write_policy = delegation_prompt_write_policy(&record.write_policy);
     // Keep the leading marker, `DelegationRecord::id`, and child-session line in
     // lockstep with startup repair in `state_inner.rs`.
-    format!(
+    let mut prompt = format!(
         "{} `{}`.\n\
 \n\
 Mode: {:?}\n\
@@ -1953,7 +2034,44 @@ Final answer requirements:\n\
         record.cwd,
         write_policy,
         record.prompt,
-    )
+    );
+    if record.review_result_required {
+        prompt.push_str("\n\n");
+        prompt.push_str(DELEGATION_REVIEW_RESULT_PROTOCOL_INSTRUCTIONS.trim());
+    }
+    prompt
+}
+
+impl AppState {
+    fn delegation_control_plane_capability_allowed(
+        &self,
+        child_session_id: &str,
+        capability: DelegationControlPlaneCapability,
+    ) -> bool {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(delegation_index) = inner.find_delegation_index_by_child_session_id(child_session_id)
+        else {
+            return false;
+        };
+        let delegation = &inner.delegations[delegation_index];
+        match capability {
+            DelegationControlPlaneCapability::SubmitReviewResult => {
+                delegation.child_session_id == child_session_id
+                    && delegation.mode == DelegationMode::Reviewer
+                    && delegation.status == DelegationStatus::Running
+                    && delegation.review_result_required
+                    && inner
+                        .find_session_index(child_session_id)
+                        .and_then(|index| inner.sessions.get(index))
+                        .is_some_and(|child| {
+                            !child.hidden
+                                && child.is_local_session()
+                                && child.session.parent_delegation_id.as_deref()
+                                    == Some(delegation.id.as_str())
+                        })
+            }
+        }
+    }
 }
 
 fn configure_delegation_child_prompt_settings(
@@ -2467,6 +2585,87 @@ fn update_parent_delegation_card_locked(
     None
 }
 
+fn post_submission_transport_error(outcome: &DelegationChildOutcome) -> Option<String> {
+    match outcome {
+        DelegationChildOutcome::Running | DelegationChildOutcome::Completed { .. } => None,
+        DelegationChildOutcome::Failed { summary } => {
+            let detail = summary.trim();
+            Some(if detail.is_empty() {
+                "Child runtime failed after structured result submission.".to_owned()
+            } else {
+                format!("Child runtime failed after structured result submission: {detail}")
+            })
+        }
+        DelegationChildOutcome::IdleWithoutResult => Some(
+            "Child became idle without a final assistant packet after structured result submission."
+                .to_owned(),
+        ),
+        DelegationChildOutcome::Missing => Some(
+            "Delegation child session disappeared after structured result submission.".to_owned(),
+        ),
+    }
+}
+
+fn terminalize_submitted_review_result_locked(
+    inner: &mut StateInner,
+    delegation_index: usize,
+    delegation: &DelegationRecord,
+    result: DelegationResult,
+    post_submission_transport_error: Option<String>,
+) -> Option<DelegationLifecycleDelta> {
+    let terminal_at = stamp_now();
+    let public_summary = compact_delegation_public_summary(&result.summary);
+    let (card_status, lifecycle_status) = match result.status {
+        DelegationStatus::Completed => (
+            ParallelAgentStatus::Completed,
+            DelegationStatus::Completed,
+        ),
+        DelegationStatus::Failed => (ParallelAgentStatus::Error, DelegationStatus::Failed),
+        _ => return None,
+    };
+    {
+        let record = inner.delegations.get_mut(delegation_index)?;
+        record.status = lifecycle_status;
+        record.completed_at = Some(terminal_at.clone());
+        record.result = Some(result.clone());
+        record.submitted_review_result = None;
+        record.post_submission_transport_error = post_submission_transport_error;
+        record.review_result_recovery_probe_attempt = None;
+        record.review_result_recovery_error = None;
+        record.review_result_schema_version = Some(DELEGATION_REVIEW_RESULT_SCHEMA_VERSION);
+        record.result_parser_version = DELEGATION_RESULT_PARSER_VERSION;
+    }
+    inner.sync_running_read_only_delegation_index(delegation_index);
+    inner.mark_delegation_mutated(delegation_index);
+    settle_terminal_delegation_child_locked(
+        inner,
+        &delegation.child_session_id,
+        SessionStatus::Idle,
+        &public_summary,
+    );
+    let parent_card_delta = update_parent_delegation_card_locked(
+        inner,
+        delegation,
+        card_status,
+        public_summary,
+    );
+    Some(match lifecycle_status {
+        DelegationStatus::Completed => DelegationLifecycleDelta::Completed {
+            delegation_id: delegation.id.clone(),
+            result,
+            completed_at: terminal_at,
+            parent_card_delta,
+        },
+        DelegationStatus::Failed => DelegationLifecycleDelta::Failed {
+            delegation_id: delegation.id.clone(),
+            result,
+            failed_at: terminal_at,
+            parent_card_delta,
+        },
+        _ => return None,
+    })
+}
+
 fn refresh_delegation_from_child_locked(
     inner: &mut StateInner,
     delegation_index: usize,
@@ -2477,6 +2676,30 @@ fn refresh_delegation_from_child_locked(
     }
 
     let child_outcome = delegation_child_outcome(inner, &delegation.child_session_id);
+    if !matches!(&child_outcome, DelegationChildOutcome::Running) {
+        if let Some(result) = delegation
+            .submitted_review_result
+            .as_ref()
+            .filter(|result| {
+                matches!(
+                    result.status,
+                    DelegationStatus::Completed | DelegationStatus::Failed
+                )
+            })
+            .cloned()
+        {
+            // A validated submission is terminal truth; later child lifecycle
+            // failure is transport metadata and must not overwrite its payload.
+            let transport_error = post_submission_transport_error(&child_outcome);
+            return terminalize_submitted_review_result_locked(
+                inner,
+                delegation_index,
+                &delegation,
+                result,
+                transport_error,
+            );
+        }
+    }
     match child_outcome {
         DelegationChildOutcome::Running => {
             let running_detail = delegation_running_detail_locked(inner, &delegation);
@@ -2532,6 +2755,63 @@ fn refresh_delegation_from_child_locked(
             notes,
         } => {
             let completed_at = stamp_now();
+            if delegation.review_result_required {
+                let unavailable_summary =
+                    "Reviewer completed without the required structured result. Inspect the full child output; TermAl did not classify this review as clean.";
+                let mut unavailable_notes = vec![
+                    "The reviewer's human-readable output remains available through paged full-output reads."
+                        .to_owned(),
+                ];
+                if let Some(reason) = delegation.review_result_recovery_error.as_deref() {
+                    unavailable_notes.push(format!(
+                        "Durable structured review result was quarantined during recovery: {reason}"
+                    ));
+                }
+                let result = DelegationResult {
+                    delegation_id: delegation.id.clone(),
+                    child_session_id: delegation.child_session_id.clone(),
+                    status: DelegationStatus::Failed,
+                    summary: unavailable_summary.to_owned(),
+                    findings: vec![DelegationFinding {
+                        severity: "Unavailable".to_owned(),
+                        file: None,
+                        line: None,
+                        message: "Structured review result was not submitted; findings are unavailable, not empty.".to_owned(),
+                    }],
+                    changed_files: Vec::new(),
+                    commands_run: Vec::new(),
+                    notes: unavailable_notes,
+                };
+                {
+                    let record = inner.delegations.get_mut(delegation_index)?;
+                    record.status = DelegationStatus::Failed;
+                    record.completed_at = Some(completed_at.clone());
+                    record.result = Some(result.clone());
+                    record.submitted_review_result = None;
+                    record.review_result_schema_version = None;
+                    record.result_parser_version = DELEGATION_RESULT_PARSER_VERSION;
+                }
+                inner.sync_running_read_only_delegation_index(delegation_index);
+                inner.mark_delegation_mutated(delegation_index);
+                settle_terminal_delegation_child_locked(
+                    inner,
+                    &delegation.child_session_id,
+                    SessionStatus::Idle,
+                    unavailable_summary,
+                );
+                let parent_card_delta = update_parent_delegation_card_locked(
+                    inner,
+                    &delegation,
+                    ParallelAgentStatus::Error,
+                    unavailable_summary.to_owned(),
+                );
+                return Some(DelegationLifecycleDelta::Failed {
+                    delegation_id: delegation.id,
+                    result,
+                    failed_at: completed_at,
+                    parent_card_delta,
+                });
+            }
             let result = DelegationResult {
                 delegation_id: delegation.id.clone(),
                 child_session_id: delegation.child_session_id.clone(),
@@ -2548,6 +2828,11 @@ fn refresh_delegation_from_child_locked(
                 record.status = DelegationStatus::Completed;
                 record.completed_at = Some(completed_at.clone());
                 record.result = Some(result.clone());
+                record.submitted_review_result = None;
+                record.post_submission_transport_error = None;
+                record.review_result_recovery_probe_attempt = None;
+                record.review_result_recovery_error = None;
+                record.review_result_schema_version = None;
                 record.result_parser_version = DELEGATION_RESULT_PARSER_VERSION;
             }
             inner.sync_running_read_only_delegation_index(delegation_index);
@@ -2598,6 +2883,8 @@ fn repair_terminal_delegation_result_locked(
     let existing = delegation.result.as_ref()?;
     if delegation.status != DelegationStatus::Completed
         || existing.status != DelegationStatus::Completed
+        || delegation.review_result_schema_version.is_some()
+        || delegation.review_result_required
         || delegation.result_parser_version >= DELEGATION_RESULT_PARSER_VERSION
     {
         return None;
@@ -2671,6 +2958,17 @@ fn rearm_terminal_delegation_for_followup_locked(
         record.status = DelegationStatus::Running;
         record.completed_at = None;
         record.result = None;
+        record.submitted_review_result = None;
+        record.post_submission_transport_error = None;
+        record.review_result_recovery_probe_attempt = None;
+        record.review_result_recovery_error = None;
+        record.review_result_schema_version = None;
+        if record.review_result_required {
+            record.review_result_submission_attempt = record
+                .review_result_submission_attempt
+                .saturating_add(1)
+                .max(1);
+        }
         record.result_parser_version = 0;
         record.started_at = Some(updated_at.clone());
     }
@@ -2827,7 +3125,6 @@ fn reconcile_delegations_for_removed_session_locked(
     let mut deltas = Vec::new();
     let mut runtimes_to_kill = Vec::new();
     let mut codex_thread_ids_to_ignore = Vec::new();
-    let mut claude_spare_profiles_to_reap = Vec::new();
     for (index, detail, removed_parent_session) in impacted {
         if let Some(delta) = mark_delegation_failed_locked(inner, index, detail) {
             deltas.push(if removed_parent_session {
@@ -2845,15 +3142,11 @@ fn reconcile_delegations_for_removed_session_locked(
         if let Some(thread_id) = removed_child.codex_thread_id_to_ignore {
             codex_thread_ids_to_ignore.push(thread_id);
         }
-        if let Some(profile) = removed_child.claude_spare_profile_to_reap {
-            claude_spare_profiles_to_reap.push(profile);
-        }
     }
     RemovedSessionDelegationReconciliation {
         lifecycle_deltas: deltas,
         runtimes_to_kill,
         codex_thread_ids_to_ignore,
-        claude_spare_profiles_to_reap,
     }
 }
 
@@ -2866,6 +3159,28 @@ fn mark_delegation_failed_locked(
     if delegation_is_terminal(delegation.status) {
         return None;
     }
+    if let Some(result) = delegation
+        .submitted_review_result
+        .as_ref()
+        .filter(|result| {
+            matches!(
+                result.status,
+                DelegationStatus::Completed | DelegationStatus::Failed
+            )
+        })
+        .cloned()
+    {
+        return terminalize_submitted_review_result_locked(
+            inner,
+            delegation_index,
+            &delegation,
+            result,
+            Some(format!(
+                "Child lifecycle failed after structured result submission: {}",
+                detail.trim()
+            )),
+        );
+    }
     let completed_at = stamp_now();
     let summary = detail.trim();
     let summary = if summary.is_empty() {
@@ -2874,6 +3189,15 @@ fn mark_delegation_failed_locked(
         summary
     };
     let public_summary = compact_delegation_public_summary(summary);
+    let recovery_notes = delegation
+        .review_result_recovery_error
+        .as_deref()
+        .map(|reason| {
+            vec![format!(
+                "Durable structured review result was quarantined during recovery: {reason}"
+            )]
+        })
+        .unwrap_or_default();
     let result = DelegationResult {
         delegation_id: delegation.id.clone(),
         child_session_id: delegation.child_session_id.clone(),
@@ -2882,12 +3206,15 @@ fn mark_delegation_failed_locked(
         findings: Vec::new(),
         changed_files: Vec::new(),
         commands_run: Vec::new(),
-        notes: Vec::new(),
+        notes: recovery_notes,
     };
     let record = inner.delegations.get_mut(delegation_index)?;
     record.status = DelegationStatus::Failed;
     record.completed_at = Some(completed_at.clone());
     record.result = Some(result.clone());
+    record.submitted_review_result = None;
+    record.post_submission_transport_error = None;
+    record.review_result_schema_version = None;
     inner.sync_running_read_only_delegation_index(delegation_index);
     inner.mark_delegation_mutated(delegation_index);
     settle_terminal_delegation_child_locked(
@@ -2936,6 +3263,10 @@ fn mark_delegation_canceled_locked(
     record.status = DelegationStatus::Canceled;
     record.completed_at = Some(canceled_at.clone());
     record.result = Some(result);
+    // Explicit user cancellation wins the lifecycle status, but an accepted
+    // structured submission remains persisted for diagnostics and future
+    // recovery; cancellation does not promote it into the terminal result.
+    record.review_result_schema_version = None;
     inner.sync_running_read_only_delegation_index(delegation_index);
     inner.mark_delegation_mutated(delegation_index);
     settle_terminal_delegation_child_locked(
@@ -3009,13 +3340,10 @@ fn remove_delegation_child_session_locked(
         .supports_codex_prompt_settings()
         .then(|| child.external_session_id.clone())
         .flatten();
-    let claude_spare_profile_to_reap =
-        (child.session.agent == Agent::Claude).then(|| claude_spare_profile(child));
     inner.remove_session_at(child_index);
     RemovedDelegationChildSession {
         runtime,
         codex_thread_id_to_ignore,
-        claude_spare_profile_to_reap,
     }
 }
 
@@ -4057,6 +4385,9 @@ fn delegation_summary_from_record(record: &DelegationRecord) -> DelegationSummar
         started_at: record.started_at.clone(),
         completed_at: record.completed_at.clone(),
         result_parser_version: record.result_parser_version,
+        review_result_required: record.review_result_required,
+        post_submission_transport_error: record.post_submission_transport_error.clone(),
+        review_result_recovery_error: record.review_result_recovery_error.clone(),
         result: record.result.as_ref().map(delegation_result_summary),
     }
 }

@@ -1,6 +1,7 @@
 use super::delegation_support::{
     finish_delegation_child_with_assistant_text, install_delegation_codex_runtime,
-    temp_delegation_state_paths, test_app_state_with_delegation_codex_runtime,
+    mark_delegation_as_legacy_unstructured_review, temp_delegation_state_paths,
+    test_app_state_with_delegation_codex_runtime,
     test_app_state_with_drained_delegation_codex_runtime,
 };
 use super::*;
@@ -29,7 +30,7 @@ fn attach_sleeping_claude_runtime_to_delegation_child(
 }
 
 #[test]
-fn delegation_prompt_marker_stays_in_sync_with_review_code_command() {
+fn reviewer_delegation_prompt_injects_termal_owned_result_protocol() {
     let record = DelegationRecord {
         id: "delegation-marker-test".to_owned(),
         parent_session_id: "session-parent".to_owned(),
@@ -37,7 +38,7 @@ fn delegation_prompt_marker_stays_in_sync_with_review_code_command() {
         mode: DelegationMode::Reviewer,
         status: DelegationStatus::Running,
         title: "Marker Test".to_owned(),
-        prompt: "/review-code".to_owned(),
+        prompt: "Run this repository's own review command.".to_owned(),
         cwd: "/tmp/termal-marker-test".to_owned(),
         agent: Agent::Codex,
         model: None,
@@ -46,22 +47,182 @@ fn delegation_prompt_marker_stays_in_sync_with_review_code_command() {
         started_at: Some(stamp_now()),
         completed_at: None,
         result: None,
+        submitted_review_result: None,
+        post_submission_transport_error: None,
+        review_result_recovery_probe_attempt: None,
+        review_result_recovery_error: None,
+        review_result_schema_version: None,
+        review_result_required: true,
+        review_result_submission_attempt: 1,
         result_parser_version: 0,
     };
     let prompt = build_delegation_prompt(&record);
-    let review_code = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/.claude/commands/review-code.md"
-    ));
 
     assert!(
         prompt.contains(DELEGATED_CHILD_SESSION_MARKER),
         "delegation runtime prompt must expose the delegated-session marker"
     );
     assert!(
-        review_code.contains(DELEGATED_CHILD_SESSION_MARKER),
-        "/review-code must key delegated-child mode off the emitted marker"
+        prompt.contains("TERMAL_STRUCTURED_REVIEW_RESULT_V1"),
+        "TermAl must inject the structured result protocol independently of repository commands"
     );
+    assert!(
+        prompt.contains("TermAl control plane, not a workspace mutation"),
+        "the built-in protocol must distinguish control-plane delivery from workspace writes"
+    );
+    assert!(
+        prompt.contains("termal_submit_review_result"),
+        "TermAl must tell every reviewer child how to submit the typed result"
+    );
+}
+
+#[test]
+fn non_reviewer_delegation_prompt_does_not_inject_review_result_protocol() {
+    let record = DelegationRecord {
+        id: "delegation-explorer-prompt".to_owned(),
+        parent_session_id: "session-parent".to_owned(),
+        child_session_id: "session-child".to_owned(),
+        mode: DelegationMode::Explorer,
+        status: DelegationStatus::Running,
+        title: "Explorer".to_owned(),
+        prompt: "Inspect one subsystem.".to_owned(),
+        cwd: "/tmp/termal-explorer".to_owned(),
+        agent: Agent::Codex,
+        model: None,
+        write_policy: DelegationWritePolicy::ReadOnly,
+        created_at: stamp_now(),
+        started_at: Some(stamp_now()),
+        completed_at: None,
+        result: None,
+        submitted_review_result: None,
+        post_submission_transport_error: None,
+        review_result_recovery_probe_attempt: None,
+        review_result_recovery_error: None,
+        review_result_schema_version: None,
+        review_result_required: false,
+        review_result_submission_attempt: 0,
+        result_parser_version: 0,
+    };
+
+    let prompt = build_delegation_prompt(&record);
+    assert!(!prompt.contains("TERMAL_STRUCTURED_REVIEW_RESULT_V1"));
+    assert!(!prompt.contains("termal_submit_review_result"));
+}
+
+#[test]
+fn reviewer_spawn_requires_structured_result_without_repository_prompt_marker() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Use the repository's review workflow.".to_owned(),
+                title: Some("Repository-owned review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("reviewer delegation should be created");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let delegation = inner
+        .delegations
+        .iter()
+        .find(|record| record.id == created.delegation.id)
+        .expect("delegation should exist");
+    assert!(delegation.review_result_required);
+    assert_eq!(delegation.review_result_submission_attempt, 1);
+    drop(inner);
+    assert!(state.delegation_control_plane_capability_allowed(
+        &created.delegation.child_session_id,
+        DelegationControlPlaneCapability::SubmitReviewResult,
+    ));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn codex_reviewer_auto_accepts_only_authorized_review_result_control_plane_request() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review the current changes.".to_owned(),
+                title: Some("Control-plane review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("reviewer delegation should be created");
+    let request = json!({
+        "id": "review-submit-approval",
+        "params": {
+            "threadId": "thread-reviewer",
+            "turnId": "turn-reviewer",
+            "serverName": TERMAL_DELEGATION_MCP_SERVER_NAME,
+            "mode": "form",
+            "message": "Approval copy is not part of the authorization contract.",
+            "requestedSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            },
+            "_meta": {
+                "codex_approval_kind": "mcp_tool_call",
+                "tool_description": TERMAL_SUBMIT_REVIEW_RESULT_TOOL_DESCRIPTION,
+                "tool_params": { "schemaVersion": 1 }
+            }
+        }
+    });
+    let (input_tx, input_rx) = mpsc::channel();
+
+    assert!(
+        try_auto_respond_delegation_control_plane_request(
+            "mcpServer/elicitation/request",
+            &request,
+            &state,
+            &created.delegation.child_session_id,
+            &input_tx,
+        )
+        .expect("authorized control-plane request should be handled")
+    );
+    let response = input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("Codex should receive an automatic control-plane response");
+    assert!(matches!(
+        response,
+        CodexRuntimeCommand::JsonRpcResponse {
+            response: CodexJsonRpcResponseCommand {
+                request_id,
+                payload: CodexJsonRpcResponsePayload::Result(result),
+            }
+        } if request_id == json!("review-submit-approval")
+            && result == json!({ "action": "accept", "content": {} })
+    ));
+
+    let mut unrelated = request;
+    unrelated["params"]["_meta"]["tool_description"] = json!("Different tool");
+    assert!(
+        !try_auto_respond_delegation_control_plane_request(
+            "mcpServer/elicitation/request",
+            &unrelated,
+            &state,
+            &created.delegation.child_session_id,
+            &input_tx,
+        )
+        .expect("unrelated MCP request should remain interactive")
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 #[test]
@@ -82,6 +243,13 @@ fn delegation_summary_serializes_the_result_parser_version() {
         started_at: Some(stamp_now()),
         completed_at: Some(stamp_now()),
         result: None,
+        submitted_review_result: None,
+        post_submission_transport_error: None,
+        review_result_recovery_probe_attempt: None,
+        review_result_recovery_error: None,
+        review_result_schema_version: None,
+        review_result_required: false,
+        review_result_submission_attempt: 0,
         result_parser_version: 7,
     };
 
@@ -109,6 +277,13 @@ fn delegation_prompt_tells_child_to_fail_fast_on_blocking_tooling() {
         started_at: Some(stamp_now()),
         completed_at: None,
         result: None,
+        submitted_review_result: None,
+        post_submission_transport_error: None,
+        review_result_recovery_probe_attempt: None,
+        review_result_recovery_error: None,
+        review_result_schema_version: None,
+        review_result_required: false,
+        review_result_submission_attempt: 0,
         result_parser_version: 0,
     };
     let prompt = build_delegation_prompt(&record);
@@ -1603,6 +1778,7 @@ async fn delegation_list_route_is_parent_scoped_compact_and_status_fresh() {
     let completed = create(&parent_session_id, "First parent-scoped review");
     let running = create(&parent_session_id, "Second parent-scoped review");
     let other = create(&other_parent_session_id, "Other parent's review");
+    mark_delegation_as_legacy_unstructured_review(&state, &completed.delegation.id);
     finish_delegation_child_with_assistant_text(
         &state,
         &completed.delegation.child_session_id,
@@ -1692,6 +1868,7 @@ async fn delegation_result_route_uses_camel_case_json_shape() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
 
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -2458,6 +2635,13 @@ fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
             started_at: Some(now.clone()),
             completed_at: Some(now),
             result: None,
+            submitted_review_result: None,
+            post_submission_transport_error: None,
+            review_result_recovery_probe_attempt: None,
+            review_result_recovery_error: None,
+            review_result_schema_version: None,
+            review_result_required: false,
+            review_result_submission_attempt: 0,
             result_parser_version: 0,
         });
         state.commit_locked(&mut inner).unwrap();
@@ -2502,8 +2686,8 @@ fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// tm-5tu / tm-h30: a peer message delivered via `termal_send_to_session`
-// carries the sender session's identity so the receiver's transcript labels it
+// A peer message delivered via `termal_send_to_session` carries the sender
+// session's identity so the receiver's transcript labels it
 // with the sender's name instead of "You". The backend resolves
 // source_session_id to a display name while holding the state lock, so a caller
 // cannot spoof another session's name. The runtime prompt also carries a
@@ -2619,8 +2803,8 @@ fn peer_message_dispatch_attributes_sender_and_instructs_cross_repo_reply() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// tm-5tu: when the target is mid-turn the peer message is queued, so the
-// attribution must ride on the queued prompt and be applied when it later
+// When the target is mid-turn the peer message is queued, so the attribution
+// must ride on the queued prompt and be applied when it later
 // becomes a `Message::Text`. An unknown sender id resolves to no attribution,
 // leaving the message as an ordinary "You" prompt.
 #[test]
@@ -3022,6 +3206,7 @@ fn delegated_child_completion_refreshes_through_production_lifecycle_hook() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
     let mut delta_events = state.subscribe_delta_events();
     let child_token = runtime_token_for_session(&state, &created.delegation.child_session_id);
     push_delegation_child_assistant_text_without_finishing(
@@ -3299,6 +3484,7 @@ fn production_completion_clears_queued_child_prompt_before_dispatch() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
     input_rx
         .recv_timeout(Duration::from_secs(1))
         .expect("initial delegation prompt should dispatch");
@@ -3455,6 +3641,7 @@ fn delegation_result_is_derived_from_completed_child_session() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
 
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -3585,6 +3772,7 @@ fn delegation_result_completion_clears_child_follow_up_queue() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let child_index = inner
@@ -3733,6 +3921,7 @@ fn delegation_parent_card_changes_emit_transcript_deltas() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
 
     let mut parent_message_id = None;
     while let Ok(payload) = delta_events.try_recv() {
@@ -4153,6 +4342,7 @@ fn delegation_status_get_refreshes_child_state() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
 
     finish_delegation_child_with_assistant_text(
         &state,
@@ -4245,6 +4435,7 @@ fn delegation_status_poll_consumes_satisfied_wait_for_busy_parent() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
 
     let wait = state
         .create_delegation_wait(
@@ -4316,6 +4507,7 @@ fn delegation_result_poll_consumes_satisfied_wait_for_busy_parent() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
 
     let wait = state
         .create_delegation_wait(
@@ -4398,6 +4590,7 @@ fn delegation_status_poll_any_wait_uses_cached_sibling_state_until_polled() {
             },
         )
         .expect("sibling delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &sibling.delegation.id);
 
     let wait = state
         .create_delegation_wait(
@@ -4702,6 +4895,8 @@ fn delegation_status_poll_does_not_consume_unrelated_satisfied_wait() {
             },
         )
         .expect("unrelated delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &polled.delegation.id);
+    mark_delegation_as_legacy_unstructured_review(&state, &unrelated.delegation.id);
 
     let unrelated_wait = state
         .create_delegation_wait(
@@ -4771,6 +4966,7 @@ fn delegation_public_result_summary_is_capped() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
     let long_summary = "x".repeat(MAX_DELEGATION_PUBLIC_SUMMARY_CHARS + 128);
     finish_delegation_child_with_assistant_text(
         &state,
@@ -4821,6 +5017,7 @@ fn delegation_full_output_pages_reconstruct_large_utf8_child_result() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
     let output = format!(
         "{{\"draft\":\"{}\",\"tail\":\"zażółć 🧪\"}}",
         "0123456789🙂".repeat(1_400)
@@ -4886,6 +5083,142 @@ fn delegation_full_output_pages_reconstruct_large_utf8_child_result() {
 }
 
 #[test]
+fn delegation_full_output_refreshes_lifecycle_only_while_result_is_unavailable() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Return a paged artifact.".to_owned(),
+                title: Some("Paged output refresh".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    let output = "page-boundary-".repeat(300);
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &created.delegation.child_session_id,
+        &output,
+    );
+
+    let first_page = state
+        .get_delegation_result_output(
+            &parent_session_id,
+            &created.delegation.id,
+            1,
+            MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES,
+        )
+        .expect("any first page should refresh and terminalize the delegation");
+    let next_offset = first_page
+        .next_offset_bytes
+        .expect("fixture should span more than one page");
+    let revision = first_page.revision;
+
+    let second_page = state
+        .get_delegation_result_output(
+            &parent_session_id,
+            &created.delegation.id,
+            next_offset,
+            MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES,
+        )
+        .expect("later pages should read the terminal snapshot");
+    assert_eq!(second_page.revision, revision);
+    assert_eq!(second_page.offset_bytes, next_offset);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn delegation_full_output_applies_one_time_parser_repair_before_paging() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Return a repairable result.".to_owned(),
+                title: Some("Paged output parser repair".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
+    let output = "paged parser repair output ".repeat(250);
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &created.delegation.child_session_id,
+        &output,
+    );
+    state
+        .refresh_delegation_for_child_session(&created.delegation.child_session_id)
+        .expect("refresh should complete");
+
+    let stale_revision = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .delegations
+            .iter()
+            .position(|record| record.id == created.delegation.id)
+            .expect("delegation should exist");
+        inner.delegations[index].result_parser_version = DELEGATION_RESULT_PARSER_VERSION - 1;
+        inner.mark_delegation_mutated(index);
+        state
+            .commit_locked(&mut inner)
+            .expect("stale parser version should persist")
+    };
+
+    let repaired_page = state
+        .get_delegation_result_output(
+            &parent_session_id,
+            &created.delegation.id,
+            0,
+            MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES,
+        )
+        .expect("output paging should repair a stale terminal result");
+    assert!(repaired_page.revision > stale_revision);
+
+    let repaired_revision = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .delegations
+            .iter()
+            .find(|record| record.id == created.delegation.id)
+            .expect("delegation should exist");
+        assert_eq!(
+            record.result_parser_version,
+            DELEGATION_RESULT_PARSER_VERSION
+        );
+        inner.revision
+    };
+    assert_eq!(repaired_page.revision, repaired_revision);
+
+    let next_offset = repaired_page
+        .next_offset_bytes
+        .expect("fixture should span more than one page");
+    let continuation = state
+        .get_delegation_result_output(
+            &parent_session_id,
+            &created.delegation.id,
+            next_offset,
+            MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES,
+        )
+        .expect("continuation page should use the repaired snapshot");
+    assert_eq!(continuation.revision, repaired_revision);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn cancel_preserves_completed_delegation_result() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);
@@ -4903,6 +5236,7 @@ fn cancel_preserves_completed_delegation_result() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
 
     finish_delegation_child_with_assistant_text(
         &state,
@@ -5390,6 +5724,7 @@ fn failed_start_cleanup_is_noop_for_already_terminal_delegation() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
 
     finish_delegation_child_with_assistant_text(
         &state,
@@ -5814,84 +6149,6 @@ fn removing_delegation_parent_cascades_to_nested_delegation_children() {
         }),
         "cascade-deleted Codex child threads should not be rediscovered"
     );
-
-    let _ = fs::remove_file(state.persistence_path.as_path());
-}
-
-#[test]
-fn removing_delegation_parent_reaps_hidden_claude_spare_for_child_profile() {
-    let state = test_app_state();
-    let parent_session_id = test_session_id(&state, Agent::Codex);
-    let created = state
-        .create_read_only_delegation(
-            &parent_session_id,
-            CreateDelegationRequest {
-                prompt: "Delegate Claude-profile review.".to_owned(),
-                title: Some("Claude Profile Child".to_owned()),
-                cwd: None,
-                agent: Some(Agent::Codex),
-                model: None,
-                mode: Some(DelegationMode::Reviewer),
-                write_policy: Some(DelegationWritePolicy::ReadOnly),
-            },
-        )
-        .expect("delegation should be created");
-    let child_session_id = created.delegation.child_session_id.clone();
-    let spare_profile = {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let child_index = inner
-            .find_session_index(&child_session_id)
-            .expect("child session should exist");
-        let child = inner
-            .session_mut_by_index(child_index)
-            .expect("child session index should be valid");
-        child.session.agent = Agent::Claude;
-        child.session.model = "claude-profile-child".to_owned();
-        child.session.claude_approval_mode = Some(ClaudeApprovalMode::Plan);
-        child.session.claude_effort = Some(ClaudeEffortLevel::High);
-        let profile = claude_spare_profile(child);
-        let spare_id = inner
-            .ensure_hidden_claude_spare(
-                profile.0.clone(),
-                profile.1.clone(),
-                profile.2.clone(),
-                profile.3,
-                profile.4,
-            )
-            .expect("hidden Claude spare should be reserved");
-        assert!(
-            inner.sessions.iter().any(|record| {
-                record.session.id == spare_id
-                    && record.hidden
-                    && record.session.agent == Agent::Claude
-            }),
-            "test setup should create a matching hidden Claude spare"
-        );
-        state.commit_locked(&mut inner).unwrap();
-        profile
-    };
-
-    state
-        .kill_session(&parent_session_id)
-        .expect("parent removal should succeed");
-
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    assert!(
-        inner
-            .sessions
-            .iter()
-            .all(|record| record.session.id != child_session_id),
-        "child session should be deleted"
-    );
-    assert!(
-        inner.sessions.iter().all(|record| {
-            !(record.hidden
-                && record.session.agent == Agent::Claude
-                && claude_spare_profile(record) == spare_profile)
-        }),
-        "hidden Claude spare for a cascade-deleted child should be reaped"
-    );
-    drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }

@@ -640,7 +640,11 @@ Findings:\n\
 
 #[test]
 fn delegation_result_packet_recovers_common_bug_and_problem_summaries() {
-    for summary in ["One bug remains.", "Two bugs detected.", "One problem remains."] {
+    for summary in [
+        "One bug remains.",
+        "Two bugs detected.",
+        "One problem remains.",
+    ] {
         let packet = format!(
             "# Code Review\n\n\
 ## Actionable\n\
@@ -659,6 +663,181 @@ Findings:\n\
         assert_eq!(parsed.findings[0].severity, "Medium");
         assert_eq!(parsed.findings[0].file.as_deref(), Some("src/parser.rs"));
     }
+}
+
+#[test]
+fn delegation_result_packet_recovers_nested_code_review_inside_findings_section() {
+    // Verbatim parent-scoped output from the reviewer that exposed this
+    // boundary. The packet itself ended at the shown truncation point.
+    let parsed = parse_delegation_result_packet(
+        r#"## Result
+
+Status: completed
+
+Summary: Reviewed all 22 staged files across the six configured lenses. Found one High-severity fail-open condition. No files were modified, and no tests were run under the read-only policy.
+
+Findings:
+
+# Code Review — 2026-08-14
+
+## Changes Reviewed
+
+Migration of cutover lifecycle, reference, historical-pin, and transition validation from Python into `rincon-verify cutover-state`, including CLI/release-gate wiring, documentation, protected bindings, and removal of the legacy Python implementation/tests.
+
+## Actionable
+
+- **[High]** [cutover_state.rs:207](/Users/greg/GitHub/Personal/rincon-common/legal/tooling/rincon-verify/src/cutover_state.rs:207) — `load_records` returns an empty, successful record set when `legal/migrations/` is absent or contains no records. Consequently, `cutover-state` reports `passed: true` with `migration_records: 0`. The deleted Python loader explicitly failed when the migration directory was absent. This weakens the advertised fail-closed state gate and allows deletion of the governed migration corpus to pass standalone and transaction verification; only the separately configured release-time manifest gate may catch it. Require at least one canonical migration record, or otherwise represent and validate directory/corpus presence, and add a negative test for an absent/empty migration corpus.
+
+## Informational
+
+- Historical review packets still reference the deleted Python implementation and tests. These appear to be immutable historical evidence, so updating them would be inappropriate.
+- No package architecture, `common_core`, platform-adapter, secret/PII, or substantive legal-rule defects were found.
+
+## Reviewer Summaries
+
+- **Quick Scan:** One fail-open corpus-presence defect; otherwise the Rust migration is coherent.
+- **Architecture:** Correctly moves production cutover verification from Python to Rust and remains app-neutral.
+- **Core:** No `common_core` changes.
+- **Platform:** No platform-package changes.
+- **Security:** Protected Git invocation and path confinement appear sound; no secrets or sensitive logging introduced.
+- **Legal:** Separation between state mechanics and protected manifest authority is preserved, subject to the missing-corpus failure above.
+- **Testing:** Broad parity coverage exists, but there is no absent/empty-corpus regression test.
+
+## Proposed Follow-ups
+
+Read-only mode prevented Beads mutation. Exact proposed command:
+"#,
+    )
+    .expect("a nested full review should remain inside the packet findings section");
+
+    assert_eq!(
+        parsed.summary,
+        "Reviewed all 22 staged files across the six configured lenses. Found one High-severity fail-open condition. No files were modified, and no tests were run under the read-only policy."
+    );
+    assert_eq!(
+        parsed.findings,
+        vec![DelegationFinding {
+            severity: "High".to_owned(),
+            file: Some("cutover_state.rs".to_owned()),
+            line: Some(207),
+            message: "`load_records` returns an empty, successful record set when `legal/migrations/` is absent or contains no records. Consequently, `cutover-state` reports `passed: true` with `migration_records: 0`. The deleted Python loader explicitly failed when the migration directory was absent. This weakens the advertised fail-closed state gate and allows deletion of the governed migration corpus to pass standalone and transaction verification; only the separately configured release-time manifest gate may catch it. Require at least one canonical migration record, or otherwise represent and validate directory/corpus presence, and add a negative test for an absent/empty migration corpus.".to_owned(),
+        }]
+    );
+    assert!(
+        parsed.notes.is_empty(),
+        "nested Informational, Reviewer Summaries, and truncated Proposed Follow-ups must not leak into packet notes"
+    );
+}
+
+#[test]
+fn delegation_result_packet_recovers_colon_decorated_nested_code_review() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+Summary: One issue found.\n\n\
+Findings:\n\n\
+# Code Review: 2026-08-15\n\n\
+## Actionable\n\n\
+- **[Low]** `src/parser.rs:7` — Preserve colon-decorated nested reviews.",
+    )
+    .expect("a colon-decorated nested review should remain in Findings");
+
+    assert_eq!(parsed.findings.len(), 1);
+    assert_eq!(parsed.findings[0].severity, "Low");
+    assert_eq!(parsed.findings[0].file.as_deref(), Some("src/parser.rs"));
+    assert_eq!(parsed.findings[0].line, Some(7));
+}
+
+#[test]
+fn delegation_result_packet_never_reports_clean_when_declared_finding_details_are_missing() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+Summary:\n\
+Found one High-severity fail-open condition.\n\n\
+Findings:\n\
+- None",
+    )
+    .expect("a contradictory packet should remain visibly non-clean");
+
+    assert_eq!(parsed.findings.len(), 1);
+    assert_eq!(parsed.findings[0].severity, "High");
+    assert!(parsed.findings[0].file.is_none());
+    assert!(
+        parsed.findings[0]
+            .message
+            .contains("omitted its structured details")
+    );
+}
+
+#[test]
+fn delegation_result_packet_does_not_treat_resolved_severity_count_as_open() {
+    let parsed = parse_delegation_result_packet(
+        "# Code Review\n\n\
+## Actionable\n\
+- **[High]** `src/stale.rs:4` \u{2014} Finding from an earlier review turn.\n\n\
+## Result\n\n\
+Status: completed\n\n\
+Summary:\n\
+Fixed one High-severity condition found during the earlier review.\n\n\
+Findings:\n\
+- None",
+    )
+    .expect("resolved severity-count wording should trust the empty section");
+
+    assert!(parsed.findings.is_empty());
+}
+
+#[test]
+fn delegation_result_packet_does_not_join_unrelated_count_and_severity_phrases() {
+    let parsed = parse_delegation_result_packet(
+        "# Code Review\n\n\
+## Actionable\n\
+- **[High]** `src/stale.rs:4` — Finding from an earlier review turn.\n\n\
+## Result\n\n\
+Status: completed\n\n\
+Summary:\n\
+Reviewed 3 files and found the code clean; no high-risk areas remain.\n\n\
+Findings:\n\
+- None",
+    )
+    .expect("unrelated counts and risk wording should trust the empty section");
+
+    assert!(parsed.findings.is_empty());
+}
+
+#[test]
+fn delegation_result_packet_does_not_treat_complexity_as_a_finding_severity() {
+    let parsed = parse_delegation_result_packet(
+        "# Code Review\n\n\
+## Actionable\n\
+- **[High]** `src/stale.rs:4` — Finding from an earlier review turn.\n\n\
+## Result\n\n\
+Status: completed\n\n\
+Summary:\n\
+Reviewed the diff and found one module with high complexity; no defects.\n\n\
+Findings:\n\
+- None",
+    )
+    .expect("an incidental complexity adjective should trust the empty section");
+
+    assert!(parsed.findings.is_empty());
+}
+
+#[test]
+fn delegation_result_packet_attributes_fallback_to_the_declared_severity() {
+    let parsed = parse_delegation_result_packet(
+        "## Result\n\n\
+Status: completed\n\n\
+Summary:\n\
+Found one low-severity issue; no high-risk areas remain.\n\n\
+Findings:\n\
+- None",
+    )
+    .expect("a contradictory packet should retain its declared finding severity");
+
+    assert_eq!(parsed.findings.len(), 1);
+    assert_eq!(parsed.findings[0].severity, "Low");
 }
 
 #[test]

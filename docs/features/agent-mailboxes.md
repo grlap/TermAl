@@ -43,6 +43,51 @@ cross the root-peer boundary. The TermAl MCP bridge additionally hides and
 rejects all peer/mailbox tools for delegation children, so a well-behaved child
 never reaches these route errors during normal tool discovery or invocation.
 
+### Structured delegation review results
+
+Delegated `/review-code` uses one deliberately narrower mailbox capability:
+`termal_submit_review_result`. It is not peer messaging. The tool accepts only a
+versioned review-result object and exposes no target, topic, state stamp, or
+idempotency key. TermAl derives those fields from the durable delegation link,
+accepts the call only from a linked reviewer-mode child for which the host
+requires the structured-result protocol, and routes it only to that child's
+own root coordinator. TermAl injects this requirement when it creates the
+reviewer delegation; repository commands do not opt in and need no marker.
+
+The stored message uses topic `delegation-review-result/v1`, the delegation id
+plus backend-owned submission-attempt number as its state stamp, and a
+deterministic per-delegation/per-attempt idempotency key. The attempt advances
+when a completed delegation is rearmed for follow-up. Nested objects reject
+unknown fields; severities, statuses, sizes, and list counts are validated
+before append. An exact retry returns the original receipt. A second, different
+result for the same attempt conflicts.
+
+Review-result messages are committed with
+`notificationDisposition: durableButNotWoken`. They do not create an early
+mailbox turn in the coordinator: the existing delegation wait remains the only
+fan-in activation. The versioned control-plane topic is also excluded from
+routine mailbox unread counts, latest previews, reads, and both wake-up queries.
+This filtering never advances a participant cursor; durable recovery reads the
+stored envelope directly by its backend-owned idempotency key. After the child
+reaches a terminal state, the backend
+promotes the validated submission into the compact delegation result. Submission
+is authoritative; subsequent runtime failure, idle teardown, or child disappearance
+is recorded as separate transport metadata and cannot replace the submitted fields.
+Missing required submissions still fail closed as unavailable. Explicit
+cancellation retains a previously accepted envelope without promoting it. The child
+transcript remains available as human-readable full output but is not a protocol
+source.
+
+The child-facing ingest path stays strict, while parent-side crash recovery is
+resilient. A corrupt or identity-mismatched durable review envelope is logged,
+quarantined for that submission attempt, and reported through
+`reviewResultRecoveryError`; it never bricks delegation status, result paging,
+cancellation, or follow-up with a repeated `500`. Recovery probes live on the
+delegation record and are compared with the backend-owned attempt number. A
+narrow coordination-store guard serializes the recovery read with a structured
+result append without holding the main application-state mutex across SQLite
+I/O.
+
 The wake-up prompt is not the message. If wake-up fails, the committed message
 remains available and its receipt reports `durableButNotWoken`. Before ordinary
 local dispatch, TermAl restores never-woken notifications. If a materialized
@@ -159,8 +204,8 @@ Acknowledgement is a forward-only compare-and-swap:
 ## Foundation scope
 
 The foundation supports `routine` messages only. `stop` or urgent delivery is
-rejected until the explicit interrupt semantics in `tm-uwx.3` are implemented;
-ordinary durable delivery must not imply a safety guarantee it does not have.
+rejected until explicit interrupt semantics are implemented; ordinary durable
+delivery must not imply a safety guarantee it does not have.
 
 One compact wake-up prompt is retained per receiver/mailbox whenever the
 receiver is busy or already has queued work. New sends update that prompt's
@@ -204,10 +249,11 @@ non-idempotent endpoints cannot inherit replay from error wording alone.
 The MCP bridge sends an exact `session-*` target directly to the mailbox
 endpoint; backend target validation remains authoritative. The bridge performs
 one fail-safe root/child eligibility lookup after the caller appears in state
-and caches that immutable caller classification for its lifetime. A hidden
-Claude spare omitted before promotion fails closed without caching, so the same
-bridge can recover when that session becomes a visible root. This avoids a
-full-state snapshot per exact-id message during sustained coordination.
+and caches that immutable caller classification for its lifetime. TermAl no
+longer creates hidden prewarmed Claude sessions, so every live caller is either
+a visible root or a delegated child. Transient lookup failures still fail
+closed without caching. This avoids a full-state snapshot per exact-id message
+during sustained coordination.
 Case-insensitive names remain
 supported, but require `/api/state` resolution, so callers should retain and
 reuse exact ids returned by `termal_list_sessions`.

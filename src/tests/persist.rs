@@ -1710,7 +1710,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
     let persistence_path = state_root.join("termal.sqlite");
     let mailbox_store = Arc::new(MailboxStore::disabled_for_tests());
     // Same fd-cascade rule as the mailbox store: retained test AppStates must
-    // not hold real SQLite connections (tm-drd).
+    // not hold real SQLite connections.
     let coordination_board_store = Arc::new(CoordinationBoardStore::disabled_for_tests());
     let state = AppState {
         server_instance_id: Uuid::new_v4().to_string(),
@@ -2622,6 +2622,13 @@ fn make_persist_test_delegation(
         started_at: Some(stamp_now()),
         completed_at: None,
         result: None,
+        submitted_review_result: None,
+        post_submission_transport_error: None,
+        review_result_recovery_probe_attempt: None,
+        review_result_recovery_error: None,
+        review_result_schema_version: None,
+        review_result_required: false,
+        review_result_submission_attempt: 0,
         result_parser_version: 0,
     }
 }

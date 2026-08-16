@@ -40,18 +40,16 @@ impl AppState {
     /// Destructively removes a session: tears down its runtime (kill
     /// child process for Claude/ACP, `turn/interrupt` + detach for shared
     /// Codex), removes the `SessionRecord` from `StateInner`, garbage-collects
-    /// any delegated child sessions it owns transitively, garbage-collects any
-    /// orphan hidden Claude spares for the same workdir/project, suppresses
-    /// rediscovery of detached Codex threads, and persists the new state. No
-    /// undo. Triggered from the UI trash icon. Proxied to the remote backend
-    /// when `session.remote_target` is set.
+    /// any delegated child sessions it owns transitively, suppresses rediscovery
+    /// of detached Codex threads, and persists the new state. No undo. Triggered
+    /// from the UI trash icon. Proxied to the remote backend when
+    /// `session.remote_target` is set.
     fn kill_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_kill_session(session_id);
         }
         let (
             runtime_to_kill,
-            hidden_runtimes_to_kill,
             delegation_runtimes_to_kill,
             revision,
             delegation_lifecycle_deltas,
@@ -61,8 +59,6 @@ impl AppState {
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
-            let workdir = inner.sessions[index].session.workdir.clone();
-            let project_id = inner.sessions[index].session.project_id.clone();
             let agent = inner.sessions[index].session.agent;
             let external_session_id = inner.sessions[index].external_session_id.clone();
             let record = inner
@@ -84,84 +80,8 @@ impl AppState {
                 .expect("session should still exist after delegation reconciliation");
             inner.remove_session_at(index);
 
-            let mut hidden_runtimes = Vec::new();
-            if agent == Agent::Claude {
-                let visible_profiles = inner
-                    .sessions
-                    .iter()
-                    .filter(|session_record| {
-                        !session_record.hidden
-                            && session_record.is_local_session()
-                            && session_record.session.agent == Agent::Claude
-                            && session_record.session.workdir == workdir
-                            && session_record.session.project_id == project_id
-                    })
-                    .map(claude_spare_profile)
-                    .collect::<Vec<_>>();
-                inner.retain_sessions(|session_record| {
-                    let should_consider = session_record.hidden
-                        && session_record.is_local_session()
-                        && session_record.session.agent == Agent::Claude
-                        && session_record.session.workdir == workdir
-                        && session_record.session.project_id == project_id;
-                    if !should_consider {
-                        return true;
-                    }
-
-                    let keep = visible_profiles
-                        .iter()
-                        .any(|profile| *profile == claude_spare_profile(session_record));
-                    if !keep {
-                        if let SessionRuntime::Claude(handle) = &session_record.runtime {
-                            hidden_runtimes.push(KillableRuntime::Claude(handle.clone()));
-                        }
-                    }
-                    keep
-                });
-            }
-
             for thread_id in &delegation_reconciliation.codex_thread_ids_to_ignore {
                 inner.ignore_discovered_codex_thread(Some(thread_id));
-            }
-
-            if !delegation_reconciliation
-                .claude_spare_profiles_to_reap
-                .is_empty()
-            {
-                let visible_profiles = inner
-                    .sessions
-                    .iter()
-                    .filter(|session_record| {
-                        !session_record.hidden
-                            && session_record.is_local_session()
-                            && session_record.session.agent == Agent::Claude
-                    })
-                    .map(claude_spare_profile)
-                    .collect::<Vec<_>>();
-                inner.retain_sessions(|session_record| {
-                    if !(session_record.hidden
-                        && session_record.is_local_session()
-                        && session_record.session.agent == Agent::Claude)
-                    {
-                        return true;
-                    }
-
-                    let profile = claude_spare_profile(session_record);
-                    if !delegation_reconciliation
-                        .claude_spare_profiles_to_reap
-                        .contains(&profile)
-                    {
-                        return true;
-                    }
-
-                    let keep = visible_profiles.contains(&profile);
-                    if !keep {
-                        if let SessionRuntime::Claude(handle) = &session_record.runtime {
-                            hidden_runtimes.push(KillableRuntime::Claude(handle.clone()));
-                        }
-                    }
-                    keep
-                });
             }
 
             if agent.supports_codex_prompt_settings() {
@@ -175,7 +95,6 @@ impl AppState {
             })?;
             (
                 runtime,
-                hidden_runtimes,
                 delegation_reconciliation.runtimes_to_kill,
                 revision,
                 delegation_reconciliation.lifecycle_deltas,
@@ -199,11 +118,6 @@ impl AppState {
         if let Some(runtime) = runtime_to_kill {
             if let Err(err) = shutdown_removed_runtime(runtime, &format!("session `{session_id}`"))
             {
-                eprintln!("session cleanup warning> {err:#}");
-            }
-        }
-        for runtime in hidden_runtimes_to_kill {
-            if let Err(err) = shutdown_removed_runtime(runtime, "a hidden Claude spare") {
                 eprintln!("session cleanup warning> {err:#}");
             }
         }

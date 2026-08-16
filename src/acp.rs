@@ -1136,9 +1136,26 @@ fn handle_acp_request(
                 request_id,
             };
 
-            if let Some(option_id) =
-                acp_permission_response_option_id(agent, state, session_id, &approval)?
-            {
+            let control_plane_option = delegation_control_plane_capability_for_acp_permission(params)
+                .filter(|capability| {
+                    state.delegation_control_plane_capability_allowed(session_id, *capability)
+                })
+                .and_then(|_| {
+                    approval
+                        .allow_once_option_id
+                        .clone()
+                        .or_else(|| approval.allow_always_option_id.clone())
+                });
+            let automatic_option = match control_plane_option {
+                Some(option_id) => Some(option_id),
+                None => acp_permission_response_option_id(
+                    agent,
+                    state,
+                    session_id,
+                    &approval,
+                )?,
+            };
+            if let Some(option_id) = automatic_option {
                 input_tx
                     .send(AcpRuntimeCommand::JsonRpcMessage(
                         json_rpc_result_response_message(

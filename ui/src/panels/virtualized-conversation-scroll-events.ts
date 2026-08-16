@@ -100,7 +100,10 @@ export function useVirtualizedConversationScrollEvents({
   tailFollowIntent,
   userScrollAdjustmentCooldownMs,
 }: {
-  applyMountedPageRange: (nextRange: VirtualizedRange, options?: { flush?: boolean }) => void;
+  applyMountedPageRange: (
+    nextRange: VirtualizedRange,
+    options?: { flush?: boolean; preserveCoveringRange?: boolean },
+  ) => void;
   buildBottomMountedRange: (clientHeight: number) => VirtualizedRange;
   cancelPostActivationBottomRestore: () => void;
   captureLatestVisibleMessageAnchor: (node: HTMLElement) => VisibleMessageAnchor | null;
@@ -450,7 +453,12 @@ export function useVirtualizedConversationScrollEvents({
         clearPendingDeferredLayoutTimer();
         clearPendingIdleCompactionTimer();
         pendingDeferredLayoutAnchorRef.current = null;
-        applyMountedPageRange(buildBottomMountedRange(node.clientHeight));
+        // Bottom-follow only needs the tail pages to be resident. Keep an
+        // existing wider band intact instead of narrowing it for one render
+        // and letting viewport reconciliation expand it again immediately.
+        applyMountedPageRange(buildBottomMountedRange(node.clientHeight), {
+          preserveCoveringRange: true,
+        });
         scheduleProgrammaticViewportSync(node);
         return;
       }

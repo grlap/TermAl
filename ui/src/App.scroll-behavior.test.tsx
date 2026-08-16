@@ -885,7 +885,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("reattaches to the latest prompt while a send is in flight", async () => {
+  it("keeps a detached viewport stable while a send is in flight", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -944,8 +944,9 @@ describe("App scroll behaviour", () => {
           throw new Error("Message stack not found");
         }
 
-        messageStack.scrollTop = 0;
         act(() => {
+          fireEvent.wheel(messageStack, { deltaY: -800 });
+          messageStack.scrollTop = 0;
           fireEvent.scroll(messageStack);
         });
 
@@ -968,17 +969,15 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        const settledBottomCallCount = scrollToTopsWithBehavior(
-          scrollToMock,
-          "auto",
-        ).length;
-        expect(settledBottomCallCount).toBeGreaterThan(0);
+        expect(scrollToTopsWithBehavior(scrollToMock, "auto")).toHaveLength(0);
+        expect(messageStack.scrollTop).toBe(0);
+        expect(
+          screen.getByRole("button", { name: "New activity" }),
+        ).toBeInTheDocument();
 
         context.cleanup();
         await flushUiWork();
-        expect(scrollToTopsWithBehavior(scrollToMock, "auto")).toHaveLength(
-          settledBottomCallCount,
-        );
+        expect(scrollToTopsWithBehavior(scrollToMock, "auto")).toHaveLength(0);
       } finally {
         restoreScrollGeometry();
       }

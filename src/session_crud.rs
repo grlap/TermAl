@@ -5,28 +5,21 @@
 // half — kill/cancel/stop — lives in `session_lifecycle.rs`; the
 // run-and-broadcast half lives in `session_messages.rs` and
 // `turn_lifecycle.rs`. A new session starts here at `create_session`,
-// is promoted from a hidden Claude spare (or freshly reserved) if one
-// matches, and lands in `StateInner.sessions` with
-// `SessionRuntime::None` — the real per-session runtime is spawned
-// lazily on the first prompt through `dispatch_turn`
-// (`turn_dispatch.rs`). The one subprocess that *is* spawned here is
-// the replenishment hidden Claude spare for the next session of the
-// same shape (see `claude_spares.rs`).
+// lands in `StateInner.sessions` with `SessionRuntime::None`, and
+// spawns its real runtime lazily on the first prompt through
+// `dispatch_turn` (`turn_dispatch.rs`). Session creation itself never
+// starts an agent process.
 //
 // `create_session` flow: resolve the requested workdir (explicit →
 // project default → global default); pick the agent (respecting
 // cross-family runtime restrictions); pre-refresh the
 // `cached_agent_readiness` snapshot *before* taking the state lock so
 // `commit_session_created_locked`'s broadcast carries fresh data;
-// under the lock, try to claim a matching hidden Claude spare from
-// `StateInner.sessions` or allocate a new hidden spare placeholder
-// and promote it; for remote-backed projects, forward to the remote
-// `create_remote_session_proxy` path; publish via
+// under the lock, allocate the new session record; for remote-backed
+// projects, forward to the remote `create_remote_session_proxy` path;
+// publish via
 // `commit_session_created_locked` (emits a SessionCreated delta +
-// bumps the revision). Outside the lock, if a Claude spare was
-// consumed, replenish the pool by calling
-// `try_start_hidden_claude_spare` for the new spare-placeholder so
-// the *next* create in this shape is just as fast.
+// bumps the revision).
 //
 // `update_app_settings` updates the user's global defaults (default
 // agent, model, approval policy, cursor mode, and a few bookmark /
@@ -128,19 +121,10 @@ impl AppState {
     /// on the remote and this host only stores a proxy shell. For
     /// local projects we refresh the agent-readiness cache before
     /// taking the state lock (so the broadcast carries fresh data
-    /// without doing filesystem I/O under the lock), then try to
-    /// claim a matching hidden Claude spare via
-    /// `find_matching_hidden_claude_spare`. If one is claimed, its
-    /// warmed runtime handle and `RuntimeToken` carry over to the new
-    /// visible session; otherwise a new record lands in
-    /// `StateInner.sessions` with `SessionRuntime::None` and the real
-    /// runtime is spawned lazily on the first prompt through
+    /// without doing filesystem I/O under the lock), then create a
+    /// record with `SessionRuntime::None`. The real runtime is spawned
+    /// lazily on the first prompt through
     /// `turn_dispatch.rs::dispatch_turn`.
-    ///
-    /// Finally we replenish the hidden-spare pool (outside the lock,
-    /// via [`Self::try_start_hidden_claude_spare`]) so the next
-    /// create for this `(workdir, project, model, approval_mode,
-    /// effort)` tuple stays instant.
     fn create_session(
         &self,
         request: CreateSessionRequest,
@@ -279,53 +263,13 @@ impl AppState {
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let project_id = project.as_ref().map(|entry| entry.id.clone());
-        let mut hidden_claude_spare_to_spawn = None;
-        let mut record = if agent == Agent::Claude {
-            let final_model = requested_model
-                .clone()
-                .unwrap_or_else(|| inner.preferences.default_model_for_agent(agent));
-            let final_approval_mode = request
-                .claude_approval_mode
-                .unwrap_or(inner.preferences.default_claude_approval_mode);
-            let final_effort = request
-                .claude_effort
-                .unwrap_or(inner.preferences.default_claude_effort);
-            if let Some(index) = inner.find_matching_hidden_claude_spare(
-                &workdir,
-                project_id.as_deref(),
-                &final_model,
-                final_approval_mode,
-                final_effort,
-            ) {
-                let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-                // Hidden Claude spares intentionally keep their warmed runtime alive when claimed.
-                // Only the visible conversation state is reset here before the session is unhidden.
-                reset_hidden_claude_spare_record(record);
-                record.hidden = false;
-                if let Some(name) = requested_name.clone() {
-                    record.session.name = name;
-                }
-                record.clone()
-            } else {
-                inner.create_session(
-                    agent,
-                    requested_name.clone(),
-                    workdir.clone(),
-                    project_id.clone(),
-                    requested_model.clone(),
-                )
-            }
-        } else {
-            inner.create_session(
-                agent,
-                requested_name.clone(),
-                workdir.clone(),
-                project_id.clone(),
-                requested_model.clone(),
-            )
-        };
+        let mut record = inner.create_session(
+            agent,
+            requested_name,
+            workdir,
+            project_id,
+            requested_model,
+        );
         if record.session.agent.supports_codex_prompt_settings() {
             if let Some(sandbox_mode) = request.sandbox_mode {
                 record.codex_sandbox_mode = sandbox_mode;
@@ -355,21 +299,6 @@ impl AppState {
                 record.session.gemini_approval_mode = Some(gemini_approval_mode);
             }
         }
-        if agent == Agent::Claude {
-            hidden_claude_spare_to_spawn = inner.ensure_hidden_claude_spare(
-                workdir.clone(),
-                project_id.clone(),
-                record.session.model.clone(),
-                record
-                    .session
-                    .claude_approval_mode
-                    .unwrap_or_else(default_claude_approval_mode),
-                record
-                    .session
-                    .claude_effort
-                    .unwrap_or_else(default_claude_effort),
-            );
-        }
         if let Some(index) = inner.find_session_index(&record.session.id) {
             if let Some(slot) = inner.sessions.get_mut(index) {
                 *slot = record.clone();
@@ -396,9 +325,6 @@ impl AppState {
             session_id: session.id.clone(),
             session: delta_session,
         });
-        if let Some(session_id) = hidden_claude_spare_to_spawn {
-            self.try_start_hidden_claude_spare(&session_id);
-        }
         Ok(CreateSessionResponse {
             session_id: session.id.clone(),
             session,

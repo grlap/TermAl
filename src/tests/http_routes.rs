@@ -2322,7 +2322,7 @@ async fn codex_mcp_servers_route_paginates_and_sanitizes_status() {
         .lock()
         .expect("shared Codex runtime mutex poisoned") = Some(runtime);
 
-    std::thread::spawn(move || {
+    let server = std::thread::spawn(move || {
         for expected_cursor in [None, Some("page-2")] {
             let command = input_rx
                 .recv_timeout(Duration::from_secs(1))
@@ -2418,6 +2418,7 @@ async fn codex_mcp_servers_route_paginates_and_sanitizes_status() {
             ],
         }
     );
+    join_test_server(server);
 }
 
 #[tokio::test]
@@ -2431,7 +2432,7 @@ async fn codex_mcp_servers_route_bounds_unfinished_pagination() {
         .lock()
         .expect("shared Codex runtime mutex poisoned") = Some(runtime);
 
-    std::thread::spawn(move || {
+    let server = std::thread::spawn(move || {
         for page_index in 0..CODEX_MCP_STATUS_MAX_PAGES {
             let command = input_rx
                 .recv_timeout(Duration::from_secs(1))
@@ -2460,7 +2461,7 @@ async fn codex_mcp_servers_route_bounds_unfinished_pagination() {
     });
 
     let app = app_router(state);
-    let response = request_response(
+    let (status, response): (StatusCode, Value) = request_json(
         &app,
         Request::get(format!("/api/sessions/{session_id}/codex/mcp-servers"))
             .body(Body::empty())
@@ -2468,7 +2469,12 @@ async fn codex_mcp_servers_route_bounds_unfinished_pagination() {
     )
     .await;
 
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        response["error"].as_str(),
+        Some("Codex MCP status exceeded the pagination safety limit")
+    );
+    join_test_server(server);
 }
 
 #[tokio::test]
@@ -2574,11 +2580,9 @@ async fn codex_mcp_servers_route_proxies_remote_sessions_to_their_owner() {
 
     let requests = Arc::new(Mutex::new(Vec::<String>::new()));
     let requests_for_server = requests.clone();
-    let expected_request_prefix = format!(
-        "GET /api/sessions/{remote_session_id}/codex/mcp-servers "
-    );
-    let listener =
-        std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let expected_request_prefix =
+        format!("GET /api/sessions/{remote_session_id}/codex/mcp-servers ");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
     let port = listener.local_addr().expect("listener addr").port();
     let server = std::thread::spawn(move || {
         for _ in 0..2 {
@@ -2634,11 +2638,9 @@ async fn codex_mcp_servers_route_proxies_remote_sessions_to_their_owner() {
     );
     let requests = requests.lock().expect("requests mutex poisoned");
     assert!(
-        requests
-            .iter()
-            .any(|request| request.starts_with(&format!(
-                "GET /api/sessions/{remote_session_id}/codex/mcp-servers "
-            ))),
+        requests.iter().any(|request| request.starts_with(&format!(
+            "GET /api/sessions/{remote_session_id}/codex/mcp-servers "
+        ))),
         "expected the remote session id in proxied requests, saw {requests:?}"
     );
     drop(requests);

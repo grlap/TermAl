@@ -843,6 +843,7 @@ describe("session pane historical-window tail state", () => {
     const sharedParams = {
       ...params(historicalSession),
       isSessionTabActive: true,
+      paneShouldStickToBottomRef: { current: { "pane-1": true } },
     };
     const hook = renderHook(
       ({ activeSession, contentSignature, lastAuthor }) =>
@@ -894,7 +895,7 @@ describe("session pane historical-window tail state", () => {
     removeListener();
   });
 
-  it("reattaches a historical window only on the explicit send transition", async () => {
+  it("keeps a historical window detached when a send starts", () => {
     const animationFrames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", ((
       callback: FrameRequestCallback,
@@ -911,6 +912,7 @@ describe("session pane historical-window tail state", () => {
     const sharedParams = {
       ...params(historicalSession),
       isSessionTabActive: true,
+      paneShouldStickToBottomRef: { current: { "pane-1": true } },
     };
     const hook = renderHook(
       ({ isSending }) =>
@@ -926,25 +928,21 @@ describe("session pane historical-window tail state", () => {
     expect(demands).toHaveLength(0);
     expect(animationFrames).toHaveLength(1);
 
-    await act(async () => {
+    act(() => {
       animationFrames.shift()?.(0);
-      await Promise.resolve();
     });
 
-    expect(demands).toHaveLength(1);
-    expect(demands[0]).toMatchObject({
-      sessionId: "session-history",
-      direction: "tail",
-    });
-    act(() => {
-      completeSessionHistoryPageDemand(demands[0]?.requestId, false);
-    });
-    await Promise.resolve();
+    expect(demands).toHaveLength(0);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    expect(hook.result.current.showNewResponseIndicator).toBe(true);
+    expect(hook.result.current.newResponseIndicatorLabel).toBe(
+      "Jump to latest",
+    );
 
     removeListener();
   });
 
-  it("reattaches an approval request before its follow frame and stays pinned into waiting output", () => {
+  it("keeps a detached viewport stable through approval and waiting activity", () => {
     let nextAnimationFrameId = 1;
     const animationFrames = new Map<number, FrameRequestCallback>();
     vi.stubGlobal(
@@ -1012,30 +1010,12 @@ describe("session pane historical-window tail state", () => {
       waiting: false,
     });
 
-    // The approval click publishes stickiness synchronously. State/output can
-    // now change before the first scheduled scroll without detaching the pane.
-    expect(hook.result.current.liveTailPinned).toBe(true);
-    expect(paneShouldStickToBottomRef.current["pane-1"]).toBe(true);
-
-    let frameTimestamp = 1_000;
-    const drainAnimationFrames = () => {
-      let drainedFrames = 0;
-      while (animationFrames.size > 0 && drainedFrames < 60) {
-        const nextFrame = animationFrames.entries().next().value;
-        if (!nextFrame) {
-          break;
-        }
-        animationFrames.delete(nextFrame[0]);
-        frameTimestamp += 1000 / 60;
-        act(() => nextFrame[1](frameTimestamp));
-        drainedFrames += 1;
-      }
-      expect(drainedFrames).toBeLessThan(60);
-      return drainedFrames;
-    };
-
-    expect(drainAnimationFrames()).toBeGreaterThan(24);
-    expect(scrollNode.scrollTop).toBe(1_800);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    expect(paneShouldStickToBottomRef.current["pane-1"]).toBe(false);
+    expect(hook.result.current.showNewResponseIndicator).toBe(true);
+    expect(hook.result.current.newResponseIndicatorLabel).toBe("New activity");
+    expect(animationFrames.size).toBe(0);
+    expect(scrollNode.scrollTop).toBe(520);
     expect(onScrollToBottomRequestHandled).toHaveBeenCalledWith(7);
 
     scrollHeight = 2_120;
@@ -1044,10 +1024,10 @@ describe("session pane historical-window tail state", () => {
       request: null,
       waiting: true,
     });
-    drainAnimationFrames();
-
-    expect(hook.result.current.liveTailPinned).toBe(true);
-    expect(scrollNode.scrollTop).toBe(1_920);
+    expect(animationFrames.size).toBe(0);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    expect(hook.result.current.showNewResponseIndicator).toBe(true);
+    expect(scrollNode.scrollTop).toBe(520);
   });
 
   it("keeps history unpinned and reattaches through one bounded tail demand", async () => {

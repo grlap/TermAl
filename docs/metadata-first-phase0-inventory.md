@@ -102,7 +102,7 @@ Legend:
 | `src/session_identity.rs:91` | runtime-guarded external session id | No | Full state today | Summary update is enough. |
 | `src/session_identity.rs:130` | clear external session id | No | Full state today | Summary update is enough. |
 | `src/session_identity.rs:174` | set Codex thread state | No | Full state today | Summary update is enough. |
-| `src/session_lifecycle.rs:114` | kill/remove session and hidden spares | Removes sessions | Full state today | Summary removal/create handling required. |
+| `src/session_lifecycle.rs:114` | kill/remove session | Removes sessions | Full state today | Summary removal handling required. |
 | `src/session_lifecycle.rs:171` | cancel queued prompt | No message write, pending prompts only | Full state today | Pending prompt summary must be bounded and updated. |
 | `src/session_lifecycle.rs:397` | stop active turn | Yes, cancels pending interaction messages and appends stop/file-change messages | No | Add cancel/message-created deltas or targeted hydration invalidation. |
 | `src/session_sync.rs:69` | sync Claude approval mode | No | Full state today | Summary update is enough. |

@@ -147,7 +147,7 @@ export function useInitialActiveTranscriptMessages({
   // large session is tail-hydrated: `messages` then holds only the 20-message
   // tail window. Keying page eligibility off `messages.length` made a 12k-message
   // session look complete, so the demand listeners below never attached and the
-  // reader was stranded on the tail (tm-jfx, tm-2po). Optional/nullable so
+  // reader was stranded on the tail. Optional/nullable so
   // callers without a summary count fall back to what they hold.
   messageCount?: number | null;
   messages: Message[];

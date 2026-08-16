@@ -99,6 +99,49 @@ fn trace_shared_codex_event(
     );
 }
 
+fn try_auto_respond_delegation_control_plane_request(
+    method: &str,
+    message: &Value,
+    state: &AppState,
+    session_id: &str,
+    input_tx: &Sender<CodexRuntimeCommand>,
+) -> Result<bool> {
+    if method != "mcpServer/elicitation/request" {
+        return Ok(false);
+    }
+    let Some(request_id) = message.get("id").cloned() else {
+        return Ok(false);
+    };
+    let Some(params) = message.get("params") else {
+        return Ok(false);
+    };
+    let Ok(request) = serde_json::from_value::<McpElicitationRequestPayload>(params.clone()) else {
+        return Ok(false);
+    };
+    let Some(capability) = delegation_control_plane_capability_for_codex_elicitation(&request)
+    else {
+        return Ok(false);
+    };
+    if !state.delegation_control_plane_capability_allowed(session_id, capability) {
+        return Ok(false);
+    }
+    if validate_codex_mcp_elicitation_form_content(&request, json!({})).is_err() {
+        return Ok(false);
+    }
+    input_tx
+        .send(CodexRuntimeCommand::JsonRpcResponse {
+            response: CodexJsonRpcResponseCommand {
+                request_id,
+                payload: CodexJsonRpcResponsePayload::Result(json!({
+                    "action": "accept",
+                    "content": {}
+                })),
+            },
+        })
+        .map_err(|err| anyhow!("failed to deliver delegation control-plane response: {err}"))?;
+    Ok(true)
+}
+
 fn handle_shared_codex_app_server_message(
     message: &Value,
     state: &AppState,
@@ -344,6 +387,15 @@ fn handle_shared_codex_app_server_message(
                 Some("request_not_active_turn"),
             );
             reject_undeliverable_codex_server_request(message, input_tx);
+            return Ok(());
+        }
+        if try_auto_respond_delegation_control_plane_request(
+            method,
+            message,
+            state,
+            &session_id,
+            input_tx,
+        )? {
             return Ok(());
         }
         return handle_codex_app_server_request(method, message, &mut recorder);

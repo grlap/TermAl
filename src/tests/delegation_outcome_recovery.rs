@@ -6,7 +6,7 @@
 //! remain in focused sibling modules or `delegations.rs`.
 
 use super::delegation_support::{
-    finish_delegation_child_with_assistant_text,
+    finish_delegation_child_with_assistant_text, mark_delegation_as_legacy_unstructured_review,
     test_app_state_with_drained_delegation_codex_runtime,
 };
 use super::*;
@@ -82,6 +82,7 @@ fn delegation_idle_child_without_result_packet_preserves_final_assistant_output(
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
     let review = "### Sync Review\n\n\
 **Findings:**\n\
 - **[Note]** `lib/database/sync/sync_engine.dart:3506` \u{2014} Verified the cross-user row remains pending.\n\n\
@@ -219,6 +220,7 @@ fn completed_delegation_repairs_degraded_legacy_result_once_and_refreshes_parent
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
     finish_delegation_child_with_assistant_text(
         &state,
         &created.delegation.child_session_id,
@@ -245,10 +247,9 @@ fn completed_delegation_repairs_degraded_legacy_result_once_and_refreshes_parent
             line: None,
             message: "**[High]** Markdown headings dropped findings.".to_owned(),
         }];
-        // Version 1 produced the stale packet shape above. A semantic parser
-        // upgrade must advance the version so this retained transcript is
-        // reparsed exactly once.
-        delegation.result_parser_version = 1;
+        // A result written by the immediately preceding parser must be
+        // reparsed exactly once after a semantic parser upgrade.
+        delegation.result_parser_version = DELEGATION_RESULT_PARSER_VERSION - 1;
         let parent = inner
             .sessions
             .iter_mut()
@@ -340,6 +341,7 @@ fn delegation_idle_child_error_like_plain_output_is_completed() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
     let output = "I could not finish the review because the required files were unavailable.";
 
     finish_delegation_child_with_assistant_text(
@@ -756,6 +758,7 @@ fn delegation_error_child_with_result_packet_recovers_completed_result() {
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
 
     finish_delegation_child_with_assistant_text(
         &state,
@@ -879,6 +882,7 @@ fn delegation_completed_child_recovers_actionable_findings_when_result_packet_de
             },
         )
         .expect("delegation should be created");
+    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
 
     finish_delegation_child_with_assistant_text(
         &state,

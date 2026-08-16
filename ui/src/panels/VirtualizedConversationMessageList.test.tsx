@@ -1687,6 +1687,60 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("does not rerender an unchanged mounted range for repeated bottom follow", async () => {
+    const messages = makeTextMessages(80);
+    let renderCount = 0;
+    const harness = renderVirtualizedHarness({
+      messages,
+      preferInitialEstimatedBottomViewport: true,
+      renderMessageCard: (message) => {
+        renderCount += 1;
+        return <article className="message-card">{message.id}</article>;
+      },
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-80")).toBeInTheDocument();
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      harness.setScrollTop(
+        Math.max(harness.estimatedLayout.totalHeight - 500, 0),
+      );
+
+      // Establish bottom authority first; the initial signal is allowed to
+      // replace a startup range with the real bottom range.
+      act(() => {
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "bottom_follow",
+        });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const settledRenderCount = renderCount;
+
+      // A subsequent live update with unchanged geometry resolves to the same
+      // range and must not add a second render after the message commit.
+      act(() => {
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "bottom_follow",
+        });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(renderCount).toBe(settledRenderCount);
+      expect(screen.getByText("message-80")).toBeInTheDocument();
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("bottom-pin mounts the bottom range without starting a boundary reveal", async () => {
     const messages = makeTextMessages(160);
     const harness = renderVirtualizedHarness({

@@ -1180,10 +1180,14 @@ describe("App control panel - openers and canvas", () => {
         return controlPanelShell;
       }
 
-      function latestRequestTo(pathname: string) {
-        const requests = fetchMock.mock.calls
+      function requestsTo(pathname: string) {
+        return fetchMock.mock.calls
           .map(([input]) => new URL(String(input), "http://localhost"))
           .filter((requestUrl) => requestUrl.pathname === pathname);
+      }
+
+      function latestRequestTo(pathname: string) {
+        const requests = requestsTo(pathname);
         const request = requests[requests.length - 1];
         if (!request) {
           throw new Error(`No request captured for ${pathname}`);
@@ -1343,10 +1347,13 @@ describe("App control panel - openers and canvas", () => {
         });
         expect(screen.queryByRole("tab", { name: /Git status: api/i })).toBeNull();
         await waitFor(() => {
-          const request = latestRequestTo("/api/git/status");
-          expect(request.searchParams.get("path")).toBe("/projects/termal");
-          expect(request.searchParams.get("sessionId")).toBeNull();
-          expect(request.searchParams.get("projectId")).toBe("project-termal");
+          const scopedRequest = requestsTo("/api/git/status").find(
+            (request) =>
+              request.searchParams.get("path") === "/projects/termal" &&
+              request.searchParams.get("sessionId") === null &&
+              request.searchParams.get("projectId") === "project-termal",
+          );
+          expect(scopedRequest).toBeDefined();
         });
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);

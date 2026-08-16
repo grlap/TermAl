@@ -179,8 +179,8 @@ export function useComposerAutoResize(activeSessionId: string | null) {
       (parseFloat(textarea.style.height) ||
         textarea.getBoundingClientRect().height ||
         null);
-    // tm-7cu.18: the shrink probe below collapses the textarea to its minimum
-    // and the `scrollHeight` read flushes layout in that collapsed state. The
+    // The shrink probe below collapses the textarea to its minimum and the
+    // `scrollHeight` read flushes layout in that collapsed state. The
     // flex-sibling transcript pane is transiently TALLER during that flush, so
     // the browser natively clamps a bottom-pinned scrollTop down — and keeps
     // the clamped value after the height is restored (drift == previousHeight

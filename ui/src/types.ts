@@ -444,6 +444,9 @@ export type DelegationRecord = {
   completedAt?: string | null;
   result?: DelegationResult | null;
   resultParserVersion: number;
+  reviewResultRequired?: boolean;
+  postSubmissionTransportError?: string | null;
+  reviewResultRecoveryError?: string | null;
 };
 
 export type DelegationSummary = Omit<
@@ -1045,8 +1048,8 @@ export type SessionSettingsValue =
   | CursorMode
   | GeminiApprovalMode;
 
-// Coordination board (tm-uwx.7): level-triggered per-project facts. Read-only
-// in the UI per Greg's v1 ruling — agents write via MCP/HTTP, humans observe.
+// Coordination board: level-triggered per-project facts. Read-only in the UI;
+// agents write via MCP/HTTP, humans observe.
 export type BoardEntry = {
   key: string;
   revision: number;

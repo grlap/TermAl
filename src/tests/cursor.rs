@@ -18,6 +18,178 @@
 
 use super::*;
 
+#[test]
+fn acp_reviewer_allows_authorized_delegation_control_plane_submission_in_plan_mode() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let child_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let child = inner.create_session(
+            Agent::Cursor,
+            Some("ACP reviewer".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            Some("auto".to_owned()),
+        );
+        let child_session_id = child.session.id.clone();
+        let child_index = inner
+            .find_session_index(&child_session_id)
+            .expect("child should be indexed");
+        inner.sessions[child_index].session.parent_delegation_id =
+            Some("delegation-acp-review".to_owned());
+        inner.sessions[child_index].session.cursor_mode = Some(CursorMode::Plan);
+        inner.delegations.push(DelegationRecord {
+            id: "delegation-acp-review".to_owned(),
+            parent_session_id,
+            child_session_id: child_session_id.clone(),
+            mode: DelegationMode::Reviewer,
+            status: DelegationStatus::Running,
+            title: "ACP reviewer".to_owned(),
+            prompt: "Review changes.".to_owned(),
+            cwd: "/tmp".to_owned(),
+            agent: Agent::Cursor,
+            model: Some("auto".to_owned()),
+            write_policy: DelegationWritePolicy::ReadOnly,
+            created_at: stamp_now(),
+            started_at: Some(stamp_now()),
+            completed_at: None,
+            result: None,
+            submitted_review_result: None,
+            post_submission_transport_error: None,
+            review_result_recovery_probe_attempt: None,
+            review_result_recovery_error: None,
+            review_result_schema_version: None,
+            review_result_required: true,
+            review_result_submission_attempt: 1,
+            result_parser_version: 0,
+        });
+        let delegation_index = inner.delegations.len() - 1;
+        inner.mark_delegation_mutated(delegation_index);
+        inner.sync_running_read_only_delegation_index(delegation_index);
+        state.commit_locked(&mut inner).unwrap();
+        child_session_id
+    };
+    let (input_tx, input_rx) = mpsc::channel();
+    let mut recorder = SessionRecorder::new(state.clone(), child_session_id.clone());
+    let request = json!({
+        "id": "acp-review-submit",
+        "method": "session/request_permission",
+        "params": {
+            "toolName": "mcp__termal-delegation__termal_submit_review_result",
+            "description": "Submit delegated review result",
+            "options": [
+                { "optionId": "once", "kind": "allow_once", "name": "Allow once" },
+                { "optionId": "reject", "kind": "reject_once", "name": "Reject" }
+            ]
+        }
+    });
+
+    handle_acp_request(
+        &request,
+        &state,
+        &child_session_id,
+        &input_tx,
+        &mut recorder,
+        AcpAgent::Cursor,
+    )
+    .expect("control-plane permission should be handled");
+    let response = input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("ACP reviewer should receive automatic permission response");
+    assert!(matches!(
+        response,
+        AcpRuntimeCommand::JsonRpcMessage(message)
+            if message["result"]["outcome"]["optionId"] == "once"
+    ));
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn acp_reviewer_does_not_auto_approve_an_unscoped_colliding_tool_name() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let child_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let child = inner.create_session(
+            Agent::Cursor,
+            Some("ACP reviewer".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            Some("auto".to_owned()),
+        );
+        let child_session_id = child.session.id.clone();
+        let child_index = inner
+            .find_session_index(&child_session_id)
+            .expect("child should be indexed");
+        inner.sessions[child_index].session.parent_delegation_id =
+            Some("delegation-acp-collision".to_owned());
+        inner.sessions[child_index].session.cursor_mode = Some(CursorMode::Plan);
+        inner.delegations.push(DelegationRecord {
+            id: "delegation-acp-collision".to_owned(),
+            parent_session_id,
+            child_session_id: child_session_id.clone(),
+            mode: DelegationMode::Reviewer,
+            status: DelegationStatus::Running,
+            title: "ACP reviewer".to_owned(),
+            prompt: "Review changes.".to_owned(),
+            cwd: "/tmp".to_owned(),
+            agent: Agent::Cursor,
+            model: Some("auto".to_owned()),
+            write_policy: DelegationWritePolicy::ReadOnly,
+            created_at: stamp_now(),
+            started_at: Some(stamp_now()),
+            completed_at: None,
+            result: None,
+            submitted_review_result: None,
+            post_submission_transport_error: None,
+            review_result_recovery_probe_attempt: None,
+            review_result_recovery_error: None,
+            review_result_schema_version: None,
+            review_result_required: true,
+            review_result_submission_attempt: 1,
+            result_parser_version: 0,
+        });
+        let delegation_index = inner.delegations.len() - 1;
+        inner.mark_delegation_mutated(delegation_index);
+        inner.sync_running_read_only_delegation_index(delegation_index);
+        state.commit_locked(&mut inner).unwrap();
+        child_session_id
+    };
+    let (input_tx, input_rx) = mpsc::channel();
+    let mut recorder = SessionRecorder::new(state.clone(), child_session_id.clone());
+    let request = json!({
+        "id": "acp-review-collision",
+        "method": "session/request_permission",
+        "params": {
+            "toolName": TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME,
+            "description": "A different server reused the leaf name",
+            "options": [
+                { "optionId": "once", "kind": "allow_once", "name": "Allow once" },
+                { "optionId": "reject", "kind": "reject_once", "name": "Reject" }
+            ]
+        }
+    });
+
+    handle_acp_request(
+        &request,
+        &state,
+        &child_session_id,
+        &input_tx,
+        &mut recorder,
+        AcpAgent::Cursor,
+    )
+    .expect("colliding permission should be handled by the ordinary policy");
+    let response = input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("plan mode should reject the untrusted collision");
+    assert!(matches!(
+        response,
+        AcpRuntimeCommand::JsonRpcMessage(message)
+            if message["result"]["outcome"]["optionId"] == "reject"
+    ));
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // pins that `sync_session_model_options` stores the full option list and
 // applies the selected model value onto the Cursor session record.
 // guards against drift where ACP-advertised model choices would be silently

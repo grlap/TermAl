@@ -1,27 +1,15 @@
-// claude and codex session lifecycle: creation, hidden spare-pool, and
-// kill semantics.
+// Claude and Codex session lifecycle: creation and kill semantics.
 //
-// claude code has a noticeable cold-start cost, so termal pre-spawns
-// "hidden claude spares" keyed by (workdir, model, approval_mode,
-// effort). when the user creates a real session whose dimensions match
-// a spare, `StateInner::create_session` promotes the spare in place
-// instead of cold-starting, then `ensure_hidden_claude_spare`
-// replenishes the pool. hidden spares carry `hidden = true` and are
-// filtered out of `/api/state` snapshots and `PersistedState` so the
-// user never sees them.
+// Agent processes start lazily when the user sends the first prompt;
+// creating a session alone must not start a runtime. Codex sessions can
+// share a single runtime, so killing one must not tear down siblings even
+// when the `turn/interrupt` JSON-RPC call fails. Local Codex sessions are
+// also added to a rediscovery ignore list so they cannot silently return
+// after restart.
 //
-// kill-session semantics diverge by agent. killing the LAST visible
-// claude session for a workdir also reaps the matching hidden spare,
-// since there is no reason to keep a warm session for a workdir the
-// user abandoned; if another visible session remains, the spare stays
-// warm. codex sessions can share a single runtime: killing one must
-// not tear down siblings even when the `turn/interrupt` jsonrpc call
-// fails, and local codex sessions are added to a rediscovery ignore
-// list so they cannot silently return after restart.
-//
-// production surfaces under test: `StateInner::create_session`,
-// `AppState::kill_session`, the axum `kill_session` route in
-// `src/api.rs`, and `StateInner::ensure_hidden_claude_spare`.
+// Production surfaces under test: `StateInner::create_session`,
+// `AppState::kill_session`, and the Axum `kill_session` route in
+// `src/api.rs`.
 
 use super::*;
 
@@ -167,13 +155,22 @@ fn creates_claude_sessions_with_requested_plan_mode() {
     assert_eq!(session.claude_effort, Some(ClaudeEffortLevel::High));
 
     let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == response.session_id)
+        .expect("created Claude session should exist");
+    assert!(!record.hidden);
+    assert!(
+        matches!(record.runtime, SessionRuntime::None),
+        "creating a Claude session must not start its runtime before the first prompt",
+    );
     assert!(
         inner
             .sessions
             .iter()
-            .filter(|record| record.hidden && record.session.agent == Agent::Claude)
-            .all(|record| matches!(record.runtime, SessionRuntime::None)),
-        "lightweight test states must keep hidden spare bookkeeping without spawning Claude",
+            .all(|record| !(record.hidden && record.session.agent == Agent::Claude)),
+        "creating a Claude session must not allocate a hidden background session",
     );
 }
 
@@ -235,336 +232,6 @@ fn lightweight_test_state_rejects_direct_acp_runtime_spawning() {
         err.to_string(),
         "agent runtime spawning is disabled for this AppState"
     );
-}
-
-// pins the invisibility contract for hidden claude spares: a spare
-// created via `ensure_hidden_claude_spare` lives in `inner.sessions`
-// with `hidden = true`, but is filtered out of both
-// `AppState::snapshot` and `PersistedState::from_inner`.
-// guards against the warm pool leaking into the ui or on-disk state.
-#[test]
-fn hidden_claude_spares_are_filtered_from_snapshots_and_persistence() {
-    let state = test_app_state();
-    let workdir = resolve_session_workdir("/tmp").expect("test workdir should resolve");
-    let hidden_session_id = {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        inner
-            .ensure_hidden_claude_spare(
-                workdir,
-                None,
-                Agent::Claude.default_model().to_owned(),
-                ClaudeApprovalMode::Ask,
-                ClaudeEffortLevel::Default,
-            )
-            .expect("hidden Claude spare should be created")
-    };
-
-    let snapshot = state.snapshot();
-    assert!(
-        snapshot
-            .sessions
-            .iter()
-            .all(|session| session.id != hidden_session_id)
-    );
-
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    assert!(
-        inner
-            .sessions
-            .iter()
-            .any(|record| record.hidden && record.session.id == hidden_session_id)
-    );
-    let persisted = PersistedState::from_inner(&inner);
-    assert!(
-        persisted
-            .sessions
-            .iter()
-            .all(|record| record.session.id != hidden_session_id)
-    );
-}
-
-// pins spare promotion on the default-profile path: creating a
-// visible claude session whose (workdir, model, approval, effort)
-// matches a hidden spare returns that spare's id, flips
-// `hidden = false`, and leaves exactly one fresh spare behind.
-// guards against losing the warm pool or double-promoting.
-#[test]
-fn create_session_promotes_matching_hidden_claude_spare_and_replenishes_pool() {
-    let state = test_app_state();
-    let workdir = resolve_session_workdir("/tmp").expect("test workdir should resolve");
-    let hidden_session_id = {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        inner
-            .ensure_hidden_claude_spare(
-                workdir.clone(),
-                None,
-                Agent::Claude.default_model().to_owned(),
-                ClaudeApprovalMode::Ask,
-                ClaudeEffortLevel::Default,
-            )
-            .expect("hidden Claude spare should be created")
-    };
-
-    let response = state
-        .create_session(CreateSessionRequest {
-            agent: Some(Agent::Claude),
-            name: Some("Visible Claude".to_owned()),
-            workdir: Some(workdir.clone()),
-            project_id: None,
-            model: None,
-            approval_policy: None,
-            reasoning_effort: None,
-            sandbox_mode: None,
-            cursor_mode: None,
-            claude_approval_mode: None,
-            claude_effort: None,
-            gemini_approval_mode: None,
-        })
-        .unwrap();
-
-    assert_eq!(response.session_id, hidden_session_id);
-    let session = &response.session;
-    assert_eq!(session.id, hidden_session_id);
-    assert_eq!(session.name, "Visible Claude");
-
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    let promoted = inner
-        .sessions
-        .iter()
-        .find(|record| record.session.id == hidden_session_id)
-        .expect("promoted session record should exist");
-    assert!(!promoted.hidden);
-    assert!(
-        promoted.session.parent_delegation_id.is_none(),
-        "promoting a hidden spare into a root session must not attach it to a delegation"
-    );
-
-    let hidden_spares = inner
-        .sessions
-        .iter()
-        .filter(|record| {
-            record.hidden
-                && record.session.agent == Agent::Claude
-                && record.session.workdir == workdir
-                && record.session.project_id.is_none()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(hidden_spares.len(), 1);
-    assert_ne!(hidden_spares[0].session.id, hidden_session_id);
-}
-
-#[test]
-fn promoted_hidden_claude_spare_does_not_leak_prompt_history() {
-    let state = test_app_state();
-    let workdir = resolve_session_workdir("/tmp").expect("test workdir should resolve");
-    let hidden_session_id = {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let hidden_session_id = inner
-            .ensure_hidden_claude_spare(
-                workdir.clone(),
-                None,
-                Agent::Claude.default_model().to_owned(),
-                ClaudeApprovalMode::Ask,
-                ClaudeEffortLevel::Default,
-            )
-            .expect("hidden Claude spare should be created");
-        let record = inner
-            .sessions
-            .iter_mut()
-            .find(|record| record.session.id == hidden_session_id)
-            .expect("hidden Claude spare record should exist");
-        record.session.prompt_history = vec!["prompt from prior owner".to_owned()];
-        hidden_session_id
-    };
-
-    let response = state
-        .create_session(CreateSessionRequest {
-            agent: Some(Agent::Claude),
-            name: Some("Visible Claude".to_owned()),
-            workdir: Some(workdir),
-            project_id: None,
-            model: None,
-            approval_policy: None,
-            reasoning_effort: None,
-            sandbox_mode: None,
-            cursor_mode: None,
-            claude_approval_mode: None,
-            claude_effort: None,
-            gemini_approval_mode: None,
-        })
-        .expect("matching hidden Claude spare should be promoted");
-
-    assert_eq!(response.session_id, hidden_session_id);
-    assert!(
-        response.session.prompt_history.is_empty(),
-        "promoted hidden Claude spare must not expose prompt history from its prior lifecycle"
-    );
-}
-
-// pins that spare matching keys on all four dimensions, not just
-// workdir: a `(claude-custom, Plan, High)` spare is promoted by a
-// request with the same model/approval/effort, and a new spare is
-// respawned for the same non-default profile.
-// guards against over-broad matching that would hand out a spare
-// with the wrong flags.
-#[test]
-fn create_session_promotes_matching_non_default_hidden_claude_spare() {
-    let state = test_app_state();
-    let workdir = resolve_session_workdir("/tmp").expect("test workdir should resolve");
-    let hidden_session_id = {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        inner
-            .ensure_hidden_claude_spare(
-                workdir.clone(),
-                None,
-                "claude-custom".to_owned(),
-                ClaudeApprovalMode::Plan,
-                ClaudeEffortLevel::High,
-            )
-            .expect("hidden Claude spare should be created")
-    };
-
-    let response = state
-        .create_session(CreateSessionRequest {
-            agent: Some(Agent::Claude),
-            name: Some("Plan Claude".to_owned()),
-            workdir: Some(workdir.clone()),
-            project_id: None,
-            model: Some("claude-custom".to_owned()),
-            approval_policy: None,
-            reasoning_effort: None,
-            sandbox_mode: None,
-            cursor_mode: None,
-            claude_approval_mode: Some(ClaudeApprovalMode::Plan),
-            claude_effort: Some(ClaudeEffortLevel::High),
-            gemini_approval_mode: None,
-        })
-        .unwrap();
-
-    assert_eq!(response.session_id, hidden_session_id);
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    let hidden_spares = inner
-        .sessions
-        .iter()
-        .filter(|record| {
-            record.hidden
-                && record.session.agent == Agent::Claude
-                && record.session.workdir == workdir
-                && record.session.model == "claude-custom"
-                && record.session.claude_approval_mode == Some(ClaudeApprovalMode::Plan)
-                && record.session.claude_effort == Some(ClaudeEffortLevel::High)
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(hidden_spares.len(), 1);
-    assert_ne!(hidden_spares[0].session.id, hidden_session_id);
-}
-
-// pins the "last visible session" reap rule: once the final
-// visible claude session for a workdir is killed, every claude
-// record for that workdir (hidden spares included) is removed.
-// guards against stranded warm processes tied to a workdir the
-// user has walked away from.
-#[test]
-fn killing_last_visible_claude_session_reaps_hidden_spare_for_context() {
-    let state = test_app_state();
-    let workdir = resolve_session_workdir("/tmp").expect("test workdir should resolve");
-    let created = state
-        .create_session(CreateSessionRequest {
-            agent: Some(Agent::Claude),
-            name: Some("Claude Visible".to_owned()),
-            workdir: Some(workdir.clone()),
-            project_id: None,
-            model: None,
-            approval_policy: None,
-            reasoning_effort: None,
-            sandbox_mode: None,
-            cursor_mode: None,
-            claude_approval_mode: None,
-            claude_effort: None,
-            gemini_approval_mode: None,
-        })
-        .unwrap();
-
-    {
-        let inner = state.inner.lock().expect("state mutex poisoned");
-        assert!(inner.sessions.iter().any(|record| {
-            record.hidden
-                && record.session.agent == Agent::Claude
-                && record.session.workdir == workdir
-        }));
-    }
-
-    let killed = state.kill_session(&created.session_id).unwrap();
-    assert!(
-        killed
-            .sessions
-            .iter()
-            .all(|session| session.id != created.session_id)
-    );
-
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    assert!(inner.sessions.iter().all(|record| {
-        !(record.session.agent == Agent::Claude && record.session.workdir == workdir)
-    }));
-}
-
-// pins the complement of the reap rule: with two visible claude
-// sessions sharing a workdir, killing one preserves both the
-// surviving visible session and the matching hidden spare.
-// guards against over-eager reaping that would force the next
-// session to cold-start.
-#[test]
-fn killing_one_visible_claude_session_keeps_hidden_spares_when_another_visible_session_remains() {
-    let state = test_app_state();
-    let workdir = resolve_session_workdir("/tmp").expect("test workdir should resolve");
-    let first = state
-        .create_session(CreateSessionRequest {
-            agent: Some(Agent::Claude),
-            name: Some("Claude A".to_owned()),
-            workdir: Some(workdir.clone()),
-            project_id: None,
-            model: None,
-            approval_policy: None,
-            reasoning_effort: None,
-            sandbox_mode: None,
-            cursor_mode: None,
-            claude_approval_mode: None,
-            claude_effort: None,
-            gemini_approval_mode: None,
-        })
-        .unwrap();
-    let second = state
-        .create_session(CreateSessionRequest {
-            agent: Some(Agent::Claude),
-            name: Some("Claude B".to_owned()),
-            workdir: Some(workdir.clone()),
-            project_id: None,
-            model: None,
-            approval_policy: None,
-            reasoning_effort: None,
-            sandbox_mode: None,
-            cursor_mode: None,
-            claude_approval_mode: None,
-            claude_effort: None,
-            gemini_approval_mode: None,
-        })
-        .unwrap();
-
-    state.kill_session(&first.session_id).unwrap();
-
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    assert!(
-        inner
-            .sessions
-            .iter()
-            .any(|record| !record.hidden && record.session.id == second.session_id)
-    );
-    assert!(inner.sessions.iter().any(|record| {
-        record.hidden
-            && record.session.agent == Agent::Claude
-            && record.session.workdir == workdir
-            && record.session.project_id.is_none()
-    }));
 }
 
 // pins that a kill still commits to disk when the shared codex

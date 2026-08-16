@@ -17,6 +17,16 @@ Review current staged and unstaged changes by delegating `/review-code` to both 
 
 Delegated child reviewers run with `writePolicy: readOnly`. They may use read-only git/file inspection commands freely, but must not edit files, run mutating git commands, launch nested reviewer agents, run quality gates, inspect the existing Beads tracker, or call `bd`. Their `Suggested beads updates` sections are proposals only. The parent session exclusively owns all compilation, build, test, type-check, lint, and formatting gates; it first consolidates and deduplicates both reviews in Step 5, then reconciles the consolidated result with Beads in Step 6.
 
+Delegated `/review-code` children submit their authoritative result through the
+versioned `termal_submit_review_result` mailbox contract. The backend validates
+that payload and projects it into `termal_get_session_result`; reviewer prose is
+retained only as paged full output. Never infer a clean review from prose. If a
+required structured submission is missing, TermAl reports the delegation result
+as failed/unavailable rather than returning an empty findings list.
+TermAl injects this result protocol into every reviewer-mode child; the
+repository's `/review-code` command does not need to contain the submission
+schema or an opt-in marker.
+
 Required MCP tools:
 - `termal_spawn_session`
 - `termal_get_session_status`
@@ -116,6 +126,12 @@ Deduplicate findings. If both reviewers report the same issue, merge it and note
 Also merge their proposed tracker follow-ups into the consolidated action list.
 Do not create, update, comment on, or close tracker items until this
 consolidation is complete.
+
+Treat each fetched compact packet as authoritative because it is backed by the
+validated mailbox submission. If a reviewer status is failed or its result says
+the structured submission is unavailable, report that reviewer as unavailable
+and do not replace it with conclusions inferred from the full Markdown output.
+Paged full output may be shown for diagnosis, but it is not a result protocol.
 
 ## Step 6: Reconcile consolidated findings with Beads (bd)
 

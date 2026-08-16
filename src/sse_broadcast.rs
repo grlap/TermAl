@@ -121,9 +121,8 @@ impl AppState {
     /// receiver-dropped channel; shutdown happens if the persist
     /// thread exited early), fall back to the original synchronous
     /// `persist_created_session` path. That fallback writes a full
-    /// snapshot so any sibling mutations from the create flow (for
-    /// example hidden-spare pool changes) land with the created
-    /// session.
+    /// snapshot so any sibling mutations from the create flow land
+    /// with the created session.
     fn commit_session_created_locked(
         &self,
         inner: &mut StateInner,

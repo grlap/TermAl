@@ -11,13 +11,9 @@
 //   `session_crud.rs` is a thin wrapper that resolves defaults,
 //   refreshes the readiness cache, and then calls these.
 //
-// - **Codex thread discovery + hidden Claude spares**:
+// - **Codex thread discovery**:
 //   `ignore_discovered_codex_thread` / `allow_discovered_codex_thread`
-//   (user explicitly hides/unhides imported threads),
-//   `find_matching_hidden_claude_spare` /
-//   `ensure_hidden_claude_spare` — the spare-matching logic keyed
-//   on `(workdir, project, model, approval_mode, effort)` that
-//   `session_crud.rs` and `claude_spares.rs` consume.
+//   (user explicitly hides/unhides imported threads).
 //
 // - **Session-array primitives**: `next_message_id` + `next_mutation_stamp`
 //   counters, the `session_mut*` accessors that bump `mutation_stamp`
@@ -26,13 +22,11 @@
 //   `collect_persist_delta` which the persist thread drains each tick
 //   to write only sessions that have changed since its last watermark.
 //
-// - **Finders**: `find_session_index` (all sessions including hidden
-//   spares), `find_visible_session_index` (user-facing only —
-//   excludes hidden Claude spares), `find_remote_session_index`,
+// - **Finders**: `find_session_index` (all internal sessions),
+//   `find_visible_session_index` (user-facing only), `find_remote_session_index`,
 //   `find_remote_orchestrator_index`, `find_project`, `find_remote`,
 //   `find_project_for_workdir`. The "visible" filter is a recurring
-//   gotcha — most API routes want it to avoid accidentally operating
-//   on a pre-warmed spare.
+//   gotcha — most API routes should not operate on internal records.
 //
 // The `#[warn(dead_code)]` exemption on `session_mut` and
 // `stamp_session_at_index` is intentional: both are test-only
@@ -79,8 +73,7 @@ impl StateInner {
         // database. A rewindable `project-{number}` id can therefore inherit an
         // unrelated live board scope or permanent deletion fence. Keep the
         // legacy counter for persisted-state compatibility and validation,
-        // but give every newly created project a collision-resistant identity
-        // (tm-uwx.7.7).
+        // but give every newly created project a collision-resistant identity.
         let project_id = loop {
             let candidate = format!("project-{}", Uuid::new_v4());
             if self.projects.iter().all(|project| project.id != candidate) {
@@ -315,70 +308,6 @@ impl StateInner {
         }
     }
 
-    /// Returns the index of a hidden Claude spare whose dimensions
-    /// `(workdir, project, model, approval_mode, effort)` match the
-    /// requested tuple so [`AppState::create_session`] can promote
-    /// the warmed runtime instead of cold-starting.
-    fn find_matching_hidden_claude_spare(
-        &self,
-        workdir: &str,
-        project_id: Option<&str>,
-        model: &str,
-        approval_mode: ClaudeApprovalMode,
-        effort: ClaudeEffortLevel,
-    ) -> Option<usize> {
-        self.sessions.iter().position(|record| {
-            record.hidden
-                && record.is_local_session()
-                && record.session.agent == Agent::Claude
-                && record.session.workdir == workdir
-                && record.session.project_id.as_deref() == project_id
-                && record.session.model == model
-                && record.session.claude_approval_mode == Some(approval_mode)
-                && record.session.claude_effort == Some(effort)
-        })
-    }
-
-    /// Reserves a placeholder hidden-spare `SessionRecord` for the
-    /// requested shape if one doesn't already exist, returning the
-    /// session id the caller should hand to
-    /// `try_start_hidden_claude_spare` (see `claude_spares.rs`) to
-    /// actually spawn the child process.
-    fn ensure_hidden_claude_spare(
-        &mut self,
-        workdir: String,
-        project_id: Option<String>,
-        model: String,
-        approval_mode: ClaudeApprovalMode,
-        effort: ClaudeEffortLevel,
-    ) -> Option<String> {
-        if let Some(index) = self.find_matching_hidden_claude_spare(
-            &workdir,
-            project_id.as_deref(),
-            &model,
-            approval_mode,
-            effort,
-        ) {
-            let record = self
-                .session_mut_by_index(index)
-                .expect("session index should be valid");
-            reset_hidden_claude_spare_record(record);
-            return matches!(record.runtime, SessionRuntime::None)
-                .then(|| record.session.id.clone());
-        }
-
-        self.create_session(Agent::Claude, None, workdir, project_id, Some(model));
-        let record = self
-            .sessions
-            .last_mut()
-            .expect("create_session should append a session record");
-        record.hidden = true;
-        record.session.claude_approval_mode = Some(approval_mode);
-        record.session.claude_effort = Some(effort);
-        reset_hidden_claude_spare_record(record);
-        Some(record.session.id.clone())
-    }
-
     /// Returns the next message ID.
     fn next_message_id(&mut self) -> String {
         let id = format!("message-{}", self.next_message_number);
@@ -608,10 +537,9 @@ impl StateInner {
     ///
     /// - App metadata (non-session fields; shallow clones, no transcripts).
     /// - Sessions whose `mutation_stamp > watermark`, filtered so
-    ///   hidden sessions produce `DELETE`s instead of upserts (visible
-    ///   sessions that have flipped to hidden since the last persist
-    ///   need to disappear from SQLite, and hidden spares are
-    ///   regenerated on startup rather than persisted).
+    ///   hidden internal records produce `DELETE`s instead of upserts.
+    ///   A visible session that becomes hidden must disappear from
+    ///   SQLite rather than leave a stale user-facing row behind.
     /// - The tombstone list of explicitly removed session ids, drained
     ///   from `removed_session_ids`.
     /// - Delegation rows and delegation tombstones whose runtime-only
@@ -636,8 +564,8 @@ impl StateInner {
             }
             if record.hidden {
                 // A session that changed and is now hidden must not
-                // stay in SQLite — hidden spares are re-seeded on
-                // startup, so ensure the row is removed.
+                // stay in SQLite, so ensure any prior visible row is
+                // removed.
                 removed_ids.push(record.session.id.clone());
             } else {
                 let mut persisted = PersistedSessionRecord::from_record(record);
@@ -697,19 +625,16 @@ impl StateInner {
         }
     }
 
-    /// Returns the index of any session (including hidden spares) by
-    /// TermAl session id. For user-facing queries prefer
-    /// [`StateInner::find_visible_session_index`] so a hidden spare
-    /// doesn't accidentally respond to a routed request.
+    /// Returns the index of any session, including internal records, by
+    /// TermAl session id. User-facing queries should use
+    /// [`StateInner::find_visible_session_index`].
     fn find_session_index(&self, session_id: &str) -> Option<usize> {
         self.sessions
             .iter()
             .position(|record| record.session.id == session_id)
     }
 
-    /// Returns the index of a *visible* (non-hidden) session by id.
-    /// Hidden Claude spares are excluded so API routes can't
-    /// accidentally operate on a pre-warmed spare.
+    /// Returns the index of a visible (non-hidden) session by id.
     fn find_visible_session_index(&self, session_id: &str) -> Option<usize> {
         self.sessions
             .iter()

@@ -126,10 +126,6 @@ fn set_prompt_history_on_record(record: &mut SessionRecord, prompt_history: Vec<
     record.prompt_history_mutation_stamp = record.mutation_stamp;
 }
 
-fn clear_prompt_history_on_record(record: &mut SessionRecord) {
-    set_prompt_history_on_record(record, Vec::new());
-}
-
 fn append_prompt_history(record: &mut SessionRecord, prompt: &str) {
     let prompts = record
         .session

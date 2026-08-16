@@ -36,6 +36,17 @@ pub(super) fn finish_delegation_child_with_assistant_text(
     state.commit_locked(&mut inner).unwrap();
 }
 
+pub(super) fn mark_delegation_as_legacy_unstructured_review(state: &AppState, delegation_id: &str) {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let delegation_index = inner
+        .find_delegation_index(delegation_id)
+        .expect("delegation should exist");
+    let delegation = &mut inner.delegations[delegation_index];
+    delegation.review_result_required = false;
+    delegation.review_result_submission_attempt = 0;
+    state.commit_locked(&mut inner).unwrap();
+}
+
 pub(super) fn test_app_state_with_delegation_codex_runtime(
     runtime_id: &str,
 ) -> (AppState, mpsc::Receiver<CodexRuntimeCommand>) {

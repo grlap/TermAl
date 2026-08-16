@@ -33,6 +33,21 @@ Optional sidecar:
 to SQLite before a metadata-only receiver wake-up, are fetched explicitly, and
 use forward-only compare-and-swap acknowledgements. A mailbox is a separate
 domain object, not an agent session or runtime.
+Delegated `/review-code` adds one child-only, targetless mailbox operation:
+`termal_submit_review_result`. TermAl validates its versioned payload, derives
+the linked parent/delegation identity, stores it without an early wake, and
+promotes it when the child turn becomes terminal. The accepted result remains
+authoritative across later child runtime failure or disappearance; those
+conditions are separate transport diagnostics. Human Markdown remains
+full output; legacy parsing is not used for these new structured reviews. The
+submission contract is injected by TermAl for every reviewer-mode delegation,
+after repository-owned task text, so repositories do not need to modify their
+own review commands. Read-only policy remains a workspace boundary; this single
+child-owned result submission is an authenticated control-plane capability.
+Malformed durable review artifacts are quarantined per submission attempt and
+reported as `reviewResultRecoveryError`; parent lifecycle endpoints continue
+through the normal fail-closed path rather than propagating recovery parse
+errors.
 
 **Remote model:** The browser connects to a single local TermAl server. That
 server stores preferences, manages remote connections, and routes project work
@@ -65,7 +80,7 @@ both sides: the peer tools reach only root sessions (delegation children stay
 unreachable as peers), and they are offered only to root callers — a bridge
 serving a delegation child has the peer tools removed from its tools/list and
 rejected on invocation (failing closed if the caller cannot be resolved), so a
-child cannot reach root sessions *through the bridge* (tm-r0y). This is a
+child cannot reach root sessions *through the bridge*. This is a
 tool-layer guardrail, not process isolation: the loopback HTTP API is
 unauthenticated under the single-user, local-only trust model (`GET /api/state`,
 the mailbox endpoints), so a child able to issue raw HTTP could
@@ -284,6 +299,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/messages` | Send an ordinary prompt to a session; queues on the target's pending-prompt FIFO if it is mid-turn. Peer coordination uses the durable mailbox routes below rather than injecting bodies through this route. |
 | GET | `/api/sessions/{id}/mailboxes` | List neutral mailbox summaries for a participant, including peer display names, latest sequence, and unread count. Unknown session ids return `404`. |
 | POST | `/api/sessions/{id}/mailboxes/send` | Atomically append a routine message from `{id}` to a target root session. Requires a sender-scoped idempotency key; returns the durable receipt before/beside a best-effort metadata wake-up. Writer-admission exhaustion returns a typed `503` before this operation commits; bridge transport loss instead reports an unknown outcome and requires retrying the same key. |
+| POST | `/api/sessions/{id}/delegation-review-result` | Child-only submission for the current structured `/review-code` result. The backend derives the linked parent, topic, state stamp, and idempotency key; validates the complete schema; appends without waking the parent; and rejects root, explorer, unrelated, stale, or malformed callers. |
 | POST | `/api/sessions/{id}/mailboxes/{mailbox_id}/read` | Read a FIFO mailbox range without advancing the participant cursor. Each message exposes mutable `notificationState`; the send receipt's immutable point-in-time outcome remains `notificationDisposition`. This intentionally uses POST because the bounded range request is a JSON body; it remains read-only. |
 | POST | `/api/sessions/{id}/mailboxes/{mailbox_id}/acknowledge` | Advance `{id}`'s processed cursor with a forward-only compare-and-swap. Replaying an acknowledgement whose requested cursor is already satisfied succeeds idempotently; a stale expected cursor that requests additional progress returns a typed `409` whose detail survives the MCP bridge. The response summary is prepared inside the cursor transaction, leaving no fallible post-commit lookup. |
 | GET | `/api/sessions/{id}/mailbox-messages/{message_id}` | Read one exact durable mailbox message after participant authorization, including its current mutable `notificationState`. |
@@ -1243,7 +1259,6 @@ termal/
 |   |-- claude.rs            # Claude NDJSON message handling
 |   |-- claude_spawn.rs      # Claude CLI subprocess spawn + wire writers
 |   |-- claude_args.rs       # Claude CLI argv construction + message parsing
-|   |-- claude_spares.rs     # hidden Claude spare pre-warming
 |   |-- codex.rs             # Codex shared-runtime spawn + session state
 |   |-- codex_home.rs        # Codex home directory setup + stderr formatters
 |   |-- codex_bin.rs         # Codex executable discovery + web-search formatters

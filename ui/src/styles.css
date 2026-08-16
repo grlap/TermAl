@@ -4781,6 +4781,23 @@ textarea {
   min-width: 0;
 }
 
+/* Keep one formatting context through hold and release. Switching from block
+   to grid at the boundary changes margin collapsing and can move the message
+   by a few pixels even when its measured content height is stable. */
+.streaming-markdown-height-floor {
+  display: grid;
+  align-items: start;
+}
+
+/* While a transient streaming-height floor is active, keep the rendered
+   Markdown against its bottom edge. The reserved row height and everything
+   below it then remain stationary when the body briefly shrinks, and native
+   bottom clamping cancels the eventual floor release instead of reversing the
+   visible content a frame later. */
+.streaming-markdown-height-floor.is-holding-streaming-height {
+  align-items: end;
+}
+
 .new-response-indicator {
   display: flex;
   align-items: center;
@@ -6047,12 +6064,17 @@ textarea {
 }
 
 .diff-preview-loading-path {
+  max-width: min(42rem, 88vw);
   color: var(--text);
   font-weight: 600;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .diff-preview-loading-detail {
   max-width: min(32rem, 88vw);
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .diff-preview-loading-state.is-error .diff-preview-loading-detail {
