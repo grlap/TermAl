@@ -390,6 +390,69 @@ describe("SessionPaneView composer delegation click-through", () => {
     expect(onComposerError).toHaveBeenCalledWith(null);
   });
 
+  it("preselects a read-only explorer for Cursor composer delegations", async () => {
+    const session = makeSession({
+      id: "session-parent",
+      agent: "Cursor",
+    });
+    spawnDelegationCommandMock.mockResolvedValue(completedSpawnResult());
+
+    renderSessionPaneView({
+      session,
+      draft: "Inspect the current change.",
+    });
+
+    expect(screen.getByRole("combobox", { name: "Delegation mode" })).toHaveValue(
+      "explorer",
+    );
+    expect(
+      screen.getByRole("option", {
+        name: "Reviewer — requires Claude or Codex",
+      }),
+    ).toBeDisabled();
+    await clickAndSettle(screen.getByRole("button", { name: "Delegate" }));
+
+    await waitFor(() => {
+      expect(spawnDelegationCommandMock).toHaveBeenCalledWith(
+        "session-parent",
+        expect.objectContaining({
+          agent: "Cursor",
+          mode: "explorer",
+          writePolicy: { kind: "readOnly" },
+        }),
+      );
+    });
+  });
+
+  it("preselects an isolated-worktree explorer for OpenCode composer delegations", async () => {
+    const session = makeSession({
+      id: "session-parent",
+      agent: "OpenCode",
+    });
+    spawnDelegationCommandMock.mockResolvedValue(completedSpawnResult());
+
+    renderSessionPaneView({
+      session,
+      draft: "Inspect the current change.",
+    });
+
+    expect(screen.getByRole("combobox", { name: "Delegation mode" })).toHaveValue(
+      "explorer",
+    );
+    await clickAndSettle(screen.getByRole("button", { name: "Delegate" }));
+
+    await waitFor(() => {
+      expect(spawnDelegationCommandMock).toHaveBeenCalledWith(
+        "session-parent",
+        expect.objectContaining({
+          agent: "OpenCode",
+          mode: "explorer",
+          writePolicy: { kind: "isolatedWorktree", ownedPaths: [] },
+        }),
+      );
+    });
+  });
+
   it("passes command-owned isolated worktree defaults through to spawn", async () => {
     const session = makeSession({ id: "session-parent" });
     const reviewLocalCommand: AgentCommand = {

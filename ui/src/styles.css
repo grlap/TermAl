@@ -9314,6 +9314,21 @@ textarea {
   white-space: nowrap;
 }
 
+.composer-delegation-controls {
+  display: flex;
+  gap: 0.45rem;
+  align-items: stretch;
+}
+
+.composer-delegation-mode-select {
+  width: auto;
+  min-width: 6.9rem;
+  padding: 0.7rem 0.65rem;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .new-session-button:disabled,
 .send-button:disabled,
 .approval-button:disabled,
@@ -10009,9 +10024,14 @@ textarea {
   }
 
   .composer-stop-button,
+  .composer-delegation-controls,
   .composer-delegate-button,
   .send-button {
     width: 100%;
+  }
+
+  .composer-delegation-mode-select {
+    flex: 1;
   }
 
   .session-kill-popover {

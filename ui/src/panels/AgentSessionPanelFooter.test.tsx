@@ -658,6 +658,60 @@ describe("AgentSessionPanelFooter", () => {
     await waitFor(() => expect(textarea).toHaveValue(""));
   });
 
+  it.each(["Cursor", "Gemini", "OpenCode"] satisfies Session["agent"][])(
+    "shows Explorer and an unavailable Reviewer option for %s",
+    (agent) => {
+      render(
+        renderFooter({
+          session: makeSession("session-a", { agent }),
+          canSpawnDelegation: true,
+          onSpawnDelegation: vi.fn(async () => true),
+        }),
+      );
+
+      expect(
+        screen.getByRole("combobox", { name: "Delegation mode" }),
+      ).toHaveValue("explorer");
+      expect(
+        screen.getByRole("option", {
+          name: "Reviewer — requires Claude or Codex",
+        }),
+      ).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Delegate" })).toHaveTextContent(
+        "Delegate · Explorer",
+      );
+    },
+  );
+
+  it("forwards a user-selected Explorer mode from a Codex composer", async () => {
+    const onSpawnDelegation = vi.fn(async () => true);
+    render(
+      renderFooter({
+        session: makeSession("session-a", { agent: "Codex" }),
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+      }),
+    );
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Delegation mode" }), {
+      target: { value: "explorer" },
+    });
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "Inspect the current change." },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      await Promise.resolve();
+    });
+
+    expect(onSpawnDelegation).toHaveBeenCalledWith(
+      "session-a",
+      "Inspect the current change.",
+      { mode: "explorer" },
+    );
+  });
+
   it("keeps the draft when delegation spawn is rejected", async () => {
     const onSpawnDelegation = vi.fn(async () => false);
     render(
@@ -806,7 +860,7 @@ describe("AgentSessionPanelFooter", () => {
     expect(busyButton).not.toHaveAttribute("aria-busy");
     expect(busyButton).toHaveAttribute(
       "title",
-      "Spawn read-only delegation from current draft",
+      "Spawn read-only reviewer delegation from current draft",
     );
 
     await act(async () => {

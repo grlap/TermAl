@@ -1444,6 +1444,58 @@ async fn acp_reviewer_delegations_are_rejected_before_child_creation() {
     }
 }
 
+#[tokio::test]
+async fn inherited_acp_agent_and_default_reviewer_mode_are_rejected_before_creation() {
+    let state = test_app_state();
+    let parent_session_id = test_session_id(&state, Agent::Cursor);
+    let session_count_before = state
+        .inner
+        .lock()
+        .expect("state mutex poisoned")
+        .sessions
+        .len();
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "prompt": "Inspect through the inherited ACP parent",
+        "title": "Inherited ACP reviewer rejection"
+    }))
+    .expect("delegation request should serialize");
+
+    let (status, response): (StatusCode, ErrorResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{parent_session_id}/delegations"))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        response
+            .error
+            .contains("reviewer mode requires Claude or Codex")
+            && response.error.contains("pass mode `explorer`"),
+        "the rejection must name both the constraint and the supported fix: {}",
+        response.error
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(
+        inner.sessions.len(),
+        session_count_before,
+        "defaulted ACP reviewer rejection must not create a child session"
+    );
+    assert!(
+        inner.delegations.is_empty(),
+        "defaulted ACP reviewer rejection must not create delegation metadata"
+    );
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Pins R5 at the shared backend boundary used by both raw HTTP callers and
 // the TermAl MCP bridge. OpenCode cannot enforce a shared-worktree read-only
 // sandbox, so rejection must happen before a child session or runtime exists.

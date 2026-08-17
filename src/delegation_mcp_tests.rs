@@ -1771,7 +1771,7 @@ fn delegation_mcp_spawn_session_posts_parent_scoped_request() {
 }
 
 #[test]
-fn delegation_mcp_spawn_schema_documents_opencode_read_only_rejection() {
+fn delegation_mcp_spawn_schema_documents_mode_and_agent_boundaries() {
     let tools = mcp_tools_list_result();
     let spawn = tools["tools"]
         .as_array()
@@ -1779,13 +1779,17 @@ fn delegation_mcp_spawn_schema_documents_opencode_read_only_rejection() {
         .iter()
         .find(|tool| tool["name"] == "termal_spawn_session")
         .expect("spawn tool should be advertised");
+    let description = spawn["description"]
+        .as_str()
+        .expect("spawn description should be text");
     assert!(
-        spawn["description"]
-            .as_str()
-            .is_some_and(|description| description.contains("OpenCode")
-                && description.contains("readOnly")
-                && description.contains("isolatedWorktree")),
-        "spawn description must explain the OpenCode write-policy boundary"
+        description.contains("defaults to reviewer")
+            && description.contains("reviewer mode supports only Claude or Codex")
+            && description.contains("Cursor and Gemini")
+            && description.contains("pass explorer")
+            && description.contains("OpenCode")
+            && description.contains("isolatedWorktree"),
+        "spawn description must explain the default, reviewer-agent boundary, and ACP alternatives: {description}"
     );
     assert!(
         spawn
@@ -1793,6 +1797,21 @@ fn delegation_mcp_spawn_schema_documents_opencode_read_only_rejection() {
             .and_then(Value::as_array)
             .is_some_and(|agents| agents.contains(&json!("OpenCode"))),
         "OpenCode must be offered as a first-class delegated agent"
+    );
+    let agent_description = spawn
+        .pointer("/inputSchema/properties/agent/description")
+        .and_then(Value::as_str)
+        .expect("agent schema should explain reviewer compatibility");
+    let mode_description = spawn
+        .pointer("/inputSchema/properties/mode/description")
+        .and_then(Value::as_str)
+        .expect("mode schema should explain its default and compatibility");
+    assert!(
+        agent_description.contains("Reviewer mode requires Claude or Codex")
+            && agent_description.contains("explorer")
+            && mode_description.contains("Defaults to reviewer")
+            && mode_description.contains("ACP agents should pass explorer"),
+        "spawn input schema must teach callers the same constraints as the tool description"
     );
 }
 

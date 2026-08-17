@@ -1183,6 +1183,100 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("preserves a detached anchor across sequential and batched page measurements before native scroll", async () => {
+    const messages = makeTextMessages(24);
+    let firstPageSlotHeight = 80;
+    let secondPageSlotHeight = 80;
+    const harness = renderVirtualizedHarness({
+      clientHeight: 300,
+      initialScrollTop: 1_480,
+      messages,
+      slotHeight: (message) => {
+        const messageNumber = Number(message.id.replace("message-", ""));
+        if (messageNumber <= 8) {
+          return firstPageSlotHeight;
+        }
+        return messageNumber <= 16 ? secondPageSlotHeight : 80;
+      },
+    });
+
+    try {
+      const anchorSlot = await waitFor(() => {
+        const slot = document.querySelector<HTMLElement>(
+          '.virtualized-message-slot[data-message-id="message-17"]',
+        );
+        expect(slot).not.toBeNull();
+        return slot!;
+      });
+      const firstPage = document
+        .querySelector<HTMLElement>(
+          '.virtualized-message-slot[data-message-id="message-1"]',
+        )
+        ?.closest<HTMLElement>(".virtualized-message-page");
+      const secondPage = document
+        .querySelector<HTMLElement>(
+          '.virtualized-message-slot[data-message-id="message-9"]',
+        )
+        ?.closest<HTMLElement>(".virtualized-message-page");
+      expect(firstPage).not.toBeNull();
+      expect(secondPage).not.toBeNull();
+      const firstPageResize = harness.resizeCallbacks.get(firstPage!);
+      const secondPageResize = harness.resizeCallbacks.get(secondPage!);
+      expect(firstPageResize).toBeDefined();
+      expect(secondPageResize).toBeDefined();
+
+      harness.setScrollTop(1_480);
+      fireEvent.keyDown(harness.scrollNode, { key: "ArrowUp" });
+      fireEvent.scroll(harness.scrollNode);
+      const anchorTop = anchorSlot.getBoundingClientRect().top;
+
+      await act(async () => {
+        firstPageSlotHeight = 90;
+        firstPageResize!(
+          [] as unknown as ResizeObserverEntry[],
+          {} as ResizeObserver,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(anchorSlot.getBoundingClientRect().top).toBe(anchorTop);
+      expect(harness.scrollTop).toBe(1_560);
+
+      await act(async () => {
+        secondPageSlotHeight = 85;
+        secondPageResize!(
+          [] as unknown as ResizeObserverEntry[],
+          {} as ResizeObserver,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(anchorSlot.getBoundingClientRect().top).toBe(anchorTop);
+      expect(harness.scrollTop).toBe(1_600);
+
+      await act(async () => {
+        firstPageSlotHeight = 95;
+        secondPageSlotHeight = 90;
+        firstPageResize!(
+          [] as unknown as ResizeObserverEntry[],
+          {} as ResizeObserver,
+        );
+        secondPageResize!(
+          [] as unknown as ResizeObserverEntry[],
+          {} as ResizeObserver,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(anchorSlot.getBoundingClientRect().top).toBe(anchorTop);
+      expect(harness.scrollTop).toBe(1_680);
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("adopts physically visible adjacent page measurements before the deferred layout timer", async () => {
     vi.useFakeTimers();
     const messages = makeTextMessages(16);

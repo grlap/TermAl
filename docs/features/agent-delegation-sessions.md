@@ -89,7 +89,8 @@ parallel work a durable application feature:
 
 - **Cross-agent fan-out**: a parent can ask Claude, Codex, Cursor, and Gemini to
   inspect the same work independently, instead of being limited to one
-  provider's internal helper model.
+  provider's internal helper model. Claude and Codex can use reviewer mode;
+  ACP agents participate through explorer mode.
 - **Durable child sessions**: delegated work is persisted as normal TermAl
   sessions with openable transcripts, lifecycle state, cancellation, and result
   packets.
@@ -276,6 +277,11 @@ fields. TermAl rejects `mode: reviewer` for those ACP adapters before child
 creation instead of guessing from names or leaving a headless child blocked on
 approval. ACP agents remain available in `mode: explorer` where the requested
 write policy is supported.
+
+The composer makes this boundary visible. Claude and Codex preselect Reviewer.
+Cursor and Gemini preselect Explorer and keep Reviewer visible but disabled with
+an explanation. OpenCode also preselects Explorer and uses an isolated worktree,
+because its delegated children do not support the shared read-only policy.
 
 The packet is a summary for resumption, not a replacement for the child
 transcript. Structured review submissions accept only terminal command status
@@ -1419,7 +1425,8 @@ Files Inspected:
 ## UI Placement
 
 V1 can be minimal:
-- composer "Delegate" action that spawns a read-only child from the current draft
+- composer delegation mode selector plus a "Delegate · Reviewer/Explorer"
+  action; unsupported reviewer mode remains visible with an explanation
 - parent transcript delegation card
 - child session opens as an ordinary tab
 - session header shows parent link

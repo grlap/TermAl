@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
-import { ApiRequestError } from "./api";
+import { ApiRequestError, type CreateDelegationRequest } from "./api";
 import type { SpawnDelegationTransportFailurePacket } from "./delegation-error-packets";
 import {
   cancelDelegationCommand,
+  COMPOSER_REVIEWER_UNAVAILABLE_MESSAGE,
   createComposerDelegationRequest,
   createDelegationCommands,
   DELEGATION_COMPOSER_TITLE_MAX_CHARS,
@@ -382,6 +383,50 @@ describe("delegation command surface", () => {
       mode: "explorer",
       writePolicy: { kind: "readOnly" },
     });
+  });
+
+  it.each([
+    ["Cursor", { kind: "readOnly" }],
+    ["Gemini", { kind: "readOnly" }],
+    ["OpenCode", { kind: "isolatedWorktree", ownedPaths: [] }],
+  ] satisfies Array<
+    [
+      Session["agent"],
+      NonNullable<CreateDelegationRequest["writePolicy"]>,
+    ]
+  >)("defaults %s composer delegations to explorer mode", (agent, writePolicy) => {
+    expect(
+      createComposerDelegationRequest(
+        makeSession({ agent }),
+        "Inspect the current implementation.",
+      ),
+    ).toMatchObject({
+      agent,
+      mode: "explorer",
+      writePolicy,
+    });
+  });
+
+  it("rejects explicit reviewer mode for ACP composer delegations", () => {
+    const cursorSession = makeSession({ agent: "Cursor" });
+
+    expect(
+      resolveComposerDelegationAvailability(
+        cursorSession,
+        { remoteId: "local" },
+        "reviewer",
+      ),
+    ).toEqual({
+      outcome: "error",
+      message: COMPOSER_REVIEWER_UNAVAILABLE_MESSAGE,
+    });
+    expect(
+      resolveComposerDelegationAvailability(
+        cursorSession,
+        { remoteId: "local" },
+        "explorer",
+      ),
+    ).toEqual({ outcome: "available" });
   });
 
   it.each([

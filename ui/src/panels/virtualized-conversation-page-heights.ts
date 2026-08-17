@@ -190,7 +190,7 @@ export function useVirtualizedConversationPageHeightChange({
         !isScrollContainerNearBottom(node))
     ) {
       const correction =
-        anchorOffsetDelta !== null && Math.abs(anchorOffsetDelta) >= 1
+        anchorOffsetDelta !== null
           ? anchorOffsetDelta
           : pageIndex < latestVisiblePageRange.startIndex &&
               Math.abs(layoutHeightDelta) >= 1
@@ -201,6 +201,12 @@ export function useVirtualizedConversationPageHeightChange({
           node,
           Math.max(node.scrollTop + correction, 0),
         );
+        // ResizeObserver can report multiple page refinements in one delivery.
+        // The matching native scroll event is queued only after this callback,
+        // so keep the synchronous reference aligned with our anchor write.
+        // Otherwise the first correction makes the second page look like an
+        // unrelated scroll and leaves a small uncompensated viewport shift.
+        lastNativeScrollTopRef.current = node.scrollTop;
       }
     }
     const isVisiblePage =

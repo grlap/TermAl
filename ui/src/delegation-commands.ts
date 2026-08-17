@@ -75,6 +75,11 @@ const UNSAFE_TRANSPORT_ID_PATTERN = /[/?#\u0000-\u001f\u007f]/u;
 const DELEGATION_COMPOSER_FALLBACK_TITLE = "Delegated review";
 const DELEGATION_COMPOSER_TITLE_ELLIPSIS = "...";
 
+export type ComposerDelegationMode = "reviewer" | "explorer";
+
+export const COMPOSER_REVIEWER_UNAVAILABLE_MESSAGE =
+  "Reviewer requires Claude or Codex. Select Explorer instead.";
+
 export type CreateComposerDelegationOptions = {
   title?: string;
   mode?: CreateDelegationRequest["mode"];
@@ -290,9 +295,10 @@ export function createComposerDelegationRequest(
   prompt: string,
   options: CreateComposerDelegationOptions = {},
 ): CreateDelegationRequest {
-  // The composer Delegate action defaults to read-only reviewer mode. Resolved
-  // commands can override mode/write policy when the backend provides explicit
-  // delegation defaults.
+  // Claude and Codex default to reviewer mode. ACP parents visibly default to
+  // explorer because reviewer result submission requires an authenticated MCP
+  // identity those adapters do not expose. OpenCode explorers also require an
+  // isolated worktree rather than the shared read-only workspace.
   // Other delegation entry points should add their own builder instead of
   // treating this composer default as a generic request factory.
   return {
@@ -300,9 +306,29 @@ export function createComposerDelegationRequest(
     prompt,
     agent: parentSession.agent,
     model: options.model ?? parentSession.model,
-    mode: options.mode ?? "reviewer",
-    writePolicy: options.writePolicy ?? { kind: "readOnly" },
+    mode: options.mode ?? defaultComposerDelegationMode(parentSession.agent),
+    writePolicy:
+      options.writePolicy ??
+      defaultComposerDelegationWritePolicy(parentSession.agent),
   };
+}
+
+export function supportsComposerReviewer(agent: Session["agent"]): boolean {
+  return agent === "Claude" || agent === "Codex";
+}
+
+export function defaultComposerDelegationMode(
+  agent: Session["agent"],
+): ComposerDelegationMode {
+  return supportsComposerReviewer(agent) ? "reviewer" : "explorer";
+}
+
+export function defaultComposerDelegationWritePolicy(
+  agent: Session["agent"],
+): NonNullable<CreateDelegationRequest["writePolicy"]> {
+  return agent === "OpenCode"
+    ? { kind: "isolatedWorktree", ownedPaths: [] }
+    : { kind: "readOnly" };
 }
 
 export type ComposerDelegationAvailability =
@@ -312,6 +338,7 @@ export type ComposerDelegationAvailability =
 export function resolveComposerDelegationAvailability(
   parentSession: Session | null | undefined,
   parentProject: Pick<Project, "remoteId"> | null | undefined,
+  requestedMode?: CreateDelegationRequest["mode"],
 ): ComposerDelegationAvailability {
   if (!parentSession) {
     return {
@@ -329,6 +356,16 @@ export function resolveComposerDelegationAvailability(
     return {
       outcome: "error",
       message: "Delegations are available only for local sessions.",
+    };
+  }
+  if (
+    (requestedMode ?? defaultComposerDelegationMode(parentSession.agent)) ===
+      "reviewer" &&
+    !supportsComposerReviewer(parentSession.agent)
+  ) {
+    return {
+      outcome: "error",
+      message: COMPOSER_REVIEWER_UNAVAILABLE_MESSAGE,
     };
   }
   return { outcome: "available" };

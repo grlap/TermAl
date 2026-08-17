@@ -787,6 +787,7 @@ export function SessionPaneView({
       const availability = resolveComposerDelegationAvailability(
         parentSession,
         parentProject,
+        options?.mode,
       );
       if (availability.outcome === "error") {
         onComposerError(availability.message);
