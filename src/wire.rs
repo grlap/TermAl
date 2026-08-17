@@ -300,6 +300,12 @@ impl Agent {
             _ => None,
         }
     }
+
+    /// Returns whether the adapter can authenticate the MCP tool that submits
+    /// the authoritative result for a delegated reviewer.
+    fn supports_structured_review_results(self) -> bool {
+        matches!(self, Self::Codex | Self::Claude)
+    }
 }
 
 /// Represents project.

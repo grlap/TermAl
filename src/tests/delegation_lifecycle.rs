@@ -430,12 +430,12 @@ fn stale_busy_delegation_child_without_runtime_uses_agent_name_in_summary() {
         .create_read_only_delegation(
             &parent_session_id,
             CreateDelegationRequest {
-                prompt: "Review until a Cursor runtime disappears.".to_owned(),
+                prompt: "Inspect until a Cursor runtime disappears.".to_owned(),
                 title: Some("Stale Cursor Runtime Review".to_owned()),
                 cwd: None,
                 agent: Some(Agent::Cursor),
                 model: None,
-                mode: Some(DelegationMode::Reviewer),
+                mode: Some(DelegationMode::Explorer),
                 write_policy: Some(DelegationWritePolicy::ReadOnly),
             },
         )

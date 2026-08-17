@@ -267,6 +267,16 @@ missing, the review result fails closed as unavailable and includes an explicit
 older persisted delegations that predate the required structured protocol retain
 the versioned prose parser as a legacy fallback.
 
+New reviewer delegations currently support Claude and Codex. Their native
+permission protocols let TermAl authenticate the injected MCP server/tool before
+granting the narrow result-submission exception. ACP v1
+`session/request_permission` does not expose a portable authenticated MCP tool
+identity, and Cursor, Gemini, and OpenCode emit incompatible presentation-only
+fields. TermAl rejects `mode: reviewer` for those ACP adapters before child
+creation instead of guessing from names or leaving a headless child blocked on
+approval. ACP agents remain available in `mode: explorer` where the requested
+write policy is supported.
+
 The packet is a summary for resumption, not a replacement for the child
 transcript. Structured review submissions accept only terminal command status
 labels: `success` or `error`.
@@ -888,7 +898,7 @@ Agent integration hooks:
   back to a backend-specific generated local config from the same descriptor.
 - Claude sessions: pass the bridge through Claude's `--mcp-config` process
   launch/resume path.
-- All agents: if the bridge cannot be configured, commands that require
+- Supported reviewer agents: if the bridge cannot be configured, commands that require
   delegated review must fail fast instead of silently falling back to raw HTTP,
   shell polling, Task agents, or Codex platform subagents.
 
@@ -1316,6 +1326,9 @@ be explicit about which guarantees are enforced and which are advisory.
   `termal_submit_review_result`. Agent adapters map their native protocol onto
   the same capability check, while the backend independently revalidates the
   live reviewer link, schema, routing, and idempotency before any mailbox append.
+  Claude and Codex currently provide the authenticated permission identity this
+  requires. ACP reviewer creation fails before child state exists until ACP has
+  an equivalent tool-origin contract.
 - While the read-only delegation is running, TermAl also blocks local
   TermAl-mediated writes from parent or sibling sessions that target the same
   project/workdir scope. This fail-closed project lock prevents bypassing a

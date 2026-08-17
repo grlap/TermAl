@@ -19,7 +19,7 @@
 use super::*;
 
 #[test]
-fn acp_reviewer_allows_authorized_delegation_control_plane_submission_in_plan_mode() {
+fn acp_permission_does_not_infer_control_plane_identity_from_a_tool_name() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);
     let child_session_id = {
@@ -92,14 +92,14 @@ fn acp_reviewer_allows_authorized_delegation_control_plane_submission_in_plan_mo
         &mut recorder,
         AcpAgent::Cursor,
     )
-    .expect("control-plane permission should be handled");
+    .expect("ACP permission should be handled by the ordinary plan policy");
     let response = input_rx
         .recv_timeout(Duration::from_secs(1))
-        .expect("ACP reviewer should receive automatic permission response");
+        .expect("plan mode should reject an ACP permission without authenticated identity");
     assert!(matches!(
         response,
         AcpRuntimeCommand::JsonRpcMessage(message)
-            if message["result"]["outcome"]["optionId"] == "once"
+            if message["result"]["outcome"]["optionId"] == "reject"
     ));
     let _ = fs::remove_file(state.persistence_path.as_path());
 }

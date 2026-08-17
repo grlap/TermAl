@@ -329,6 +329,8 @@ fn running_read_only_delegation_index_entry(
 
 const OPENCODE_READ_ONLY_DELEGATION_ERROR: &str =
     "OpenCode delegations do not support writePolicy `readOnly`; use `isolatedWorktree` for bounded writable work";
+const ACP_REVIEWER_DELEGATION_ERROR: &str =
+    "Cursor, Gemini, and OpenCode reviewer delegations are unavailable because ACP permission requests do not provide an authenticated MCP tool identity; use Codex or Claude for reviewer mode, or use explorer mode with a write policy supported by the ACP agent";
 
 fn find_parent_delegation_index_locked(
     inner: &StateInner,
@@ -479,6 +481,9 @@ impl AppState {
         }
 
         let agent = request.agent.unwrap_or(parent_agent);
+        if mode == DelegationMode::Reviewer && !agent.supports_structured_review_results() {
+            return Err(ApiError::bad_request(ACP_REVIEWER_DELEGATION_ERROR));
+        }
         if agent == Agent::OpenCode
             && requested_write_policy == DelegationWritePolicy::ReadOnly
         {

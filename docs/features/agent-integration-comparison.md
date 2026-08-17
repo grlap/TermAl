@@ -43,8 +43,21 @@ the agent name alone.
 |---|---|---|---|---|
 | Mechanism | `control_request` and `control_response` | JSON-RPC server requests | Policy engine and confirmation bus | `session/request_permission` |
 | TermAl can intercept | Yes | Yes | No (stream-json) / Yes (ACP) | Yes |
+| Authenticated structured reviewer submit | Yes, qualified injected MCP tool identity | Yes, MCP-server-authenticated elicitation | No over ACP v1 | No over ACP v1 |
 | Persist decisions | Settings file | N/A | `auto-saved.toml` | Via `allow-always` option |
 | Safety checkers | Built-in | Sandbox model | Pluggable | Built-in |
+
+ACP v1 permission requests identify a tool call by `toolCallId` and a
+human-readable title, but do not carry a portable authenticated MCP server/tool
+identity. Current runtimes also diverge in their extensions: Cursor has emitted
+a flat `toolName`, Gemini emits the standard nested tool call without a name,
+and OpenCode uses its permission category as the title. TermAl therefore does
+not infer control-plane authority from any of those presentation fields.
+`mode: reviewer` is accepted only for Claude and Codex; Cursor, Gemini, and
+OpenCode can still use `mode: explorer` where their write policy is supported.
+This is a fail-fast protocol boundary, not an agent-name workaround: ACP
+reviewers can be enabled together when ACP exposes an authenticated tool-origin
+contract.
 
 ## Advanced features
 

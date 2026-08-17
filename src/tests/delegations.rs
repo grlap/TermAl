@@ -1390,6 +1390,60 @@ async fn delegation_routes_create_status_and_unavailable_result() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// ACP v1 permission requests do not carry a portable authenticated MCP tool
+// identity. Reviewer mode requires such an identity so the host can approve
+// only the structured-result submission and no unrelated tool. Reject ACP
+// reviewers before creating either child state or runtime resources.
+#[tokio::test]
+async fn acp_reviewer_delegations_are_rejected_before_child_creation() {
+    for agent in ["Cursor", "Gemini", "OpenCode"] {
+        let state = test_app_state();
+        let parent_session_id = test_session_id(&state, Agent::Codex);
+        let session_count_before = state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .sessions
+            .len();
+        let app = app_router(state.clone());
+        let body = serde_json::to_vec(&json!({
+            "prompt": "Review through ACP",
+            "title": format!("{agent} reviewer rejection"),
+            "agent": agent,
+            "mode": "reviewer",
+            "writePolicy": { "kind": "readOnly" }
+        }))
+        .expect("delegation request should serialize");
+
+        let (status, response): (StatusCode, ErrorResponse) = request_json(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{parent_session_id}/delegations"))
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "agent: {agent}");
+        assert_eq!(response.error, ACP_REVIEWER_DELEGATION_ERROR);
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(
+            inner.sessions.len(),
+            session_count_before,
+            "rejected {agent} reviewer must not create a child"
+        );
+        assert!(
+            inner.delegations.is_empty(),
+            "rejected {agent} reviewer must not create metadata"
+        );
+        drop(inner);
+
+        let _ = fs::remove_file(state.persistence_path.as_path());
+    }
+}
+
 // Pins R5 at the shared backend boundary used by both raw HTTP callers and
 // the TermAl MCP bridge. OpenCode cannot enforce a shared-worktree read-only
 // sandbox, so rejection must happen before a child session or runtime exists.
@@ -1408,7 +1462,7 @@ async fn opencode_read_only_delegation_is_rejected_before_child_creation() {
         "prompt": "Review with OpenCode",
         "title": "OpenCode read-only rejection",
         "agent": "OpenCode",
-        "mode": "reviewer",
+        "mode": "explorer",
         "writePolicy": { "kind": "readOnly" }
     }))
     .expect("delegation request should serialize");
@@ -1459,7 +1513,7 @@ async fn opencode_delegation_rejects_an_invalid_model_before_child_creation() {
         "prompt": "Review with OpenCode",
         "title": "OpenCode invalid model",
         "agent": "OpenCode",
-        "mode": "reviewer",
+        "mode": "explorer",
         "writePolicy": { "kind": "isolatedWorktree", "ownedPaths": [] },
         "model": "openai/gpt-5.4\u{7}malformed"
     }))
@@ -1533,7 +1587,7 @@ async fn opencode_delegation_normalizes_a_valid_model_on_the_child_record() {
         "prompt": "Review with OpenCode",
         "title": "OpenCode model normalization",
         "agent": "OpenCode",
-        "mode": "reviewer",
+        "mode": "explorer",
         "writePolicy": { "kind": "isolatedWorktree", "ownedPaths": [] },
         "model": "  openai/gpt-5.4  "
     }))
@@ -2171,7 +2225,7 @@ fn isolated_worktree_setup_failure_does_not_leave_worktree() {
             cwd: None,
             agent: Some(Agent::Cursor),
             model: None,
-            mode: Some(DelegationMode::Reviewer),
+            mode: Some(DelegationMode::Explorer),
             write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
                 owned_paths: vec!["README.md".to_owned()],
                 worktree_path: Some(worktree_root.to_string_lossy().into_owned()),

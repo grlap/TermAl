@@ -333,58 +333,29 @@ fn delegation_review_result_tool_advertises_bounded_control_plane_semantics() {
 }
 
 #[test]
-fn delegation_control_plane_tool_identity_is_shared_across_agent_protocols() {
+fn claude_control_plane_tool_identity_requires_the_injected_server_scope() {
     assert_eq!(
-        delegation_control_plane_capability_for_tool_name(
+        delegation_control_plane_capability_for_claude_tool_name(
             TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME
         ),
         Some(DelegationControlPlaneCapability::SubmitReviewResult)
     );
     assert_eq!(
-        delegation_control_plane_capability_for_acp_permission(&json!({
-            "toolName": "mcp__termal-delegation__termal_submit_review_result"
-        })),
-        Some(DelegationControlPlaneCapability::SubmitReviewResult)
-    );
-    assert_eq!(
-        delegation_control_plane_capability_for_acp_permission(&json!({
-            "toolCall": {
-                "toolName": TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME
-            }
-        })),
-        Some(DelegationControlPlaneCapability::SubmitReviewResult)
-    );
-    assert_eq!(
-        delegation_control_plane_capability_for_tool_name(
+        delegation_control_plane_capability_for_claude_tool_name(
             "mcp__termal_delegation__termal_submit_review_result"
         ),
         None,
         "a foreign server whose name resembles a normalized alias must not inherit approval"
     );
     assert_eq!(
-        delegation_control_plane_capability_for_acp_permission(&json!({
-            "toolName": "mcp__termal_delegation__termal_submit_review_result"
-        })),
-        None,
-        "ACP must accept only the identity emitted for TermAl's injected bridge"
-    );
-    assert_eq!(
-        delegation_control_plane_capability_for_tool_name(
+        delegation_control_plane_capability_for_claude_tool_name(
             TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME
         ),
         None,
         "an unscoped leaf name cannot authenticate the TermAl MCP server"
     );
     assert_eq!(
-        delegation_control_plane_capability_for_acp_permission(&json!({
-            "toolName": TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME,
-            "_meta": { "serverName": TERMAL_DELEGATION_MCP_SERVER_NAME }
-        })),
-        None,
-        "agent-supplied metadata cannot upgrade an unscoped tool name"
-    );
-    assert_eq!(
-        delegation_control_plane_capability_for_tool_name("termal_send_to_session"),
+        delegation_control_plane_capability_for_claude_tool_name("termal_send_to_session"),
         None
     );
 }

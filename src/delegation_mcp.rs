@@ -60,29 +60,18 @@ enum DelegationControlPlaneCapability {
     SubmitReviewResult,
 }
 
-fn delegation_control_plane_capability_for_tool_name(
+fn delegation_control_plane_capability_for_claude_tool_name(
     tool_name: &str,
 ) -> Option<DelegationControlPlaneCapability> {
-    // A bare MCP tool name does not identify its server. Claude and ACP may
-    // both have other configured tools with the same leaf name, so granting
-    // control-plane approval from that value alone would let an unrelated
-    // tool inherit the mailbox exception. Only adapter-qualified identities
-    // are accepted here; Codex uses the separate server-authenticated
-    // elicitation classifier below.
+    // A bare MCP tool name does not identify its server. Claude may have other
+    // configured tools with the same leaf name, so granting control-plane
+    // approval from that value alone would let an unrelated tool inherit the
+    // mailbox exception. Codex uses the separate server-authenticated
+    // elicitation classifier below. ACP reviewer mode is rejected at creation
+    // because ACP v1 permission requests do not carry a portable,
+    // authenticated MCP tool identity.
     (tool_name == TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME)
         .then_some(DelegationControlPlaneCapability::SubmitReviewResult)
-}
-
-fn delegation_control_plane_capability_for_acp_permission(
-    params: &Value,
-) -> Option<DelegationControlPlaneCapability> {
-    let tool_call = params.get("toolCall");
-    let tool_name = params
-        .get("toolName")
-        .and_then(Value::as_str)
-        .or_else(|| tool_call.and_then(|value| value.get("toolName")).and_then(Value::as_str))
-        .or_else(|| tool_call.and_then(|value| value.get("name")).and_then(Value::as_str))?;
-    delegation_control_plane_capability_for_tool_name(tool_name)
 }
 
 fn delegation_control_plane_capability_for_codex_elicitation(

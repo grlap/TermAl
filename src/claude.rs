@@ -69,7 +69,7 @@ fn classify_claude_control_request(
     }
 
     if delegation_control_plane_access
-        && delegation_control_plane_capability_for_tool_name(&request.tool_name).is_some()
+        && delegation_control_plane_capability_for_claude_tool_name(&request.tool_name).is_some()
     {
         return Ok(Some(ClaudeControlRequestAction::Respond(
             ClaudePermissionDecision::Allow {

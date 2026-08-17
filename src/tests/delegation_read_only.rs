@@ -1032,7 +1032,7 @@ fn read_only_cursor_delegation_uses_plan_mode() {
                 cwd: None,
                 agent: Some(Agent::Cursor),
                 model: None,
-                mode: Some(DelegationMode::Reviewer),
+                mode: Some(DelegationMode::Explorer),
                 write_policy: Some(DelegationWritePolicy::ReadOnly),
             },
         )

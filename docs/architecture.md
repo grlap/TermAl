@@ -44,6 +44,12 @@ submission contract is injected by TermAl for every reviewer-mode delegation,
 after repository-owned task text, so repositories do not need to modify their
 own review commands. Read-only policy remains a workspace boundary; this single
 child-owned result submission is an authenticated control-plane capability.
+Reviewer mode is currently limited to Claude and Codex because their native
+permission protocols expose an identity that TermAl can authenticate. ACP v1
+permission requests do not expose a portable authenticated MCP tool origin, so
+Cursor, Gemini, and OpenCode reviewer requests fail before child creation rather
+than relying on presentation-name heuristics; those agents remain available for
+explorer delegations where their write policy is supported.
 Malformed durable review artifacts are quarantined per submission attempt and
 reported as `reviewResultRecoveryError`; parent lifecycle endpoints continue
 through the normal fail-closed path rather than propagating recovery parse

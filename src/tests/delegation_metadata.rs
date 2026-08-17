@@ -541,7 +541,7 @@ fn delegation_metadata_size_errors_precede_setup_failure_injection() {
             cwd: None,
             agent: Some(Agent::Cursor),
             model: None,
-            mode: Some(DelegationMode::Reviewer),
+            mode: Some(DelegationMode::Explorer),
             write_policy: Some(DelegationWritePolicy::ReadOnly),
         },
     ) {
@@ -571,7 +571,7 @@ fn delegation_metadata_size_errors_precede_setup_failure_injection() {
             cwd: None,
             agent: Some(Agent::Cursor),
             model: Some(oversized_model),
-            mode: Some(DelegationMode::Reviewer),
+            mode: Some(DelegationMode::Explorer),
             write_policy: Some(DelegationWritePolicy::ReadOnly),
         },
     ) {
@@ -600,7 +600,7 @@ fn delegation_metadata_size_errors_precede_setup_failure_injection() {
             cwd: None,
             agent: Some(Agent::Cursor),
             model: None,
-            mode: Some(DelegationMode::Reviewer),
+            mode: Some(DelegationMode::Explorer),
             write_policy: Some(DelegationWritePolicy::ReadOnly),
         },
     ) {
