@@ -12,6 +12,21 @@ export type PaneScrollCommand =
   | { kind: "page"; direction: "up" | "down" }
   | { kind: "boundary"; direction: "up" | "down" };
 
+export function isThemeModeToggleShortcut(event: {
+  altKey: boolean;
+  ctrlKey: boolean;
+  key: string;
+  metaKey: boolean;
+  shiftKey: boolean;
+}): boolean {
+  return (
+    event.key.toLowerCase() === "l" &&
+    event.shiftKey &&
+    (event.metaKey || event.ctrlKey) &&
+    !event.altKey
+  );
+}
+
 export function shouldHandlePanePageKey(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return true;

@@ -12,8 +12,10 @@ This document describes the theme system that currently ships in TermAl.
 Implemented.
 
 TermAl separates color theme, chrome style, font size, editor font size, and UI
-density. These preferences are runtime switchable and persisted in
-`localStorage`.
+density. Color themes are selected as a light/dark pair. The Light, Dark, or
+Auto mode decides which member is active, and Auto follows
+`prefers-color-scheme` live. These preferences are runtime switchable and
+persisted in `localStorage` and the workspace layout.
 
 ## Theme assets
 
@@ -34,6 +36,9 @@ Current color themes:
 - Sea Glass
 - Terminal
 - Violet Night
+- Fjord
+- Amber Trace
+- Heather
 - Sunset Paper
 - Blueprint
 - Ember
@@ -58,7 +63,10 @@ The active preferences are stored under:
 
 | Preference | Storage key | Default |
 |------------|-------------|---------|
-| Color theme | `termal-ui-theme` | `warm-light` |
+| Active color theme compatibility key | `termal-ui-theme` | resolved member of the pair |
+| Light color theme | `termal-ui-theme-light` | `warm-light` |
+| Dark color theme | `termal-ui-theme-dark` | `dark` |
+| Theme mode | `termal-ui-theme-mode` | `auto` |
 | Chrome style | `termal-ui-style` | `theme-default` |
 | UI font size | `termal-ui-font-size` | `16` |
 | Editor font size | `termal-editor-font-size` | `13` |
@@ -70,7 +78,9 @@ The DOM application model is:
 <html data-theme="warm-light" data-ui-style="theme-default">
 ```
 
-Color themes set CSS variables such as `--paper`, `--ink`, `--line`,
+Each theme CSS file declares `color-scheme: light` or `color-scheme: dark`.
+The registry derives a theme's slot from that computed property instead of
+maintaining separate metadata. Color themes set CSS variables such as `--paper`, `--ink`, `--line`,
 `--panel`, `--signal-blue`, and Monaco-related colors. Chrome style files layer
 layout, border, radius, and typography treatments over the selected palette.
 
@@ -82,8 +92,13 @@ layout, border, radius, and typography treatments over the selected palette.
 - New chrome styles should be `.css` files plus one entry in `STYLES`.
 - Theme CSS should prefer existing semantic variables before introducing a new
   variable.
-- The selected theme and chrome style must not affect persisted backend state;
-  they are browser-local UI preferences.
+- The selected pair and mode are stored with the workspace layout, while the
+  local keys provide the cold-start fallback before workspace hydration.
+- `Cmd+Shift+L` (`Ctrl+Shift+L` outside macOS) and the shell button switch the
+  effective light/dark member without a reload. In Auto, a manual switch is a
+  session-only override until the user returns to Auto. Editor-local keymaps
+  take precedence when Monaco handles the same chord; the shell button remains
+  available in that context.
 - Monaco should continue to derive its colors from the active TermAl palette so
   source and diff views match the rest of the app.
 

@@ -1989,6 +1989,14 @@ enum WorkspaceControlPanelSide {
     Right,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum WorkspaceThemeMode {
+    Light,
+    Dark,
+    Auto,
+}
+
 /// Represents the workspace layout document.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1999,6 +2007,12 @@ struct WorkspaceLayoutDocument {
     control_panel_side: WorkspaceControlPanelSide,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     theme_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    light_theme_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dark_theme_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    theme_mode: Option<WorkspaceThemeMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     style_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2028,6 +2042,12 @@ struct WorkspaceLayoutSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     theme_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    light_theme_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dark_theme_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    theme_mode: Option<WorkspaceThemeMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     style_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     font_size_px: Option<u32>,
@@ -2051,6 +2071,12 @@ struct PutWorkspaceLayoutRequest {
     control_panel_side: WorkspaceControlPanelSide,
     #[serde(default)]
     theme_id: Option<String>,
+    #[serde(default)]
+    light_theme_id: Option<String>,
+    #[serde(default)]
+    dark_theme_id: Option<String>,
+    #[serde(default)]
+    theme_mode: Option<WorkspaceThemeMode>,
     #[serde(default)]
     style_id: Option<String>,
     #[serde(default)]

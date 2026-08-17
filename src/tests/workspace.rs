@@ -46,6 +46,9 @@ async fn workspace_layout_routes_round_trip_put_get_and_list() {
     let initial_body = serde_json::to_vec(&json!({
         "controlPanelSide": "left",
         "themeId": "terminal",
+        "lightThemeId": "warm-light",
+        "darkThemeId": "terminal",
+        "themeMode": "dark",
         "styleId": "style-terminal",
         "fontSizePx": 14,
         "editorFontSizePx": 15,
@@ -73,6 +76,18 @@ async fn workspace_layout_routes_round_trip_put_get_and_list() {
     );
     assert_eq!(create_response.layout.theme_id.as_deref(), Some("terminal"));
     assert_eq!(
+        create_response.layout.light_theme_id.as_deref(),
+        Some("warm-light")
+    );
+    assert_eq!(
+        create_response.layout.dark_theme_id.as_deref(),
+        Some("terminal")
+    );
+    assert_eq!(
+        create_response.layout.theme_mode,
+        Some(WorkspaceThemeMode::Dark)
+    );
+    assert_eq!(
         create_response.layout.style_id.as_deref(),
         Some("style-terminal")
     );
@@ -95,6 +110,9 @@ async fn workspace_layout_routes_round_trip_put_get_and_list() {
     let update_body = serde_json::to_vec(&json!({
         "controlPanelSide": "right",
         "themeId": "frost",
+        "lightThemeId": "frost",
+        "darkThemeId": "fjord",
+        "themeMode": "auto",
         "styleId": "style-editorial",
         "fontSizePx": 16,
         "editorFontSizePx": 17,
@@ -121,6 +139,18 @@ async fn workspace_layout_routes_round_trip_put_get_and_list() {
         WorkspaceControlPanelSide::Right
     );
     assert_eq!(update_response.layout.theme_id.as_deref(), Some("frost"));
+    assert_eq!(
+        update_response.layout.light_theme_id.as_deref(),
+        Some("frost")
+    );
+    assert_eq!(
+        update_response.layout.dark_theme_id.as_deref(),
+        Some("fjord")
+    );
+    assert_eq!(
+        update_response.layout.theme_mode,
+        Some(WorkspaceThemeMode::Auto)
+    );
     assert_eq!(
         update_response.layout.style_id.as_deref(),
         Some("style-editorial")
@@ -149,6 +179,12 @@ async fn workspace_layout_routes_round_trip_put_get_and_list() {
         WorkspaceControlPanelSide::Right
     );
     assert_eq!(get_response.layout.theme_id.as_deref(), Some("frost"));
+    assert_eq!(get_response.layout.light_theme_id.as_deref(), Some("frost"));
+    assert_eq!(get_response.layout.dark_theme_id.as_deref(), Some("fjord"));
+    assert_eq!(
+        get_response.layout.theme_mode,
+        Some(WorkspaceThemeMode::Auto)
+    );
     assert_eq!(
         get_response.layout.style_id.as_deref(),
         Some("style-editorial")
@@ -180,6 +216,9 @@ async fn workspace_layout_routes_round_trip_put_get_and_list() {
     assert_eq!(summary.revision, 2);
     assert_eq!(summary.control_panel_side, WorkspaceControlPanelSide::Right);
     assert_eq!(summary.theme_id.as_deref(), Some("frost"));
+    assert_eq!(summary.light_theme_id.as_deref(), Some("frost"));
+    assert_eq!(summary.dark_theme_id.as_deref(), Some("fjord"));
+    assert_eq!(summary.theme_mode, Some(WorkspaceThemeMode::Auto));
     assert_eq!(summary.style_id.as_deref(), Some("style-editorial"));
     assert_eq!(summary.font_size_px, Some(16));
     assert_eq!(summary.editor_font_size_px, Some(17));
@@ -466,6 +505,9 @@ fn updating_existing_workspace_layout_advances_global_revision_and_publishes_sta
             PutWorkspaceLayoutRequest {
                 control_panel_side: WorkspaceControlPanelSide::Left,
                 theme_id: None,
+                light_theme_id: None,
+                dark_theme_id: None,
+                theme_mode: None,
                 style_id: None,
                 font_size_px: None,
                 editor_font_size_px: None,
@@ -483,6 +525,9 @@ fn updating_existing_workspace_layout_advances_global_revision_and_publishes_sta
             PutWorkspaceLayoutRequest {
                 control_panel_side: WorkspaceControlPanelSide::Right,
                 theme_id: Some("ink".to_owned()),
+                light_theme_id: Some("warm-light".to_owned()),
+                dark_theme_id: Some("dark".to_owned()),
+                theme_mode: Some(WorkspaceThemeMode::Auto),
                 style_id: None,
                 font_size_px: None,
                 editor_font_size_px: None,

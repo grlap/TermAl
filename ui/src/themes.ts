@@ -1,4 +1,7 @@
 export const THEME_STORAGE_KEY = "termal-ui-theme";
+export const LIGHT_THEME_STORAGE_KEY = "termal-ui-theme-light";
+export const DARK_THEME_STORAGE_KEY = "termal-ui-theme-dark";
+export const THEME_MODE_STORAGE_KEY = "termal-ui-theme-mode";
 export const STYLE_STORAGE_KEY = "termal-ui-style";
 export const MARKDOWN_THEME_STORAGE_KEY = "termal-markdown-theme";
 export const MARKDOWN_STYLE_STORAGE_KEY = "termal-markdown-style";
@@ -131,6 +134,24 @@ export const THEMES = [
     swatches: ["#151528", "#c18cff", "#7da5ff"],
   },
   {
+    id: "fjord",
+    name: "Fjord",
+    description: "Calm nordic slate with desaturated steel-blue and sea-green accents.",
+    swatches: ["#171c22", "#7fa6c8", "#79b8a0"],
+  },
+  {
+    id: "amber-trace",
+    name: "Amber Trace",
+    description: "Warm amber phosphor on near-black — the classic CRT beside Terminal's green.",
+    swatches: ["#161006", "#ffc96b", "#ffb04d"],
+  },
+  {
+    id: "heather",
+    name: "Heather",
+    description: "Light lavender-grey with muted violet accents — Violet Night's daylight pair.",
+    swatches: ["#f4f1f8", "#6f5fb0", "#a668a8"],
+  },
+  {
     id: "sunset-paper",
     name: "Sunset Paper",
     description: "Apricot paper, terracotta signals, and a mellow dusk glow.",
@@ -164,7 +185,18 @@ export const THEMES = [
 
 export type ThemeId = (typeof THEMES)[number]["id"];
 
+export type ThemeKind = "light" | "dark";
+export type ThemeMode = ThemeKind | "auto";
+export type ThemePreferences = {
+  lightThemeId: ThemeId;
+  darkThemeId: ThemeId;
+  themeMode: ThemeMode;
+};
+
 export const DEFAULT_THEME_ID: ThemeId = "warm-light";
+export const DEFAULT_LIGHT_THEME_ID: ThemeId = "warm-light";
+export const DEFAULT_DARK_THEME_ID: ThemeId = "dark";
+export const DEFAULT_THEME_MODE: ThemeMode = "auto";
 
 // Markdown theme / Markdown style are two axes that apply specifically
 // to rendered-Markdown surfaces (message cards, rendered diff preview,
@@ -337,6 +369,122 @@ export function isThemeId(value: string | null | undefined): value is ThemeId {
   return THEMES.some((theme) => theme.id === value);
 }
 
+export function isThemeMode(
+  value: string | null | undefined,
+): value is ThemeMode {
+  return value === "light" || value === "dark" || value === "auto";
+}
+
+const themeKindCache = new Map<ThemeId, ThemeKind>();
+
+function themeKindFromSwatch(themeId: ThemeId): ThemeKind {
+  const theme = THEMES.find((candidate) => candidate.id === themeId);
+  return theme && isDarkHexColor(theme.swatches[0]) ? "dark" : "light";
+}
+
+/**
+ * Refreshes the CSS-derived theme-kind registry after theme stylesheets load.
+ *
+ * Keeping the DOM probe at application bootstrap makes `getThemeKind` a pure
+ * read during React rendering. Tests may refresh after installing a synthetic
+ * stylesheet, and non-rendering environments use the deterministic swatch
+ * fallback without maintaining a second manual light/dark registry.
+ */
+export function refreshThemeKindCacheFromDocument(): void {
+  themeKindCache.clear();
+  if (typeof document === "undefined" || typeof getComputedStyle !== "function") {
+    return;
+  }
+
+  const probes = THEMES.map((theme) => {
+    const probe = document.createElement("span");
+    probe.dataset.theme = theme.id;
+    probe.hidden = true;
+    return [theme.id, probe] as const;
+  });
+  const probeContainer = document.createElement("div");
+  probeContainer.hidden = true;
+  probeContainer.append(...probes.map(([, probe]) => probe));
+  document.documentElement.append(probeContainer);
+
+  try {
+    for (const [themeId, probe] of probes) {
+      const colorScheme = getComputedStyle(probe).colorScheme
+        .trim()
+        .toLowerCase()
+        .split(/\s+/);
+      if (colorScheme.includes("dark") || colorScheme.includes("light")) {
+        themeKindCache.set(
+          themeId,
+          colorScheme.includes("dark") ? "dark" : "light",
+        );
+      }
+    }
+  } finally {
+    probeContainer.remove();
+  }
+}
+
+export function getThemeKind(themeId: ThemeId): ThemeKind {
+  return themeKindCache.get(themeId) ?? themeKindFromSwatch(themeId);
+}
+
+export function getSystemThemeKind(): ThemeKind {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return "light";
+  }
+
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
+export function subscribeToSystemThemeKind(
+  listener: (kind: ThemeKind) => void,
+): () => void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return () => {};
+  }
+
+  const query = window.matchMedia("(prefers-color-scheme: dark)");
+  const handleChange = (event: MediaQueryListEvent) => {
+    listener(event.matches ? "dark" : "light");
+  };
+
+  if (typeof query.addEventListener === "function") {
+    query.addEventListener("change", handleChange);
+    return () => query.removeEventListener("change", handleChange);
+  }
+
+  query.addListener(handleChange);
+  return () => query.removeListener(handleChange);
+}
+
+export function resolveEffectiveThemeKind(
+  themeMode: ThemeMode,
+  systemThemeKind: ThemeKind,
+  sessionOverride: ThemeKind | null,
+): ThemeKind {
+  if (themeMode === "auto") {
+    return sessionOverride ?? systemThemeKind;
+  }
+  return themeMode;
+}
+
+export function resolveEffectiveThemeId(
+  preferences: ThemePreferences,
+  systemThemeKind: ThemeKind,
+  sessionOverride: ThemeKind | null,
+): ThemeId {
+  return resolveEffectiveThemeKind(
+    preferences.themeMode,
+    systemThemeKind,
+    sessionOverride,
+  ) === "dark"
+    ? preferences.darkThemeId
+    : preferences.lightThemeId;
+}
+
 export function isMarkdownThemeId(
   value: string | null | undefined,
 ): value is MarkdownThemeId {
@@ -374,6 +522,80 @@ export function getStoredThemePreference(): ThemeId {
   return isThemeId(storedTheme) ? storedTheme : DEFAULT_THEME_ID;
 }
 
+export function getStoredThemePreferences(
+  workspacePreferences: Partial<{
+    darkThemeId: unknown;
+    lightThemeId: unknown;
+    themeId: unknown;
+    themeMode: unknown;
+  }> = {},
+): ThemePreferences {
+  const storedLightTheme = readStoredThemeForKind(
+    LIGHT_THEME_STORAGE_KEY,
+    "light",
+  );
+  const storedDarkTheme = readStoredThemeForKind(
+    DARK_THEME_STORAGE_KEY,
+    "dark",
+  );
+  const storedThemeMode = readStoredThemeMode();
+  const workspaceHasPairPreference =
+    workspacePreferences.lightThemeId !== undefined ||
+    workspacePreferences.darkThemeId !== undefined ||
+    workspacePreferences.themeMode !== undefined;
+  const workspaceThemeId =
+    typeof workspacePreferences.themeId === "string"
+      ? workspacePreferences.themeId
+      : null;
+  const workspaceLegacyTheme: ThemeId | null = isThemeId(workspaceThemeId)
+    ? workspaceThemeId
+    : null;
+  const storedLegacyTheme =
+    typeof window === "undefined"
+      ? null
+      : window.localStorage.getItem(THEME_STORAGE_KEY);
+  const legacyTheme = workspaceLegacyTheme ??
+    (isThemeId(storedLegacyTheme) ? storedLegacyTheme : null);
+
+  let lightThemeId = themeForKindOrFallback(
+    workspacePreferences.lightThemeId,
+    "light",
+    storedLightTheme ?? DEFAULT_LIGHT_THEME_ID,
+  );
+  let darkThemeId = themeForKindOrFallback(
+    workspacePreferences.darkThemeId,
+    "dark",
+    storedDarkTheme ?? DEFAULT_DARK_THEME_ID,
+  );
+  const workspaceThemeMode =
+    typeof workspacePreferences.themeMode === "string"
+      ? workspacePreferences.themeMode
+      : null;
+  let themeMode: ThemeMode = isThemeMode(workspaceThemeMode)
+    ? workspaceThemeMode
+    : (storedThemeMode ?? DEFAULT_THEME_MODE);
+
+  const hasStoredPairPreference =
+    storedLightTheme !== null ||
+    storedDarkTheme !== null ||
+    storedThemeMode !== null;
+  if (
+    legacyTheme &&
+    !workspaceHasPairPreference &&
+    (!hasStoredPairPreference || workspaceLegacyTheme !== null)
+  ) {
+    const legacyKind = getThemeKind(legacyTheme);
+    if (legacyKind === "dark") {
+      darkThemeId = legacyTheme;
+    } else {
+      lightThemeId = legacyTheme;
+    }
+    themeMode = legacyKind;
+  }
+
+  return { lightThemeId, darkThemeId, themeMode };
+}
+
 export function getStoredStylePreference(): StyleId {
   if (typeof window === "undefined") {
     return DEFAULT_STYLE_ID;
@@ -391,6 +613,22 @@ export function persistThemePreference(themeId: ThemeId) {
   window.localStorage.setItem(THEME_STORAGE_KEY, themeId);
 }
 
+export function persistThemePreferences(preferences: ThemePreferences) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(
+    LIGHT_THEME_STORAGE_KEY,
+    preferences.lightThemeId,
+  );
+  window.localStorage.setItem(
+    DARK_THEME_STORAGE_KEY,
+    preferences.darkThemeId,
+  );
+  window.localStorage.setItem(THEME_MODE_STORAGE_KEY, preferences.themeMode);
+}
+
 export function persistStylePreference(styleId: StyleId) {
   if (typeof window === "undefined") {
     return;
@@ -405,6 +643,51 @@ export function applyThemePreference(themeId: ThemeId) {
   }
 
   document.documentElement.dataset.theme = themeId;
+}
+
+function readStoredThemeForKind(
+  storageKey: string,
+  kind: ThemeKind,
+): ThemeId | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const stored = window.localStorage.getItem(storageKey);
+  return isThemeId(stored) && getThemeKind(stored) === kind ? stored : null;
+}
+
+function readStoredThemeMode(): ThemeMode | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const stored = window.localStorage.getItem(THEME_MODE_STORAGE_KEY);
+  return isThemeMode(stored) ? stored : null;
+}
+
+function themeForKindOrFallback(
+  value: unknown,
+  kind: ThemeKind,
+  fallback: ThemeId,
+): ThemeId {
+  return typeof value === "string" &&
+    isThemeId(value) &&
+    getThemeKind(value) === kind
+    ? value
+    : fallback;
+}
+
+function isDarkHexColor(color: string): boolean {
+  const normalized = color.trim().replace(/^#/, "");
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) {
+    return false;
+  }
+
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  return (red * 299 + green * 587 + blue * 114) / 1000 < 128;
 }
 
 export function applyStylePreference(styleId: StyleId) {

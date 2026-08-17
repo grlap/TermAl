@@ -8,6 +8,9 @@ import {
   DEFAULT_MARKDOWN_STYLE_ID,
   DEFAULT_MARKDOWN_THEME_ID,
   DEFAULT_STYLE_ID,
+  DEFAULT_DARK_THEME_ID,
+  DEFAULT_LIGHT_THEME_ID,
+  DEFAULT_THEME_MODE,
   DEFAULT_THEME_ID,
   DENSITY_STORAGE_KEY,
   DIAGRAM_LOOKS,
@@ -29,6 +32,9 @@ import {
   MIN_FONT_SIZE_PX,
   STYLES,
   STYLE_STORAGE_KEY,
+  DARK_THEME_STORAGE_KEY,
+  LIGHT_THEME_STORAGE_KEY,
+  THEME_MODE_STORAGE_KEY,
   THEME_STORAGE_KEY,
   THEMES,
   applyDensityPreference,
@@ -52,7 +58,10 @@ import {
   getStoredMarkdownStylePreference,
   getStoredMarkdownThemePreference,
   getStoredStylePreference,
+  getStoredThemePreferences,
   getStoredThemePreference,
+  getThemeKind,
+  refreshThemeKindCacheFromDocument,
   isDiagramLook,
   isDiagramPalette,
   isDiagramThemeOverrideMode,
@@ -69,7 +78,9 @@ import {
   persistMarkdownStylePreference,
   persistMarkdownThemePreference,
   persistStylePreference,
+  persistThemePreferences,
   persistThemePreference,
+  resolveEffectiveThemeId,
 } from "./themes";
 
 describe("theme helpers", () => {
@@ -97,6 +108,142 @@ describe("theme helpers", () => {
     persistThemePreference("terminal");
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("terminal");
     expect(getStoredThemePreference()).toBe("terminal");
+  });
+
+  it("migrates the legacy single theme into the matching pair slot", () => {
+    const style = document.createElement("style");
+    style.textContent = `
+      [data-theme="warm-light"] { color-scheme: light; }
+      [data-theme="terminal"] { color-scheme: dark; }
+    `;
+    document.head.append(style);
+    refreshThemeKindCacheFromDocument();
+    window.localStorage.setItem(THEME_STORAGE_KEY, "terminal");
+
+    expect(getStoredThemePreferences()).toEqual({
+      lightThemeId: DEFAULT_LIGHT_THEME_ID,
+      darkThemeId: "terminal",
+      themeMode: "dark",
+    });
+    expect(getThemeKind("terminal")).toBe("dark");
+
+    style.remove();
+    refreshThemeKindCacheFromDocument();
+  });
+
+  it("reads cached theme kinds without mutating the DOM during consumers", () => {
+    const computedStyleSpy = vi
+      .spyOn(globalThis, "getComputedStyle")
+      .mockImplementation((element) => ({
+        colorScheme:
+          (element as HTMLElement).dataset.theme === "warm-light"
+            ? "dark"
+            : "",
+      }) as CSSStyleDeclaration);
+
+    refreshThemeKindCacheFromDocument();
+    expect(getThemeKind("warm-light")).toBe("dark");
+    computedStyleSpy.mockClear();
+    const appendSpy = vi.spyOn(document.documentElement, "append");
+
+    expect(getThemeKind("warm-light")).toBe("dark");
+    expect(computedStyleSpy).not.toHaveBeenCalled();
+    expect(appendSpy).not.toHaveBeenCalled();
+
+    appendSpy.mockRestore();
+    computedStyleSpy.mockRestore();
+    refreshThemeKindCacheFromDocument();
+  });
+
+  it("lets a workspace legacy theme override the matching stored pair slot", () => {
+    persistThemePreferences({
+      lightThemeId: "heather",
+      darkThemeId: "fjord",
+      themeMode: "auto",
+    });
+
+    expect(getStoredThemePreferences({ themeId: "terminal" })).toEqual({
+      lightThemeId: "heather",
+      darkThemeId: "terminal",
+      themeMode: "dark",
+    });
+  });
+
+  it("prefers workspace pair preferences over a workspace legacy theme", () => {
+    expect(
+      getStoredThemePreferences({
+        lightThemeId: "heather",
+        darkThemeId: "fjord",
+        themeId: "terminal",
+        themeMode: "auto",
+      }),
+    ).toEqual({
+      lightThemeId: "heather",
+      darkThemeId: "fjord",
+      themeMode: "auto",
+    });
+  });
+
+  it("lets stored pair preferences suppress the local legacy theme", () => {
+    persistThemePreferences({
+      lightThemeId: "heather",
+      darkThemeId: "fjord",
+      themeMode: "auto",
+    });
+    window.localStorage.setItem(THEME_STORAGE_KEY, "terminal");
+
+    expect(getStoredThemePreferences()).toEqual({
+      lightThemeId: "heather",
+      darkThemeId: "fjord",
+      themeMode: "auto",
+    });
+  });
+
+  it("persists the theme pair and resolves the active theme from mode and system", () => {
+    persistThemePreferences({
+      lightThemeId: "heather",
+      darkThemeId: "fjord",
+      themeMode: "auto",
+    });
+
+    expect(window.localStorage.getItem(LIGHT_THEME_STORAGE_KEY)).toBe("heather");
+    expect(window.localStorage.getItem(DARK_THEME_STORAGE_KEY)).toBe("fjord");
+    expect(window.localStorage.getItem(THEME_MODE_STORAGE_KEY)).toBe("auto");
+    expect(getStoredThemePreferences()).toEqual({
+      lightThemeId: "heather",
+      darkThemeId: "fjord",
+      themeMode: "auto",
+    });
+    expect(
+      resolveEffectiveThemeId(
+        {
+          lightThemeId: "heather",
+          darkThemeId: "fjord",
+          themeMode: "auto",
+        },
+        "dark",
+        null,
+      ),
+    ).toBe("fjord");
+    expect(
+      resolveEffectiveThemeId(
+        {
+          lightThemeId: "heather",
+          darkThemeId: "fjord",
+          themeMode: "auto",
+        },
+        "dark",
+        "light",
+      ),
+    ).toBe("heather");
+  });
+
+  it("uses Auto for a fresh install with the default light and dark pair", () => {
+    expect(getStoredThemePreferences()).toEqual({
+      lightThemeId: DEFAULT_LIGHT_THEME_ID,
+      darkThemeId: DEFAULT_DARK_THEME_ID,
+      themeMode: DEFAULT_THEME_MODE,
+    });
   });
 
   it("reads and persists valid stored styles", () => {

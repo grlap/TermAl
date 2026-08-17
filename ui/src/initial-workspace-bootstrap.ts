@@ -4,7 +4,7 @@
 //   - `createInitialWorkspaceBootstrap` — the one-shot cold-start
 //     hydrator. Given a workspace view id, reads the saved
 //     workspace layout (`getStoredWorkspaceLayout`) plus every
-//     stored preference slot (theme, style, Markdown theme,
+//     stored preference slot (light/dark theme pair and mode, style, Markdown theme,
 //     Markdown style, diagram override mode / look / palette,
 //     font size, editor font size, density, control-panel side),
 //     then runs the result through `hydrateControlPanelLayout` so
@@ -38,14 +38,15 @@ import {
   getStoredMarkdownStylePreference,
   getStoredMarkdownThemePreference,
   getStoredStylePreference,
-  getStoredThemePreference,
+  getStoredThemePreferences,
+  getSystemThemeKind,
+  resolveEffectiveThemeId,
   type DiagramLook,
   type DiagramPalette,
   type DiagramThemeOverrideMode,
   type MarkdownStyleId,
   type MarkdownThemeId,
   type StyleId,
-  type ThemeId,
 } from "./themes";
 import {
   getStoredWorkspaceLayout,
@@ -56,7 +57,17 @@ export function createInitialWorkspaceBootstrap(workspaceViewId: string) {
   const storedLayout = getStoredWorkspaceLayout(workspaceViewId);
   const controlPanelSide: ControlPanelSide =
     storedLayout?.controlPanelSide ?? "left";
-  const themeId: ThemeId = storedLayout?.themeId ?? getStoredThemePreference();
+  const themePreferences = getStoredThemePreferences({
+    themeId: storedLayout?.themeId,
+    lightThemeId: storedLayout?.lightThemeId,
+    darkThemeId: storedLayout?.darkThemeId,
+    themeMode: storedLayout?.themeMode,
+  });
+  const themeId = resolveEffectiveThemeId(
+    themePreferences,
+    getSystemThemeKind(),
+    null,
+  );
   const styleId: StyleId = storedLayout?.styleId ?? getStoredStylePreference();
   const markdownThemeId: MarkdownThemeId =
     storedLayout?.markdownThemeId ?? getStoredMarkdownThemePreference();
@@ -86,6 +97,7 @@ export function createInitialWorkspaceBootstrap(workspaceViewId: string) {
   return {
     controlPanelSide,
     themeId,
+    ...themePreferences,
     styleId,
     markdownThemeId,
     markdownStyleId,

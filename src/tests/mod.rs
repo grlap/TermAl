@@ -52,6 +52,7 @@ pub use orchestrator::{
 };
 mod peer_messages;
 mod persist;
+mod persist_delta;
 mod project_digest;
 mod projects;
 mod remote;

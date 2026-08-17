@@ -566,7 +566,7 @@ describe("App preferences", () => {
       );
 
       expect(
-        screen.getByRole("radiogroup", { name: "UI theme" }),
+        screen.getByRole("group", { name: "UI themes" }),
       ).toBeInTheDocument();
       expect(
         screen.getByRole("radiogroup", { name: "UI style" }),
@@ -581,7 +581,7 @@ describe("App preferences", () => {
         screen.getByRole("heading", { level: 3, name: "Font sizes" }),
       ).toBeInTheDocument();
       expect(
-        screen.queryByRole("radiogroup", { name: "UI theme" }),
+        screen.queryByRole("group", { name: "UI themes" }),
       ).not.toBeInTheDocument();
       expect(
         screen.queryByRole("radiogroup", { name: "UI style" }),

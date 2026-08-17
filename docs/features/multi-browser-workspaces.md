@@ -123,6 +123,9 @@ Returns:
     "revision": 3,
     "updatedAt": "2026-03-28 10:24:11",
     "controlPanelSide": "left",
+    "lightThemeId": "warm-light",
+    "darkThemeId": "dark",
+    "themeMode": "auto",
     "workspace": { "...": "workspace document" }
   }
 }
@@ -142,6 +145,9 @@ Request:
 ```json
 {
   "controlPanelSide": "left",
+  "lightThemeId": "warm-light",
+  "darkThemeId": "dark",
+  "themeMode": "auto",
   "workspace": { "...": "workspace document" }
 }
 ```

@@ -231,6 +231,9 @@ export type WorkspaceLayoutDocument = {
   updatedAt: string;
   controlPanelSide: "left" | "right";
   themeId?: string;
+  lightThemeId?: string;
+  darkThemeId?: string;
+  themeMode?: "light" | "dark" | "auto";
   styleId?: string;
   markdownThemeId?: string;
   markdownStyleId?: string;
@@ -253,6 +256,9 @@ export type WorkspaceLayoutSummary = {
   updatedAt: string;
   controlPanelSide: "left" | "right";
   themeId?: string;
+  lightThemeId?: string;
+  darkThemeId?: string;
+  themeMode?: "light" | "dark" | "auto";
   styleId?: string;
   fontSizePx?: number;
   editorFontSizePx?: number;
@@ -679,6 +685,9 @@ export function saveWorkspaceLayout(
   payload: {
     controlPanelSide: "left" | "right";
     themeId?: string;
+    lightThemeId?: string;
+    darkThemeId?: string;
+    themeMode?: "light" | "dark" | "auto";
     styleId?: string;
     markdownThemeId?: string;
     markdownStyleId?: string;

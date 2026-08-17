@@ -108,6 +108,7 @@ import {
 } from "./remotes";
 import {
   ControlPanelConnectionIndicator,
+  ThemeModeToggle,
   WorkspaceSwitcher,
 } from "./workspace-shell-controls";
 import type { RuntimeAction } from "./runtime-action-button";
@@ -377,6 +378,16 @@ export default function App() {
   const {
     themeId,
     setThemeId,
+    lightThemeId,
+    setLightThemeId,
+    darkThemeId,
+    setDarkThemeId,
+    themeMode,
+    setThemeMode,
+    effectiveThemeKind,
+    themeSessionOverride,
+    toggleThemeKind,
+    returnToAuto,
     styleId,
     setStyleId,
     markdownThemeId,
@@ -774,6 +785,9 @@ export default function App() {
     setControlPanelSide,
     preferences: {
       themeId,
+      lightThemeId,
+      darkThemeId,
+      themeMode,
       styleId,
       markdownThemeId,
       markdownStyleId,
@@ -786,6 +800,9 @@ export default function App() {
     },
     setPreferences: {
       setThemeId,
+      setLightThemeId,
+      setDarkThemeId,
+      setThemeMode,
       setStyleId,
       setMarkdownThemeId,
       setMarkdownStyleId,
@@ -2037,20 +2054,29 @@ export default function App() {
 
   function renderControlPanelPaneBarActions(): JSX.Element {
     return (
-      <WorkspaceSwitcher
-        currentWorkspaceId={workspaceViewId}
-        deletingWorkspaceIds={deletingWorkspaceIds}
-        error={workspaceSwitcherError}
-        isLoading={isWorkspaceSwitcherLoading}
-        isOpen={isWorkspaceSwitcherOpen}
-        summaries={workspaceSummaries}
-        switcherRef={workspaceSwitcherRef}
-        onDeleteWorkspace={handleDeleteWorkspace}
-        onOpenNewWorkspaceHere={handleOpenNewWorkspaceHere}
-        onOpenNewWorkspaceWindow={handleOpenNewWorkspaceWindow}
-        onOpenWorkspace={handleOpenWorkspaceHere}
-        onToggle={handleWorkspaceSwitcherToggle}
-      />
+      <>
+        <ThemeModeToggle
+          effectiveThemeKind={effectiveThemeKind}
+          hasAutoOverride={
+            themeMode === "auto" && themeSessionOverride !== null
+          }
+          onToggle={toggleThemeKind}
+        />
+        <WorkspaceSwitcher
+          currentWorkspaceId={workspaceViewId}
+          deletingWorkspaceIds={deletingWorkspaceIds}
+          error={workspaceSwitcherError}
+          isLoading={isWorkspaceSwitcherLoading}
+          isOpen={isWorkspaceSwitcherOpen}
+          summaries={workspaceSummaries}
+          switcherRef={workspaceSwitcherRef}
+          onDeleteWorkspace={handleDeleteWorkspace}
+          onOpenNewWorkspaceHere={handleOpenNewWorkspaceHere}
+          onOpenNewWorkspaceWindow={handleOpenNewWorkspaceWindow}
+          onOpenWorkspace={handleOpenWorkspaceHere}
+          onToggle={handleWorkspaceSwitcherToggle}
+        />
+      </>
     );
   }
 
@@ -2301,8 +2327,14 @@ export default function App() {
         setSettingsTab={setSettingsTab}
         activeStyle={activeStyle}
         activeTheme={activeTheme}
+        activeThemeKind={effectiveThemeKind}
+        lightThemeId={lightThemeId}
+        darkThemeId={darkThemeId}
+        themeMode={themeMode}
+        themeSessionOverride={themeSessionOverride}
         styleId={styleId}
-        themeId={themeId}
+        returnToAuto={returnToAuto}
+        setThemeMode={setThemeMode}
         setStyleId={setStyleId}
         setThemeId={setThemeId}
         activeMarkdownTheme={activeMarkdownTheme}

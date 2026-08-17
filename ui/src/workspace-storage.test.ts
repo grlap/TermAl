@@ -374,6 +374,50 @@ describe("workspace storage", () => {
     });
   });
 
+  it("preserves the light/dark theme pair and mode", () => {
+    const raw = JSON.stringify({
+      controlPanelSide: "left",
+      lightThemeId: "heather",
+      darkThemeId: "fjord",
+      themeMode: "auto",
+      workspace: {
+        root: null,
+        panes: [],
+        activePaneId: null,
+      },
+    });
+
+    expect(parseStoredWorkspaceLayout(raw)).toMatchObject({
+      lightThemeId: "heather",
+      darkThemeId: "fjord",
+      themeMode: "auto",
+    });
+  });
+
+  it("rejects unknown theme ids and modes at the shared storage and server boundary", () => {
+    const baseLayout = {
+      controlPanelSide: "left",
+      workspace: {
+        root: null,
+        panes: [],
+        activePaneId: null,
+      },
+    };
+
+    for (const invalidPreference of [
+      { themeId: "missing-theme" },
+      { lightThemeId: "missing-light-theme" },
+      { darkThemeId: "missing-dark-theme" },
+      { themeMode: "sometimes" },
+    ]) {
+      expect(
+        parseStoredWorkspaceLayout(
+          JSON.stringify({ ...baseLayout, ...invalidPreference }),
+        ),
+      ).toBeNull();
+    }
+  });
+
   it("preserves current Mermaid diagram look preferences", () => {
     const raw = JSON.stringify({
       controlPanelSide: "left",

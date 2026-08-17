@@ -108,7 +108,7 @@ impl AppState {
     ///
     /// The session's `mutation_stamp` was already advanced by
     /// `session_mut_by_index` / `push_session` in the caller, so
-    /// `collect_persist_delta(watermark)` on the background thread
+    /// split-lock delta collection on the background thread
     /// picks this record up on the next tick and writes it via the
     /// cached `SqlitePersistConnectionCache`. The crash-before-
     /// persist window loses at most a just-created empty session
@@ -151,9 +151,9 @@ impl AppState {
     /// Persists internal locked.
     ///
     /// Sends a `PersistRequest::Delta` wake signal to the background
-    /// persist thread; the thread then locks `inner` briefly on its
-    /// own to collect the diff of sessions whose `mutation_stamp` is
-    /// past its internal watermark. This means `commit_locked` no
+    /// persist thread; the thread captures a lightweight plan and then
+    /// snapshots each changed record under a separate lock acquisition. This
+    /// means `commit_locked` no
     /// longer pays to clone `PersistedState::from_inner(inner)` under
     /// the state mutex on every mutation — for a visible-session list
     /// with long transcripts, that clone used to dominate the
@@ -203,7 +203,7 @@ impl AppState {
     /// Sends `PersistRequest::Shutdown` and joins the thread. The
     /// worker's loop drains every queued `Delta` (including any
     /// commits queued between the shutdown signal and the worker's
-    /// next iteration) and runs one final `collect_persist_delta` /
+    /// next iteration) and runs one final split-lock delta collection /
     /// `persist_delta_via_cache` pass before exiting. After `join()`
     /// returns this method performs one final synchronous full-state
     /// persist while holding `inner`, then flips `persist_worker_alive`

@@ -1,6 +1,42 @@
 import { describe, expect, it } from "vitest";
 
-import { resolvePaneScrollCommand, shouldHandlePanePageKey } from "./pane-keyboard";
+import {
+  isThemeModeToggleShortcut,
+  resolvePaneScrollCommand,
+  shouldHandlePanePageKey,
+} from "./pane-keyboard";
+
+describe("isThemeModeToggleShortcut", () => {
+  it("matches the primary-modifier Shift+L shortcut", () => {
+    expect(
+      isThemeModeToggleShortcut({
+        altKey: false,
+        ctrlKey: false,
+        key: "L",
+        metaKey: true,
+        shiftKey: true,
+      }),
+    ).toBe(true);
+    expect(
+      isThemeModeToggleShortcut({
+        altKey: false,
+        ctrlKey: true,
+        key: "l",
+        metaKey: false,
+        shiftKey: true,
+      }),
+    ).toBe(true);
+    expect(
+      isThemeModeToggleShortcut({
+        altKey: false,
+        ctrlKey: false,
+        key: "l",
+        metaKey: true,
+        shiftKey: false,
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("shouldHandlePanePageKey", () => {
   it("allows pane paging for non-editable targets", () => {

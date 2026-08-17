@@ -1,6 +1,39 @@
 import { useId, useMemo, useState, type RefObject } from "react";
 
 import type { WorkspaceLayoutSummary } from "./api";
+import { primaryModifierLabel } from "./app-utils";
+import type { ThemeKind } from "./themes";
+
+export function ThemeModeToggle({
+  effectiveThemeKind,
+  hasAutoOverride,
+  onToggle,
+}: {
+  effectiveThemeKind: ThemeKind;
+  hasAutoOverride: boolean;
+  onToggle: () => void;
+}) {
+  const nextKind = effectiveThemeKind === "dark" ? "light" : "dark";
+  const shortcut = `${primaryModifierLabel()}+Shift+L`;
+  const overrideCopy = hasAutoOverride
+    ? " Auto is overridden for this session; return to Auto in Themes settings."
+    : "";
+
+  return (
+    <button
+      className={`ghost-button theme-mode-toggle ${hasAutoOverride ? "overridden" : ""}`.trim()}
+      type="button"
+      aria-label={`Switch to ${nextKind} theme`}
+      title={`Switch to ${nextKind} theme (${shortcut}).${overrideCopy}`}
+      onClick={onToggle}
+    >
+      <span aria-hidden="true">{effectiveThemeKind === "dark" ? "☀︎" : "☾"}</span>
+      {hasAutoOverride ? (
+        <span className="theme-mode-toggle-override-dot" aria-hidden="true" />
+      ) : null}
+    </button>
+  );
+}
 
 export function WorkspaceSwitcher({
   currentWorkspaceId,

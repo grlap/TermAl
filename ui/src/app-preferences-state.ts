@@ -1,7 +1,7 @@
 // app-preferences-state.ts
 //
 // Owns: the React state + apply/persist side-effect orchestration
-// for App's preference surface — theme, editor style, markdown
+// for App's preference surface — theme pair/mode, editor style, markdown
 // theme/style, diagram theme-override mode, diagram look /
 // palette, UI font size, editor font size, density, plus the
 // default agent/session settings (Codex sandbox / approval /
@@ -29,7 +29,6 @@ import {
   applyMarkdownStylePreference,
   applyMarkdownThemePreference,
   applyStylePreference,
-  applyThemePreference,
   persistDensityPreference,
   persistDiagramLookPreference,
   persistDiagramPalettePreference,
@@ -39,15 +38,14 @@ import {
   persistMarkdownStylePreference,
   persistMarkdownThemePreference,
   persistStylePreference,
-  persistThemePreference,
   type DiagramLook,
   type DiagramPalette,
   type DiagramThemeOverrideMode,
   type MarkdownStyleId,
   type MarkdownThemeId,
   type StyleId,
-  type ThemeId,
 } from "./themes";
+import { useThemePreferencesState } from "./use-theme-preferences";
 import {
   DEFAULT_CLAUDE_APPROVAL_MODE,
   DEFAULT_CLAUDE_EFFORT,
@@ -76,9 +74,11 @@ type InitialWorkspaceBootstrap = ReturnType<
 export function useAppPreferencesState(
   initialWorkspaceBootstrap: InitialWorkspaceBootstrap,
 ) {
-  const [themeId, setThemeId] = useState<ThemeId>(
-    initialWorkspaceBootstrap.themeId,
-  );
+  const themePreferences = useThemePreferencesState({
+    lightThemeId: initialWorkspaceBootstrap.lightThemeId,
+    darkThemeId: initialWorkspaceBootstrap.darkThemeId,
+    themeMode: initialWorkspaceBootstrap.themeMode,
+  });
   const [styleId, setStyleId] = useState<StyleId>(
     initialWorkspaceBootstrap.styleId,
   );
@@ -134,12 +134,6 @@ export function useAppPreferencesState(
     useState<GeminiApprovalMode>("default");
 
   useLayoutEffect(() => {
-    applyThemePreference(themeId);
-    // Also update the global fallback key so main.tsx can use it for new workspaces
-    persistThemePreference(themeId);
-  }, [themeId]);
-
-  useLayoutEffect(() => {
     applyStylePreference(styleId);
     persistStylePreference(styleId);
   }, [styleId]);
@@ -184,8 +178,7 @@ export function useAppPreferencesState(
   }, [editorFontSizePx]);
 
   return {
-    themeId,
-    setThemeId,
+    ...themePreferences,
     styleId,
     setStyleId,
     markdownThemeId,

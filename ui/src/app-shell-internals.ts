@@ -58,6 +58,7 @@ import type {
   MarkdownThemeId,
   StyleId,
   ThemeId,
+  ThemeMode,
 } from "./themes";
 import type { WorkspaceState } from "./workspace";
 import type { ControlPanelSide } from "./workspace-storage";
@@ -82,6 +83,9 @@ export type WorkspaceLayoutPersistencePayload = {
   fontSizePx: number;
   styleId: StyleId;
   themeId: ThemeId;
+  lightThemeId: ThemeId;
+  darkThemeId: ThemeId;
+  themeMode: ThemeMode;
   markdownStyleId: MarkdownStyleId;
   markdownThemeId: MarkdownThemeId;
   diagramThemeOverrideMode: DiagramThemeOverrideMode;

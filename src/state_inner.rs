@@ -19,7 +19,7 @@
 //   counters, the `session_mut*` accessors that bump `mutation_stamp`
 //   on every hand-out (load-bearing for persist-delta correctness),
 //   `push_session` / `remove_session_at` / `retain_sessions`, and
-//   `collect_persist_delta` which the persist thread drains each tick
+//   the persist-delta planner which the persist thread drains each tick
 //   to write only sessions that have changed since its last watermark.
 //
 // - **Finders**: `find_session_index` (all internal sessions),
@@ -425,7 +425,7 @@ impl StateInner {
     /// can't know whether the caller will actually change anything
     /// — so a check-then-early-return caller using `session_mut*`
     /// permanently marks the session dirty and forces
-    /// `collect_persist_delta` to re-serialize its row on the next
+    /// persist-delta planner to re-serialize its row on the next
     /// tick. Reading through this helper first keeps the stamp
     /// unchanged on the no-op path. Callers that decide to mutate
     /// after the read should re-borrow via `session_mut_by_index`
@@ -530,31 +530,30 @@ impl StateInner {
         }
     }
 
-    /// Collects the subset of state that advanced past `watermark`.
+    /// Selects the subset of state that advanced past `watermark`.
     ///
     /// Called by the background persist thread while it briefly holds
     /// `AppState::inner`. Clones only:
     ///
     /// - App metadata (non-session fields; shallow clones, no transcripts).
-    /// - Sessions whose `mutation_stamp > watermark`, filtered so
-    ///   hidden internal records produce `DELETE`s instead of upserts.
-    ///   A visible session that becomes hidden must disappear from
-    ///   SQLite rather than leave a stale user-facing row behind.
+    /// - Ids and prompt-history flags for sessions whose
+    ///   `mutation_stamp > watermark`. Hidden internal records produce
+    ///   `DELETE`s instead of candidates. A visible session that becomes hidden
+    ///   must disappear from SQLite rather than leave a stale user-facing row.
     /// - The tombstone list of explicitly removed session ids, drained
     ///   from `removed_session_ids`.
-    /// - Delegation rows and delegation tombstones whose runtime-only
-    ///   mutation stamps advanced past the watermark.
+    /// - Delegation ids and delegation tombstones whose runtime-only mutation
+    ///   stamps advanced past the watermark.
     ///
-    /// Returns the new watermark (`last_mutation_stamp` at collection
-    /// time) that the caller should install after a successful write.
+    /// Returns a plan carrying the new watermark (`last_mutation_stamp` at
+    /// selection time). Large session and delegation values are materialized
+    /// separately so a dirty batch cannot monopolize the global mutex.
     ///
-    /// The only call site is the background persist thread, which is
-    /// `#[cfg(not(test))]`-gated — so under `cargo test` this looks
-    /// unused. The `allow(dead_code)` silences that warning without
-    /// hiding real dead code in release builds.
+    /// Tests also use this selection boundary directly to verify that
+    /// concurrent mutations are deferred rather than mixed across revisions.
     #[cfg_attr(test, allow(dead_code))]
-    fn collect_persist_delta(&mut self, watermark: u64) -> PersistDelta {
-        let mut changed_sessions: Vec<PersistedSessionRecord> = Vec::new();
+    fn collect_persist_delta_plan(&mut self, watermark: u64) -> PersistDeltaPlan {
+        let mut changed_sessions = Vec::new();
         let retry_removed_ids = std::mem::take(&mut self.removed_session_ids);
         let retry_removed_delegation_ids = std::mem::take(&mut self.removed_delegation_ids);
         let mut removed_ids = retry_removed_ids.clone();
@@ -568,21 +567,26 @@ impl StateInner {
                 // removed.
                 removed_ids.push(record.session.id.clone());
             } else {
-                let mut persisted = PersistedSessionRecord::from_record(record);
-                persisted.persist_prompt_history =
-                    record.prompt_history_mutation_stamp > watermark;
-                changed_sessions.push(persisted);
+                changed_sessions.push(PersistSessionCandidate {
+                    session_id: record.session.id.clone(),
+                    mutation_stamp: record.mutation_stamp,
+                    persist_prompt_history: record.prompt_history_mutation_stamp > watermark,
+                });
             }
         }
         let changed_delegations = self
             .delegations
             .iter()
-            .filter(|delegation| {
-                self.delegation_mutation_stamps
+            .filter_map(|delegation| {
+                let mutation_stamp = self
+                    .delegation_mutation_stamps
                     .get(&delegation.id)
-                    .is_some_and(|stamp| *stamp > watermark)
+                    .copied()?;
+                (mutation_stamp > watermark).then(|| PersistDelegationCandidate {
+                    delegation_id: delegation.id.clone(),
+                    mutation_stamp,
+                })
             })
-            .cloned()
             .collect::<Vec<_>>();
         let removed_delegation_ids = retry_removed_delegation_ids
             .iter()
@@ -591,16 +595,72 @@ impl StateInner {
             })
             .collect::<Vec<_>>();
 
-        PersistDelta {
+        PersistDeltaPlan {
             metadata: PersistedState::metadata_from_inner(self),
             changed_sessions,
             removed_session_ids: removed_ids,
-            changed_delegations: (!changed_delegations.is_empty()).then_some(changed_delegations),
+            changed_delegations,
             removed_delegation_ids,
             drained_delegation_tombstones: retry_removed_delegation_ids,
             drained_explicit_tombstones: retry_removed_ids,
             watermark: self.last_mutation_stamp,
         }
+    }
+
+    /// Materializes a persist plan against this state value.
+    ///
+    /// Tests and synchronous helpers use this form directly. The production
+    /// worker uses [`collect_persist_delta_from_shared_state`] so it can release
+    /// the global mutex between individual record snapshots.
+    #[cfg(test)]
+    fn materialize_persist_delta(&self, plan: PersistDeltaPlan) -> PersistDelta {
+        materialize_persist_delta_plan(
+            plan,
+            |candidate| {
+                let Some(record) = self
+                    .sessions
+                    .iter()
+                    .find(|record| record.session.id == candidate.session_id)
+                else {
+                    return PersistCandidateMaterialization::Changed;
+                };
+                if record.hidden || record.mutation_stamp != candidate.mutation_stamp {
+                    return PersistCandidateMaterialization::Changed;
+                }
+                let mut persisted = PersistedSessionRecord::from_record(record);
+                persisted.persist_prompt_history = candidate.persist_prompt_history;
+                PersistCandidateMaterialization::Snapshot(persisted)
+            },
+            |candidate| {
+                let Some(delegation) = self
+                    .delegations
+                    .iter()
+                    .find(|delegation| delegation.id == candidate.delegation_id)
+                else {
+                    return PersistCandidateMaterialization::Changed;
+                };
+                if self
+                    .delegation_mutation_stamps
+                    .get(&candidate.delegation_id)
+                    .copied()
+                    != Some(candidate.mutation_stamp)
+                {
+                    return PersistCandidateMaterialization::Changed;
+                }
+                PersistCandidateMaterialization::Snapshot(delegation.clone())
+            },
+        )
+    }
+
+    /// Collects and materializes one delta without an external state mutex.
+    ///
+    /// This remains the convenient test/synchronous surface. Production must
+    /// call [`collect_persist_delta_from_shared_state`] to avoid one cumulative
+    /// lock hold across all large records.
+    #[cfg(test)]
+    fn collect_persist_delta(&mut self, watermark: u64) -> PersistDelta {
+        let plan = self.collect_persist_delta_plan(watermark);
+        self.materialize_persist_delta(plan)
     }
 
     fn trim_persisted_session_tails(
@@ -696,6 +756,305 @@ impl StateInner {
             })
             .max_by_key(|project| project.root_path.len())
     }
+}
+
+/// Converts a lightweight persist plan into owned rows.
+///
+/// A candidate that changes, disappears, or becomes hidden after selection is
+/// omitted instead of mixing state from two revisions. A later mutation stamp
+/// or an explicit removal tombstone selects that record again without
+/// rewriting stable snapshots from this batch.
+fn materialize_persist_delta_plan(
+    plan: PersistDeltaPlan,
+    mut snapshot_session: impl FnMut(
+        &PersistSessionCandidate,
+    ) -> PersistCandidateMaterialization<PersistedSessionRecord>,
+    mut snapshot_delegation: impl FnMut(
+        &PersistDelegationCandidate,
+    ) -> PersistCandidateMaterialization<DelegationRecord>,
+) -> PersistDelta {
+    let PersistDeltaPlan {
+        metadata,
+        changed_sessions: session_candidates,
+        removed_session_ids,
+        changed_delegations: delegation_candidates,
+        removed_delegation_ids,
+        drained_delegation_tombstones,
+        drained_explicit_tombstones,
+        watermark,
+    } = plan;
+
+    let mut changed_sessions = Vec::with_capacity(session_candidates.len());
+    let mut deferred_session_ids = Vec::new();
+    let mut deferred_prompt_history_session_ids = Vec::new();
+    for candidate in session_candidates {
+        match snapshot_session(&candidate) {
+            PersistCandidateMaterialization::Snapshot(record) => changed_sessions.push(record),
+            PersistCandidateMaterialization::Changed => {
+                if candidate.persist_prompt_history {
+                    deferred_prompt_history_session_ids.push(candidate.session_id.clone());
+                }
+                deferred_session_ids.push(candidate.session_id);
+            }
+        }
+        std::thread::yield_now();
+    }
+
+    let mut changed_delegations = Vec::with_capacity(delegation_candidates.len());
+    let mut deferred_delegation_ids = Vec::new();
+    for candidate in delegation_candidates {
+        match snapshot_delegation(&candidate) {
+            PersistCandidateMaterialization::Snapshot(record) => changed_delegations.push(record),
+            PersistCandidateMaterialization::Changed => {
+                deferred_delegation_ids.push(candidate.delegation_id)
+            }
+        }
+        std::thread::yield_now();
+    }
+
+    PersistDelta {
+        metadata,
+        changed_sessions,
+        removed_session_ids,
+        changed_delegations: (!changed_delegations.is_empty()).then_some(changed_delegations),
+        removed_delegation_ids,
+        deferred_session_ids,
+        deferred_prompt_history_session_ids,
+        deferred_delegation_ids,
+        drained_delegation_tombstones,
+        drained_explicit_tombstones,
+        watermark,
+    }
+}
+
+/// Applies a later materialization pass over an earlier one.
+///
+/// The later pass is authoritative for any repeated id. A newer snapshot
+/// cancels an earlier delete, while a newer delete removes an earlier
+/// snapshot. Session prompt-history persistence is cumulative across the two
+/// passes so replacing an older row snapshot cannot lose a history write that
+/// was selected by the first watermark.
+fn merge_persist_delta_passes(mut earlier: PersistDelta, later: PersistDelta) -> PersistDelta {
+    let PersistDelta {
+        metadata,
+        changed_sessions: later_changed_sessions,
+        removed_session_ids: later_removed_session_ids,
+        changed_delegations: later_changed_delegations,
+        removed_delegation_ids: later_removed_delegation_ids,
+        deferred_session_ids,
+        deferred_prompt_history_session_ids,
+        deferred_delegation_ids,
+        drained_delegation_tombstones,
+        drained_explicit_tombstones,
+        watermark,
+    } = later;
+
+    for session_id in later_removed_session_ids {
+        earlier
+            .changed_sessions
+            .retain(|record| record.session.id != session_id);
+        if !earlier.removed_session_ids.contains(&session_id) {
+            earlier.removed_session_ids.push(session_id);
+        }
+    }
+    for mut record in later_changed_sessions {
+        let session_id = record.session.id.clone();
+        earlier
+            .removed_session_ids
+            .retain(|removed_id| removed_id != &session_id);
+        if let Some(existing) = earlier
+            .changed_sessions
+            .iter_mut()
+            .find(|existing| existing.session.id == session_id)
+        {
+            record.persist_prompt_history |= existing.persist_prompt_history;
+            *existing = record;
+        } else {
+            earlier.changed_sessions.push(record);
+        }
+    }
+
+    let mut changed_delegations = earlier.changed_delegations.take().unwrap_or_default();
+    for delegation_id in later_removed_delegation_ids {
+        changed_delegations.retain(|delegation| delegation.id != delegation_id);
+        if !earlier.removed_delegation_ids.contains(&delegation_id) {
+            earlier.removed_delegation_ids.push(delegation_id);
+        }
+    }
+    for delegation in later_changed_delegations.unwrap_or_default() {
+        earlier
+            .removed_delegation_ids
+            .retain(|removed_id| removed_id != &delegation.id);
+        if let Some(existing) = changed_delegations
+            .iter_mut()
+            .find(|existing| existing.id == delegation.id)
+        {
+            *existing = delegation;
+        } else {
+            changed_delegations.push(delegation);
+        }
+    }
+    earlier.changed_delegations = (!changed_delegations.is_empty()).then_some(changed_delegations);
+
+    for session_id in drained_explicit_tombstones {
+        if !earlier.drained_explicit_tombstones.contains(&session_id) {
+            earlier.drained_explicit_tombstones.push(session_id);
+        }
+    }
+    for (delegation_id, stamp) in drained_delegation_tombstones {
+        earlier
+            .drained_delegation_tombstones
+            .entry(delegation_id)
+            .and_modify(|existing| *existing = (*existing).max(stamp))
+            .or_insert(stamp);
+    }
+
+    earlier.metadata = metadata;
+    earlier.deferred_session_ids = deferred_session_ids;
+    earlier.deferred_prompt_history_session_ids = deferred_prompt_history_session_ids;
+    earlier.deferred_delegation_ids = deferred_delegation_ids;
+    earlier.watermark = watermark;
+    earlier
+}
+
+/// Builds a persistence delta without holding the global mutex across the
+/// whole dirty batch.
+///
+/// The first acquisition captures only metadata, ids, flags, tombstones, and
+/// the target watermark. Each large session/delegation snapshot gets its own
+/// acquisition, allowing unrelated state work to run between records.
+#[cfg(test)]
+fn collect_persist_delta_from_shared_state(
+    inner: &StateMutex<StateInner>,
+    watermark: u64,
+) -> PersistDelta {
+    collect_persist_delta_from_shared_state_with_prompt_history_carry(
+        inner,
+        watermark,
+        &BTreeSet::new(),
+    )
+}
+
+fn collect_persist_delta_from_shared_state_with_prompt_history_carry(
+    inner: &StateMutex<StateInner>,
+    watermark: u64,
+    prompt_history_carry: &BTreeSet<String>,
+) -> PersistDelta {
+    collect_persist_delta_from_shared_state_with_carry_and_first_plan_hook(
+        inner,
+        watermark,
+        prompt_history_carry,
+        || {},
+    )
+}
+
+#[cfg(test)]
+fn collect_persist_delta_from_shared_state_with_first_plan_hook(
+    inner: &StateMutex<StateInner>,
+    watermark: u64,
+    after_first_plan: impl FnOnce(),
+) -> PersistDelta {
+    collect_persist_delta_from_shared_state_with_carry_and_first_plan_hook(
+        inner,
+        watermark,
+        &BTreeSet::new(),
+        after_first_plan,
+    )
+}
+
+fn collect_persist_delta_from_shared_state_with_carry_and_first_plan_hook(
+    inner: &StateMutex<StateInner>,
+    watermark: u64,
+    prompt_history_carry: &BTreeSet<String>,
+    after_first_plan: impl FnOnce(),
+) -> PersistDelta {
+    let first = collect_persist_delta_pass_from_shared_state(
+        inner,
+        watermark,
+        prompt_history_carry,
+        after_first_plan,
+    );
+    if first.deferred_session_ids.is_empty() && first.deferred_delegation_ids.is_empty() {
+        return first;
+    }
+
+    // A single bounded re-plan closes the common race where one mutation lands
+    // between selection and that record's snapshot lock, without turning a hot
+    // session into an unbounded in-tick loop. The second pass starts at the
+    // first plan's watermark, so already-stable rows are not selected again.
+    let mut retry_prompt_history_carry = prompt_history_carry.clone();
+    retry_prompt_history_carry.extend(first.deferred_prompt_history_session_ids.iter().cloned());
+    let retry = collect_persist_delta_pass_from_shared_state(
+        inner,
+        first.watermark,
+        &retry_prompt_history_carry,
+        || {},
+    );
+    let merged = merge_persist_delta_passes(first, retry);
+    if !merged.deferred_session_ids.is_empty() || !merged.deferred_delegation_ids.is_empty() {
+        eprintln!(
+            "[termal] persist snapshot still deferred after bounded retry: {} session(s), {} delegation(s)",
+            merged.deferred_session_ids.len(),
+            merged.deferred_delegation_ids.len(),
+        );
+    }
+    merged
+}
+
+fn collect_persist_delta_pass_from_shared_state(
+    inner: &StateMutex<StateInner>,
+    watermark: u64,
+    prompt_history_carry: &BTreeSet<String>,
+    after_plan: impl FnOnce(),
+) -> PersistDelta {
+    let mut plan = {
+        let mut state = inner.lock().expect("state mutex poisoned");
+        state.collect_persist_delta_plan(watermark)
+    };
+    for candidate in &mut plan.changed_sessions {
+        candidate.persist_prompt_history |=
+            prompt_history_carry.contains(&candidate.session_id);
+    }
+    after_plan();
+
+    materialize_persist_delta_plan(
+        plan,
+        |candidate| {
+            let state = inner.lock().expect("state mutex poisoned");
+            let Some(record) = state
+                .sessions
+                .iter()
+                .find(|record| record.session.id == candidate.session_id)
+            else {
+                return PersistCandidateMaterialization::Changed;
+            };
+            if record.hidden || record.mutation_stamp != candidate.mutation_stamp {
+                return PersistCandidateMaterialization::Changed;
+            }
+            let mut persisted = PersistedSessionRecord::from_record(record);
+            persisted.persist_prompt_history = candidate.persist_prompt_history;
+            PersistCandidateMaterialization::Snapshot(persisted)
+        },
+        |candidate| {
+            let state = inner.lock().expect("state mutex poisoned");
+            let Some(delegation) = state
+                .delegations
+                .iter()
+                .find(|delegation| delegation.id == candidate.delegation_id)
+            else {
+                return PersistCandidateMaterialization::Changed;
+            };
+            if state
+                .delegation_mutation_stamps
+                .get(&candidate.delegation_id)
+                .copied()
+                != Some(candidate.mutation_stamp)
+            {
+                return PersistCandidateMaterialization::Changed;
+            }
+            PersistCandidateMaterialization::Snapshot(delegation.clone())
+        },
+    )
 }
 
 fn delegation_id_from_child_session_marker(record: &SessionRecord) -> Option<String> {

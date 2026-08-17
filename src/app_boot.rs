@@ -18,7 +18,7 @@
 //    deletion outbox entries are handed to it only after their primary-state
 //    commit, so large board cascades never block boot or termal.sqlite writes.
 // 5. Spawns the background persist thread (which drains
-//    `collect_persist_delta` in a loop and writes to SQLite).
+//    the split-lock persist-delta collector in a loop and writes to SQLite).
 // 6. Spawns the SSE broadcaster thread (JSON-serialize state snapshots
 //    off the state-mutex critical path — see `sse_broadcast.rs`).
 // 7. Persists any boot-time fixups so the first mutation after
@@ -378,7 +378,8 @@ impl AppState {
         // `AppState::inner` is built here (rather than inside the struct
         // literal further below) so we can share an `Arc` clone with the
         // background persist thread. The thread briefly re-locks it on
-        // each tick to collect the diff; see `StateInner::collect_persist_delta`.
+        // each tick to collect the diff; see
+        // `collect_persist_delta_from_shared_state`.
         let inner_arc = Arc::new(StateMutex::new(inner));
         let inner_for_persist = Arc::clone(&inner_arc);
         let inner_for_coordination_cleanup = Arc::clone(&inner_arc);
@@ -410,15 +411,16 @@ impl AppState {
         // Background persist thread: drains `PersistRequest::Delta`
         // wake signals and writes the accumulated diff to SQLite.
         //
-        // On each signal the thread locks `inner_for_persist` briefly,
-        // calls `StateInner::collect_persist_delta(watermark)` to build
-        // the diff of sessions whose `mutation_stamp` advanced past
-        // its own watermark plus the drained `removed_session_ids`,
-        // releases the lock, and writes the delta with targeted
+        // On each signal the thread captures a lightweight plan under
+        // `inner_for_persist`, then snapshots each selected session/delegation
+        // in a separate lock acquisition. This prevents a batch of large
+        // transcripts from becoming one application-wide lock hold. It then
+        // writes the delta with targeted
         // `INSERT OR UPDATE` per changed session and
         // `DELETE WHERE id = ?` per removed id. No `DELETE FROM sessions`
         // sweep is issued — unchanged rows stay untouched. See
-        // `state.rs::PersistDelta` + `StateInner::collect_persist_delta`
+        // `state.rs::PersistDeltaPlan` +
+        // `collect_persist_delta_from_shared_state`
         // for the delta contract.
         //
         // The thread owns a `SqlitePersistConnectionCache` so the SQLite
@@ -431,6 +433,7 @@ impl AppState {
             .spawn(move || {
                 let mut cache = SqlitePersistConnectionCache::new();
                 let mut watermark: u64 = 0;
+                let mut prompt_history_carry = BTreeSet::new();
                 let mut retry_state = PersistWorkerRetryState::default();
                 loop {
                     let outcome = retry_state.wait_for_next_tick(&persist_rx);
@@ -455,11 +458,17 @@ impl AppState {
                     }
 
                     let result: Result<()> = (|| {
-                        let delta = {
-                            let mut inner = inner_for_persist.lock().expect("state mutex poisoned");
-                            inner.collect_persist_delta(watermark)
-                        };
+                        let delta = collect_persist_delta_from_shared_state_with_prompt_history_carry(
+                            &inner_for_persist,
+                            watermark,
+                            &prompt_history_carry,
+                        );
                         let next_watermark = delta.watermark;
+                        let next_prompt_history_carry = delta
+                            .deferred_prompt_history_session_ids
+                            .iter()
+                            .cloned()
+                            .collect::<BTreeSet<_>>();
                         let pending_scope_deletions = delta
                             .metadata
                             .pending_coordination_scope_deletions
@@ -488,7 +497,7 @@ impl AppState {
                                 // Without this, a transient SQLite error
                                 // (locked DB, disk full, I/O error) would
                                 // silently leak an orphan `sessions` row
-                                // into SQLite — `collect_persist_delta`
+                                // into SQLite — persist-delta planning
                                 // drained the vec via `mem::take`, and
                                 // since the watermark wasn't advanced the
                                 // `changed_sessions` side auto-retries on
@@ -524,6 +533,7 @@ impl AppState {
                             );
                         }
                         watermark = next_watermark;
+                        prompt_history_carry = next_prompt_history_carry;
                         if !pending_scope_deletions.is_empty() {
                             // Only a successful primary commit authorizes
                             // secondary cleanup. The dedicated worker removes

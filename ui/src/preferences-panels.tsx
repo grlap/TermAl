@@ -1,10 +1,7 @@
 import {
   useEffect,
-  useLayoutEffect,
   useMemo,
-  useRef,
   useState,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
   areRemoteConfigsEqual,
@@ -30,6 +27,7 @@ import {
   MIN_FONT_SIZE_PX,
   STYLES,
   THEMES,
+  getThemeKind,
   type DiagramLook,
   type DiagramPalette,
   type DiagramThemeOverrideMode,
@@ -37,8 +35,10 @@ import {
   type MarkdownThemeId,
   type StyleId,
   type ThemeId,
+  type ThemeKind,
+  type ThemeMode,
 } from "./themes";
-import { clamp } from "./app-utils";
+import { primaryModifierLabel } from "./app-utils";
 import {
   isLocalRemoteId,
   remoteConnectionLabel,
@@ -124,15 +124,27 @@ export const GEMINI_APPROVAL_OPTIONS = [
 export function ThemePreferencesPanel({
   activeStyle,
   activeTheme,
+  activeThemeKind,
+  darkThemeId,
+  lightThemeId,
   styleId,
-  themeId,
+  themeMode,
+  themeSessionOverride,
+  onReturnToAuto,
+  onSelectMode,
   onSelectStyle,
   onSelectTheme,
 }: {
   activeStyle: (typeof STYLES)[number];
   activeTheme: (typeof THEMES)[number];
+  activeThemeKind: ThemeKind;
+  darkThemeId: ThemeId;
+  lightThemeId: ThemeId;
   styleId: StyleId;
-  themeId: ThemeId;
+  themeMode: ThemeMode;
+  themeSessionOverride: ThemeKind | null;
+  onReturnToAuto: () => void;
+  onSelectMode: (mode: ThemeMode) => void;
   onSelectStyle: (styleId: StyleId) => void;
   onSelectTheme: (themeId: ThemeId) => void;
 }) {
@@ -144,247 +156,226 @@ export function ThemePreferencesPanel({
         onSelectStyle={onSelectStyle}
         compact
       />
-      <ThemePicker activeTheme={activeTheme} themeId={themeId} onSelectTheme={onSelectTheme} />
+      <ThemePicker
+        activeTheme={activeTheme}
+        activeThemeKind={activeThemeKind}
+        darkThemeId={darkThemeId}
+        lightThemeId={lightThemeId}
+        themeMode={themeMode}
+        themeSessionOverride={themeSessionOverride}
+        onReturnToAuto={onReturnToAuto}
+        onSelectMode={onSelectMode}
+        onSelectTheme={onSelectTheme}
+      />
     </section>
+  );
+}
+
+export function ThemeSwatchPreview({
+  className = "",
+  theme,
+}: {
+  className?: string;
+  theme: (typeof THEMES)[number];
+}) {
+  const accentSwatches = theme.swatches.slice(1);
+  const previewBars = [
+    accentSwatches[0],
+    accentSwatches[1] ?? accentSwatches[0],
+    accentSwatches[0],
+  ];
+
+  return (
+    <span
+      className={`theme-swatch-preview ${className}`.trim()}
+      aria-hidden="true"
+      style={{ background: theme.swatches[0] }}
+    >
+      <span className="theme-swatch-preview-chrome">
+        <span style={{ background: previewBars[0] }} />
+        <span style={{ background: previewBars[1] }} />
+      </span>
+      <span className="theme-swatch-preview-content">
+        {previewBars.map((swatch, index) => (
+          <span
+            key={`${theme.id}-preview-${index}`}
+            className={`theme-swatch-preview-bar theme-swatch-preview-bar-${index + 1}`}
+            style={{ background: swatch }}
+          />
+        ))}
+      </span>
+    </span>
   );
 }
 
 export function ThemePicker({
   activeTheme,
-  themeId,
+  activeThemeKind,
+  darkThemeId,
+  lightThemeId,
+  themeMode,
+  themeSessionOverride,
+  onReturnToAuto,
+  onSelectMode,
   onSelectTheme,
 }: {
   activeTheme: (typeof THEMES)[number];
-  themeId: ThemeId;
+  activeThemeKind: ThemeKind;
+  darkThemeId: ThemeId;
+  lightThemeId: ThemeId;
+  themeMode: ThemeMode;
+  themeSessionOverride: ThemeKind | null;
+  onReturnToAuto: () => void;
+  onSelectMode: (mode: ThemeMode) => void;
   onSelectTheme: (themeId: ThemeId) => void;
 }) {
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const dragStateRef = useRef<{
-    pointerId: number;
-    startPointerY: number;
-    startThumbOffset: number;
-  } | null>(null);
-  const [scrollState, setScrollState] = useState({
-    thumbHeight: 0,
-    thumbOffset: 0,
-    visible: false,
-  });
-  const [isDraggingScrollbar, setIsDraggingScrollbar] = useState(false);
-
-  useLayoutEffect(() => {
-    const listElement = listRef.current;
-    if (!listElement) {
-      return;
-    }
-
-    const updateScrollState = () => {
-      const { clientHeight, scrollHeight, scrollTop } = listElement;
-      const hasOverflow = scrollHeight - clientHeight > 1;
-
-      if (!hasOverflow) {
-        setScrollState((current) =>
-          current.visible || current.thumbHeight !== 0 || current.thumbOffset !== 0
-            ? { thumbHeight: 0, thumbOffset: 0, visible: false }
-            : current,
-        );
-        return;
-      }
-
-      const thumbHeight = Math.max((clientHeight * clientHeight) / scrollHeight, 48);
-      const maxThumbOffset = Math.max(clientHeight - thumbHeight, 0);
-      const maxScrollTop = Math.max(scrollHeight - clientHeight, 1);
-      const thumbOffset = (scrollTop / maxScrollTop) * maxThumbOffset;
-
-      setScrollState((current) => {
-        if (
-          current.visible &&
-          Math.abs(current.thumbHeight - thumbHeight) < 0.5 &&
-          Math.abs(current.thumbOffset - thumbOffset) < 0.5
-        ) {
-          return current;
-        }
-
-        return {
-          thumbHeight,
-          thumbOffset,
-          visible: true,
-        };
-      });
-    };
-
-    updateScrollState();
-
-    listElement.addEventListener("scroll", updateScrollState);
-    window.addEventListener("resize", updateScrollState);
-
-    const ResizeObserverCtor = globalThis.ResizeObserver;
-    const resizeObserver =
-      typeof ResizeObserverCtor === "function"
-        ? new ResizeObserverCtor(() => {
-            updateScrollState();
-          })
-        : null;
-
-    resizeObserver?.observe(listElement);
-
-    return () => {
-      listElement.removeEventListener("scroll", updateScrollState);
-      window.removeEventListener("resize", updateScrollState);
-      resizeObserver?.disconnect();
-    };
-  }, []);
-
-  useEffect(() => {
-    function handlePointerMove(event: PointerEvent) {
-      const dragState = dragStateRef.current;
-      const listElement = listRef.current;
-      if (!dragState || !listElement || event.pointerId !== dragState.pointerId) {
-        return;
-      }
-
-      const { clientHeight, scrollHeight } = listElement;
-      const thumbHeight = Math.max((clientHeight * clientHeight) / Math.max(scrollHeight, 1), 48);
-      const maxThumbOffset = Math.max(clientHeight - thumbHeight, 0);
-      const nextThumbOffset = clamp(
-        dragState.startThumbOffset + (event.clientY - dragState.startPointerY),
-        0,
-        maxThumbOffset,
-      );
-      const maxScrollTop = Math.max(scrollHeight - clientHeight, 0);
-
-      listElement.scrollTop =
-        maxThumbOffset > 0 ? (nextThumbOffset / maxThumbOffset) * maxScrollTop : 0;
-    }
-
-    function handlePointerUp(event: PointerEvent) {
-      const dragState = dragStateRef.current;
-      if (!dragState || event.pointerId !== dragState.pointerId) {
-        return;
-      }
-
-      dragStateRef.current = null;
-      setIsDraggingScrollbar(false);
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
-
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-    };
-  }, []);
-
-  function scrollListToThumbOffset(nextThumbOffset: number) {
-    const listElement = listRef.current;
-    if (!listElement) {
-      return;
-    }
-
-    const { clientHeight, scrollHeight } = listElement;
-    const thumbHeight = Math.max((clientHeight * clientHeight) / Math.max(scrollHeight, 1), 48);
-    const maxThumbOffset = Math.max(clientHeight - thumbHeight, 0);
-    const clampedThumbOffset = clamp(nextThumbOffset, 0, maxThumbOffset);
-    const maxScrollTop = Math.max(scrollHeight - clientHeight, 0);
-
-    listElement.scrollTop =
-      maxThumbOffset > 0 ? (clampedThumbOffset / maxThumbOffset) * maxScrollTop : 0;
-  }
-
-  function handleScrollbarThumbPointerDown(event: ReactPointerEvent<HTMLSpanElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    dragStateRef.current = {
-      pointerId: event.pointerId,
-      startPointerY: event.clientY,
-      startThumbOffset: scrollState.thumbOffset,
-    };
-    setIsDraggingScrollbar(true);
-  }
-
-  function handleScrollbarTrackPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    event.preventDefault();
-
-    const trackRect = event.currentTarget.getBoundingClientRect();
-    const nextThumbOffset = event.clientY - trackRect.top - scrollState.thumbHeight / 2;
-    const { clientHeight } = event.currentTarget;
-    const clampedThumbOffset = clamp(
-      nextThumbOffset,
-      0,
-      Math.max(clientHeight - scrollState.thumbHeight, 0),
-    );
-
-    scrollListToThumbOffset(clampedThumbOffset);
-    dragStateRef.current = {
-      pointerId: event.pointerId,
-      startPointerY: event.clientY,
-      startThumbOffset: clampedThumbOffset,
-    };
-    setIsDraggingScrollbar(true);
-  }
+  const catalogKind = themeMode === "auto" ? null : themeMode;
+  const catalogTitle =
+    themeMode === "light"
+      ? "Light themes"
+      : themeMode === "dark"
+        ? "Dark themes"
+        : "All themes";
+  const visibleThemes = THEMES.filter(
+    (theme) => catalogKind === null || getThemeKind(theme.id) === catalogKind,
+  );
+  const lightTheme =
+    THEMES.find((theme) => theme.id === lightThemeId) ?? activeTheme;
+  const darkTheme =
+    THEMES.find((theme) => theme.id === darkThemeId) ?? activeTheme;
+  const shortcutLabel = `${primaryModifierLabel() === "Cmd" ? "⌘" : "Ctrl"} ⇧ L`;
 
   return (
-    <section className="theme-panel">
-      <div className="theme-panel-header">
-        <div>
-          <p className="session-control-label">Theme</p>
-          <p className="theme-panel-copy">{activeTheme.description}</p>
+    <section className="theme-panel theme-pairing-panel">
+      <section className="theme-settings-section theme-mode-section">
+        <div className="theme-section-heading">
+          <div>
+            <h3>Mode</h3>
+            <p>Choose a fixed appearance or follow your system.</p>
+          </div>
+          <kbd className="theme-shortcut-label">{shortcutLabel}</kbd>
         </div>
-      </div>
 
-      <div className="theme-option-list-shell">
-        <div ref={listRef} className="theme-option-list" role="radiogroup" aria-label="UI theme">
-          {THEMES.map((theme) => {
-            const isSelected = theme.id === themeId;
+        <div
+          className="theme-mode-segmented"
+          role="group"
+          aria-label="Theme mode"
+        >
+          {(["light", "dark", "auto"] as const).map((mode) => (
+            <button
+              key={mode}
+              className={`theme-mode-segment ${themeMode === mode ? "selected" : ""}`}
+              type="button"
+              aria-pressed={themeMode === mode}
+              onClick={() => onSelectMode(mode)}
+            >
+              {mode !== "auto" ? (
+                <span className="theme-mode-segment-icon" aria-hidden="true">
+                  {mode === "light" ? "☀︎" : "☾"}
+                </span>
+              ) : null}
+              {mode === "light" ? "Light" : mode === "dark" ? "Dark" : "Auto"}
+            </button>
+          ))}
+        </div>
+
+        {themeMode === "auto" && themeSessionOverride ? (
+          <div className="theme-auto-override-notice" role="status">
+            <span>
+              Auto is overridden with {themeSessionOverride} for this session.
+            </span>
+            <button className="ghost-button" type="button" onClick={onReturnToAuto}>
+              Return to Auto
+            </button>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="theme-settings-section theme-pair-section">
+        <div className="theme-section-heading">
+          <div>
+            <h3>Your pair</h3>
+            <p>TermAl switches between these two themes.</p>
+          </div>
+        </div>
+        <div className="theme-pair-grid" role="group" aria-label="Theme pair">
+          {([
+            ["light", lightTheme],
+            ["dark", darkTheme],
+          ] as const).map(([kind, theme]) => {
+            const isActive = activeThemeKind === kind && activeTheme.id === theme.id;
 
             return (
-              <button
-                key={theme.id}
-                className={`theme-option ${isSelected ? "selected" : ""}`}
-                type="button"
-                role="radio"
-                aria-checked={isSelected}
-                onClick={() => onSelectTheme(theme.id)}
+              <article
+                key={kind}
+                className={`theme-pair-card ${isActive ? "active" : ""}`}
+                aria-label={`${kind === "light" ? "Light" : "Dark"} theme: ${theme.name}`}
               >
-                <span className="theme-option-main">
-                  <span className="theme-option-title-row">
-                    <strong className="theme-option-title">{theme.name}</strong>
+                <div className="theme-pair-card-topline">
+                  <span className="theme-pair-kind">
+                    <span aria-hidden="true">{kind === "light" ? "☀︎" : "☾"}</span>
+                    {kind === "light" ? "Light theme" : "Dark theme"}
                   </span>
-                  <span className="theme-option-copy">{theme.description}</span>
-                </span>
-                <span className="theme-option-preview" aria-hidden="true">
-                  {theme.swatches.map((swatch) => (
-                    <span
-                      key={`${theme.id}-${swatch}`}
-                      className="theme-option-swatch"
-                      style={{ background: swatch }}
-                    />
-                  ))}
-                </span>
-              </button>
+                  {isActive ? <span className="theme-pair-active-badge">Active</span> : null}
+                </div>
+                <ThemeSwatchPreview className="theme-pair-preview" theme={theme} />
+                <div className="theme-pair-copy">
+                  <strong>{theme.name}</strong>
+                  <span>{theme.description}</span>
+                </div>
+              </article>
             );
           })}
         </div>
-        {scrollState.visible ? (
-          <div
-            className={`theme-option-scrollbar ${isDraggingScrollbar ? "dragging" : ""}`}
-            aria-hidden="true"
-            onPointerDown={handleScrollbarTrackPointerDown}
-          >
-            <span
-              className="theme-option-scrollbar-thumb"
-              onPointerDown={handleScrollbarThumbPointerDown}
-              style={{
-                height: `${scrollState.thumbHeight}px`,
-                transform: `translateY(${scrollState.thumbOffset}px)`,
-              }}
-            />
+      </section>
+
+      <section className="theme-settings-section theme-catalog-section">
+        <div className="theme-catalog-heading">
+          <div className="theme-section-heading">
+            <div>
+              <h3>{catalogTitle}</h3>
+              <p>
+                {themeMode === "auto"
+                  ? "Choose either theme; your system decides which one is active."
+                  : `Choose the ${themeMode} theme used by this mode.`}
+              </p>
+            </div>
           </div>
-        ) : null}
-      </div>
+        </div>
+
+        <div className="theme-option-list-shell">
+          <div
+            className="theme-option-list theme-catalog-grid"
+            role="group"
+            aria-label="UI themes"
+          >
+            {visibleThemes.map((theme) => {
+              const themeKind = getThemeKind(theme.id);
+              const isSelected =
+                theme.id ===
+                (themeKind === "dark" ? darkThemeId : lightThemeId);
+
+              return (
+                <button
+                  key={theme.id}
+                  className={`theme-option theme-catalog-card ${isSelected ? "selected" : ""}`}
+                  type="button"
+                  aria-pressed={isSelected}
+                  aria-label={`${theme.name}, ${themeKind} theme${isSelected ? `, selected for ${themeKind} slot` : ""}`}
+                  title={theme.description}
+                  onClick={() => onSelectTheme(theme.id)}
+                >
+                  <ThemeSwatchPreview theme={theme} />
+                  <span className="theme-catalog-card-footer">
+                    <strong className="theme-option-title">{theme.name}</strong>
+                    {isSelected ? <span aria-hidden="true">✓</span> : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
     </section>
   );
 }

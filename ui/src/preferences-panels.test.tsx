@@ -16,7 +16,9 @@ import {
   INTERNAL_CLAUDE_APPROVAL_MODES,
   OpenCodePreferencesPanel,
   RemotePreferencesPanel,
+  ThemePreferencesPanel,
 } from "./preferences-panels";
+import { THEMES } from "./themes";
 import type { RemoteConfig } from "./types";
 
 vi.mock("./api", async () => {
@@ -30,6 +32,100 @@ vi.mock("./api", async () => {
 
 const registerRemoteTermalMock = vi.mocked(registerRemoteTermal);
 const upgradeRemoteTermalMock = vi.mocked(upgradeRemoteTermal);
+
+describe("ThemePreferencesPanel", () => {
+  it("renders mode, paired slots, and the theme catalog as distinct visual sections", () => {
+    const { container } = render(
+      <ThemePreferencesPanel
+        activeStyle={{
+          id: "theme-default",
+          name: "Match Theme",
+          description: "Use the visual treatment bundled with the selected theme.",
+        }}
+        activeTheme={THEMES.find((theme) => theme.id === "warm-light")!}
+        activeThemeKind="light"
+        darkThemeId="dark"
+        lightThemeId="warm-light"
+        styleId="theme-default"
+        themeMode="light"
+        themeSessionOverride={null}
+        onReturnToAuto={vi.fn()}
+        onSelectMode={vi.fn()}
+        onSelectStyle={vi.fn()}
+        onSelectTheme={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Mode" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Your pair" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Light themes" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Theme mode" })).toHaveClass(
+      "theme-mode-segmented",
+    );
+    expect(screen.getByRole("button", { name: "Light" })).toHaveTextContent("☀︎");
+    expect(screen.getByRole("button", { name: "Dark" })).toHaveTextContent("☾");
+    expect(screen.getByRole("article", { name: "Light theme: Warm Light" })).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Dark theme: Darkroom" })).toBeInTheDocument();
+    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Theme filter" })).toBeNull();
+    expect(screen.getByRole("group", { name: "UI themes" })).toHaveClass(
+      "theme-catalog-grid",
+    );
+    expect(container.querySelectorAll(".theme-swatch-preview").length).toBeGreaterThan(2);
+    expect(container.querySelector(".theme-option-scrollbar")).toBeNull();
+  });
+
+  it("derives the catalog filter from mode and assigns a clicked theme to its matching slot", () => {
+    const onSelectTheme = vi.fn();
+
+    const panelProps: Omit<
+      ComponentProps<typeof ThemePreferencesPanel>,
+      "themeMode"
+    > = {
+      activeStyle: {
+        id: "theme-default",
+        name: "Match Theme",
+        description: "Use the visual treatment bundled with the selected theme.",
+      },
+      activeTheme: THEMES.find((theme) => theme.id === "warm-light")!,
+      activeThemeKind: "light",
+      darkThemeId: "dark",
+      lightThemeId: "warm-light",
+      styleId: "theme-default",
+      themeSessionOverride: null,
+      onReturnToAuto: vi.fn(),
+      onSelectMode: vi.fn(),
+      onSelectStyle: vi.fn(),
+      onSelectTheme,
+    };
+    const { rerender } = render(
+      <ThemePreferencesPanel
+        {...panelProps}
+        themeMode="light"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Warm Light/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Darkroom/i })).toBeNull();
+
+    rerender(<ThemePreferencesPanel {...panelProps} themeMode="dark" />);
+
+    expect(screen.getByRole("heading", { name: "Dark themes" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Darkroom/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Warm Light/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Darkroom/i }));
+    expect(onSelectTheme).toHaveBeenCalledWith("dark");
+
+    rerender(<ThemePreferencesPanel {...panelProps} themeMode="auto" />);
+
+    expect(screen.getByRole("heading", { name: "All themes" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Warm Light/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Darkroom/i })).toBeInTheDocument();
+    const catalog = screen.getByRole("group", { name: "UI themes" });
+    expect(catalog.querySelectorAll('button[aria-pressed="true"]')).toHaveLength(2);
+  });
+});
 
 function renderCodexPanel({
   defaultModel = "default",

@@ -26,10 +26,10 @@ mutex.
 /// Wake signal sent to the background persist thread.
 ///
 /// The persist thread owns an `Arc<StateMutex<StateInner>>` and collects
-/// the diff itself on each tick — it locks briefly, filters sessions
-/// by `mutation_stamp > watermark`, clones only that subset plus app
-/// metadata, drains `removed_session_ids`, then releases the lock and
-/// writes to SQLite via `persist_delta_via_cache` (see `persist.rs`).
+/// the diff itself on each tick — it captures a lightweight selection under
+/// the global mutex, then clones each selected session/delegation in a separate
+/// acquisition before writing to SQLite via `persist_delta_via_cache` (see
+/// `persist.rs`).
 /// `PersistRequest` therefore carries only the wake signal; the full
 /// `PersistedState` snapshot that earlier versions cloned under the
 /// state mutex is no longer needed.
@@ -700,18 +700,55 @@ impl RemoteDeltaReplayCache {
     }
 }
 
-/// The diff the persist thread writes on each tick.
+/// Lightweight selection captured in one pass under `AppState::inner`.
 ///
-/// Built inside `AppState::inner` by
-/// [`StateInner::collect_persist_delta`]. `changed_sessions` is the
-/// subset of sessions whose `mutation_stamp` advanced past the
-/// thread's watermark; `removed_session_ids` is the union of explicit
-/// removals and sessions that flipped to hidden since the last
-/// persist. The persist thread then writes the delta to SQLite with
-/// targeted session/delegation upserts and deletes. `drained_explicit_tombstones`
-/// keeps only the tombstones drained from state so a failed write can restore
-/// those without duplicating hidden-session deletes synthesized from
-/// still-hidden records.
+/// Session transcripts and delegation payloads are deliberately represented by
+/// ids here. The persistence worker materializes those large values one record
+/// at a time, releasing the global state mutex between records so a batch of
+/// dirty transcripts cannot form one long application-wide lock convoy.
+#[cfg_attr(test, allow(dead_code))]
+struct PersistDeltaPlan {
+    metadata: PersistedState,
+    changed_sessions: Vec<PersistSessionCandidate>,
+    removed_session_ids: Vec<String>,
+    changed_delegations: Vec<PersistDelegationCandidate>,
+    removed_delegation_ids: Vec<String>,
+    drained_delegation_tombstones: BTreeMap<String, u64>,
+    drained_explicit_tombstones: Vec<String>,
+    watermark: u64,
+}
+
+#[cfg_attr(test, allow(dead_code))]
+struct PersistSessionCandidate {
+    session_id: String,
+    mutation_stamp: u64,
+    persist_prompt_history: bool,
+}
+
+#[cfg_attr(test, allow(dead_code))]
+struct PersistDelegationCandidate {
+    delegation_id: String,
+    mutation_stamp: u64,
+}
+
+enum PersistCandidateMaterialization<T> {
+    Snapshot(T),
+    Changed,
+}
+
+/// The fully materialized diff the persist thread writes on each tick.
+///
+/// `changed_sessions` contains only sessions selected by a preceding
+/// [`PersistDeltaPlan`]. `removed_session_ids` is the union of explicit
+/// removals and sessions that were hidden when selected. Candidates that
+/// change before materialization are omitted from that pass; the plan watermark
+/// advances, and their later mutation stamp or tombstone selects them again.
+/// Production performs one bounded re-plan pass before returning the delta and
+/// retains the remaining deferred ids for diagnostics.
+/// The persist thread writes the delta to SQLite with targeted
+/// session/delegation upserts and deletes.
+/// `drained_explicit_tombstones` keeps only tombstones drained from state so a
+/// failed write can restore those without duplicating synthesized deletes.
 #[cfg_attr(test, allow(dead_code))]
 struct PersistDelta {
     metadata: PersistedState,
@@ -719,6 +756,9 @@ struct PersistDelta {
     removed_session_ids: Vec<String>,
     changed_delegations: Option<Vec<DelegationRecord>>,
     removed_delegation_ids: Vec<String>,
+    deferred_session_ids: Vec<String>,
+    deferred_prompt_history_session_ids: Vec<String>,
+    deferred_delegation_ids: Vec<String>,
     drained_delegation_tombstones: BTreeMap<String, u64>,
     drained_explicit_tombstones: Vec<String>,
     watermark: u64,
@@ -1066,6 +1106,9 @@ fn collect_workspace_layout_summaries<'a>(
             updated_at: layout.updated_at.clone(),
             control_panel_side: layout.control_panel_side,
             theme_id: layout.theme_id.clone(),
+            light_theme_id: layout.light_theme_id.clone(),
+            dark_theme_id: layout.dark_theme_id.clone(),
+            theme_mode: layout.theme_mode.clone(),
             style_id: layout.style_id.clone(),
             font_size_px: layout.font_size_px,
             editor_font_size_px: layout.editor_font_size_px,

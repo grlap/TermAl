@@ -16,18 +16,23 @@ TermAl gives you one place to run, supervise, review, and steer long-running sof
 - **Workspace terminal** — project- or session-scoped terminal tabs stream stdout/stderr live, preserve terminal history per tab, and intentionally have no production timeout for long-running dev tasks
 - **Smart pane placement** — source, diff, terminal, files, git, instruction-debugger, and control-surface tabs open in the nearest useful pane
 - **Explicit approvals** — agents request permission for risky actions; you approve, reject, or set a session-wide policy
-- **Prompt queueing** — send follow-up prompts while an agent is working; they run automatically in order
+- **Prompt queueing** — send follow-up prompts while an agent is working; they render as visible queued cards and run automatically in order
+- **Response board** — an Obsidian-style spatial canvas: drag any agent response (or pin it) onto a pannable, zoomable board of immutable snapshot cards with provenance links back to the source session
+- **Agent delegations** — sessions spawn child agent sessions (reviewer / explorer / worker modes, read-only or isolated-worktree write policies) with structured, durably-submitted result envelopes that survive runtime failures
+- **Durable agent mailboxes** — root sessions coordinate through durable, cursor-acknowledged mailboxes; humans read the same threads in a dedicated live-refreshing mailbox tab that never advances agent cursors
+- **Conversation minimap** — a position-space overview rail served by a single one-call API, rendered complete on session open with click-to-jump navigation
+- **Bounded transcript paging** — large sessions (tens of thousands of messages) open instantly on a bounded tail; history pages in on demand with jump-to-start, marker jumps, and full-text search over loaded messages
 - **Session model controls** — Claude, Codex, Cursor, Gemini, and OpenCode sessions refresh live model lists and expose session-scoped mode/approval/effort controls; Codex also exposes catalog-gated Fast mode
 - **SSH remotes** — connect to remote machines over SSH tunnels; run agents on a build server while supervising from your laptop
 - **Session persistence** — sessions and message history survive restart (`~/.termal/termal.sqlite`)
 - **Filesystem and git panels** — browse files, view git status, edit source, review diffs, and react to local file watcher updates directly from the workspace
-- **18 themes + 4 chrome styles** — hand-crafted color palettes, independent chrome styles (Terminal, Editorial, Studio, Blueprint), font-size controls, and a density control switchable at runtime
+- **21 themes + 4 chrome styles** — hand-crafted light and dark palettes selected as a **light + dark pair** with a Light / Dark / Auto mode (Auto follows the OS live), a ⌘⇧L toggle, independent chrome styles (Terminal, Editorial, Studio, Blueprint), font-size controls, and a density control switchable at runtime
 
 ## Agent Integrations
 
-TermAl integrates with Claude Code, OpenAI Codex, Gemini CLI, and Cursor. Agent
-protocol differences are normalized into the same session, message, approval,
-and streaming model in the UI.
+TermAl integrates with Claude Code, OpenAI Codex, Gemini CLI, Cursor, and
+OpenCode. Agent protocol differences are normalized into the same session,
+message, approval, and streaming model in the UI.
 
 ## Architecture
 
@@ -47,7 +52,8 @@ Browser (React + TypeScript)        Rust Backend (axum + tokio)
                                     │  ├── Claude (NDJSON stdio)       │
                                     │  ├── Codex (JSON-RPC stdio)      │
                                     │  ├── Gemini (ACP stdio)          │
-                                    │  └── Cursor (ACP stdio)          │
+                                    │  ├── Cursor (ACP stdio)          │
+                                    │  └── OpenCode (ACP stdio)        │
                                     └──────────────────────────────────┘
 ```
 
@@ -301,7 +307,7 @@ termal/
 │   │   ├── session-store.ts         # Session slice publication for heavy panels
 │   │   ├── workspace*.ts            # Pane/tab/split state and layout persistence
 │   │   ├── message-*.tsx            # Message cards, icons, and render helpers
-│   │   ├── themes/                  # 18 color themes + chrome style presets
+│   │   ├── themes/                  # 21 color themes + chrome style presets
 │   │   └── panels/
 │   │       ├── AgentSessionPanel.tsx                # Chat session view
 │   │       ├── ControlPanelSurface.tsx              # Dockable sidebar with section tabs
@@ -312,6 +318,8 @@ termal/
 │   │       ├── DiffPanel.tsx                        # Diff viewer
 │   │       ├── FileSystemPanel.tsx                  # Filesystem browser
 │   │       ├── GitStatusPanel.tsx                   # Git status and diff tree
+│   │       ├── ResponseBoardPanel.tsx               # Spatial board of pinned agent responses
+│   │       ├── MailboxPanel.tsx                     # Durable agent mailbox reader
 │   │       ├── TerminalPanel.tsx                    # Scoped terminal command runner
 │   │       └── InstructionDebuggerPanel.tsx         # Agent instruction tracing
 │   └── vite.config.ts          # Dev proxy: /api → :8787
@@ -368,4 +376,10 @@ Instances can be **paused**, **resumed**, or **stopped** from the control panel 
   - [Workspace terminal](docs/features/workspace-terminal.md) — scoped terminal command execution and streaming
   - [Diff review workflow](docs/features/diff-review-workflow.md) — structured diff review
   - [Agent integrations](docs/features/agent-integration-comparison.md) — Claude, Codex, Gemini, Cursor comparison
+  - [OpenCode integration](docs/features/opencode-acp-integration.md) — OpenCode over ACP
+  - [Response board](docs/features/response-board.md) — spatial board of immutable agent-response snapshots
+  - [Agent mailboxes](docs/features/agent-mailboxes.md) — durable cross-session agent coordination
+  - [Agent delegation sessions](docs/features/agent-delegation-sessions.md) — child sessions, write policies, structured results
+  - [Conversation overview map](docs/features/conversation-overview-map.md) — the one-call minimap
+  - [Virtualized transcripts](docs/features/session-virtualized-transcript.md) — bounded paging for huge sessions
   - [Project-scoped remotes](docs/features/project-scoped-remotes.md) — remote binding at project level

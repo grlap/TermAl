@@ -66,7 +66,9 @@ import {
   type ControlPanelSide,
   WORKSPACE_VIEW_QUERY_PARAM,
 } from "./workspace-storage";
+import { getStoredThemePreferences } from "./themes";
 import type {
+  ThemePreferences,
   DiagramLook,
   DiagramPalette,
   DiagramThemeOverrideMode,
@@ -74,6 +76,7 @@ import type {
   MarkdownThemeId,
   StyleId,
   ThemeId,
+  ThemeMode,
 } from "./themes";
 import { getErrorMessage } from "./app-utils";
 import {
@@ -94,6 +97,9 @@ export type UseAppWorkspaceLayoutParams = {
   setControlPanelSide: Dispatch<SetStateAction<ControlPanelSide>>;
   preferences: {
     themeId: ThemeId;
+    lightThemeId: ThemeId;
+    darkThemeId: ThemeId;
+    themeMode: ThemeMode;
     styleId: StyleId;
     markdownThemeId: MarkdownThemeId;
     markdownStyleId: MarkdownStyleId;
@@ -106,6 +112,9 @@ export type UseAppWorkspaceLayoutParams = {
   };
   setPreferences: {
     setThemeId: Dispatch<SetStateAction<ThemeId>>;
+    setLightThemeId: Dispatch<SetStateAction<ThemeId>>;
+    setDarkThemeId: Dispatch<SetStateAction<ThemeId>>;
+    setThemeMode: Dispatch<SetStateAction<ThemeMode>>;
     setStyleId: Dispatch<SetStateAction<StyleId>>;
     setMarkdownThemeId: Dispatch<SetStateAction<MarkdownThemeId>>;
     setMarkdownStyleId: Dispatch<SetStateAction<MarkdownStyleId>>;
@@ -129,6 +138,29 @@ export type UseAppWorkspaceLayoutParams = {
     side?: ControlPanelSide,
   ) => WorkspaceState;
 };
+
+type FetchedWorkspaceThemeFields = Pick<
+  StoredWorkspaceLayout,
+  "themeId" | "lightThemeId" | "darkThemeId" | "themeMode"
+>;
+
+export function resolveFetchedWorkspaceThemePreferences(
+  layout: FetchedWorkspaceThemeFields,
+): ThemePreferences | null {
+  if (
+    layout.themeId === undefined &&
+    layout.lightThemeId === undefined &&
+    layout.darkThemeId === undefined &&
+    layout.themeMode === undefined
+  ) {
+    return null;
+  }
+
+  // Use the same precedence and legacy migration as cold-start hydration.
+  // In particular, a legacy themeId-only layout pins the matching mode so
+  // live hydration immediately reproduces the saved appearance.
+  return getStoredThemePreferences(layout);
+}
 
 export type UseAppWorkspaceLayoutReturn = {
   isWorkspaceLayoutReady: boolean;
@@ -206,6 +238,9 @@ export function useAppWorkspaceLayout(
   } = params;
   const {
     themeId,
+    lightThemeId,
+    darkThemeId,
+    themeMode,
     styleId,
     markdownThemeId,
     markdownStyleId,
@@ -217,7 +252,9 @@ export function useAppWorkspaceLayout(
     densityPercent,
   } = preferences;
   const {
-    setThemeId,
+    setLightThemeId,
+    setDarkThemeId,
+    setThemeMode,
     setStyleId,
     setMarkdownThemeId,
     setMarkdownStyleId,
@@ -555,11 +592,17 @@ export function useAppWorkspaceLayout(
           return;
         }
 
+        // Backend response types are compile-time only. Reuse the persisted
+        // layout parser here as the runtime boundary so unknown theme ids,
+        // modes, and other hand-edited/stale values never reach DOM setters.
         const nextLayout = response
           ? parseStoredWorkspaceLayout(
               JSON.stringify({
                 controlPanelSide: response.layout.controlPanelSide,
                 themeId: response.layout.themeId,
+                lightThemeId: response.layout.lightThemeId,
+                darkThemeId: response.layout.darkThemeId,
+                themeMode: response.layout.themeMode,
                 styleId: response.layout.styleId,
                 markdownThemeId: response.layout.markdownThemeId,
                 markdownStyleId: response.layout.markdownStyleId,
@@ -588,8 +631,12 @@ export function useAppWorkspaceLayout(
           if (shouldApplyFetchedWorkspaceLayout) {
             setControlPanelSide(nextLayout.controlPanelSide);
           }
-          if (nextLayout.themeId) {
-            setThemeId(nextLayout.themeId);
+          const fetchedThemePreferences =
+            resolveFetchedWorkspaceThemePreferences(nextLayout);
+          if (fetchedThemePreferences) {
+            setLightThemeId(fetchedThemePreferences.lightThemeId);
+            setDarkThemeId(fetchedThemePreferences.darkThemeId);
+            setThemeMode(fetchedThemePreferences.themeMode);
           }
           if (nextLayout.styleId) {
             setStyleId(nextLayout.styleId);
@@ -806,6 +853,9 @@ export function useAppWorkspaceLayout(
     const layout: WorkspaceLayoutPersistencePayload = {
       controlPanelSide,
       themeId,
+      lightThemeId,
+      darkThemeId,
+      themeMode,
       styleId,
       markdownThemeId,
       markdownStyleId,
@@ -847,6 +897,9 @@ export function useAppWorkspaceLayout(
     markdownThemeId,
     styleId,
     themeId,
+    lightThemeId,
+    darkThemeId,
+    themeMode,
     workspace,
     workspaceViewId,
   ]);

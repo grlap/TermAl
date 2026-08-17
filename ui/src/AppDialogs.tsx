@@ -149,8 +149,14 @@ type AppDialogsProps = {
   setSettingsTab: (nextTab: PreferencesTabId) => void;
   activeStyle: ThemePanelProps["activeStyle"];
   activeTheme: ThemePanelProps["activeTheme"];
+  activeThemeKind: ThemePanelProps["activeThemeKind"];
+  lightThemeId: ThemePanelProps["lightThemeId"];
+  darkThemeId: ThemePanelProps["darkThemeId"];
+  themeMode: ThemePanelProps["themeMode"];
+  themeSessionOverride: ThemePanelProps["themeSessionOverride"];
   styleId: ThemePanelProps["styleId"];
-  themeId: ThemePanelProps["themeId"];
+  returnToAuto: ThemePanelProps["onReturnToAuto"];
+  setThemeMode: ThemePanelProps["onSelectMode"];
   setStyleId: ThemePanelProps["onSelectStyle"];
   setThemeId: ThemePanelProps["onSelectTheme"];
   activeMarkdownTheme: MarkdownPanelProps["activeMarkdownTheme"];
@@ -430,8 +436,14 @@ export function AppDialogs({
   setSettingsTab,
   activeStyle,
   activeTheme,
+  activeThemeKind,
+  lightThemeId,
+  darkThemeId,
+  themeMode,
+  themeSessionOverride,
   styleId,
-  themeId,
+  returnToAuto,
+  setThemeMode,
   setStyleId,
   setThemeId,
   activeMarkdownTheme,
@@ -1078,8 +1090,14 @@ export function AppDialogs({
                 <ThemePreferencesPanel
                   activeStyle={activeStyle}
                   activeTheme={activeTheme}
+                  activeThemeKind={activeThemeKind}
+                  lightThemeId={lightThemeId}
+                  darkThemeId={darkThemeId}
+                  themeMode={themeMode}
+                  themeSessionOverride={themeSessionOverride}
                   styleId={styleId}
-                  themeId={themeId}
+                  onReturnToAuto={returnToAuto}
+                  onSelectMode={setThemeMode}
                   onSelectStyle={setStyleId}
                   onSelectTheme={setThemeId}
                 />

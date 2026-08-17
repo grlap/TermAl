@@ -37,6 +37,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App from "./App";
+import { resolveFetchedWorkspaceThemePreferences } from "./app-workspace-layout";
 import { ThemedCombobox } from "./preferences-panels";
 import {
   describeCodexModelAdjustmentNotice,
@@ -72,6 +73,7 @@ import {
 import type { AgentReadiness, OrchestratorInstance, Session } from "./types";
 import * as workspaceStorage from "./workspace-storage";
 import { WORKSPACE_LAYOUT_STORAGE_KEY } from "./workspace-storage";
+import { persistThemePreferences } from "./themes";
 import type { WorkspaceState, WorkspaceTab } from "./workspace";
 import type { AppTestStateResponse } from "./app-test-harness";
 import {
@@ -254,6 +256,22 @@ describe("App workspace layout", () => {
     vi.spyOn(api, "saveWorkspaceLayout").mockResolvedValue(
       makeWorkspaceLayoutResponse(),
     );
+  });
+
+  it("migrates a live legacy theme layout with the cold-start precedence", () => {
+    persistThemePreferences({
+      lightThemeId: "heather",
+      darkThemeId: "fjord",
+      themeMode: "auto",
+    });
+
+    expect(
+      resolveFetchedWorkspaceThemePreferences({ themeId: "terminal" }),
+    ).toEqual({
+      lightThemeId: "heather",
+      darkThemeId: "terminal",
+      themeMode: "dark",
+    });
   });
 
   afterEach(async () => {

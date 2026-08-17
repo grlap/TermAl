@@ -6,6 +6,7 @@ import type {
   MarkdownThemeId,
   StyleId,
   ThemeId,
+  ThemeMode,
 } from "./themes";
 import {
   isDiagramLook,
@@ -15,6 +16,7 @@ import {
   isMarkdownThemeId,
   isStyleId,
   isThemeId,
+  isThemeMode,
 } from "./themes";
 import {
   normalizeWorkspaceStatePaths,
@@ -38,6 +40,9 @@ export type ControlPanelSide = "left" | "right";
 export type StoredWorkspaceLayout = {
   controlPanelSide: ControlPanelSide;
   themeId?: ThemeId;
+  lightThemeId?: ThemeId;
+  darkThemeId?: ThemeId;
+  themeMode?: ThemeMode;
   styleId?: StyleId;
   markdownThemeId?: MarkdownThemeId;
   markdownStyleId?: MarkdownStyleId;
@@ -210,6 +215,24 @@ function isStoredWorkspaceLayout(
 
   // themeId and styleId are optional - accept absent, reject invalid
   if (value.themeId !== undefined && !isThemeId(value.themeId as string)) {
+    return false;
+  }
+  if (
+    value.lightThemeId !== undefined &&
+    !isThemeId(value.lightThemeId as string)
+  ) {
+    return false;
+  }
+  if (
+    value.darkThemeId !== undefined &&
+    !isThemeId(value.darkThemeId as string)
+  ) {
+    return false;
+  }
+  if (
+    value.themeMode !== undefined &&
+    !isThemeMode(value.themeMode as string)
+  ) {
     return false;
   }
   if (value.styleId !== undefined && !isStyleId(value.styleId as string)) {
