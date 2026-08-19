@@ -209,6 +209,9 @@ export function useSessionPaneScrollState({
   const visibleContentSignatureByKeyRef = useRef<
     Record<string, string | undefined>
   >({});
+  const messageStackBottomByKeyRef = useRef<
+    Record<string, number | undefined>
+  >({});
   const liveFlowActiveByKeyRef = useRef<Record<string, boolean | undefined>>(
     {},
   );
@@ -366,6 +369,19 @@ export function useSessionPaneScrollState({
       };
     }
   }, [scrollStateKey]);
+
+  useLayoutEffect(
+    () => () => {
+      // Live follow survives ordinary message/status commits, but never owns a
+      // pane after its scroll scope changes or becomes inactive. Keeping this
+      // cleanup separate from content effects prevents status-only commits
+      // from cancelling convergence without scheduling a replacement.
+      cancelSettledScrollToBottom();
+      cancelPaneProgrammaticBottomFollow();
+      delete messageStackBottomByKeyRef.current[scrollStateKey];
+    },
+    [isActive, isSessionTabActive, paneViewMode, scrollStateKey],
+  );
 
   function setNewResponseIndicator(
     key: string,
@@ -784,6 +800,20 @@ export function useSessionPaneScrollState({
       (currentLiveFlowActive ||
         postLiveMessageTransition.shouldFollowPostLiveMessage ||
         receivedFirstOutputForPrompt);
+    const messageStack = messageStackRef.current;
+    const previousMessageStackBottom =
+      messageStackBottomByKeyRef.current[scrollStateKey];
+    const currentMessageStackBottom = messageStack
+      ? Math.max(messageStack.scrollHeight - messageStack.clientHeight, 0)
+      : undefined;
+    if (currentMessageStackBottom !== undefined) {
+      messageStackBottomByKeyRef.current[scrollStateKey] =
+        currentMessageStackBottom;
+    }
+    const bottomMovedUpBeforePaint =
+      previousMessageStackBottom !== undefined &&
+      currentMessageStackBottom !== undefined &&
+      currentMessageStackBottom < previousMessageStackBottom - 0.5;
     if (
       (!receivedFirstOutputForPrompt && !changedLiveContent) ||
       hasUnloadedNewerHistory ||
@@ -796,8 +826,9 @@ export function useSessionPaneScrollState({
     }
 
     // LIVE TURN remains an ordinary in-flow tail. While auto-follow owns the
-    // pane, compensate every committed conversation change before paint so
-    // the tail does not first move down and then catch up one frame later.
+    // pane, one persistent animation-frame controller retargets the moving
+    // bottom. Content commits never consume their own synthetic frame budget,
+    // so a burst of SSE/React commits before paint cannot accelerate motion.
     // Turn status and the final assistant message can arrive in separate SSE
     // commits. The per-key latch survives a status-only idle commit, but stays
     // bound to that turn's prompt identity. A later prompt clears it without
@@ -805,13 +836,19 @@ export function useSessionPaneScrollState({
     // synchronization even when earlier command/progress output means this is
     // not first output.
     if (changedLiveContent) {
-      scrollToLatestMessage("auto", true, "bottom_follow", {
-        snapBottomFollowBeforePaint: true,
-      });
+      if (bottomMovedUpBeforePaint) {
+        // A browser clamp can make a live reparse require no numeric write.
+        // Still notify the virtualizer synchronously so the final page and the
+        // corrected viewport reach the same paint.
+        scrollToLatestMessage("auto", true, "bottom_follow", {
+          snapBottomFollowBeforePaint: true,
+        });
+      }
+      scheduleLiveTailFollow();
       return;
     }
 
-    return scheduleLiveTailFollow();
+    scheduleLiveTailFollow();
   }, [
     activeSession?.messages,
     hasUnloadedNewerHistory,
@@ -1246,6 +1283,20 @@ export function useSessionPaneScrollState({
       ) {
         frameId = window.requestAnimationFrame(tick);
       } else {
+        if (
+          options.scrollKind === "bottom_follow" &&
+          bottomGap > settledBottomGap &&
+          getTailFollowIntent() &&
+          !hasTailFollowUserEscape()
+        ) {
+          // The velocity budget is intentionally finite, but attachment is a
+          // stronger contract: once that budget expires, finish at the current
+          // physical bottom so the latest response cannot remain hidden with
+          // no indicator or future wake-up.
+          scrollToLatestMessage("auto", true, "bottom_follow", {
+            snapBottomFollowBeforePaint: true,
+          });
+        }
         complete();
       }
     };
@@ -1270,7 +1321,7 @@ export function useSessionPaneScrollState({
   function scheduleLiveTailFollow() {
     if (!getTailFollowIntent()) {
       setNewResponseIndicator(scrollStateKey, true, "activity");
-      return undefined;
+      return;
     }
     // Mark the entire live-flow transition before its first animation frame.
     // Composer measurements and ResizeObserver delivery can run in the gap
@@ -1280,7 +1331,10 @@ export function useSessionPaneScrollState({
     // authoritative pre-paint collapses use the separate synchronous repin
     // path so the visible tree can never outrun its viewport correction.
     beginPaneProgrammaticBottomFollow();
-    return scheduleSettledScrollToBottom("auto", {
+    if (isSettledProgrammaticBottomFollowActive()) {
+      return;
+    }
+    scheduleSettledScrollToBottom("auto", {
       // Large command/result cards can require more than the old 400 ms window
       // now that each frame is deliberately velocity-bounded.
       maxAttempts: 60,
@@ -1832,14 +1886,12 @@ export function useSessionPaneScrollState({
     // Sending starts new activity, but it is not a navigation command. A
     // reader who moved away from the tail keeps the same viewport and gets an
     // indicator instead of being pulled away from the text they are reading.
-    let cleanup: (() => void) | undefined;
     const frameId = window.requestAnimationFrame(() => {
-      cleanup = followLatestMessageForPromptSend();
+      followLatestMessageForPromptSend();
     });
 
     return () => {
       window.cancelAnimationFrame(frameId);
-      cleanup?.();
     };
   }, [isSending, paneViewMode, scrollStateKey]);
 

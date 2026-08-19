@@ -1598,8 +1598,8 @@ describe("App scroll behaviour", () => {
         scrollToMock.mockClear();
 
         // This turn already has agent output (the command), so final text is not
-        // the "first output". The pending post-live latch must nevertheless snap
-        // to the final physical/virtual bottom before post-paint easing begins.
+        // the "first output". The pending post-live latch must nevertheless
+        // begin a bounded follow immediately and converge on the final bottom.
         transcriptScrollHeight = 1080;
         await dispatchStateEvent(latestEventSource(), {
           ...activeState,
@@ -1638,7 +1638,9 @@ describe("App scroll behaviour", () => {
           messageStack,
           "auto",
         );
-        expect(replacementTops[0]).toBe(880);
+        expect(replacementTops[0]).toBeGreaterThan(800);
+        expect(replacementTops[0]).toBeLessThan(880);
+        expect(replacementTops[replacementTops.length - 1]).toBe(880);
 
         scrollToMock.mockClear();
         transcriptScrollHeight = 1160;

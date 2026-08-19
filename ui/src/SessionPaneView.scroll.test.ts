@@ -464,7 +464,7 @@ describe("session pane historical-window tail state", () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  it("pins a newly inserted reply before paint and smoothly follows measured growth", () => {
+  it("coalesces live commits, survives status changes, and guarantees convergence", () => {
     let nextAnimationFrameId = 1;
     const animationFrames = new Map<number, FrameRequestCallback>();
     const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
@@ -513,6 +513,13 @@ describe("session pane historical-window tail state", () => {
       messages: [prompt],
       messageCount: 1,
     };
+    const firstReply: Message = {
+      id: "reply-current",
+      type: "text",
+      timestamp: "12:02",
+      author: "assistant",
+      text: "First reply",
+    };
     const paneShouldStickToBottomRef = { current: { "pane-1": true } };
     const paneScrollPositions: Record<
       string,
@@ -528,11 +535,12 @@ describe("session pane historical-window tail state", () => {
       showWaitingIndicator: true,
     };
     const hook = renderHook(
-      ({ currentSession, contentSignature, paneActive }) =>
+      ({ currentSession, contentSignature, paneActive, waiting }) =>
         useSessionPaneScrollState({
           ...sharedParams,
           activeSession: currentSession,
           isActive: paneActive,
+          showWaitingIndicator: waiting,
           visibleContentSignature: contentSignature,
           visibleMessageContentSignature: contentSignature,
           visibleLastMessageAuthor:
@@ -543,6 +551,7 @@ describe("session pane historical-window tail state", () => {
           currentSession: activeSession,
           contentSignature: "prompt-current",
           paneActive: false,
+          waiting: true,
         },
       },
     );
@@ -551,7 +560,21 @@ describe("session pane historical-window tail state", () => {
       currentSession: activeSession,
       contentSignature: "prompt-current",
       paneActive: true,
+      waiting: true,
     });
+    let setupFrameTimestamp = 0;
+    let setupFrameCount = 0;
+    while (animationFrames.size > 0 && setupFrameCount < 10) {
+      const setupFrame = animationFrames.entries().next().value;
+      if (!setupFrame) {
+        break;
+      }
+      animationFrames.delete(setupFrame[0]);
+      setupFrameTimestamp += 1000 / 60;
+      act(() => setupFrame[1](setupFrameTimestamp));
+      setupFrameCount += 1;
+    }
+    expect(setupFrameCount).toBeLessThan(10);
     animationFrames.clear();
     requestAnimationFrame.mockClear();
     scrollTo.mockClear();
@@ -560,38 +583,54 @@ describe("session pane historical-window tail state", () => {
     hook.rerender({
       currentSession: {
         ...activeSession,
-        messages: [
-          prompt,
-          {
-            id: "reply-current",
-            type: "text",
-            timestamp: "12:02",
-            author: "assistant",
-            text: "First reply",
-          },
-        ],
+        messages: [prompt, firstReply],
         messageCount: 2,
       },
       contentSignature: "reply-current",
       paneActive: true,
+      waiting: true,
     });
 
-    expect(scrollNode.scrollTop).toBe(920);
-    expect(scrollTo).toHaveBeenCalledWith({
-      behavior: "auto",
-      top: 920,
-    });
-    expect(scrollWrites[scrollWrites.length - 1]?.detail.scrollKind).toBe(
-      "bottom_follow",
-    );
+    expect(scrollNode.scrollTop).toBe(800);
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+    expect(animationFrames.size).toBe(1);
 
-    // Content inside the new card can grow after the structural commit. That
-    // measured growth should stay velocity-bounded instead of snapping again.
+    // A second committed delta before the browser drains rAF only retargets
+    // the existing controller. Commit frequency cannot consume extra motion
+    // budget or enqueue another animation frame.
     scrollHeight = 1_240;
+    scrollTo.mockClear();
+    const streamingSession = {
+      ...activeSession,
+      messages: [
+        prompt,
+        {
+          ...firstReply,
+          text: "First reply with another streamed line",
+        },
+      ],
+      messageCount: 2,
+    };
+    hook.rerender({
+      currentSession: streamingSession,
+      contentSignature: "reply-current:stream-2",
+      paneActive: true,
+      waiting: true,
+    });
+
+    expect(scrollNode.scrollTop).toBe(800);
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+    expect(animationFrames.size).toBe(1);
+
+    // Measurement requests join the active follow loop instead of adding a
+    // second synchronous writer for the same growth.
     scrollTo.mockClear();
     act(() => {
       requestMessageStackBottomRepin(scrollNode);
     });
+    expect(scrollTo).not.toHaveBeenCalled();
     const firstFrame = animationFrames.entries().next().value;
     if (!firstFrame) {
       throw new Error("Expected a scheduled bottom-follow frame");
@@ -601,8 +640,8 @@ describe("session pane historical-window tail state", () => {
     act(() => firstFrame[1](frameTimestamp));
 
     const firstFrameScrollTop = scrollNode.scrollTop;
-    expect(firstFrameScrollTop).toBeGreaterThan(920);
-    expect(firstFrameScrollTop).toBeLessThan(970);
+    expect(firstFrameScrollTop).toBeGreaterThan(800);
+    expect(firstFrameScrollTop - 800).toBeLessThan(50);
     expect(scrollTo).toHaveBeenCalledWith({
       behavior: "auto",
       top: firstFrameScrollTop,
@@ -611,39 +650,72 @@ describe("session pane historical-window tail state", () => {
       "bottom_follow",
     );
 
-    // A streaming-to-settled reparse can make the live card shorter between
-    // the follow loop's rAF and paint. The urgent request still claims the
-    // virtualizer authority, but it must not issue an explicit upward write
-    // while the browser has not clamped the stale geometry yet.
-    scrollHeight = 980;
-    scrollTo.mockClear();
-    const scrollTopBeforeShrink = scrollNode.scrollTop;
-    let claimedBeforePaintAuthority = false;
-    act(() => {
-      claimedBeforePaintAuthority = requestMessageStackBottomRepin(scrollNode, {
-        beforePaint: true,
-      });
+    // A status-only commit runs the content effect again but must not cancel
+    // the in-flight controller when there is no replacement schedule.
+    const pendingFrameIdAfterFirstWrite = animationFrames.keys().next().value;
+    if (pendingFrameIdAfterFirstWrite === undefined) {
+      throw new Error("Expected bottom-follow to schedule its next frame");
+    }
+    hook.rerender({
+      currentSession: streamingSession,
+      contentSignature: "reply-current:stream-2",
+      paneActive: true,
+      waiting: false,
     });
-    expect(claimedBeforePaintAuthority).toBe(true);
-    expect(scrollNode.scrollTop).toBe(scrollTopBeforeShrink);
+    expect(animationFrames.size).toBe(1);
+    expect(animationFrames.has(pendingFrameIdAfterFirstWrite)).toBe(true);
+
+    // A plain live commit can shrink the physical bottom and let the browser
+    // clamp scrollTop before the layout effect runs. Even without an explicit
+    // beforePaint repin request, the virtualizer must receive a synchronous
+    // bottom-follow notification while no upward write is issued.
+    scrollHeight = 980;
+    scrollNode.scrollTop = 780;
+    scrollTo.mockClear();
+    const scrollWriteCountBeforeShrink = scrollWrites.length;
+    hook.rerender({
+      currentSession: {
+        ...streamingSession,
+        messages: [
+          prompt,
+          {
+            ...firstReply,
+            text: "Settled reply",
+          },
+        ],
+      },
+      contentSignature: "reply-current:settled",
+      paneActive: true,
+      waiting: false,
+    });
+    expect(scrollNode.scrollTop).toBe(780);
     expect(scrollTo).not.toHaveBeenCalled();
-    expect(paneScrollPositions["pane-1:session-history"]?.top).toBe(
-      scrollTopBeforeShrink,
-    );
+    expect(scrollWrites).toHaveLength(scrollWriteCountBeforeShrink + 1);
     expect(scrollWrites[scrollWrites.length - 1]?.detail.scrollKind).toBe(
       "bottom_follow",
     );
 
-    // Real browsers clamp scrollTop to the shorter physical range. The test
-    // geometry is intentionally mutable, so emulate that native clamp before
-    // the next growth commit.
-    scrollNode.scrollTop = 780;
-
-    // Once content grows again, the existing loop converges smoothly rather
-    // than snapping to the moving bottom.
-    scrollHeight = 1_120;
+    // A very large final card exceeds the normal 60-frame velocity budget.
+    // The controller remains smooth during that budget and then performs its
+    // explicit terminal correction so attached content cannot stay hidden.
+    scrollHeight = 5_000;
+    hook.rerender({
+      currentSession: {
+        ...streamingSession,
+        messages: [
+          prompt,
+          {
+            ...firstReply,
+            text: "A very large final response",
+          },
+        ],
+      },
+      contentSignature: "reply-current:very-large-final",
+      paneActive: true,
+      waiting: false,
+    });
     let drainedFrames = 0;
-    while (animationFrames.size > 0 && drainedFrames < 30) {
+    while (animationFrames.size > 0 && drainedFrames < 70) {
       const nextFrame = animationFrames.entries().next().value;
       if (!nextFrame) {
         break;
@@ -653,16 +725,9 @@ describe("session pane historical-window tail state", () => {
       act(() => nextFrame[1](frameTimestamp));
       drainedFrames += 1;
     }
-    expect(drainedFrames).toBeLessThan(30);
-    expect(scrollNode.scrollTop).toBe(920);
+    expect(drainedFrames).toBeLessThanOrEqual(60);
+    expect(scrollNode.scrollTop).toBe(4_800);
 
-    const firstReply: Message = {
-      id: "reply-current",
-      type: "text",
-      timestamp: "12:02",
-      author: "assistant",
-      text: "First reply",
-    };
     const nextPrompt: Message = {
       id: "prompt-next",
       type: "text",
@@ -678,6 +743,7 @@ describe("session pane historical-window tail state", () => {
       },
       contentSignature: "prompt-next",
       paneActive: true,
+      waiting: false,
     });
 
     paneShouldStickToBottomRef.current["pane-1"] = false;
@@ -703,6 +769,7 @@ describe("session pane historical-window tail state", () => {
       },
       contentSignature: "reply-next",
       paneActive: true,
+      waiting: true,
     });
 
     expect(scrollNode.scrollTop).toBe(700);
