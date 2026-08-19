@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import type {
+  FocusEvent as ReactFocusEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   UIEvent as ReactUIEvent,
@@ -1567,6 +1568,85 @@ describe("session pane historical-window tail state", () => {
 
     // A callback already dequeued by the browser must still observe that the
     // scrollbar gesture transferred authority to the user.
+    act(() => retainedRestoreFrame(1000 / 60));
+    expect(scrollNode.scrollTop).toBe(350);
+    expect(paneScrollPositions[detachedKey]).toEqual({
+      top: 350,
+      shouldStick: false,
+    });
+  });
+
+  it("does not let a retained restore frame revert focus navigation", () => {
+    let nextAnimationFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        const frameId = nextAnimationFrameId;
+        nextAnimationFrameId += 1;
+        animationFrames.set(frameId, callback);
+        return frameId;
+      }),
+    );
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((frameId: number) => animationFrames.delete(frameId)),
+    );
+    const liveSession = session(false);
+    const detachedKey = "pane-1:session-detached";
+    const paneScrollPositions = {
+      [detachedKey]: { top: 600, shouldStick: false },
+    };
+    const scrollNode = document.createElement("section");
+    const focusedButton = document.createElement("button");
+    scrollNode.append(focusedButton);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_200 },
+      scrollTop: { configurable: true, writable: true, value: 200 },
+    });
+    const hook = renderHook(
+      ({ isSessionTabActive, scrollStateKey }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive: true,
+          isSessionTabActive,
+          paneScrollPositions,
+          paneShouldStickToBottomRef: {
+            current: { [detachedKey]: false },
+          },
+          scrollStateKey,
+        }),
+      {
+        initialProps: {
+          isSessionTabActive: false,
+          scrollStateKey: "pane-1:control-panel",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+    hook.rerender({
+      isSessionTabActive: true,
+      scrollStateKey: detachedKey,
+    });
+    const retainedRestoreFrame = animationFrames.values().next().value;
+    if (!retainedRestoreFrame) {
+      throw new Error("Detached restore verification frame was not scheduled");
+    }
+
+    act(() => {
+      hook.result.current.handleMessageStackFocusCapture({
+        currentTarget: scrollNode,
+        target: focusedButton,
+      } as unknown as ReactFocusEvent<HTMLElement>);
+      scrollNode.scrollTop = 350;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    // Browser focus may call scrollIntoView without a wheel/key precursor. It
+    // still transfers authority away from the pending detached restoration.
     act(() => retainedRestoreFrame(1000 / 60));
     expect(scrollNode.scrollTop).toBe(350);
     expect(paneScrollPositions[detachedKey]).toEqual({

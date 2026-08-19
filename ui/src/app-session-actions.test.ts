@@ -586,7 +586,7 @@ describe("useAppSessionActions", () => {
     );
   });
 
-  it("removes the optimistic pending prompt after a stale send response", async () => {
+  it("keeps the optimistic pending prompt after a stale send response", async () => {
     const staleState = {
       ...makeStateResponse(4),
       sessions: [makeSession("session-1", { status: "active" })],
@@ -602,7 +602,12 @@ describe("useAppSessionActions", () => {
 
     await waitFor(() => {
       expect(params.adoptState).toHaveBeenCalledWith(staleState);
-      expect(params.refs.sessionsRef.current[0]?.pendingPrompts).toBeUndefined();
+      expect(params.refs.sessionsRef.current[0]?.pendingPrompts).toEqual([
+        expect.objectContaining({
+          localOnly: true,
+          text: "hello",
+        }),
+      ]);
     });
   });
 

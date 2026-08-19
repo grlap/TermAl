@@ -694,7 +694,7 @@ describe("AgentSessionPanel conversation caching", () => {
     }
   });
 
-  it("renders pending prompts outside the live tail when no live turn is visible", () => {
+  it("keeps pending prompts in the shared live tail without a live turn", () => {
     renderSessionPanelWithDefaults({
       activeSession: makeSession("session-a", {
         messages: [],
@@ -718,9 +718,7 @@ describe("AgentSessionPanel conversation caching", () => {
 
     expect(queuedPromptCard).not.toBeNull();
     expect(pendingPromptQueue).not.toBeNull();
-    expect(
-      document.querySelector(".conversation-live-tail"),
-    ).not.toBeInTheDocument();
+    expect(pendingPromptQueue?.closest(".conversation-live-tail")).not.toBeNull();
     expect(pendingPromptQueue).toContainElement(
       queuedPromptCard as HTMLElement,
     );
@@ -771,10 +769,10 @@ describe("AgentSessionPanel conversation caching", () => {
       screen.getByText("Codex is starting the next turn"),
     ).toBeInTheDocument();
     expect(liveTail).not.toBeNull();
-    expect(liveTail).not.toContainElement(queuedPromptCard as HTMLElement);
+    expect(liveTail).toContainElement(queuedPromptCard as HTMLElement);
     expect(
       Boolean(
-        queuedPromptCard!.compareDocumentPosition(liveTail!) &
+        queuedPromptCard!.compareDocumentPosition(handoffCard!) &
         Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true);
@@ -1055,7 +1053,7 @@ describe("AgentSessionPanel conversation caching", () => {
     ).not.toHaveAttribute("title");
   });
 
-  it("keeps the live-turn tail calm while assistant output grows above queued prompts", () => {
+  it("keeps the attached live-turn tail calm while assistant output grows above queued prompts", () => {
     const scrollNode = document.createElement("section");
     let scrollTop = 120;
     const scrollWrites: number[] = [];
@@ -1131,7 +1129,9 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(pendingPromptQueue).not.toBeNull();
     expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
     expect(liveTurnCard).not.toBeNull();
-    expect(pendingPromptQueue?.closest(".conversation-live-tail")).toBeNull();
+    expect(pendingPromptQueue?.closest(".conversation-live-tail")).toBe(
+      liveTail,
+    );
     expect(
       Boolean(
         firstQueuedPromptCard!.compareDocumentPosition(
@@ -1145,8 +1145,8 @@ describe("AgentSessionPanel conversation caching", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true);
-    expect(liveTail).not.toContainElement(firstQueuedPromptCard as HTMLElement);
-    expect(liveTail).not.toContainElement(
+    expect(liveTail).toContainElement(firstQueuedPromptCard as HTMLElement);
+    expect(liveTail).toContainElement(
       secondQueuedPromptCard as HTMLElement,
     );
     expect(liveTail).toContainElement(liveTurnCard as HTMLElement);
@@ -1224,7 +1224,7 @@ describe("AgentSessionPanel conversation caching", () => {
       /\bposition\s*:\s*sticky\s*;/,
     );
     expect(attachedDeclarations).toMatch(
-      /\bbottom\s*:\s*var\(--message-stack-block-padding\)\s*;/,
+      /\bbottom\s*:\s*0\s*;/,
     );
 
     const activeSession = makeSession("session-a", {
@@ -1291,7 +1291,7 @@ describe("AgentSessionPanel conversation caching", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("removes the live-turn layout footprint atomically when the waiting indicator clears", async () => {
+  it("keeps the shared queued tail mounted when the waiting indicator clears", async () => {
     vi.useFakeTimers();
     const activeSession = makeSession("session-a", {
       status: "active",
@@ -1326,7 +1326,7 @@ describe("AgentSessionPanel conversation caching", () => {
       .getByText("Queued follow-up after current turn")
       .closest(".pending-prompt-card");
     expect(liveTail).not.toBeNull();
-    expect(liveTail).not.toContainElement(queuedPromptCard as HTMLElement);
+    expect(liveTail).toContainElement(queuedPromptCard as HTMLElement);
 
     await act(async () => {
       await vi.advanceTimersToNextTimerAsync();
@@ -1345,7 +1345,7 @@ describe("AgentSessionPanel conversation caching", () => {
         .getByText("Queued follow-up after current turn")
         .closest(".pending-prompt-card"),
     ).toBe(queuedPromptCard);
-    expect(liveTail).not.toBeInTheDocument();
+    expect(liveTail).toBeInTheDocument();
     expect(
       screen.getByText("Queued follow-up after current turn"),
     ).toBeInTheDocument();
@@ -1353,7 +1353,7 @@ describe("AgentSessionPanel conversation caching", () => {
       screen
         .getByText("Queued follow-up after current turn")
         .closest(".conversation-live-tail"),
-    ).toBeNull();
+    ).toBe(liveTail);
   });
 
   it("suppresses a stale idle live-turn tail after visible agent output", () => {

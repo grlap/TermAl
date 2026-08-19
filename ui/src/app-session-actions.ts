@@ -562,7 +562,11 @@ export function useAppSessionActions(
           return;
         }
         const adopted = adoptState(state);
-        removeOptimisticPendingPrompt(sessionId, optimisticPromptId);
+        // Keep the optimistic prompt until an authoritative pending prompt or
+        // user-message delta replaces it. Send responses may be summary-only
+        // or stale relative to SSE; removing it here creates a blank frame in
+        // which the submitted prompt disappears before its persisted message
+        // arrives. The error path still removes it and restores the draft.
         releaseDraftAttachments(attachments);
         setRequestError(null);
         const responseKeepsSessionActive = state.sessions?.some(

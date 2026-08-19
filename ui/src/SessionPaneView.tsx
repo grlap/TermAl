@@ -668,6 +668,7 @@ export function SessionPaneView({
     (paneMessageContentSignaturesRef.current[pane.id] = {});
   const {
     handleConversationSearchItemMount,
+    handleMessageStackFocusCapture,
     handleMessageStackScroll,
     handleMessageStackTouchStart,
     handleMessageStackUserScrollIntent,
@@ -1371,6 +1372,7 @@ export function SessionPaneView({
             : undefined
         }
         onScroll={handleMessageStackScroll}
+        onFocusCapture={handleMessageStackFocusCapture}
         onWheel={handleMessageStackUserScrollIntent}
         onTouchStart={handleMessageStackTouchStart}
         onTouchMove={handleMessageStackUserScrollIntent}

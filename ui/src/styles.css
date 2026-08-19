@@ -5225,10 +5225,25 @@ textarea {
 
 .conversation-live-tail[data-tail-follow="attached"] {
   /* Keep LIVE TURN stable while streamed content moves underneath it. The
-     scroll controller removes this state before deliberate user navigation. */
+     scroll controller removes this state before deliberate user navigation.
+
+     The inset must stay 0: a sticky element cannot leave its containing
+     block, so it can never enter the scroll container's bottom padding.
+     `bottom: 0` therefore rests exactly at the natural in-flow position at
+     full scroll, and removing the sticky state moves nothing. Any positive
+     inset lifts the sticky rest above the natural rest by that amount, and
+     the first manual scroll then releases it as a visible downward snap
+     while the transcript moves — the tail and transcript appear to travel
+     in different coordinate systems for that first movement. Measured live:
+     bottom: var(--message-stack-block-padding) produced a 17px first-frame
+     divergence; bottom: 0 produced zero. */
   position: sticky;
-  bottom: var(--message-stack-block-padding);
+  bottom: 0;
   z-index: 2;
+}
+
+.conversation-live-tail[data-manual-detach-compensation] {
+  transform: translateY(var(--conversation-live-tail-detach-offset));
 }
 
 .conversation-pending-prompts {

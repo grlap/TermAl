@@ -1213,17 +1213,21 @@ const SessionConversationPage = memo(
         </div>
       ) : null;
     const liveTail = (
-      <ConversationTailPresence active={liveTurnCard !== null}>
+      <ConversationTailPresence
+        active={pendingPromptQueue !== null || liveTurnCard !== null}
+      >
         {/*
-          LIVE TURN always reserves its place in transcript flow. While the
-          scroll controller owns tail follow, the attribute also pins that
-          reserved wrapper to the viewport bottom; explicit user navigation
-          detaches it and restores ordinary in-flow movement.
+          Queued prompts and LIVE TURN are one visual tail. While the scroll
+          controller owns tail follow, sticky presentation keeps the whole
+          group stable as agent output grows above it. Explicit user navigation
+          detaches the group before moving, so all tail cards then travel with
+          the transcript.
         */}
         <div
           className="conversation-live-tail"
           data-tail-follow={liveTailPinned ? "attached" : "detached"}
         >
+          {pendingPromptQueue}
           {liveTurnCard}
         </div>
       </ConversationTailPresence>
@@ -1243,10 +1247,8 @@ const SessionConversationPage = memo(
         {markerNavigation}
         {conversationMessages}
         {markerContextMenuNode}
-        {/* Queued prompts keep one stable parent across live-card transitions.
-        Only the departing live card reserves exit height, so queue content
-        is never double-counted or remounted when a turn finishes. */}
-        {pendingPromptQueue}
+        {/* The shared tail keeps queued prompts mounted while LIVE TURN enters
+        or exits, avoiding two independently moving bottom anchors. */}
         {liveTail}
       </>
     );
