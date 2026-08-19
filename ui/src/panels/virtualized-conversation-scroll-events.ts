@@ -343,6 +343,7 @@ export function useVirtualizedConversationScrollEvents({
       }
       pendingProgrammaticBottomFollowUntilRef.current =
         Number.NEGATIVE_INFINITY;
+      pendingProgrammaticScrollTopRef.current = null;
       pendingPrependedTopBoundaryRef.current = false;
       if (upwardInputDeltaPx === null || !isLikelyBottomEscape) {
         pendingPrependedBottomGapRef.current = null;
@@ -408,6 +409,38 @@ export function useVirtualizedConversationScrollEvents({
               ?.scrollSource ?? "programmatic")
           : "programmatic";
 
+      if (explicitScrollKind === "position_restore") {
+        const previousScrollTop = lastNativeScrollTopRef.current;
+        const scrollDelta = node.scrollTop - previousScrollTop;
+        pendingProgrammaticBottomFollowUntilRef.current =
+          Number.NEGATIVE_INFINITY;
+        pendingProgrammaticScrollTopRef.current =
+          Math.abs(scrollDelta) >= 0.5 ? node.scrollTop : null;
+        lastNativeScrollTopRef.current = node.scrollTop;
+        shouldKeepBottomAfterLayoutRef.current = false;
+        isDetachedFromBottomRef.current = true;
+        setHasUserScrollInteraction(false);
+        pendingAggressiveIdleCompactionRef.current = true;
+        pendingMountedPrependRestoreRef.current = null;
+        skipNextMountedPrependRestoreRef.current = false;
+        clearPendingDeferredLayoutTimer();
+        clearPendingIdleCompactionTimer();
+        pendingDeferredLayoutAnchorRef.current = null;
+        // Mounted-range resolution consults the viewport snapshot during the
+        // same render. Publish the restored DOM position first so it cannot
+        // discard the requested range using the previous tab's scrollTop.
+        syncViewportFromScrollNode(node);
+        // A tab can restore to the same numeric scrollTop used by the outgoing
+        // session while needing a completely different mounted page range.
+        reconcileMountedRangeForNativeScroll(node, scrollDelta, "seek", {
+          allowSeekFlush: false,
+        });
+        lastUserScrollKindRef.current = null;
+        lastUserScrollInputTimeRef.current = Number.NEGATIVE_INFINITY;
+        scheduleProgrammaticViewportSync(node);
+        return;
+      }
+
       if (
         explicitScrollKind === "bottom_pin" ||
         explicitScrollKind === "bottom_boundary"
@@ -429,6 +462,7 @@ export function useVirtualizedConversationScrollEvents({
         clearPendingDeferredLayoutTimer();
         clearPendingIdleCompactionTimer();
         pendingDeferredLayoutAnchorRef.current = null;
+        syncViewportFromScrollNode(node);
         if (explicitScrollKind === "bottom_boundary") {
           pendingBottomBoundarySeekRef.current = true;
           mountBottomBoundary(node);
@@ -453,6 +487,7 @@ export function useVirtualizedConversationScrollEvents({
         clearPendingDeferredLayoutTimer();
         clearPendingIdleCompactionTimer();
         pendingDeferredLayoutAnchorRef.current = null;
+        syncViewportFromScrollNode(node);
         // Bottom-follow only needs the tail pages to be resident. Keep an
         // existing wider band intact instead of narrowing it for one render
         // and letting viewport reconciliation expand it again immediately.
@@ -539,6 +574,7 @@ export function useVirtualizedConversationScrollEvents({
     const cancelBottomFollowOnMouseDown = (event: MouseEvent) => {
       pendingProgrammaticBottomFollowUntilRef.current = Number.NEGATIVE_INFINITY;
       if (event.target === node) {
+        pendingProgrammaticScrollTopRef.current = null;
         shouldKeepBottomAfterLayoutRef.current = false;
         isDetachedFromBottomRef.current = true;
         setHasUserScrollInteraction(true);

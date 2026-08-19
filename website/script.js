@@ -349,54 +349,97 @@
     const demo = qs("#theme-demo");
     if (!demo) return;
     const choices = qsa("[data-theme-choice]", demo);
-    choices.forEach((button) => {
-      button.addEventListener("click", () => {
-        const theme = button.dataset.themeChoice;
-        demo.dataset.previewTheme = theme;
-        choices.forEach((choice) => choice.setAttribute("aria-pressed", String(choice === button)));
-      });
-    });
-  }
+    const modeChoices = qsa("[data-theme-mode-choice]", demo);
+    const pairCards = qsa("[data-theme-pair]", demo);
+    const status = qs("#theme-demo-status span", demo);
+    const themeState = window.TermalThemeDemoState;
+    // The catalog remains a complete static no-JS presentation if its small
+    // controller asset fails independently. Do not disable unrelated page
+    // enhancements because this optional demo could not initialize.
+    if (!themeState) return;
+    const systemColorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+    const selected = {
+      light: choices.find((choice) => choice.dataset.themeKind === "light" && choice.getAttribute("aria-pressed") === "true"),
+      dark: choices.find((choice) => choice.dataset.themeKind === "dark" && choice.getAttribute("aria-pressed") === "true"),
+    };
+    let mode = modeChoices.find((choice) => choice.getAttribute("aria-pressed") === "true")?.dataset.themeModeChoice || "auto";
+    let themeModeController;
 
-  function initCopyButtons() {
-    const buttons = qsa("[data-copy]");
-    if (!buttons.length) return;
-    root.classList.add("copy-ready");
-
-    async function copyText(text) {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-        return;
-      }
-      const field = document.createElement("textarea");
-      field.value = text;
-      field.setAttribute("readonly", "");
-      field.style.position = "fixed";
-      field.style.opacity = "0";
-      document.body.append(field);
-      field.select();
-      const copied = document.execCommand("copy");
-      field.remove();
-      if (!copied) throw new Error("Copy failed");
+    function themeName(choice) {
+      return qs("b", choice)?.textContent?.trim() || choice.dataset.themeChoice;
     }
 
-    buttons.forEach((button) => {
-      button.setAttribute("aria-live", "polite");
-      button.addEventListener("click", async () => {
-        const source = document.getElementById(button.dataset.copy);
-        const label = qs("span", button);
-        if (!source || !label) return;
-        const original = label.textContent;
-        try {
-          await copyText(source.textContent.trim());
-          label.textContent = "Copied";
-        } catch {
-          label.textContent = "Select text";
-          source.focus?.();
-        }
-        window.setTimeout(() => { label.textContent = original; }, 1700);
+    function swatches(choice) {
+      const styles = getComputedStyle(choice);
+      return {
+        background: styles.getPropertyValue("--swatch-bg").trim(),
+        accent: styles.getPropertyValue("--swatch-a").trim(),
+        detail: styles.getPropertyValue("--swatch-b").trim(),
+      };
+    }
+
+    function updatePair(choice) {
+      const kind = choice.dataset.themeKind;
+      const pair = pairCards.find((card) => card.dataset.themePair === kind);
+      if (!pair) return;
+      const palette = swatches(choice);
+      const preview = qs("[data-theme-pair-preview]", pair);
+      qs("[data-theme-pair-name]", pair).textContent = themeName(choice);
+      preview.style.setProperty("--swatch-bg", palette.background);
+      preview.style.setProperty("--swatch-a", palette.accent);
+      preview.style.setProperty("--swatch-b", palette.detail);
+    }
+
+    function render(choice) {
+      if (!choice) return;
+      const palette = swatches(choice);
+      const name = themeName(choice);
+      const activeKind = choice.dataset.themeKind;
+      demo.dataset.previewTheme = choice.dataset.themeChoice;
+      demo.dataset.previewKind = activeKind;
+      demo.style.setProperty("--theme-bg", palette.background);
+      demo.style.setProperty("--theme-accent", palette.accent);
+      demo.style.setProperty("--theme-detail", palette.detail);
+
+      choices.forEach((candidate) => candidate.classList.toggle("is-previewing", candidate === choice));
+      pairCards.forEach((pair) => {
+        const isActive = pair.dataset.themePair === activeKind;
+        pair.classList.toggle("is-active", isActive);
+        qs("[data-theme-pair-active]", pair).hidden = !isActive;
       });
+      if (status) status.textContent = `${mode === "auto" ? "Auto preview" : mode === "light" ? "Light" : "Dark"} · ${name} active`;
+    }
+
+    choices.forEach((button) => {
+      button.addEventListener("click", () => {
+        const kind = button.dataset.themeKind;
+        selected[kind] = button;
+        choices.forEach((choice) => {
+          const isSelected = choice === selected[choice.dataset.themeKind];
+          choice.setAttribute("aria-pressed", String(isSelected));
+        });
+        updatePair(button);
+        render(selected[themeModeController.getPreviewKind()]);
+      });
+      button.disabled = false;
     });
+
+    themeModeController = themeState.createThemeModeController({
+      initialMode: mode,
+      mediaQuery: systemColorScheme,
+      onPreviewKindChange: (nextKind) => render(selected[nextKind]),
+    });
+
+    modeChoices.forEach((button) => {
+      button.addEventListener("click", () => {
+        mode = button.dataset.themeModeChoice;
+        modeChoices.forEach((choice) => choice.setAttribute("aria-pressed", String(choice === button)));
+        themeModeController.setMode(mode);
+      });
+      button.disabled = false;
+    });
+
+    render(selected[themeModeController.getPreviewKind()]);
   }
 
   try {
@@ -406,7 +449,6 @@
     initScrollReveals();
     initControlRoom();
     initThemePreview();
-    initCopyButtons();
     root.classList.replace("no-js", "js");
     window.__termalReady = true;
   } catch (error) {

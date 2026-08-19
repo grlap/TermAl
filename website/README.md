@@ -18,7 +18,7 @@ Run the static contract checks with:
 node website/verify.mjs
 ```
 
-The page works without JavaScript. JavaScript adds the guided control-room demo, scroll reveals, theme preview, copy buttons, progress state, and mobile-menu focus management. Visitors who request reduced motion get the completed workflow state without timed movement.
+The page works without JavaScript. JavaScript adds the guided control-room demo, scroll reveals, paired 21-theme appearance preview, progress state, and mobile-menu focus management. Visitors who request reduced motion get the completed workflow state without timed movement.
 
 ## Publishing boundary
 
@@ -35,10 +35,11 @@ The launch-mode verifier is expected to fail until those prerequisites exist.
 
 ## Product-copy guardrails
 
-- TermAl currently integrates Claude Code, OpenAI Codex, Gemini CLI, and Cursor Agent.
+- TermAl currently integrates Claude Code, OpenAI Codex, Gemini CLI, Cursor Agent, and OpenCode.
 - It runs from source; no packaged release is advertised.
 - “Source available” is intentional. Do not change it to “open source” until a license is declared.
 - Approval and sandbox controls vary by agent and configuration. Do not promise that every command is sandboxed or requires approval.
 - Multi-browser layouts are separate persisted views, not collaborative multi-user editing.
+- Rendered Markdown diff editing is available only when TermAl has a complete document and an unambiguous live worktree save target. Patch-only and unsafe staged states remain read-only.
+- Mermaid and KaTeX views are source-derived renders, not executable notebooks or a general WYSIWYG environment.
 - Never advise exposing the local API on port `8787` to an untrusted network.
-

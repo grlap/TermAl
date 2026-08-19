@@ -1,5 +1,9 @@
 import { act, renderHook } from "@testing-library/react";
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  UIEvent as ReactUIEvent,
+} from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -66,7 +70,6 @@ function params(activeSession: Session) {
     isSessionTabActive: false,
     onScrollToBottomRequestHandled: vi.fn(),
     paneContentSignatures: {},
-    paneId: "pane-1",
     paneMessageContentSignatures: {},
     paneRootRef: { current: null },
     paneScrollPositions: {},
@@ -74,7 +77,6 @@ function params(activeSession: Session) {
     paneViewMode: "session" as const,
     pendingScrollToBottomRequest: null,
     scrollStateKey: "pane-1:session-history",
-    sessions: [activeSession],
     showWaitingIndicator: false,
     visibleContentSignature: "history",
     visibleLastMessageAuthor: "assistant" as const,
@@ -415,7 +417,9 @@ describe("session pane historical-window tail state", () => {
       messageCount: 1_000,
       hasOlderHistory: true,
     };
-    const paneShouldStickToBottomRef = { current: { "pane-1": false } };
+    const paneShouldStickToBottomRef = {
+      current: { "pane-1:session-history": false },
+    };
     const sharedParams = {
       ...params(assistantOnlyTail),
       isActive: true,
@@ -520,7 +524,9 @@ describe("session pane historical-window tail state", () => {
       author: "assistant",
       text: "First reply",
     };
-    const paneShouldStickToBottomRef = { current: { "pane-1": true } };
+    const paneShouldStickToBottomRef = {
+      current: { "pane-1:session-history": true },
+    };
     const paneScrollPositions: Record<
       string,
       { top: number; shouldStick: boolean }
@@ -746,7 +752,7 @@ describe("session pane historical-window tail state", () => {
       waiting: false,
     });
 
-    paneShouldStickToBottomRef.current["pane-1"] = false;
+    paneShouldStickToBottomRef.current["pane-1:session-history"] = false;
     scrollNode.scrollTop = 700;
     scrollHeight = 1_240;
     scrollTo.mockClear();
@@ -797,7 +803,9 @@ describe("session pane historical-window tail state", () => {
     scrollNode.append(button);
     const sharedParams = {
       ...params(activeSession),
-      paneShouldStickToBottomRef: { current: { "pane-1": true } },
+      paneShouldStickToBottomRef: {
+        current: { "pane-1:session-history": true },
+      },
     };
     const hook = renderHook(() => useSessionPaneScrollState(sharedParams));
     hook.result.current.messageStackRef.current = scrollNode;
@@ -829,6 +837,50 @@ describe("session pane historical-window tail state", () => {
       } as unknown as ReactKeyboardEvent<HTMLElement>);
     });
     expect(hook.result.current.liveTailPinned).toBe(true);
+  });
+
+  it("reads a mutable saved tail intent at callback time", () => {
+    const activeSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: { top: 800, shouldStick: true },
+    };
+    const paneShouldStickToBottomRef = {
+      current: {} as Record<string, boolean>,
+    };
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 300 },
+    });
+    const hook = renderHook(() =>
+      useSessionPaneScrollState({
+        ...params(activeSession),
+        paneScrollPositions,
+        paneShouldStickToBottomRef,
+        scrollStateKey,
+      }),
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    // Mutable pane geometry can change after render but before an rAF/native
+    // callback. The callback must not revive the captured attached snapshot.
+    paneScrollPositions[scrollStateKey] = {
+      top: 300,
+      shouldStick: false,
+    };
+    act(() => {
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 300,
+      shouldStick: false,
+    });
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
   });
 
   it("does not advertise phantom newer content while explicitly tail-pinned", () => {
@@ -867,7 +919,7 @@ describe("session pane historical-window tail state", () => {
     };
     const paneShouldStickToBottomRef = {
       current: {
-        "pane-1": true,
+        [scrollStateKey]: true,
       },
     };
     const sharedParams = {
@@ -882,20 +934,896 @@ describe("session pane historical-window tail state", () => {
       scrollTop: { configurable: true, writable: true, value: 52_788 },
     });
     const hook = renderHook(
-      ({ isSessionTabActive }) =>
+      ({ isSessionTabActive, activeScrollStateKey }) =>
         useSessionPaneScrollState({
           ...sharedParams,
           isSessionTabActive,
+          scrollStateKey: activeScrollStateKey,
         }),
-      { initialProps: { isSessionTabActive: false } },
+      {
+        initialProps: {
+          isSessionTabActive: false,
+          activeScrollStateKey: "pane-1:control-panel",
+        },
+      },
     );
     hook.result.current.messageStackRef.current = scrollNode;
 
-    hook.rerender({ isSessionTabActive: true });
+    hook.rerender({
+      isSessionTabActive: true,
+      activeScrollStateKey: scrollStateKey,
+    });
 
     expect(scrollNode.scrollTop).toBe(52_788);
-    expect(paneShouldStickToBottomRef.current["pane-1"]).toBe(true);
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(true);
     expect(animationFrames.length).toBeGreaterThan(0);
+  });
+
+  it("restores an attached tab to the bottom before its first animation frame", () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", ((
+      callback: FrameRequestCallback,
+    ) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    }) as typeof requestAnimationFrame);
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const liveSession = session(false);
+    const sessionScrollKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [sessionScrollKey]: {
+        top: Number.MAX_SAFE_INTEGER,
+        shouldStick: true,
+      },
+    };
+    const sharedParams = {
+      ...params(liveSession),
+      isActive: true,
+      paneScrollPositions,
+      paneShouldStickToBottomRef: { current: { [sessionScrollKey]: true } },
+    };
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 240 },
+    });
+    const scrollWrites: CustomEvent[] = [];
+    scrollNode.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, (event) => {
+      scrollWrites.push(event as CustomEvent);
+    });
+    const hook = renderHook(
+      ({ isSessionTabActive, scrollStateKey }) =>
+        useSessionPaneScrollState({
+          ...sharedParams,
+          isSessionTabActive,
+          scrollStateKey,
+        }),
+      {
+        initialProps: {
+          isSessionTabActive: false,
+          scrollStateKey: "pane-1:control-panel",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    hook.rerender({
+      isSessionTabActive: true,
+      scrollStateKey: sessionScrollKey,
+    });
+
+    expect(scrollNode.scrollTop).toBe(800);
+    expect(scrollWrites[scrollWrites.length - 1]?.detail).toMatchObject({
+      scrollKind: "bottom_pin",
+    });
+    expect(animationFrames.length).toBeGreaterThan(0);
+  });
+
+  it("does not let first-visit follow overwrite a restored detached tab", () => {
+    let nextAnimationFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        const frameId = nextAnimationFrameId;
+        nextAnimationFrameId += 1;
+        animationFrames.set(frameId, callback);
+        return frameId;
+      }),
+    );
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((frameId: number) => animationFrames.delete(frameId)),
+    );
+    const attachedSession = {
+      ...session(false),
+      id: "session-attached",
+    };
+    const detachedSession = {
+      ...session(false),
+      id: "session-detached",
+    };
+    const attachedKey = "pane-1:session-attached";
+    const detachedKey = "pane-1:session-detached";
+    const paneScrollPositions = {
+      [attachedKey]: {
+        top: Number.MAX_SAFE_INTEGER,
+        shouldStick: true,
+      },
+      [detachedKey]: {
+        top: 320,
+        shouldStick: false,
+      },
+    };
+    const paneShouldStickToBottomRef = {
+      current: {
+        "pane-1": true,
+        [attachedKey]: true,
+        [detachedKey]: false,
+      },
+    };
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    Object.defineProperty(scrollNode, "scrollTo", {
+      configurable: true,
+      value: vi.fn((options: ScrollToOptions) => {
+        if (typeof options.top === "number") {
+          scrollNode.scrollTop = options.top;
+        }
+      }),
+    });
+    const sharedParams = {
+      ...params(attachedSession),
+      isActive: true,
+      paneScrollPositions,
+      paneShouldStickToBottomRef,
+    };
+    const hook = renderHook(
+      ({ activeSession, isSessionTabActive, scrollStateKey }) =>
+        useSessionPaneScrollState({
+          ...sharedParams,
+          activeSession,
+          isSessionTabActive,
+          scrollStateKey,
+        }),
+      {
+        initialProps: {
+          activeSession: attachedSession,
+          isSessionTabActive: false,
+          scrollStateKey: attachedKey,
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    hook.rerender({
+      activeSession: detachedSession,
+      isSessionTabActive: true,
+      scrollStateKey: detachedKey,
+    });
+
+    expect(scrollNode.scrollTop).toBe(320);
+    let frameTimestamp = 0;
+    let drainedFrames = 0;
+    while (animationFrames.size > 0 && drainedFrames < 20) {
+      const nextFrame = animationFrames.entries().next().value;
+      if (!nextFrame) {
+        break;
+      }
+      animationFrames.delete(nextFrame[0]);
+      frameTimestamp += 1000 / 60;
+      act(() => nextFrame[1](frameTimestamp));
+      drainedFrames += 1;
+    }
+
+    expect(scrollNode.scrollTop).toBe(320);
+    expect(paneScrollPositions[detachedKey]).toEqual({
+      top: 320,
+      shouldStick: false,
+    });
+  });
+
+  it("retains an out-of-range detached target until virtualized geometry catches up", () => {
+    let nextAnimationFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        const frameId = nextAnimationFrameId;
+        nextAnimationFrameId += 1;
+        animationFrames.set(frameId, callback);
+        return frameId;
+      }),
+    );
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((frameId: number) => animationFrames.delete(frameId)),
+    );
+    const liveSession = session(false);
+    const scrollStateKey = "pane-1:session-detached";
+    const paneScrollPositions = {
+      [scrollStateKey]: {
+        top: 600,
+        shouldStick: false,
+      },
+    };
+    const paneShouldStickToBottomRef = {
+      current: {
+        [scrollStateKey]: false,
+      },
+    };
+    let scrollHeight = 600;
+    const scrollNode = document.createElement("section");
+    scrollNode.append(
+      Object.assign(document.createElement("div"), {
+        className: "virtualized-message-list",
+      }),
+    );
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, writable: true, value: 120 },
+    });
+    Object.defineProperty(scrollNode, "scrollTo", {
+      configurable: true,
+      value: vi.fn((options: ScrollToOptions) => {
+        if (typeof options.top === "number") {
+          scrollNode.scrollTop = options.top;
+        }
+      }),
+    });
+    const hook = renderHook(
+      ({ isSessionTabActive, activeScrollStateKey }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive: true,
+          isSessionTabActive,
+          paneScrollPositions,
+          paneShouldStickToBottomRef,
+          scrollStateKey: activeScrollStateKey,
+        }),
+      {
+        initialProps: {
+          isSessionTabActive: false,
+          activeScrollStateKey: "pane-1:control-panel",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    hook.rerender({
+      isSessionTabActive: true,
+      activeScrollStateKey: scrollStateKey,
+    });
+
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 600,
+      shouldStick: false,
+    });
+    act(() => {
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 600,
+      shouldStick: false,
+    });
+    scrollHeight = 900;
+    let frameTimestamp = 0;
+    let drainedFrames = 0;
+    while (animationFrames.size > 0 && drainedFrames < 20) {
+      const nextFrame = animationFrames.entries().next().value;
+      if (!nextFrame) {
+        break;
+      }
+      animationFrames.delete(nextFrame[0]);
+      frameTimestamp += 1000 / 60;
+      act(() => nextFrame[1](frameTimestamp));
+      drainedFrames += 1;
+    }
+
+    expect(scrollNode.scrollTop).toBe(600);
+    act(() => {
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 600,
+      shouldStick: false,
+    });
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
+
+    // The matching native event ends restore ownership. A later virtualizer
+    // anchor correction must publish its adjusted detached position instead
+    // of replaying the old absolute restore target forever.
+    scrollNode.scrollTop = 625;
+    act(() => {
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 625,
+      shouldStick: false,
+    });
+  });
+
+  it("publishes the reachable detached position when restore convergence expires", () => {
+    let nextAnimationFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        const frameId = nextAnimationFrameId;
+        nextAnimationFrameId += 1;
+        animationFrames.set(frameId, callback);
+        return frameId;
+      }),
+    );
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((frameId: number) => animationFrames.delete(frameId)),
+    );
+    const liveSession = session(false);
+    const detachedKey = "pane-1:session-detached";
+    const paneScrollPositions = {
+      [detachedKey]: { top: 600, shouldStick: false },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [detachedKey]: false },
+    };
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 120 },
+    });
+    const hook = renderHook(
+      ({ isSessionTabActive, scrollStateKey }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive: true,
+          isSessionTabActive,
+          paneScrollPositions,
+          paneShouldStickToBottomRef,
+          scrollStateKey,
+        }),
+      {
+        initialProps: {
+          isSessionTabActive: false,
+          scrollStateKey: "pane-1:control-panel",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+    hook.rerender({
+      isSessionTabActive: true,
+      scrollStateKey: detachedKey,
+    });
+
+    let frameTimestamp = 0;
+    let drainedFrames = 0;
+    while (animationFrames.size > 0 && drainedFrames < 65) {
+      const nextFrame = animationFrames.entries().next().value;
+      if (!nextFrame) {
+        break;
+      }
+      animationFrames.delete(nextFrame[0]);
+      frameTimestamp += 1000 / 60;
+      act(() => nextFrame[1](frameTimestamp));
+      drainedFrames += 1;
+    }
+
+    expect(drainedFrames).toBe(60);
+    expect(scrollNode.scrollTop).toBe(400);
+    expect(paneScrollPositions[detachedKey]).toEqual({
+      top: 400,
+      shouldStick: false,
+    });
+    expect(paneShouldStickToBottomRef.current[detachedKey]).toBe(false);
+    expect(animationFrames.size).toBe(0);
+  });
+
+  it("gives an explicit bottom jump authority before virtualizer reconciliation", () => {
+    let nextAnimationFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        const frameId = nextAnimationFrameId;
+        nextAnimationFrameId += 1;
+        animationFrames.set(frameId, callback);
+        return frameId;
+      }),
+    );
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((frameId: number) => animationFrames.delete(frameId)),
+    );
+    const liveSession = session(false);
+    const detachedKey = "pane-1:session-detached";
+    const paneScrollPositions = {
+      [detachedKey]: { top: 600, shouldStick: false },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [detachedKey]: false },
+    };
+    const scrollNode = document.createElement("section");
+    scrollNode.append(
+      Object.assign(document.createElement("div"), {
+        className: "virtualized-message-list",
+      }),
+    );
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 120 },
+    });
+    const hook = renderHook(
+      ({ isSessionTabActive, scrollStateKey }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive: true,
+          isSessionTabActive,
+          paneScrollPositions,
+          paneShouldStickToBottomRef,
+          scrollStateKey,
+        }),
+      {
+        initialProps: {
+          isSessionTabActive: false,
+          scrollStateKey: "pane-1:control-panel",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+    let positionObservedDuringBoundaryWrite:
+      | { top: number; shouldStick: boolean }
+      | undefined;
+    scrollNode.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, (event) => {
+      if (
+        (event as CustomEvent).detail?.scrollKind !== "bottom_boundary"
+      ) {
+        return;
+      }
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+      positionObservedDuringBoundaryWrite = {
+        ...paneScrollPositions[detachedKey],
+      };
+    });
+
+    hook.rerender({
+      isSessionTabActive: true,
+      scrollStateKey: detachedKey,
+    });
+    expect(scrollNode.scrollTop).toBe(400);
+    expect(animationFrames.size).toBeGreaterThan(0);
+
+    act(() => {
+      hook.result.current.scrollMessageStackToBoundary("bottom");
+    });
+
+    expect(positionObservedDuringBoundaryWrite).toEqual({
+      top: 400,
+      shouldStick: true,
+    });
+    expect(paneScrollPositions[detachedKey]).toEqual({
+      top: Number.MAX_SAFE_INTEGER,
+      shouldStick: true,
+    });
+    expect(paneShouldStickToBottomRef.current[detachedKey]).toBe(true);
+    expect(animationFrames.size).toBe(0);
+  });
+
+  it("does not let a retained restore frame revert a button-driven page jump", () => {
+    let nextAnimationFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        const frameId = nextAnimationFrameId;
+        nextAnimationFrameId += 1;
+        animationFrames.set(frameId, callback);
+        return frameId;
+      }),
+    );
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((frameId: number) => animationFrames.delete(frameId)),
+    );
+    const liveSession = session(false);
+    const detachedKey = "pane-1:session-detached";
+    const paneScrollPositions = {
+      [detachedKey]: { top: 600, shouldStick: false },
+    };
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_200 },
+      scrollTop: { configurable: true, writable: true, value: 200 },
+    });
+    const hook = renderHook(
+      ({ isSessionTabActive, scrollStateKey }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive: true,
+          isSessionTabActive,
+          paneScrollPositions,
+          paneShouldStickToBottomRef: {
+            current: { [detachedKey]: false },
+          },
+          scrollStateKey,
+        }),
+      {
+        initialProps: {
+          isSessionTabActive: false,
+          scrollStateKey: "pane-1:control-panel",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+    hook.rerender({
+      isSessionTabActive: true,
+      scrollStateKey: detachedKey,
+    });
+    expect(scrollNode.scrollTop).toBe(600);
+    const retainedRestoreFrame = animationFrames.values().next().value;
+    if (!retainedRestoreFrame) {
+      throw new Error("Detached restore verification frame was not scheduled");
+    }
+
+    act(() => {
+      hook.result.current.scrollSessionMessageStackByPageJump(1);
+    });
+    const pageJumpTop = scrollNode.scrollTop;
+    expect(pageJumpTop).toBeGreaterThan(600);
+
+    // cancelAnimationFrame cannot stop a callback the browser already handed
+    // off. The controller's cancelled guard must still reject that stale tick.
+    act(() => retainedRestoreFrame(1000 / 60));
+    expect(scrollNode.scrollTop).toBe(pageJumpTop);
+    expect(paneScrollPositions[detachedKey]).toEqual({
+      top: pageJumpTop,
+      shouldStick: false,
+    });
+  });
+
+  it("does not let a retained restore frame revert scrollbar-thumb navigation", () => {
+    let nextAnimationFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        const frameId = nextAnimationFrameId;
+        nextAnimationFrameId += 1;
+        animationFrames.set(frameId, callback);
+        return frameId;
+      }),
+    );
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((frameId: number) => animationFrames.delete(frameId)),
+    );
+    const liveSession = session(false);
+    const detachedKey = "pane-1:session-detached";
+    const paneScrollPositions = {
+      [detachedKey]: { top: 600, shouldStick: false },
+    };
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_200 },
+      scrollTop: { configurable: true, writable: true, value: 200 },
+    });
+    const hook = renderHook(
+      ({ isSessionTabActive, scrollStateKey }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive: true,
+          isSessionTabActive,
+          paneScrollPositions,
+          paneShouldStickToBottomRef: {
+            current: { [detachedKey]: false },
+          },
+          scrollStateKey,
+        }),
+      {
+        initialProps: {
+          isSessionTabActive: false,
+          scrollStateKey: "pane-1:control-panel",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+    hook.rerender({
+      isSessionTabActive: true,
+      scrollStateKey: detachedKey,
+    });
+    const retainedRestoreFrame = animationFrames.values().next().value;
+    if (!retainedRestoreFrame) {
+      throw new Error("Detached restore verification frame was not scheduled");
+    }
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        currentTarget: scrollNode,
+        target: scrollNode,
+        type: "mousedown",
+      } as unknown as ReactMouseEvent<HTMLElement>);
+      scrollNode.scrollTop = 350;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    // A callback already dequeued by the browser must still observe that the
+    // scrollbar gesture transferred authority to the user.
+    act(() => retainedRestoreFrame(1000 / 60));
+    expect(scrollNode.scrollTop).toBe(350);
+    expect(paneScrollPositions[detachedKey]).toEqual({
+      top: 350,
+      shouldStick: false,
+    });
+  });
+
+  it("rechecks a zero-write detached restore after the virtualized range commit", () => {
+    let nextAnimationFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        const frameId = nextAnimationFrameId;
+        nextAnimationFrameId += 1;
+        animationFrames.set(frameId, callback);
+        return frameId;
+      }),
+    );
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((frameId: number) => animationFrames.delete(frameId)),
+    );
+    const liveSession = session(false);
+    const detachedKey = "pane-1:session-detached";
+    const paneScrollPositions = {
+      [detachedKey]: { top: 600, shouldStick: false },
+    };
+    let scrollHeight = 900;
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, writable: true, value: 600 },
+    });
+    const hook = renderHook(
+      ({ isSessionTabActive, scrollStateKey }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive: true,
+          isSessionTabActive,
+          paneScrollPositions,
+          paneShouldStickToBottomRef: {
+            current: { [detachedKey]: false },
+          },
+          scrollStateKey,
+        }),
+      {
+        initialProps: {
+          isSessionTabActive: false,
+          scrollStateKey: "pane-1:control-panel",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+    hook.rerender({
+      isSessionTabActive: true,
+      scrollStateKey: detachedKey,
+    });
+
+    // The outgoing tab already used the same numeric top, so the synchronous
+    // restore performs no DOM write. The incoming virtualized commit then
+    // shrinks and clamps the range before the verification frame.
+    expect(scrollNode.scrollTop).toBe(600);
+    scrollHeight = 600;
+    scrollNode.scrollTop = 400;
+    act(() => {
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+    expect(paneScrollPositions[detachedKey]).toEqual({
+      top: 600,
+      shouldStick: false,
+    });
+
+    const firstFrame = animationFrames.entries().next().value;
+    if (!firstFrame) {
+      throw new Error("Detached verification frame was not scheduled");
+    }
+    animationFrames.delete(firstFrame[0]);
+    act(() => firstFrame[1](1000 / 60));
+    expect(scrollNode.scrollTop).toBe(400);
+    expect(animationFrames.size).toBeGreaterThan(0);
+
+    scrollHeight = 900;
+    const secondFrame = animationFrames.entries().next().value;
+    if (!secondFrame) {
+      throw new Error("Detached retry frame was not scheduled");
+    }
+    animationFrames.delete(secondFrame[0]);
+    act(() => secondFrame[1](2000 / 60));
+    expect(scrollNode.scrollTop).toBe(600);
+    act(() => {
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+    expect(paneScrollPositions[detachedKey]).toEqual({
+      top: 600,
+      shouldStick: false,
+    });
+  });
+
+  it("keeps detached restore convergence alive when another visible pane gains focus", () => {
+    let nextAnimationFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        const frameId = nextAnimationFrameId;
+        nextAnimationFrameId += 1;
+        animationFrames.set(frameId, callback);
+        return frameId;
+      }),
+    );
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((frameId: number) => animationFrames.delete(frameId)),
+    );
+    const liveSession = session(false);
+    const detachedKey = "pane-1:session-detached";
+    const paneScrollPositions = {
+      [detachedKey]: { top: 600, shouldStick: false },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [detachedKey]: false },
+    };
+    let scrollHeight = 600;
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, writable: true, value: 120 },
+    });
+    const hook = renderHook(
+      ({ isActive, isSessionTabActive, scrollStateKey }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive,
+          isSessionTabActive,
+          paneScrollPositions,
+          paneShouldStickToBottomRef,
+          scrollStateKey,
+        }),
+      {
+        initialProps: {
+          isActive: true,
+          isSessionTabActive: false,
+          scrollStateKey: "pane-1:control-panel",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+    hook.rerender({
+      isActive: true,
+      isSessionTabActive: true,
+      scrollStateKey: detachedKey,
+    });
+    hook.rerender({
+      isActive: false,
+      isSessionTabActive: true,
+      scrollStateKey: detachedKey,
+    });
+
+    expect(scrollNode.scrollTop).toBe(400);
+    expect(animationFrames.size).toBeGreaterThan(0);
+    scrollHeight = 900;
+    let frameTimestamp = 0;
+    let drainedFrames = 0;
+    while (animationFrames.size > 0 && drainedFrames < 20) {
+      const nextFrame = animationFrames.entries().next().value;
+      if (!nextFrame) {
+        break;
+      }
+      animationFrames.delete(nextFrame[0]);
+      frameTimestamp += 1000 / 60;
+      act(() => nextFrame[1](frameTimestamp));
+      drainedFrames += 1;
+    }
+
+    expect(scrollNode.scrollTop).toBe(600);
+    expect(paneScrollPositions[detachedKey]).toEqual({
+      top: 600,
+      shouldStick: false,
+    });
+  });
+
+  it("cancels a detached restore retry when its tab leaves the scroll scope", () => {
+    let nextAnimationFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        const frameId = nextAnimationFrameId;
+        nextAnimationFrameId += 1;
+        animationFrames.set(frameId, callback);
+        return frameId;
+      }),
+    );
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((frameId: number) => animationFrames.delete(frameId)),
+    );
+    const liveSession = session(false);
+    const detachedKey = "pane-1:session-detached";
+    const paneScrollPositions = {
+      [detachedKey]: { top: 600, shouldStick: false },
+    };
+    let scrollHeight = 600;
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, writable: true, value: 120 },
+    });
+    const hook = renderHook(
+      ({ isSessionTabActive, activeScrollStateKey }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive: true,
+          isSessionTabActive,
+          paneScrollPositions,
+          paneShouldStickToBottomRef: {
+            current: { [detachedKey]: false },
+          },
+          scrollStateKey: activeScrollStateKey,
+        }),
+      {
+        initialProps: {
+          isSessionTabActive: false,
+          activeScrollStateKey: "pane-1:control-panel",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    hook.rerender({
+      isSessionTabActive: true,
+      activeScrollStateKey: detachedKey,
+    });
+    expect(scrollNode.scrollTop).toBe(400);
+    expect(animationFrames.size).toBeGreaterThan(0);
+
+    hook.rerender({
+      isSessionTabActive: false,
+      activeScrollStateKey: detachedKey,
+    });
+    expect(animationFrames.size).toBe(0);
+    scrollHeight = 900;
+
+    expect(scrollNode.scrollTop).toBe(400);
+    expect(paneScrollPositions[detachedKey]).toEqual({
+      top: 600,
+      shouldStick: false,
+    });
   });
 
   it("does not infer a prompt send when start-page residency ends with a user message", () => {
@@ -910,7 +1838,9 @@ describe("session pane historical-window tail state", () => {
     const sharedParams = {
       ...params(historicalSession),
       isSessionTabActive: true,
-      paneShouldStickToBottomRef: { current: { "pane-1": true } },
+      paneShouldStickToBottomRef: {
+        current: { "pane-1:session-history": true },
+      },
     };
     const hook = renderHook(
       ({ activeSession, contentSignature, lastAuthor }) =>
@@ -979,7 +1909,9 @@ describe("session pane historical-window tail state", () => {
     const sharedParams = {
       ...params(historicalSession),
       isSessionTabActive: true,
-      paneShouldStickToBottomRef: { current: { "pane-1": true } },
+      paneShouldStickToBottomRef: {
+        current: { "pane-1:session-history": true },
+      },
     };
     const hook = renderHook(
       ({ isSending }) =>
@@ -1041,7 +1973,9 @@ describe("session pane historical-window tail state", () => {
       }),
     });
     const activeSession = session(false);
-    const paneShouldStickToBottomRef = { current: { "pane-1": false } };
+    const paneShouldStickToBottomRef = {
+      current: { "pane-1:session-history": false },
+    };
     const onScrollToBottomRequestHandled = vi.fn();
     const sharedParams = {
       ...params(activeSession),
@@ -1078,7 +2012,9 @@ describe("session pane historical-window tail state", () => {
     });
 
     expect(hook.result.current.liveTailPinned).toBe(false);
-    expect(paneShouldStickToBottomRef.current["pane-1"]).toBe(false);
+    expect(
+      paneShouldStickToBottomRef.current["pane-1:session-history"],
+    ).toBe(false);
     expect(hook.result.current.showNewResponseIndicator).toBe(true);
     expect(hook.result.current.newResponseIndicatorLabel).toBe("New activity");
     expect(animationFrames.size).toBe(0);

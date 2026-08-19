@@ -22,7 +22,6 @@ import {
   canNestedScrollableConsumeWheel,
   clamp,
   normalizeWheelDelta,
-  pruneSessionFlags,
 } from "./app-utils";
 import {
   MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
@@ -146,7 +145,6 @@ type UseSessionPaneScrollStateParams = {
   isSessionTabActive: boolean;
   onScrollToBottomRequestHandled: (token: number) => void;
   paneContentSignatures: Record<string, string>;
-  paneId: string;
   paneMessageContentSignatures: Record<string, string>;
   paneRootRef: RefObject<HTMLElement | null>;
   paneScrollPositions: Record<string, PaneScrollPosition>;
@@ -160,7 +158,6 @@ type UseSessionPaneScrollStateParams = {
     token: number;
   } | null;
   scrollStateKey: string;
-  sessions: Session[];
   showWaitingIndicator: boolean;
   visibleContentSignature: string;
   visibleLastMessageAuthor: Message["author"] | undefined;
@@ -179,7 +176,6 @@ export function useSessionPaneScrollState({
   isSessionTabActive,
   onScrollToBottomRequestHandled,
   paneContentSignatures,
-  paneId,
   paneMessageContentSignatures,
   paneRootRef,
   paneScrollPositions,
@@ -187,7 +183,6 @@ export function useSessionPaneScrollState({
   paneViewMode,
   pendingScrollToBottomRequest,
   scrollStateKey,
-  sessions,
   showWaitingIndicator,
   visibleContentSignature,
   visibleLastMessageAuthor,
@@ -226,6 +221,21 @@ export function useSessionPaneScrollState({
   const paneTailFollowUserEscapeByKeyRef = useRef<
     Record<string, true | undefined>
   >({});
+  const paneDetachedRestoreByKeyRef = useRef<
+    Record<
+      string,
+      | {
+          expectedNativeTop: number | null;
+          isRetrying: boolean;
+          targetTop: number;
+        }
+      | undefined
+    >
+  >({});
+  const detachedMessageStackRestoreCancelRef = useRef<{
+    cancel: () => void;
+    key: string;
+  } | null>(null);
   const currentScrollStateKeyRef = useRef(scrollStateKey);
   const pendingStartHistoryDemandRef = useRef<{ key: string } | null>(null);
   const pendingTailHistoryDemandRef = useRef<{ key: string } | null>(null);
@@ -238,9 +248,6 @@ export function useSessionPaneScrollState({
   >({});
   const [liveTailPinnedByKey, setLiveTailPinnedByKey] = useState<
     Record<string, boolean | undefined>
-  >({});
-  const [visitedSessionIds, setVisitedSessionIds] = useState<
-    Record<string, true | undefined>
   >({});
   currentScrollStateKeyRef.current = scrollStateKey;
   liveFlowActiveRef.current = isSending || showWaitingIndicator;
@@ -259,7 +266,6 @@ export function useSessionPaneScrollState({
   }, [scrollStateKey]);
 
   const savedScrollPosition = paneScrollPositions[scrollStateKey];
-  const savedScrollShouldStick = savedScrollPosition?.shouldStick === true;
   const hasUnloadedNewerHistory = activeSession?.hasNewerHistory === true;
   const newResponseIndicatorKind =
     newResponseIndicatorByKey[scrollStateKey] ?? null;
@@ -273,14 +279,25 @@ export function useSessionPaneScrollState({
     if (hasUnloadedNewerHistory) {
       return false;
     }
-    return paneShouldStickToBottomRef.current[paneId] ?? true;
+    return (
+      paneShouldStickToBottomRef.current[scrollStateKey] ??
+      paneScrollPositions[scrollStateKey]?.shouldStick ??
+      true
+    );
   }
 
-  function setTailFollowIntent(nextValue: boolean) {
-    paneShouldStickToBottomRef.current[paneId] = nextValue;
+  function setTailFollowIntent(
+    nextValue: boolean,
+    options: { preserveDetachedRestore?: boolean } = {},
+  ) {
+    paneShouldStickToBottomRef.current[scrollStateKey] = nextValue;
     if (nextValue) {
+      cancelDetachedMessageStackRestore(scrollStateKey);
       delete paneTailFollowUserEscapeByKeyRef.current[scrollStateKey];
     } else {
+      if (!options.preserveDetachedRestore) {
+        cancelDetachedMessageStackRestore(scrollStateKey);
+      }
       paneTailFollowUserEscapeByKeyRef.current[scrollStateKey] = true;
     }
     setLiveTailPinnedByKey((current) => {
@@ -294,10 +311,10 @@ export function useSessionPaneScrollState({
     });
   }
 
-  // LIVE TURN attachment is a scroll-controller state, never a CSS positioning
-  // mode. While attached, this hook keeps the ordinary in-flow tail at the
-  // viewport bottom. Explicit user navigation detaches it so the whole
-  // transcript, including LIVE TURN, moves as one surface.
+  // LIVE TURN attachment is owned by the scroll controller. Its wrapper keeps
+  // an in-flow height reservation, while CSS visually pins the attached state
+  // to the viewport bottom. Explicit user navigation detaches it before moving
+  // the transcript, so the card resumes ordinary in-flow movement.
   const tailFollowIntent =
     liveTailPinnedByKey[scrollStateKey] ??
     savedScrollPosition?.shouldStick ??
@@ -361,6 +378,15 @@ export function useSessionPaneScrollState({
     );
   }
 
+  function cancelDetachedMessageStackRestore(key = scrollStateKey) {
+    const pendingRestore = detachedMessageStackRestoreCancelRef.current;
+    if (pendingRestore?.key === key) {
+      detachedMessageStackRestoreCancelRef.current = null;
+      pendingRestore.cancel();
+    }
+    delete paneDetachedRestoreByKeyRef.current[key];
+  }
+
   useEffect(() => {
     if (paneProgrammaticBottomFollowRef.current.key !== scrollStateKey) {
       paneProgrammaticBottomFollowRef.current = {
@@ -381,6 +407,16 @@ export function useSessionPaneScrollState({
       delete messageStackBottomByKeyRef.current[scrollStateKey];
     },
     [isActive, isSessionTabActive, paneViewMode, scrollStateKey],
+  );
+
+  useLayoutEffect(
+    () => () => {
+      // Losing focus to another visible pane does not invalidate this pane's
+      // geometry convergence. A tab/mode/key change does: the shared DOM then
+      // belongs to a different scroll scope.
+      cancelDetachedMessageStackRestore(scrollStateKey);
+    },
+    [isSessionTabActive, paneViewMode, scrollStateKey],
   );
 
   function setNewResponseIndicator(
@@ -825,10 +861,11 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    // LIVE TURN remains an ordinary in-flow tail. While auto-follow owns the
-    // pane, one persistent animation-frame controller retargets the moving
-    // bottom. Content commits never consume their own synthetic frame budget,
-    // so a burst of SSE/React commits before paint cannot accelerate motion.
+    // LIVE TURN keeps an in-flow height reservation even while its attached
+    // presentation is sticky. One persistent animation-frame controller
+    // retargets the moving bottom. Content commits never consume their own
+    // synthetic frame budget, so a burst of SSE/React commits before paint
+    // cannot accelerate motion.
     // Turn status and the final assistant message can arrive in separate SSE
     // commits. The per-key latch survives a status-only idle commit, but stays
     // bound to that turn's prompt identity. A later prompt clears it without
@@ -872,6 +909,11 @@ export function useSessionPaneScrollState({
     if (!node) {
       return;
     }
+
+    // Page controls and normalized wheel/touch paths are explicit navigation.
+    // They must take authority before any write, including when a retained
+    // detached-restore frame has already been dequeued by the browser.
+    cancelDetachedMessageStackRestore(scrollStateKey);
 
     if (
       !canMoveMessageStackByDelta(
@@ -950,10 +992,15 @@ export function useSessionPaneScrollState({
   function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
     if (boundary === "bottom") {
       const applyBottomBoundary = () => {
+        // Explicit navigation owns the viewport before it emits any scroll
+        // write. A synchronous virtualizer reconciliation must not observe an
+        // older detached-restore controller and replay its saved target.
+        cancelDetachedMessageStackRestore(scrollStateKey);
         cancelSettledScrollToBottom();
         cancelPaneProgrammaticBottomFollow();
         const node = messageStackRef.current;
         if (node) {
+          setTailFollowIntent(true);
           if (
             !scrollVirtualizedMessageStackToBottom(node, {
               scrollKind: "bottom_boundary",
@@ -1180,6 +1227,7 @@ export function useSessionPaneScrollState({
   ) {
     cancelSettledScrollToBottom();
 
+    const scheduledScrollStateKey = scrollStateKey;
     let frameId = 0;
     let cancelled = false;
     let completed = false;
@@ -1212,6 +1260,18 @@ export function useSessionPaneScrollState({
 
     const tick = (frameTimestamp: number) => {
       frameId = 0;
+      // cancelAnimationFrame cannot retract a callback the browser has already
+      // dequeued. Re-check ownership inside the callback so a user detach or
+      // scroll-scope change cannot be followed by one stale bottom write.
+      if (cancelled || completed) {
+        return;
+      }
+      if (currentScrollStateKeyRef.current !== scheduledScrollStateKey) {
+        // The pane reuses one scroll container across session tabs. A frame
+        // queued by the outgoing tab must never write into the incoming tab.
+        cancel();
+        return;
+      }
       if (
         options.scrollKind === "bottom_follow" &&
         (!getTailFollowIntent() || hasTailFollowUserEscape())
@@ -1441,6 +1501,7 @@ export function useSessionPaneScrollState({
     if (!isManualMessageStackScrollInput(event)) {
       return;
     }
+    cancelDetachedMessageStackRestore(scrollStateKey);
     cancelPaneProgrammaticBottomFollow();
     if (!hasTailFollowUserEscape() || getTailFollowIntent()) {
       markTailFollowUserEscape();
@@ -1449,6 +1510,37 @@ export function useSessionPaneScrollState({
 
   function handleMessageStackScroll(event: ReactUIEvent<HTMLElement>) {
     const node = event.currentTarget;
+    const detachedRestore =
+      paneDetachedRestoreByKeyRef.current[scrollStateKey];
+    if (detachedRestore !== undefined) {
+      // Native scroll events can arrive after either the clamped first write or
+      // the final write of a virtualized detached restore. User navigation and
+      // other explicit scroll commands clear this ownership before they move.
+      // Consume only the native event matching our own write; once convergence
+      // finishes, later virtualizer anchor corrections must publish their real
+      // position instead of replaying this stale absolute target.
+      const matchesExpectedWrite =
+        detachedRestore.expectedNativeTop !== null &&
+        Math.abs(node.scrollTop - detachedRestore.expectedNativeTop) <= 1;
+      if (matchesExpectedWrite || detachedRestore.isRetrying) {
+        setTailFollowIntent(false, { preserveDetachedRestore: true });
+        paneScrollPositions[scrollStateKey] = {
+          top: detachedRestore.targetTop,
+          shouldStick: false,
+        };
+        if (hasUnloadedNewerHistory) {
+          setNewResponseIndicator(scrollStateKey, true);
+        }
+        if (matchesExpectedWrite) {
+          detachedRestore.expectedNativeTop = null;
+          if (!detachedRestore.isRetrying) {
+            cancelDetachedMessageStackRestore(scrollStateKey);
+          }
+        }
+        return;
+      }
+      cancelDetachedMessageStackRestore(scrollStateKey);
+    }
     const previousScrollPosition = paneScrollPositions[scrollStateKey];
     const previousTop = previousScrollPosition?.top;
     const movedUpFromRecordedPosition =
@@ -1508,7 +1600,9 @@ export function useSessionPaneScrollState({
 
   function restoreMessageStackScrollTop(targetTop: number) {
     const node = messageStackRef.current;
-    if (!node) {
+    const detachedRestore =
+      paneDetachedRestoreByKeyRef.current[scrollStateKey];
+    if (!node || !detachedRestore || detachedRestore.targetTop !== targetTop) {
       return false;
     }
     // A saved detached position can be recorded during the brief gap between
@@ -1519,22 +1613,177 @@ export function useSessionPaneScrollState({
     }
 
     const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-    if (targetTop > maxScrollTop + 1) {
-      return false;
-    }
-
     const nextTop = clamp(targetTop, 0, maxScrollTop);
-    node.scrollTop = nextTop;
-    notifyMessageStackScrollWrite(node);
+    detachedRestore.expectedNativeTop = null;
     paneScrollPositions[scrollStateKey] = {
       top: targetTop,
       shouldStick: false,
     };
-    return true;
+    if (Math.abs(node.scrollTop - nextTop) > 0.5) {
+      node.scrollTop = nextTop;
+      detachedRestore.expectedNativeTop = node.scrollTop;
+    }
+    // The virtualizer must adopt detached restore authority even when the DOM
+    // was already clamped to this exact numeric position.
+    notifyMessageStackScrollWrite(node, {
+      scrollKind: "position_restore",
+    });
+    return targetTop <= maxScrollTop + 1;
+  }
+
+  function scheduleDetachedMessageStackRestore(targetTop: number) {
+    const restoreKey = scrollStateKey;
+    cancelDetachedMessageStackRestore(restoreKey);
+    const detachedRestore = {
+      expectedNativeTop: null as number | null,
+      isRetrying: true,
+      targetTop,
+    };
+    paneDetachedRestoreByKeyRef.current[restoreKey] = detachedRestore;
+    let frameId = 0;
+    let releaseFrameId = 0;
+    let attempts = 0;
+    let cancelled = false;
+    let previousMaxScrollTop = Math.max(
+      (messageStackRef.current?.scrollHeight ?? 0) -
+        (messageStackRef.current?.clientHeight ?? 0),
+      0,
+    );
+
+    const clearPendingCancel = () => {
+      if (
+        detachedMessageStackRestoreCancelRef.current?.cancel === cleanup
+      ) {
+        detachedMessageStackRestoreCancelRef.current = null;
+      }
+    };
+    const cleanup = () => {
+      cancelled = true;
+      clearPendingCancel();
+      if (
+        paneDetachedRestoreByKeyRef.current[restoreKey] === detachedRestore
+      ) {
+        delete paneDetachedRestoreByKeyRef.current[restoreKey];
+      }
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId);
+        frameId = 0;
+      }
+      if (releaseFrameId !== 0) {
+        window.cancelAnimationFrame(releaseFrameId);
+        releaseFrameId = 0;
+      }
+    };
+    const finish = () => {
+      detachedRestore.isRetrying = false;
+      if (detachedRestore.expectedNativeTop === null) {
+        cleanup();
+        return;
+      }
+      // Browser native scroll delivery normally consumes the marker first.
+      // This one-frame bound also prevents a missing/coalesced native event
+      // from turning restore ownership into permanent scroll authority.
+      releaseFrameId = window.requestAnimationFrame(() => {
+        releaseFrameId = 0;
+        cleanup();
+      });
+    };
+    const tick = () => {
+      frameId = 0;
+      if (
+        cancelled ||
+        currentScrollStateKeyRef.current !== restoreKey ||
+        paneDetachedRestoreByKeyRef.current[restoreKey] !== detachedRestore
+      ) {
+        return;
+      }
+
+      attempts += 1;
+      const node = messageStackRef.current;
+      const maxScrollTop = node
+        ? Math.max(node.scrollHeight - node.clientHeight, 0)
+        : previousMaxScrollTop;
+      const geometryChanged =
+        Math.abs(maxScrollTop - previousMaxScrollTop) > 0.5;
+      previousMaxScrollTop = maxScrollTop;
+      const nextTop = clamp(targetTop, 0, maxScrollTop);
+      const actualPositionChanged = node
+        ? Math.abs(node.scrollTop - nextTop) > 0.5
+        : false;
+      const reachedTarget =
+        node && (geometryChanged || actualPositionChanged)
+          ? restoreMessageStackScrollTop(targetTop)
+          : Boolean(
+              node &&
+                targetTop <= maxScrollTop + 1 &&
+                Math.abs(node.scrollTop - targetTop) <= 0.5,
+            );
+      if (reachedTarget) {
+        finish();
+        return;
+      }
+      if (attempts >= 60) {
+        // A virtualizer may never make the saved absolute offset reachable
+        // (for example after history truncation or a materially different
+        // measurement pass). Bound restore ownership, but publish the actual
+        // clamped detached position before releasing it. This prevents the
+        // next incidental native scroll from silently deciding which offset
+        // will be restored on the following tab visit.
+        detachedRestore.expectedNativeTop = null;
+        detachedRestore.isRetrying = false;
+        if (node) {
+          setTailFollowIntent(false, { preserveDetachedRestore: true });
+          paneScrollPositions[restoreKey] = {
+            top: node.scrollTop,
+            shouldStick: false,
+          };
+        }
+        if (hasUnloadedNewerHistory) {
+          setNewResponseIndicator(restoreKey, true);
+        }
+        cleanup();
+        return;
+      }
+      frameId = window.requestAnimationFrame(tick);
+    };
+
+    detachedMessageStackRestoreCancelRef.current = {
+      cancel: cleanup,
+      key: restoreKey,
+    };
+    // Always verify once after the virtualizer has committed the range
+    // requested by position_restore. The outgoing DOM can make the target look
+    // reachable synchronously while the incoming range changes geometry before
+    // the next paint, including the zero-numeric-delta tab-switch case.
+    restoreMessageStackScrollTop(targetTop);
+    frameId = window.requestAnimationFrame(tick);
+    return cleanup;
+  }
+
+  function restorePinnedMessageStackBeforePaint(node: HTMLElement) {
+    // A tab switch reuses the pane's scroll container. Waiting until the first
+    // animation frame would paint the newly active transcript at the previous
+    // tab's offset and then visibly jump it to the bottom. Establish attached
+    // geometry during the layout phase; the settled follow below remains
+    // responsible for measurements that arrive after this commit.
+    node.scrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+    notifyMessageStackScrollWrite(node, {
+      scrollKind: "bottom_pin",
+    });
+    setTailFollowIntent(true);
+    paneScrollPositions[scrollStateKey] = {
+      top: Number.MAX_SAFE_INTEGER,
+      shouldStick: true,
+    };
+    setNewResponseIndicator(scrollStateKey, false);
   }
 
   useLayoutEffect(() => {
     let restoreCleanup: (() => void) | undefined;
+    const restoreKey = scrollStateKey;
+    if (!isSessionTabActive || paneViewMode !== "session") {
+      return undefined;
+    }
     const node = messageStackRef.current;
     if (!node) {
       return undefined;
@@ -1560,29 +1809,29 @@ export function useSessionPaneScrollState({
       }
     } else if (paneScrollPositions[scrollStateKey]) {
       const saved = paneScrollPositions[scrollStateKey];
-      setTailFollowIntent(saved.shouldStick);
-      if (saved.shouldStick) {
+      if (saved.shouldStick || getTailFollowIntent()) {
+        restorePinnedMessageStackBeforePaint(node);
         restoreCleanup = scheduleSettledScrollToBottom("auto", {
           maxAttempts: 60,
           preferVirtualizedBoundary: true,
         });
-      } else if (!restoreMessageStackScrollTop(saved.top)) {
-        setTailFollowIntent(true);
-        restoreCleanup = scheduleSettledScrollToBottom("auto", {
-          maxAttempts: 60,
-          preferVirtualizedBoundary: true,
-        });
+      } else {
+        // A scroll controller from the previous tab must not survive into a
+        // saved detached position. Virtualized geometry can also be
+        // temporarily shorter than the saved target while its pages remount;
+        // preserve that target and retry instead of converting it to a bottom
+        // pin, which would permanently lose the user's reading position.
+        cancelPaneProgrammaticBottomFollow();
+        cancelSettledScrollToBottom();
+        setTailFollowIntent(false, { preserveDetachedRestore: true });
+        restoreCleanup = scheduleDetachedMessageStackRestore(saved.top);
       }
     } else if (defaultScrollToBottom) {
+      restorePinnedMessageStackBeforePaint(node);
       restoreCleanup = scheduleSettledScrollToBottom("auto", {
         maxAttempts: 60,
         preferVirtualizedBoundary: true,
       });
-      setTailFollowIntent(true);
-      paneScrollPositions[scrollStateKey] = {
-        top: Number.MAX_SAFE_INTEGER,
-        shouldStick: true,
-      };
     } else {
       node.scrollTop = 0;
       notifyMessageStackScrollWrite(node);
@@ -1595,8 +1844,15 @@ export function useSessionPaneScrollState({
 
     return () => {
       restoreCleanup?.();
+      delete paneDetachedRestoreByKeyRef.current[restoreKey];
     };
-  }, [activeSession?.id, defaultScrollToBottom, scrollStateKey]);
+  }, [
+    activeSession?.id,
+    defaultScrollToBottom,
+    isSessionTabActive,
+    paneViewMode,
+    scrollStateKey,
+  ]);
 
   useLayoutEffect(() => {
     const previousByKey = previousShowWaitingIndicatorByKeyRef.current;
@@ -1676,56 +1932,6 @@ export function useSessionPaneScrollState({
     scrollStateKey,
   ]);
 
-  useLayoutEffect(() => {
-    if (
-      deferContentScrollEffects ||
-      !activeSession ||
-      !isSessionTabActive ||
-      paneViewMode !== "session" ||
-      visitedSessionIds[activeSession.id]
-    ) {
-      return;
-    }
-
-    if (savedScrollShouldStick) {
-      return;
-    }
-
-    return scheduleSettledScrollToBottom("auto", {
-      preferVirtualizedBoundary: true,
-    });
-  }, [
-    activeSession?.id,
-    deferContentScrollEffects,
-    isSessionTabActive,
-    paneViewMode,
-    savedScrollShouldStick,
-    scrollStateKey,
-    visitedSessionIds,
-  ]);
-
-  useEffect(() => {
-    if (!activeSession?.id) {
-      return;
-    }
-
-    setVisitedSessionIds((current) =>
-      current[activeSession.id]
-        ? current
-        : {
-            ...current,
-            [activeSession.id]: true,
-          },
-    );
-  }, [activeSession?.id]);
-
-  useEffect(() => {
-    const availableSessionIds = new Set(sessions.map((session) => session.id));
-    setVisitedSessionIds((current) =>
-      pruneSessionFlags(current, availableSessionIds),
-    );
-  }, [sessions]);
-
   useEffect(() => {
     if (!activeSession || !isSessionTabActive) {
       return;
@@ -1744,20 +1950,9 @@ export function useSessionPaneScrollState({
     paneMessageContentSignatures[scrollStateKey] =
       visibleMessageContentSignature;
     if (previousSignature === undefined) {
-      const saved = paneScrollPositions[scrollStateKey];
-      if (saved && !saved.shouldStick) {
-        if (!restoreMessageStackScrollTop(saved.top)) {
-          setTailFollowIntent(true);
-          return scheduleSettledScrollToBottom("auto", { maxAttempts: 60 });
-        }
-        return;
-      }
-      if (getTailFollowIntent() || saved?.shouldStick) {
-        return scheduleSettledScrollToBottom("auto", {
-          maxAttempts: 60,
-          preferVirtualizedBoundary: true,
-        });
-      }
+      // The layout-phase restore above owns first activation. Repeating it
+      // here after paint creates a second scroll authority and can overwrite a
+      // detached position restored during the same commit.
       return;
     }
 

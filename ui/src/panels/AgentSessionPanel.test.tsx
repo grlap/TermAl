@@ -1189,7 +1189,7 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(scrollWrites).toEqual([]);
   });
 
-  it("keeps the live-turn tail in flow while exposing bottom-follow state", async () => {
+  it("pins the attached live-turn tail and releases it on detach", async () => {
     const nodeFsModule = "node:fs";
     const { readFileSync } = (await import(nodeFsModule)) as {
       readFileSync: (path: string, encoding: "utf8") => string;
@@ -1203,12 +1203,28 @@ describe("AgentSessionPanel conversation caching", () => {
       `${runtimeProcess.cwd()}/src/styles.css`,
       "utf8",
     );
+    const messageStackDeclarations = stylesCss.match(
+      /\.message-stack\s*\{([^}]*)\}/s,
+    )?.[1];
+    expect(messageStackDeclarations).toMatch(
+      /--message-stack-block-padding\s*:\s*var\(--space-2xl\)\s*;/,
+    );
     const baseDeclarations = stylesCss.match(
       /\.conversation-live-tail\s*\{([^}]*)\}/s,
     )?.[1];
     expect(baseDeclarations).toBeDefined();
     expect(baseDeclarations).not.toMatch(
       /(?:^|;)\s*position\s*:\s*(?:sticky|fixed|absolute)\s*(?:;|$)/,
+    );
+    const attachedDeclarations = stylesCss.match(
+      /\.conversation-live-tail\[data-tail-follow="attached"\]\s*\{([^}]*)\}/s,
+    )?.[1];
+    expect(attachedDeclarations).toBeDefined();
+    expect(attachedDeclarations).toMatch(
+      /\bposition\s*:\s*sticky\s*;/,
+    );
+    expect(attachedDeclarations).toMatch(
+      /\bbottom\s*:\s*var\(--message-stack-block-padding\)\s*;/,
     );
 
     const activeSession = makeSession("session-a", {

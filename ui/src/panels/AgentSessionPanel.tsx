@@ -1215,9 +1215,10 @@ const SessionConversationPage = memo(
     const liveTail = (
       <ConversationTailPresence active={liveTurnCard !== null}>
         {/*
-          LIVE TURN must stay in normal transcript flow in both states. The
-          attribute exposes scroll-controller attachment for diagnostics and
-          tests; it must never become a sticky/fixed positioning hook.
+          LIVE TURN always reserves its place in transcript flow. While the
+          scroll controller owns tail follow, the attribute also pins that
+          reserved wrapper to the viewport bottom; explicit user navigation
+          detaches it and restores ordinary in-flow movement.
         */}
         <div
           className="conversation-live-tail"

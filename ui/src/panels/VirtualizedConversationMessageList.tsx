@@ -233,6 +233,7 @@ export function VirtualizedConversationMessageList({
   const pendingIdleCompactionTimerRef = useRef<number | null>(null);
   const pendingBottomBoundaryRevealFrameRef = useRef<number | null>(null);
   const pendingBottomBoundaryRevealNodeRef = useRef<HTMLElement | null>(null);
+  const bottomBoundaryRevealGenerationRef = useRef(0);
   const pendingDeferredRenderResumeTimerRef = useRef<number | null>(null);
   const pendingDeferredRenderSuspendedNodeRef = useRef<HTMLElement | null>(
     null,
@@ -431,6 +432,10 @@ export function VirtualizedConversationMessageList({
     ],
   );
   const clearPendingBottomBoundaryRevealFrame = useCallback(() => {
+    // A frame or timer may already be dequeued when cancellation runs. Move
+    // the generation synchronously so those stale callbacks can prove that
+    // they no longer own the shared scroll container before writing.
+    bottomBoundaryRevealGenerationRef.current += 1;
     if (pendingBottomBoundaryRevealFrameRef.current !== null) {
       window.cancelAnimationFrame(pendingBottomBoundaryRevealFrameRef.current);
       pendingBottomBoundaryRevealFrameRef.current = null;
@@ -442,6 +447,7 @@ export function VirtualizedConversationMessageList({
     }
   }, []);
   const finishPostActivationMeasuring = useCallback(() => {
+    bottomBoundaryRevealGenerationRef.current += 1;
     renderedListRef.current?.classList.remove("is-measuring-post-activation");
     if (pendingBottomBoundaryRevealNodeRef.current) {
       delete pendingBottomBoundaryRevealNodeRef.current.dataset
@@ -505,6 +511,7 @@ export function VirtualizedConversationMessageList({
   const scheduleBottomBoundaryReveal = useCallback(
     (node: HTMLElement) => {
       clearPendingBottomBoundaryRevealFrame();
+      const revealGeneration = bottomBoundaryRevealGenerationRef.current;
       pendingBottomBoundaryRevealNodeRef.current = node;
       node.dataset.virtualizedBottomBoundaryReveal = "true";
       renderedListRef.current?.classList.add("is-measuring-post-activation");
@@ -516,7 +523,10 @@ export function VirtualizedConversationMessageList({
         pendingBottomBoundaryRevealFrameRef.current =
           window.requestAnimationFrame(() => {
           pendingBottomBoundaryRevealFrameRef.current = null;
-          if (scrollContainerRef.current !== node) {
+          if (
+            bottomBoundaryRevealGenerationRef.current !== revealGeneration ||
+            scrollContainerRef.current !== node
+          ) {
             return;
           }
 
@@ -560,7 +570,13 @@ export function VirtualizedConversationMessageList({
       return undefined;
     }
 
+    const revealGeneration = bottomBoundaryRevealGenerationRef.current;
     const timeoutId = window.setTimeout(() => {
+      if (
+        bottomBoundaryRevealGenerationRef.current !== revealGeneration
+      ) {
+        return;
+      }
       const node = scrollContainerRef.current;
       if (node) {
         const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);

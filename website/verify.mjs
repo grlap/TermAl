@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -9,6 +10,7 @@ const cssPath = join(root, "styles.css");
 const jsPath = join(root, "script.js");
 const launchMode = process.argv.includes("--launch");
 const failures = [];
+const require = createRequire(import.meta.url);
 
 const read = (path) => readFileSync(path, "utf8");
 const fail = (message) => failures.push(message);
@@ -31,8 +33,7 @@ function checkReferences(ids) {
   const fragmentRefs = matches(/\shref=["']#([^"']+)["']/gi).map((match) => match[1]);
   const ariaRefs = matches(/\saria-(?:controls|describedby|labelledby|owns)=["']([^"']+)["']/gi)
     .flatMap((match) => match[1].trim().split(/\s+/));
-  const copyRefs = matches(/\sdata-copy=["']([^"']+)["']/gi).map((match) => match[1]);
-  [...fragmentRefs, ...ariaRefs, ...copyRefs].forEach((id) => {
+  [...fragmentRefs, ...ariaRefs].forEach((id) => {
     if (!ids.has(id)) fail(`Reference points to missing id #${id}`);
   });
 }
@@ -106,7 +107,81 @@ function checkProgressiveEnhancement() {
   if (!/classList\.replace\(["']no-js["'],\s*["']js["']\)/.test(js)) fail("JavaScript must enable enhancements only after initialization");
   if (!/__termalReady\s*=\s*true/.test(js)) fail("JavaScript must expose its browser-test readiness marker");
   if (!/dataset\.flowState/.test(js) || !/data-flow-step/.test(html)) fail("The control-room step interaction is not wired");
-  if (!/data-theme-choice/.test(js)) fail("The theme preview is not wired");
+  const themeChoices = matches(/\sdata-theme-choice=["'][^"']+["']/gi);
+  if (themeChoices.length !== 21) fail(`The theme catalog must expose all 21 themes, found ${themeChoices.length}`);
+  const lightThemeChoices = matches(/<button\b[^>]*\bdata-theme-choice=["'][^"']+["'][^>]*\bdata-theme-kind=["']light["'][^>]*>/gi);
+  const darkThemeChoices = matches(/<button\b[^>]*\bdata-theme-choice=["'][^"']+["'][^>]*\bdata-theme-kind=["']dark["'][^>]*>/gi);
+  if (lightThemeChoices.length !== 10 || darkThemeChoices.length !== 11) {
+    fail(`The paired theme catalog must expose 10 light and 11 dark themes, found ${lightThemeChoices.length} light and ${darkThemeChoices.length} dark`);
+  }
+  if (!/data-theme-choice/.test(js) || !/createThemeModeController/.test(js)) fail("The paired theme-system preview is not wired");
+  if (!/Rendered Markdown/.test(html) || !/Save Markdown/.test(html) || !/INLINE VIEW ZONE/.test(html)) {
+    fail("The Markdown diff and inline Mermaid differentiators must remain represented in the workspace");
+  }
+  if (!/workspace-demo--markdown[^>]*role=["']group["']/.test(html)) {
+    fail("The text-rich Markdown workspace demo must remain exposed as an accessible group");
+  }
+  if (!/role=["']group["'][^>]*aria-label=["']10 light and 11 dark themes["']/.test(html)) {
+    fail("The theme counts must expose their shared light/dark context");
+  }
+  if (!/Auto preview · Darkroom active/.test(html)) {
+    fail("The static theme status must match the enhanced Auto preview wording");
+  }
+}
+
+function checkThemeModeBehavior() {
+  let createThemeModeController;
+  try {
+    ({ createThemeModeController } = require("./theme-demo-state.js"));
+  } catch (error) {
+    fail(`Theme demo state controller could not be loaded: ${error.message}`);
+    return;
+  }
+  let systemChangeListener = null;
+  const mediaQuery = {
+    matches: false,
+    addEventListener(type, listener) {
+      if (type === "change") systemChangeListener = listener;
+    },
+    removeEventListener(type, listener) {
+      if (type === "change" && systemChangeListener === listener) {
+        systemChangeListener = null;
+      }
+    },
+  };
+  const observedKinds = [];
+  const controller = createThemeModeController({
+    initialMode: "auto",
+    mediaQuery,
+    onPreviewKindChange: (kind) => observedKinds.push(kind),
+  });
+
+  if (controller.getPreviewKind() !== "light") {
+    fail("Auto mode must initialize from a light system preference");
+  }
+  mediaQuery.matches = true;
+  systemChangeListener?.({ matches: true });
+  if (observedKinds.at(-1) !== "dark") {
+    fail("Auto mode must follow a live system change to dark");
+  }
+  controller.setMode("light");
+  const observationsBeforeExplicitModeSystemChange = observedKinds.length;
+  mediaQuery.matches = false;
+  systemChangeListener?.({ matches: false });
+  if (
+    observedKinds.length !== observationsBeforeExplicitModeSystemChange ||
+    controller.getPreviewKind() !== "light"
+  ) {
+    fail("An explicit theme mode must ignore later system scheme changes");
+  }
+  controller.setMode("auto");
+  if (observedKinds.at(-1) !== "light") {
+    fail("Returning to Auto must immediately adopt the current system scheme");
+  }
+  controller.dispose();
+  if (systemChangeListener !== null) {
+    fail("The theme mode controller must release its system scheme listener");
+  }
 }
 
 function checkSourceTypes() {
@@ -128,6 +203,7 @@ checkExternalLinks();
 checkSemantics();
 checkMetadata();
 checkProgressiveEnhancement();
+checkThemeModeBehavior();
 checkSourceTypes();
 
 if (failures.length) {

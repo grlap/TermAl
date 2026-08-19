@@ -50,7 +50,7 @@
         <a href="#agents">Agents</a>
         <a href="#product">Mailbox + Board</a>
         <a href="#workspace">Workspace</a>
-        <a href="#setup">Run it</a>
+        <a href="#personalize">Themes</a>
       </div>
 
       <a class="nav__github" href="https://github.com/grlap/TermAl" target="_blank" rel="noopener">
@@ -64,7 +64,7 @@
           <a href="#agents"><span>01</span><b>Agents</b></a>
           <a href="#product"><span>02</span><b>Mailbox + Board</b></a>
           <a href="#workspace"><span>03</span><b>Workspace</b></a>
-          <a href="#setup"><span>04</span><b>Run it</b></a>
+          <a href="#personalize"><span>04</span><b>Themes</b></a>
           <a href="https://github.com/grlap/TermAl" target="_blank" rel="noopener"><span>05</span><b>GitHub ↗</b></a>
         </div>
       </details>
@@ -88,7 +88,7 @@
 
           <div class="hero__actions">
             <a class="button button--primary" href="#product"><span>See Mailbox + Response Board</span><span aria-hidden="true">↓</span></a>
-            <a class="button button--secondary" href="#setup"><span>Run from source</span><span aria-hidden="true">↘</span></a>
+            <a class="button button--secondary" href="#workspace"><span>See Markdown + Mermaid</span><span aria-hidden="true">↘</span></a>
           </div>
 
           <div class="hero__plain-language">
@@ -318,47 +318,66 @@
     </section>
 
     <section class="workspace section shell" id="workspace">
-      <div class="section-kicker" data-reveal><span>03 / WORKSPACE</span><i></i><b>More than conversation</b></div>
+      <div class="section-kicker" data-reveal><span>03 / MARKDOWN + MERMAID</span><i></i><b>Rich artifacts, native views</b></div>
       <div class="section-heading">
-        <div><p class="eyebrow" data-reveal><span></span>Arrange the work around the task</p><h2 data-reveal>Every surface.<br><em>One workspace tree.</em></h2></div>
-        <p data-reveal>Split panes, drag tabs, and keep a session beside the artifacts it is changing. Each browser workspace persists independently.</p>
+        <div><p class="eyebrow" data-reveal><span></span>Most tools stop at source</p><h2 data-reveal>Read the change.<br><em>Edit the document.</em></h2></div>
+        <p data-reveal>Markdown files move between Code, Preview, and Split. Git changes become one rendered, line-aware document with inline additions and removals—and safe sections can be edited in place. Mermaid and KaTeX stay live inside source and diff views.</p>
       </div>
 
-      <div class="workspace-demo" data-reveal>
-        <header><span><i></i><i></i><i></i></span><b>payments-api · checkout hardening</b><small>workspace saved</small></header>
+      <div class="workspace-demo workspace-demo--markdown" data-reveal role="group" aria-label="TermAl Markdown and Mermaid workspace demonstration">
+        <header><span><i></i><i></i><i></i></span><b>docs / architecture.md · unstaged</b><small>FULL DOCUMENT · EDITABLE</small></header>
         <div class="workspace-demo__body">
-          <section class="workspace-pane workspace-pane--files">
-            <header><span>FILES</span><b>⌕</b></header>
-            <ul><li><i>⌄</i><b>src</b></li><li class="is-child"><i>⌄</i><b>checkout</b></li><li class="is-child is-deep is-active"><i>TS</i><span>retry-policy.ts</span><em>M</em></li><li class="is-child is-deep"><i>TS</i><span>transport.ts</span><em>M</em></li><li><i>⌄</i><b>tests</b></li><li class="is-child"><i>TS</i><span>checkout.test.ts</span><em>M</em></li></ul>
-          </section>
-          <section class="workspace-pane workspace-pane--diff">
-            <header><div><span class="is-active">Rendered diff</span><span>Raw patch</span></div><b>retry-policy.ts</b></header>
-            <div class="code-diff" role="img" aria-label="Illustrative code diff">
-              <span><i>41</i><i>41</i><code>export async function runWithRetry(</code></span>
-              <span class="diff-add"><i></i><i>42</i><code>+  policy: RetryPolicy,</code></span>
-              <span><i>42</i><i>43</i><code>   operation: () =&gt; Promise&lt;Response&gt;</code></span>
-              <span><i>43</i><i>44</i><code>) {</code></span>
-              <span class="diff-remove"><i>44</i><i></i><code>-  return operation();</code></span>
-              <span class="diff-add"><i></i><i>45</i><code>+  return retry(policy, operation);</code></span>
-              <span><i>45</i><i>46</i><code>}</code></span>
+          <section class="md-diff-pane">
+            <header class="md-pane-header">
+              <div><span><em>＋12</em><del>−4</del></span><b>architecture.md</b></div>
+              <div class="md-view-modes"><span>All lines</span><span>Changed only</span><span class="is-active">Rendered Markdown</span><span>Edit mode</span><span>Raw patch</span></div>
+            </header>
+            <div class="md-review-toolbar">
+              <div><span>UNSTAGED</span><span>ONE DOCUMENT</span><span>EDITABLE</span></div>
+              <b>Save Markdown</b>
             </div>
-            <footer><span><em>＋34</em><del>−12</del> 3 files</span><b>Open in editor ↗</b></footer>
+            <div class="md-document">
+              <div class="md-document__intro"><span>08</span><div><small>ARCHITECTURE NOTE</small><h3>Retry only what can recover</h3><p>The transport separates transient failures from terminal responses before scheduling another attempt.</p></div></div>
+              <div class="md-change md-change--removed"><span>12 −</span><p>Every failed request returns to the queue immediately.</p></div>
+              <div class="md-change md-change--added"><span>12 +</span><div><p>Only transient failures return to the queue, with bounded exponential backoff.</p><small><i></i> rendered section · click to edit</small></div></div>
+              <section class="md-mermaid-view">
+                <header><span>21–27</span><div><small>MERMAID</small><b>Rendered from fenced source</b></div><em>FIT TO PANE</em></header>
+                <div class="mermaid-flow">
+                  <div><b>Request</b><small>start</small></div><i>→</i>
+                  <div class="is-decision"><b>Transient?</b><small>classify</small></div><i>→</i>
+                  <div><b>Backoff</b><small>bounded</small></div><i>→</i>
+                  <div class="is-terminal"><b>Retry</b><small>resume</small></div>
+                </div>
+              </section>
+            </div>
+            <footer class="md-statusbar"><span>Change 2 of 3</span><b>Rendered Markdown edits update the file buffer</b></footer>
           </section>
-          <section class="workspace-pane workspace-pane--terminal">
-            <header><span>TERMINAL · cargo test</span><b>＋　⌄</b></header>
-            <pre><code><i>$</i> scripts/test-rust.sh
-running 428 tests
-<b>test result: ok.</b> 428 passed; 0 failed
-<em>finished in 18.42s</em></code></pre>
+
+          <section class="md-source-pane">
+            <header><div><span>SOURCE</span><b>retry-flow.mmd</b></div><em>Mermaid</em></header>
+            <div class="md-source-modes"><span class="is-active">Code</span><span>Preview</span><span>Split</span></div>
+            <div class="md-source-code">
+              <span><i>21</i><code>flowchart LR</code></span>
+              <span><i>22</i><code>Request --&gt; Check{Transient?}</code></span>
+              <span><i>23</i><code>Check -- yes --&gt; Backoff</code></span>
+              <span><i>24</i><code>Backoff --&gt; Retry</code></span>
+              <span><i>25</i><code>Check -- no --&gt; Surface</code></span>
+            </div>
+            <div class="md-inline-zone">
+              <header><span>INLINE VIEW ZONE</span><b>after line 25</b></header>
+              <div><span>Request</span><i>→</i><span>Transient?</span><i>→</i><span>Retry</span></div>
+              <p>Diagram updates with the source buffer.</p>
+            </div>
+            <footer><span><i></i> live source buffer</span><b>⌘S · saved</b></footer>
           </section>
         </div>
       </div>
 
       <div class="surface-list">
-        <article data-reveal><i>01</i><span><b>Source + filesystem</b><small>Browse and edit the project without leaving the workspace.</small></span><em>Monaco</em></article>
-        <article data-reveal><i>02</i><span><b>Rendered + raw diffs</b><small>Review structured changes, hunks, commits, and patch details.</small></span><em>Review</em></article>
-        <article data-reveal><i>03</i><span><b>Git + terminal</b><small>Inspect branch state and run commands beside the agent session.</small></span><em>Tools</em></article>
-        <article data-reveal><i>04</i><span><b>Conversation overview</b><small>Jump through prompts, tools, approvals, and results in long turns.</small></span><em>Navigate</em></article>
+        <article data-reveal><i>01</i><span><b>Rendered Markdown diff</b><small>Read staged or unstaged changes as one document, then edit safe after-side sections in place.</small></span><em>Review + edit</em></article>
+        <article data-reveal><i>02</i><span><b>Mermaid beside source</b><small>Render fenced diagrams, dedicated Mermaid files, and diagrams inside Rust documentation.</small></span><em>Live</em></article>
+        <article data-reveal><i>03</i><span><b>Code / Preview / Split</b><small>Source and rendered Markdown share one live, persisted file buffer.</small></span><em>Monaco</em></article>
+        <article data-reveal><i>04</i><span><b>KaTeX + complete GFM</b><small>Math, tables, task lists, code, images, and workspace-aware links remain first-class.</small></span><em>Render</em></article>
       </div>
     </section>
 
@@ -406,66 +425,113 @@ running 428 tests
     <section class="personalize section" id="personalize">
       <div class="personalize__inner shell">
         <div class="personalize__copy">
-          <div class="section-kicker section-kicker--dark" data-reveal><span>06 / PERSONALIZE</span><i></i><b>Your control surface</b></div>
-          <p class="eyebrow eyebrow--dark" data-reveal><span></span>18 themes, four chrome styles</p>
-          <h2 data-reveal>Dense by design.<br><em>Yours in detail.</em></h2>
-          <p data-reveal>Choose the color system, interface style, Markdown treatment, font size, and density independently. TermAl can feel like a terminal, a studio, a blueprint, or something in between.</p>
+          <div class="section-kicker section-kicker--dark" data-reveal><span>06 / PERSONALIZE</span><i></i><b>A real appearance system</b></div>
+          <p class="eyebrow eyebrow--dark" data-reveal><span></span>21 color themes · four chrome overrides</p>
+          <h2 data-reveal>Daylight. After dark.<br><em>Make both yours.</em></h2>
+          <p data-reveal>Choose one theme for light mode and another for dark. Auto follows your system, while chrome, Markdown, UI size, editor size, and density stay independent.</p>
         </div>
 
-        <div class="theme-demo" id="theme-demo" data-preview-theme="obsidian" data-reveal>
-          <div class="theme-demo__controls" role="group" aria-label="Preview TermAl themes">
-            <button type="button" data-theme-choice="obsidian" aria-pressed="true"><i></i><span>Obsidian</span></button>
-            <button type="button" data-theme-choice="evergreen" aria-pressed="false"><i></i><span>Evergreen</span></button>
-            <button type="button" data-theme-choice="blueprint" aria-pressed="false"><i></i><span>Blueprint</span></button>
-            <button type="button" data-theme-choice="porcelain" aria-pressed="false"><i></i><span>Porcelain</span></button>
-          </div>
-          <div class="theme-workspace">
-            <aside><b>T</b><i></i><i></i><i></i><i></i></aside>
-            <section>
-              <header><span><i></i> design-system</span><b>connected</b></header>
-              <div class="theme-tabs"><span class="is-active">design review</span><span>source.css</span><span>Response Board</span></div>
-              <article class="theme-message theme-message--user"><small>YOU</small><p>Audit the new palette across every control surface.</p></article>
-              <article class="theme-message theme-message--agent"><small>CODEX</small><p>Contrast passes. I found two muted-state tokens to tighten.</p><div><em>＋18</em><del>−6</del><b>Open diff ↗</b></div></article>
-              <footer><span>Ask a follow-up…</span><b>↑</b></footer>
+        <div class="theme-demo" id="theme-demo" data-preview-theme="dark" data-preview-kind="dark" data-reveal>
+          <header class="theme-demo__titlebar">
+            <div><small>PREFERENCES / THEMES</small><b>Appearance</b></div>
+            <p id="theme-demo-status" aria-live="polite"><i></i><span>Auto preview · Darkroom active</span></p>
+          </header>
+
+          <section class="theme-style" aria-labelledby="theme-style-heading">
+            <div class="theme-panel-heading">
+              <div><small>STYLE</small><b id="theme-style-heading">Change the chrome, not the palette</b></div>
+              <span>1 bundled + 4 overrides</span>
+            </div>
+            <div class="theme-style__options" role="list" aria-label="TermAl interface styles">
+              <div class="is-selected" role="listitem"><i><span></span><span></span><span></span></i><b>Match Theme</b></div>
+              <div role="listitem"><i><span></span><span></span><span></span></i><b>Editorial</b></div>
+              <div role="listitem"><i><span></span><span></span><span></span></i><b>Studio</b></div>
+              <div role="listitem"><i><span></span><span></span><span></span></i><b>Terminal</b></div>
+              <div role="listitem"><i><span></span><span></span><span></span></i><b>Blueprint</b></div>
+            </div>
+          </section>
+
+          <div class="theme-demo__body">
+            <div class="theme-demo__settings">
+              <section class="theme-settings-block" aria-labelledby="theme-mode-heading">
+                <div class="theme-panel-heading">
+                  <div><small>MODE</small><b id="theme-mode-heading">Follow the room</b></div>
+                  <kbd>⌘ ⇧ L</kbd>
+                </div>
+                <div class="theme-mode" role="group" aria-label="Preview theme mode">
+                  <button type="button" data-theme-mode-choice="light" aria-pressed="false" disabled><span>☀︎</span> Light</button>
+                  <button type="button" data-theme-mode-choice="dark" aria-pressed="false" disabled><span>☾</span> Dark</button>
+                  <button type="button" data-theme-mode-choice="auto" aria-pressed="true" disabled>Auto</button>
+                </div>
+              </section>
+
+              <section class="theme-settings-block theme-pair" aria-labelledby="theme-pair-heading">
+                <div class="theme-panel-heading">
+                  <div><small>YOUR PAIR</small><b id="theme-pair-heading">Two slots, one shortcut</b></div>
+                </div>
+                <div class="theme-pair__cards">
+                  <article class="theme-pair__card" data-theme-pair="light">
+                    <header><span>☀︎ LIGHT THEME</span><em data-theme-pair-active hidden>ACTIVE</em></header>
+                    <div class="theme-pair__preview" data-theme-pair-preview style="--swatch-bg:#f4efe4;--swatch-a:#cf9d34;--swatch-b:#2f5f80"><i></i><i></i><i></i></div>
+                    <b data-theme-pair-name>Warm Light</b>
+                  </article>
+                  <article class="theme-pair__card is-active" data-theme-pair="dark">
+                    <header><span>☾ DARK THEME</span><em data-theme-pair-active>ACTIVE</em></header>
+                    <div class="theme-pair__preview" data-theme-pair-preview style="--swatch-bg:#1a1a1f;--swatch-a:#e07050;--swatch-b:#5a9ac0"><i></i><i></i><i></i></div>
+                    <b data-theme-pair-name>Darkroom</b>
+                  </article>
+                </div>
+              </section>
+
+              <section class="theme-settings-block theme-tuning" aria-labelledby="theme-tuning-heading">
+                <div class="theme-panel-heading"><div><small>INDEPENDENT CONTROLS</small><b id="theme-tuning-heading">Tune the working surface</b></div></div>
+                <div class="theme-tuning__grid">
+                  <div><span>UI</span><b>16 px</b></div>
+                  <div><span>Editor</span><b>13 px</b></div>
+                  <div><span>Density</span><b>100%</b></div>
+                  <div><span>Markdown</span><b>Match UI</b></div>
+                </div>
+              </section>
+            </div>
+
+            <section class="theme-catalog" aria-labelledby="theme-catalog-heading">
+              <div class="theme-catalog__heading">
+                <div><small>ALL THEMES</small><b id="theme-catalog-heading">21 installed</b></div>
+                <div role="group" aria-label="10 light and 11 dark themes"><span>ALL 21</span><span>LIGHT 10</span><span>DARK 11</span></div>
+              </div>
+              <p>Selecting a card updates its light or dark slot.</p>
+              <div class="theme-catalog__cards" role="group" aria-label="All 21 TermAl color themes">
+                <button type="button" data-theme-choice="warm-light" data-theme-kind="light" aria-pressed="true" disabled style="--swatch-bg:#f4efe4;--swatch-a:#cf9d34;--swatch-b:#2f5f80"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Warm Light</b><em>☀︎</em></button>
+                <button type="button" data-theme-choice="gallery-white" data-theme-kind="light" aria-pressed="false" disabled style="--swatch-bg:#f8fbff;--swatch-a:#2b6cb0;--swatch-b:#d1573b"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Gallery White</b><em>☀︎</em></button>
+                <button type="button" data-theme-choice="workbench-light" data-theme-kind="light" aria-pressed="false" disabled style="--swatch-bg:#f3f4f6;--swatch-a:#607d93;--swatch-b:#d86f58"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Workbench Light</b><em>☀︎</em></button>
+                <button type="button" data-theme-choice="silver-white" data-theme-kind="light" aria-pressed="false" disabled style="--swatch-bg:#f5f6f7;--swatch-a:#a5adb6;--swatch-b:#4c5e70"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Silver White</b><em>☀︎</em></button>
+                <button type="button" data-theme-choice="porcelain-white" data-theme-kind="light" aria-pressed="false" disabled style="--swatch-bg:#fcfbf8;--swatch-a:#368873;--swatch-b:#8f5a7a"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Porcelain White</b><em>☀︎</em></button>
+                <button type="button" data-theme-choice="dark" data-theme-kind="dark" aria-pressed="true" disabled style="--swatch-bg:#1a1a1f;--swatch-a:#e07050;--swatch-b:#5a9ac0"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Darkroom</b><em>☾</em></button>
+                <button type="button" data-theme-choice="code-black" data-theme-kind="dark" aria-pressed="false" disabled style="--swatch-bg:#1e1e1e;--swatch-a:#3794ff;--swatch-b:#d7ba7d"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Code Black</b><em>☾</em></button>
+                <button type="button" data-theme-choice="obsidian-black" data-theme-kind="dark" aria-pressed="false" disabled style="--swatch-bg:#080a0d;--swatch-a:#63d2ff;--swatch-b:#ff7a59"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Obsidian Black</b><em>☾</em></button>
+                <button type="button" data-theme-choice="oxide-black" data-theme-kind="dark" aria-pressed="false" disabled style="--swatch-bg:#0d0b09;--swatch-a:#d46e43;--swatch-b:#6fc7a1"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Oxide Black</b><em>☾</em></button>
+                <button type="button" data-theme-choice="evergreen-night" data-theme-kind="dark" aria-pressed="false" disabled style="--swatch-bg:#141917;--swatch-a:#59c97b;--swatch-b:#88d8a5"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Evergreen Night</b><em>☾</em></button>
+                <button type="button" data-theme-choice="seaglass" data-theme-kind="light" aria-pressed="false" disabled style="--swatch-bg:#ebf6f6;--swatch-a:#2d6f88;--swatch-b:#4ea39a"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Sea Glass</b><em>☀︎</em></button>
+                <button type="button" data-theme-choice="terminal" data-theme-kind="dark" aria-pressed="false" disabled style="--swatch-bg:#07120c;--swatch-a:#5ccf86;--swatch-b:#d7c46a"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Terminal</b><em>☾</em></button>
+                <button type="button" data-theme-choice="violet-night" data-theme-kind="dark" aria-pressed="false" disabled style="--swatch-bg:#151528;--swatch-a:#c18cff;--swatch-b:#7da5ff"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Violet Night</b><em>☾</em></button>
+                <button type="button" data-theme-choice="fjord" data-theme-kind="dark" aria-pressed="false" disabled style="--swatch-bg:#171c22;--swatch-a:#7fa6c8;--swatch-b:#79b8a0"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Fjord</b><em>☾</em></button>
+                <button type="button" data-theme-choice="amber-trace" data-theme-kind="dark" aria-pressed="false" disabled style="--swatch-bg:#161006;--swatch-a:#ffc96b;--swatch-b:#ffb04d"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Amber Trace</b><em>☾</em></button>
+                <button type="button" data-theme-choice="heather" data-theme-kind="light" aria-pressed="false" disabled style="--swatch-bg:#f4f1f8;--swatch-a:#6f5fb0;--swatch-b:#a668a8"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Heather</b><em>☀︎</em></button>
+                <button type="button" data-theme-choice="sunset-paper" data-theme-kind="light" aria-pressed="false" disabled style="--swatch-bg:#f7e7da;--swatch-a:#d96d4f;--swatch-b:#b05f76"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Sunset Paper</b><em>☀︎</em></button>
+                <button type="button" data-theme-choice="blueprint" data-theme-kind="dark" aria-pressed="false" disabled style="--swatch-bg:#0d2132;--swatch-a:#79d4ff;--swatch-b:#f3cf7a"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Blueprint</b><em>☾</em></button>
+                <button type="button" data-theme-choice="ember" data-theme-kind="dark" aria-pressed="false" disabled style="--swatch-bg:#1c1410;--swatch-a:#e8944a;--swatch-b:#c44830"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Ember</b><em>☾</em></button>
+                <button type="button" data-theme-choice="frost" data-theme-kind="light" aria-pressed="false" disabled style="--swatch-bg:#edf2f8;--swatch-a:#3878b0;--swatch-b:#c04858"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Frost</b><em>☀︎</em></button>
+                <button type="button" data-theme-choice="sakura" data-theme-kind="light" aria-pressed="false" disabled style="--swatch-bg:#faf2f4;--swatch-a:#d07090;--swatch-b:#6878a8"><span class="theme-card__preview"><i></i><i></i><i></i></span><b>Sakura</b><em>☀︎</em></button>
+              </div>
             </section>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="setup section shell" id="setup">
-      <div class="section-kicker" data-reveal><span>07 / RUN IT</span><i></i><b>Source available today</b></div>
-      <div class="section-heading">
-        <div><p class="eyebrow" data-reveal><span></span>Two processes, one local workspace</p><h2 data-reveal>Clone it.<br><em>Take control.</em></h2></div>
-        <p data-reveal>TermAl currently runs from source. Start the Rust backend, launch the React workspace, then add a local or SSH-backed project.</p>
-      </div>
-
-      <ol class="setup-steps">
-        <li data-reveal>
-          <span class="setup-step__number">01</span>
-          <div><small>BACKEND</small><h3>Start the control plane.</h3><p>Serves the API, live event stream, runtimes, and durable state on loopback.</p></div>
-          <div class="code-window"><header><span>shell</span><button class="copy-button" type="button" data-copy="backend-code"><span>Copy</span><i aria-hidden="true">□</i></button></header><pre id="backend-code" tabindex="-1"><code>git clone https://github.com/grlap/TermAl.git
-cd TermAl
-cargo run</code></pre></div>
-        </li>
-        <li data-reveal>
-          <span class="setup-step__number">02</span>
-          <div><small>WORKSPACE</small><h3>Open the browser UI.</h3><p>Vite serves the interface and proxies local API requests during development.</p></div>
-          <div class="code-window"><header><span>shell</span><button class="copy-button" type="button" data-copy="frontend-code"><span>Copy</span><i aria-hidden="true">□</i></button></header><pre id="frontend-code" tabindex="-1"><code>cd TermAl/ui
-npm install
-npm run dev</code></pre></div>
-        </li>
-      </ol>
-
-      <div class="setup__links">
-        <a href="https://github.com/grlap/TermAl" target="_blank" rel="noopener"><span><small>SOURCE</small><b>Explore the repository</b></span><i>↗</i></a>
-        <a href="https://github.com/grlap/TermAl/blob/master/docs/architecture.md" target="_blank" rel="noopener"><span><small>UNDER THE HOOD</small><b>Read the architecture</b></span><i>↗</i></a>
-      </div>
-    </section>
-
     <section class="boundary section" id="boundary">
       <div class="boundary__inner shell">
-        <div class="section-kicker section-kicker--dark" data-reveal><span>08 / TRUST BOUNDARY</span><i></i><b>Power needs a clear edge</b></div>
+        <div class="section-kicker section-kicker--dark" data-reveal><span>07 / TRUST BOUNDARY</span><i></i><b>Power needs a clear edge</b></div>
         <div class="section-heading section-heading--dark">
           <div><p class="eyebrow eyebrow--dark" data-reveal><span></span>Know what runs, and where</p><h2 data-reveal>Local by default.<br><em>Explicit by design.</em></h2></div>
           <p data-reveal>TermAl is a single-user local control surface. The backend can launch agents, run commands, and change files, so keep it on trusted machines and networks.</p>
@@ -484,7 +550,7 @@ npm run dev</code></pre></div>
         <p class="eyebrow"><span></span>The terminal starts the agent</p>
         <h2>TermAl runs<br><em>the operation.</em></h2>
         <p>Give every session, delegation, decision, and change a place you can return to.</p>
-        <div><a class="button button--primary" href="#setup"><span>Run TermAl from source</span><span aria-hidden="true">↑</span></a><a class="button button--secondary" href="https://github.com/grlap/TermAl" target="_blank" rel="noopener"><span>View on GitHub</span><span aria-hidden="true">↗</span></a></div>
+        <div><a class="button button--primary" href="https://github.com/grlap/TermAl" target="_blank" rel="noopener"><span>View source on GitHub</span><span aria-hidden="true">↗</span></a><a class="button button--secondary" href="#personalize"><span>Explore 21 themes</span><span aria-hidden="true">↑</span></a></div>
       </div>
     </section>
   </main>
@@ -496,11 +562,12 @@ npm run dev</code></pre></div>
         <span>Term<span>Al</span></span>
       </a>
       <p>A local control room for AI coding agents. Built for people who need to see the whole operation.</p>
-      <nav class="footer__links" aria-label="Footer navigation"><a href="#product">Product</a><a href="#coordination">Coordination</a><a href="#setup">Run it</a><a href="https://github.com/grlap/TermAl" target="_blank" rel="noopener">GitHub ↗</a></nav>
+      <nav class="footer__links" aria-label="Footer navigation"><a href="#product">Product</a><a href="#coordination">Coordination</a><a href="#personalize">Themes</a><a href="https://github.com/grlap/TermAl" target="_blank" rel="noopener">GitHub ↗</a></nav>
       <div class="footer__bottom"><span>Source available · macOS · Windows · Linux</span><span>Local backend · no cloud sync · single-user by design</span></div>
     </div>
   </footer>
 
+  <script src="theme-demo-state.js" defer></script>
   <script src="script.js" defer></script>
 </body>
 </html>

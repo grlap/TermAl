@@ -367,6 +367,7 @@ describe("App scroll behaviour", () => {
           throw new Error("Message stack not found");
         }
         messageStack.scrollTop = 800;
+        const dequeuedBeforeCancellation = [...pendingFrames.values()];
 
         await act(async () => {
           fireEvent.keyDown(messageStack, {
@@ -382,6 +383,16 @@ describe("App scroll behaviour", () => {
           filterScrollToCallsAt(scrollToMock, 0, "auto").length,
         ).toBeGreaterThan(0);
         expect(cancelAnimationFrameMock).toHaveBeenCalled();
+
+        // A browser may already have dequeued a frame when cancellation lands.
+        // Its callback must still observe cancellation and leave the reader's
+        // explicit navigation in place.
+        for (const callback of dequeuedBeforeCancellation) {
+          await act(async () => {
+            callback(Date.now());
+            await flushUiWork();
+          });
+        }
 
         const queuedFrames = [...pendingFrames.values()];
         pendingFrames.clear();
@@ -688,7 +699,274 @@ describe("App scroll behaviour", () => {
         await clickAndSettle(
           within(currentTablist).getByRole("tab", { name: "Session 1" }),
         );
-        expect(messageStack.scrollTop).toBe(800);
+        expect(messageStack.scrollTop).toBe(150);
+      } finally {
+        restoreScrollGeometry();
+      }
+    });
+  });
+
+  it("restores an attached virtualized session before the first frame after a tab switch", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        // Keep the DOM bottom in the same neighborhood as the virtualizer's
+        // estimated layout for eighty short assistant messages. A tiny fake
+        // scrollHeight would describe the physical bottom as the middle of the
+        // estimated page model and make the mounted-range assertion invalid.
+        scrollHeight: 10_000,
+      });
+      const makeVirtualizedMessages = (
+        sessionId: string,
+      ): Session["messages"] =>
+        Array.from({ length: 80 }, (_, index) => ({
+          id: `${sessionId}-message-${index}`,
+          type: "text" as const,
+          timestamp: `10:${String(index).padStart(2, "0")}`,
+          author: "assistant" as const,
+          text: `${sessionId} response ${index}`,
+        }));
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse({
+            revision: 1,
+            projects: [
+              {
+                id: "project-termal",
+                name: "TermAl",
+                rootPath: "/projects/termal",
+              },
+            ],
+            sessions: [
+              makeSession("session-1", {
+                name: "Session 1",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+                messages: makeVirtualizedMessages("session-1"),
+              }),
+              makeSession("session-2", {
+                name: "Session 2",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+                messages: makeVirtualizedMessages("session-2"),
+              }),
+            ],
+          });
+        }
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+
+      const workspaceId = "test-virtualized-tab-first-paint";
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `/?workspace=${workspaceId}`,
+      );
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceId}`,
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: {
+              type: "pane",
+              paneId: "pane-session",
+            },
+            panes: [
+              {
+                id: "pane-session",
+                tabs: [
+                  {
+                    id: "tab-session-1",
+                    kind: "session",
+                    sessionId: "session-1",
+                  },
+                  {
+                    id: "tab-session-2",
+                    kind: "session",
+                    sessionId: "session-2",
+                  },
+                ],
+                activeTabId: "tab-session-1",
+                activeSessionId: "session-1",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+            ],
+            activePaneId: "pane-session",
+          },
+        }),
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+        act(() => {
+          latestEventSource().dispatchError();
+        });
+        await settleAsyncUi();
+
+        const tablist = screen
+          .getAllByRole("tablist", { name: "Tile tabs" })
+          .find((candidate) =>
+            within(candidate).queryByRole("tab", { name: "Session 1" }),
+          );
+        if (!tablist) {
+          throw new Error("Session pane tablist not found");
+        }
+        const session2Tab = within(tablist).getByRole("tab", {
+          name: "Session 2",
+        });
+        await clickAndSettle(session2Tab);
+
+        const messageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Active message stack not found");
+        }
+        expect(
+          messageStack.querySelector(".virtualized-message-list"),
+        ).not.toBeNull();
+        expect(messageStack.scrollTop).toBe(9800);
+
+        act(() => {
+          // Start from a deterministic mid-transcript position, then use a
+          // real upward wheel input to hand ownership to the reader and save
+          // the resulting detached geometry through the production handler.
+          messageStack.scrollTop = 5001;
+          fireEvent.wheel(messageStack, { deltaY: -1 });
+        });
+        // Commit the wheel/detach update before advancing timers. Keeping
+        // flushUiWork inside one async act lets jsdom run an old activation
+        // timeout before React can apply the cancellation, an ordering the
+        // browser cannot produce between separate input and timer tasks.
+        expect(messageStack.scrollTop).toBe(5000);
+        await settleAsyncUi();
+        expect(messageStack.scrollTop).toBe(5000);
+
+        let nextFrameId = 1;
+        const pendingFrames = new Map<number, FrameRequestCallback>();
+        vi.stubGlobal(
+          "requestAnimationFrame",
+          vi.fn((callback: FrameRequestCallback) => {
+            const frameId = nextFrameId;
+            nextFrameId += 1;
+            pendingFrames.set(frameId, callback);
+            return frameId;
+          }),
+        );
+        vi.stubGlobal(
+          "cancelAnimationFrame",
+          vi.fn((frameId: number) => pendingFrames.delete(frameId)),
+        );
+
+        const scrollKinds: Array<string | undefined> = [];
+        const recordScrollWrite = (event: Event) => {
+          scrollKinds.push(
+            event instanceof CustomEvent
+              ? (event.detail as { scrollKind?: string } | undefined)
+                  ?.scrollKind
+              : undefined,
+          );
+        };
+        messageStack.addEventListener(
+          MESSAGE_STACK_SCROLL_WRITE_EVENT,
+          recordScrollWrite,
+        );
+        try {
+          const currentTablist = screen
+            .getAllByRole("tablist", { name: "Tile tabs" })
+            .find((candidate) =>
+              within(candidate).queryByRole("tab", {
+                name: "Session 2",
+                selected: true,
+              }),
+            );
+          if (!currentTablist) {
+            throw new Error("Active Session 2 tablist not found");
+          }
+
+          await act(async () => {
+            fireEvent.click(
+              within(currentTablist).getByRole("tab", { name: "Session 1" }),
+            );
+          });
+
+          const restoredMessageStack = document.querySelector(
+            ".workspace-pane.active .message-stack",
+          );
+          expect(restoredMessageStack).toBe(messageStack);
+          expect(messageStack.scrollTop).toBe(9800);
+          expect(scrollKinds).toContain("bottom_pin");
+          expect(pendingFrames.size).toBeGreaterThan(0);
+          expect(
+            messageStack.querySelector(
+              '[data-message-id="session-1-message-79"]',
+            ),
+          ).not.toBeNull();
+
+          const firstFrameCallbacks = Array.from(pendingFrames.values());
+          pendingFrames.clear();
+          await act(async () => {
+            const firstFrameTime = performance.now() + 1000 / 60;
+            for (const callback of firstFrameCallbacks) {
+              callback(firstFrameTime);
+            }
+            await flushUiWork();
+          });
+          expect(messageStack.scrollTop).toBe(9800);
+          expect(
+            scrollKinds.filter((scrollKind) => scrollKind === "bottom_pin")
+              .length,
+          ).toBeGreaterThanOrEqual(1);
+
+          scrollKinds.length = 0;
+          const session1Tablist = screen
+            .getAllByRole("tablist", { name: "Tile tabs" })
+            .find((candidate) =>
+              within(candidate).queryByRole("tab", {
+                name: "Session 1",
+                selected: true,
+              }),
+            );
+          if (!session1Tablist) {
+            throw new Error("Active Session 1 tablist not found");
+          }
+          await act(async () => {
+            fireEvent.click(
+              within(session1Tablist).getByRole("tab", {
+                name: "Session 2",
+              }),
+            );
+          });
+
+          expect(messageStack.scrollTop).toBe(5000);
+          expect(scrollKinds).toContain("position_restore");
+          expect(scrollKinds).not.toContain("bottom_pin");
+          expect(scrollKinds).not.toContain("bottom_boundary");
+          expect(
+            messageStack.querySelector(
+              '[data-message-id="session-2-message-40"]',
+            ),
+          ).not.toBeNull();
+        } finally {
+          messageStack.removeEventListener(
+            MESSAGE_STACK_SCROLL_WRITE_EVENT,
+            recordScrollWrite,
+          );
+        }
       } finally {
         restoreScrollGeometry();
       }
@@ -2815,11 +3093,16 @@ describe("App scroll behaviour", () => {
         });
         expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
 
-        await act(async () => {
+        act(() => {
           fireEvent.wheel(messageStack, { deltaY: -20 });
+        });
+        // Sticky LIVE TURN ownership must be gone in the input task itself;
+        // waiting for the resulting native scroll or an animation frame lets
+        // the card overlay history for one painted frame.
+        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+        await act(async () => {
           await flushUiWork();
         });
-        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
 
         messageStack.scrollTop = 800;
         await act(async () => {
@@ -3016,52 +3299,11 @@ describe("App scroll behaviour", () => {
   });
 
   it("runs the default-scroll-to-bottom branch of the session scroll useLayoutEffect on mount and lets the cleanup return cleanly", async () => {
-    // Regression for round 7's session-pane scroll restoration
-    // `useLayoutEffect` restructure and the synchronous first `tick()`
-    // inside `scheduleSettledScrollToBottom`. The two changes are
-    // observed together here because the effect runs `tick()`
-    // synchronously via `scheduleSettledScrollToBottom("auto", ...)` as
-    // part of the default-scroll-to-bottom branch on first mount:
-    //
-    //  1. `messageStackRef.current` is the `<section class="message-stack">`
-    //     rendered by `SessionPaneContent`.
-    //  2. The effect hits the `else if (defaultScrollToBottom) { ... }`
-    //     arm (branch 3) because there is no prior saved
-    //     `paneScrollPositions[scrollStateKey]` entry.
-    //  3. `scheduleSettledScrollToBottom("auto", { maxAttempts: 60 })`
-    //     runs `tick()` synchronously inside its own call. `tick()`
-    //     calls `scrollToLatestMessage("auto")`.
-    //  4. `scrollToLatestMessage` computes
-    //     `nextScrollTop = Math.max(scrollHeight - clientHeight, 0)`
-    //     and invokes `node.scrollTo({ top, behavior })` when the
-    //     current `scrollTop` is farther than 1 px from the target.
-    //
-    // jsdom reports `scrollHeight` and `clientHeight` as 0 on every
-    // element, which would collapse `nextScrollTop` to 0 and skip the
-    // `scrollTo` call via the 1-px tolerance. To observe the scroll the
-    // test overrides the prototype getters for the duration of the test
-    // so `scrollHeight - clientHeight = 800`, matches the sibling
-    // `TerminalPanel.test.tsx` `stubScrollGeometry` helper's spirit
-    // while staying scoped to a single test via a finally-block
-    // restore. The test then checks `HTMLElement.prototype.scrollTo`
-    // (which `beforeEach` already stubs with `vi.fn()`) to prove the
-    // effect reached the `scrollTo({ top: 800, ... })` branch, which
-    // simultaneously pins:
-    //
-    //  - Branch 3 of the restored `useLayoutEffect` if-else chain,
-    //  - The synchronous first `tick()` in `scheduleSettledScrollToBottom`,
-    //  - The `Math.max(scrollHeight - clientHeight, 0)` / 1-px tolerance
-    //    pattern shared between `scrollToLatestMessage` and
-    //    `scrollTerminalHistoryToBottom`,
-    //  - And finally the cleanup branch: after `cleanup()` fires in
-    //    `afterEach`, the returned cleanup function from
-    //    `scheduleSettledScrollToBottom` runs `if (frameId !== 0)
-    //    cancelAnimationFrame(frameId)`. A regression that dropped the
-    //    `frameId !== 0` guard after the synchronous complete would
-    //    still produce a noisy `cancelAnimationFrame(0)` call that
-    //    would surface via `cancelAnimationFrameMock`'s tracking map
-    //    (verified implicitly — the test's own afterEach would throw
-    //    under the unhandled error if the cleanup propagated one).
+    // A newly mounted or reactivated attached transcript must establish its
+    // physical bottom during the layout phase. Deferring that first write to
+    // requestAnimationFrame paints one frame at the previous tab's offset. The
+    // settled scheduler still runs afterward to absorb late measurements, and
+    // its cleanup must not issue a meaningless cancelAnimationFrame(0).
     await withVerifiedNoReactActWarnings(async () => {
       const originalScrollHeight = Object.getOwnPropertyDescriptor(
         HTMLElement.prototype,
@@ -3109,24 +3351,11 @@ describe("App scroll behaviour", () => {
           );
           expect(messageStack).not.toBeNull();
 
-          // The synchronous first `tick()` in `scheduleSettledScrollToBottom`
-          // must have scrolled to `top: 800` (Math.max(1000 - 200, 0) =
-          // 800) on the message stack. We do not pin a single call
-          // index because the scheduler's rAF follow-ups also run
-          // (`requestAnimationFrameMock` queues them as microtasks),
-          // so the mock may observe several scroll-to-bottom calls as
-          // the stability loop settles — all of them should target
-          // 800.
-          const callsAtBottom = scrollToMock.mock.calls.filter((call) => {
-            const arg = call[0];
-            return (
-              typeof arg === "object" &&
-              arg !== null &&
-              (arg as ScrollToOptions).top === 800 &&
-              (arg as ScrollToOptions).behavior === "auto"
-            );
-          });
-          expect(callsAtBottom.length).toBeGreaterThan(0);
+          // The layout effect must establish `top: 800` synchronously before
+          // the first animation frame. A post-frame `scrollTo` would let the
+          // newly active tab paint once at the previous tab's offset.
+          expect((messageStack as HTMLElement).scrollTop).toBe(800);
+          expect(scrollToMock).not.toHaveBeenCalled();
         } finally {
           teardown();
         }

@@ -75,6 +75,9 @@ type UseAppWorkspaceActionsParams = {
   isMountedRef: MutableRefObject<boolean>;
   gitDiffPreviewRefreshVersionsRef: MutableRefObject<Map<string, number>>;
   attemptedGitDiffDocumentContentRestoreKeysRef: MutableRefObject<Set<string>>;
+  forceSessionScrollToBottomRef: MutableRefObject<
+    Record<string, true | undefined>
+  >;
   newSessionAgent: AgentType;
   newSessionModel: string;
   createSessionPaneId: string | null;
@@ -90,9 +93,6 @@ type UseAppWorkspaceActionsParams = {
   draftsBySessionIdRef: MutableRefObject<Record<string, string>>;
   draftAttachmentsBySessionIdRef: MutableRefObject<
     Record<string, DraftImageAttachment[]>
-  >;
-  forceSessionScrollToBottomRef: MutableRefObject<
-    Record<string, true | undefined>
   >;
   setPendingScrollToBottomRequest: Dispatch<
     SetStateAction<PendingScrollToBottomRequest>
@@ -271,6 +271,7 @@ export function useAppWorkspaceActions({
   isMountedRef,
   gitDiffPreviewRefreshVersionsRef,
   attemptedGitDiffDocumentContentRestoreKeysRef,
+  forceSessionScrollToBottomRef,
   newSessionAgent,
   newSessionModel,
   createSessionPaneId,
@@ -283,7 +284,6 @@ export function useAppWorkspaceActions({
   setDraftsBySessionId,
   draftsBySessionIdRef,
   draftAttachmentsBySessionIdRef,
-  forceSessionScrollToBottomRef,
   setPendingScrollToBottomRequest,
   setRequestError,
   setPendingOrchestratorActionById,
@@ -578,10 +578,13 @@ export function useAppWorkspaceActions({
       }
     }
 
+    // An ordinary session-tab selection supersedes a stale workspace-rebuild
+    // override that the inactive tab could not consume. A first visit has no
+    // saved position and defaults to the tail, an attached revisit follows the
+    // tail, and a detached revisit must preserve its reading position.
     if (tab?.kind === "session") {
-      forceSessionScrollToBottomRef.current[tab.sessionId] = true;
+      delete forceSessionScrollToBottomRef.current[tab.sessionId];
     }
-
     setWorkspace((current) => activatePane(current, paneId, tabId));
   }
 

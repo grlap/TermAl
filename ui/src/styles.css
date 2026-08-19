@@ -4451,10 +4451,11 @@ textarea {
 }
 
 .message-stack {
+  --message-stack-block-padding: var(--space-2xl);
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: var(--space-2xl) var(--space-3xl);
+  padding: var(--message-stack-block-padding) var(--space-3xl);
   display: grid;
   gap: var(--message-stack-gap);
   align-content: start;
@@ -5214,12 +5215,20 @@ textarea {
 }
 
 .conversation-live-tail {
-  /* Deliberately in flow. Bottom attachment belongs to the message-stack
-     scroll controller; positioning this wrapper would overlap prior cards. */
+  /* The wrapper always reserves its transcript height. Attachment only changes
+     its visual position; detaching returns it to ordinary in-flow movement. */
   display: grid;
   gap: var(--message-stack-gap);
   align-content: start;
   padding-bottom: 1px;
+}
+
+.conversation-live-tail[data-tail-follow="attached"] {
+  /* Keep LIVE TURN stable while streamed content moves underneath it. The
+     scroll controller removes this state before deliberate user navigation. */
+  position: sticky;
+  bottom: var(--message-stack-block-padding);
+  z-index: 2;
 }
 
 .conversation-pending-prompts {

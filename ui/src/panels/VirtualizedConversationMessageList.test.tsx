@@ -1884,6 +1884,64 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("keeps a saved position restore detached while mounting its virtualized range", async () => {
+    const messages = makeTextMessages(160);
+    const harness = renderVirtualizedHarness({
+      clientHeight: 240,
+      messages,
+      preferInitialEstimatedBottomViewport: true,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-160")).toBeInTheDocument();
+      });
+
+      // The reused scroll container already reports zero, which is also the
+      // virtualizer's last native position. A restore still has to replace the
+      // estimated tail band with the incoming session's top band even though
+      // the numeric scroll delta is exactly zero.
+      act(() => {
+        harness.setScrollTop(0);
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "position_restore",
+        });
+      });
+      await waitFor(() => {
+        expect(screen.getByText("message-1")).toBeInTheDocument();
+        expect(screen.queryByText("message-160")).not.toBeInTheDocument();
+      });
+
+      act(() => {
+        harness.setScrollTop(harness.estimatedLayout.totalHeight / 2);
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "position_restore",
+        });
+      });
+
+      await waitFor(() => {
+        const mountedMessageIds = Array.from(
+          document.querySelectorAll<HTMLElement>("[data-message-id]"),
+          (slot) => Number.parseInt(
+            slot.dataset.messageId?.replace("message-", "") ?? "",
+            10,
+          ),
+        );
+        expect(
+          mountedMessageIds.some(
+            (messageNumber) => messageNumber >= 60 && messageNumber <= 120,
+          ),
+        ).toBe(true);
+      });
+      expect(screen.queryByText("message-160")).not.toBeInTheDocument();
+      expect(
+        harness.scrollNode.dataset.virtualizedBottomBoundaryReveal,
+      ).toBeUndefined();
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("follows large streamed growth after the user manually scrolls back to bottom", async () => {
     let currentScrollHeight = 500;
     const messages = makeTextMessages(3);
