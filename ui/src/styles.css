@@ -8578,6 +8578,45 @@ textarea {
   color: var(--muted);
 }
 
+.markdown-copy blockquote.markdown-blockquote-copyable {
+  position: relative;
+  padding-right: 2.2rem;
+}
+
+.markdown-blockquote-copy-button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.65rem;
+  block-size: 1.65rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.42rem;
+  background: transparent;
+  color: currentColor;
+  opacity: 0.62;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+}
+
+.markdown-blockquote-copy-button:hover,
+.markdown-blockquote-copy-button:focus-visible {
+  background: var(--panel-strong);
+  color: var(--ink);
+  opacity: 1;
+}
+
+.markdown-blockquote-copy-button.copied {
+  color: var(--signal-blue);
+  opacity: 1;
+}
+
 .markdown-copy a {
   color: var(--signal-blue);
   text-decoration-thickness: 1.5px;

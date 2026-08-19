@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import mermaid from "mermaid";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as clipboard from "./clipboard";
 import * as connectionRetry from "./connection-retry";
 import { MarkdownContent, MessageCard } from "./message-cards";
 import { areMarkdownLineMarkersEqual } from "./markdown-line-markers";
@@ -1445,6 +1446,54 @@ describe("MarkdownContent math rendering", () => {
 // name so the tests remain grep-findable by their historical
 // identifiers.
 describe("MarkdownContent", () => {
+  it("copies only the rendered text of a quoted assistant-response block", async () => {
+    const copySpy = vi
+      .spyOn(clipboard, "copyTextToClipboard")
+      .mockResolvedValue();
+    const quote =
+      "Ratyfikuję terms.modification_clause_fair=true dla pakietu sha256:92a7354850b85dd04d69f5b67ee552f169aaee470ef8c580416cc1773543592c i autoryzuję wyłącznie opisaną w nim transakcję ratyfikacyjną; bez stage, commit, push, deploy, remote mutation ani bd dolt push.";
+    const markdown = [
+      "Kontekst odpowiedzi.",
+      "",
+      "> Ratyfikuję `terms.modification_clause_fair=true` dla pakietu `sha256:92a7354850b85dd04d69f5b67ee552f169aaee470ef8c580416cc1773543592c` i autoryzuję wyłącznie opisaną w nim transakcję ratyfikacyjną; bez stage, commit, push, deploy, remote mutation ani `bd dolt push`.",
+      "",
+      "Dalsza część odpowiedzi.",
+    ].join("\n");
+
+    try {
+      render(
+        <MessageCard
+          message={{
+            id: "message-copy-quote",
+            type: "text",
+            author: "assistant",
+            timestamp: "10:03",
+            text: markdown,
+          }}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Copy quote" }));
+
+      expect(copySpy).toHaveBeenCalledWith(quote);
+      expect(
+        await screen.findByRole("button", { name: "Quote copied" }),
+      ).toBeInTheDocument();
+    } finally {
+      copySpy.mockRestore();
+    }
+  });
+
+  it("does not add quote-copy controls to generic Markdown previews", () => {
+    render(<MarkdownContent markdown="> Preview quote" />);
+
+    expect(
+      screen.queryByRole("button", { name: "Copy quote" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("wraps markdown tables in a scroll container", () => {
     const markdown = [
       "| Finding | Resolution |",

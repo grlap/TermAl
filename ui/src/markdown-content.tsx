@@ -10,6 +10,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentPropsWithoutRef,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
@@ -19,7 +20,9 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { getErrorMessage } from "./app-utils";
+import { copyTextToClipboard } from "./clipboard";
 import { HighlightedCodeBlock } from "./highlighted-code-block";
+import { CheckIcon, CopyIcon } from "./message-card-icons";
 import {
   buildMarkdownHrefDisplayLabel,
   isExternalMarkdownHref,
@@ -345,6 +348,74 @@ const MarkdownLinkContext = createContext(false);
 // marker for the same rendered line.
 const MarkdownLineNumberSuppressedContext = createContext(false);
 
+function MarkdownBlockquote({
+  children,
+  className,
+  showCopyButton,
+  ...props
+}: ComponentPropsWithoutRef<"blockquote"> & {
+  showCopyButton: boolean;
+}) {
+  const blockquoteRef = useRef<HTMLQuoteElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => setCopied(false), 1600);
+    return () => window.clearTimeout(timeoutId);
+  }, [copied]);
+
+  async function handleCopy() {
+    const blockquote = blockquoteRef.current;
+    if (!blockquote) {
+      return;
+    }
+
+    const text = (blockquote.innerText || blockquote.textContent || "").trim();
+    if (!text) {
+      return;
+    }
+
+    try {
+      await copyTextToClipboard(text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <blockquote
+      {...props}
+      className={
+        `${className ?? ""}${showCopyButton ? " markdown-blockquote-copyable" : ""}`.trim() ||
+        undefined
+      }
+      ref={blockquoteRef}
+    >
+      {showCopyButton ? (
+        <button
+          className={`markdown-blockquote-copy-button${copied ? " copied" : ""}`}
+          type="button"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={() => void handleCopy()}
+          aria-label={copied ? "Quote copied" : "Copy quote"}
+          title={copied ? "Copied" : "Copy quote"}
+        >
+          {copied ? <CheckIcon /> : <CopyIcon />}
+        </button>
+      ) : null}
+      {children}
+    </blockquote>
+  );
+}
+
 export function MarkdownContent({
   appearance = "dark",
   documentPath = null,
@@ -358,6 +429,7 @@ export function MarkdownContent({
   renderMermaidDiagrams = true,
   searchQuery = "",
   searchHighlightTone = "match",
+  showBlockquoteCopyButton = false,
   showLineNumbers = false,
   startLineNumber = 1,
   workspaceRoot = null,
@@ -399,6 +471,7 @@ export function MarkdownContent({
   renderMermaidDiagrams?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
+  showBlockquoteCopyButton?: boolean;
   showLineNumbers?: boolean;
   startLineNumber?: number | null;
   workspaceRoot?: string | null;
@@ -881,16 +954,17 @@ export function MarkdownContent({
               MarkdownLineNumberSuppressedContext,
             );
             return (
-              <blockquote
+              <MarkdownBlockquote
                 {...props}
                 {...(suppressLineNumber
                   ? {}
                   : (getLineAttributes(sourcePosition) ?? {}))}
+                showCopyButton={showBlockquoteCopyButton}
               >
                 <MarkdownLineNumberSuppressedContext.Provider value>
                   {highlightChildren(children)}
                 </MarkdownLineNumberSuppressedContext.Provider>
-              </blockquote>
+              </MarkdownBlockquote>
             );
           },
           h1: ({ children, sourcePosition, ...props }) => {
@@ -1126,6 +1200,7 @@ export function MarkdownContent({
     renderMermaidDiagrams,
     searchQuery,
     searchHighlightTone,
+    showBlockquoteCopyButton,
     showLineNumbers,
     workspaceRoot,
     hasOpenSourceLink,

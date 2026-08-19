@@ -87,6 +87,7 @@ export function DeferredMarkdownContent({
   preferImmediateRender = false,
   searchQuery = "",
   searchHighlightTone = "match",
+  showBlockquoteCopyButton = false,
   workspaceRoot = null,
 }: {
   appearance?: MonacoAppearance;
@@ -97,6 +98,7 @@ export function DeferredMarkdownContent({
   preferImmediateRender?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
+  showBlockquoteCopyButton?: boolean;
   workspaceRoot?: string | null;
 }) {
   const metrics = useMemo(() => measureTextBlock(markdown), [markdown]);
@@ -136,6 +138,7 @@ export function DeferredMarkdownContent({
           onOpenSourceLink={onOpenSourceLink}
           searchQuery={searchQuery}
           searchHighlightTone={searchHighlightTone}
+          showBlockquoteCopyButton={showBlockquoteCopyButton}
           workspaceRoot={workspaceRoot}
         />
     </DeferredHeavyContent>

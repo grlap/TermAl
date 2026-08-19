@@ -274,6 +274,7 @@ export const MessageCard = memo(
                   preferImmediateRender={preferImmediateHeavyRender}
                   searchQuery={searchQuery}
                   searchHighlightTone={searchHighlightTone}
+                  showBlockquoteCopyButton
                   workspaceRoot={workspaceRoot}
                 />
               </StreamingMarkdownHeightGuard>
