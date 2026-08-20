@@ -1,15 +1,9 @@
-// Pure helpers for tracking and converging scroll position in
-// long, virtualized message lists.
+// Shared thresholds and convergence helpers for long, virtualized message
+// lists.
 //
 // What this file owns:
-//   - `syncMessageStackScrollPosition` — reads a scrollable node's
-//     `scrollHeight` / `scrollTop` / `clientHeight`, writes the
-//     resulting `{ top, shouldStick }` into the caller's
-//     per-pane scroll-position record, and returns the same
-//     `{ top, shouldStick }`. `shouldStick` is true when the user
-//     is within 72 px of the bottom (the "sticky-bottom" zone); the
-//     calling code later uses the value to decide whether the
-//     next layout pass should re-pin to the latest message.
+//   - `SESSION_STICKY_BOTTOM_BAND_PX` — the shared near-bottom geometry
+//     tolerance used by both pane scroll ownership and virtualization.
 //   - `resolveSettledScrollMinimumAttempts` — picks how many
 //     "settled" measurement attempts to require before calling a
 //     virtualized scroll position stable. Long conversations
@@ -18,36 +12,15 @@
 //     argument, and the result is clamped to the cap.
 //
 // What this file does NOT own:
-//   - The React state that records scroll position (that lives in
-//     `App.tsx` on `paneScrollPositionsRef.current`).
+//   - The React state/ref record that stores pane scroll position.
 //   - The virtualized list logic itself — see
-//     `./panels/AgentSessionPanel.tsx`. That file deliberately
-//     mirrors the `< 72` sticky-bottom threshold; if this module's
-//     threshold changes, the mirror has to move too.
+//     `./panels/AgentSessionPanel.tsx`.
 //   - Any DOM side effects — both helpers take the values they need
 //     as arguments.
 //
-// Split out of `ui/src/App.tsx`. Same function signatures and
-// behaviour as the inline definitions they replaced; consumers
-// (including `App.test.tsx`) import from here directly.
+// Split out of `ui/src/App.tsx`.
 
-export function syncMessageStackScrollPosition(
-  node: Pick<HTMLElement, "scrollHeight" | "scrollTop" | "clientHeight">,
-  scrollStateKey: string,
-  paneScrollPositions: Record<string, { top: number; shouldStick: boolean }>,
-) {
-  const shouldStick =
-    node.scrollHeight - node.scrollTop - node.clientHeight < 72;
-  paneScrollPositions[scrollStateKey] = {
-    top: node.scrollTop,
-    shouldStick,
-  };
-
-  return {
-    top: node.scrollTop,
-    shouldStick,
-  };
-}
+export const SESSION_STICKY_BOTTOM_BAND_PX = 72;
 
 export function resolveSettledScrollMinimumAttempts(
   maxAttempts: number,

@@ -49,10 +49,7 @@ import {
   formatSessionOrchestratorGroupName,
 } from "./control-surface-state";
 import { collectRestoredGitDiffDocumentContentRefreshes } from "./git-diff-refresh";
-import {
-  resolveSettledScrollMinimumAttempts,
-  syncMessageStackScrollPosition,
-} from "./scroll-position";
+import { resolveSettledScrollMinimumAttempts } from "./scroll-position";
 import {
   resolveAdoptedStateSlices,
   resolveRecoveredWorkspaceLayoutRequestError,
@@ -598,4 +595,3 @@ describe("App control panel - helpers and compact coverage", () => {
     }
   });
 });
-

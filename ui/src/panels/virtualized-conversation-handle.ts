@@ -10,6 +10,7 @@ import {
   type MutableRefObject,
   type RefObject,
 } from "react";
+import { SESSION_STICKY_BOTTOM_BAND_PX } from "../scroll-position";
 import {
   VIRTUALIZED_MESSAGE_GAP_PX,
   clampVirtualizedViewportScrollTop,
@@ -229,7 +230,8 @@ export function useVirtualizedConversationHandle({
       setHasUserScrollInteraction(false);
 
       const bottomTarget = Math.max(node.scrollHeight - node.clientHeight, 0);
-      const targetNearBottom = bottomTarget - nextScrollTop < 72;
+      const targetNearBottom =
+        bottomTarget - nextScrollTop < SESSION_STICKY_BOTTOM_BAND_PX;
       shouldKeepBottomAfterLayoutRef.current = targetNearBottom;
       isDetachedFromBottomRef.current = !targetNearBottom;
 

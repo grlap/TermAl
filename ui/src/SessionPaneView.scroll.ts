@@ -41,8 +41,13 @@ import {
   type DetachedScrollRestoreController,
 } from "./session-pane-detached-restore";
 import {
+  clearManualLiveTailDetachCompensation,
+  detachLiveTailPresentationBeforeManualScroll,
+  releaseManualLiveTailDetachCompensationOutsideViewport,
+} from "./session-live-tail-presentation";
+import {
+  SESSION_STICKY_BOTTOM_BAND_PX,
   resolveSettledScrollMinimumAttempts,
-  syncMessageStackScrollPosition,
 } from "./scroll-position";
 import {
   SESSION_BOTTOM_FOLLOW_MAX_FRAME_MS,
@@ -73,72 +78,11 @@ export {
 
 const SESSION_PAGE_SCROLL_VIEWPORT_FACTOR = 0.85;
 const SESSION_PAGE_SCROLL_MINIMUM_PX = 160;
+const SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX = 4;
+const ACTIVE_LIVE_TAIL_SELECTOR =
+  ".session-conversation-page.is-active .conversation-live-tail";
 const SESSION_BOTTOM_FOLLOW_STABLE_MS =
   SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS * 2;
-const ACTIVE_ATTACHED_LIVE_TAIL_SELECTOR =
-  '.session-conversation-page.is-active .conversation-live-tail[data-tail-follow="attached"]';
-const COMPENSATED_DETACHED_LIVE_TAIL_SELECTOR =
-  ".session-conversation-page.is-active .conversation-live-tail[data-manual-detach-compensation]";
-const LIVE_TAIL_DETACH_OFFSET_PROPERTY =
-  "--conversation-live-tail-detach-offset";
-
-function clearManualLiveTailDetachCompensation(node: HTMLElement | null) {
-  const liveTail = node?.querySelector<HTMLElement>(
-    COMPENSATED_DETACHED_LIVE_TAIL_SELECTOR,
-  );
-  if (!liveTail) {
-    return;
-  }
-  liveTail.removeAttribute("data-manual-detach-compensation");
-  liveTail.style.removeProperty(LIVE_TAIL_DETACH_OFFSET_PROPERTY);
-}
-
-function detachLiveTailPresentationBeforeManualScroll(node: HTMLElement) {
-  const liveTail = node.querySelector<HTMLElement>(
-    ACTIVE_ATTACHED_LIVE_TAIL_SELECTOR,
-  );
-  if (!liveTail) {
-    return;
-  }
-
-  const attachedTop = liveTail.getBoundingClientRect().top;
-  liveTail.setAttribute("data-tail-follow", "detached");
-  const detachedTop = liveTail.getBoundingClientRect().top;
-  const detachOffset = attachedTop - detachedTop;
-
-  if (Math.abs(detachOffset) < 0.5) {
-    return;
-  }
-
-  // Sticky presentation can be displaced from its in-flow slot while the
-  // velocity-bounded bottom follow catches up with streaming growth. Preserve
-  // that exact visual position across the detach; from the first native
-  // scroll step onward this fixed transform travels with the transcript.
-  liveTail.style.setProperty(
-    LIVE_TAIL_DETACH_OFFSET_PROPERTY,
-    `${detachOffset}px`,
-  );
-  liveTail.setAttribute("data-manual-detach-compensation", "");
-}
-
-function releaseManualLiveTailDetachCompensationOutsideViewport(
-  node: HTMLElement,
-) {
-  const liveTail = node.querySelector<HTMLElement>(
-    COMPENSATED_DETACHED_LIVE_TAIL_SELECTOR,
-  );
-  if (!liveTail) {
-    return;
-  }
-  const viewportRect = node.getBoundingClientRect();
-  const liveTailRect = liveTail.getBoundingClientRect();
-  if (
-    liveTailRect.bottom <= viewportRect.top ||
-    liveTailRect.top >= viewportRect.bottom
-  ) {
-    clearManualLiveTailDetachCompensation(node);
-  }
-}
 
 export function resolveSessionPageScrollDistance(clientHeight: number) {
   return Math.max(
@@ -165,6 +109,28 @@ export function canMoveMessageStackByDelta(
   const currentScrollTop = clamp(scrollTop, 0, maxScrollTop);
   const nextScrollTop = clamp(currentScrollTop + deltaY, 0, maxScrollTop);
   return Math.abs(nextScrollTop - currentScrollTop) >= 0.5;
+}
+
+export function isMessageStackAtPhysicalBottom(
+  scrollTop: number,
+  scrollHeight: number,
+  clientHeight: number,
+) {
+  return (
+    Math.max(scrollHeight - clientHeight - scrollTop, 0) <=
+    SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX
+  );
+}
+
+function attachLiveTailPresentation(node: HTMLElement | null) {
+  const liveTail = node?.querySelector<HTMLElement>(ACTIVE_LIVE_TAIL_SELECTOR);
+  if (liveTail) {
+    // Manual detach changes this attribute synchronously, ahead of React. A
+    // detach+reattach sequence can batch to the original `true` state, so
+    // React may have no render to restore the attribute for us.
+    liveTail.setAttribute("data-tail-follow", "attached");
+  }
+  clearManualLiveTailDetachCompensation(node);
 }
 
 export function claimMessageStackBottomRepinAuthority(
@@ -354,7 +320,7 @@ export function useSessionPaneScrollState({
   ) {
     paneShouldStickToBottomRef.current[scrollStateKey] = nextValue;
     if (nextValue) {
-      clearManualLiveTailDetachCompensation(messageStackRef.current);
+      attachLiveTailPresentation(messageStackRef.current);
       cancelDetachedMessageStackRestore(scrollStateKey);
       delete paneTailFollowDetachedByKeyRef.current[scrollStateKey];
     } else {
@@ -987,9 +953,24 @@ export function useSessionPaneScrollState({
 
     const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
     const nextScrollTop = clamp(node.scrollTop + deltaY, 0, maxScrollTop);
-    const isUpwardScroll = deltaY < -0.5;
-    if (isUpwardScroll) {
-      paneTailFollowDetachedByKeyRef.current[scrollStateKey] = true;
+    const landsAtPhysicalBottom = isMessageStackAtPhysicalBottom(
+      nextScrollTop,
+      node.scrollHeight,
+      node.clientHeight,
+    );
+    if (!landsAtPhysicalBottom) {
+      // This is the shared first-write path for native wheel/trackpad input
+      // and explicit page controls. React's delegated wheel handler observes
+      // the native listener only after it has called preventDefault(), so
+      // waiting for that handler would leave the primary desktop path attached
+      // for its first scroll step. Detach presentation immediately before the
+      // write so LIVE TURN and the transcript enter the same coordinate system
+      // together. A delta that reaches the bottom stays attached throughout.
+      detachLiveTailPresentationBeforeManualScroll(node);
+      // Manual navigation is direction-independent and remains detached until
+      // the physical bottom; the shared sticky-bottom band only absorbs
+      // layout jitter while already attached.
+      markTailFollowDetachedByUser();
     }
     cancelPaneProgrammaticBottomFollow();
     node.scrollTop = nextScrollTop;
@@ -997,20 +978,13 @@ export function useSessionPaneScrollState({
       scrollKind: options.scrollKind,
       scrollSource: "user",
     });
-    const { shouldStick } = syncMessageStackScrollPosition(
-      node,
-      scrollStateKey,
-      paneScrollPositions,
-    );
-    if (isUpwardScroll) {
-      setTailFollowIntent(false);
-      cancelSettledScrollToBottom();
-    } else if (shouldStick) {
+    paneScrollPositions[scrollStateKey] = {
+      top: node.scrollTop,
+      shouldStick: landsAtPhysicalBottom,
+    };
+    if (landsAtPhysicalBottom) {
       setTailFollowIntent(true);
       setNewResponseIndicator(scrollStateKey, false);
-    } else {
-      setTailFollowIntent(false);
-      cancelSettledScrollToBottom();
     }
   }
 
@@ -1193,8 +1167,6 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    cancelPaneProgrammaticBottomFollow();
-    markTailFollowDetachedByUser();
     event.preventDefault();
     scrollMessageStackByDelta(deltaY, {
       scrollKind: "incremental",
@@ -1384,7 +1356,7 @@ export function useSessionPaneScrollState({
       const settledBottomGap =
         options.scrollKind === "bottom_follow"
           ? SESSION_BOTTOM_FOLLOW_SNAP_DISTANCE_PX
-          : 4;
+          : SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX;
       const heightStable =
         previousScrollHeight >= 0 &&
         Math.abs(node.scrollHeight - previousScrollHeight) <= 16;
@@ -1615,13 +1587,14 @@ export function useSessionPaneScrollState({
       node.scrollTop < previousTop - 1;
     const movedUpAfterUserEscape =
       hasDetachedTailFollowAuthority() && movedUpFromRecordedPosition;
-    const { shouldStick } = syncMessageStackScrollPosition(
-      node,
-      scrollStateKey,
-      paneScrollPositions,
+    const shouldStick =
+      node.scrollHeight - node.scrollTop - node.clientHeight <
+      SESSION_STICKY_BOTTOM_BAND_PX;
+    const isAtPhysicalBottom = isMessageStackAtPhysicalBottom(
+      node.scrollTop,
+      node.scrollHeight,
+      node.clientHeight,
     );
-    const isAtPhysicalBottom =
-      Math.max(node.scrollHeight - node.clientHeight - node.scrollTop, 0) <= 1;
     if (hasUnloadedNewerHistory) {
       cancelPaneProgrammaticBottomFollow();
       cancelSettledScrollToBottom();
@@ -1641,12 +1614,18 @@ export function useSessionPaneScrollState({
         shouldStick: true,
       };
       setNewResponseIndicator(scrollStateKey, false);
-      if (targetTop - node.scrollTop <= 4) {
+      if (
+        targetTop - node.scrollTop <= SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX
+      ) {
         cancelPaneProgrammaticBottomFollow();
       }
       return;
     }
     if (movedUpAfterUserEscape) {
+      paneScrollPositions[scrollStateKey] = {
+        top: node.scrollTop,
+        shouldStick: false,
+      };
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
     } else if (
@@ -1654,13 +1633,21 @@ export function useSessionPaneScrollState({
       !isAtPhysicalBottom
     ) {
       // A manual gesture owns the viewport until it reaches the real bottom.
-      // The wider 72 px geometry threshold is useful for absorbing layout
-      // jitter while attached, but must never re-enable sticky presentation
+      // The wider sticky-bottom band is useful for absorbing layout jitter
+      // while attached, but must never re-enable sticky presentation
       // after a small deliberate scroll away from the tail.
+      paneScrollPositions[scrollStateKey] = {
+        top: node.scrollTop,
+        shouldStick: false,
+      };
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
     } else if (shouldStick) {
       // Reaching the physical bottom is the natural reattachment action.
+      paneScrollPositions[scrollStateKey] = {
+        top: node.scrollTop,
+        shouldStick: true,
+      };
       setTailFollowIntent(true);
       setNewResponseIndicator(scrollStateKey, false);
     } else if (
@@ -1668,6 +1655,10 @@ export function useSessionPaneScrollState({
       movedUpFromRecordedPosition ||
       !getTailFollowIntent()
     ) {
+      paneScrollPositions[scrollStateKey] = {
+        top: node.scrollTop,
+        shouldStick: false,
+      };
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
     } else {

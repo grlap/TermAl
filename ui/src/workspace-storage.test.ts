@@ -148,6 +148,8 @@ describe("workspace storage", () => {
           },
         ],
         activePaneId: "pane-session",
+        lastContentPaneId: "pane-session",
+        lastViewerPaneId: "pane-session",
       },
     };
 

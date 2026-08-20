@@ -749,6 +749,159 @@ describe("applyDeltaToSessions", () => {
     ]);
   });
 
+  it("matches an optimistic slash-command prompt by its expanded text", () => {
+    const sessions = [
+      makeSession("session-a", {
+        pendingPrompts: [
+          {
+            id: "optimistic-send-session-a-abc-1",
+            timestamp: "10:00",
+            text: "/review-code",
+            expandedText: "Expanded review instructions",
+            localOnly: true,
+          },
+          {
+            id: "optimistic-send-session-a-abc-2",
+            timestamp: "10:01",
+            text: "Later optimistic prompt",
+            localOnly: true,
+          },
+          {
+            id: "queued-server-prompt",
+            timestamp: "10:02",
+            text: "Server queued prompt",
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 1,
+      sessionId: "session-a",
+      messageId: "message-server-1",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "message-server-1",
+        type: "text",
+        timestamp: "10:00",
+        author: "you",
+        text: "Expanded review instructions",
+      },
+      preview: "Expanded review instructions",
+      status: "active",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+    expect(result.sessions[0].pendingPrompts).toEqual([
+      expect.objectContaining({
+        id: "optimistic-send-session-a-abc-2",
+        localOnly: true,
+      }),
+      expect.objectContaining({ id: "queued-server-prompt" }),
+    ]);
+  });
+
+  it("removes only an id-matched server prompt when local optimistic sends follow it", () => {
+    const sessions = [
+      makeSession("session-a", {
+        pendingPrompts: [
+          {
+            id: "message-server-queued",
+            timestamp: "10:00",
+            text: "Queued server prompt",
+          },
+          {
+            id: "optimistic-send-session-a-abc-1",
+            timestamp: "10:01",
+            text: "Queued server prompt",
+            localOnly: true,
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 1,
+      sessionId: "session-a",
+      messageId: "message-server-queued",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "message-server-queued",
+        type: "text",
+        timestamp: "10:00",
+        author: "you",
+        text: "Queued server prompt",
+      },
+      preview: "Queued server prompt",
+      status: "active",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+    expect(result.sessions[0].pendingPrompts).toEqual([
+      expect.objectContaining({
+        id: "optimistic-send-session-a-abc-1",
+        localOnly: true,
+      }),
+    ]);
+  });
+
+  it("does not consume a local optimistic prompt for an unrelated user message", () => {
+    const sessions = [
+      makeSession("session-a", {
+        pendingPrompts: [
+          {
+            id: "optimistic-send-session-a-abc-1",
+            timestamp: "10:00",
+            text: "This tab's pending prompt",
+            localOnly: true,
+          },
+        ],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 1,
+      sessionId: "session-a",
+      messageId: "message-other-origin",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "message-other-origin",
+        type: "text",
+        timestamp: "10:00",
+        author: "you",
+        text: "Message from another origin",
+      },
+      preview: "Message from another origin",
+      status: "active",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected delta to apply");
+    }
+    expect(result.sessions[0].pendingPrompts).toEqual([
+      expect.objectContaining({
+        id: "optimistic-send-session-a-abc-1",
+        localOnly: true,
+      }),
+    ]);
+  });
+
   it("retains created messages for unhydrated summaries without forcing a state resync", () => {
     const sessions = [
       makeSession("session-a", {

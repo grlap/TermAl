@@ -20,10 +20,8 @@
 //     rendered.
 //   - `getScrollContainerBottomGap` — pixel distance from the
 //     current viewport bottom to the end of the scroll content.
-//   - `isScrollContainerNearBottom` — true when the viewport is
-//     within 72 px of the bottom. Intentionally mirrors
-//     `syncMessageStackScrollPosition`'s `< 72` threshold in
-//     `ui/src/scroll-position.ts`; both must stay in sync.
+//   - `isScrollContainerNearBottom` — true when the viewport is inside the
+//     shared sticky-bottom band.
 //   - `getAdjustedVirtualizedScrollTopForHeightChange` — when a
 //     message grows or shrinks after it has already been
 //     measured, returns the new `scrollTop` that keeps the user's
@@ -41,14 +39,14 @@
 //     those stay in `./AgentSessionPanel.tsx` with the rest of
 //     the session-pane rendering.
 //   - The `MessageStack` scroll-position tracker that drives the
-//     parent-pane stick/unstick — `syncMessageStackScrollPosition`
-//     lives in `../scroll-position`.
+//     parent-pane stick/unstick.
 //
 // Split out of `ui/src/panels/AgentSessionPanel.tsx`. Same
 // constants, same function bodies; consumers (including
 // `AgentSessionPanel.test.tsx`) import directly from here.
 
 import type { Message } from "../types";
+import { SESSION_STICKY_BOTTOM_BAND_PX } from "../scroll-position";
 
 export const VIRTUALIZED_MESSAGE_GAP_PX = 12;
 export const DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT = 720;
@@ -216,18 +214,13 @@ export function getScrollContainerBottomGap(
   return Math.max(node.scrollHeight - node.clientHeight - node.scrollTop, 0);
 }
 
-// Intentionally mirrors `syncMessageStackScrollPosition`'s `< 72`
-// stickiness threshold in `ui/src/scroll-position.ts`. A previous revision used
-// 96 px, which left a 72-96 px band where the parent pane had already recorded
-// `shouldStick: false` (because the user scrolled up past its own
-// threshold) but a later measurement in the virtualized panel would still
-// re-pin the viewport to the latest message — the user would feel
-// "snatched back" when a code block tokenized or an image loaded. Any
-// change here should be made symmetrically in both files.
+// A previous revision used a separate 96 px threshold, which left a band where
+// the parent pane had detached but a later virtualized measurement could still
+// re-pin the viewport. Sharing the constant makes that drift unrepresentable.
 export function isScrollContainerNearBottom(
   node: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">,
 ) {
-  return getScrollContainerBottomGap(node) < 72;
+  return getScrollContainerBottomGap(node) < SESSION_STICKY_BOTTOM_BAND_PX;
 }
 
 export function getAdjustedVirtualizedScrollTopForHeightChange({

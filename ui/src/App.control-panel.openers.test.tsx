@@ -49,10 +49,7 @@ import {
   formatSessionOrchestratorGroupName,
 } from "./control-surface-state";
 import { collectRestoredGitDiffDocumentContentRefreshes } from "./git-diff-refresh";
-import {
-  resolveSettledScrollMinimumAttempts,
-  syncMessageStackScrollPosition,
-} from "./scroll-position";
+import { resolveSettledScrollMinimumAttempts } from "./scroll-position";
 import {
   resolveAdoptedStateSlices,
   resolveRecoveredWorkspaceLayoutRequestError,
@@ -809,7 +806,7 @@ describe("App control panel - openers and canvas", () => {
       }
     });
   });
-  it("moves an existing shared canvas into the new launch context and syncs its pane state", async () => {
+  it("activates an existing shared canvas in place and syncs its launch context", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
@@ -1034,12 +1031,12 @@ describe("App control panel - openers and canvas", () => {
         );
 
         expect(
-          within(getTablistForSession("Review")).getByRole("tab", {
+          within(getTablistForSession("Main")).getByRole("tab", {
             name: /Canvas/i,
           }),
         ).toBeInTheDocument();
         expect(
-          within(getTablistForSession("Main")).queryByRole("tab", {
+          within(getTablistForSession("Review")).queryByRole("tab", {
             name: /Canvas/i,
           }),
         ).toBeNull();
@@ -1065,20 +1062,29 @@ describe("App control panel - openers and canvas", () => {
           (pane) => pane.id === "pane-main",
         );
 
-        expect(persistedReviewPane?.activeTabId).toBe("tab-canvas");
+        expect(persistedReviewPane?.activeTabId).toBe("tab-review");
         expect(persistedReviewPane?.activeSessionId).toBe("session-2");
-        expect(persistedReviewPane?.tabs).toContainEqual({
-          id: "tab-canvas",
-          kind: "canvas",
-          cards: [],
-          originSessionId: "session-2",
-          originProjectId: "project-api",
-        });
+        expect(persistedReviewPane?.tabs).toEqual([
+          {
+            id: "tab-review",
+            kind: "session",
+            sessionId: "session-2",
+          },
+        ]);
+        expect(persistedMainPane?.activeTabId).toBe("tab-canvas");
+        expect(persistedMainPane?.activeSessionId).toBe("session-2");
         expect(persistedMainPane?.tabs).toEqual([
           {
             id: "tab-main",
             kind: "session",
             sessionId: "session-1",
+          },
+          {
+            id: "tab-canvas",
+            kind: "canvas",
+            cards: [],
+            originSessionId: "session-2",
+            originProjectId: "project-api",
           },
         ]);
       } finally {

@@ -9,6 +9,7 @@ import {
   type RefObject,
 } from "react";
 import type { Message } from "../types";
+import { SESSION_STICKY_BOTTOM_BAND_PX } from "../scroll-position";
 import {
   clampVirtualizedViewportScrollTop,
   isScrollContainerNearBottom,
@@ -221,7 +222,8 @@ export function useVirtualizedConversationPrependEffects({
             viewportHeight: viewportHeightPx,
           });
     const targetNearBottom =
-      pageLayout.totalHeight - (targetScrollTop + viewportHeightPx) < 72;
+      pageLayout.totalHeight - (targetScrollTop + viewportHeightPx) <
+      SESSION_STICKY_BOTTOM_BAND_PX;
     const preserveDetachedScroll =
       hasUserScrollInteractionRef.current ||
       isDetachedFromBottomRef.current ||

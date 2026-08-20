@@ -1257,6 +1257,52 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(liveTail).toHaveClass("conversation-live-tail");
   });
 
+  it("stacks the prompt above composer actions based on pane width", async () => {
+    const nodeFsModule = "node:fs";
+    const { readFileSync } = (await import(nodeFsModule)) as {
+      readFileSync: (path: string, encoding: "utf8") => string;
+    };
+    const runtimeProcess = (
+      globalThis as typeof globalThis & {
+        process: { cwd: () => string };
+      }
+    ).process;
+    const stylesCss = readFileSync(
+      `${runtimeProcess.cwd()}/src/styles.css`,
+      "utf8",
+    );
+
+    const composerDeclarations = stylesCss.match(
+      /\.composer\s*\{([^}]*)\}/s,
+    )?.[1];
+    expect(composerDeclarations).toMatch(
+      /container-name\s*:\s*session-composer\s*;/,
+    );
+    expect(composerDeclarations).toMatch(/container-type\s*:\s*inline-size\s*;/);
+
+    const narrowComposerStart = stylesCss.indexOf(
+      "@container session-composer (max-width: 46rem)",
+    );
+    const narrowComposerEnd = stylesCss.indexOf(
+      "@container session-composer (max-width: 20rem)",
+      narrowComposerStart,
+    );
+    expect(narrowComposerStart).toBeGreaterThanOrEqual(0);
+    expect(narrowComposerEnd).toBeGreaterThan(narrowComposerStart);
+    const narrowComposerRules = stylesCss.slice(
+      narrowComposerStart,
+      narrowComposerEnd,
+    );
+    expect(narrowComposerRules).toContain(".composer-row");
+    expect(narrowComposerRules).toMatch(
+      /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s*;/,
+    );
+    expect(narrowComposerRules).toContain(".composer-actions");
+    expect(narrowComposerRules).toContain("repeat(2, minmax(0, 1fr))");
+    expect(narrowComposerRules).toContain(".composer-delegation-controls");
+    expect(narrowComposerRules).toMatch(/display\s*:\s*contents\s*;/);
+  });
+
   it("does not splice live-only cards beneath a historical window", async () => {
     renderSessionPanelWithDefaults({
       activeSession: makeSession("session-a", {
@@ -4770,9 +4816,8 @@ describe("isScrollContainerNearBottom", () => {
     return { scrollHeight, clientHeight, scrollTop };
   }
 
-  // The near-bottom threshold is `< 72 px`, intentionally chosen to
-  // match the parent pane's sticky threshold in
-  // `syncMessageStackScrollPosition`. A previous revision used
+  // The near-bottom threshold uses the same shared sticky-bottom band as the
+  // parent pane. A previous revision used
   // `<= 96 px` which created a 72-96 px "dead band" where the parent
   // had recorded `shouldStick: false` (the user scrolled up past the
   // 72 threshold) but a later virtualized measurement would still

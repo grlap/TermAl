@@ -5,12 +5,14 @@ import type {
   MouseEvent as ReactMouseEvent,
   UIEvent as ReactUIEvent,
 } from "react";
+import { useLayoutEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   canMoveMessageStackByDelta,
   claimMessageStackBottomRepinAuthority,
   isFirstAgentOutputForObservedPrompt,
+  isMessageStackAtPhysicalBottom,
   resolveLatestTurnOutputState,
   resolveLatestTurnTailSignature,
   resolveNewResponseIndicatorVisibility,
@@ -87,6 +89,7 @@ function params(activeSession: Session) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("session pane historical-window tail state", () => {
@@ -795,6 +798,394 @@ describe("session pane historical-window tail state", () => {
     expect(canMoveMessageStackByDelta(0, 1_000, 200, -20)).toBe(false);
     expect(canMoveMessageStackByDelta(400, 1_000, 200, 20)).toBe(true);
     expect(canMoveMessageStackByDelta(400, 1_000, 200, -20)).toBe(true);
+  });
+
+  it("recognizes the reachable physical bottom under fractional zoom geometry", () => {
+    expect(isMessageStackAtPhysicalBottom(796.5, 1_000, 200)).toBe(true);
+    expect(isMessageStackAtPhysicalBottom(795.5, 1_000, 200)).toBe(false);
+  });
+
+  it("detaches the sticky live tail before a native wheel write and preserves that state across a tab round trip", () => {
+    let nextAnimationFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        const frameId = nextAnimationFrameId;
+        nextAnimationFrameId += 1;
+        animationFrames.set(frameId, callback);
+        return frameId;
+      }),
+    );
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((frameId: number) => animationFrames.delete(frameId)),
+    );
+
+    const activeSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: { top: 800, shouldStick: true },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: true },
+    };
+    const scrollNode = document.createElement("section");
+    const conversationPage = document.createElement("div");
+    conversationPage.className = "session-conversation-page is-active";
+    const liveTail = document.createElement("div");
+    liveTail.className = "conversation-live-tail";
+    liveTail.setAttribute("data-tail-follow", "attached");
+    conversationPage.append(liveTail);
+    scrollNode.append(conversationPage);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    vi.spyOn(scrollNode, "getBoundingClientRect").mockReturnValue({
+      bottom: 600,
+      height: 600,
+      left: 0,
+      right: 800,
+      top: 0,
+      width: 800,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(liveTail, "getBoundingClientRect").mockImplementation(() => {
+      const top =
+        liveTail.getAttribute("data-tail-follow") === "attached" ? 100 : 120;
+      return {
+        bottom: top + 60,
+        height: 60,
+        left: 0,
+        right: 600,
+        top,
+        width: 600,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      };
+    });
+
+    const hook = renderHook(
+      ({ isSessionTabActive }) => {
+        const state = useSessionPaneScrollState({
+          ...params(activeSession),
+          isSessionTabActive,
+          paneScrollPositions,
+          paneShouldStickToBottomRef,
+          scrollStateKey,
+        });
+        // The component assigns this DOM ref during commit, before the hook's
+        // passive native-wheel subscription runs. Mirror that ordering here.
+        useLayoutEffect(() => {
+          state.messageStackRef.current = scrollNode;
+        }, [state.messageStackRef]);
+        return state;
+      },
+      { initialProps: { isSessionTabActive: true } },
+    );
+
+    const wheelEvent = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: -20,
+    });
+    act(() => {
+      scrollNode.dispatchEvent(wheelEvent);
+    });
+
+    expect(wheelEvent.defaultPrevented).toBe(true);
+    expect(scrollNode.scrollTop).toBe(780);
+    expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+    expect(liveTail).toHaveAttribute("data-manual-detach-compensation");
+    expect(
+      liveTail.style.getPropertyValue(
+        "--conversation-live-tail-detach-offset",
+      ),
+    ).toBe("-20px");
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 780,
+      shouldStick: false,
+    });
+    expect(hook.result.current.liveTailPinned).toBe(false);
+
+    hook.rerender({ isSessionTabActive: false });
+    expect(liveTail).not.toHaveAttribute("data-manual-detach-compensation");
+    expect(
+      liveTail.style.getPropertyValue(
+        "--conversation-live-tail-detach-offset",
+      ),
+    ).toBe("");
+
+    hook.rerender({ isSessionTabActive: true });
+    expect(scrollNode.scrollTop).toBe(780);
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 780,
+      shouldStick: false,
+    });
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+  });
+
+  it("persists detached intent after an upward native scrollbar drag inside the near-bottom band", () => {
+    let nextAnimationFrameId = 1;
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        const frameId = nextAnimationFrameId;
+        nextAnimationFrameId += 1;
+        animationFrames.set(frameId, callback);
+        return frameId;
+      }),
+    );
+    vi.stubGlobal(
+      "cancelAnimationFrame",
+      vi.fn((frameId: number) => animationFrames.delete(frameId)),
+    );
+    const activeSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: { top: 790, shouldStick: true },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: true },
+    };
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 790 },
+    });
+    const hook = renderHook(
+      ({ isSessionTabActive }) => {
+        const state = useSessionPaneScrollState({
+          ...params(activeSession),
+          isSessionTabActive,
+          paneScrollPositions,
+          paneShouldStickToBottomRef,
+          scrollStateKey,
+        });
+        useLayoutEffect(() => {
+          state.messageStackRef.current = scrollNode;
+        }, [state.messageStackRef]);
+        return state;
+      },
+      { initialProps: { isSessionTabActive: true } },
+    );
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        target: scrollNode,
+        type: "mousedown",
+      } as unknown as ReactMouseEvent<HTMLElement>);
+      // A lower scrollTop than the recorded 790 exercises the
+      // movedUpAfterUserEscape persistence branch.
+      scrollNode.scrollTop = 780;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 780,
+      shouldStick: false,
+    });
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
+
+    hook.rerender({ isSessionTabActive: false });
+    hook.rerender({ isSessionTabActive: true });
+    expect(scrollNode.scrollTop).toBe(780);
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 780,
+      shouldStick: false,
+    });
+    expect(hook.result.current.liveTailPinned).toBe(false);
+  });
+
+  it("keeps a downward wheel move detached inside the near-bottom band", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const activeSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: { top: 720, shouldStick: true },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: true },
+    };
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 720 },
+    });
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
+        ...params(activeSession),
+        paneScrollPositions,
+        paneShouldStickToBottomRef,
+        scrollStateKey,
+      });
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    const wheelEvent = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 40,
+    });
+    act(() => {
+      scrollNode.dispatchEvent(wheelEvent);
+    });
+
+    expect(wheelEvent.defaultPrevented).toBe(true);
+    expect(scrollNode.scrollTop).toBe(760);
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 760,
+      shouldStick: false,
+    });
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+  });
+
+  it("restores attached presentation when a downward page command reaches the physical bottom", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const activeSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: { top: 740, shouldStick: true },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: true },
+    };
+    const scrollNode = document.createElement("section");
+    const conversationPage = document.createElement("div");
+    conversationPage.className = "session-conversation-page is-active";
+    const liveTail = document.createElement("div");
+    liveTail.className = "conversation-live-tail";
+    liveTail.setAttribute("data-tail-follow", "attached");
+    conversationPage.append(liveTail);
+    scrollNode.append(conversationPage);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 740 },
+    });
+    const liveTailRect = vi
+      .spyOn(liveTail, "getBoundingClientRect")
+      .mockImplementation(() => {
+        const top =
+          liveTail.getAttribute("data-tail-follow") === "attached"
+            ? 100
+            : 120;
+        return {
+          bottom: top + 60,
+          height: 60,
+          left: 0,
+          right: 600,
+          top,
+          width: 600,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        };
+      });
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
+        ...params(activeSession),
+        paneScrollPositions,
+        paneShouldStickToBottomRef,
+        scrollStateKey,
+      });
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    act(() => {
+      hook.result.current.scrollMessageStackByPage(1);
+    });
+
+    expect(scrollNode.scrollTop).toBe(800);
+    expect(liveTailRect).not.toHaveBeenCalled();
+    expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+    expect(liveTail).not.toHaveAttribute("data-manual-detach-compensation");
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 800,
+      shouldStick: true,
+    });
+    expect(hook.result.current.liveTailPinned).toBe(true);
+  });
+
+  it("keeps attached presentation when a downward wheel lands inside the fractional physical-bottom tolerance", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const activeSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: { top: 790.5, shouldStick: true },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: true },
+    };
+    const scrollNode = document.createElement("section");
+    const conversationPage = document.createElement("div");
+    conversationPage.className = "session-conversation-page is-active";
+    const liveTail = document.createElement("div");
+    liveTail.className = "conversation-live-tail";
+    liveTail.setAttribute("data-tail-follow", "attached");
+    conversationPage.append(liveTail);
+    scrollNode.append(conversationPage);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 790.5 },
+    });
+    const liveTailRect = vi.spyOn(liveTail, "getBoundingClientRect");
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
+        ...params(activeSession),
+        paneScrollPositions,
+        paneShouldStickToBottomRef,
+        scrollStateKey,
+      });
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    const wheelEvent = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 6,
+    });
+    act(() => {
+      scrollNode.dispatchEvent(wheelEvent);
+    });
+
+    expect(wheelEvent.defaultPrevented).toBe(true);
+    expect(scrollNode.scrollTop).toBe(796.5);
+    expect(liveTailRect).not.toHaveBeenCalled();
+    expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 796.5,
+      shouldStick: true,
+    });
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(true);
+    expect(hook.result.current.liveTailPinned).toBe(true);
   });
 
   it("does not detach live follow for navigation keys owned by transcript controls", () => {

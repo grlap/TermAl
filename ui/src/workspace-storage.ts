@@ -311,7 +311,11 @@ function isWorkspaceState(value: unknown): value is WorkspaceState {
   if (
     !isRecord(value) ||
     !Array.isArray(value.panes) ||
-    !isNullableString(value.activePaneId)
+    !isNullableString(value.activePaneId) ||
+    (value.lastContentPaneId !== undefined &&
+      !isNullableString(value.lastContentPaneId)) ||
+    (value.lastViewerPaneId !== undefined &&
+      !isNullableString(value.lastViewerPaneId))
   ) {
     return false;
   }
@@ -323,6 +327,20 @@ function isWorkspaceState(value: unknown): value is WorkspaceState {
 
   const paneIds = new Set(panes.map((pane) => pane.id));
   if (value.activePaneId !== null && !paneIds.has(value.activePaneId)) {
+    return false;
+  }
+  if (
+    value.lastContentPaneId !== undefined &&
+    value.lastContentPaneId !== null &&
+    !paneIds.has(value.lastContentPaneId)
+  ) {
+    return false;
+  }
+  if (
+    value.lastViewerPaneId !== undefined &&
+    value.lastViewerPaneId !== null &&
+    !paneIds.has(value.lastViewerPaneId)
+  ) {
     return false;
   }
 

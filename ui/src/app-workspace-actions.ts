@@ -41,6 +41,7 @@ import {
   openSourceInWorkspaceState,
   openTerminalInWorkspaceState,
   removeCanvasSessionCard,
+  resolveWorkspaceViewerSplitAnchorPaneId,
   rescopeControlSurfacePane,
   setCanvasZoom,
   setPaneSourcePath,
@@ -54,6 +55,7 @@ import {
   type WorkspaceTab,
 } from "./workspace";
 import { resolveWorkspaceTabProjectId } from "./workspace-queries";
+import { workspacePaneHasRoomForViewerSplit } from "./workspace-viewer-layout";
 import type {
   OrchestratorRuntimeAction,
   StandaloneControlSurfaceViewState,
@@ -109,10 +111,7 @@ type UseAppWorkspaceActionsParams = {
   markSessionTabsForBottomAfterWorkspaceRebuild: (
     nextWorkspace: WorkspaceState,
   ) => void;
-  reportRequestError: (
-    error: unknown,
-    options?: { message?: string },
-  ) => void;
+  reportRequestError: (error: unknown, options?: { message?: string }) => void;
   adoptState: (nextState: StateResponse) => boolean;
   handleNewSession: (options: {
     agent: AgentType;
@@ -468,8 +467,8 @@ export function useAppWorkspaceActions({
         ? (nearestSessionPane.tabs.find(
             (candidate) => candidate.id === nearestSessionPane.activeTabId,
           ) ??
-            nearestSessionPane.tabs[0] ??
-            null)
+          nearestSessionPane.tabs[0] ??
+          null)
         : null;
       const nearestSession =
         nearestSessionTab?.kind === "session"
@@ -510,8 +509,8 @@ export function useAppWorkspaceActions({
         ? (nearestSessionPane.tabs.find(
             (candidate) => candidate.id === nearestSessionPane.activeTabId,
           ) ??
-            nearestSessionPane.tabs[0] ??
-            null)
+          nearestSessionPane.tabs[0] ??
+          null)
         : null;
       const nearestSession =
         nearestSessionTab?.kind === "session"
@@ -654,6 +653,14 @@ export function useAppWorkspaceActions({
     originProjectId: string | null,
     options?: OpenPathOptions,
   ) {
+    const splitAnchorPaneId = resolveWorkspaceViewerSplitAnchorPaneId(
+      workspaceRef.current,
+      paneId,
+      originSessionId,
+    );
+    const allowViewerSplit = workspacePaneHasRoomForViewerSplit(
+      splitAnchorPaneId ?? paneId,
+    );
     setWorkspace((current) =>
       applyControlPanelLayout(
         openSourceInWorkspaceState(
@@ -666,6 +673,7 @@ export function useAppWorkspaceActions({
             line: options?.line,
             column: options?.column,
             openInNewTab: options?.openInNewTab,
+            allowViewerSplit,
           },
         ),
       ),
@@ -714,6 +722,14 @@ export function useAppWorkspaceActions({
     originSessionId: string | null,
     originProjectId: string | null,
   ) {
+    const splitAnchorPaneId = resolveWorkspaceViewerSplitAnchorPaneId(
+      workspaceRef.current,
+      paneId,
+      originSessionId,
+    );
+    const allowViewerSplit = workspacePaneHasRoomForViewerSplit(
+      splitAnchorPaneId ?? paneId,
+    );
     setWorkspace((current) =>
       applyControlPanelLayout(
         openDiffPreviewInWorkspaceState(
@@ -731,6 +747,7 @@ export function useAppWorkspaceActions({
             summary: message.summary,
           },
           paneId,
+          { allowViewerSplit },
         ),
       ),
     );
@@ -746,6 +763,14 @@ export function useAppWorkspaceActions({
       sectionId?: GitDiffSection;
     },
   ) {
+    const splitAnchorPaneId = resolveWorkspaceViewerSplitAnchorPaneId(
+      workspaceRef.current,
+      paneId,
+      originSessionId,
+    );
+    const allowViewerSplit = workspacePaneHasRoomForViewerSplit(
+      splitAnchorPaneId ?? paneId,
+    );
     const requestKey = buildGitDiffPreviewRequestKey(
       paneId,
       request,
@@ -787,9 +812,11 @@ export function useAppWorkspaceActions({
         options?.openInNewTab
           ? {
               openInNewTab: true,
+              allowViewerSplit,
             }
           : {
               reuseActiveViewerTab: true,
+              allowViewerSplit,
             },
       );
       return applyControlPanelLayout(
@@ -823,7 +850,8 @@ export function useAppWorkspaceActions({
               documentEnrichmentNote:
                 diffPreview.documentEnrichmentNote ?? null,
               documentContent: diffPreview.documentContent ?? null,
-              displayPath: diffPreview.filePath ?? tab.displayPath ?? request.path,
+              displayPath:
+                diffPreview.filePath ?? tab.displayPath ?? request.path,
               filePath:
                 diffPreview.language === "git-submodule"
                   ? null

@@ -61,10 +61,7 @@ import {
   formatSessionOrchestratorGroupName,
 } from "./control-surface-state";
 import { collectRestoredGitDiffDocumentContentRefreshes } from "./git-diff-refresh";
-import {
-  resolveSettledScrollMinimumAttempts,
-  syncMessageStackScrollPosition,
-} from "./scroll-position";
+import { resolveSettledScrollMinimumAttempts } from "./scroll-position";
 import {
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   requestMessageStackBottomRepin,
@@ -3816,38 +3813,6 @@ describe("App scroll behaviour", () => {
   it("keeps control panel width fallbacks aligned with the 36rem floor", () => {
     expect(CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX).toBe(36 * 16);
     expect(CONTROL_PANEL_PANE_MIN_WIDTH_FALLBACK_PX).toBe(36 * 16);
-  });
-
-  it("stores manual message scroll state immediately when leaving the bottom", () => {
-    const paneScrollPositions: Record<
-      string,
-      {
-        top: number;
-        shouldStick: boolean;
-      }
-    > = {
-      "pane-1:session:session-1": {
-        top: 1200,
-        shouldStick: true,
-      },
-    };
-    const node = {
-      clientHeight: 800,
-      scrollHeight: 2000,
-      scrollTop: 960,
-    };
-
-    const next = syncMessageStackScrollPosition(
-      node,
-      "pane-1:session:session-1",
-      paneScrollPositions,
-    );
-
-    expect(next).toEqual({
-      top: 960,
-      shouldStick: false,
-    });
-    expect(paneScrollPositions["pane-1:session:session-1"]).toEqual(next);
   });
 
   it("uses the control panel pixel minimum instead of the generic row split clamp", () => {

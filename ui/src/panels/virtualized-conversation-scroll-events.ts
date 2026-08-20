@@ -7,6 +7,7 @@ import {
   canNestedScrollableConsumeWheel,
   normalizeWheelDelta,
 } from "../app-utils";
+import { SESSION_STICKY_BOTTOM_BAND_PX } from "../scroll-position";
 import {
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
@@ -323,7 +324,8 @@ export function useVirtualizedConversationScrollEvents({
           : null;
       const isLikelyBottomEscape =
         upwardInputDeltaPx !== null
-          ? bottomGapBeforeInput <= 72 + upwardInputDeltaPx
+          ? bottomGapBeforeInput <=
+            SESSION_STICKY_BOTTOM_BAND_PX + upwardInputDeltaPx
           : isScrollContainerNearBottom(node);
       const visibleAnchorBeforeNativeScroll =
         captureFirstVisibleMountedMessageAnchor(renderedListRef.current, node);
@@ -381,8 +383,9 @@ export function useVirtualizedConversationScrollEvents({
         }
         // The first upward gesture from the bottom should always break the
         // "stick to latest" intent immediately. Waiting until the native
-        // scroll lands more than 72 px away keeps the bottom-pin armed long
-        // enough for a later layout tick to snap the viewport back down once.
+        // scroll lands outside the shared sticky-bottom band keeps the
+        // bottom-pin armed long enough for a later layout tick to snap the
+        // viewport back down once.
         shouldKeepBottomAfterLayoutRef.current = false;
         isDetachedFromBottomRef.current = true;
       }

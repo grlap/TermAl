@@ -38,22 +38,14 @@ import {
   type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import {
-  resolveControlPanelWorkspaceRoot,
-} from "./session-model-utils";
-import {
-  ThemedCombobox,
-} from "./preferences-panels";
+import { resolveControlPanelWorkspaceRoot } from "./session-model-utils";
+import { ThemedCombobox } from "./preferences-panels";
 import { SessionFindBar } from "./SessionFindBar";
 import { useStableEvent } from "./panels/use-stable-event";
-import {
-  resolveWorkspaceScopedSessionId,
-} from "./control-surface-state";
+import { resolveWorkspaceScopedSessionId } from "./control-surface-state";
 import { sourceFileStateFromResponse } from "./source-file-state";
 import { normalizeDisplayPath } from "./path-display";
-import {
-  resolvePaneScrollCommand,
-} from "./pane-keyboard";
+import { resolvePaneScrollCommand } from "./pane-keyboard";
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
@@ -68,26 +60,20 @@ import { ResponseBoardPanel } from "./panels/ResponseBoardPanel";
 import { PaneTabs } from "./panels/PaneTabs";
 import { OrchestratorTemplatesPanel } from "./panels/OrchestratorTemplatesPanel";
 import { SessionCanvasPanel } from "./panels/SessionCanvasPanel";
-import {
-  TerminalPanel,
-} from "./panels/TerminalPanel";
+import { TerminalPanel } from "./panels/TerminalPanel";
 import { SourcePanel } from "./panels/SourcePanel";
 import {
   buildSessionSearchIndex,
   buildSessionSearchMatchesFromIndex,
 } from "./session-find";
-import type {
-  Session,
-} from "./types";
+import type { Session } from "./types";
 import {
   type SessionPaneViewMode,
   type TabDropPlacement,
   type WorkspacePane,
   type WorkspaceSessionTab,
 } from "./workspace";
-import {
-  dataTransferHasSessionDragType,
-} from "./session-drag";
+import { dataTransferHasSessionDragType } from "./session-drag";
 import {
   TAB_DRAG_MIME_TYPE,
   readWorkspaceTabDragData,
@@ -109,9 +95,7 @@ import {
   resolveLiveWaitingIndicatorPrompt,
   type DraftImageAttachment,
 } from "./app-utils";
-import {
-  buildConnectionRetryDisplayStateByMessageId,
-} from "./connection-retry";
+import { buildConnectionRetryDisplayStateByMessageId } from "./connection-retry";
 import { useStableMapBySignature } from "./use-stable-map-by-signature";
 import {
   streamingAssistantTextMessageIdForSession,
@@ -244,9 +228,8 @@ export function SessionPaneView({
         tab.kind === "session" && sessionLookup.has(tab.sessionId),
     )?.sessionId ?? null;
   const firstSessionTabId =
-    pane.tabs.find(
-      (tab): tab is WorkspaceSessionTab => tab.kind === "session",
-    )?.sessionId ?? null;
+    pane.tabs.find((tab): tab is WorkspaceSessionTab => tab.kind === "session")
+      ?.sessionId ?? null;
   const activeSessionSnapshotId =
     (pane.activeSessionId && sessionLookup.has(pane.activeSessionId)
       ? pane.activeSessionId
@@ -564,10 +547,10 @@ export function SessionPaneView({
     : -1;
   const isSessionSearchPartial = Boolean(
     activeSession &&
-      ((activeSession.messageCount ?? activeSession.messages.length) >
-        activeSession.messages.length ||
-        activeSession.hasOlderHistory === true ||
-        activeSession.hasNewerHistory === true),
+    ((activeSession.messageCount ?? activeSession.messages.length) >
+      activeSession.messages.length ||
+      activeSession.hasOlderHistory === true ||
+      activeSession.hasNewerHistory === true),
   );
   const waitingIndicatorPrompt = useMemo(() => {
     if (showDelegationWaitIndicator) {
@@ -602,7 +585,7 @@ export function SessionPaneView({
     ? "delegationWait"
     : isSending && !isSessionBusy
       ? "send"
-    : "liveTurn";
+      : "liveTurn";
   const composerInputDisabled = !activeSession || isStopping;
   const composerSendDisabled = !activeSession || isSending || isStopping;
   const scrollStateKey = resolveSessionPaneScrollStateKey(
@@ -611,7 +594,9 @@ export function SessionPaneView({
     activeSession?.id,
     activeTab,
   );
-  const defaultScrollToBottom = paneViewModeDefaultsToBottomScroll(pane.viewMode);
+  const defaultScrollToBottom = paneViewModeDefaultsToBottomScroll(
+    pane.viewMode,
+  );
   const {
     visibleMessages,
     visibleContentSignature,
@@ -654,7 +639,8 @@ export function SessionPaneView({
     nextConnectionRetryDisplayStateByMessageId,
   );
   const getConnectionRetryDisplayState = useCallback(
-    (messageId: string) => connectionRetryDisplayStateByMessageId.get(messageId),
+    (messageId: string) =>
+      connectionRetryDisplayStateByMessageId.get(messageId),
     [connectionRetryDisplayStateByMessageId],
   );
   const paneScrollPositions =
@@ -718,9 +704,7 @@ export function SessionPaneView({
     pane.viewMode === "session" &&
     Boolean(
       activeSession &&
-        (isSessionBusy ||
-          isStopping ||
-          effectiveShowNewResponseIndicator),
+      (isSessionBusy || isStopping || effectiveShowNewResponseIndicator),
     );
 
   function handleComposerPaste(
@@ -928,9 +912,7 @@ export function SessionPaneView({
       command.kind === "page" &&
       (event.key === "PageUp" || event.key === "PageDown")
     ) {
-      scrollSessionMessageStackByPageJump(
-        command.direction === "up" ? -1 : 1,
-      );
+      scrollSessionMessageStackByPageJump(command.direction === "up" ? -1 : 1);
       return;
     }
     if (command.kind === "boundary") {
@@ -1061,6 +1043,7 @@ export function SessionPaneView({
     <section
       ref={paneRootRef}
       className={`workspace-pane thread panel ${isActive ? "active" : ""}`}
+      data-workspace-pane-id={pane.id}
       onMouseDown={() => {
         if (!isActive) {
           onActivatePane(pane.id);
@@ -1445,8 +1428,9 @@ export function SessionPaneView({
                 ? () =>
                     onOpenInstructionDebuggerTab(
                       pane.id,
-                      activeContextSessionLookup.get(activeSourceOriginSessionId)
-                        ?.workdir ?? null,
+                      activeContextSessionLookup.get(
+                        activeSourceOriginSessionId,
+                      )?.workdir ?? null,
                       activeSourceOriginSessionId,
                       activeSourceOriginProjectId,
                     )
@@ -1757,8 +1741,8 @@ export function SessionPaneView({
                     ? "Loading diff"
                     : "Unable to load diff"}
                 </strong>
-                {activeDiffPreviewTab.displayPath ??
-                activeDiffPreviewTab.filePath ? (
+                {(activeDiffPreviewTab.displayPath ??
+                activeDiffPreviewTab.filePath) ? (
                   <span className="diff-preview-loading-path">
                     {normalizeDisplayPath(
                       activeDiffPreviewTab.displayPath ??
@@ -1884,7 +1868,11 @@ export function SessionPaneView({
       {showDelegatedChildFooter ? (
         <footer className="composer delegated-child-footer">
           {effectiveShowNewResponseIndicator ? (
-            <button className="new-response-indicator" type="button" onClick={handleScrollToLatestFromFooter}>
+            <button
+              className="new-response-indicator"
+              type="button"
+              onClick={handleScrollToLatestFromFooter}
+            >
               {effectiveNewResponseIndicatorLabel}
               {queuedPromptHistoryAffordanceCount > 0 ? (
                 <span className="new-response-indicator-queued-count">
@@ -1893,9 +1881,16 @@ export function SessionPaneView({
               ) : null}
             </button>
           ) : null}
-          <div className="delegated-child-footer-status" role="status" aria-live="polite">
+          <div
+            className="delegated-child-footer-status"
+            role="status"
+            aria-live="polite"
+          >
             {isSessionBusy ? (
-              <span className="activity-spinner delegated-child-footer-spinner" aria-hidden="true" />
+              <span
+                className="activity-spinner delegated-child-footer-spinner"
+                aria-hidden="true"
+              />
             ) : null}
             <span className="delegated-child-footer-copy">
               {isStopping
@@ -1951,7 +1946,9 @@ export function SessionPaneView({
           hasLoadedAgentCommands={hasLoadedAgentCommands}
           isRefreshingAgentCommands={isRefreshingAgentCommands}
           agentCommandsError={agentCommandsError}
-          onRefreshSessionModelOptions={handleRefreshSessionModelOptionsFromFooter}
+          onRefreshSessionModelOptions={
+            handleRefreshSessionModelOptionsFromFooter
+          }
           onRefreshAgentCommands={handleRefreshAgentCommandsFromFooter}
           onSend={handleSendFromFooter}
           canSpawnDelegation={enableLocalDelegationActions}

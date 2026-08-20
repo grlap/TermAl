@@ -296,14 +296,22 @@ export function removePendingPromptForCreatedMessage(
   if (!withoutMatchingServerId?.length) {
     return withoutMatchingServerId;
   }
+  // One created message reconciles exactly one queue entry. When the backend
+  // id matched a server-owned queued prompt, do not also consume an unrelated
+  // local optimistic send that happens to follow it in the same queue.
+  if (withoutMatchingServerId !== pendingPrompts) {
+    return withoutMatchingServerId;
+  }
   if (message.type !== "text" || message.author !== "you") {
     return withoutMatchingServerId;
   }
 
   const optimisticIndex = withoutMatchingServerId.findIndex(
-    (prompt) => prompt.localOnly === true && prompt.text === message.text,
+    (prompt) =>
+      prompt.localOnly === true &&
+      (prompt.text === message.text || prompt.expandedText === message.text),
   );
-  if (optimisticIndex === -1) {
+  if (optimisticIndex < 0) {
     return withoutMatchingServerId;
   }
 

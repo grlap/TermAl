@@ -37,6 +37,10 @@
      floor and later snap back during layout hydration. */
   --control-panel-pane-width: calc(36rem * var(--density-scale));
   --control-panel-pane-min-width: calc(36rem * var(--density-scale));
+  /* Editor readability is a physical-space constraint. Unlike controls and
+     spacing, it must not shrink with compact UI density or an ~780px
+     conversation pane would be split into two unusable ~390px columns. */
+  --workspace-viewer-pane-min-width: 30rem;
   --standalone-control-surface-pane-min-width: calc(
     16rem * var(--density-scale)
   );
@@ -9330,6 +9334,8 @@ textarea {
 .composer {
   flex: none;
   position: relative;
+  container-name: session-composer;
+  container-type: inline-size;
   padding: 1rem 1.35rem 1.3rem;
   border-top: 1px solid var(--line);
   background: var(--surface-composer);
@@ -9745,6 +9751,47 @@ textarea {
   font: inherit;
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+/* Pane width, not viewport width, determines whether the composer controls
+   can share a row with the prompt. Tiled desktop windows can keep a wide
+   viewport while each individual conversation pane is narrow. */
+@container session-composer (max-width: 46rem) {
+  .composer-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .composer-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .composer-delegation-controls {
+    display: contents;
+  }
+
+  .composer-stop-button,
+  .composer-delegate-button,
+  .composer-delegation-mode-select,
+  .send-button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .composer-actions:not(:has(.composer-stop-button)) > .send-button {
+    grid-column: 1 / -1;
+  }
+}
+
+@container session-composer (max-width: 20rem) {
+  .composer-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .composer-actions > .send-button {
+    grid-column: 1;
+  }
 }
 
 .new-session-button:disabled,

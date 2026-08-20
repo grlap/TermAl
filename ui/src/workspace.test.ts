@@ -29,6 +29,7 @@ import {
   reconcileWorkspaceState,
   removeCanvasSessionCard,
   rescopeControlSurfacePane,
+  resolveWorkspaceViewerSplitAnchorPaneId,
   setCanvasZoom,
   setPaneSourcePath,
   splitPane,
@@ -152,6 +153,18 @@ function makeControlPanelTab(
     id,
     kind: "controlPanel",
     originSessionId,
+  };
+}
+
+function makeResponseBoardTab(
+  id: string,
+  originSessionId: string | null,
+): WorkspaceTab {
+  return {
+    id,
+    kind: "responseBoard",
+    originSessionId,
+    refreshToken: `${id}-refresh`,
   };
 }
 
@@ -336,6 +349,44 @@ describe("workspace helpers", () => {
     expect(next).toBe(workspace);
   });
 
+  it("activatePane remembers the last content pane while focus moves to a control surface", () => {
+    const contentPane = makePane(
+      "pane-content",
+      [makeSessionTab("tab-session", "session-a")],
+      { activeTabId: "tab-session" },
+    );
+    const controlPane = makePane(
+      "pane-control",
+      [makeControlPanelTab("tab-control", "session-a")],
+      {
+        activeTabId: "tab-control",
+        activeSessionId: null,
+        viewMode: "controlPanel",
+      },
+    );
+    const workspace = makeSplitWorkspace(
+      contentPane,
+      controlPane,
+      contentPane.id,
+    );
+
+    const focusedControl = activatePane(workspace, controlPane.id);
+    const opened = openSessionInWorkspaceState(
+      focusedControl,
+      "session-b",
+      controlPane.id,
+    );
+
+    expect(focusedControl.lastContentPaneId).toBe(contentPane.id);
+    expect(opened.activePaneId).toBe(contentPane.id);
+    expect(
+      opened.panes.find((pane) => pane.id === contentPane.id)?.tabs,
+    ).toEqual([
+      makeSessionTab("tab-session", "session-a"),
+      expect.objectContaining({ kind: "session", sessionId: "session-b" }),
+    ]);
+  });
+
   it("openSessionInWorkspaceState creates the first pane for an empty workspace", () => {
     const next = openSessionInWorkspaceState(
       {
@@ -427,7 +478,7 @@ describe("workspace helpers", () => {
     });
   });
 
-  it("openCanvasInWorkspaceState moves the existing canvas to the nearest session pane when launched from a control surface", () => {
+  it("openCanvasInWorkspaceState activates an existing canvas in place", () => {
     const controlPane = makePane(
       "pane-control",
       [makeControlPanelTab("control-a", null)],
@@ -494,14 +545,17 @@ describe("workspace helpers", () => {
       "project-target",
     );
 
-    expect(next.activePaneId).toBe(targetSessionPane.id);
+    expect(next.activePaneId).toBe(remoteCanvasPane.id);
     expect(next.panes.find((pane) => pane.id === controlPane.id)?.tabs).toEqual(
       [makeControlPanelTab("control-a", null)],
     );
     expect(
       next.panes.find((pane) => pane.id === targetSessionPane.id)?.tabs,
+    ).toEqual([makeSessionTab("tab-target", "session-target")]);
+    expect(
+      next.panes.find((pane) => pane.id === remoteCanvasPane.id)?.tabs,
     ).toEqual([
-      makeSessionTab("tab-target", "session-target"),
+      makeSessionTab("tab-review", "session-review"),
       {
         id: "canvas-a",
         kind: "canvas",
@@ -511,18 +565,15 @@ describe("workspace helpers", () => {
       },
     ]);
     expect(
-      next.panes.find((pane) => pane.id === targetSessionPane.id)?.activeTabId,
+      next.panes.find((pane) => pane.id === remoteCanvasPane.id)?.activeTabId,
     ).toBe("canvas-a");
     expect(
-      next.panes.find((pane) => pane.id === targetSessionPane.id)
+      next.panes.find((pane) => pane.id === remoteCanvasPane.id)
         ?.activeSessionId,
     ).toBe("session-target");
     expect(
-      next.panes.find((pane) => pane.id === targetSessionPane.id)?.viewMode,
+      next.panes.find((pane) => pane.id === remoteCanvasPane.id)?.viewMode,
     ).toBe("canvas");
-    expect(
-      next.panes.find((pane) => pane.id === remoteCanvasPane.id)?.tabs,
-    ).toEqual([makeSessionTab("tab-review", "session-review")]);
   });
 
   it("openOrchestratorListInWorkspaceState opens a reusable orchestrator library tab", () => {
@@ -558,7 +609,7 @@ describe("workspace helpers", () => {
     expect(reused.panes[0]?.tabs).toHaveLength(2);
   });
 
-  it("openOrchestratorListInWorkspaceState reuses the library tab in the origin session pane", () => {
+  it("openOrchestratorListInWorkspaceState updates and activates the library tab in place", () => {
     const controlPane = makePane(
       "pane-control",
       [makeControlPanelTab("control-a", null)],
@@ -644,14 +695,11 @@ describe("workspace helpers", () => {
       "project-b",
     );
 
-    expect(next.activePaneId).toBe(sessionPaneB.id);
+    expect(next.activePaneId).toBe(sessionPaneA.id);
     expect(
       next.panes.find((pane) => pane.id === sessionPaneA.id)?.tabs,
-    ).toEqual([makeSessionTab("tab-a", "session-a")]);
-    expect(
-      next.panes.find((pane) => pane.id === sessionPaneB.id)?.tabs,
     ).toEqual([
-      makeSessionTab("tab-b", "session-b"),
+      makeSessionTab("tab-a", "session-a"),
       {
         ...existingOrchestratorTab,
         originSessionId: "session-b",
@@ -659,7 +707,10 @@ describe("workspace helpers", () => {
       },
     ]);
     expect(
-      next.panes.find((pane) => pane.id === sessionPaneB.id)?.activeTabId,
+      next.panes.find((pane) => pane.id === sessionPaneB.id)?.tabs,
+    ).toEqual([makeSessionTab("tab-b", "session-b")]);
+    expect(
+      next.panes.find((pane) => pane.id === sessionPaneA.id)?.activeTabId,
     ).toBe(existingOrchestratorTab.id);
   });
 
@@ -841,7 +892,7 @@ describe("workspace helpers", () => {
     ]);
   });
 
-  it("openSessionInWorkspaceState moves an existing session to the nearest session pane when launched from a control surface", () => {
+  it("openSessionInWorkspaceState activates an existing session without moving it", () => {
     const controlPane = makePane(
       "pane-control",
       [makeControlPanelTab("control-a", null)],
@@ -904,33 +955,24 @@ describe("workspace helpers", () => {
       controlPane.id,
     );
 
-    expect(next.activePaneId).toBe(targetSessionPane.id);
+    expect(next.activePaneId).toBe(remoteSessionPane.id);
     expect(next.panes.find((pane) => pane.id === controlPane.id)?.tabs).toEqual(
       [makeControlPanelTab("control-a", null)],
     );
     expect(
       next.panes.find((pane) => pane.id === targetSessionPane.id)?.tabs,
-    ).toEqual([
-      makeSessionTab("tab-target", "session-target"),
-      {
-        id: "tab-review",
-        kind: "session",
-        sessionId: "session-review",
-      },
-    ]);
+    ).toEqual([makeSessionTab("tab-target", "session-target")]);
     expect(
-      next.panes.find((pane) => pane.id === targetSessionPane.id)?.activeTabId,
+      next.panes.find((pane) => pane.id === remoteSessionPane.id)?.activeTabId,
     ).toBe("tab-review");
     expect(
-      next.panes.find((pane) => pane.id === targetSessionPane.id)
+      next.panes.find((pane) => pane.id === remoteSessionPane.id)
         ?.activeSessionId,
     ).toBe("session-review");
-    expect(next.panes.some((pane) => pane.id === remoteSessionPane.id)).toBe(
-      false,
-    );
+    expect(next.panes).toHaveLength(3);
   });
 
-  it("openSessionInWorkspaceState prefers the first content pane to the right of a control surface", () => {
+  it("openSessionInWorkspaceState prefers the last focused content pane", () => {
     const leftSessionPane = makePane(
       "pane-left",
       [makeSessionTab("tab-left", "session-left")],
@@ -979,6 +1021,7 @@ describe("workspace helpers", () => {
       },
       panes: [leftSessionPane, controlPane, rightSessionPane],
       activePaneId: controlPane.id,
+      lastContentPaneId: rightSessionPane.id,
     };
 
     const next = openSessionInWorkspaceState(
@@ -1010,7 +1053,7 @@ describe("workspace helpers", () => {
     ).toBe("session-new");
   });
 
-  it("openSessionInWorkspaceState creates a new pane when only a control surface and one content pane exist", () => {
+  it("openSessionInWorkspaceState reuses the last content pane without an implicit split", () => {
     const controlPane = makePane(
       "pane-control",
       [makeControlPanelTab("control-a", null)],
@@ -1036,34 +1079,76 @@ describe("workspace helpers", () => {
       controlPane.id,
     );
 
-    const newSessionPane = next.panes.find(
-      (pane) =>
-        pane.id !== controlPane.id &&
-        pane.id !== sessionPane.id &&
-        pane.tabs.some(
-          (tab) => tab.kind === "session" && tab.sessionId === "session-b",
-        ),
-    );
-
-    expect(next.panes).toHaveLength(3);
-    expect(next.activePaneId).toBe(newSessionPane?.id ?? null);
+    expect(next.panes).toHaveLength(2);
+    expect(next.activePaneId).toBe(sessionPane.id);
     expect(next.panes.find((pane) => pane.id === controlPane.id)?.tabs).toEqual(
       [makeControlPanelTab("control-a", null)],
     );
-    expect(next.panes.find((pane) => pane.id === sessionPane.id)?.tabs).toEqual(
-      [makeSessionTab("tab-session", "session-a")],
+    expect(next.panes.find((pane) => pane.id === sessionPane.id)).toMatchObject(
+      {
+        tabs: [
+          makeSessionTab("tab-session", "session-a"),
+          {
+            id: expect.any(String),
+            kind: "session",
+            sessionId: "session-b",
+          },
+        ],
+        activeSessionId: "session-b",
+        viewMode: "session",
+      },
     );
-    expect(newSessionPane).toMatchObject({
-      tabs: [
+  });
+
+  it("openSessionInWorkspaceState keeps new sessions in the primary pane while the viewer is active", () => {
+    const sessionPane = makePane(
+      "pane-session",
+      [makeSessionTab("tab-session", "session-a")],
+      {
+        activeTabId: "tab-session",
+        activeSessionId: "session-a",
+        viewMode: "session",
+      },
+    );
+    const viewerPane = makePane(
+      "pane-viewer",
+      [makeSourceTab("source-a", "/tmp/app.ts", "session-a")],
+      {
+        activeTabId: "source-a",
+        activeSessionId: "session-a",
+        viewMode: "source",
+        sourcePath: "/tmp/app.ts",
+      },
+    );
+    const workspace: WorkspaceState = {
+      ...makeSplitWorkspace(sessionPane, viewerPane, viewerPane.id),
+      lastContentPaneId: sessionPane.id,
+      lastViewerPaneId: viewerPane.id,
+    };
+
+    const next = openSessionInWorkspaceState(
+      workspace,
+      "session-b",
+      viewerPane.id,
+    );
+
+    expect(next.panes).toHaveLength(2);
+    expect(next.activePaneId).toBe(sessionPane.id);
+    expect(next.lastContentPaneId).toBe(sessionPane.id);
+    expect(next.lastViewerPaneId).toBe(viewerPane.id);
+    expect(next.panes.find((pane) => pane.id === sessionPane.id)?.tabs).toEqual(
+      [
+        makeSessionTab("tab-session", "session-a"),
         {
           id: expect.any(String),
           kind: "session",
           sessionId: "session-b",
         },
       ],
-      activeSessionId: "session-b",
-      viewMode: "session",
-    });
+    );
+    expect(next.panes.find((pane) => pane.id === viewerPane.id)?.tabs).toEqual([
+      makeSourceTab("source-a", "/tmp/app.ts", "session-a"),
+    ]);
   });
 
   it("placeSessionDropInWorkspaceState adds a dropped session to the target tab rail", () => {
@@ -1854,7 +1939,7 @@ describe("workspace helpers", () => {
     expect(next.activePaneId).toBeNull();
   });
 
-  it("openSourceInWorkspaceState opens a source tab in the current session pane", () => {
+  it("openSourceInWorkspaceState creates a viewer pane beside the current session pane", () => {
     const next = openSourceInWorkspaceState(
       makeSinglePaneWorkspace(
         makePane("pane-a", [makeSessionTab("tab-a", "session-a")]),
@@ -1864,10 +1949,14 @@ describe("workspace helpers", () => {
       "session-a",
     );
 
-    expect(next.panes).toHaveLength(1);
-    expect(next.activePaneId).toBe("pane-a");
-    expect(next.panes[0]?.tabs).toEqual([
+    const viewerPane = next.panes.find((pane) => pane.id !== "pane-a");
+
+    expect(next.panes).toHaveLength(2);
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.tabs).toEqual([
       makeSessionTab("tab-a", "session-a"),
+    ]);
+    expect(next.activePaneId).toBe(viewerPane?.id);
+    expect(viewerPane?.tabs).toEqual([
       {
         id: expect.any(String),
         kind: "source",
@@ -1875,15 +1964,22 @@ describe("workspace helpers", () => {
         originSessionId: "session-a",
       },
     ]);
-    expect(next.panes[0]).toMatchObject({
+    expect(viewerPane).toMatchObject({
       activeSessionId: "session-a",
       viewMode: "source",
       sourcePath: "/tmp/app.ts",
     });
-    expect(next.panes[0]?.activeTabId).toBe(next.panes[0]?.tabs[1]?.id ?? null);
+    expect(next.lastContentPaneId).toBe("pane-a");
+    expect(next.lastViewerPaneId).toBe(viewerPane?.id);
+    expect(next.root).toMatchObject({
+      type: "split",
+      direction: "row",
+      first: { type: "pane", paneId: "pane-a" },
+      second: { type: "pane", paneId: viewerPane?.id },
+    });
   });
 
-  it("openSourceInWorkspaceState opens a file from the control panel beside the session pane", () => {
+  it("openSourceInWorkspaceState creates a viewer beside the last content pane", () => {
     const next = openSourceInWorkspaceState(
       makeSplitWorkspace(
         makePane("pane-a", [makeControlPanelTab("control-a", null)], {
@@ -1913,12 +2009,10 @@ describe("workspace helpers", () => {
       viewMode: "controlPanel",
       activeSessionId: null,
     });
-    expect(next.panes.find((pane) => pane.id === "pane-b")).toMatchObject({
-      tabs: [makeSessionTab("tab-b", "session-b")],
-      activeTabId: "tab-b",
-      viewMode: "session",
-      activeSessionId: "session-b",
-    });
+    expect(sourcePane.id).not.toBe("pane-b");
+    expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
+      makeSessionTab("tab-b", "session-b"),
+    ]);
     expect(sourcePane).toMatchObject({
       tabs: [
         {
@@ -1931,6 +2025,35 @@ describe("workspace helpers", () => {
       viewMode: "source",
       sourcePath: "/tmp/app.ts",
     });
+    expect(next.lastContentPaneId).toBe("pane-b");
+    expect(next.lastViewerPaneId).toBe(sourcePane.id);
+  });
+
+  it("resolveWorkspaceViewerSplitAnchorPaneId measures the content target rather than a control-surface opener", () => {
+    const controlPane = makePane(
+      "pane-control",
+      [makeFilesystemTab("files-a", "/tmp", "session-a")],
+      {
+        activeTabId: "files-a",
+        activeSessionId: "session-a",
+        viewMode: "filesystem",
+      },
+    );
+    const sessionPane = makePane("pane-session", [
+      makeSessionTab("tab-a", "session-a"),
+    ]);
+    const workspace: WorkspaceState = {
+      ...makeSplitWorkspace(controlPane, sessionPane, controlPane.id),
+      lastContentPaneId: sessionPane.id,
+    };
+
+    expect(
+      resolveWorkspaceViewerSplitAnchorPaneId(
+        workspace,
+        controlPane.id,
+        "session-a",
+      ),
+    ).toBe(sessionPane.id);
   });
 
   it("openSourceInWorkspaceState opens a new tab instead of reusing an existing source tab when requested", () => {
@@ -1975,6 +2098,299 @@ describe("workspace helpers", () => {
     });
   });
 
+  it("openSourceInWorkspaceState reuses the existing viewer pane", () => {
+    const sessionPane = makePane(
+      "pane-session",
+      [makeSessionTab("tab-session", "session-a")],
+      {
+        activeTabId: "tab-session",
+        activeSessionId: "session-a",
+        viewMode: "session",
+      },
+    );
+    const viewerPane = makePane(
+      "pane-viewer",
+      [makeSourceTab("source-a", "/tmp/app.ts", "session-a")],
+      {
+        activeTabId: "source-a",
+        activeSessionId: "session-a",
+        viewMode: "source",
+        sourcePath: "/tmp/app.ts",
+      },
+    );
+    const workspace: WorkspaceState = {
+      ...makeSplitWorkspace(sessionPane, viewerPane, sessionPane.id),
+      lastContentPaneId: sessionPane.id,
+      lastViewerPaneId: viewerPane.id,
+    };
+
+    const next = openSourceInWorkspaceState(
+      workspace,
+      "/tmp/next.ts",
+      sessionPane.id,
+      "session-a",
+    );
+
+    expect(next.panes).toHaveLength(2);
+    expect(next.activePaneId).toBe(viewerPane.id);
+    expect(next.lastContentPaneId).toBe(sessionPane.id);
+    expect(next.lastViewerPaneId).toBe(viewerPane.id);
+    expect(next.panes.find((pane) => pane.id === sessionPane.id)?.tabs).toEqual(
+      [makeSessionTab("tab-session", "session-a")],
+    );
+    expect(next.panes.find((pane) => pane.id === viewerPane.id)?.tabs).toEqual([
+      makeSourceTab("source-a", "/tmp/app.ts", "session-a"),
+      {
+        id: expect.any(String),
+        kind: "source",
+        path: "/tmp/next.ts",
+        originSessionId: "session-a",
+      },
+    ]);
+  });
+
+  it("openSourceInWorkspaceState creates a viewer beside a legacy mixed primary pane", () => {
+    const mixedPane = makePane(
+      "pane-primary",
+      [
+        makeSessionTab("tab-session", "session-a"),
+        makeSourceTab("source-old", "/tmp/old.ts", "session-a"),
+      ],
+      {
+        activeTabId: "tab-session",
+        activeSessionId: "session-a",
+        viewMode: "session",
+      },
+    );
+
+    const next = openSourceInWorkspaceState(
+      makeSinglePaneWorkspace(mixedPane),
+      "/tmp/new.ts",
+      mixedPane.id,
+      "session-a",
+    );
+    const viewerPane = next.panes.find((pane) => pane.id !== mixedPane.id);
+
+    expect(next.panes).toHaveLength(2);
+    expect(next.panes.find((pane) => pane.id === mixedPane.id)?.tabs).toEqual(
+      mixedPane.tabs,
+    );
+    expect(viewerPane?.tabs).toEqual([
+      {
+        id: expect.any(String),
+        kind: "source",
+        path: "/tmp/new.ts",
+        originSessionId: "session-a",
+      },
+    ]);
+    expect(next.activePaneId).toBe(viewerPane?.id);
+    expect(next.lastContentPaneId).toBe(mixedPane.id);
+    expect(next.lastViewerPaneId).toBe(viewerPane?.id);
+  });
+
+  it("openSourceInWorkspaceState reuses a non-session pane when the opener is too narrow to split", () => {
+    const sessionPane = makePane("pane-session", [
+      makeSessionTab("tab-session", "session-a"),
+    ]);
+    const boardPane = makePane(
+      "pane-board",
+      [makeResponseBoardTab("board-a", "session-a")],
+      {
+        activeTabId: "board-a",
+        activeSessionId: "session-a",
+        viewMode: "responseBoard",
+      },
+    );
+    const workspace: WorkspaceState = {
+      ...makeSplitWorkspace(sessionPane, boardPane, sessionPane.id),
+      lastContentPaneId: sessionPane.id,
+    };
+
+    const next = openSourceInWorkspaceState(
+      workspace,
+      "/tmp/new.ts",
+      sessionPane.id,
+      "session-a",
+      { allowViewerSplit: false },
+    );
+
+    expect(next.panes).toHaveLength(2);
+    expect(next.root).toEqual(workspace.root);
+    expect(next.activePaneId).toBe(boardPane.id);
+    expect(next.lastContentPaneId).toBe(sessionPane.id);
+    expect(next.lastViewerPaneId).toBe(boardPane.id);
+    expect(next.panes.find((pane) => pane.id === sessionPane.id)?.tabs).toEqual(
+      [makeSessionTab("tab-session", "session-a")],
+    );
+    expect(next.panes.find((pane) => pane.id === boardPane.id)?.tabs).toEqual([
+      makeResponseBoardTab("board-a", "session-a"),
+      {
+        id: expect.any(String),
+        kind: "source",
+        path: "/tmp/new.ts",
+        originSessionId: "session-a",
+      },
+    ]);
+  });
+
+  it("openSourceInWorkspaceState uses an existing second session pane instead of creating a third pane", () => {
+    const primaryPane = makePane("pane-primary", [
+      makeSessionTab("tab-primary", "session-a"),
+    ]);
+    const secondaryPane = makePane("pane-secondary", [
+      makeSessionTab("tab-secondary", "session-b"),
+    ]);
+    const workspace: WorkspaceState = {
+      ...makeSplitWorkspace(primaryPane, secondaryPane, primaryPane.id),
+      lastContentPaneId: primaryPane.id,
+    };
+
+    const next = openSourceInWorkspaceState(
+      workspace,
+      "/tmp/new.ts",
+      primaryPane.id,
+      "session-a",
+    );
+
+    expect(next.panes).toHaveLength(2);
+    expect(next.root).toEqual(workspace.root);
+    expect(next.activePaneId).toBe(secondaryPane.id);
+    expect(next.lastContentPaneId).toBe(primaryPane.id);
+    expect(next.lastViewerPaneId).toBe(secondaryPane.id);
+    expect(next.panes.find((pane) => pane.id === primaryPane.id)?.tabs).toEqual(
+      [makeSessionTab("tab-primary", "session-a")],
+    );
+    expect(
+      next.panes.find((pane) => pane.id === secondaryPane.id)?.tabs,
+    ).toEqual([
+      makeSessionTab("tab-secondary", "session-b"),
+      {
+        id: expect.any(String),
+        kind: "source",
+        path: "/tmp/new.ts",
+        originSessionId: "session-a",
+      },
+    ]);
+  });
+
+  it("openSourceInWorkspaceState stacks in the opener when a narrow workspace has no reusable pane", () => {
+    const next = openSourceInWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane("pane-session", [makeSessionTab("tab-a", "session-a")]),
+      ),
+      "/tmp/new.ts",
+      "pane-session",
+      "session-a",
+      { allowViewerSplit: false },
+    );
+
+    expect(next.panes).toHaveLength(1);
+    expect(next.activePaneId).toBe("pane-session");
+    expect(next.lastContentPaneId).toBe("pane-session");
+    expect(next.lastViewerPaneId).toBeNull();
+    expect(next.panes[0]?.tabs).toEqual([
+      makeSessionTab("tab-a", "session-a"),
+      {
+        id: expect.any(String),
+        kind: "source",
+        path: "/tmp/new.ts",
+        originSessionId: "session-a",
+      },
+    ]);
+  });
+
+  it("openSourceInWorkspaceState preserves a remembered viewer role after a session is dragged into it", () => {
+    const primaryPane = makePane("pane-primary", [
+      makeSessionTab("tab-primary", "session-a"),
+    ]);
+    const mixedViewerPane = makePane(
+      "pane-viewer",
+      [
+        makeSourceTab("source-a", "/tmp/app.ts", "session-a"),
+        makeSessionTab("tab-review", "session-review"),
+      ],
+      {
+        activeTabId: "tab-review",
+        activeSessionId: "session-review",
+        viewMode: "session",
+      },
+    );
+    const workspace: WorkspaceState = {
+      ...makeSplitWorkspace(primaryPane, mixedViewerPane, primaryPane.id),
+      lastContentPaneId: primaryPane.id,
+      lastViewerPaneId: mixedViewerPane.id,
+    };
+
+    const next = openSourceInWorkspaceState(
+      workspace,
+      "/tmp/next.ts",
+      primaryPane.id,
+      "session-a",
+    );
+
+    expect(next.panes).toHaveLength(2);
+    expect(next.activePaneId).toBe(mixedViewerPane.id);
+    expect(
+      next.panes.find((pane) => pane.id === mixedViewerPane.id)?.tabs,
+    ).toEqual([
+      makeSourceTab("source-a", "/tmp/app.ts", "session-a"),
+      makeSessionTab("tab-review", "session-review"),
+      {
+        id: expect.any(String),
+        kind: "source",
+        path: "/tmp/next.ts",
+        originSessionId: "session-a",
+      },
+    ]);
+    expect(next.lastContentPaneId).toBe(primaryPane.id);
+    expect(next.lastViewerPaneId).toBe(mixedViewerPane.id);
+  });
+
+  it("openSourceInWorkspaceState recreates a viewer after its last tab closes", () => {
+    const opened = openSourceInWorkspaceState(
+      makeSinglePaneWorkspace(
+        makePane("pane-session", [makeSessionTab("tab-a", "session-a")]),
+      ),
+      "/tmp/app.ts",
+      "pane-session",
+      "session-a",
+    );
+    const firstViewer = opened.panes.find((pane) => pane.id !== "pane-session");
+    const firstViewerTab = firstViewer?.tabs[0];
+    if (!firstViewer || !firstViewerTab) {
+      throw new Error("Expected the first viewer pane");
+    }
+
+    const withoutViewer = closeWorkspaceTab(
+      opened,
+      firstViewer.id,
+      firstViewerTab.id,
+    );
+    const next = openSourceInWorkspaceState(
+      withoutViewer,
+      "/tmp/next.ts",
+      "pane-session",
+      "session-a",
+    );
+    const recreatedViewer = next.panes.find(
+      (pane) => pane.id !== "pane-session",
+    );
+
+    expect(next.panes).toHaveLength(2);
+    expect(recreatedViewer?.id).not.toBe(firstViewer.id);
+    expect(next.activePaneId).toBe(recreatedViewer?.id);
+    expect(next.lastContentPaneId).toBe("pane-session");
+    expect(next.lastViewerPaneId).toBe(recreatedViewer?.id);
+    expect(recreatedViewer?.tabs).toEqual([
+      {
+        id: expect.any(String),
+        kind: "source",
+        path: "/tmp/next.ts",
+        originSessionId: "session-a",
+      },
+    ]);
+  });
+
   it("openSourceInWorkspaceState opens a file from a filesystem pane in a separate source pane", () => {
     const next = openSourceInWorkspaceState(
       makeSinglePaneWorkspace(
@@ -2015,7 +2431,7 @@ describe("workspace helpers", () => {
     });
   });
 
-  it("openSourceInWorkspaceState moves an existing source tab into the current session pane", () => {
+  it("openSourceInWorkspaceState activates an existing source tab without moving it", () => {
     const next = openSourceInWorkspaceState(
       makeSplitWorkspace(
         makePane(
@@ -2036,24 +2452,17 @@ describe("workspace helpers", () => {
       "session-a",
     );
 
-    expect(next.panes).toHaveLength(1);
-    expect(next.activePaneId).toBe("pane-b");
-    expect(next.panes[0]?.tabs).toEqual([
-      makeSessionTab("tab-b", "session-a"),
-      {
-        id: "source-a",
-        kind: "source",
-        path: "/tmp/app.ts",
-        originSessionId: "session-a",
-      },
-    ]);
-    expect(next.panes[0]).toMatchObject({
-      id: "pane-b",
+    expect(next.panes).toHaveLength(2);
+    expect(next.activePaneId).toBe("pane-a");
+    expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
       activeSessionId: "session-a",
       activeTabId: "source-a",
       viewMode: "source",
       sourcePath: "/tmp/app.ts",
     });
+    expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
+      makeSessionTab("tab-b", "session-a"),
+    ]);
   });
 
   it("openSourceInWorkspaceState reuses a restored source tab with a legacy Windows UNC verbatim path", () => {
@@ -2471,7 +2880,7 @@ describe("workspace helpers", () => {
     });
   });
 
-  it("openSessionListInWorkspaceState moves the existing sessions tab into the new session pane", () => {
+  it("openSessionListInWorkspaceState updates and activates the existing tab in place", () => {
     const paneA = makePane(
       "pane-a",
       [makeSessionListTab("sessions-a", "session-a")],
@@ -2490,17 +2899,17 @@ describe("workspace helpers", () => {
       "project-b",
     );
 
-    expect(next.activePaneId).toBe("pane-b");
-    expect(next.panes.some((pane) => pane.id === "pane-a")).toBe(false);
-    expect(next.panes.find((pane) => pane.id === "pane-b")).toMatchObject({
+    expect(next.activePaneId).toBe("pane-a");
+    expect(next.panes).toHaveLength(2);
+    expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
       activeTabId: "sessions-a",
       activeSessionId: "session-b",
       viewMode: "sessionList",
-      tabs: [
-        makeSessionTab("tab-b", "session-b"),
-        makeSessionListTab("sessions-a", "session-b", "project-b"),
-      ],
+      tabs: [makeSessionListTab("sessions-a", "session-b", "project-b")],
     });
+    expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
+      makeSessionTab("tab-b", "session-b"),
+    ]);
   });
 
   it("openSessionListInWorkspaceState opens in the pane for the origin session when launched from the control panel", () => {
@@ -2770,7 +3179,7 @@ describe("workspace helpers", () => {
     });
   });
 
-  it("openDiffPreviewInWorkspaceState opens a diff preview in a new pane to the right", () => {
+  it("openDiffPreviewInWorkspaceState creates a viewer pane beside the current pane", () => {
     const next = openDiffPreviewInWorkspaceState(
       makeSinglePaneWorkspace(
         makePane("pane-a", [makeSessionTab("tab-a", "session-a")]),
@@ -2787,13 +3196,13 @@ describe("workspace helpers", () => {
       "pane-a",
     );
 
+    const diffPane = next.panes.find((pane) => pane.id !== "pane-a");
+
     expect(next.panes).toHaveLength(2);
-    expect(next.panes.find((pane) => pane.id === "pane-a")).toMatchObject({
-      tabs: [makeSessionTab("tab-a", "session-a")],
-      activeTabId: "tab-a",
-      viewMode: "session",
-    });
-    expect(next.panes.find((pane) => pane.id !== "pane-a")).toMatchObject({
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.tabs).toEqual([
+      makeSessionTab("tab-a", "session-a"),
+    ]);
+    expect(diffPane).toMatchObject({
       tabs: [
         {
           id: expect.any(String),
@@ -2806,6 +3215,66 @@ describe("workspace helpers", () => {
       viewMode: "diffPreview",
       activeSessionId: "session-a",
     });
+    expect(next.activePaneId).toBe(diffPane?.id);
+    expect(next.lastContentPaneId).toBe("pane-a");
+    expect(next.lastViewerPaneId).toBe(diffPane?.id);
+  });
+
+  it("openDiffPreviewInWorkspaceState preserves a reusable pane's existing tab when there is no room to split", () => {
+    const sessionPane = makePane("pane-session", [
+      makeSessionTab("tab-session", "session-a"),
+    ]);
+    const boardPane = makePane(
+      "pane-board",
+      [makeResponseBoardTab("board-a", "session-a")],
+      {
+        activeTabId: "board-a",
+        activeSessionId: "session-a",
+        viewMode: "responseBoard",
+      },
+    );
+    const workspace: WorkspaceState = {
+      ...makeSplitWorkspace(sessionPane, boardPane, sessionPane.id),
+      lastContentPaneId: sessionPane.id,
+    };
+
+    const next = openDiffPreviewInWorkspaceState(
+      workspace,
+      {
+        changeType: "edit",
+        diff: "-before\n+after",
+        diffMessageId: "diff-a",
+        filePath: "/tmp/app.ts",
+        language: "typescript",
+        originSessionId: "session-a",
+        summary: "Updated app.ts",
+      },
+      sessionPane.id,
+      {
+        reuseActiveViewerTab: true,
+        allowViewerSplit: false,
+      },
+    );
+
+    expect(next.panes).toHaveLength(2);
+    expect(next.root).toEqual(workspace.root);
+    expect(next.activePaneId).toBe(boardPane.id);
+    expect(next.lastContentPaneId).toBe(sessionPane.id);
+    expect(next.lastViewerPaneId).toBe(boardPane.id);
+    expect(next.panes.find((pane) => pane.id === boardPane.id)?.tabs).toEqual([
+      makeResponseBoardTab("board-a", "session-a"),
+      {
+        id: expect.any(String),
+        kind: "diffPreview",
+        changeType: "edit",
+        diff: "-before\n+after",
+        diffMessageId: "diff-a",
+        filePath: "/tmp/app.ts",
+        language: "typescript",
+        originSessionId: "session-a",
+        summary: "Updated app.ts",
+      },
+    ]);
   });
 
   it("openDiffPreviewInWorkspaceState preserves Markdown document content metadata", () => {
@@ -2935,7 +3404,7 @@ describe("workspace helpers", () => {
     );
   });
 
-  it("openDiffPreviewInWorkspaceState opens a control-panel diff beside the session pane", () => {
+  it("openDiffPreviewInWorkspaceState creates a viewer beside the last content pane", () => {
     const next = openDiffPreviewInWorkspaceState(
       makeSplitWorkspace(
         makePane("pane-a", [makeControlPanelTab("control-a", null)], {
@@ -2975,12 +3444,10 @@ describe("workspace helpers", () => {
       viewMode: "controlPanel",
       activeSessionId: null,
     });
-    expect(next.panes.find((pane) => pane.id === "pane-b")).toMatchObject({
-      tabs: [makeSessionTab("tab-b", "session-b")],
-      activeTabId: "tab-b",
-      viewMode: "session",
-      activeSessionId: "session-b",
-    });
+    expect(diffPane.id).not.toBe("pane-b");
+    expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
+      makeSessionTab("tab-b", "session-b"),
+    ]);
     expect(diffPane).toMatchObject({
       tabs: [
         {
@@ -2997,9 +3464,11 @@ describe("workspace helpers", () => {
       ],
       viewMode: "diffPreview",
     });
+    expect(next.lastContentPaneId).toBe("pane-b");
+    expect(next.lastViewerPaneId).toBe(diffPane.id);
   });
 
-  it("openDiffPreviewInWorkspaceState opens a standalone git diff beside the related session pane", () => {
+  it("openDiffPreviewInWorkspaceState creates a viewer beside the related content pane", () => {
     const next = openDiffPreviewInWorkspaceState(
       makeSplitWorkspace(
         makePane(
@@ -3037,41 +3506,22 @@ describe("workspace helpers", () => {
       pane.tabs.some((tab) => tab.kind === "diffPreview"),
     );
 
-    if (
-      !diffPane ||
-      !next.root ||
-      next.root.type !== "split" ||
-      next.root.first.type !== "pane" ||
-      next.root.second.type !== "split"
-    ) {
-      throw new Error("Expected diff preview to split beside the session pane");
+    if (!diffPane) {
+      throw new Error("Expected diff preview in a content pane");
     }
 
+    expect(next.panes).toHaveLength(3);
     expect(next.activePaneId).toBe(diffPane.id);
+    expect(diffPane.id).not.toBe("pane-session");
     expect(next.panes.find((pane) => pane.id === "pane-git")).toMatchObject({
       tabs: [makeGitStatusTab("git-a", "/repo", "session-a")],
       activeTabId: "git-a",
       viewMode: "gitStatus",
       activeSessionId: "session-a",
     });
-    expect(next.root).toMatchObject({
-      type: "split",
-      first: {
-        type: "pane",
-        paneId: "pane-git",
-      },
-      second: {
-        type: "split",
-        first: {
-          type: "pane",
-          paneId: "pane-session",
-        },
-        second: {
-          type: "pane",
-          paneId: diffPane.id,
-        },
-      },
-    });
+    expect(next.panes.find((pane) => pane.id === "pane-session")?.tabs).toEqual(
+      [makeSessionTab("tab-a", "session-a")],
+    );
     expect(diffPane).toMatchObject({
       tabs: [
         {
@@ -3086,6 +3536,8 @@ describe("workspace helpers", () => {
       ],
       viewMode: "diffPreview",
     });
+    expect(next.lastContentPaneId).toBe("pane-session");
+    expect(next.lastViewerPaneId).toBe(diffPane.id);
   });
 
   it("openDiffPreviewInWorkspaceState focuses an existing diff tab with the same change set", () => {
@@ -3198,7 +3650,7 @@ describe("workspace helpers", () => {
     });
   });
 
-  it("openDiffPreviewInWorkspaceState reuses the existing diff pane for later previews", () => {
+  it("openDiffPreviewInWorkspaceState sends a new preview to the existing viewer pane", () => {
     const next = openDiffPreviewInWorkspaceState(
       makeSplitWorkspace(
         makePane("pane-a", [makeSessionTab("tab-a", "session-a")]),
@@ -3232,6 +3684,9 @@ describe("workspace helpers", () => {
     );
 
     expect(next.activePaneId).toBe("pane-b");
+    expect(next.panes.find((pane) => pane.id === "pane-a")?.tabs).toEqual([
+      makeSessionTab("tab-a", "session-a"),
+    ]);
     expect(next.panes.find((pane) => pane.id === "pane-b")?.tabs).toEqual([
       makeDiffPreviewTab("diff-tab-a", "diff-a", "/tmp/app.ts", "session-a"),
       {
@@ -3354,7 +3809,7 @@ describe("workspace helpers", () => {
     ]);
   });
 
-  it("openDiffPreviewInWorkspaceState prefers the nearest viewer pane for standalone git tabs", () => {
+  it("openDiffPreviewInWorkspaceState prefers the remembered viewer pane over tree order", () => {
     const leftViewerPane = makePane(
       "pane-a",
       [makeSourceTab("source-left", "/tmp/left.ts", null)],
@@ -3423,6 +3878,8 @@ describe("workspace helpers", () => {
         rightViewerPane,
       ],
       activePaneId: standaloneGitPane.id,
+      lastContentPaneId: rightViewerPane.id,
+      lastViewerPaneId: rightViewerPane.id,
     };
 
     const next = openDiffPreviewInWorkspaceState(
@@ -3468,7 +3925,7 @@ describe("workspace helpers", () => {
     ).toEqual([makeSessionListTab("sessions-b", null)]);
   });
 
-  it("openDiffPreviewInWorkspaceState keeps docked git diffs local when a far viewer is active", () => {
+  it("openDiffPreviewInWorkspaceState uses the existing viewer pane from the control panel", () => {
     const controlPane = makePane(
       "pane-a",
       [makeControlPanelTab("control-a", null)],
@@ -3529,7 +3986,9 @@ describe("workspace helpers", () => {
         },
       },
       panes: [controlPane, localSessionPane, middleSessionPane, farViewerPane],
-      activePaneId: farViewerPane.id,
+      activePaneId: controlPane.id,
+      lastContentPaneId: localSessionPane.id,
+      lastViewerPaneId: farViewerPane.id,
     };
 
     const next = openDiffPreviewInWorkspaceState(
@@ -3550,11 +4009,13 @@ describe("workspace helpers", () => {
       },
     );
 
-    expect(next.activePaneId).toBe(localSessionPane.id);
+    expect(next.activePaneId).toBe(farViewerPane.id);
     expect(
       next.panes.find((pane) => pane.id === localSessionPane.id)?.tabs,
+    ).toEqual([makeSessionTab("session-b", "session-b")]);
+    expect(
+      next.panes.find((pane) => pane.id === farViewerPane.id)?.tabs,
     ).toEqual([
-      makeSessionTab("session-b", "session-b"),
       {
         id: expect.any(String),
         kind: "diffPreview",
@@ -3567,11 +4028,6 @@ describe("workspace helpers", () => {
         originSessionId: null,
         summary: "Updated local.ts",
       },
-    ]);
-    expect(
-      next.panes.find((pane) => pane.id === farViewerPane.id)?.tabs,
-    ).toEqual([
-      makeDiffPreviewTab("diff-d", "diff-existing", "/tmp/existing.ts", null),
     ]);
   });
 
