@@ -16,6 +16,7 @@ import {
 import {
   DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
   getScrollContainerBottomGap,
+  isScrollContainerAtPhysicalBottom,
   isScrollContainerNearBottom,
 } from "./conversation-virtualization";
 import {
@@ -237,7 +238,10 @@ export function useVirtualizedConversationScrollEvents({
             lastUserScrollKindRef.current,
             { flush: shouldFlushActiveNativeScroll },
           );
-          if (scrollDelta >= 0 && isScrollContainerNearBottom(node)) {
+          if (
+            scrollDelta >= 0 &&
+            isScrollContainerAtPhysicalBottom(node)
+          ) {
             // The user just scrolled DOWN to (or stayed at) the
             // bottom. Re-arm the bottom-follow flags so subsequent
             // layout changes can keep the view pinned, and clear the
@@ -508,16 +512,35 @@ export function useVirtualizedConversationScrollEvents({
       pendingPrependedTopBoundaryRef.current =
         explicitScrollKind === "seek" && node.scrollTop <= 1;
       const isNearBottomAfterWrite = isScrollContainerNearBottom(node);
+      // The wide sticky band absorbs measurement jitter while layout-owned
+      // follow is already attached. It must not reclaim authority from an
+      // explicit wheel/page write: manual navigation stays detached until the
+      // reachable physical bottom. Otherwise the pane and virtualizer disagree
+      // for one commit and a page measurement can snap the viewport downward.
+      const hasBottomAuthorityAfterWrite =
+        explicitScrollSource === "user"
+          ? isScrollContainerAtPhysicalBottom(node)
+          : isNearBottomAfterWrite;
       if (pendingPrependedTopBoundaryRef.current || isNearBottomAfterWrite) {
         pendingPrependedBottomGapRef.current = null;
       }
       if (!isNearBottomAfterWrite) {
         suspendDeferredRenderActivation(node);
       }
-      if (shouldKeepBottomAfterLayoutRef.current && !isNearBottomAfterWrite) {
+      if (
+        shouldKeepBottomAfterLayoutRef.current &&
+        !hasBottomAuthorityAfterWrite
+      ) {
         shouldKeepBottomAfterLayoutRef.current = false;
       }
-      if (isNearBottomAfterWrite) {
+      if (
+        explicitScrollSource === "user" &&
+        !hasBottomAuthorityAfterWrite
+      ) {
+        isDetachedFromBottomRef.current = true;
+        setHasUserScrollInteraction(true);
+      }
+      if (hasBottomAuthorityAfterWrite) {
         shouldKeepBottomAfterLayoutRef.current = true;
         isDetachedFromBottomRef.current = false;
         setHasUserScrollInteraction(false);
@@ -528,20 +551,23 @@ export function useVirtualizedConversationScrollEvents({
       clearPendingDeferredLayoutTimer();
       pendingDeferredLayoutAnchorRef.current = null;
       if (Math.abs(scrollDelta) >= 0.5) {
-        if (explicitScrollKind === "seek" && isNearBottomAfterWrite) {
+        if (
+          explicitScrollKind === "seek" &&
+          hasBottomAuthorityAfterWrite
+        ) {
           shouldKeepBottomAfterLayoutRef.current = true;
           isDetachedFromBottomRef.current = false;
         }
         const resolvedScrollKind =
           explicitScrollKind ??
-          (isNearBottomAfterWrite
+          (hasBottomAuthorityAfterWrite
             ? "seek"
             : classifyScrollKind(scrollDelta, node.clientHeight));
         const scrollWriteTime = performance.now();
-        lastUserScrollKindRef.current = isNearBottomAfterWrite
+        lastUserScrollKindRef.current = hasBottomAuthorityAfterWrite
           ? null
           : resolvedScrollKind;
-        if (!isNearBottomAfterWrite) {
+        if (!hasBottomAuthorityAfterWrite) {
           if (explicitScrollSource === "user") {
             releaseConversationSearchPinForUserScroll();
           }
@@ -551,7 +577,7 @@ export function useVirtualizedConversationScrollEvents({
         const isActiveUpwardUserScrollWrite =
           explicitScrollSource === "user" &&
           scrollDelta < 0 &&
-          !isNearBottomAfterWrite;
+          !hasBottomAuthorityAfterWrite;
         reconcileMountedRangeForNativeScroll(
           node,
           scrollDelta,

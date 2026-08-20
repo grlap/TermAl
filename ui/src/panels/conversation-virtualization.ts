@@ -20,8 +20,10 @@
 //     rendered.
 //   - `getScrollContainerBottomGap` — pixel distance from the
 //     current viewport bottom to the end of the scroll content.
+//   - `isScrollContainerAtPhysicalBottom` — true only at the reachable DOM
+//     bottom, where explicit user navigation may return tail-follow authority.
 //   - `isScrollContainerNearBottom` — true when the viewport is inside the
-//     shared sticky-bottom band.
+//     wider shared sticky-bottom layout band.
 //   - `getAdjustedVirtualizedScrollTopForHeightChange` — when a
 //     message grows or shrinks after it has already been
 //     measured, returns the new `scrollTop` that keeps the user's
@@ -46,7 +48,10 @@
 // `AgentSessionPanel.test.tsx`) import directly from here.
 
 import type { Message } from "../types";
-import { SESSION_STICKY_BOTTOM_BAND_PX } from "../scroll-position";
+import {
+  SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX,
+  SESSION_STICKY_BOTTOM_BAND_PX,
+} from "../scroll-position";
 
 export const VIRTUALIZED_MESSAGE_GAP_PX = 12;
 export const DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT = 720;
@@ -221,6 +226,15 @@ export function isScrollContainerNearBottom(
   node: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">,
 ) {
   return getScrollContainerBottomGap(node) < SESSION_STICKY_BOTTOM_BAND_PX;
+}
+
+export function isScrollContainerAtPhysicalBottom(
+  node: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">,
+) {
+  return (
+    getScrollContainerBottomGap(node) <=
+    SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX
+  );
 }
 
 export function getAdjustedVirtualizedScrollTopForHeightChange({

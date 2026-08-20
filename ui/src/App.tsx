@@ -1260,9 +1260,32 @@ export default function App() {
       }
     }
 
+    const previousMarkers = new Map(
+      [...sessionIds].map((sessionId) => [
+        sessionId,
+        {
+          existed: Object.prototype.hasOwnProperty.call(
+            forceSessionScrollToBottomRef.current,
+            sessionId,
+          ),
+          value: forceSessionScrollToBottomRef.current[sessionId],
+        },
+      ]),
+    );
     for (const sessionId of sessionIds) {
       forceSessionScrollToBottomRef.current[sessionId] = true;
     }
+
+    return () => {
+      for (const [sessionId, previousMarker] of previousMarkers) {
+        if (previousMarker.existed && previousMarker.value !== undefined) {
+          forceSessionScrollToBottomRef.current[sessionId] =
+            previousMarker.value;
+        } else {
+          delete forceSessionScrollToBottomRef.current[sessionId];
+        }
+      }
+    };
   }
 
   const {

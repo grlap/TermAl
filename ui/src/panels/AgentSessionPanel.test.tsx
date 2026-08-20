@@ -44,6 +44,7 @@ import {
   estimateConversationMessageHeight,
   getAdjustedVirtualizedScrollTopForHeightChange,
   getScrollContainerBottomGap,
+  isScrollContainerAtPhysicalBottom,
   isScrollContainerNearBottom,
 } from "./conversation-virtualization";
 import type {
@@ -54,6 +55,56 @@ import type {
   Session,
 } from "../types";
 import { RESPONSE_BOARD_MESSAGE_MIME } from "../response-board";
+
+function extractCssBlock(source: string, headerPattern: RegExp) {
+  const match = source.match(headerPattern);
+  if (!match || match.index === undefined) {
+    throw new Error(`Missing CSS block matching ${headerPattern}`);
+  }
+
+  const openingBrace = source.indexOf("{", match.index + match[0].length);
+  if (openingBrace < 0) {
+    throw new Error(`Missing opening brace for CSS block ${headerPattern}`);
+  }
+
+  let depth = 0;
+  let quote: '"' | "'" | null = null;
+  let inComment = false;
+  for (let index = openingBrace; index < source.length; index += 1) {
+    const character = source[index];
+    const nextCharacter = source[index + 1];
+    if (inComment) {
+      if (character === "*" && nextCharacter === "/") {
+        inComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (character === "\\") {
+        index += 1;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === "/" && nextCharacter === "*") {
+      inComment = true;
+      index += 1;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(openingBrace + 1, index);
+      }
+    }
+  }
+
+  throw new Error(`Missing closing brace for CSS block ${headerPattern}`);
+}
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
@@ -1272,35 +1323,50 @@ describe("AgentSessionPanel conversation caching", () => {
       "utf8",
     );
 
-    const composerDeclarations = stylesCss.match(
-      /\.composer\s*\{([^}]*)\}/s,
-    )?.[1];
+    const composerDeclarations = extractCssBlock(
+      stylesCss,
+      /(?:^|\n)\.composer\s*(?=\{)/,
+    );
     expect(composerDeclarations).toMatch(
       /container-name\s*:\s*session-composer\s*;/,
     );
     expect(composerDeclarations).toMatch(/container-type\s*:\s*inline-size\s*;/);
 
-    const narrowComposerStart = stylesCss.indexOf(
-      "@container session-composer (max-width: 46rem)",
+    const narrowComposerRules = extractCssBlock(
+      stylesCss,
+      /@container\s+session-composer\s*\(\s*max-width\s*:\s*46rem\s*\)(?=\s*\{)/,
     );
-    const narrowComposerEnd = stylesCss.indexOf(
-      "@container session-composer (max-width: 20rem)",
-      narrowComposerStart,
+    const narrowComposerRow = extractCssBlock(
+      narrowComposerRules,
+      /(?:^|\n)\s*\.composer-row\s*(?=\{)/,
     );
-    expect(narrowComposerStart).toBeGreaterThanOrEqual(0);
-    expect(narrowComposerEnd).toBeGreaterThan(narrowComposerStart);
-    const narrowComposerRules = stylesCss.slice(
-      narrowComposerStart,
-      narrowComposerEnd,
-    );
-    expect(narrowComposerRules).toContain(".composer-row");
-    expect(narrowComposerRules).toMatch(
+    expect(narrowComposerRow).toMatch(
       /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s*;/,
     );
-    expect(narrowComposerRules).toContain(".composer-actions");
-    expect(narrowComposerRules).toContain("repeat(2, minmax(0, 1fr))");
-    expect(narrowComposerRules).toContain(".composer-delegation-controls");
-    expect(narrowComposerRules).toMatch(/display\s*:\s*contents\s*;/);
+    const narrowComposerActions = extractCssBlock(
+      narrowComposerRules,
+      /(?:^|\n)\s*\.composer-actions\s*(?=\{)/,
+    );
+    expect(narrowComposerActions).toMatch(
+      /grid-template-columns\s*:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)\s*;/,
+    );
+    const narrowDelegationControls = extractCssBlock(
+      narrowComposerRules,
+      /(?:^|\n)\s*\.composer-delegation-controls\s*(?=\{)/,
+    );
+    expect(narrowDelegationControls).toMatch(/display\s*:\s*contents\s*;/);
+
+    const compactComposerRules = extractCssBlock(
+      stylesCss,
+      /@container\s+session-composer\s*\(\s*max-width\s*:\s*20rem\s*\)(?=\s*\{)/,
+    );
+    const compactComposerActions = extractCssBlock(
+      compactComposerRules,
+      /(?:^|\n)\s*\.composer-actions\s*(?=\{)/,
+    );
+    expect(compactComposerActions).toMatch(
+      /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s*;/,
+    );
   });
 
   it("does not splice live-only cards beneath a historical window", async () => {
@@ -4839,5 +4905,24 @@ describe("isScrollContainerNearBottom", () => {
   });
   it("returns true for short content whose gap clamps to 0", () => {
     expect(isScrollContainerNearBottom(node(300, 400, 0))).toBe(true);
+  });
+});
+
+describe("isScrollContainerAtPhysicalBottom", () => {
+  function node(scrollHeight: number, clientHeight: number, scrollTop: number) {
+    return { scrollHeight, clientHeight, scrollTop };
+  }
+
+  it("accepts the reachable fractional bottom tolerance", () => {
+    expect(isScrollContainerAtPhysicalBottom(node(1000, 200, 796.5))).toBe(
+      true,
+    );
+  });
+
+  it("does not treat the wider sticky layout band as physical bottom", () => {
+    expect(isScrollContainerNearBottom(node(1000, 200, 760))).toBe(true);
+    expect(isScrollContainerAtPhysicalBottom(node(1000, 200, 760))).toBe(
+      false,
+    );
   });
 });

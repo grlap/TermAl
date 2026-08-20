@@ -2,6 +2,8 @@
 // lists.
 //
 // What this file owns:
+//   - `SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX` — the smaller tolerance used
+//     when explicit user navigation may hand authority back to tail-follow.
 //   - `SESSION_STICKY_BOTTOM_BAND_PX` — the shared near-bottom geometry
 //     tolerance used by both pane scroll ownership and virtualization.
 //   - `resolveSettledScrollMinimumAttempts` — picks how many
@@ -20,6 +22,7 @@
 //
 // Split out of `ui/src/App.tsx`.
 
+export const SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX = 4;
 export const SESSION_STICKY_BOTTOM_BAND_PX = 72;
 
 export function resolveSettledScrollMinimumAttempts(

@@ -609,6 +609,17 @@ export function placeSessionDropInWorkspaceState(
 ): WorkspaceState {
   if (placement === "tabs") {
     const existing = findSessionTab(workspace, sessionId);
+    const targetPane = workspace.panes.find(
+      (pane) => pane.id === targetPaneId,
+    );
+    const sessionTab = existing?.tab ?? createSessionTab(sessionId);
+    if (
+      !targetPane ||
+      !isAllowedControlPanelPlacement(targetPane, sessionTab, placement)
+    ) {
+      return workspace;
+    }
+
     if (existing) {
       return activatePane(
         moveWorkspaceTabToPane(
@@ -626,7 +637,7 @@ export function placeSessionDropInWorkspaceState(
     return addWorkspaceTabToPane(
       workspace,
       targetPaneId,
-      createSessionTab(sessionId),
+      sessionTab,
       tabIndex,
     );
   }
@@ -1565,19 +1576,18 @@ export function placeExternalTab(
   targetPaneId: string,
   placement: TabDropPlacement,
   tabIndex?: number,
+  transferredTabId?: string,
 ): WorkspaceState {
-  const transferredTab = cloneWorkspaceTab(tab);
+  const transferredTab = cloneWorkspaceTab(tab, transferredTabId);
   const targetPane = workspace.panes.find((pane) => pane.id === targetPaneId);
+  if (!targetPane || !workspace.root) {
+    // A drag/drop gesture names a concrete destination. If that destination
+    // vanished before the reducer ran, refuse the transfer instead of routing
+    // the cloned tab somewhere the user did not choose.
+    return workspace;
+  }
 
   if (placement === "tabs") {
-    if (!targetPane) {
-      return openTabInWorkspaceState(
-        workspace,
-        transferredTab,
-        targetPaneId,
-        tabIndex,
-      );
-    }
     if (
       !isAllowedControlPanelPlacement(targetPane, transferredTab, placement)
     ) {
@@ -1590,15 +1600,6 @@ export function placeExternalTab(
       workspace,
       targetPaneId,
       transferredTab,
-      tabIndex,
-    );
-  }
-
-  if (!targetPane || !workspace.root) {
-    return openTabInWorkspaceState(
-      workspace,
-      transferredTab,
-      targetPaneId,
       tabIndex,
     );
   }
@@ -2821,14 +2822,16 @@ function resolveViewerOpenTarget(
     };
   }
 
-  return {
-    targetPaneId: null,
-    splitAnchorPaneId:
-      preferredPane?.id ??
-      workspace.activePaneId ??
-      workspace.panes[0]?.id ??
-      null,
-  };
+  const fallbackPaneId =
+    preferredPane?.id ??
+    workspace.activePaneId ??
+    workspace.panes[0]?.id ??
+    null;
+  // `allowViewerSplit` gates the optional second lane beside existing content.
+  // When the workspace contains only ambient control surfaces, the first
+  // viewer still needs its own content pane: placing it in the control dock
+  // would violate the stable pane-role boundary and cover the control panel.
+  return { targetPaneId: null, splitAnchorPaneId: fallbackPaneId };
 }
 
 function workspaceWithRememberedViewerTarget(
@@ -3270,10 +3273,13 @@ function findDiffPreviewTab(
   return null;
 }
 
-function cloneWorkspaceTab(tab: WorkspaceTab): WorkspaceTab {
+function cloneWorkspaceTab(
+  tab: WorkspaceTab,
+  transferredTabId: string = crypto.randomUUID(),
+): WorkspaceTab {
   return {
     ...tab,
-    id: crypto.randomUUID(),
+    id: transferredTabId,
   };
 }
 

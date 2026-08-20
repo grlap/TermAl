@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   hasRoomForWorkspaceViewerSplit,
@@ -6,6 +6,7 @@ import {
 } from "./workspace-viewer-layout";
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   document.body.replaceChildren();
   document.documentElement.style.removeProperty(
     "--workspace-viewer-pane-min-width",
@@ -74,5 +75,11 @@ describe("workspace viewer layout", () => {
 
   it("refuses the split when layout geometry is not measurable", () => {
     expect(workspacePaneHasRoomForViewerSplit("missing-pane")).toBe(false);
+  });
+
+  it("refuses the split when DOM geometry is unavailable", () => {
+    vi.stubGlobal("document", undefined);
+
+    expect(workspacePaneHasRoomForViewerSplit("pane-a")).toBe(false);
   });
 });

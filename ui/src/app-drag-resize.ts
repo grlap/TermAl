@@ -1,5 +1,4 @@
 import {
-  startTransition,
   useCallback,
   useEffect,
   useRef,
@@ -58,7 +57,17 @@ type UseAppDragResizeArgs = {
       sessionIds?: string[];
       tabs?: WorkspaceTab[];
     },
-  ) => void;
+  ) => (() => void) | void;
+};
+
+type WorkspaceDropExpectation = {
+  allowsControlPanelSideOnly?: boolean;
+  placement: TabDropPlacement;
+  sourcePaneId?: string;
+  tabId?: string;
+  sessionId?: string;
+  targetPaneId: string;
+  mayActivateExistingPane?: boolean;
 };
 
 type UseAppDragResizeResult = {
@@ -85,6 +94,67 @@ type UseAppDragResizeResult = {
     dataTransfer?: DataTransfer | null,
   ) => void;
 };
+
+function resolveControlPanelSideAfterDrop(
+  tab: WorkspaceTab,
+  placement: TabDropPlacement,
+  currentSide: ControlPanelSide,
+): ControlPanelSide {
+  return tab.kind === "controlPanel" &&
+    (placement === "left" || placement === "right")
+    ? placement
+    : currentSide;
+}
+
+function workspaceContainsCommittedDrop(
+  workspace: WorkspaceState,
+  expectation: WorkspaceDropExpectation,
+) {
+  // Accepting placement reducers activate the inserted/moved tab and pane,
+  // and control-panel docking must preserve that activation. Cross-window
+  // acknowledgement relies on this contract so mere tab presence cannot be
+  // mistaken for the current drop when equivalent content already exists.
+  for (const pane of workspace.panes) {
+    const tab = pane.tabs.find((candidate) =>
+      expectation.sessionId
+        ? candidate.kind === "session" &&
+          candidate.sessionId === expectation.sessionId
+        : candidate.id === expectation.tabId,
+    );
+    if (
+      !tab ||
+      workspace.activePaneId !== pane.id ||
+      pane.activeTabId !== tab.id
+    ) {
+      continue;
+    }
+
+    if (expectation.placement === "tabs") {
+      return pane.id === expectation.targetPaneId;
+    }
+    if (expectation.mayActivateExistingPane) {
+      return true;
+    }
+    if (expectation.sourcePaneId) {
+      return pane.id !== expectation.sourcePaneId;
+    }
+    return pane.id !== expectation.targetPaneId;
+  }
+
+  return false;
+}
+
+function workspaceContainsTab(
+  workspace: WorkspaceState,
+  tabId: string | undefined,
+) {
+  if (!tabId) {
+    return false;
+  }
+  return workspace.panes.some((pane) =>
+    pane.tabs.some((tab) => tab.id === tabId),
+  );
+}
 
 export function useAppDragResize({
   windowId,
@@ -116,6 +186,8 @@ export function useAppDragResize({
   const dragChannelRef = useRef<BroadcastChannel | null>(null);
   const draggedTabRef = useRef<WorkspaceTabDrag | null>(null);
   const launcherDraggedTabRef = useRef<WorkspaceTabDrag | null>(null);
+  const workspaceRef = useRef(workspace);
+  workspaceRef.current = workspace;
   const applyControlPanelLayoutRef = useRef(applyControlPanelLayout);
   applyControlPanelLayoutRef.current = applyControlPanelLayout;
 
@@ -243,6 +315,74 @@ export function useAppDragResize({
     setLauncherDraggedTab(null);
   }, []);
 
+  const commitWorkspaceDrop = useCallback(
+    (
+      placeWorkspace: (current: WorkspaceState) => WorkspaceState,
+      options: {
+        sessionIds?: string[];
+        tabs?: WorkspaceTab[];
+      },
+      expectation: WorkspaceDropExpectation,
+      nextControlPanelSide: ControlPanelSide = controlPanelSide,
+    ) => {
+      const previewWorkspace = placeWorkspace(workspace);
+      const changesControlPanelSide =
+        nextControlPanelSide !== controlPanelSide;
+      const allowsControlPanelSideOnly =
+        expectation.allowsControlPanelSideOnly === true &&
+        changesControlPanelSide;
+      if (previewWorkspace === workspace && !allowsControlPanelSideOnly) {
+        return false;
+      }
+
+      // The preview rejects known no-ops before scroll restoration is armed.
+      // The synchronous functional update then safely rebases the accepted
+      // drop over queued workspace state. After the commit, verify the actual
+      // pane/tab placement so a rebase-time refusal cannot acknowledge a
+      // cross-window drop or leave temporary restoration markers behind.
+      const transaction: { rollbackScrollMarkers?: () => void } = {};
+      flushSync(() => {
+        transaction.rollbackScrollMarkers =
+          markSessionTabsForBottomAfterWorkspaceRebuild(workspace, options) ??
+          undefined;
+        setWorkspace((current) => {
+          const placedWorkspace = placeWorkspace(current);
+          const commitsExistingControlPanelSide =
+            allowsControlPanelSideOnly &&
+            workspaceContainsTab(current, expectation.tabId);
+          const committedSide =
+            placedWorkspace !== current || commitsExistingControlPanelSide
+              ? nextControlPanelSide
+              : controlPanelSide;
+          return applyControlPanelLayout(placedWorkspace, committedSide);
+        });
+      });
+      const commitsExistingControlPanelSide =
+        allowsControlPanelSideOnly &&
+        workspaceContainsTab(workspaceRef.current, expectation.tabId);
+      const didCommit =
+        workspaceContainsCommittedDrop(workspaceRef.current, expectation) ||
+        commitsExistingControlPanelSide;
+      if (!didCommit) {
+        transaction.rollbackScrollMarkers?.();
+      } else if (changesControlPanelSide) {
+        // Only publish the dock-side preference after the rebased workspace
+        // contains the transferred tab. A local control-panel edge gesture is
+        // the sole side-only commit because it moves the existing dock.
+        flushSync(() => setControlPanelSide(nextControlPanelSide));
+      }
+      return didCommit;
+    },
+    [
+      applyControlPanelLayout,
+      controlPanelSide,
+      markSessionTabsForBottomAfterWorkspaceRebuild,
+      setControlPanelSide,
+      setWorkspace,
+      workspace,
+    ],
+  );
+
   const handleTabDrop = useCallback(
     (
       targetPaneId: string,
@@ -252,21 +392,23 @@ export function useAppDragResize({
     ) => {
       const droppedSession = readSessionDragData(dataTransfer ?? null);
       if (droppedSession) {
-        markSessionTabsForBottomAfterWorkspaceRebuild(workspace, {
-          sessionIds: [droppedSession.sessionId],
-        });
-        startTransition(() => {
-          setWorkspace((current) => {
-            const nextWorkspace = placeSessionDropInWorkspaceState(
+        commitWorkspaceDrop(
+          (current) =>
+            placeSessionDropInWorkspaceState(
               current,
               droppedSession.sessionId,
               targetPaneId,
               placement,
               tabIndex,
-            );
-            return applyControlPanelLayout(nextWorkspace, controlPanelSide);
-          });
-        });
+            ),
+          { sessionIds: [droppedSession.sessionId] },
+          {
+            placement,
+            sessionId: droppedSession.sessionId,
+            targetPaneId,
+            mayActivateExistingPane: placement !== "tabs",
+          },
+        );
         return;
       }
 
@@ -297,57 +439,60 @@ export function useAppDragResize({
 
       if (currentDraggedTab) {
         const drop = currentDraggedTab;
-        markSessionTabsForBottomAfterWorkspaceRebuild(workspace, {
-          tabs: [drop.tab],
-        });
         draggedTabRef.current = null;
         setDraggedTab(null);
-        const nextControlPanelSide =
-          drop.tab.kind === "controlPanel" &&
-          (placement === "left" || placement === "right")
-            ? placement
-            : controlPanelSide;
-        if (nextControlPanelSide !== controlPanelSide) {
-          setControlPanelSide(nextControlPanelSide);
-        }
-        startTransition(() => {
-          setWorkspace((current) =>
-            applyControlPanelLayout(
-              placeDraggedTab(
-                current,
-                drop.sourcePaneId,
-                drop.tabId,
-                targetPaneId,
-                placement,
-                tabIndex,
-              ),
-              nextControlPanelSide,
+        const nextControlPanelSide = resolveControlPanelSideAfterDrop(
+          drop.tab,
+          placement,
+          controlPanelSide,
+        );
+        commitWorkspaceDrop(
+          (current) =>
+            placeDraggedTab(
+              current,
+              drop.sourcePaneId,
+              drop.tabId,
+              targetPaneId,
+              placement,
+              tabIndex,
             ),
-          );
-        });
+          { tabs: [drop.tab] },
+          {
+            allowsControlPanelSideOnly:
+              drop.tab.kind === "controlPanel" &&
+              (placement === "left" || placement === "right"),
+            placement,
+            sourcePaneId: drop.sourcePaneId,
+            tabId: drop.tabId,
+            targetPaneId,
+          },
+          nextControlPanelSide,
+        );
         return;
       }
 
       if (currentLauncherDraggedTab) {
         const drop = currentLauncherDraggedTab;
-        markSessionTabsForBottomAfterWorkspaceRebuild(workspace, {
-          tabs: [drop.tab],
-        });
+        const transferredTabId = crypto.randomUUID();
         launcherDraggedTabRef.current = null;
         setLauncherDraggedTab(null);
-        flushSync(() => {
-          setWorkspace((current) =>
-            applyControlPanelLayout(
-              placeExternalTab(
-                current,
-                drop.tab,
-                targetPaneId,
-                placement,
-                tabIndex,
-              ),
+        commitWorkspaceDrop(
+          (current) =>
+            placeExternalTab(
+              current,
+              drop.tab,
+              targetPaneId,
+              placement,
+              tabIndex,
+              transferredTabId,
             ),
-          );
-        });
+          { tabs: [drop.tab] },
+          {
+            placement,
+            tabId: transferredTabId,
+            targetPaneId,
+          },
+        );
         return;
       }
 
@@ -356,42 +501,43 @@ export function useAppDragResize({
       }
 
       const drop = currentExternalDraggedTab;
-      markSessionTabsForBottomAfterWorkspaceRebuild(workspace, {
-        tabs: [drop.tab],
-      });
+      const transferredTabId = crypto.randomUUID();
       setExternalDraggedTab((current) =>
         current?.dragId === drop.dragId ? null : current,
       );
-      const nextControlPanelSide =
-        drop.tab.kind === "controlPanel" &&
-        (placement === "left" || placement === "right")
-          ? placement
-          : controlPanelSide;
-      if (nextControlPanelSide !== controlPanelSide) {
-        setControlPanelSide(nextControlPanelSide);
-      }
-      flushSync(() => {
-        setWorkspace((current) =>
-          applyControlPanelLayout(
-            placeExternalTab(
-              current,
-              drop.tab,
-              targetPaneId,
-              placement,
-              tabIndex,
-            ),
-            nextControlPanelSide,
+      const nextControlPanelSide = resolveControlPanelSideAfterDrop(
+        drop.tab,
+        placement,
+        controlPanelSide,
+      );
+      const didCommit = commitWorkspaceDrop(
+        (current) =>
+          placeExternalTab(
+            current,
+            drop.tab,
+            targetPaneId,
+            placement,
+            tabIndex,
+            transferredTabId,
           ),
-        );
-      });
-      broadcastTabDragMessage({
-        type: "drop-commit",
-        dragId: drop.dragId,
-        sourceWindowId: drop.sourceWindowId,
-        sourcePaneId: drop.sourcePaneId,
-        tabId: drop.tabId,
-        targetWindowId: windowId,
-      });
+        { tabs: [drop.tab] },
+        {
+          placement,
+          tabId: transferredTabId,
+          targetPaneId,
+        },
+        nextControlPanelSide,
+      );
+      if (didCommit) {
+        broadcastTabDragMessage({
+          type: "drop-commit",
+          dragId: drop.dragId,
+          sourceWindowId: drop.sourceWindowId,
+          sourcePaneId: drop.sourcePaneId,
+          tabId: drop.tabId,
+          targetWindowId: windowId,
+        });
+      }
       broadcastTabDragMessage({
         type: "drag-end",
         dragId: drop.dragId,
@@ -399,15 +545,12 @@ export function useAppDragResize({
       });
     },
     [
-      applyControlPanelLayout,
       broadcastTabDragMessage,
+      commitWorkspaceDrop,
       controlPanelSide,
       draggedTab,
       externalDraggedTab,
       launcherDraggedTab,
-      markSessionTabsForBottomAfterWorkspaceRebuild,
-      setControlPanelSide,
-      setWorkspace,
       windowId,
       workspace,
     ],

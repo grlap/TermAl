@@ -111,6 +111,7 @@ type VirtualizedHarnessOptions = {
     scrollTop: number,
   ) => { height: number; top: number } | null;
   slotHeight?: (message: Message) => number;
+  tailFollowIntent?: boolean;
   virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
 };
 
@@ -137,6 +138,7 @@ function renderVirtualizedHarness({
   scrollHeight,
   slotRect,
   slotHeight = () => 80,
+  tailFollowIntent = false,
   virtualizerHandleRef,
 }: VirtualizedHarnessOptions) {
   const OriginalResizeObserver = window.ResizeObserver;
@@ -294,6 +296,7 @@ function renderVirtualizedHarness({
       messageStartIndex={currentMessageStartIndex}
       messages={currentMessages}
       scrollContainerRef={scrollContainerRef}
+      tailFollowIntent={tailFollowIntent}
       onApprovalDecision={() => {}}
       onUserInputSubmit={() => {}}
       onMcpElicitationSubmit={() => {}}
@@ -368,6 +371,50 @@ async function advanceIdleMountedRangeCompaction() {
 }
 
 describe("VirtualizedConversationMessageList foundation", () => {
+  it("keeps an explicit user scroll detached inside the sticky layout band", async () => {
+    const messages = makeTextMessages(80);
+    let scrollHeight = 5_000;
+    const harness = renderVirtualizedHarness({
+      clientHeight: 500,
+      initialScrollTop: 4_460,
+      messages,
+      scrollHeight: () => scrollHeight,
+      tailFollowIntent: true,
+    });
+
+    try {
+      act(() => {
+        harness.setScrollTop(4_460);
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "incremental",
+          scrollSource: "user",
+        });
+      });
+      expect(harness.scrollTop).toBe(4_460);
+
+      scrollHeight = 5_200;
+      act(() => {
+        harness.rerenderWithMessages([
+          ...messages,
+          {
+            author: "assistant",
+            id: "message-81",
+            text: "Message 81",
+            timestamp: "10:81",
+            type: "text",
+          },
+        ]);
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(harness.scrollTop).toBe(4_460);
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("only scans mounted pages that have a reusable measurement", () => {
     const harness = renderVirtualizedHarness({
       messages: makeTextMessages(8),

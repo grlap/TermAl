@@ -28,7 +28,7 @@ export function hasRoomForWorkspaceViewerSplit(
 
 export function workspacePaneHasRoomForViewerSplit(paneId: string) {
   if (typeof document === "undefined") {
-    return true;
+    return false;
   }
 
   const pane = Array.from(

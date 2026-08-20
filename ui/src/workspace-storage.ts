@@ -126,8 +126,10 @@ export function parseStoredWorkspaceLayout(
   }
 
   try {
-    const parsed = normalizeStoredWorkspaceTabVisitHistories(
-      normalizeStoredWorkspaceLayoutPreferences(JSON.parse(raw)),
+    const parsed = normalizeStoredWorkspaceRoutingHints(
+      normalizeStoredWorkspaceTabVisitHistories(
+        normalizeStoredWorkspaceLayoutPreferences(JSON.parse(raw)),
+      ),
     );
     if (!isStoredWorkspaceLayout(parsed)) {
       return null;
@@ -142,6 +144,41 @@ export function parseStoredWorkspaceLayout(
   } catch {
     return null;
   }
+}
+
+function normalizeStoredWorkspaceRoutingHints(value: unknown): unknown {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.workspace) ||
+    !Array.isArray(value.workspace.panes)
+  ) {
+    return value;
+  }
+
+  const paneIds = new Set(
+    value.workspace.panes.flatMap((pane) =>
+      isRecord(pane) && isString(pane.id) ? [pane.id] : [],
+    ),
+  );
+  const workspace = value.workspace;
+  let normalizedWorkspace: Record<string, unknown> | null = null;
+  for (const key of ["lastContentPaneId", "lastViewerPaneId"] as const) {
+    const paneId = workspace[key];
+    if (
+      paneId === undefined ||
+      paneId === null ||
+      (typeof paneId === "string" && paneIds.has(paneId))
+    ) {
+      continue;
+    }
+
+    normalizedWorkspace ??= { ...workspace };
+    normalizedWorkspace[key] = null;
+  }
+
+  return normalizedWorkspace
+    ? { ...value, workspace: normalizedWorkspace }
+    : value;
 }
 
 function normalizeStoredWorkspaceTabVisitHistories(value: unknown): unknown {

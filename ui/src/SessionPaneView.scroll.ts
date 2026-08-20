@@ -46,6 +46,7 @@ import {
   releaseManualLiveTailDetachCompensationOutsideViewport,
 } from "./session-live-tail-presentation";
 import {
+  SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX,
   SESSION_STICKY_BOTTOM_BAND_PX,
   resolveSettledScrollMinimumAttempts,
 } from "./scroll-position";
@@ -78,7 +79,6 @@ export {
 
 const SESSION_PAGE_SCROLL_VIEWPORT_FACTOR = 0.85;
 const SESSION_PAGE_SCROLL_MINIMUM_PX = 160;
-const SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX = 4;
 const ACTIVE_LIVE_TAIL_SELECTOR =
   ".session-conversation-page.is-active .conversation-live-tail";
 const SESSION_BOTTOM_FOLLOW_STABLE_MS =

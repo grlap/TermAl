@@ -163,6 +163,109 @@ describe("workspace storage", () => {
     expect(getStoredWorkspaceLayout(workspaceViewId)).toEqual(layout);
   });
 
+  it("sanitizes stale advisory pane-routing ids without discarding the layout", () => {
+    const parsed = parseStoredWorkspaceLayout(
+      JSON.stringify({
+        controlPanelSide: "left",
+        workspace: {
+          root: { type: "pane", paneId: "pane-session" },
+          panes: [
+            {
+              id: "pane-session",
+              tabs: [
+                {
+                  id: "tab-session",
+                  kind: "session",
+                  sessionId: "session-1",
+                },
+              ],
+              activeTabId: "tab-session",
+              activeSessionId: "session-1",
+              viewMode: "session",
+              lastSessionViewMode: "session",
+              sourcePath: null,
+            },
+          ],
+          activePaneId: "pane-session",
+          lastContentPaneId: "pane-closed",
+          lastViewerPaneId: "pane-closed",
+        },
+      }),
+    );
+
+    expect(parsed?.workspace.lastContentPaneId).toBeNull();
+    expect(parsed?.workspace.lastViewerPaneId).toBeNull();
+    expect(parsed?.workspace.panes).toHaveLength(1);
+  });
+
+  it("sanitizes malformed advisory pane-routing hints without discarding the layout", () => {
+    const parsed = parseStoredWorkspaceLayout(
+      JSON.stringify({
+        controlPanelSide: "left",
+        workspace: {
+          root: { type: "pane", paneId: "pane-session" },
+          panes: [
+            {
+              id: "pane-session",
+              tabs: [
+                {
+                  id: "tab-session",
+                  kind: "session",
+                  sessionId: "session-1",
+                },
+              ],
+              activeTabId: "tab-session",
+              activeSessionId: "session-1",
+              viewMode: "session",
+              lastSessionViewMode: "session",
+              sourcePath: null,
+            },
+          ],
+          activePaneId: "pane-session",
+          lastContentPaneId: 7,
+          lastViewerPaneId: { paneId: "pane-session" },
+        },
+      }),
+    );
+
+    expect(parsed?.workspace.lastContentPaneId).toBeNull();
+    expect(parsed?.workspace.lastViewerPaneId).toBeNull();
+    expect(parsed?.workspace.panes).toHaveLength(1);
+  });
+
+  it("accepts layouts that predate advisory pane-routing ids", () => {
+    const parsed = parseStoredWorkspaceLayout(
+      JSON.stringify({
+        controlPanelSide: "left",
+        workspace: {
+          root: { type: "pane", paneId: "pane-session" },
+          panes: [
+            {
+              id: "pane-session",
+              tabs: [
+                {
+                  id: "tab-session",
+                  kind: "session",
+                  sessionId: "session-1",
+                },
+              ],
+              activeTabId: "tab-session",
+              activeSessionId: "session-1",
+              viewMode: "session",
+              lastSessionViewMode: "session",
+              sourcePath: null,
+            },
+          ],
+          activePaneId: "pane-session",
+        },
+      }),
+    );
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.workspace.lastContentPaneId).toBeUndefined();
+    expect(parsed?.workspace.lastViewerPaneId).toBeUndefined();
+  });
+
   it("strips full Markdown diff document content before persisting layout", () => {
     const layout: StoredWorkspaceLayout = {
       controlPanelSide: "right",
