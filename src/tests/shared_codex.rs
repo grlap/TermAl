@@ -1384,8 +1384,8 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
         });
         inner.sessions[index].session.status = SessionStatus::Active;
     }
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    state.persist_tx = mpsc::channel().0;
 
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let mut writer = Vec::new();
@@ -1736,8 +1736,8 @@ fn set_external_session_id_if_runtime_matches_reports_persist_failure() {
             .expect("Codex session should exist");
         inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
     }
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    state.persist_tx = mpsc::channel().0;
 
     let result = state.set_external_session_id_if_runtime_matches(
         &session_id,
@@ -1775,8 +1775,8 @@ fn record_codex_runtime_config_if_runtime_matches_reports_persist_failure() {
             .expect("Codex session should exist");
         inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
     }
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    state.persist_tx = mpsc::channel().0;
 
     let result = state.record_codex_runtime_config_if_runtime_matches(
         &session_id,
@@ -1827,8 +1827,8 @@ fn shared_codex_start_turn_persist_failure_does_not_tear_down_runtime() {
         });
         inner.sessions[index].session.status = SessionStatus::Active;
     }
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    state.persist_tx = mpsc::channel().0;
 
     handle_shared_codex_start_turn(
         &mut Vec::new(),

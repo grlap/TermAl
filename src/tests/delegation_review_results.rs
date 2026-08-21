@@ -787,8 +787,8 @@ fn durable_review_recovery_propagates_primary_state_persistence_failures() {
     ));
     fs::create_dir_all(&failing_persistence_path)
         .expect("failing persistence directory should exist");
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    state.persist_tx = mpsc::channel().0;
 
     let error = match state.get_delegation_result(&parent_session_id, &delegation_id) {
         Ok(_) => panic!("a genuine primary-state projection failure must block lifecycle refresh"),

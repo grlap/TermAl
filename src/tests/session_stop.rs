@@ -588,8 +588,8 @@ fn stop_session_clears_active_turn_file_tracking_when_persist_fails() {
     }
     seed_active_turn_file_change(&state, &session_id);
 
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    state.persist_tx = mpsc::channel().0;
 
     let error = match state.stop_session(&session_id) {
         Ok(_) => panic!("stop_session should report persistence failure"),

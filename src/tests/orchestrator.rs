@@ -499,10 +499,10 @@ fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
     state
         .begin_orchestrator_stop(&instance_id)
         .expect("stop should be marked in progress");
+    // Stop and join the worker before installing the failing path so the
+    // error propagates through the synchronous post-shutdown fallback.
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    // Force synchronous persistence so the error propagates instead of
-    // being swallowed by the background persist thread.
-    state.persist_tx = mpsc::channel().0;
 
     let error = state
         .stop_session_with_options(
@@ -683,10 +683,10 @@ fn aborted_stop_resume_does_not_redispatch_child_after_child_stop_persist_fails(
     state
         .begin_orchestrator_stop(&instance_id)
         .expect("stop should be marked in progress");
+    // Stop and join the worker before installing the failing path so the
+    // error propagates through the synchronous post-shutdown fallback.
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    // Force synchronous persistence so the error propagates instead of
-    // being swallowed by the background persist thread.
-    state.persist_tx = mpsc::channel().0;
 
     let error = state
         .stop_session_with_options(
@@ -797,10 +797,10 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
-    // Restart assertions read the SQLite file immediately; keep all setup
-    // commits on the synchronous fallback instead of racing the background
-    // persist worker.
-    state.persist_tx = mpsc::channel().0;
+    // Restart assertions read SQLite immediately. Join the boot worker first;
+    // replacing only its sender would leave the captured boot delta alive and
+    // able to overwrite later synchronous snapshots.
+    state.shutdown_persist_blocking();
     let project_id = create_test_project(&state, &project_root, "Persist Failure Restart");
     let template = state
         .create_orchestrator_template(sample_orchestrator_template_draft())
@@ -865,10 +865,10 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
     state
         .begin_orchestrator_stop(&instance_id)
         .expect("stop should be marked in progress");
+    // Stop and join the worker before installing the failing path so the
+    // error propagates through the synchronous post-shutdown fallback.
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    // Force synchronous persistence so the error propagates instead of
-    // being swallowed by the background persist thread.
-    state.persist_tx = mpsc::channel().0;
 
     let error = state
         .stop_session_with_options(
@@ -961,10 +961,10 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
-    // Restart assertions read the SQLite file immediately; keep all setup
-    // commits on the synchronous fallback instead of racing the background
-    // persist worker.
-    state.persist_tx = mpsc::channel().0;
+    // Restart assertions read SQLite immediately. Join the boot worker first;
+    // replacing only its sender would leave the captured boot delta alive and
+    // able to overwrite later synchronous snapshots.
+    state.shutdown_persist_blocking();
     let project_id = create_test_project(&state, &project_root, "Persist Failure Restart Queue");
     let template = state
         .create_orchestrator_template(sample_orchestrator_template_draft())
@@ -1019,10 +1019,10 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
     state
         .begin_orchestrator_stop(&instance_id)
         .expect("stop should be marked in progress");
+    // Stop and join the worker before installing the failing path so the
+    // error propagates through the synchronous post-shutdown fallback.
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    // Force synchronous persistence so the error propagates instead of
-    // being swallowed by the background persist thread.
-    state.persist_tx = mpsc::channel().0;
 
     let error = state
         .stop_session_with_options(
@@ -1170,8 +1170,8 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
     state
         .begin_orchestrator_stop(&instance_id)
         .expect("stop should be marked in progress");
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    state.persist_tx = mpsc::channel().0;
 
     let error = state
         .stop_session_with_options(
@@ -1385,8 +1385,8 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
         state.commit_locked(&mut inner).unwrap();
     }
 
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    state.persist_tx = mpsc::channel().0;
     let stop_error = state
         .stop_session_with_options(&session_id, StopSessionOptions::default())
         .err()
@@ -1565,8 +1565,8 @@ fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stal
         state.commit_locked(&mut inner).unwrap();
     }
 
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    state.persist_tx = mpsc::channel().0;
     let stop_error = state
         .stop_session_with_options(&session_id, StopSessionOptions::default())
         .err()
@@ -2051,8 +2051,8 @@ fn begin_orchestrator_stop_rolls_back_stop_in_progress_after_persist_failure() {
         .expect("orchestrator instance should be created")
         .orchestrator;
     let instance_id = orchestrator.id.clone();
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    state.persist_tx = mpsc::channel().0;
 
     let error = state
         .begin_orchestrator_stop(&instance_id)
@@ -2118,15 +2118,16 @@ fn load_state_preserves_pending_transitions_when_stop_in_progress_has_no_stopped
     let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
-    let mut state = AppState::new_with_paths(
+    let state = AppState::new_with_paths(
         normalized_root.clone(),
         persistence_path.clone(),
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
-    // Force synchronous persistence so file reads in this test see the
-    // written data immediately.
-    state.persist_tx = mpsc::channel().0;
+    // Join the boot worker before seeding restart state. Replacing only the
+    // sender leaves its captured boot delta alive and able to overwrite the
+    // later synchronous snapshot.
+    state.shutdown_persist_blocking();
     let project_id = create_test_project(&state, &project_root, "Restart Recovery Project");
     let template = state
         .create_orchestrator_template(sample_orchestrator_template_draft())
@@ -2257,15 +2258,16 @@ fn load_state_recovers_completed_stop_when_active_children_finished_during_stop(
     let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
-    let mut state = AppState::new_with_paths(
+    let state = AppState::new_with_paths(
         normalized_root.clone(),
         persistence_path.clone(),
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
-    // Force synchronous persistence so file reads in this test see the
-    // written data immediately.
-    state.persist_tx = mpsc::channel().0;
+    // Join the boot worker before seeding restart state. Replacing only the
+    // sender leaves its captured boot delta alive and able to overwrite the
+    // later synchronous snapshot.
+    state.shutdown_persist_blocking();
     let project_id = create_test_project(&state, &project_root, "Restart Recovery Project");
     let template = state
         .create_orchestrator_template(sample_orchestrator_template_draft())
@@ -2428,13 +2430,15 @@ fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() 
     let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
-    let mut state = AppState::new_with_paths(
+    let state = AppState::new_with_paths(
         normalized_root.clone(),
         persistence_path.clone(),
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
-    state.persist_tx = mpsc::channel().0;
+    // Join the boot worker before seeding restart state so no captured boot
+    // delta can overwrite the synchronous recovery fixture.
+    state.shutdown_persist_blocking();
     let project_id = create_test_project(&state, &project_root, "Recovery Queue Project");
     let template = state
         .create_orchestrator_template(sample_orchestrator_template_draft())
@@ -2599,13 +2603,15 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
     let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
-    let mut state = AppState::new_with_paths(
+    let state = AppState::new_with_paths(
         normalized_root.clone(),
         persistence_path.clone(),
         orchestrator_templates_path.clone(),
     )
     .expect("state should initialize");
-    state.persist_tx = mpsc::channel().0;
+    // Join the boot worker before seeding restart state so no captured boot
+    // delta can overwrite the synchronous recovery fixture.
+    state.shutdown_persist_blocking();
     let project_id = create_test_project(&state, &project_root, "Completed Recovery Project");
     let template = state
         .create_orchestrator_template(sample_orchestrator_template_draft())

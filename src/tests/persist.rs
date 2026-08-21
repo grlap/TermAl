@@ -21,6 +21,38 @@
 
 use super::*;
 
+// Disconnecting only `persist_tx` does not stop the worker created by
+// `AppState::new_with_paths`: the worker retains its receiver and may write a
+// captured boot delta after the test has switched to synchronous persistence.
+// Keep this source lock so persistence tests use the production shutdown fence
+// (`shutdown_persist_blocking`) instead of creating an orphan writer.
+#[test]
+fn tests_must_join_persist_worker_instead_of_disconnecting_its_sender() {
+    fn assert_source_tree_has_no_orphan_worker_pattern(root: &FsPath, forbidden: &str) {
+        for entry in fs::read_dir(root).expect("test source directory should be readable") {
+            let entry = entry.expect("test source entry should be readable");
+            let path = entry.path();
+            if path.is_dir() {
+                assert_source_tree_has_no_orphan_worker_pattern(&path, forbidden);
+                continue;
+            }
+            if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+                continue;
+            }
+            let source = fs::read_to_string(&path).expect("Rust test source should be readable");
+            assert!(
+                !source.contains(forbidden),
+                "{} disconnects persist_tx without joining its existing worker; call shutdown_persist_blocking() instead",
+                path.display()
+            );
+        }
+    }
+
+    let tests_root = FsPath::new(env!("CARGO_MANIFEST_DIR")).join("src/tests");
+    let forbidden = ["persist_tx", " = mpsc::channel().0"].concat();
+    assert_source_tree_has_no_orphan_worker_pattern(&tests_root, &forbidden);
+}
+
 struct PersistTestRoot(PathBuf);
 
 impl PersistTestRoot {

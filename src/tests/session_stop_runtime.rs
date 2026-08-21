@@ -1137,8 +1137,8 @@ fn fail_turn_if_runtime_matches_publishes_error_state_when_persist_fails() {
         inner.sessions[index].session.preview = "Streaming reply...".to_owned();
     }
 
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    state.persist_tx = mpsc::channel().0;
 
     let baseline_revision = state.full_snapshot().revision;
     let mut state_events = state.subscribe_events();
@@ -1207,8 +1207,8 @@ fn runtime_exit_clears_active_turn_file_tracking_when_persist_fails() {
     }
     seed_runtime_exit_active_turn_file_change(&state, &session_id);
 
+    state.shutdown_persist_blocking();
     state.persistence_path = Arc::new(failing_persistence_path.clone());
-    state.persist_tx = mpsc::channel().0;
 
     let error = state
         .handle_runtime_exit_if_matches(&session_id, &runtime_token, Some("runtime crashed"))
