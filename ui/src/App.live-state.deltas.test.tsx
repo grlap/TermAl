@@ -472,11 +472,11 @@ describe("App live state - delta-gap core", () => {
         });
 
         // Three deltas still coalesce into one broad-render frame. The eager
-        // active-session slice commits once as well and now schedules its own
-        // smooth live-tail follow frame instead of synchronously snapping on
-        // every text delta.
-        expect(requestAnimationFrameMock).toHaveBeenCalledTimes(2);
-        expect(pendingFrames.size).toBe(2);
+        // active-session slice commits immediately, while attached live-tail
+        // geometry is corrected in layout before paint rather than scheduling
+        // a second animation frame that would expose the displaced tail.
+        expect(requestAnimationFrameMock).toHaveBeenCalledTimes(1);
+        expect(pendingFrames.size).toBe(1);
         expect(screen.getAllByText("Live output 4").length).toBeGreaterThan(0);
 
         await act(async () => {

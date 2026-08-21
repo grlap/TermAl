@@ -628,7 +628,7 @@ describe("session pane historical-window tail state", () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  it("coalesces live commits, survives status changes, and guarantees convergence", () => {
+  it("repins attached live growth before paint and leaves detached readers alone", () => {
     let nextAnimationFrameId = 1;
     const animationFrames = new Map<number, FrameRequestCallback>();
     const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
@@ -644,6 +644,15 @@ describe("session pane historical-window tail state", () => {
     );
     let scrollHeight = 1_000;
     const scrollNode = document.createElement("section");
+    const conversationPage = document.createElement("div");
+    conversationPage.className = "session-conversation-page is-active";
+    const transcriptCard = document.createElement("article");
+    const liveTail = document.createElement("div");
+    liveTail.className = "conversation-live-tail";
+    liveTail.setAttribute("data-tail-follow", "attached");
+    conversationPage.append(transcriptCard, liveTail);
+    scrollNode.append(conversationPage);
+    let liveTailContentTop = 900;
     Object.defineProperties(scrollNode, {
       clientHeight: { configurable: true, value: 200 },
       scrollHeight: { configurable: true, get: () => scrollHeight },
@@ -660,6 +669,20 @@ describe("session pane historical-window tail state", () => {
     Object.defineProperty(scrollNode, "scrollTo", {
       configurable: true,
       value: scrollTo as HTMLElement["scrollTo"],
+    });
+    vi.spyOn(liveTail, "getBoundingClientRect").mockImplementation(() => {
+      const top = liveTailContentTop - scrollNode.scrollTop;
+      return {
+        bottom: top + 60,
+        height: 60,
+        left: 0,
+        right: 600,
+        top,
+        width: 600,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      };
     });
     const scrollWrites: CustomEvent[] = [];
     scrollNode.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, (event) => {
@@ -728,24 +751,13 @@ describe("session pane historical-window tail state", () => {
       paneActive: true,
       waiting: true,
     });
-    let setupFrameTimestamp = 0;
-    let setupFrameCount = 0;
-    while (animationFrames.size > 0 && setupFrameCount < 10) {
-      const setupFrame = animationFrames.entries().next().value;
-      if (!setupFrame) {
-        break;
-      }
-      animationFrames.delete(setupFrame[0]);
-      setupFrameTimestamp += 1000 / 60;
-      act(() => setupFrame[1](setupFrameTimestamp));
-      setupFrameCount += 1;
-    }
-    expect(setupFrameCount).toBeLessThan(10);
     animationFrames.clear();
     requestAnimationFrame.mockClear();
     scrollTo.mockClear();
 
+    const firstTailTop = liveTail.getBoundingClientRect().top;
     scrollHeight = 1_120;
+    liveTailContentTop += 120;
     hook.rerender({
       currentSession: {
         ...activeSession,
@@ -757,15 +769,17 @@ describe("session pane historical-window tail state", () => {
       waiting: true,
     });
 
-    expect(scrollNode.scrollTop).toBe(800);
-    expect(scrollTo).not.toHaveBeenCalled();
-    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
-    expect(animationFrames.size).toBe(1);
+    expect(scrollNode.scrollTop).toBe(920);
+    expect(liveTail.getBoundingClientRect().top).toBe(firstTailTop);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
+    expect(animationFrames.size).toBe(0);
 
-    // A second committed delta before the browser drains rAF only retargets
-    // the existing controller. Commit frequency cannot consume extra motion
-    // budget or enqueue another animation frame.
-    scrollHeight = 1_240;
+    // A bulk append is one React commit and therefore one pre-paint write,
+    // regardless of how many messages arrived in that commit.
+    const bulkTailTop = liveTail.getBoundingClientRect().top;
+    scrollHeight = 1_360;
+    liveTailContentTop += 240;
     scrollTo.mockClear();
     const streamingSession = {
       ...activeSession,
@@ -775,8 +789,22 @@ describe("session pane historical-window tail state", () => {
           ...firstReply,
           text: "First reply with another streamed line",
         },
+        {
+          id: "command-current",
+          type: "text" as const,
+          timestamp: "12:02",
+          author: "assistant" as const,
+          text: "First bulk result",
+        },
+        {
+          id: "command-current-2",
+          type: "text" as const,
+          timestamp: "12:02",
+          author: "assistant" as const,
+          text: "Second bulk result",
+        },
       ],
-      messageCount: 2,
+      messageCount: 4,
     };
     hook.rerender({
       currentSession: streamingSession,
@@ -785,58 +813,49 @@ describe("session pane historical-window tail state", () => {
       waiting: true,
     });
 
-    expect(scrollNode.scrollTop).toBe(800);
-    expect(scrollTo).not.toHaveBeenCalled();
-    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
-    expect(animationFrames.size).toBe(1);
-
-    // Measurement requests join the active follow loop instead of adding a
-    // second synchronous writer for the same growth.
-    scrollTo.mockClear();
-    act(() => {
-      requestMessageStackBottomRepin(scrollNode);
-    });
-    expect(scrollTo).not.toHaveBeenCalled();
-    const firstFrame = animationFrames.entries().next().value;
-    if (!firstFrame) {
-      throw new Error("Expected a scheduled bottom-follow frame");
-    }
-    animationFrames.delete(firstFrame[0]);
-    let frameTimestamp = 1_000;
-    act(() => firstFrame[1](frameTimestamp));
-
-    const firstFrameScrollTop = scrollNode.scrollTop;
-    expect(firstFrameScrollTop).toBeGreaterThan(800);
-    expect(firstFrameScrollTop - 800).toBeLessThan(50);
+    expect(scrollNode.scrollTop).toBe(1_160);
+    expect(liveTail.getBoundingClientRect().top).toBe(bulkTailTop);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
     expect(scrollTo).toHaveBeenCalledWith({
       behavior: "auto",
-      top: firstFrameScrollTop,
+      top: 1_160,
     });
     expect(scrollWrites[scrollWrites.length - 1]?.detail.scrollKind).toBe(
       "bottom_follow",
     );
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
 
-    // A status-only commit runs the content effect again but must not cancel
-    // the in-flight controller when there is no replacement schedule.
-    const pendingFrameIdAfterFirstWrite = animationFrames.keys().next().value;
-    if (pendingFrameIdAfterFirstWrite === undefined) {
-      throw new Error("Expected bottom-follow to schedule its next frame");
-    }
+    // A measured card can grow after the commit's layout effects but before
+    // paint. A same-render repin request with new geometry must not be mistaken
+    // for the duplicate layout-effect call that was already coalesced.
+    const measuredTailTop = liveTail.getBoundingClientRect().top;
+    scrollHeight = 1_440;
+    liveTailContentTop += 80;
+    scrollTo.mockClear();
+    act(() => {
+      requestMessageStackBottomRepin(scrollNode, { beforePaint: true });
+    });
+    expect(scrollNode.scrollTop).toBe(1_240);
+    expect(liveTail.getBoundingClientRect().top).toBe(measuredTailTop);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
+
+    // A status-only commit has no geometry to correct and schedules no work.
+    scrollTo.mockClear();
     hook.rerender({
       currentSession: streamingSession,
       contentSignature: "reply-current:stream-2",
       paneActive: true,
       waiting: false,
     });
-    expect(animationFrames.size).toBe(1);
-    expect(animationFrames.has(pendingFrameIdAfterFirstWrite)).toBe(true);
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
 
-    // A plain live commit can shrink the physical bottom and let the browser
-    // clamp scrollTop before the layout effect runs. Even without an explicit
-    // beforePaint repin request, the virtualizer must receive a synchronous
-    // bottom-follow notification while no upward write is issued.
+    // A shrink may already be browser-clamped. The controller still notifies
+    // the virtualizer synchronously but never issues an upward correction.
     scrollHeight = 980;
     scrollNode.scrollTop = 780;
+    liveTailContentTop = 880;
     scrollTo.mockClear();
     const scrollWriteCountBeforeShrink = scrollWrites.length;
     hook.rerender({
@@ -861,39 +880,6 @@ describe("session pane historical-window tail state", () => {
       "bottom_follow",
     );
 
-    // A very large final card exceeds the normal 60-frame velocity budget.
-    // The controller remains smooth during that budget and then performs its
-    // explicit terminal correction so attached content cannot stay hidden.
-    scrollHeight = 5_000;
-    hook.rerender({
-      currentSession: {
-        ...streamingSession,
-        messages: [
-          prompt,
-          {
-            ...firstReply,
-            text: "A very large final response",
-          },
-        ],
-      },
-      contentSignature: "reply-current:very-large-final",
-      paneActive: true,
-      waiting: false,
-    });
-    let drainedFrames = 0;
-    while (animationFrames.size > 0 && drainedFrames < 70) {
-      const nextFrame = animationFrames.entries().next().value;
-      if (!nextFrame) {
-        break;
-      }
-      animationFrames.delete(nextFrame[0]);
-      frameTimestamp += 1000 / 60;
-      act(() => nextFrame[1](frameTimestamp));
-      drainedFrames += 1;
-    }
-    expect(drainedFrames).toBeLessThanOrEqual(60);
-    expect(scrollNode.scrollTop).toBe(4_800);
-
     const nextPrompt: Message = {
       id: "prompt-next",
       type: "text",
@@ -915,6 +901,7 @@ describe("session pane historical-window tail state", () => {
     paneShouldStickToBottomRef.current["pane-1:session-history"] = false;
     scrollNode.scrollTop = 700;
     scrollHeight = 1_240;
+    liveTailContentTop = 1_140;
     scrollTo.mockClear();
     hook.rerender({
       currentSession: {
@@ -940,6 +927,7 @@ describe("session pane historical-window tail state", () => {
 
     expect(scrollNode.scrollTop).toBe(700);
     expect(scrollTo).not.toHaveBeenCalled();
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
   });
 
   it("uses one viewport-relative distance for every session PageUp/PageDown path", () => {
@@ -961,7 +949,7 @@ describe("session pane historical-window tail state", () => {
     expect(isMessageStackAtPhysicalBottom(795.5, 1_000, 200)).toBe(false);
   });
 
-  it("detaches the sticky live tail before a native wheel write and preserves that state across a tab round trip", () => {
+  it("moves the transcript and live tail by the same first upward wheel delta", () => {
     let nextAnimationFrameId = 1;
     const animationFrames = new Map<number, FrameRequestCallback>();
     vi.stubGlobal(
@@ -989,42 +977,43 @@ describe("session pane historical-window tail state", () => {
     const scrollNode = document.createElement("section");
     const conversationPage = document.createElement("div");
     conversationPage.className = "session-conversation-page is-active";
+    const transcriptCard = document.createElement("article");
     const liveTail = document.createElement("div");
     liveTail.className = "conversation-live-tail";
     liveTail.setAttribute("data-tail-follow", "attached");
-    conversationPage.append(liveTail);
+    conversationPage.append(transcriptCard, liveTail);
     scrollNode.append(conversationPage);
+    let scrollTop = 800;
+    const scrollTopWrites: number[] = [];
     Object.defineProperties(scrollNode, {
       clientHeight: { configurable: true, value: 200 },
       scrollHeight: { configurable: true, value: 1_000 },
-      scrollTop: { configurable: true, writable: true, value: 800 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (nextValue: number) => {
+          scrollTop = nextValue;
+          scrollTopWrites.push(nextValue);
+        },
+      },
     });
-    vi.spyOn(scrollNode, "getBoundingClientRect").mockReturnValue({
-      bottom: 600,
-      height: 600,
-      left: 0,
-      right: 800,
-      top: 0,
-      width: 800,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    });
-    vi.spyOn(liveTail, "getBoundingClientRect").mockImplementation(() => {
-      const top =
-        liveTail.getAttribute("data-tail-follow") === "attached" ? 100 : 120;
-      return {
-        bottom: top + 60,
-        height: 60,
-        left: 0,
-        right: 600,
-        top,
-        width: 600,
-        x: 0,
-        y: top,
-        toJSON: () => ({}),
-      };
-    });
+    const mockFlowRect = (node: HTMLElement, contentTop: number) =>
+      vi.spyOn(node, "getBoundingClientRect").mockImplementation(() => {
+        const top = contentTop - scrollTop;
+        return {
+          bottom: top + 60,
+          height: 60,
+          left: 0,
+          right: 600,
+          top,
+          width: 600,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        };
+      });
+    mockFlowRect(transcriptCard, 820);
+    mockFlowRect(liveTail, 920);
 
     const hook = renderHook(
       ({ isSessionTabActive }) => {
@@ -1045,6 +1034,8 @@ describe("session pane historical-window tail state", () => {
       { initialProps: { isSessionTabActive: true } },
     );
 
+    const transcriptTopBefore = transcriptCard.getBoundingClientRect().top;
+    const liveTailTopBefore = liveTail.getBoundingClientRect().top;
     const wheelEvent = new WheelEvent("wheel", {
       bubbles: true,
       cancelable: true,
@@ -1053,16 +1044,16 @@ describe("session pane historical-window tail state", () => {
     act(() => {
       scrollNode.dispatchEvent(wheelEvent);
     });
+    const transcriptDelta =
+      transcriptCard.getBoundingClientRect().top - transcriptTopBefore;
+    const liveTailDelta =
+      liveTail.getBoundingClientRect().top - liveTailTopBefore;
 
     expect(wheelEvent.defaultPrevented).toBe(true);
+    expect(scrollTopWrites).toEqual([780]);
     expect(scrollNode.scrollTop).toBe(780);
-    expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
-    expect(liveTail).toHaveAttribute("data-manual-detach-compensation");
-    expect(
-      liveTail.style.getPropertyValue(
-        "--conversation-live-tail-detach-offset",
-      ),
-    ).toBe("-20px");
+    expect(transcriptDelta).toBe(20);
+    expect(liveTailDelta).toBe(transcriptDelta);
     expect(paneScrollPositions[scrollStateKey]).toEqual({
       top: 780,
       shouldStick: false,
@@ -1070,13 +1061,6 @@ describe("session pane historical-window tail state", () => {
     expect(hook.result.current.liveTailPinned).toBe(false);
 
     hook.rerender({ isSessionTabActive: false });
-    expect(liveTail).not.toHaveAttribute("data-manual-detach-compensation");
-    expect(
-      liveTail.style.getPropertyValue(
-        "--conversation-live-tail-detach-offset",
-      ),
-    ).toBe("");
-
     hook.rerender({ isSessionTabActive: true });
     expect(scrollNode.scrollTop).toBe(780);
     expect(paneScrollPositions[scrollStateKey]).toEqual({
@@ -1238,25 +1222,6 @@ describe("session pane historical-window tail state", () => {
       scrollHeight: { configurable: true, value: 1_000 },
       scrollTop: { configurable: true, writable: true, value: 740 },
     });
-    const liveTailRect = vi
-      .spyOn(liveTail, "getBoundingClientRect")
-      .mockImplementation(() => {
-        const top =
-          liveTail.getAttribute("data-tail-follow") === "attached"
-            ? 100
-            : 120;
-        return {
-          bottom: top + 60,
-          height: 60,
-          left: 0,
-          right: 600,
-          top,
-          width: 600,
-          x: 0,
-          y: top,
-          toJSON: () => ({}),
-        };
-      });
     const hook = renderHook(() => {
       const state = useSessionPaneScrollState({
         ...params(activeSession),
@@ -1275,9 +1240,7 @@ describe("session pane historical-window tail state", () => {
     });
 
     expect(scrollNode.scrollTop).toBe(800);
-    expect(liveTailRect).not.toHaveBeenCalled();
     expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
-    expect(liveTail).not.toHaveAttribute("data-manual-detach-compensation");
     expect(paneScrollPositions[scrollStateKey]).toEqual({
       top: 800,
       shouldStick: true,
@@ -1309,7 +1272,6 @@ describe("session pane historical-window tail state", () => {
       scrollHeight: { configurable: true, value: 1_000 },
       scrollTop: { configurable: true, writable: true, value: 790.5 },
     });
-    const liveTailRect = vi.spyOn(liveTail, "getBoundingClientRect");
     const hook = renderHook(() => {
       const state = useSessionPaneScrollState({
         ...params(activeSession),
@@ -1334,7 +1296,6 @@ describe("session pane historical-window tail state", () => {
 
     expect(wheelEvent.defaultPrevented).toBe(true);
     expect(scrollNode.scrollTop).toBe(796.5);
-    expect(liveTailRect).not.toHaveBeenCalled();
     expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
     expect(paneScrollPositions[scrollStateKey]).toEqual({
       top: 796.5,
@@ -2552,11 +2513,7 @@ describe("session pane historical-window tail state", () => {
     animationFrames.length = 0;
     hook.rerender({ isSending: true });
     expect(demands).toHaveLength(0);
-    expect(animationFrames).toHaveLength(1);
-
-    act(() => {
-      animationFrames.shift()?.(0);
-    });
+    expect(animationFrames).toHaveLength(0);
 
     expect(demands).toHaveLength(0);
     expect(hook.result.current.liveTailPinned).toBe(false);
@@ -2566,6 +2523,63 @@ describe("session pane historical-window tail state", () => {
     );
 
     removeListener();
+  });
+
+  it("repins the first live-turn frame before later layout observers run", () => {
+    let scrollHeight = 1_000;
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const scrollTo = vi.fn((options: ScrollToOptions) => {
+      scrollNode.scrollTop = options.top ?? scrollNode.scrollTop;
+    });
+    Object.defineProperty(scrollNode, "scrollTo", {
+      configurable: true,
+      value: scrollTo as HTMLElement["scrollTo"],
+    });
+    const activeSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    const observedScrollTops: number[] = [];
+    const sharedParams = {
+      ...params(activeSession),
+      defaultScrollToBottom: true,
+      isActive: true,
+      isSessionTabActive: true,
+      paneShouldStickToBottomRef: {
+        current: { [scrollStateKey]: true },
+      },
+      scrollStateKey,
+    };
+    const hook = renderHook(
+      ({ isSending }) => {
+        const state = useSessionPaneScrollState({
+          ...sharedParams,
+          isSending,
+        });
+        useLayoutEffect(() => {
+          state.messageStackRef.current = scrollNode;
+          if (isSending) {
+            observedScrollTops.push(scrollNode.scrollTop);
+          }
+        }, [isSending, state.messageStackRef]);
+        return state;
+      },
+      { initialProps: { isSending: false } },
+    );
+    scrollTo.mockClear();
+
+    // LIVE TURN adds height in this commit. The hook's layout effect must move
+    // the real viewport before a later layout observer (and therefore paint)
+    // can see the old bottom.
+    scrollHeight = 1_120;
+    hook.rerender({ isSending: true });
+
+    expect(observedScrollTops).toEqual([920]);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: "auto", top: 920 });
   });
 
   it("keeps a detached viewport stable through approval and waiting activity", () => {

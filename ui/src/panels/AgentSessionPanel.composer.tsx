@@ -19,7 +19,6 @@ import {
   type ResolveAgentCommandResponse,
 } from "../api";
 import {
-  COMPOSER_REVIEWER_UNAVAILABLE_MESSAGE,
   defaultComposerDelegationMode,
   defaultComposerDelegationWritePolicy,
   supportsComposerReviewer,
@@ -47,6 +46,11 @@ import {
 } from "./session-slash-palette";
 import { useComposerSessionSnapshot } from "../session-store";
 import { useComposerAutoResize } from "./useComposerAutoResize";
+import {
+  ComposerActionSplitButton,
+  type ComposerActionMode,
+  type ComposerActionOption,
+} from "./composer-action-split-button";
 import type {
   AgentCommandResolverErrorState,
   PromptHistoryState,
@@ -144,7 +148,7 @@ export const SessionComposer = memo(function SessionComposer({
   const codexMcpRequestInFlightRef = useRef<Set<string>>(new Set());
   const codexMcpSessionCacheOrderRef = useRef<string[]>([]);
   const slashOptionsRef = useRef<HTMLDivElement | null>(null);
-  const composerDelegateButtonRef = useRef<HTMLButtonElement | null>(null);
+  const composerPrimaryActionButtonRef = useRef<HTMLButtonElement | null>(null);
   const session = useComposerSessionSnapshot(sessionId);
   // This state is intentionally narrow: it exists so slash-palette rendering
   // has a reactive draft. Plain prompt text lives in the uncontrolled textarea;
@@ -175,8 +179,8 @@ export const SessionComposer = memo(function SessionComposer({
   const [isAgentCommandResolving, setIsAgentCommandResolving] = useState(false);
   const isAgentCommandResolvingRef = useRef(false);
   const [isDelegationSpawning, setIsDelegationSpawning] = useState(false);
-  const [composerDelegationModeBySessionId, setComposerDelegationModeBySessionId] =
-    useState<Record<string, ComposerDelegationMode | undefined>>({});
+  const [composerActionModeBySessionId, setComposerActionModeBySessionId] =
+    useState<Record<string, ComposerActionMode | undefined>>({});
   const [agentCommandResolverError, setAgentCommandResolverError] =
     useState<AgentCommandResolverErrorState | null>(null);
   const [codexMcpRequestStateBySessionId, setCodexMcpRequestStateBySessionId] =
@@ -195,12 +199,22 @@ export const SessionComposer = memo(function SessionComposer({
   const defaultComposerMode = session
     ? defaultComposerDelegationMode(session.agent)
     : "reviewer";
-  const composerDelegationMode = activeSessionId
-    ? (composerDelegationModeBySessionId[activeSessionId] ?? defaultComposerMode)
-    : defaultComposerMode;
   const composerReviewerAvailable = session
     ? supportsComposerReviewer(session.agent)
     : false;
+  const composerDelegationAvailable = Boolean(
+    session && onSpawnDelegation && canSpawnDelegation,
+  );
+  const storedComposerActionMode = activeSessionId
+    ? (composerActionModeBySessionId[activeSessionId] ?? "send")
+    : "send";
+  const composerActionMode: ComposerActionMode = !composerDelegationAvailable
+    ? "send"
+    : storedComposerActionMode === "reviewer" && !composerReviewerAvailable
+      ? "explorer"
+      : storedComposerActionMode;
+  const composerDelegationMode: ComposerDelegationMode =
+    composerActionMode === "send" ? defaultComposerMode : composerActionMode;
   const composerDelegationWritePolicy = session
     ? defaultComposerDelegationWritePolicy(session.agent)
     : { kind: "readOnly" as const };
@@ -299,6 +313,42 @@ export const SessionComposer = memo(function SessionComposer({
     isAgentCommandResolving ||
     isDelegationSpawning ||
     (slashPalette.kind !== "none" && !canDelegateActiveSlashCommand);
+  const composerActionMenuDisabled =
+    !session ||
+    isSending ||
+    isStopping ||
+    isUpdating ||
+    isAgentCommandResolving ||
+    isDelegationSpawning;
+  const composerActionOptions: readonly ComposerActionOption[] = [
+    { mode: "send", label: "Send" },
+    {
+      mode: "reviewer",
+      label: composerReviewerAvailable
+        ? "Delegate · Reviewer"
+        : "Delegate · Reviewer — requires Claude or Codex",
+      disabled: !composerReviewerAvailable,
+    },
+    { mode: "explorer", label: "Delegate · Explorer" },
+  ];
+  const composerPrimaryDisabled =
+    composerActionMode === "send"
+      ? composerSendDisabled
+      : composerDelegateDisabled;
+  const composerPrimaryLabel =
+    composerActionMode === "send"
+      ? isSending
+        ? isSessionBusy
+          ? "Queueing..."
+          : "Sending..."
+        : isSessionBusy
+          ? "Queue"
+          : "Send"
+      : isDelegationSpawning
+        ? "Delegating..."
+        : composerActionMode === "reviewer"
+          ? "Delegate · Reviewer"
+          : "Delegate · Explorer";
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -916,7 +966,9 @@ export const SessionComposer = memo(function SessionComposer({
     focusComposerInput();
   }
 
-  async function handleComposerDelegationSpawn() {
+  async function handleComposerDelegationSpawn(
+    delegationMode: ComposerDelegationMode = composerDelegationMode,
+  ) {
     if (composerDelegateDisabled || !activeSessionId || !onSpawnDelegation) {
       focusComposerInput();
       return;
@@ -974,8 +1026,8 @@ export const SessionComposer = memo(function SessionComposer({
       delegationOptions = spawnDelegationOptionsFromResolvedCommand(resolved);
     } else {
       prompt = getComposerDraftValue().trim();
-      if (composerDelegationMode !== defaultComposerMode) {
-        delegationOptions = { mode: composerDelegationMode };
+      if (delegationMode !== defaultComposerMode) {
+        delegationOptions = { mode: delegationMode };
       }
     }
     if (!prompt) {
@@ -1019,6 +1071,14 @@ export const SessionComposer = memo(function SessionComposer({
     focusComposerInput();
   }
 
+  function handleComposerPrimaryAction() {
+    if (composerActionMode === "send") {
+      void handleComposerSend();
+      return;
+    }
+    void handleComposerDelegationSpawn(composerActionMode);
+  }
+
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (!activeSessionId) {
       return;
@@ -1044,7 +1104,7 @@ export const SessionComposer = memo(function SessionComposer({
         )
       ) {
         event.preventDefault();
-        composerDelegateButtonRef.current?.focus();
+        composerPrimaryActionButtonRef.current?.focus();
         return;
       }
 
@@ -1213,7 +1273,8 @@ export const SessionComposer = memo(function SessionComposer({
       ? (slashPalette.statusText ?? null)
       : null;
   const slashPaletteHintId = `composer-slash-hint-${paneId}`;
-  const keyboardDelegationHint = "Tab moves focus to Delegate.";
+  const keyboardDelegationHint =
+    "Tab moves focus to the composer action; use Arrow Down to choose delegation.";
   const slashPaletteHint =
     slashPalette.kind !== "none" &&
     canDelegateActiveSlashCommand &&
@@ -1299,77 +1360,58 @@ export const SessionComposer = memo(function SessionComposer({
               {isStopping ? "Stopping..." : "Stop"}
             </button>
           ) : null}
-          {session && onSpawnDelegation && canSpawnDelegation ? (
-            <div className="composer-delegation-controls">
-              <select
-                className="themed-input composer-delegation-mode-select"
-                aria-label="Delegation mode"
-                value={composerDelegationMode}
-                title={
-                  composerReviewerAvailable
-                    ? "Choose delegation mode"
-                    : COMPOSER_REVIEWER_UNAVAILABLE_MESSAGE
+          {composerDelegationAvailable ? (
+            <ComposerActionSplitButton
+              ref={composerPrimaryActionButtonRef}
+              actionLabel={composerPrimaryLabel}
+              actionTitle={
+                composerActionMode === "send"
+                  ? undefined
+                  : composerDelegationButtonTitle
+              }
+              disabled={composerPrimaryDisabled}
+              menuDisabled={composerActionMenuDisabled}
+              onAction={handleComposerPrimaryAction}
+              onModeChange={(mode) => {
+                if (!activeSessionId) {
+                  return;
                 }
-                disabled={composerDelegateDisabled}
-                onChange={(event) => {
-                  if (!activeSessionId) {
-                    return;
-                  }
-                  const mode = event.target.value as ComposerDelegationMode;
-                  setComposerDelegationModeBySessionId((current) => ({
-                    ...current,
-                    [activeSessionId]: mode,
-                  }));
-                }}
-              >
-                <option value="reviewer" disabled={!composerReviewerAvailable}>
-                  {composerReviewerAvailable
-                    ? "Reviewer"
-                    : "Reviewer — requires Claude or Codex"}
-                </option>
-                <option value="explorer">Explorer</option>
-              </select>
-              <button
-                ref={composerDelegateButtonRef}
-                className="ghost-button composer-delegate-button"
-                type="button"
-                aria-label={isDelegationSpawning ? "Delegating..." : "Delegate"}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                }}
-                onClick={() => void handleComposerDelegationSpawn()}
-                disabled={composerDelegateDisabled}
-                title={composerDelegationButtonTitle}
-              >
-                {isDelegationSpawning
-                  ? "Delegating..."
-                  : `Delegate · ${composerDelegationMode === "reviewer" ? "Reviewer" : "Explorer"}`}
-              </button>
-            </div>
-          ) : null}
-          <button
-            className={`send-button${isSessionBusy ? " composer-queue-button" : ""}`}
-            type="button"
-            onMouseDown={(event) => {
-              event.preventDefault();
-            }}
-            onClick={() => void handleComposerSend()}
-            disabled={composerSendDisabled}
-          >
-            {isSending
-              ? isSessionBusy
-                ? "Queueing..."
-                : "Sending..."
-              : isSessionBusy
-                ? "Queue"
-                : "Send"}
-          </button>
+                setComposerActionModeBySessionId((current) => ({
+                  ...current,
+                  [activeSessionId]: mode,
+                }));
+              }}
+              options={composerActionOptions}
+              primaryClassName={
+                composerActionMode === "send" && isSessionBusy
+                  ? "composer-queue-button"
+                  : undefined
+              }
+              selectedMode={composerActionMode}
+            />
+          ) : (
+            <button
+              ref={composerPrimaryActionButtonRef}
+              className={`send-button${isSessionBusy ? " composer-queue-button" : ""}`}
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault();
+              }}
+              onClick={() => void handleComposerSend()}
+              disabled={composerSendDisabled}
+            >
+              {composerPrimaryLabel}
+            </button>
+          )}
         </div>
       </div>
       {session ? (
         <p className="composer-hint">
           Paste PNG, JPEG, GIF, or WebP images into the prompt. Drag-and-drop is not supported
           yet.
+          {composerActionMode === "send"
+            ? null
+            : ` Enter still sends normally; click ${composerPrimaryLabel} to delegate.`}
         </p>
       ) : null}
       {session && slashPalette.kind !== "none" ? (

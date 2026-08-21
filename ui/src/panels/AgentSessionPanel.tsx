@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ComponentPropsWithoutRef,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
@@ -33,6 +34,10 @@ import {
   ConversationOverviewRail,
 } from "./ConversationOverviewRail";
 import { useConversationOverviewController } from "./conversation-overview-controller";
+import {
+  useConversationMessageRevealIds,
+  useConversationMessageRevealOnMount,
+} from "./conversation-message-reveal";
 import {
   ConversationMarkerFloatingWindow,
   findActivatableConversationMarkerContextMenuTrigger,
@@ -105,6 +110,41 @@ const NOOP_OPEN_MAILBOX = () => {};
 // need the virtualizer handle as soon as the transcript itself virtualizes.
 const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES =
   CONVERSATION_OVERVIEW_MIN_MESSAGES;
+
+function ConversationMessageRevealShell({
+  className,
+  messageId,
+  revealInCurrentCommit,
+  revealUserScrollGeneration,
+  sessionId,
+  userScrollGeneration,
+  ...props
+}: ComponentPropsWithoutRef<"div"> & {
+  messageId: string;
+  revealInCurrentCommit: boolean;
+  revealUserScrollGeneration: number;
+  sessionId: string;
+  userScrollGeneration: number;
+}) {
+  // The class is a mount property, not live render state. A streamed update to
+  // the same message keeps the element and must neither cancel nor replay its
+  // one-shot fade; a later virtualizer remount asks the session watermark again
+  // and receives false for an identity the reader has already seen.
+  const shouldReveal = useConversationMessageRevealOnMount({
+    messageId,
+    revealInCurrentCommit,
+    revealUserScrollGeneration,
+    sessionId,
+    userScrollGeneration,
+  });
+  return (
+    <div
+      {...props}
+      className={`${className ?? ""}${shouldReveal ? " conversation-message-entry-reveal" : ""}`}
+    />
+  );
+}
+
 export function AgentSessionPanel({
   paneId,
   viewMode,
@@ -625,6 +665,10 @@ const SessionConversationPage = memo(
       (hasNewerHistory && !hasOlderHistory
         ? 0
         : Math.max(0, overviewMessageCount - overviewMessages.length));
+    const visiblePendingPromptIds = useMemo(
+      () => visiblePendingPrompts.map((prompt) => prompt.id),
+      [visiblePendingPrompts],
+    );
     const conversationOverview = useConversationOverviewController({
       isActive,
       messageCount: overviewMessageCount,
@@ -635,6 +679,19 @@ const SessionConversationPage = memo(
       sessionId: session.id,
       sessionMutationStamp: session.sessionMutationStamp ?? 0,
       tailFollowIntent: liveTailPinned,
+    });
+    const messageRevealUserScrollGeneration =
+      conversationOverview.virtualizerHandleRef.current?.getUserScrollGeneration() ??
+      0;
+    const messageRevealIds = useConversationMessageRevealIds({
+      isActive,
+      liveTurnVisible:
+        effectiveShowWaitingIndicator &&
+        waitingIndicatorKind !== "delegationWait",
+      messages: visibleMessages,
+      pendingPromptIds: visiblePendingPromptIds,
+      sessionId: session.id,
+      userScrollGeneration: messageRevealUserScrollGeneration,
     });
     const markersByMessageId = useMemo(
       () => groupConversationMarkersByMessageId(visibleMarkers),
@@ -765,16 +822,21 @@ const SessionConversationPage = memo(
       sessionId: session.id,
       visibleMessageIds,
     });
+    const requestMarkerHistoryWindow = useCallback(
+      (position: number) =>
+        requestSessionHistoryAroundPage(session.id, position),
+      [session.id],
+    );
     const {
       handleConversationItemMount,
       jumpToMarker: jumpToConversationMarker,
       jumpToMessageId,
     } = useConversationMarkerJump({
       historyWindowKey: `${visibleMessages[0]?.id ?? ""}:${visibleMessages[visibleMessages.length - 1]?.id ?? ""}:${hasOlderHistory}`,
+      messageStartIndex: overviewMessageStartIndex,
       onMissingMessageJump: requestOlderTranscriptPage,
       onConversationSearchItemMount,
-      requestMarkerHistoryAround: (position) =>
-        requestSessionHistoryAroundPage(session.id, position),
+      requestMarkerHistoryAround: requestMarkerHistoryWindow,
       scrollContainerRef,
       sessionId: session.id,
       virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
@@ -944,6 +1006,9 @@ const SessionConversationPage = memo(
         onMessageMcpElicitationSubmit,
         onMessageCodexAppRequestSubmit,
       ) => {
+        const currentUserScrollGeneration =
+          conversationOverview.virtualizerHandleRef.current?.getUserScrollGeneration() ??
+          0;
         const rendered = renderMessageCard(
           message,
           preferImmediateHeavyRender,
@@ -1053,10 +1118,15 @@ const SessionConversationPage = memo(
           openMarkerMenuFromTrigger(trigger, rect.left, rect.bottom);
         };
         return (
-          <div
+          <ConversationMessageRevealShell
             className={`conversation-message-marker-shell can-open-marker-menu${isActiveMarkerMessage ? " is-active-marker" : ""}`}
+            messageId={message.id}
+            revealInCurrentCommit={messageRevealIds.has(message.id)}
+            revealUserScrollGeneration={messageRevealUserScrollGeneration}
+            sessionId={session.id}
             style={markerShellStyle}
             tabIndex={-1}
+            userScrollGeneration={currentUserScrollGeneration}
             onClick={handleMarkerTriggerClick}
             onContextMenu={handleMarkerContextMenu}
             onKeyDown={handleMarkerTriggerKeyDown}
@@ -1088,7 +1158,7 @@ const SessionConversationPage = memo(
             >
               {rendered}
             </MessageMetaMarkerMenuProvider>
-          </div>
+          </ConversationMessageRevealShell>
         );
       },
       [
@@ -1097,9 +1167,12 @@ const SessionConversationPage = memo(
         activeMarkerId,
         activeMarkerMessageId,
         markersByMessageId,
+        messageRevealIds,
+        messageRevealUserScrollGeneration,
         openMarkerContextMenu,
         pendingCreatedMarkers,
         renderMessageCard,
+        conversationOverview.virtualizerHandleRef,
         session.id,
       ],
     );
@@ -1228,10 +1301,9 @@ const SessionConversationPage = memo(
       >
         {/*
           Queued prompts and LIVE TURN are one visual tail. While the scroll
-          controller owns tail follow, sticky presentation keeps the whole
-          group stable as agent output grows above it. Explicit user navigation
-          detaches the group before moving, so all tail cards then travel with
-          the transcript.
+          controller owns tail follow, it moves the whole transcript before
+          paint to keep this in-flow group stable. Explicit user navigation
+          detaches that scroll intent; the cards always travel with transcript.
         */}
         <div
           className="conversation-live-tail"

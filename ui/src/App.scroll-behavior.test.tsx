@@ -2325,7 +2325,7 @@ describe("App scroll behaviour", () => {
 
         // This turn already has agent output (the command), so final text is not
         // the "first output". The pending post-live latch must nevertheless
-        // begin a bounded follow immediately and converge on the final bottom.
+        // commit the final bottom synchronously before that message paints.
         transcriptScrollHeight = 1080;
         await dispatchStateEvent(latestEventSource(), {
           ...activeState,
@@ -2364,9 +2364,7 @@ describe("App scroll behaviour", () => {
           messageStack,
           "auto",
         );
-        expect(replacementTops[0]).toBeGreaterThan(800);
-        expect(replacementTops[0]).toBeLessThan(880);
-        expect(replacementTops[replacementTops.length - 1]).toBe(880);
+        expect(replacementTops).toEqual([880]);
 
         scrollToMock.mockClear();
         transcriptScrollHeight = 1160;
@@ -2401,13 +2399,7 @@ describe("App scroll behaviour", () => {
           messageStack,
           "auto",
         );
-        expect(followedTops.length).toBeGreaterThan(0);
-        expect(followedTops.every((top) => top >= 880)).toBe(true);
-        expect(
-          followedTops.every(
-            (top, index) => index === 0 || top >= followedTops[index - 1],
-          ),
-        ).toBe(true);
+        expect(followedTops).toEqual([960]);
       } finally {
         context.cleanup();
         restoreScrollGeometry();

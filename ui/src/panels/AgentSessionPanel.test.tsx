@@ -1240,7 +1240,7 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(scrollWrites).toEqual([]);
   });
 
-  it("pins the attached live-turn tail and releases it on detach", async () => {
+  it("keeps the live-turn tail in normal flow across attachment state", async () => {
     const nodeFsModule = "node:fs";
     const { readFileSync } = (await import(nodeFsModule)) as {
       readFileSync: (path: string, encoding: "utf8") => string;
@@ -1270,13 +1270,10 @@ describe("AgentSessionPanel conversation caching", () => {
     const attachedDeclarations = stylesCss.match(
       /\.conversation-live-tail\[data-tail-follow="attached"\]\s*\{([^}]*)\}/s,
     )?.[1];
-    expect(attachedDeclarations).toBeDefined();
-    expect(attachedDeclarations).toMatch(
-      /\bposition\s*:\s*sticky\s*;/,
-    );
-    expect(attachedDeclarations).toMatch(
-      /\bbottom\s*:\s*0\s*;/,
-    );
+    // Attachment is scroll-controller intent only. Synchronous pre-paint
+    // growth correction keeps the in-flow tail stable without a second
+    // positioning authority during the first manual movement.
+    expect(attachedDeclarations).toBeUndefined();
 
     const activeSession = makeSession("session-a", {
       status: "active",
@@ -1308,6 +1305,159 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(liveTail).toHaveClass("conversation-live-tail");
   });
 
+  it("reveals only appended transcript entries with paint-only motion", async () => {
+    const nodeFsModule = "node:fs";
+    const { readFileSync } = (await import(nodeFsModule)) as {
+      readFileSync: (path: string, encoding: "utf8") => string;
+    };
+    const runtimeProcess = (
+      globalThis as typeof globalThis & {
+        process: { cwd: () => string };
+      }
+    ).process;
+    const stylesCss = readFileSync(
+      `${runtimeProcess.cwd()}/src/styles.css`,
+      "utf8",
+    );
+    const initialMessages = makeTextMessages(30);
+    const activeSession = makeSession("session-message-reveal", {
+      messages: initialMessages,
+      messagesLoaded: true,
+    });
+    const renderPanel = createAgentSessionPanelHarness({ activeSession });
+    const { container } = render(renderPanel());
+
+    expect(container.querySelector(".virtualized-message-list")).not.toBeNull();
+    const initialShell = screen
+      .getByText("message-30")
+      .closest(".conversation-message-marker-shell");
+    expect(initialShell).not.toBeNull();
+    expect(initialShell).not.toHaveClass("conversation-message-entry-reveal");
+
+    const appendedMessage: Message = {
+      id: "message-reveal-new",
+      type: "text",
+      timestamp: "10:02",
+      author: "assistant",
+      text: "New reply",
+    };
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [
+          makeSession("session-message-reveal", {
+            messages: [...initialMessages, appendedMessage],
+            messagesLoaded: true,
+          }),
+        ],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+
+    const appendedShell = await waitFor(() => {
+      const shell = screen
+        .getByText("message-reveal-new")
+        .closest(".conversation-message-marker-shell");
+      expect(shell).toHaveClass("conversation-message-entry-reveal");
+      return shell;
+    });
+    expect(initialShell).not.toHaveClass("conversation-message-entry-reveal");
+    expect(appendedShell?.closest(".message-slot")).not.toHaveClass(
+      "conversation-message-entry-reveal",
+    );
+    expect(
+      container.querySelector(
+        ".message-stack.conversation-message-entry-reveal",
+      ),
+    ).toBeNull();
+    expect(
+      container.querySelector(
+        ".conversation-live-tail.conversation-message-entry-reveal",
+      ),
+    ).toBeNull();
+
+    const revealDeclarations = extractCssBlock(
+      stylesCss,
+      /(?:^|\n)\.conversation-message-entry-reveal\s*(?=\{)/,
+    );
+    expect(revealDeclarations).toMatch(
+      /animation\s*:\s*conversation-message-entry-reveal\s+160ms\s+ease-out\s+both\s*;/,
+    );
+    const revealKeyframes = extractCssBlock(
+      stylesCss,
+      /@keyframes\s+conversation-message-entry-reveal\s*(?=\{)/,
+    );
+    expect(revealKeyframes).toMatch(/from\s*\{\s*opacity\s*:\s*0\s*;/s);
+    expect(revealKeyframes).toMatch(/to\s*\{\s*opacity\s*:\s*1\s*;/s);
+
+    const forbiddenGeometryProperty =
+      /(?:^|[;{}\s])(?:block-size|bottom|gap|height|inset|left|margin|max-height|min-height|padding|position|right|scroll-margin|top|transform|translate)\s*:/m;
+    expect(revealDeclarations).not.toMatch(forbiddenGeometryProperty);
+    expect(revealKeyframes).not.toMatch(forbiddenGeometryProperty);
+
+    const reducedMotionRules = extractCssBlock(
+      stylesCss,
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*(?=\{)/,
+    );
+    expect(reducedMotionRules).toMatch(
+      /\.conversation-message-entry-reveal\s*\{\s*animation\s*:\s*none\s*;/s,
+    );
+  });
+
+  it("keeps append identity through a metadata-first message-count update", async () => {
+    const initialMessages = makeTextMessages(30);
+    const activeSession = makeSession("session-message-reveal-metadata", {
+      messageCount: 30,
+      messages: initialMessages,
+      messagesLoaded: true,
+    });
+    const renderPanel = createAgentSessionPanelHarness({ activeSession });
+    render(renderPanel());
+
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [
+          makeSession("session-message-reveal-metadata", {
+            messageCount: 31,
+            messages: initialMessages,
+            messagesLoaded: true,
+          }),
+        ],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+
+    const appendedMessage: Message = {
+      id: "message-metadata-late",
+      type: "text",
+      timestamp: "10:30",
+      author: "assistant",
+      text: "Arrived after metadata",
+    };
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [
+          makeSession("session-message-reveal-metadata", {
+            messageCount: 31,
+            messages: [...initialMessages, appendedMessage],
+            messagesLoaded: true,
+          }),
+        ],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+
+    await waitFor(() => {
+      expect(
+        screen
+          .getByText("message-metadata-late")
+          .closest(".conversation-message-marker-shell"),
+      ).toHaveClass("conversation-message-entry-reveal");
+    });
+  });
+
   it("stacks the prompt above composer actions based on pane width", async () => {
     const nodeFsModule = "node:fs";
     const { readFileSync } = (await import(nodeFsModule)) as {
@@ -1332,6 +1482,29 @@ describe("AgentSessionPanel conversation caching", () => {
     );
     expect(composerDeclarations).toMatch(/container-type\s*:\s*inline-size\s*;/);
 
+    const composerActionSplit = extractCssBlock(
+      stylesCss,
+      /(?:^|\n)\.composer-action-split\s*(?=\{)/,
+    );
+    expect(composerActionSplit).toMatch(/justify-self\s*:\s*end\s*;/);
+    expect(composerActionSplit).toMatch(/width\s*:\s*max-content\s*;/);
+    expect(composerActionSplit).toMatch(/min-width\s*:\s*12\.5rem\s*;/);
+
+    const composerActionTrigger = extractCssBlock(
+      stylesCss,
+      /(?:^|\n)\.composer-action-split\s*>\s*\.composer-action-menu-trigger\s*(?=\{)/,
+    );
+    expect(composerActionTrigger).toMatch(/flex\s*:\s*0\s+0\s+2\.35rem\s*;/);
+    expect(composerActionTrigger).toMatch(/width\s*:\s*2\.35rem\s*;/);
+
+    const composerActionMenu = extractCssBlock(
+      stylesCss,
+      /(?:^|\n)\.composer-action-menu\s*(?=\{)/,
+    );
+    expect(composerActionMenu).toMatch(
+      /background\s*:\s*linear-gradient\([^}]*var\(--paper-strong\)/,
+    );
+
     const narrowComposerRules = extractCssBlock(
       stylesCss,
       /@container\s+session-composer\s*\(\s*max-width\s*:\s*46rem\s*\)(?=\s*\{)/,
@@ -1350,11 +1523,13 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(narrowComposerActions).toMatch(
       /grid-template-columns\s*:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)\s*;/,
     );
-    const narrowDelegationControls = extractCssBlock(
+    const narrowComposerActionSplit = extractCssBlock(
       narrowComposerRules,
-      /(?:^|\n)\s*\.composer-delegation-controls\s*(?=\{)/,
+      /(?:^|\n)\s*\.composer-actions\s*>\s*\.composer-action-split\s*(?=\{)/,
     );
-    expect(narrowDelegationControls).toMatch(/display\s*:\s*contents\s*;/);
+    expect(narrowComposerActionSplit).toMatch(/width\s*:\s*max-content\s*;/);
+    expect(narrowComposerActionSplit).toMatch(/min-width\s*:\s*12\.5rem\s*;/);
+    expect(narrowComposerActionSplit).toMatch(/justify-self\s*:\s*end\s*;/);
 
     const compactComposerRules = extractCssBlock(
       stylesCss,

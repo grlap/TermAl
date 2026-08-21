@@ -318,6 +318,25 @@ function renderSessionPaneView({
   };
 }
 
+async function selectComposerAction(
+  label: "Delegate · Reviewer" | "Delegate · Explorer",
+) {
+  await clickAndSettle(
+    screen.getByRole("button", { name: /Choose composer action, current:/ }),
+  );
+  await clickAndSettle(
+    await screen.findByRole("menuitemradio", { name: label }),
+  );
+  return screen.getByRole("button", { name: label });
+}
+
+async function clickComposerDelegate(
+  label: "Delegate · Reviewer" | "Delegate · Explorer" =
+    "Delegate · Reviewer",
+) {
+  await clickAndSettle(await selectComposerAction(label));
+}
+
 describe("SessionPaneView composer delegation click-through", () => {
   let animationFrameSpies: Array<{ mockRestore: () => void }> = [];
 
@@ -367,7 +386,7 @@ describe("SessionPaneView composer delegation click-through", () => {
     });
 
     expect(textarea!.value).toBe(draft);
-    await clickAndSettle(screen.getByRole("button", { name: "Delegate" }));
+    await clickComposerDelegate();
 
     await waitFor(() => {
       expect(spawnDelegationCommandMock).toHaveBeenCalledWith(
@@ -389,7 +408,7 @@ describe("SessionPaneView composer delegation click-through", () => {
     expect(onComposerError).toHaveBeenCalledWith(null);
   });
 
-  it("preselects a read-only explorer for Cursor composer delegations", async () => {
+  it("offers a read-only explorer for Cursor composer delegations", async () => {
     const session = makeSession({
       id: "session-parent",
       agent: "Cursor",
@@ -401,15 +420,20 @@ describe("SessionPaneView composer delegation click-through", () => {
       draft: "Inspect the current change.",
     });
 
-    expect(screen.getByRole("combobox", { name: "Delegation mode" })).toHaveValue(
-      "explorer",
+    await clickAndSettle(
+      screen.getByRole("button", { name: /Choose composer action, current: Send/ }),
     );
     expect(
-      screen.getByRole("option", {
-        name: "Reviewer — requires Claude or Codex",
+      screen.getByRole("menuitemradio", {
+        name: "Delegate · Reviewer — requires Claude or Codex",
       }),
     ).toBeDisabled();
-    await clickAndSettle(screen.getByRole("button", { name: "Delegate" }));
+    await clickAndSettle(
+      screen.getByRole("menuitemradio", { name: "Delegate · Explorer" }),
+    );
+    await clickAndSettle(
+      screen.getByRole("button", { name: "Delegate · Explorer" }),
+    );
 
     await waitFor(() => {
       expect(spawnDelegationCommandMock).toHaveBeenCalledWith(
@@ -423,7 +447,7 @@ describe("SessionPaneView composer delegation click-through", () => {
     });
   });
 
-  it("preselects an isolated-worktree explorer for OpenCode composer delegations", async () => {
+  it("offers an isolated-worktree explorer for OpenCode composer delegations", async () => {
     const session = makeSession({
       id: "session-parent",
       agent: "OpenCode",
@@ -435,10 +459,7 @@ describe("SessionPaneView composer delegation click-through", () => {
       draft: "Inspect the current change.",
     });
 
-    expect(screen.getByRole("combobox", { name: "Delegation mode" })).toHaveValue(
-      "explorer",
-    );
-    await clickAndSettle(screen.getByRole("button", { name: "Delegate" }));
+    await clickComposerDelegate("Delegate · Explorer");
 
     await waitFor(() => {
       expect(spawnDelegationCommandMock).toHaveBeenCalledWith(
@@ -488,7 +509,7 @@ describe("SessionPaneView composer delegation click-through", () => {
     ).toBeInTheDocument();
 
     await withVerifiedNoReactActWarnings(async () => {
-      await clickAndSettle(screen.getByRole("button", { name: "Delegate" }));
+      await clickComposerDelegate();
 
       await waitFor(() => {
         expect(resolveAgentCommandMock).toHaveBeenCalledWith(
@@ -529,7 +550,7 @@ describe("SessionPaneView composer delegation click-through", () => {
       draft,
     });
 
-    await clickAndSettle(screen.getByRole("button", { name: "Delegate" }));
+    await clickComposerDelegate();
 
     await waitFor(() => {
       expect(spawnDelegationCommandMock).toHaveBeenCalledWith(
@@ -547,7 +568,7 @@ describe("SessionPaneView composer delegation click-through", () => {
       );
     });
     expect(textarea!.value).toBe(draft);
-    expect(onDraftCommit).not.toHaveBeenCalled();
+    expect(onDraftCommit).toHaveBeenCalledWith("session-parent", draft);
   });
 
   it("preserves the draft and skips spawn when delegation availability fails", async () => {
@@ -563,14 +584,14 @@ describe("SessionPaneView composer delegation click-through", () => {
       projects: [],
     });
 
-    await clickAndSettle(screen.getByRole("button", { name: "Delegate" }));
+    await clickComposerDelegate();
 
     expect(spawnDelegationCommandMock).not.toHaveBeenCalled();
     expect(onComposerError).toHaveBeenCalledWith(
       "Delegations are unavailable until the session project is loaded.",
     );
     expect(textarea!.value).toBe(draft);
-    expect(onDraftCommit).not.toHaveBeenCalled();
+    expect(onDraftCommit).toHaveBeenCalledWith("session-parent", draft);
   });
 
   it("hides composer controls for delegated child sessions while keeping transcript find available", async () => {

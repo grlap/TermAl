@@ -459,6 +459,37 @@ function renderFooter({
   );
 }
 
+async function selectComposerAction(
+  label: "Send" | "Delegate · Reviewer" | "Delegate · Explorer",
+) {
+  fireEvent.click(
+    screen.getByRole("button", { name: /Choose composer action, current:/ }),
+  );
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: label }));
+  return await screen.findByRole("button", { name: label });
+}
+
+async function getComposerDelegateButton(
+  label: "Delegate · Reviewer" | "Delegate · Explorer" =
+    "Delegate · Reviewer",
+) {
+  return await selectComposerAction(label);
+}
+
+async function clickComposerDelegate(
+  label: "Delegate · Reviewer" | "Delegate · Explorer" =
+    "Delegate · Reviewer",
+) {
+  const delegateButton = await getComposerDelegateButton(label);
+  await act(async () => {
+    fireEvent.click(delegateButton);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 function deferredValue<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -645,10 +676,7 @@ describe("AgentSessionPanelFooter", () => {
       target: { value: "  Review the staged frontend change.  " },
     });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     expect(onSpawnDelegation).toHaveBeenCalledWith(
       "session-a",
@@ -669,17 +697,20 @@ describe("AgentSessionPanelFooter", () => {
         }),
       );
 
+      fireEvent.click(
+        screen.getByRole("button", { name: /Choose composer action, current: Send/ }),
+      );
       expect(
-        screen.getByRole("combobox", { name: "Delegation mode" }),
-      ).toHaveValue("explorer");
-      expect(
-        screen.getByRole("option", {
-          name: "Reviewer — requires Claude or Codex",
+        screen.getByRole("menuitemradio", {
+          name: "Delegate · Reviewer — requires Claude or Codex",
         }),
       ).toBeDisabled();
-      expect(screen.getByRole("button", { name: "Delegate" })).toHaveTextContent(
-        "Delegate · Explorer",
+      fireEvent.click(
+        screen.getByRole("menuitemradio", { name: "Delegate · Explorer" }),
       );
+      expect(
+        screen.getByRole("button", { name: "Delegate · Explorer" }),
+      ).toBeInTheDocument();
     },
   );
 
@@ -693,15 +724,13 @@ describe("AgentSessionPanelFooter", () => {
       }),
     );
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Delegation mode" }), {
-      target: { value: "explorer" },
-    });
+    const delegateButton = await getComposerDelegateButton("Delegate · Explorer");
     fireEvent.change(screen.getByLabelText("Message session-a"), {
       target: { value: "Inspect the current change." },
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
+      fireEvent.click(delegateButton);
       await Promise.resolve();
     });
 
@@ -710,6 +739,135 @@ describe("AgentSessionPanelFooter", () => {
       "Inspect the current change.",
       { mode: "explorer" },
     );
+  });
+
+  it("always sends on Enter while a delegation action is selected", async () => {
+    const onSend = vi.fn(() => true);
+    const onSpawnDelegation = vi.fn(async () => true);
+    render(
+      renderFooter({
+        session: makeSession("session-a"),
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+        onSend,
+      }),
+    );
+    await selectComposerAction("Delegate · Explorer");
+
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "Send, do not delegate." } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("session-a", "Send, do not delegate.");
+    expect(onSpawnDelegation).not.toHaveBeenCalled();
+  });
+
+  it("restores action choices per session and degrades to plain Send when delegation disappears", async () => {
+    const stableProps = {
+      canSpawnDelegation: true,
+      onSpawnDelegation: vi.fn(async () => true),
+    };
+    const sessionA = makeSession("session-a");
+    const sessionB = makeSession("session-b");
+    const { rerender } = render(
+      renderFooter({ session: sessionA, ...stableProps }),
+    );
+    await selectComposerAction("Delegate · Explorer");
+
+    await act(async () => {
+      rerender(renderFooter({ session: sessionB, ...stableProps }));
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    await selectComposerAction("Delegate · Reviewer");
+
+    await act(async () => {
+      rerender(renderFooter({ session: sessionA, ...stableProps }));
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByRole("button", { name: "Delegate · Explorer" }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      rerender(
+        renderFooter({
+          session: sessionA,
+          canSpawnDelegation: false,
+          onSpawnDelegation: stableProps.onSpawnDelegation,
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Choose composer action/ }),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      rerender(renderFooter({ session: sessionA, ...stableProps }));
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByRole("button", { name: "Delegate · Explorer" }),
+    ).toBeInTheDocument();
+  });
+
+  it("temporarily degrades a stored Reviewer action when the active agent cannot review", async () => {
+    const onSpawnDelegation = vi.fn(async () => true);
+    const { rerender } = render(
+      renderFooter({
+        session: makeSession("session-a", { agent: "Codex" }),
+        canSpawnDelegation: true,
+        onSpawnDelegation,
+      }),
+    );
+    await selectComposerAction("Delegate · Reviewer");
+
+    await act(async () => {
+      rerender(
+        renderFooter({
+          session: makeSession("session-a", { agent: "Cursor" }),
+          canSpawnDelegation: true,
+          onSpawnDelegation,
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByRole("button", { name: "Delegate · Explorer" }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      rerender(
+        renderFooter({
+          session: makeSession("session-a", { agent: "Codex" }),
+          canSpawnDelegation: true,
+          onSpawnDelegation,
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByRole("button", { name: "Delegate · Reviewer" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps busy labels specific to the selected action", async () => {
+    render(
+      renderFooter({
+        session: makeSession("session-a"),
+        isSessionBusy: true,
+        canSpawnDelegation: true,
+        onSpawnDelegation: vi.fn(async () => true),
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "Queue" })).toBeInTheDocument();
+    await selectComposerAction("Delegate · Explorer");
+    expect(
+      screen.getByRole("button", { name: "Delegate · Explorer" }),
+    ).not.toHaveClass("composer-queue-button");
   });
 
   it("keeps the draft when delegation spawn is rejected", async () => {
@@ -727,10 +885,7 @@ describe("AgentSessionPanelFooter", () => {
       target: { value: "Review this before I send it." },
     });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     expect(onSpawnDelegation).toHaveBeenCalledWith(
       "session-a",
@@ -748,7 +903,10 @@ describe("AgentSessionPanelFooter", () => {
       }),
     );
 
-    expect(screen.queryByRole("button", { name: "Delegate" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Choose composer action/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
   });
 
   it("refreshes the delegation action when availability changes", () => {
@@ -773,7 +931,9 @@ describe("AgentSessionPanelFooter", () => {
       }),
     );
 
-    expect(screen.queryByRole("button", { name: "Delegate" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Choose composer action/ }),
+    ).not.toBeInTheDocument();
 
     rerender(
       renderFooter({
@@ -783,7 +943,9 @@ describe("AgentSessionPanelFooter", () => {
       }),
     );
 
-    expect(screen.getByRole("button", { name: "Delegate" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Choose composer action, current: Send/ }),
+    ).toBeInTheDocument();
   });
 
   it("uses the latest delegation handler after rerender", async () => {
@@ -821,10 +983,7 @@ describe("AgentSessionPanelFooter", () => {
     fireEvent.change(textarea, {
       target: { value: "Use the latest delegation handler." },
     });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     expect(initialSpawn).not.toHaveBeenCalled();
     expect(latestSpawn).toHaveBeenCalledWith(
@@ -849,9 +1008,7 @@ describe("AgentSessionPanelFooter", () => {
       target: { value: "Review while I keep typing." },
     });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-    });
+    await clickComposerDelegate();
 
     const busyButton = await screen.findByRole("button", {
       name: "Delegating...",
@@ -887,10 +1044,7 @@ describe("AgentSessionPanelFooter", () => {
       target: { value: "Keep this if spawn rejects." },
     });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     expect(onSpawnDelegation).toHaveBeenCalledWith(
       "session-a",
@@ -902,10 +1056,10 @@ describe("AgentSessionPanelFooter", () => {
         screen.queryByRole("button", { name: "Delegating..." }),
       ).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: "Delegate" })).toBeEnabled();
+    expect(await getComposerDelegateButton()).toBeEnabled();
   });
 
-  it("disables delegation for session-control slash palette choices", () => {
+  it("disables delegation for session-control slash palette choices", async () => {
     const onSpawnDelegation = vi.fn(async () => true);
     render(
       renderFooter({
@@ -918,7 +1072,7 @@ describe("AgentSessionPanelFooter", () => {
       }),
     );
 
-    const delegateButton = screen.getByRole("button", { name: "Delegate" });
+    const delegateButton = await getComposerDelegateButton();
     expect(
       screen.getByRole("listbox", { name: "Codex models" }),
     ).toBeInTheDocument();
@@ -995,10 +1149,7 @@ describe("AgentSessionPanelFooter", () => {
       screen.getByRole("option", { name: /\/review-code/ }),
     ).toBeInTheDocument();
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     expect(onSpawnDelegation).toHaveBeenCalledWith(
       "session-a",
@@ -1017,7 +1168,7 @@ describe("AgentSessionPanelFooter", () => {
     await waitFor(() => expect(textarea).toHaveValue(""));
   });
 
-  it("lets keyboard users tab to Delegate for active agent slash commands", async () => {
+  it("lets keyboard users tab to the composer action and choose Delegate", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn(() => true);
     const onSpawnDelegation = vi.fn(async () => true);
@@ -1062,18 +1213,23 @@ describe("AgentSessionPanelFooter", () => {
     expect(
       screen.getByRole("option", { name: /\/review-code/ }),
     ).toBeInTheDocument();
-    const hint = screen.getByText(/Tab moves focus to Delegate\./);
+    const hint = screen.getByText(/Tab moves focus to the composer action/);
     expect(textarea).toHaveAttribute("aria-describedby", hint.id);
     const stopButton = screen.getByRole("button", { name: "Stop" });
 
     await user.tab();
 
-    const delegateButton = screen.getByRole("button", { name: "Delegate" });
-    expect(delegateButton).toHaveFocus();
+    const actionButton = screen.getByRole("button", { name: "Queue" });
+    expect(actionButton).toHaveFocus();
     expect(stopButton).not.toHaveFocus();
     expect(onSend).not.toHaveBeenCalled();
     expect(onSpawnDelegation).not.toHaveBeenCalled();
 
+    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    await user.tab({ shift: true });
+    expect(
+      screen.getByRole("button", { name: "Delegate · Reviewer" }),
+    ).toHaveFocus();
     await user.keyboard("{Enter}");
 
     await waitFor(() =>
@@ -1178,10 +1334,10 @@ describe("AgentSessionPanelFooter", () => {
       screen.getByRole("option", { name: /\/review-code/ }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(/Tab moves focus to Delegate\./),
+      screen.queryByText(/Tab moves focus to the composer action/),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Delegate" }),
+      screen.queryByRole("button", { name: /Choose composer action/ }),
     ).not.toBeInTheDocument();
 
     await act(async () => {
@@ -1241,10 +1397,10 @@ describe("AgentSessionPanelFooter", () => {
     expect(
       screen.getByRole("option", { name: /\/review-code/ }),
     ).toBeInTheDocument();
-    const delegateButton = screen.getByRole("button", { name: "Delegate" });
-    expect(delegateButton).toBeDisabled();
+    const actionButton = screen.getByRole("button", { name: "Send" });
+    expect(actionButton).toBeDisabled();
     expect(
-      screen.queryByText(/Tab moves focus to Delegate\./),
+      screen.queryByText(/Tab moves focus to the composer action/),
     ).not.toBeInTheDocument();
 
     const tabEvent = createEvent.keyDown(textarea, { key: "Tab" });
@@ -1254,7 +1410,7 @@ describe("AgentSessionPanelFooter", () => {
     });
 
     expect(tabEvent.defaultPrevented).toBe(false);
-    expect(delegateButton).not.toHaveFocus();
+    expect(actionButton).not.toHaveFocus();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
     expect(onSpawnDelegation).not.toHaveBeenCalled();
@@ -1517,10 +1673,7 @@ describe("AgentSessionPanelFooter", () => {
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/rev" } });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(
@@ -1570,10 +1723,7 @@ describe("AgentSessionPanelFooter", () => {
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/rev" } });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "/review", {
       title: "Review the current changes.",
@@ -1621,10 +1771,7 @@ describe("AgentSessionPanelFooter", () => {
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/exp" } });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     expect(onSpawnDelegation).toHaveBeenCalledWith(
       "session-a",
@@ -1667,7 +1814,7 @@ describe("AgentSessionPanelFooter", () => {
 
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/rev" } });
-    const delegateButton = screen.getByRole("button", { name: "Delegate" });
+    const delegateButton = await getComposerDelegateButton();
     await act(async () => {
       fireEvent.click(delegateButton);
       fireEvent.click(delegateButton);
@@ -1743,10 +1890,7 @@ describe("AgentSessionPanelFooter", () => {
 
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/rev" } });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(onSpawnDelegation).not.toHaveBeenCalled();
@@ -1823,10 +1967,7 @@ describe("AgentSessionPanelFooter", () => {
 
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/rev" } });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     await act(async () => {
       rerender(
@@ -1893,10 +2034,7 @@ describe("AgentSessionPanelFooter", () => {
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/rev" } });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "/review-code", {
       mode: "reviewer",
@@ -1940,19 +2078,13 @@ describe("AgentSessionPanelFooter", () => {
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/fix" } });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     expect(onSpawnDelegation).not.toHaveBeenCalled();
     expect(textarea).toHaveValue("/fix-bug ");
 
     fireEvent.change(textarea, { target: { value: "/fix-bug 42" } });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     expect(onSpawnDelegation).toHaveBeenCalledWith("session-a", "Fix:\n42", {
       title: "Fix bug 42",
@@ -1980,10 +2112,7 @@ describe("AgentSessionPanelFooter", () => {
     fireEvent.change(screen.getByLabelText("Message session-a"), {
       target: { value: "Review after switch." },
     });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-      await Promise.resolve();
-    });
+    await clickComposerDelegate();
 
     await act(async () => {
       rerender(
@@ -2032,10 +2161,7 @@ describe("AgentSessionPanelFooter", () => {
       fireEvent.change(screen.getByLabelText("Message session-a"), {
         target: { value: "Unmount before completion." },
       });
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Delegate" }));
-        await Promise.resolve();
-      });
+      await clickComposerDelegate();
 
       focusSpy.mockClear();
       unmount();

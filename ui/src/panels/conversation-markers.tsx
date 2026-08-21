@@ -127,6 +127,7 @@ export function sortConversationMarkersForNavigation(
 
 export function useConversationMarkerJump({
   historyWindowKey,
+  messageStartIndex,
   onMissingMessageJump,
   onConversationSearchItemMount,
   requestMarkerHistoryAround,
@@ -136,6 +137,8 @@ export function useConversationMarkerJump({
 }: {
   /** Changes only when the resident bounded transcript window changes. */
   historyWindowKey: string;
+  /** Global index of the first message in the resident transcript window. */
+  messageStartIndex: number;
   onMissingMessageJump?: () => boolean | void;
   onConversationSearchItemMount: (
     itemKey: string,
@@ -394,9 +397,33 @@ export function useConversationMarkerJump({
         (userScrollGeneration === null ||
           virtualizerHandleRef.current?.getUserScrollGeneration() ===
             userScrollGeneration);
+      let terminalFailureHandled = false;
+      const handleTerminalFailure = () => {
+        if (terminalFailureHandled) {
+          return;
+        }
+        terminalFailureHandled = true;
+        if (
+          !markerJumpIsCurrent() ||
+          marker.messageIndexHint >= messageStartIndex
+        ) {
+          return;
+        }
+        // The legacy fallback can only reveal older pages. Using it for a
+        // newer target would fetch in the wrong direction and leave a pending
+        // jump that could fire after an unrelated window change.
+        if (onMissingMessageJump?.()) {
+          requestedHistoryWindowKeyRef.current = historyWindowKey;
+          setPendingHydratedJumpMessageId(marker.messageId);
+        }
+      };
       void requestMarkerHistoryAround(marker.messageIndexHint).then(
         (applied) => {
-          if (!applied || !markerJumpIsCurrent()) {
+          if (!markerJumpIsCurrent()) {
+            return;
+          }
+          if (!applied) {
+            handleTerminalFailure();
             return;
           }
           let remainingAttempts = 2;
@@ -412,18 +439,21 @@ export function useConversationMarkerJump({
               remainingAttempts -= 1;
               if (remainingAttempts > 0) {
                 retryAfterAdoption();
+              } else {
+                handleTerminalFailure();
               }
             });
           };
           retryAfterAdoption();
         },
-        () => {},
+        handleTerminalFailure,
       );
     },
     [
       cancelCorrectionFrame,
       cancelPendingMarkerJump,
       historyWindowKey,
+      messageStartIndex,
       onMissingMessageJump,
       requestMarkerHistoryAround,
       sessionId,

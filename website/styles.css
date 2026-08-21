@@ -154,7 +154,7 @@ details:focus-visible {
 .hero__copy { position: relative; z-index: 2; }
 .hero__eyebrow { color: var(--cyan); }
 .hero h1 { max-width: 9.5ch; margin: 0; font-family: var(--display); font-size: clamp(76px,6.7vw,118px); font-weight: 600; letter-spacing: -.07em; line-height: .82; }
-.hero__line { display: block; overflow: hidden; padding: 0 .08em .09em 0; }
+.hero__line { display: block; overflow: hidden; padding: 0 .08em .2em 0; }
 .hero__line > span { display: block; }
 .hero__line--italic > span { color: var(--cyan); font-style: italic; font-weight: 500; }
 .hero__lead { max-width: 620px; margin: 30px 0 0; color: var(--muted-strong); font-size: 18px; line-height: 1.72; }

@@ -5074,8 +5074,33 @@ textarea {
   pointer-events: auto;
 }
 
-.virtualized-message-list .message-card {
+.session-conversation-page .message-card {
+  /* Conversation entry motion is gated by committed message continuity on
+     the marker shell. A card-level animation would replay on hydration,
+     history adoption, and virtualizer remounts. */
   animation: none;
+}
+
+.conversation-message-entry-reveal {
+  /* Opacity is deliberately the only animated property: it cannot change
+     layout, scroll height, containing blocks, or pane bottom-follow geometry. */
+  animation: conversation-message-entry-reveal 160ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-message-entry-reveal {
+    animation: none;
+  }
+}
+
+@keyframes conversation-message-entry-reveal {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 /* Force `content-visibility: visible` on everything inside the
@@ -5219,35 +5244,14 @@ textarea {
 }
 
 .conversation-live-tail {
-  /* The wrapper always reserves its transcript height. Attachment only changes
-     its visual position; detaching returns it to ordinary in-flow movement. */
+  /* LIVE TURN and queued prompts are regular transcript content. Attached
+     growth is corrected by the scroll controller in the same pre-paint commit;
+     positioning this wrapper separately would create a second movement
+     authority and make the first manual scroll use different geometry. */
   display: grid;
   gap: var(--message-stack-gap);
   align-content: start;
   padding-bottom: 1px;
-}
-
-.conversation-live-tail[data-tail-follow="attached"] {
-  /* Keep LIVE TURN stable while streamed content moves underneath it. The
-     scroll controller removes this state before deliberate user navigation.
-
-     The inset must stay 0: a sticky element cannot leave its containing
-     block, so it can never enter the scroll container's bottom padding.
-     `bottom: 0` therefore rests exactly at the natural in-flow position at
-     full scroll, and removing the sticky state moves nothing. Any positive
-     inset lifts the sticky rest above the natural rest by that amount, and
-     the first manual scroll then releases it as a visible downward snap
-     while the transcript moves — the tail and transcript appear to travel
-     in different coordinate systems for that first movement. Measured live:
-     bottom: var(--message-stack-block-padding) produced a 17px first-frame
-     divergence; bottom: 0 produced zero. */
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-}
-
-.conversation-live-tail[data-manual-detach-compensation] {
-  transform: translateY(var(--conversation-live-tail-detach-offset));
 }
 
 .conversation-pending-prompts {
@@ -9733,24 +9737,99 @@ textarea {
   white-space: nowrap;
 }
 
-.composer-delegate-button {
-  min-width: 6.5rem;
+.composer-action-split {
+  display: flex;
+  align-items: stretch;
+  justify-self: end;
+  width: max-content;
+  max-width: 100%;
+  min-width: 12.5rem;
+}
+
+.composer-action-primary {
+  flex: 1 1 auto;
+  min-width: 9.75rem;
+  padding-inline: 0.85rem;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
   white-space: nowrap;
 }
 
-.composer-delegation-controls {
-  display: flex;
-  gap: 0.45rem;
-  align-items: stretch;
+.composer-action-split > .composer-action-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 2.35rem;
+  width: 2.35rem;
+  min-width: 2.35rem;
+  padding: 0;
+  border-left: 1px solid color-mix(in srgb, var(--surface-white) 32%, transparent);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
-.composer-delegation-mode-select {
-  width: auto;
-  min-width: 6.9rem;
-  padding: 0.7rem 0.65rem;
+.composer-action-menu-trigger svg {
+  width: 0.75rem;
+  height: 0.5rem;
+}
+
+.composer-action-menu {
+  z-index: 140;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--paper-strong) 92%, var(--surface-white) 8%),
+    var(--paper-strong)
+  );
+  box-shadow: 0 18px 46px
+    color-mix(in srgb, var(--shadow-color, black) 28%, transparent);
+  overflow-y: auto;
+}
+
+.composer-action-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  width: 100%;
+  padding: 0.7rem 0.75rem;
+  border: 0;
+  border-radius: 0.65rem;
+  background: transparent;
+  color: var(--ink);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.composer-action-menu-item:hover,
+.composer-action-menu-item:focus {
+  background: var(--surface-white-soft);
+  outline: none;
+}
+
+.composer-action-menu-item:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
+}
+
+.composer-action-menu-item:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.composer-action-menu-check {
+  visibility: hidden;
+}
+
+.composer-action-menu-check.selected {
+  visibility: visible;
 }
 
 /* Pane width, not viewport width, determines whether the composer controls
@@ -9767,19 +9846,21 @@ textarea {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .composer-delegation-controls {
-    display: contents;
-  }
-
-  .composer-stop-button,
-  .composer-delegate-button,
-  .composer-delegation-mode-select,
-  .send-button {
+  .composer-actions > .composer-stop-button,
+  .composer-actions > .send-button {
     width: 100%;
     min-width: 0;
   }
 
-  .composer-actions:not(:has(.composer-stop-button)) > .send-button {
+  .composer-actions > .composer-action-split {
+    width: max-content;
+    max-width: 100%;
+    min-width: 12.5rem;
+    justify-self: end;
+  }
+
+  .composer-actions:not(:has(.composer-stop-button)) > .send-button,
+  .composer-actions:not(:has(.composer-stop-button)) > .composer-action-split {
     grid-column: 1 / -1;
   }
 }
@@ -10493,15 +10574,10 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .composer-stop-button,
-  .composer-delegation-controls,
-  .composer-delegate-button,
-  .send-button {
+  .composer-actions > .composer-stop-button,
+  .composer-actions > .composer-action-split,
+  .composer-actions > .send-button {
     width: 100%;
-  }
-
-  .composer-delegation-mode-select {
-    flex: 1;
   }
 
   .session-kill-popover {

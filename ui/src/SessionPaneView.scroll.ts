@@ -43,11 +43,6 @@ import {
   type DetachedScrollRestoreController,
 } from "./session-pane-detached-restore";
 import {
-  clearManualLiveTailDetachCompensation,
-  detachLiveTailPresentationBeforeManualScroll,
-  releaseManualLiveTailDetachCompensationOutsideViewport,
-} from "./session-live-tail-presentation";
-import {
   SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX,
   SESSION_STICKY_BOTTOM_BAND_PX,
   resolveSettledScrollMinimumAttempts,
@@ -81,8 +76,6 @@ export {
 
 const SESSION_PAGE_SCROLL_VIEWPORT_FACTOR = 0.85;
 const SESSION_PAGE_SCROLL_MINIMUM_PX = 160;
-const ACTIVE_LIVE_TAIL_SELECTOR =
-  ".session-conversation-page.is-active .conversation-live-tail";
 const SESSION_BOTTOM_FOLLOW_STABLE_MS =
   SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS * 2;
 
@@ -122,17 +115,6 @@ export function isMessageStackAtPhysicalBottom(
     Math.max(scrollHeight - clientHeight - scrollTop, 0) <=
     SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX
   );
-}
-
-function attachLiveTailPresentation(node: HTMLElement | null) {
-  const liveTail = node?.querySelector<HTMLElement>(ACTIVE_LIVE_TAIL_SELECTOR);
-  if (liveTail) {
-    // Manual detach changes this attribute synchronously, ahead of React. A
-    // detach+reattach sequence can batch to the original `true` state, so
-    // React may have no render to restore the attribute for us.
-    liveTail.setAttribute("data-tail-follow", "attached");
-  }
-  clearManualLiveTailDetachCompensation(node);
 }
 
 export function claimMessageStackBottomRepinAuthority(
@@ -232,15 +214,19 @@ export function useSessionPaneScrollState({
   const visibleContentSignatureByKeyRef = useRef<
     Record<string, string | undefined>
   >({});
-  const messageStackBottomByKeyRef = useRef<
-    Record<string, number | undefined>
-  >({});
   const liveFlowActiveByKeyRef = useRef<Record<string, boolean | undefined>>(
     {},
   );
   const awaitingPostLivePromptMessageIdByKeyRef = useRef<
     Record<string, string | null | undefined>
   >({});
+  const renderSequenceRef = useRef(0);
+  const lastPrePaintRepinRef = useRef<{
+    key: string;
+    render: number;
+    scrollTop: number;
+    targetTop: number;
+  } | null>(null);
   const paneProgrammaticBottomFollowRef = useRef<{
     key: string | null;
     until: number;
@@ -271,6 +257,7 @@ export function useSessionPaneScrollState({
     Record<string, boolean | undefined>
   >({});
   currentScrollStateKeyRef.current = scrollStateKey;
+  renderSequenceRef.current += 1;
   liveFlowActiveRef.current = isSending || showWaitingIndicator;
 
   useEffect(() => {
@@ -313,7 +300,6 @@ export function useSessionPaneScrollState({
   ) {
     paneShouldStickToBottomRef.current[scrollStateKey] = nextValue;
     if (nextValue) {
-      attachLiveTailPresentation(messageStackRef.current);
       cancelDetachedMessageStackRestore(scrollStateKey);
       delete paneTailFollowDetachedByKeyRef.current[scrollStateKey];
     } else {
@@ -333,10 +319,9 @@ export function useSessionPaneScrollState({
     });
   }
 
-  // LIVE TURN attachment is owned by the scroll controller. Its wrapper keeps
-  // an in-flow height reservation, while CSS visually pins the attached state
-  // to the viewport bottom. Explicit user navigation detaches it before moving
-  // the transcript, so the card resumes ordinary in-flow movement.
+  // LIVE TURN is always an ordinary in-flow transcript card. Attachment is
+  // scroll-controller intent only: it decides whether the whole transcript
+  // follows the bottom, never whether the card receives separate positioning.
   const tailFollowIntent =
     liveTailPinnedByKey[scrollStateKey] ??
     savedScrollPosition?.shouldStick ??
@@ -421,7 +406,6 @@ export function useSessionPaneScrollState({
       // from cancelling convergence without scheduling a replacement.
       cancelSettledScrollToBottom();
       cancelPaneProgrammaticBottomFollow();
-      delete messageStackBottomByKeyRef.current[scrollStateKey];
     },
     [isActive, isSessionTabActive, paneViewMode, scrollStateKey],
   );
@@ -432,7 +416,6 @@ export function useSessionPaneScrollState({
       // geometry convergence. A tab/mode/key change does: the shared DOM then
       // belongs to a different scroll scope.
       cancelDetachedMessageStackRestore(scrollStateKey);
-      clearManualLiveTailDetachCompensation(messageStackRef.current);
     },
     [isSessionTabActive, paneViewMode, scrollStateKey],
   );
@@ -554,6 +537,38 @@ export function useSessionPaneScrollState({
     setNewResponseIndicator(scrollStateKey, false);
   }
 
+  function repinAttachedLiveContentBeforePaint() {
+    const node = messageStackRef.current;
+    if (!node) {
+      return;
+    }
+    const currentRender = renderSequenceRef.current;
+    const targetTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+    const lastRepin = lastPrePaintRepinRef.current;
+    if (
+      lastRepin?.key === scrollStateKey &&
+      lastRepin.render === currentRender &&
+      Math.abs(lastRepin.targetTop - targetTop) <= 0.5 &&
+      Math.abs(lastRepin.scrollTop - node.scrollTop) <= 0.5
+    ) {
+      return;
+    }
+    // Attached content growth is not navigation. Keep the entire transcript
+    // in one coordinate system and correct its real bottom in the same commit
+    // that mounted or measured the growth. A velocity-bounded rAF follow here
+    // would expose one or more painted frames with LIVE TURN displaced.
+    cancelSettledScrollToBottom();
+    scrollToLatestMessage("auto", true, "bottom_follow", {
+      snapBottomFollowBeforePaint: true,
+    });
+    lastPrePaintRepinRef.current = {
+      key: scrollStateKey,
+      render: currentRender,
+      scrollTop: node.scrollTop,
+      targetTop: Math.max(node.scrollHeight - node.clientHeight, 0),
+    };
+  }
+
   function scrollVirtualizedMessageStackToBottom(
     node: HTMLElement,
     options: {
@@ -619,24 +634,15 @@ export function useSessionPaneScrollState({
       if (!getTailFollowIntent()) {
         return;
       }
-      // Streaming Markdown can replace a tall source block with a much shorter
-      // rendered element in this layout effect. Correct that authoritative
-      // shrink synchronously, even while the regular follow loop is active, so
-      // the new tree and its viewport position reach the same paint together.
-      if (detail?.beforePaint) {
-        scrollToLatestMessage("auto", true, "bottom_follow", {
-          snapBottomFollowBeforePaint: true,
-        });
-        return;
-      }
-      // A settled live follow already re-reads the bottom geometry on each
-      // animation frame. A second synchronous writer here would duplicate the
-      // correction and make composer/card growth appear as a snap.
-      if (isSettledProgrammaticBottomFollowActive()) {
-        return;
-      }
-      if (liveFlowActiveRef.current) {
-        scheduleLiveTailFollow();
+      // Layout requests during live flow belong to the same pre-paint append
+      // authority as message commits. This includes Markdown height collapse,
+      // composer growth, and command cards gaining measured height.
+      if (
+        detail?.beforePaint ||
+        liveFlowActiveRef.current ||
+        isSettledProgrammaticBottomFollowActive()
+      ) {
+        repinAttachedLiveContentBeforePaint();
         return;
       }
       scrollToLatestMessage("auto", true);
@@ -711,10 +717,8 @@ export function useSessionPaneScrollState({
 
     const repinAfterRelevantResize = () => {
       const activePageChanged = bindActiveConversationPage();
-      const priorContentHeight = previousContentHeight;
       const nextContentHeight =
         conversationPage?.getBoundingClientRect().height ?? 0;
-      const priorViewportHeight = previousViewportHeight;
       const nextViewportHeight = node.clientHeight;
       const contentChanged =
         Math.abs(nextContentHeight - previousContentHeight) > 0.5;
@@ -731,24 +735,14 @@ export function useSessionPaneScrollState({
       ) {
         return;
       }
-      const bottomMovedUpBeforePaint =
-        activePageChanged ||
-        nextContentHeight < priorContentHeight - 0.5 ||
-        nextViewportHeight > priorViewportHeight + 0.5;
-      // New command cards often gain their measured height after live follow
-      // starts. The settled loop targets that new bottom on its next frame; a
-      // second synchronous writer here would duplicate the correction and
-      // produce the visible up/down jump.
-      if (isSettledProgrammaticBottomFollowActive()) {
-        if (bottomMovedUpBeforePaint) {
-          scrollToLatestMessage("auto", true, "bottom_follow", {
-            snapBottomFollowBeforePaint: true,
-          });
-        }
-        return;
-      }
-      if (liveFlowActiveRef.current) {
-        scheduleLiveTailFollow();
+      // ResizeObserver runs before paint. During attached live flow every
+      // measured growth or collapse must converge here; deferring growth to a
+      // smooth animation frame makes LIVE TURN visibly jump first.
+      if (
+        liveFlowActiveRef.current ||
+        isSettledProgrammaticBottomFollowActive()
+      ) {
+        repinAttachedLiveContentBeforePaint();
         return;
       }
       // ResizeObserver callbacks run before paint. Correct synchronously through
@@ -854,20 +848,6 @@ export function useSessionPaneScrollState({
       (currentLiveFlowActive ||
         postLiveMessageTransition.shouldFollowPostLiveMessage ||
         receivedFirstOutputForPrompt);
-    const messageStack = messageStackRef.current;
-    const previousMessageStackBottom =
-      messageStackBottomByKeyRef.current[scrollStateKey];
-    const currentMessageStackBottom = messageStack
-      ? Math.max(messageStack.scrollHeight - messageStack.clientHeight, 0)
-      : undefined;
-    if (currentMessageStackBottom !== undefined) {
-      messageStackBottomByKeyRef.current[scrollStateKey] =
-        currentMessageStackBottom;
-    }
-    const bottomMovedUpBeforePaint =
-      previousMessageStackBottom !== undefined &&
-      currentMessageStackBottom !== undefined &&
-      currentMessageStackBottom < previousMessageStackBottom - 0.5;
     if (
       (!receivedFirstOutputForPrompt && !changedLiveContent) ||
       hasUnloadedNewerHistory ||
@@ -879,31 +859,18 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    // LIVE TURN keeps an in-flow height reservation even while its attached
-    // presentation is sticky. One persistent animation-frame controller
-    // retargets the moving bottom. Content commits never consume their own
-    // synthetic frame budget, so a burst of SSE/React commits before paint
-    // cannot accelerate motion.
+    // Attached appends are synchronized in this layout effect. The committed
+    // tree and its real bottom therefore reach paint together; smooth follow
+    // is reserved for explicit navigation and reattachment, not streaming.
     // Turn status and the final assistant message can arrive in separate SSE
     // commits. The per-key latch survives a status-only idle commit, but stays
     // bound to that turn's prompt identity. A later prompt clears it without
     // following, while the matching final message still receives pre-paint
     // synchronization even when earlier command/progress output means this is
     // not first output.
-    if (changedLiveContent) {
-      if (bottomMovedUpBeforePaint) {
-        // A browser clamp can make a live reparse require no numeric write.
-        // Still notify the virtualizer synchronously so the final page and the
-        // corrected viewport reach the same paint.
-        scrollToLatestMessage("auto", true, "bottom_follow", {
-          snapBottomFollowBeforePaint: true,
-        });
-      }
-      scheduleLiveTailFollow();
-      return;
-    }
-
-    scheduleLiveTailFollow();
+    // A browser clamp can make a live reparse require no numeric write. The
+    // snap helper still notifies the virtualizer synchronously in that case.
+    repinAttachedLiveContentBeforePaint();
   }, [
     activeSession?.messages,
     hasUnloadedNewerHistory,
@@ -955,11 +922,9 @@ export function useSessionPaneScrollState({
       // This is the shared first-write path for native wheel/trackpad input
       // and explicit page controls. React's delegated wheel handler observes
       // the native listener only after it has called preventDefault(), so
-      // waiting for that handler would leave the primary desktop path attached
-      // for its first scroll step. Detach presentation immediately before the
-      // write so LIVE TURN and the transcript enter the same coordinate system
-      // together. A delta that reaches the bottom stays attached throughout.
-      detachLiveTailPresentationBeforeManualScroll(node);
+      // transfer scroll authority here before the first write. LIVE TURN is
+      // already in the transcript's coordinate system and needs no separate
+      // presentation handoff. A delta reaching bottom stays attached.
       // Manual navigation is direction-independent and remains detached until
       // the physical bottom; the shared sticky-bottom band only absorbs
       // layout jitter while already attached.
@@ -999,7 +964,8 @@ export function useSessionPaneScrollState({
       setNewResponseIndicator(scrollStateKey, true, "activity");
       return undefined;
     }
-    return scheduleLiveTailFollow();
+    repinAttachedLiveContentBeforePaint();
+    return undefined;
   }
 
   function scrollMessageStackByPage(direction: -1 | 1) {
@@ -1407,31 +1373,6 @@ export function useSessionPaneScrollState({
     return cancel;
   }
 
-  function scheduleLiveTailFollow() {
-    if (!getTailFollowIntent()) {
-      setNewResponseIndicator(scrollStateKey, true, "activity");
-      return;
-    }
-    // Mark the entire live-flow transition before its first animation frame.
-    // Composer measurements and ResizeObserver delivery can run in the gap
-    // between the React commit and that frame; they must join this settled
-    // pin instead of issuing an intervening correction. Each frame targets the
-    // current bottom. Time-based interpolation keeps ordinary growth smooth;
-    // authoritative pre-paint collapses use the separate synchronous repin
-    // path so the visible tree can never outrun its viewport correction.
-    beginPaneProgrammaticBottomFollow();
-    if (isSettledProgrammaticBottomFollowActive()) {
-      return;
-    }
-    scheduleSettledScrollToBottom("auto", {
-      // Large command/result cards can require more than the old 400 ms window
-      // now that each frame is deliberately velocity-bounded.
-      maxAttempts: 60,
-      minAttempts: 4,
-      scrollKind: "bottom_follow",
-    });
-  }
-
   function cancelSettledScrollToBottom() {
     const cancel = settledScrollToBottomCancelRef.current;
     settledScrollToBottomCancelRef.current = null;
@@ -1530,13 +1471,6 @@ export function useSessionPaneScrollState({
     if (!isManualMessageStackScrollInput(event)) {
       return;
     }
-    // Native scrolling can start before React commits the detached state.
-    // Switch presentation synchronously and preserve any current sticky
-    // displacement so the very first scroll step moves the tail and transcript
-    // by exactly the same amount.
-    if (node) {
-      detachLiveTailPresentationBeforeManualScroll(node);
-    }
     cancelDetachedMessageStackRestore(scrollStateKey);
     cancelPaneProgrammaticBottomFollow();
     if (!hasDetachedTailFollowAuthority() || getTailFollowIntent()) {
@@ -1558,7 +1492,6 @@ export function useSessionPaneScrollState({
 
   function handleMessageStackScroll(event: ReactUIEvent<HTMLElement>) {
     const node = event.currentTarget;
-    releaseManualLiveTailDetachCompensationOutsideViewport(node);
     if (
       detachedScrollRestoreController.consumeNativeScroll({
         key: scrollStateKey,
@@ -1632,8 +1565,8 @@ export function useSessionPaneScrollState({
     ) {
       // A manual gesture owns the viewport until it reaches the real bottom.
       // The wider sticky-bottom band is useful for absorbing layout jitter
-      // while attached, but must never re-enable sticky presentation
-      // after a small deliberate scroll away from the tail.
+      // while attached, but must never re-enable bottom-follow intent after a
+      // small deliberate scroll away from the tail.
       paneScrollPositions[scrollStateKey] = {
         top: node.scrollTop,
         shouldStick: false,
@@ -1812,7 +1745,8 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    return scheduleLiveTailFollow();
+    repinAttachedLiveContentBeforePaint();
+    return undefined;
   }, [
     activeSession?.id,
     activeSession?.hasNewerHistory,
@@ -1859,7 +1793,7 @@ export function useSessionPaneScrollState({
     scrollStateKey,
   ]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!activeSession || !isSessionTabActive) {
       return;
     }
@@ -1890,7 +1824,8 @@ export function useSessionPaneScrollState({
     if (onlyPendingPromptsChanged) {
       if (getTailFollowIntent()) {
         setNewResponseIndicator(scrollStateKey, false);
-        return scheduleLiveTailFollow();
+        repinAttachedLiveContentBeforePaint();
+        return;
       }
       setNewResponseIndicator(scrollStateKey, true, "activity");
       return;
@@ -1921,7 +1856,8 @@ export function useSessionPaneScrollState({
     }
 
     setNewResponseIndicator(scrollStateKey, false);
-    return scheduleLiveTailFollow();
+    repinAttachedLiveContentBeforePaint();
+    return;
   }, [
     activeSession?.id,
     deferContentScrollEffects,
@@ -1935,7 +1871,7 @@ export function useSessionPaneScrollState({
     visibleMessageContentSignature,
   ]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (
       !pendingScrollToBottomRequest ||
       !isActive ||
@@ -2000,7 +1936,7 @@ export function useSessionPaneScrollState({
     scrollStateKey,
   ]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isSending || paneViewMode !== "session") {
       return;
     }
@@ -2008,13 +1944,8 @@ export function useSessionPaneScrollState({
     // Sending starts new activity, but it is not a navigation command. A
     // reader who moved away from the tail keeps the same viewport and gets an
     // indicator instead of being pulled away from the text they are reading.
-    const frameId = window.requestAnimationFrame(() => {
-      followLatestMessageForPromptSend();
-    });
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-    };
+    followLatestMessageForPromptSend();
+    return undefined;
   }, [isSending, paneViewMode, scrollStateKey]);
 
   return {
