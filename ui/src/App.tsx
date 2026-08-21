@@ -87,6 +87,10 @@ import {
   type ActionStateClassifierContext,
 } from "./app-session-actions";
 import { useAppDragResize } from "./app-drag-resize";
+import {
+  beginSessionScrollBottomRebuild,
+  type SessionScrollRebuildMarkerOptions,
+} from "./session-scroll-rebuild-markers";
 import { useAppDialogState } from "./app-dialog-state";
 import { useAppWorkspaceActions } from "./app-workspace-actions";
 import { useAppControlPanelState } from "./app-control-panel-state";
@@ -169,7 +173,6 @@ import {
   openSessionListInWorkspaceState,
   openSourceInWorkspaceState,
   openTerminalInWorkspaceState,
-  placeSessionDropInWorkspaceState,
   placeDraggedTab,
   placeExternalTab,
   reconcileWorkspaceState,
@@ -185,7 +188,6 @@ import {
   type SessionPaneViewMode,
   type TabDropPlacement,
   type WorkspaceState,
-  type WorkspaceTab,
 } from "./workspace";
 import {
   ensureWorkspaceViewId,
@@ -1237,55 +1239,13 @@ export default function App() {
 
   function markSessionTabsForBottomAfterWorkspaceRebuild(
     workspaceState: WorkspaceState,
-    options?: {
-      sessionIds?: readonly string[];
-      tabs?: readonly WorkspaceTab[];
-    },
+    options?: SessionScrollRebuildMarkerOptions,
   ) {
-    const sessionIds = new Set<string>();
-    for (const pane of workspaceState.panes) {
-      for (const tab of pane.tabs) {
-        if (tab.kind === "session") {
-          sessionIds.add(tab.sessionId);
-        }
-      }
-    }
-
-    for (const sessionId of options?.sessionIds ?? []) {
-      sessionIds.add(sessionId);
-    }
-    for (const tab of options?.tabs ?? []) {
-      if (tab.kind === "session") {
-        sessionIds.add(tab.sessionId);
-      }
-    }
-
-    const previousMarkers = new Map(
-      [...sessionIds].map((sessionId) => [
-        sessionId,
-        {
-          existed: Object.prototype.hasOwnProperty.call(
-            forceSessionScrollToBottomRef.current,
-            sessionId,
-          ),
-          value: forceSessionScrollToBottomRef.current[sessionId],
-        },
-      ]),
+    return beginSessionScrollBottomRebuild(
+      () => forceSessionScrollToBottomRef.current,
+      workspaceState,
+      options,
     );
-    for (const sessionId of sessionIds) {
-      forceSessionScrollToBottomRef.current[sessionId] = true;
-    }
-
-    return () => {
-      for (const [sessionId, previousMarker] of previousMarkers) {
-        if (previousMarker.existed && previousMarker.value !== undefined) {
-          forceSessionScrollToBottomRef.current[sessionId] =
-            previousMarker.value;
-        } else {
-          delete forceSessionScrollToBottomRef.current[sessionId];
-        }
-      }
-    };
   }
 
   const {
