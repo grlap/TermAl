@@ -37,6 +37,19 @@ import {
 import type { ControlPanelSectionId } from "./panels/ControlPanelSurface";
 import type { ControlPanelSide } from "./workspace-storage";
 import { TAB_DRAG_STALE_TIMEOUT_MS } from "./app-shell-internals";
+import type { SessionScrollRebuildMarkerOptions } from "./session-scroll-rebuild-markers";
+
+// Each accepted reducer result receives a per-drop Symbol token. It is
+// enumerable so same-flush workspace spreads preserve the commit evidence,
+// while JSON persistence still ignores symbol-keyed properties. The latest
+// token intentionally remains on live state: later accepted drops replace the
+// single property, and stale tokens are inert because verification compares
+// per-drop identity immediately after flushSync.
+const WORKSPACE_DROP_COMMIT_TOKEN = Symbol("workspaceDropCommitToken");
+
+type WorkspaceWithDropCommitToken = WorkspaceState & {
+  [WORKSPACE_DROP_COMMIT_TOKEN]?: symbol;
+};
 
 type UseAppDragResizeArgs = {
   windowId: string;
@@ -44,6 +57,14 @@ type UseAppDragResizeArgs = {
   paneLookup: Map<string, WorkspacePane>;
   controlPanelSide: ControlPanelSide;
   setControlPanelSide: Dispatch<SetStateAction<ControlPanelSide>>;
+  // Wrappers around the React setter must preserve enumerable symbol keys.
+  // Drops that create a gesture-owned tab id also carry independent structural
+  // evidence, but moves or activations of existing tabs require the token. The
+  // production app passes the raw setter. All cross-window transfers allocate a
+  // fresh id, so their acknowledgement retains structural evidence even if a
+  // wrapper strips the token. Only ambiguous same-window existing-tab drops
+  // deliberately fail closed: temporary markers are rolled back, the previous
+  // dock side is restored, and the invariant violation is warned once.
   setWorkspace: Dispatch<SetStateAction<WorkspaceState>>;
   applyControlPanelLayout: (
     nextWorkspace: WorkspaceState,
@@ -53,21 +74,16 @@ type UseAppDragResizeArgs = {
   ignoreFetchedWorkspaceLayoutRef: MutableRefObject<boolean>;
   markSessionTabsForBottomAfterWorkspaceRebuild: (
     workspaceState: WorkspaceState,
-    options?: {
-      sessionIds?: string[];
-      tabs?: WorkspaceTab[];
-    },
+    options?: SessionScrollRebuildMarkerOptions,
   ) => (() => void) | void;
 };
 
 type WorkspaceDropExpectation = {
   allowsControlPanelSideOnly?: boolean;
-  placement: TabDropPlacement;
   sourcePaneId?: string;
-  tabId?: string;
-  sessionId?: string;
+  structuralPlacementIsCommitEvidence?: boolean;
+  tabId: string;
   targetPaneId: string;
-  mayActivateExistingPane?: boolean;
 };
 
 type UseAppDragResizeResult = {
@@ -106,54 +122,50 @@ function resolveControlPanelSideAfterDrop(
     : currentSide;
 }
 
-function workspaceContainsCommittedDrop(
+function workspaceContainsGestureTabId(
   workspace: WorkspaceState,
   expectation: WorkspaceDropExpectation,
 ) {
-  // Accepting placement reducers activate the inserted/moved tab and pane,
-  // and control-panel docking must preserve that activation. Cross-window
-  // acknowledgement relies on this contract so mere tab presence cannot be
-  // mistaken for the current drop when equivalent content already exists.
-  for (const pane of workspace.panes) {
-    const tab = pane.tabs.find((candidate) =>
-      expectation.sessionId
-        ? candidate.kind === "session" &&
-          candidate.sessionId === expectation.sessionId
-        : candidate.id === expectation.tabId,
-    );
-    if (
-      !tab ||
-      workspace.activePaneId !== pane.id ||
-      pane.activeTabId !== tab.id
-    ) {
-      continue;
-    }
-
-    if (expectation.placement === "tabs") {
-      return pane.id === expectation.targetPaneId;
-    }
-    if (expectation.mayActivateExistingPane) {
-      return true;
-    }
-    if (expectation.sourcePaneId) {
-      return pane.id !== expectation.sourcePaneId;
-    }
-    return pane.id !== expectation.targetPaneId;
-  }
-
-  return false;
+  // Every fallback-capable drop owns a unique tab id allocated before the
+  // reducer runs. Its final presence is sufficient evidence for that gesture,
+  // even when the control-panel layout pass relocates or nests the new pane.
+  return workspace.panes.some((pane) =>
+    pane.tabs.some((candidate) => candidate.id === expectation.tabId),
+  );
 }
 
-function workspaceContainsTab(
+function workspacePaneContainsTab(
   workspace: WorkspaceState,
+  paneId: string,
   tabId: string | undefined,
 ) {
   if (!tabId) {
     return false;
   }
-  return workspace.panes.some((pane) =>
-    pane.tabs.some((tab) => tab.id === tabId),
+  return workspace.panes.some(
+    (pane) =>
+      pane.id === paneId && pane.tabs.some((tab) => tab.id === tabId),
   );
+}
+
+function markWorkspaceDropCommit(
+  workspace: WorkspaceState,
+  token: symbol,
+): WorkspaceState {
+  // Enumeration lets ordinary workspace spreads preserve this transient
+  // reducer evidence; symbol keys remain outside the serializable model.
+  const committedWorkspace = { ...workspace } as WorkspaceWithDropCommitToken;
+  committedWorkspace[WORKSPACE_DROP_COMMIT_TOKEN] = token;
+  return committedWorkspace;
+}
+
+function workspaceHasDropCommit(
+  workspace: WorkspaceState,
+  token: symbol,
+): boolean {
+  return (workspace as WorkspaceWithDropCommitToken)[
+    WORKSPACE_DROP_COMMIT_TOKEN
+  ] === token;
 }
 
 export function useAppDragResize({
@@ -190,6 +202,8 @@ export function useAppDragResize({
   workspaceRef.current = workspace;
   const applyControlPanelLayoutRef = useRef(applyControlPanelLayout);
   applyControlPanelLayoutRef.current = applyControlPanelLayout;
+  const warnedAboutStructuralDropFallbackRef = useRef(false);
+  const warnedAboutUnverifiableDropRef = useRef(false);
 
   const broadcastTabDragMessage = useCallback(
     (message: WorkspaceTabDragChannelMessage) => {
@@ -318,10 +332,7 @@ export function useAppDragResize({
   const commitWorkspaceDrop = useCallback(
     (
       placeWorkspace: (current: WorkspaceState) => WorkspaceState,
-      options: {
-        sessionIds?: string[];
-        tabs?: WorkspaceTab[];
-      },
+      options: SessionScrollRebuildMarkerOptions,
       expectation: WorkspaceDropExpectation,
       nextControlPanelSide: ControlPanelSide = controlPanelSide,
     ) => {
@@ -330,7 +341,8 @@ export function useAppDragResize({
         nextControlPanelSide !== controlPanelSide;
       const allowsControlPanelSideOnly =
         expectation.allowsControlPanelSideOnly === true &&
-        changesControlPanelSide;
+        changesControlPanelSide &&
+        expectation.sourcePaneId === expectation.targetPaneId;
       if (previewWorkspace === workspace && !allowsControlPanelSideOnly) {
         return false;
       }
@@ -340,31 +352,105 @@ export function useAppDragResize({
       // drop over queued workspace state. After the commit, verify the actual
       // pane/tab placement so a rebase-time refusal cannot acknowledge a
       // cross-window drop or leave temporary restoration markers behind.
-      const transaction: { rollbackScrollMarkers?: () => void } = {};
+      const commitToken = Symbol("workspaceDropCommit");
+      let rollbackScrollMarkers: (() => void) | undefined;
+      let appliedNextControlPanelSide = false;
       flushSync(() => {
-        transaction.rollbackScrollMarkers =
+        rollbackScrollMarkers =
           markSessionTabsForBottomAfterWorkspaceRebuild(workspace, options) ??
           undefined;
         setWorkspace((current) => {
           const placedWorkspace = placeWorkspace(current);
           const commitsExistingControlPanelSide =
             allowsControlPanelSideOnly &&
-            workspaceContainsTab(current, expectation.tabId);
+            workspacePaneContainsTab(
+              current,
+              expectation.targetPaneId,
+              expectation.tabId,
+            );
           const committedSide =
             placedWorkspace !== current || commitsExistingControlPanelSide
               ? nextControlPanelSide
               : controlPanelSide;
-          return applyControlPanelLayout(placedWorkspace, committedSide);
+          // React may replay this updater, but the assignment is a deterministic
+          // observation of its latest evaluation. It only avoids a redundant
+          // recovery layout; drop acknowledgement still comes from state.
+          appliedNextControlPanelSide =
+            changesControlPanelSide &&
+            committedSide === nextControlPanelSide;
+          const laidOutWorkspace = applyControlPanelLayout(
+            placedWorkspace,
+            committedSide,
+          );
+          return placedWorkspace === current
+            ? laidOutWorkspace
+            : markWorkspaceDropCommit(laidOutWorkspace, commitToken);
         });
       });
       const commitsExistingControlPanelSide =
         allowsControlPanelSideOnly &&
-        workspaceContainsTab(workspaceRef.current, expectation.tabId);
+        workspacePaneContainsTab(
+          workspaceRef.current,
+          expectation.targetPaneId,
+          expectation.tabId,
+        );
+      const reducerCommitted = workspaceHasDropCommit(
+        workspaceRef.current,
+        commitToken,
+      );
+      // The exact token is authoritative: it is attached only when the
+      // rebased placement reducer accepts this drop, before layout
+      // normalization may relocate panes or restore other focus. Structural
+      // matching is only a fallback for unambiguous drops when an outer
+      // setter wrapper reconstructs state and sheds symbol-keyed metadata.
+      const structurallyCommittedWithoutToken =
+        !reducerCommitted &&
+        expectation.structuralPlacementIsCommitEvidence === true &&
+        workspaceContainsGestureTabId(workspaceRef.current, expectation);
+      if (
+        structurallyCommittedWithoutToken &&
+        !warnedAboutStructuralDropFallbackRef.current
+      ) {
+        warnedAboutStructuralDropFallbackRef.current = true;
+        console.warn(
+          "[TermAl] Workspace setter stripped drop commit evidence; " +
+            "acknowledging via the structural fallback. Preserve enumerable " +
+            "symbol keys in workspace setter wrappers.",
+        );
+      }
+      const missingCommitEvidenceAfterStateChange =
+        !reducerCommitted &&
+        !structurallyCommittedWithoutToken &&
+        !commitsExistingControlPanelSide &&
+        workspaceRef.current !== workspace;
+      if (
+        missingCommitEvidenceAfterStateChange &&
+        !warnedAboutUnverifiableDropRef.current
+      ) {
+        warnedAboutUnverifiableDropRef.current = true;
+        console.warn(
+          "[TermAl] Could not verify a workspace drop after state changed; " +
+            "the rebased reducer may have refused it, or a workspace setter " +
+            "wrapper may have stripped enumerable Symbol commit evidence. " +
+            "Rolling back temporary scroll markers.",
+        );
+      }
       const didCommit =
-        workspaceContainsCommittedDrop(workspaceRef.current, expectation) ||
+        reducerCommitted ||
+        structurallyCommittedWithoutToken ||
         commitsExistingControlPanelSide;
       if (!didCommit) {
-        transaction.rollbackScrollMarkers?.();
+        rollbackScrollMarkers?.();
+        if (appliedNextControlPanelSide) {
+          // The placement reducer may have committed before an invalid setter
+          // wrapper stripped its token. Keep the visible dock consistent with
+          // the unpublished preference by restoring the prior side.
+          flushSync(() => {
+            setWorkspace((current) =>
+              applyControlPanelLayout(current, controlPanelSide),
+            );
+          });
+        }
       } else if (changesControlPanelSide) {
         // Only publish the dock-side preference after the rebased workspace
         // contains the transferred tab. A local control-panel edge gesture is
@@ -392,6 +478,10 @@ export function useAppDragResize({
     ) => {
       const droppedSession = readSessionDragData(dataTransfer ?? null);
       if (droppedSession) {
+        // This gesture-owned id is used only if the rebased reducer must
+        // create a tab. Its final presence is therefore unambiguous fallback
+        // evidence when an outer state wrapper sheds the commit token.
+        const newSessionTabId = crypto.randomUUID();
         commitWorkspaceDrop(
           (current) =>
             placeSessionDropInWorkspaceState(
@@ -400,13 +490,13 @@ export function useAppDragResize({
               targetPaneId,
               placement,
               tabIndex,
+              newSessionTabId,
             ),
           { sessionIds: [droppedSession.sessionId] },
           {
-            placement,
-            sessionId: droppedSession.sessionId,
+            structuralPlacementIsCommitEvidence: true,
+            tabId: newSessionTabId,
             targetPaneId,
-            mayActivateExistingPane: placement !== "tabs",
           },
         );
         return;
@@ -461,7 +551,6 @@ export function useAppDragResize({
             allowsControlPanelSideOnly:
               drop.tab.kind === "controlPanel" &&
               (placement === "left" || placement === "right"),
-            placement,
             sourcePaneId: drop.sourcePaneId,
             tabId: drop.tabId,
             targetPaneId,
@@ -488,7 +577,7 @@ export function useAppDragResize({
             ),
           { tabs: [drop.tab] },
           {
-            placement,
+            structuralPlacementIsCommitEvidence: true,
             tabId: transferredTabId,
             targetPaneId,
           },
@@ -522,7 +611,7 @@ export function useAppDragResize({
           ),
         { tabs: [drop.tab] },
         {
-          placement,
+          structuralPlacementIsCommitEvidence: true,
           tabId: transferredTabId,
           targetPaneId,
         },

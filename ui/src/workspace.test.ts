@@ -1430,6 +1430,31 @@ describe("workspace helpers", () => {
     });
   });
 
+  it("control-panel layout normalization preserves existing pane and tab ownership", () => {
+    const paneA = makePane("pane-a", [makeSessionTab("tab-a", "session-a")]);
+    const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);
+    const workspace = makeSplitWorkspace(paneA, paneB, paneA.id);
+    const existingTabOwners = new Map(
+      workspace.panes.flatMap((pane) =>
+        pane.tabs.map((tab): [string, string] => [tab.id, pane.id]),
+      ),
+    );
+
+    const ensured = ensureControlPanelInWorkspaceState(workspace);
+    const docked = dockControlPanelAtWorkspaceEdge(ensured, "right");
+
+    expect(workspace.panes.map((pane) => pane.id).every((paneId) =>
+      docked.panes.some((pane) => pane.id === paneId),
+    )).toBe(true);
+    for (const [tabId, paneId] of existingTabOwners) {
+      expect(
+        docked.panes.find((pane) =>
+          pane.tabs.some((tab) => tab.id === tabId),
+        )?.id,
+      ).toBe(paneId);
+    }
+  });
+
   it("findWorkspacePaneIdForSession returns the pane that owns the session tab", () => {
     const paneA = makePane("pane-a", [makeSessionTab("tab-a", "session-a")]);
     const paneB = makePane("pane-b", [makeSessionTab("tab-b", "session-b")]);

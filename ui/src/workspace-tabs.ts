@@ -41,9 +41,12 @@ import {
   type WorkspaceTerminalTab,
 } from "./workspace-types";
 
-export function createSessionTab(sessionId: string): WorkspaceSessionTab {
+export function createSessionTab(
+  sessionId: string,
+  tabId: string = crypto.randomUUID(),
+): WorkspaceSessionTab {
   return {
-    id: crypto.randomUUID(),
+    id: tabId,
     kind: "session",
     sessionId,
   };

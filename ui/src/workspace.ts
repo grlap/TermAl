@@ -600,19 +600,23 @@ export function openSessionInWorkspaceState(
   );
 }
 
+// Refused placements must return `workspace` by identity. The drag/drop
+// transaction uses reference equality to distinguish refusal from commit.
 export function placeSessionDropInWorkspaceState(
   workspace: WorkspaceState,
   sessionId: string,
   targetPaneId: string,
   placement: TabDropPlacement,
   tabIndex?: number,
+  newSessionTabId?: string,
 ): WorkspaceState {
   if (placement === "tabs") {
     const existing = findSessionTab(workspace, sessionId);
     const targetPane = workspace.panes.find(
       (pane) => pane.id === targetPaneId,
     );
-    const sessionTab = existing?.tab ?? createSessionTab(sessionId);
+    const sessionTab =
+      existing?.tab ?? createSessionTab(sessionId, newSessionTabId);
     if (
       !targetPane ||
       !isAllowedControlPanelPlacement(targetPane, sessionTab, placement)
@@ -646,12 +650,17 @@ export function placeSessionDropInWorkspaceState(
     return openSessionInWorkspaceState(workspace, sessionId, targetPaneId);
   }
 
+  // Keep the gesture-owned id on both sides of the clone boundary. Passing it
+  // only to createSessionTab would let placeExternalTab mint a different id,
+  // breaking the caller's unambiguous structural commit evidence.
+  const sessionTab = createSessionTab(sessionId, newSessionTabId);
   return placeExternalTab(
     workspace,
-    createSessionTab(sessionId),
+    sessionTab,
     targetPaneId,
     placement,
     tabIndex,
+    sessionTab.id,
   );
 }
 
@@ -1163,6 +1172,9 @@ export function openInstructionDebuggerInWorkspaceState(
   );
 }
 
+// Layout normalization may add the missing control surface, but it must keep
+// every existing pane id and tab-to-pane membership stable. Post-layout
+// drag/drop verification keys on those identities.
 export function ensureControlPanelInWorkspaceState(
   workspace: WorkspaceState,
 ): WorkspaceState {
@@ -1177,6 +1189,8 @@ export function ensureControlPanelInWorkspaceState(
   );
 }
 
+// Docking only restructures the pane tree. Preserve pane ids and tab-to-pane
+// membership because drag/drop commits are verified after this layout pass.
 export function dockControlPanelAtWorkspaceEdge(
   workspace: WorkspaceState,
   side: "left" | "right",
@@ -1490,6 +1504,8 @@ export function splitPane(
   );
 }
 
+// Refused placements must return `workspace` by identity. The drag/drop
+// transaction uses reference equality to distinguish refusal from commit.
 export function placeDraggedTab(
   workspace: WorkspaceState,
   sourcePaneId: string,
@@ -1570,6 +1586,8 @@ export function placeDraggedTab(
   );
 }
 
+// Refused placements must return `workspace` by identity. The drag/drop
+// transaction uses reference equality to distinguish refusal from commit.
 export function placeExternalTab(
   workspace: WorkspaceState,
   tab: WorkspaceTab,

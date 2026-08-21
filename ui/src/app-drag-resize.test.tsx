@@ -1,5 +1,6 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import {
+  StrictMode,
   useCallback,
   useEffect,
   useRef,
@@ -13,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useAppDragResize } from "./app-drag-resize";
 import { attachSessionDragData } from "./session-drag";
+import type { SessionScrollRebuildMarkerOptions } from "./session-scroll-rebuild-markers";
 import { TAB_DRAG_MIME_TYPE, type WorkspaceTabDrag } from "./tab-drag";
 import type { ControlPanelSide } from "./workspace-storage";
 import type { WorkspacePane, WorkspaceState, WorkspaceTab } from "./workspace";
@@ -138,6 +140,64 @@ function makeControlPanelSplitWorkspace(): WorkspaceState {
   };
 }
 
+function makeDuplicateSessionWorkspace(): WorkspaceState {
+  return {
+    root: {
+      id: "split-outer",
+      type: "split",
+      direction: "row",
+      ratio: 0.5,
+      first: {
+        id: "split-inner",
+        type: "split",
+        direction: "row",
+        ratio: 0.5,
+        first: { type: "pane", paneId: "pane-a" },
+        second: { type: "pane", paneId: "pane-duplicate" },
+      },
+      second: { type: "pane", paneId: "pane-target" },
+    },
+    activePaneId: "pane-a",
+    panes: [
+      {
+        id: "pane-a",
+        activeSessionId: "session-a",
+        activeTabId: "tab-a",
+        lastSessionViewMode: "session",
+        sourcePath: null,
+        tabs: [{ id: "tab-a", kind: "session", sessionId: "session-a" }],
+        viewMode: "session",
+      },
+      {
+        id: "pane-duplicate",
+        activeSessionId: "session-a",
+        activeTabId: "tab-duplicate",
+        lastSessionViewMode: "session",
+        sourcePath: null,
+        tabs: [
+          {
+            id: "tab-duplicate",
+            kind: "session",
+            sessionId: "session-a",
+          },
+        ],
+        viewMode: "session",
+      },
+      {
+        id: "pane-target",
+        activeSessionId: "session-b",
+        activeTabId: "tab-target",
+        lastSessionViewMode: "session",
+        sourcePath: null,
+        tabs: [
+          { id: "tab-target", kind: "session", sessionId: "session-b" },
+        ],
+        viewMode: "session",
+      },
+    ],
+  };
+}
+
 function makeDataTransfer() {
   const store = new Map<string, string>();
   return {
@@ -162,23 +222,28 @@ function requireDragResizeApi(api: DragResizeApi | null): DragResizeApi {
 }
 
 function Harness({
+  applyWorkspaceAfterLayout,
+  copyWorkspaceAfterDropUpdate = false,
+  rebuildWorkspaceAfterDropUpdate = false,
   initialWorkspace,
   layoutVersion,
   markSessionTabsForBottomAfterWorkspaceRebuild = () => {},
+  onControlPanelLayoutSide,
   onLayout,
   onReady,
   rebaseWorkspaceBeforeNextDrop,
   workspaceLayoutLoadPending = false,
 }: {
+  applyWorkspaceAfterLayout?: (workspace: WorkspaceState) => WorkspaceState;
+  copyWorkspaceAfterDropUpdate?: boolean;
+  rebuildWorkspaceAfterDropUpdate?: boolean;
   initialWorkspace?: WorkspaceState;
   layoutVersion: number;
   markSessionTabsForBottomAfterWorkspaceRebuild?: (
     workspaceState: WorkspaceState,
-    options?: {
-      sessionIds?: string[];
-      tabs?: WorkspaceTab[];
-    },
+    options?: SessionScrollRebuildMarkerOptions,
   ) => (() => void) | void;
+  onControlPanelLayoutSide?: (side: ControlPanelSide | undefined) => void;
   onLayout: (layoutVersion: number) => void;
   onReady?: (api: DragResizeApi) => void;
   rebaseWorkspaceBeforeNextDrop?: (
@@ -194,6 +259,11 @@ function Harness({
   const workspaceLayoutLoadPendingRef = useRef(false);
   const ignoreFetchedWorkspaceLayoutRef = useRef(false);
   const pendingDropRebaseRef = useRef(rebaseWorkspaceBeforeNextDrop);
+
+  useEffect(() => {
+    pendingDropRebaseRef.current = rebaseWorkspaceBeforeNextDrop;
+  }, [rebaseWorkspaceBeforeNextDrop]);
+
   const setWorkspaceFromDrop = useCallback<
     Dispatch<SetStateAction<WorkspaceState>>
   >((update) => {
@@ -201,9 +271,22 @@ function Harness({
       const rebase = pendingDropRebaseRef.current;
       pendingDropRebaseRef.current = undefined;
       const rebased = rebase?.(current) ?? current;
-      return typeof update === "function" ? update(rebased) : update;
+      const nextWorkspace =
+        typeof update === "function" ? update(rebased) : update;
+      if (rebuildWorkspaceAfterDropUpdate) {
+        return {
+          root: nextWorkspace.root,
+          panes: nextWorkspace.panes,
+          activePaneId: nextWorkspace.activePaneId,
+          lastContentPaneId: nextWorkspace.lastContentPaneId,
+          lastViewerPaneId: nextWorkspace.lastViewerPaneId,
+        };
+      }
+      return copyWorkspaceAfterDropUpdate
+        ? { ...nextWorkspace }
+        : nextWorkspace;
     });
-  }, []);
+  }, [copyWorkspaceAfterDropUpdate, rebuildWorkspaceAfterDropUpdate]);
   const paneLookup = new Map(
     workspace.panes.map((pane): [string, WorkspacePane] => [pane.id, pane]),
   );
@@ -218,9 +301,10 @@ function Harness({
     setControlPanelSide:
       setControlPanelSide as Dispatch<SetStateAction<ControlPanelSide>>,
     setWorkspace: setWorkspaceFromDrop,
-    applyControlPanelLayout: (nextWorkspace) => {
+    applyControlPanelLayout: (nextWorkspace, side) => {
       onLayout(layoutVersion);
-      return nextWorkspace;
+      onControlPanelLayoutSide?.(side);
+      return applyWorkspaceAfterLayout?.(nextWorkspace) ?? nextWorkspace;
     },
     workspaceLayoutLoadPendingRef,
     ignoreFetchedWorkspaceLayoutRef,
@@ -502,6 +586,315 @@ describe("useAppDragResize", () => {
     expect(screen.getByTestId("tabs")).toHaveTextContent("tab-b,tab-a");
   });
 
+  it("keeps an accepted session drop committed under StrictMode updater replay", async () => {
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(() =>
+      rollbackScrollMarkers,
+    );
+    const dataTransfer = makeDataTransfer();
+    attachSessionDragData(dataTransfer, "session-a", "Session A");
+
+    render(
+      <StrictMode>
+        <Harness
+          initialWorkspace={makeSplitWorkspace()}
+          layoutVersion={1}
+          markSessionTabsForBottomAfterWorkspaceRebuild={
+            markSessionTabsForBottomAfterWorkspaceRebuild
+          }
+          onLayout={vi.fn()}
+          onReady={(api) => {
+            dragResizeApi = api;
+          }}
+        />
+      </StrictMode>,
+    );
+    await act(async () => {});
+
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop(
+        "pane-b",
+        "tabs",
+        undefined,
+        dataTransfer,
+      );
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).not.toHaveBeenCalled();
+    expect(screen.getByTestId("tabs")).toHaveTextContent("tab-b,tab-a");
+  });
+
+  it("keeps scroll markers when a session drop commits after an earlier duplicate", async () => {
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(() =>
+      rollbackScrollMarkers,
+    );
+    const dataTransfer = makeDataTransfer();
+    attachSessionDragData(dataTransfer, "session-a", "Session A");
+
+    render(
+      <Harness
+        initialWorkspace={makeDuplicateSessionWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop(
+        "pane-target",
+        "tabs",
+        undefined,
+        dataTransfer,
+      );
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).not.toHaveBeenCalled();
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-duplicate,tab-target,tab-a",
+    );
+  });
+
+  it("rolls back markers when a rebased session drop is refused despite a target duplicate", async () => {
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(() =>
+      rollbackScrollMarkers,
+    );
+    const dataTransfer = makeDataTransfer();
+    attachSessionDragData(dataTransfer, "session-a", "Session A");
+
+    render(
+      <Harness
+        initialWorkspace={makeSplitWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+        rebaseWorkspaceBeforeNextDrop={(current) => {
+          const targetPane = current.panes.find(
+            (pane) => pane.id === "pane-b",
+          );
+          if (!targetPane) {
+            throw new Error("Expected pane-b in the split workspace fixture");
+          }
+          const duplicateTab: WorkspaceTab = {
+            id: "tab-duplicate",
+            kind: "session",
+            sessionId: "session-a",
+          };
+          const rebasedTargetPane: WorkspacePane = {
+            ...targetPane,
+            activeSessionId: "session-a",
+            activeTabId: duplicateTab.id,
+            tabs: [duplicateTab],
+          };
+          return {
+            ...current,
+            root: { type: "pane", paneId: rebasedTargetPane.id },
+            activePaneId: rebasedTargetPane.id,
+            panes: [rebasedTargetPane],
+          };
+        }}
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop(
+        "pane-b",
+        "tabs",
+        undefined,
+        dataTransfer,
+      );
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("tabs")).toHaveTextContent("tab-duplicate");
+  });
+
+  it("keeps markers when a rebase recreates the captured session tab", async () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "00000000-0000-4000-8000-000000000031",
+    );
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(() =>
+      rollbackScrollMarkers,
+    );
+    const dataTransfer = makeDataTransfer();
+    attachSessionDragData(dataTransfer, "session-a", "Session A");
+
+    render(
+      <Harness
+        initialWorkspace={makeSplitWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+        rebaseWorkspaceBeforeNextDrop={(current) => {
+          const targetPane = current.panes.find(
+            (pane) => pane.id === "pane-b",
+          );
+          if (!targetPane) {
+            throw new Error("Expected pane-b in the split workspace fixture");
+          }
+          return {
+            ...current,
+            root: { type: "pane", paneId: targetPane.id },
+            activePaneId: targetPane.id,
+            panes: [targetPane],
+          };
+        }}
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop(
+        "pane-b",
+        "tabs",
+        undefined,
+        dataTransfer,
+      );
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).not.toHaveBeenCalled();
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-b,00000000-0000-4000-8000-000000000031",
+    );
+  });
+
+  it("rolls back a metadata-stripped session drop after rebase inserts it first", async () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "00000000-0000-4000-8000-000000000032",
+    );
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(() =>
+      rollbackScrollMarkers,
+    );
+    const dataTransfer = makeDataTransfer();
+    attachSessionDragData(dataTransfer, "session-c", "Session C");
+
+    render(
+      <Harness
+        initialWorkspace={makeSplitWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+        rebaseWorkspaceBeforeNextDrop={(current) => ({
+          ...current,
+          activePaneId: "pane-b",
+          panes: current.panes.map((pane) =>
+            pane.id === "pane-b"
+              ? {
+                  ...pane,
+                  activeSessionId: "session-c",
+                  activeTabId: "tab-rebased-session-c",
+                  tabs: [
+                    ...pane.tabs,
+                    {
+                      id: "tab-rebased-session-c",
+                      kind: "session" as const,
+                      sessionId: "session-c",
+                    },
+                  ],
+                }
+              : pane,
+          ),
+        })}
+        rebuildWorkspaceAfterDropUpdate
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop(
+        "pane-b",
+        "tabs",
+        undefined,
+        dataTransfer,
+      );
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-a,tab-b,tab-rebased-session-c",
+    );
+  });
+
+  it("keeps markers when a split session drop activates one of several existing tabs", async () => {
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(() =>
+      rollbackScrollMarkers,
+    );
+    const dataTransfer = makeDataTransfer();
+    attachSessionDragData(dataTransfer, "session-a", "Session A");
+    const initialWorkspace = makeDuplicateSessionWorkspace();
+
+    render(
+      <Harness
+        initialWorkspace={{
+          ...initialWorkspace,
+          activePaneId: "pane-target",
+        }}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop(
+        "pane-target",
+        "right",
+        undefined,
+        dataTransfer,
+      );
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).not.toHaveBeenCalled();
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-a,tab-duplicate,tab-target",
+    );
+  });
+
   it("does not mark sessions when a pane-tab drop is refused", async () => {
     let dragResizeApi: DragResizeApi | null = null;
     const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn();
@@ -576,6 +969,9 @@ describe("useAppDragResize", () => {
 
     expect(markSessionTabsForBottomAfterWorkspaceRebuild).not.toHaveBeenCalled();
     expect(onLayout).not.toHaveBeenCalled();
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-session,tab-control",
+    );
   });
 
   it("does not commit or mark an external tab drop that is refused", async () => {
@@ -685,6 +1081,596 @@ describe("useAppDragResize", () => {
       tabId: externalDrag.tabId,
       targetWindowId: "window-a",
     });
+  });
+
+  it("preserves external drop acknowledgement through a same-flush workspace spread", async () => {
+    vi.stubGlobal("BroadcastChannel", BroadcastChannelMock);
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "00000000-0000-4000-8000-000000000011",
+    );
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(
+      () => rollbackScrollMarkers,
+    );
+    const externalDrag: WorkspaceTabDrag = {
+      dragId: "drag-spread-external",
+      sourceWindowId: "window-b",
+      sourcePaneId: "pane-external",
+      tabId: "tab-spread-external",
+      tab: {
+        id: "tab-spread-external",
+        kind: "session",
+        sessionId: "session-spread",
+      },
+    };
+
+    render(
+      <Harness
+        copyWorkspaceAfterDropUpdate
+        initialWorkspace={makeSplitWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+      />,
+    );
+    await act(async () => {});
+    const channel = BroadcastChannelMock.instances[0];
+
+    act(() => {
+      channel.onmessage?.({
+        data: { type: "drag-start", payload: externalDrag },
+      } as MessageEvent<unknown>);
+    });
+    await act(async () => {});
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop("pane-b", "tabs");
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).not.toHaveBeenCalled();
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-a,tab-b,00000000-0000-4000-8000-000000000011",
+    );
+    expect(channel.postMessage).toHaveBeenCalledWith({
+      type: "drop-commit",
+      dragId: externalDrag.dragId,
+      sourceWindowId: externalDrag.sourceWindowId,
+      sourcePaneId: externalDrag.sourcePaneId,
+      tabId: externalDrag.tabId,
+      targetWindowId: "window-a",
+    });
+  });
+
+  it("acknowledges a fresh external tab after a wrapper strips commit metadata", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("BroadcastChannel", BroadcastChannelMock);
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "00000000-0000-4000-8000-000000000012",
+    );
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(
+      () => rollbackScrollMarkers,
+    );
+    const externalDrag: WorkspaceTabDrag = {
+      dragId: "drag-rebuilt-external",
+      sourceWindowId: "window-b",
+      sourcePaneId: "pane-external",
+      tabId: "tab-rebuilt-external",
+      tab: {
+        id: "tab-rebuilt-external",
+        kind: "session",
+        sessionId: "session-rebuilt",
+      },
+    };
+
+    render(
+      <Harness
+        initialWorkspace={makeSplitWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+        rebuildWorkspaceAfterDropUpdate
+      />,
+    );
+    await act(async () => {});
+    const channel = BroadcastChannelMock.instances[0];
+
+    act(() => {
+      channel.onmessage?.({
+        data: { type: "drag-start", payload: externalDrag },
+      } as MessageEvent<unknown>);
+    });
+    await act(async () => {});
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop("pane-b", "tabs");
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("structural fallback"),
+    );
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-a,tab-b,00000000-0000-4000-8000-000000000012",
+    );
+    expect(channel.postMessage).toHaveBeenCalledWith({
+      type: "drop-commit",
+      dragId: externalDrag.dragId,
+      sourceWindowId: externalDrag.sourceWindowId,
+      sourcePaneId: externalDrag.sourcePaneId,
+      tabId: externalDrag.tabId,
+      targetWindowId: "window-a",
+    });
+  });
+
+  it("rolls back an ambiguous existing-session drop after a wrapper strips commit metadata", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(
+      () => rollbackScrollMarkers,
+    );
+    const dataTransfer = makeDataTransfer();
+    attachSessionDragData(dataTransfer, "session-a", "Session A");
+
+    render(
+      <Harness
+        initialWorkspace={makeSplitWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+        rebuildWorkspaceAfterDropUpdate
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop(
+        "pane-b",
+        "tabs",
+        undefined,
+        dataTransfer,
+      );
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Could not verify a workspace drop"),
+    );
+    expect(screen.getByTestId("tabs")).toHaveTextContent("tab-b,tab-a");
+  });
+
+  it("rolls back existing-tab edge-drop markers after a wrapper strips commit metadata", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(
+      () => rollbackScrollMarkers,
+    );
+    const drag: WorkspaceTabDrag = {
+      dragId: "drag-rebuilt-cross-pane",
+      sourceWindowId: "window-a",
+      sourcePaneId: "pane-a",
+      tabId: "tab-a",
+      tab: { id: "tab-a", kind: "session", sessionId: "session-a" },
+    };
+
+    render(
+      <Harness
+        initialWorkspace={makeSplitWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+        rebuildWorkspaceAfterDropUpdate
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      const api = requireDragResizeApi(dragResizeApi);
+      api.handleTabDragStart(drag);
+      api.handleTabDrop("pane-b", "left");
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Could not verify a workspace drop"),
+    );
+    expect(screen.getByTestId("tabs")).toHaveTextContent("tab-b,tab-a");
+  });
+
+  it("keeps fresh session edge-drop markers after a wrapper strips commit metadata", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000033")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000034")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000035");
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(
+      () => rollbackScrollMarkers,
+    );
+    const dataTransfer = makeDataTransfer();
+    attachSessionDragData(dataTransfer, "session-c", "Session C");
+
+    render(
+      <Harness
+        initialWorkspace={makeSplitWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+        rebuildWorkspaceAfterDropUpdate
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop(
+        "pane-b",
+        "left",
+        undefined,
+        dataTransfer,
+      );
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("structural fallback"),
+    );
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-a,tab-b,00000000-0000-4000-8000-000000000033",
+    );
+  });
+
+  it("does not let a stale token acknowledge a later rebased-refused drop", async () => {
+    vi.stubGlobal("BroadcastChannel", BroadcastChannelMock);
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000021")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000022");
+    let dragResizeApi: DragResizeApi | null = null;
+    const firstRollback = vi.fn();
+    const secondRollback = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi
+      .fn()
+      .mockReturnValueOnce(firstRollback)
+      .mockReturnValueOnce(secondRollback);
+    const firstDrag: WorkspaceTabDrag = {
+      dragId: "drag-sequential-accepted",
+      sourceWindowId: "window-b",
+      sourcePaneId: "pane-external",
+      tabId: "tab-sequential-first",
+      tab: {
+        id: "tab-sequential-first",
+        kind: "session",
+        sessionId: "session-sequential-first",
+      },
+    };
+    const secondDrag: WorkspaceTabDrag = {
+      dragId: "drag-sequential-refused",
+      sourceWindowId: "window-b",
+      sourcePaneId: "pane-external",
+      tabId: "tab-sequential-second",
+      tab: {
+        id: "tab-sequential-second",
+        kind: "session",
+        sessionId: "session-sequential-second",
+      },
+    };
+    const onReady = (api: DragResizeApi) => {
+      dragResizeApi = api;
+    };
+    const baseProps = {
+      initialWorkspace: makeSplitWorkspace(),
+      layoutVersion: 1,
+      markSessionTabsForBottomAfterWorkspaceRebuild,
+      onLayout: vi.fn(),
+      onReady,
+    };
+
+    const { rerender } = render(<Harness {...baseProps} />);
+    await act(async () => {});
+    const channel = BroadcastChannelMock.instances[0];
+
+    act(() => {
+      channel.onmessage?.({
+        data: { type: "drag-start", payload: firstDrag },
+      } as MessageEvent<unknown>);
+    });
+    await act(async () => {});
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop("pane-b", "tabs");
+    });
+
+    expect(firstRollback).not.toHaveBeenCalled();
+    expect(channel.postMessage).toHaveBeenCalledWith({
+      type: "drop-commit",
+      dragId: firstDrag.dragId,
+      sourceWindowId: firstDrag.sourceWindowId,
+      sourcePaneId: firstDrag.sourcePaneId,
+      tabId: firstDrag.tabId,
+      targetWindowId: "window-a",
+    });
+
+    rerender(
+      <Harness
+        {...baseProps}
+        rebaseWorkspaceBeforeNextDrop={(current) => ({
+          ...current,
+          panes: current.panes.map((pane) =>
+            pane.id === "pane-b"
+              ? {
+                  ...pane,
+                  activeSessionId: null,
+                  activeTabId: "tab-control",
+                  tabs: [
+                    {
+                      id: "tab-control",
+                      kind: "controlPanel" as const,
+                      originSessionId: null,
+                    },
+                  ],
+                  viewMode: "controlPanel" as const,
+                }
+              : pane,
+          ),
+        })}
+      />,
+    );
+    await act(async () => {});
+    channel.postMessage.mockClear();
+
+    act(() => {
+      channel.onmessage?.({
+        data: { type: "drag-start", payload: secondDrag },
+      } as MessageEvent<unknown>);
+    });
+    await act(async () => {});
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop("pane-b", "tabs");
+    });
+
+    expect(secondRollback).toHaveBeenCalledOnce();
+    expect(channel.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "drop-commit" }),
+    );
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-a,tab-control",
+    );
+  });
+
+  it("acknowledges a structurally committed external drop after layout restores other focus", async () => {
+    vi.stubGlobal("BroadcastChannel", BroadcastChannelMock);
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "00000000-0000-4000-8000-000000000002",
+    );
+    let dragResizeApi: DragResizeApi | null = null;
+    const externalDrag: WorkspaceTabDrag = {
+      dragId: "drag-layout-restored-focus",
+      sourceWindowId: "window-b",
+      sourcePaneId: "pane-external",
+      tabId: "tab-external",
+      tab: { id: "tab-external", kind: "session", sessionId: "session-c" },
+    };
+
+    render(
+      <Harness
+        applyWorkspaceAfterLayout={(workspace) => ({
+          ...workspace,
+          activePaneId: "pane-a",
+          panes: workspace.panes.map((pane) =>
+            pane.id === "pane-a"
+              ? { ...pane, activeSessionId: "session-a", activeTabId: "tab-a" }
+              : pane,
+          ),
+        })}
+        initialWorkspace={makeSplitWorkspace()}
+        layoutVersion={1}
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+      />,
+    );
+    await act(async () => {});
+    const channel = BroadcastChannelMock.instances[0];
+
+    act(() => {
+      channel.onmessage?.({
+        data: { type: "drag-start", payload: externalDrag },
+      } as MessageEvent<unknown>);
+    });
+    await act(async () => {});
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop("pane-b", "tabs");
+    });
+
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-a,tab-b,00000000-0000-4000-8000-000000000002",
+    );
+    expect(channel.postMessage).toHaveBeenCalledWith({
+      type: "drop-commit",
+      dragId: externalDrag.dragId,
+      sourceWindowId: externalDrag.sourceWindowId,
+      sourcePaneId: externalDrag.sourcePaneId,
+      tabId: externalDrag.tabId,
+      targetWindowId: "window-a",
+    });
+  });
+
+  it("acknowledges an external edge drop after layout restructures its split", async () => {
+    vi.stubGlobal("BroadcastChannel", BroadcastChannelMock);
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000003")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000004");
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(
+      () => rollbackScrollMarkers,
+    );
+    const externalDrag: WorkspaceTabDrag = {
+      dragId: "drag-layout-restructured-edge",
+      sourceWindowId: "window-b",
+      sourcePaneId: "pane-external",
+      tabId: "tab-external",
+      tab: { id: "tab-external", kind: "session", sessionId: "session-c" },
+    };
+
+    render(
+      <Harness
+        applyWorkspaceAfterLayout={(workspace) => ({
+          ...workspace,
+          root: {
+            id: "layout-root",
+            type: "split",
+            direction: "row",
+            ratio: 0.5,
+            first: {
+              id: "layout-content",
+              type: "split",
+              direction: "row",
+              ratio: 0.5,
+              first: { type: "pane", paneId: "pane-session" },
+              second: {
+                type: "pane",
+                paneId: "00000000-0000-4000-8000-000000000004",
+              },
+            },
+            second: { type: "pane", paneId: "pane-control" },
+          },
+        })}
+        initialWorkspace={makeControlPanelSplitWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+      />,
+    );
+    await act(async () => {});
+    const channel = BroadcastChannelMock.instances[0];
+
+    act(() => {
+      channel.onmessage?.({
+        data: { type: "drag-start", payload: externalDrag },
+      } as MessageEvent<unknown>);
+    });
+    await act(async () => {});
+    act(() => {
+      requireDragResizeApi(dragResizeApi).handleTabDrop(
+        "pane-control",
+        "right",
+      );
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).not.toHaveBeenCalled();
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-session,tab-control,00000000-0000-4000-8000-000000000003",
+    );
+    expect(channel.postMessage).toHaveBeenCalledWith({
+      type: "drop-commit",
+      dragId: externalDrag.dragId,
+      sourceWindowId: externalDrag.sourceWindowId,
+      sourcePaneId: externalDrag.sourcePaneId,
+      tabId: externalDrag.tabId,
+      targetWindowId: "window-a",
+    });
+  });
+
+  it("rolls back scroll markers when a rebase refuses a same-pane reorder", async () => {
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(() =>
+      rollbackScrollMarkers,
+    );
+    const drag: WorkspaceTabDrag = {
+      dragId: "drag-rebased-same-pane",
+      sourceWindowId: "window-a",
+      sourcePaneId: "pane-a",
+      tabId: "tab-b",
+      tab: { id: "tab-b", kind: "session", sessionId: "session-b" },
+    };
+
+    render(
+      <Harness
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+        rebaseWorkspaceBeforeNextDrop={(current) => ({
+          ...current,
+          panes: current.panes.map((pane) =>
+            pane.id === "pane-a"
+              ? {
+                  ...pane,
+                  tabs: [
+                    ...pane.tabs,
+                    {
+                      id: "tab-control",
+                      kind: "controlPanel" as const,
+                      originSessionId: null,
+                    },
+                  ],
+                }
+              : pane,
+          ),
+        })}
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      const api = requireDragResizeApi(dragResizeApi);
+      api.handleTabDragStart(drag);
+      api.handleTabDrop("pane-a", "tabs", 0);
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-a,tab-b,tab-control",
+    );
   });
 
   it("does not acknowledge an external drop refused by rebased workspace state", async () => {
@@ -864,6 +1850,159 @@ describe("useAppDragResize", () => {
     );
   });
 
+  it("does not flip sides when a rebased cross-pane control-panel drop is refused", async () => {
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(() =>
+      rollbackScrollMarkers,
+    );
+    const onControlPanelLayoutSide = vi.fn();
+    const drag: WorkspaceTabDrag = {
+      dragId: "drag-rebased-control-side",
+      sourceWindowId: "window-a",
+      sourcePaneId: "pane-control",
+      tabId: "tab-control",
+      tab: { id: "tab-control", kind: "controlPanel", originSessionId: null },
+    };
+
+    render(
+      <Harness
+        initialWorkspace={makeControlPanelSplitWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onControlPanelLayoutSide={onControlPanelLayoutSide}
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+        rebaseWorkspaceBeforeNextDrop={(current) => {
+          const controlPane = current.panes.find(
+            (pane) => pane.id === "pane-control",
+          );
+          if (!controlPane) {
+            throw new Error("Expected the control pane in the drop fixture");
+          }
+          return {
+            ...current,
+            activePaneId: controlPane.id,
+            panes: [controlPane],
+            root: { type: "pane", paneId: controlPane.id },
+          };
+        }}
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      const api = requireDragResizeApi(dragResizeApi);
+      api.handleTabDragStart(drag);
+      api.handleTabDrop("pane-session", "right");
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).toHaveBeenCalledOnce();
+    expect(onControlPanelLayoutSide).toHaveBeenCalledOnce();
+    expect(onControlPanelLayoutSide).toHaveBeenCalledWith("left");
+    expect(screen.getByTestId("control-panel-side")).toHaveTextContent("left");
+    expect(screen.getByTestId("tabs")).toHaveTextContent("tab-control");
+  });
+
+  it("publishes the dock side for an accepted cross-pane control-panel drop", async () => {
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(() =>
+      rollbackScrollMarkers,
+    );
+    const drag: WorkspaceTabDrag = {
+      dragId: "drag-accepted-control-side",
+      sourceWindowId: "window-a",
+      sourcePaneId: "pane-control",
+      tabId: "tab-control",
+      tab: { id: "tab-control", kind: "controlPanel", originSessionId: null },
+    };
+
+    render(
+      <Harness
+        initialWorkspace={makeControlPanelSplitWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      const api = requireDragResizeApi(dragResizeApi);
+      api.handleTabDragStart(drag);
+      api.handleTabDrop("pane-session", "right");
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).not.toHaveBeenCalled();
+    expect(screen.getByTestId("control-panel-side")).toHaveTextContent("right");
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-session,tab-control",
+    );
+  });
+
+  it("restores the prior dock side when a wrapper strips an accepted move token", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(() =>
+      rollbackScrollMarkers,
+    );
+    const onControlPanelLayoutSide = vi.fn();
+    const drag: WorkspaceTabDrag = {
+      dragId: "drag-rebuilt-control-side",
+      sourceWindowId: "window-a",
+      sourcePaneId: "pane-control",
+      tabId: "tab-control",
+      tab: { id: "tab-control", kind: "controlPanel", originSessionId: null },
+    };
+
+    render(
+      <Harness
+        initialWorkspace={makeControlPanelSplitWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onControlPanelLayoutSide={onControlPanelLayoutSide}
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+        rebuildWorkspaceAfterDropUpdate
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      const api = requireDragResizeApi(dragResizeApi);
+      api.handleTabDragStart(drag);
+      api.handleTabDrop("pane-session", "right");
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).toHaveBeenCalledOnce();
+    expect(onControlPanelLayoutSide.mock.calls.map(([side]) => side)).toEqual([
+      "right",
+      "left",
+    ]);
+    expect(screen.getByTestId("control-panel-side")).toHaveTextContent("left");
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Could not verify a workspace drop"),
+    );
+  });
+
   it("commits a control-panel side flip while its pane is inactive", async () => {
     let dragResizeApi: DragResizeApi | null = null;
     const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn();
@@ -906,6 +2045,73 @@ describe("useAppDragResize", () => {
     expect(screen.getByTestId("control-panel-side")).toHaveTextContent("right");
     expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
     expect(onLayout).toHaveBeenCalledOnce();
+  });
+
+  it("does not flip sides when a same-pane dock gesture rebases after the tab moves", async () => {
+    let dragResizeApi: DragResizeApi | null = null;
+    const rollbackScrollMarkers = vi.fn();
+    const markSessionTabsForBottomAfterWorkspaceRebuild = vi.fn(() =>
+      rollbackScrollMarkers,
+    );
+    const drag: WorkspaceTabDrag = {
+      dragId: "drag-rebased-same-pane-control-side",
+      sourceWindowId: "window-a",
+      sourcePaneId: "pane-control",
+      tabId: "tab-control",
+      tab: { id: "tab-control", kind: "controlPanel", originSessionId: null },
+    };
+
+    render(
+      <Harness
+        initialWorkspace={makeControlPanelSplitWorkspace()}
+        layoutVersion={1}
+        markSessionTabsForBottomAfterWorkspaceRebuild={
+          markSessionTabsForBottomAfterWorkspaceRebuild
+        }
+        onLayout={vi.fn()}
+        onReady={(api) => {
+          dragResizeApi = api;
+        }}
+        rebaseWorkspaceBeforeNextDrop={(current) => {
+          const sessionPane = current.panes.find(
+            (pane) => pane.id === "pane-session",
+          );
+          const controlPane = current.panes.find(
+            (pane) => pane.id === "pane-control",
+          );
+          const controlTab = controlPane?.tabs.find(
+            (tab) => tab.id === "tab-control",
+          );
+          if (!sessionPane || !controlTab) {
+            throw new Error("Expected both drop fixture panes and control tab");
+          }
+          const rebasedSessionPane: WorkspacePane = {
+            ...sessionPane,
+            tabs: [...sessionPane.tabs, controlTab],
+          };
+          return {
+            ...current,
+            root: { type: "pane", paneId: rebasedSessionPane.id },
+            activePaneId: rebasedSessionPane.id,
+            panes: [rebasedSessionPane],
+          };
+        }}
+      />,
+    );
+    await act(async () => {});
+
+    act(() => {
+      const api = requireDragResizeApi(dragResizeApi);
+      api.handleTabDragStart(drag);
+      api.handleTabDrop("pane-control", "right");
+    });
+
+    expect(markSessionTabsForBottomAfterWorkspaceRebuild).toHaveBeenCalledOnce();
+    expect(rollbackScrollMarkers).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("control-panel-side")).toHaveTextContent("left");
+    expect(screen.getByTestId("tabs")).toHaveTextContent(
+      "tab-session,tab-control",
+    );
   });
 
   it("updates split ratio during pointer resize and ignores pending fetched layout", async () => {

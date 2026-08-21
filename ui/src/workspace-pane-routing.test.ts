@@ -2,9 +2,10 @@
 // Does not own the general workspace reducer suite.
 // Created as the focused home for routing scenarios that cross pane roles.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  createSessionTab,
   openDiffPreviewInWorkspaceState,
   openSourceInWorkspaceState,
   placeDraggedTab,
@@ -83,6 +84,91 @@ function makeControlSplitWorkspace() {
 }
 
 describe("workspace pane routing", () => {
+  it("preserves an explicitly allocated session tab id", () => {
+    expect(createSessionTab("session-new", "tab-gesture")).toEqual({
+      id: "tab-gesture",
+      kind: "session",
+      sessionId: "session-new",
+    });
+  });
+
+  it("threads a gesture-owned session tab id through rail and edge drops", () => {
+    const { sessionPane, workspace } = makeControlSplitWorkspace();
+
+    const railDrop = placeSessionDropInWorkspaceState(
+      workspace,
+      "session-rail",
+      sessionPane.id,
+      "tabs",
+      undefined,
+      "tab-gesture-rail",
+    );
+    expect(
+      railDrop.panes
+        .find((pane) => pane.id === sessionPane.id)
+        ?.tabs.find(
+          (tab) => tab.kind === "session" && tab.sessionId === "session-rail",
+        ),
+    ).toEqual({
+      id: "tab-gesture-rail",
+      kind: "session",
+      sessionId: "session-rail",
+    });
+
+    const edgeDrop = placeSessionDropInWorkspaceState(
+      workspace,
+      "session-edge",
+      sessionPane.id,
+      "right",
+      undefined,
+      "tab-gesture-edge",
+    );
+    expect(
+      edgeDrop.panes
+        .flatMap((pane) => pane.tabs)
+        .find(
+          (tab) => tab.kind === "session" && tab.sessionId === "session-edge",
+        ),
+    ).toEqual({
+      id: "tab-gesture-edge",
+      kind: "session",
+      sessionId: "session-edge",
+    });
+  });
+
+  it("keeps a generated session tab id across the edge-drop clone boundary", () => {
+    const randomUuid = vi
+      .spyOn(crypto, "randomUUID")
+      .mockReturnValue("00000000-0000-4000-8000-000000000103")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000101")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000102");
+    const { sessionPane, workspace } = makeControlSplitWorkspace();
+
+    try {
+      const edgeDrop = placeSessionDropInWorkspaceState(
+        workspace,
+        "session-generated",
+        sessionPane.id,
+        "right",
+      );
+
+      expect(
+        edgeDrop.panes
+          .flatMap((pane) => pane.tabs)
+          .find(
+            (tab) =>
+              tab.kind === "session" &&
+              tab.sessionId === "session-generated",
+          )?.id,
+      ).toBe("00000000-0000-4000-8000-000000000101");
+      // One id each for the session tab, adjacent pane, and split node. The
+      // clone boundary must not allocate a fourth replacement tab id.
+      expect(randomUuid).toHaveBeenCalledTimes(3);
+    } finally {
+      randomUuid.mockRestore();
+    }
+  });
+
   it("refuses session tab drops into a control-panel rail", () => {
     const { controlPane, workspace } = makeControlSplitWorkspace();
 
@@ -178,6 +264,19 @@ describe("workspace pane routing", () => {
     ).toBe(workspace);
     expect(
       placeExternalTab(workspace, externalTab, "pane-missing", "right"),
+    ).toBe(workspace);
+  });
+
+  it("refuses stacking an external control panel into a tab rail", () => {
+    const { sessionPane, workspace } = makeControlSplitWorkspace();
+
+    expect(
+      placeExternalTab(
+        workspace,
+        makeControlPanelTab("tab-external-control"),
+        sessionPane.id,
+        "tabs",
+      ),
     ).toBe(workspace);
   });
 
