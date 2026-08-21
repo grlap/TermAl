@@ -556,6 +556,17 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
         sync_pending_prompts(&mut inner.sessions[index]);
     }
 
+    let baseline_snapshot = state.full_snapshot();
+    let baseline_revision = baseline_snapshot.revision;
+    let baseline_message_count = baseline_snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .map(|session| session.message_count)
+        .expect("queued session should exist before stop");
+    let mut state_events = state.subscribe_events();
+    let mut delta_events = state.subscribe_delta_events();
+
     let queued_session_id = session_id.clone();
     let command_thread = std::thread::spawn(move || {
         let interrupt = input_rx
@@ -590,10 +601,113 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
         }
     });
 
-    state.stop_session(&session_id).unwrap();
+    let stopped_snapshot = state.stop_session(&session_id).unwrap();
     command_thread
         .join()
         .expect("shared Codex command thread should join cleanly");
+
+    assert_eq!(stopped_snapshot.revision, baseline_revision + 1);
+    let stopped_session = stopped_snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("stopped session should remain present in the action response");
+    assert_eq!(stopped_session.status, SessionStatus::Active);
+    assert_eq!(
+        stopped_session.preview,
+        "queued prompt after failed interrupt"
+    );
+
+    let published: StateResponse = serde_json::from_str(
+        &state_events
+            .try_recv()
+            .expect("stop plus queued dispatch should publish one state snapshot"),
+    )
+    .expect("published stop snapshot should decode");
+    let published_session = published
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("published stop snapshot should retain the session");
+    assert_eq!(published.revision, baseline_revision + 1);
+    assert_eq!(published_session.status, SessionStatus::Active);
+    assert_eq!(
+        published_session.preview,
+        "queued prompt after failed interrupt"
+    );
+    assert!(matches!(
+        state_events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+
+    let mut published_deltas = Vec::new();
+    while let Ok(payload) = delta_events.try_recv() {
+        published_deltas
+            .push(serde_json::from_str::<DeltaEvent>(&payload).expect("stop delta should decode"));
+    }
+    let created_deltas = published_deltas
+        .iter()
+        .filter_map(|event| match event {
+            DeltaEvent::MessageCreated {
+                revision,
+                session_id: delta_session_id,
+                message_id,
+                message_count,
+                message,
+                preview,
+                status,
+                session_mutation_stamp,
+                ..
+            } if delta_session_id == &session_id => Some((
+                *revision,
+                message_id,
+                *message_count,
+                message,
+                preview,
+                *status,
+                *session_mutation_stamp,
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        created_deltas.len(),
+        2,
+        "stop and queued successor should each publish exactly one created delta"
+    );
+    assert_eq!(
+        created_deltas
+            .iter()
+            .map(|(_, message_id, ..)| message_id.as_str())
+            .collect::<HashSet<_>>()
+            .len(),
+        created_deltas.len(),
+        "the successor message must not be published twice"
+    );
+    assert!(matches!(
+        created_deltas[0].3,
+        Message::Text {
+            author: Author::Assistant,
+            text,
+            ..
+        } if text == "Turn stopped by user."
+    ));
+    assert!(matches!(
+        created_deltas[1].3,
+        Message::Text {
+            author: Author::You,
+            text,
+            ..
+        } if text == "queued prompt after failed interrupt"
+    ));
+    assert_eq!(created_deltas[0].2, baseline_message_count + 1);
+    assert_eq!(created_deltas[1].2, baseline_message_count + 2);
+    for (revision, _, _, _, preview, status, mutation_stamp) in created_deltas {
+        assert_eq!(revision, stopped_snapshot.revision);
+        assert_eq!(preview, &stopped_session.preview);
+        assert_eq!(status, stopped_session.status);
+        assert_eq!(mutation_stamp, stopped_session.session_mutation_stamp);
+    }
 
     let full_snapshot = state.full_snapshot();
     let session = full_snapshot
@@ -655,6 +769,266 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
 
     process.kill().unwrap();
     process.wait().unwrap();
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// A failed persistence commit happens after the queued successor was prepared
+// but before its dispatch was delivered. The speculative runtime and user
+// message must be removed while the coherent post-stop Idle record, including
+// the original FIFO queue, stays available for explicit recovery.
+#[test]
+fn stop_session_rolls_back_queued_successor_when_persist_fails() {
+    let mut state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Cursor);
+    let original_process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (original_input_tx, original_input_rx) = mpsc::channel();
+    let original_runtime = AcpRuntimeHandle {
+        agent: AcpAgent::Cursor,
+        runtime_id: "cursor-stop-persist-original".to_owned(),
+        input_tx: original_input_tx,
+        process: original_process.clone(),
+        turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
+    };
+    let successor_process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (successor_input_tx, successor_input_rx) = mpsc::channel();
+    let successor_runtime = AcpRuntimeHandle {
+        agent: AcpAgent::Cursor,
+        runtime_id: "cursor-stop-persist-successor".to_owned(),
+        input_tx: successor_input_tx,
+        process: successor_process.clone(),
+        turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
+    };
+    state.install_test_acp_runtime_override(AcpAgent::Cursor, successor_runtime);
+
+    let queued = [
+        ("queued-persist-first", "first queued prompt"),
+        ("queued-persist-second", "second queued prompt"),
+    ];
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Cursor session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Acp(original_runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+        for (id, text) in queued {
+            inner.sessions[index]
+                .queued_prompts
+                .push_back(QueuedPromptRecord {
+                    source: QueuedPromptSource::User,
+                    attachments: Vec::new(),
+                    pending_prompt: PendingPrompt {
+                        attachments: Vec::new(),
+                        id: id.to_owned(),
+                        timestamp: stamp_now(),
+                        text: text.to_owned(),
+                        expanded_text: None,
+                        source: None,
+                    },
+                });
+        }
+        sync_pending_prompts(&mut inner.sessions[index]);
+    }
+
+    let failing_persistence_path = std::env::temp_dir().join(format!(
+        "termal-stop-queued-successor-rollback-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("failing persistence directory should exist");
+    state.shutdown_persist_blocking();
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+
+    let baseline_revision = state.full_snapshot().revision;
+    let mut state_events = state.subscribe_events();
+    let mut delta_events = state.subscribe_delta_events();
+    let error = match state.stop_session(&session_id) {
+        Ok(_) => panic!("persistence failure should reject stop"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(error.message.contains("failed to persist session state"));
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("stopped session should remain present");
+    assert_eq!(snapshot.revision, baseline_revision + 1);
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(session.preview, "Turn stopped by user.");
+    assert_eq!(
+        session
+            .pending_prompts
+            .iter()
+            .map(|pending| pending.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["first queued prompt", "second queued prompt"]
+    );
+    assert!(session.messages.iter().any(|message| {
+        matches!(message, Message::Text { text, .. } if text == "Turn stopped by user.")
+    }));
+    assert!(!session.messages.iter().any(|message| {
+        matches!(
+            message,
+            Message::Text {
+                author: Author::You,
+                text,
+                ..
+            } if text == "first queued prompt" || text == "second queued prompt"
+        )
+    }));
+    assert!(matches!(
+        state_events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        delta_events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Cursor session should remain present");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(record.orchestrator_auto_dispatch_blocked);
+    assert_eq!(record.active_turn_start_message_count, None);
+    assert_eq!(
+        record
+            .queued_prompts
+            .iter()
+            .map(|queued| queued.pending_prompt.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["first queued prompt", "second queued prompt"]
+    );
+    drop(inner);
+
+    assert!(matches!(
+        original_input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Disconnected)
+    ));
+    assert!(matches!(
+        successor_input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Disconnected)
+    ));
+    original_process
+        .wait()
+        .expect("original Cursor runtime should be stopped");
+    successor_process
+        .wait()
+        .expect("uncommitted successor runtime should be stopped");
+    let _ = fs::remove_dir_all(failing_persistence_path);
+}
+
+// Pins the failure half of the atomic stop-plus-queue transition. If the
+// queued successor cannot start, Stop still publishes one coherent Idle
+// snapshot, keeps the prompt queued, and clears the prospective turn boundary
+// that start_turn_on_record records before fallible validation.
+#[test]
+fn stop_session_keeps_queued_prompt_idle_when_successor_start_fails() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Cursor);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, input_rx) = mpsc::channel();
+    let runtime = AcpRuntimeHandle {
+        agent: AcpAgent::Cursor,
+        runtime_id: "cursor-stop-queued-successor-failure".to_owned(),
+        input_tx,
+        process,
+        turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
+    };
+    let image = MessageImageAttachment {
+        byte_size: 4,
+        file_name: "queued.png".to_owned(),
+        media_type: "image/png".to_owned(),
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Cursor session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+        inner.sessions[index]
+            .queued_prompts
+            .push_back(QueuedPromptRecord {
+                source: QueuedPromptSource::User,
+                attachments: vec![PromptImageAttachment {
+                    data: "data".to_owned(),
+                    metadata: image.clone(),
+                }],
+                pending_prompt: PendingPrompt {
+                    attachments: vec![image],
+                    id: "queued-cursor-stop-failure".to_owned(),
+                    timestamp: stamp_now(),
+                    text: "queued prompt with unsupported image".to_owned(),
+                    expanded_text: None,
+                    source: None,
+                },
+            });
+        sync_pending_prompts(&mut inner.sessions[index]);
+    }
+
+    let baseline_revision = state.full_snapshot().revision;
+    let mut state_events = state.subscribe_events();
+    let error = match state.stop_session(&session_id) {
+        Ok(_) => panic!("unsupported queued attachments should fail successor start"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(error.message.contains("do not support image attachments"));
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("failed queued successor should retain the session");
+    assert_eq!(snapshot.revision, baseline_revision + 1);
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(session.preview, "Turn stopped by user.");
+
+    let published: StateResponse = serde_json::from_str(
+        &state_events
+            .try_recv()
+            .expect("failed queued successor should publish the Idle stop"),
+    )
+    .expect("published failed-successor snapshot should decode");
+    let published_session = published
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("published failed-successor snapshot should retain the session");
+    assert_eq!(published.revision, baseline_revision + 1);
+    assert_eq!(published_session.status, SessionStatus::Idle);
+    assert!(matches!(
+        state_events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Cursor session should remain present");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert_eq!(record.queued_prompts.len(), 1);
+    assert_eq!(record.session.pending_prompts.len(), 1);
+    assert_eq!(record.active_turn_start_message_count, None);
+    drop(inner);
+
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Disconnected)
+    ));
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 

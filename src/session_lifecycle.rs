@@ -331,7 +331,7 @@ impl AppState {
             }
         };
         let orchestrator_stop_instance_id = options.orchestrator_stop_instance_id.clone();
-        let (should_dispatch_next, pending_interaction_updates, created_messages, revision) = {
+        let transition = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -341,7 +341,7 @@ impl AppState {
                 (!inner.sessions[index].active_turn_file_changes.is_empty())
                     .then(|| inner.next_message_id());
             let mut thread_id_to_suppress = None;
-            let (pending_interaction_updates, created_messages) = {
+            let (pending_interaction_indices, mut created_message_indices) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
@@ -383,10 +383,7 @@ impl AppState {
                     }
                 }
                 finish_active_turn_file_change_tracking(record);
-                (
-                    message_updated_delta_parts_for_indices(record, pending_interaction_indices),
-                    message_created_delta_parts_for_indices(record, created_message_indices),
-                )
+                (pending_interaction_indices, created_message_indices)
             };
 
             // Suppress rediscovery of the detached thread after the record
@@ -418,10 +415,74 @@ impl AppState {
                     }
                 }
             }
-            let has_queued_prompts = options.dispatch_queued_prompts_on_success
+            let should_dispatch_next = options.dispatch_queued_prompts_on_success
                 && !inner.sessions[index].queued_prompts.is_empty();
-            let revision = match self.commit_locked(&mut inner) {
-                Ok(revision) => revision,
+            // Persistence failure cannot resurrect the stopped runtime. Only
+            // pay for a full record snapshot when a queued successor can add
+            // speculative transcript/runtime state that needs rolling back.
+            let post_stop_record = should_dispatch_next.then(|| inner.sessions[index].clone());
+            // Start an already-queued successor before publishing the stop
+            // commit. Exposing the intermediate Idle record made the session
+            // leave the Working list while the fresh runtime was being
+            // prepared, only to reappear as Active a moment later. The stop
+            // message and successor activation are one user-visible
+            // transition; a failed successor start still commits the stopped
+            // state and reports the dispatch error below.
+            let queued_turn_result = if should_dispatch_next {
+                let result = self
+                    .start_next_queued_turn_locked(&mut inner, index, false)
+                    .map_err(|err| ApiError::internal(format!("{err:#}")));
+                match &result {
+                    Ok(Some(_)) => {
+                        // The stop/file-change messages and the successor user
+                        // message form one appended suffix. Capturing them
+                        // together after promotion keeps progressive counts,
+                        // final status, and the mutation stamp coherent.
+                        let successor_message_index = inner.sessions[index]
+                            .session
+                            .messages
+                            .len()
+                            .checked_sub(1)
+                            .expect("started queued turn should append one message");
+                        created_message_indices.push(successor_message_index);
+                    }
+                    Ok(None) => {}
+                    Err(_) => {
+                        // A rejected successor still commits the stopped Idle
+                        // record. Restore the whole speculative boundary so a
+                        // fallible start cannot leak partial queue/runtime or
+                        // transcript mutations into that commit.
+                        inner.sessions[index] = post_stop_record
+                            .as_ref()
+                            .expect("queued dispatch should retain a rollback record")
+                            .clone();
+                        // Restoring a cloned record also needs a fresh mutation
+                        // stamp so the committed Idle state is persisted.
+                        let _ = inner
+                            .session_mut_by_index(index)
+                            .expect("session index should remain valid");
+                    }
+                }
+                result
+            } else {
+                Ok(None)
+            };
+
+            let (pending_interaction_updates, created_messages) = {
+                let record = &inner.sessions[index];
+                (
+                    message_updated_delta_parts_for_indices(record, pending_interaction_indices),
+                    message_created_delta_parts_for_indices(record, created_message_indices),
+                )
+            };
+
+            match self.commit_locked(&mut inner) {
+                Ok(revision) => Ok((
+                    queued_turn_result,
+                    pending_interaction_updates,
+                    created_messages,
+                    revision,
+                )),
                 Err(err) => {
                     if added_stopped_session_id {
                         if let Some(instance_index) = stopped_orchestrator_instance_index {
@@ -430,22 +491,60 @@ impl AppState {
                                 .retain(|candidate| candidate != session_id);
                         }
                     }
+
+                    let queued_runtime_to_shutdown = match (
+                        queued_turn_result.as_ref(),
+                        &inner.sessions[index].runtime,
+                    ) {
+                        (Ok(Some(_)), SessionRuntime::Claude(handle)) => {
+                            Some(KillableRuntime::Claude(handle.clone()))
+                        }
+                        (Ok(Some(_)), SessionRuntime::Codex(handle)) => {
+                            Some(KillableRuntime::Codex(handle.clone()))
+                        }
+                        (Ok(Some(_)), SessionRuntime::Acp(handle)) => {
+                            Some(KillableRuntime::Acp(handle.clone()))
+                        }
+                        (Ok(Some(_)), SessionRuntime::None)
+                        | (Ok(None), _)
+                        | (Err(_), _) => None,
+                    };
+
+                    // Keep the stopped in-memory record, but undo every
+                    // speculative successor mutation. The old runtime is
+                    // already stopped and cannot be restored; the new runtime
+                    // is returned for teardown after releasing StateInner.
+                    if let Some(post_stop_record) = post_stop_record {
+                        inner.sessions[index] = post_stop_record;
+                    }
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid");
                     record.orchestrator_auto_dispatch_blocked = true;
                     clear_active_turn_file_change_tracking(record);
-                    return Err(ApiError::internal(format!(
-                        "failed to persist session state: {err:#}"
-                    )));
+                    Err((
+                        ApiError::internal(format!("failed to persist session state: {err:#}")),
+                        queued_runtime_to_shutdown,
+                    ))
                 }
-            };
-            (
-                has_queued_prompts,
-                pending_interaction_updates,
-                created_messages,
-                revision,
-            )
+            }
+        };
+        let (queued_turn_result, pending_interaction_updates, created_messages, revision) =
+            match transition {
+                Ok(transition) => transition,
+                Err((error, queued_runtime_to_shutdown)) => {
+                    if let Some(runtime) = queued_runtime_to_shutdown {
+                        if let Err(cleanup_err) = shutdown_removed_runtime(
+                            runtime,
+                            &format!("uncommitted queued successor for session `{session_id}`"),
+                        ) {
+                            eprintln!(
+                                "session cleanup warning> failed to tear down uncommitted queued successor for session `{session_id}`: {cleanup_err:#}"
+                            );
+                        }
+                    }
+                    return Err(error);
+                }
         };
         self.publish_message_created_delta_parts(revision, created_messages);
         self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
@@ -454,15 +553,8 @@ impl AppState {
             self.note_stopped_orchestrator_session(orchestrator_instance_id, session_id);
         }
 
-        if should_dispatch_next {
-            if let Some(dispatch) =
-                self.dispatch_next_queued_turn(session_id, false)
-                    .map_err(|err| {
-                        ApiError::internal(format!("failed to dispatch queued prompt: {err:#}"))
-                    })?
-            {
-                deliver_turn_dispatch(self, dispatch)?;
-            }
+        if let Some(started) = queued_turn_result? {
+            deliver_turn_dispatch(self, started.dispatch)?;
         }
 
         Ok(self.snapshot())
