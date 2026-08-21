@@ -173,6 +173,7 @@ export function ConversationOverviewRail({
     }
     const pageStep = Math.max(1, Math.floor(overview.buckets.length / 10));
     let nextBucketIndex = currentBucketIndex;
+    let boundaryPosition: number | null = null;
     switch (event.key) {
       case "ArrowDown":
       case "ArrowRight":
@@ -189,15 +190,19 @@ export function ConversationOverviewRail({
         nextBucketIndex -= pageStep;
         break;
       case "Home":
-        nextBucketIndex = 0;
+        boundaryPosition = 0;
         break;
       case "End":
-        nextBucketIndex = overview.buckets.length - 1;
+        boundaryPosition = overview.latestPosition;
         break;
       default:
         return;
     }
     event.preventDefault();
+    if (boundaryPosition !== null) {
+      onNavigateRef.current(boundaryPosition);
+      return;
+    }
     const clampedBucketIndex = Math.min(
       overview.buckets.length - 1,
       Math.max(0, nextBucketIndex),

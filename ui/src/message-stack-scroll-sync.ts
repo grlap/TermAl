@@ -58,6 +58,20 @@ export function notifyMessageStackScrollWrite(
   );
 }
 
+export function writeMessageStackScrollTopImmediately(
+  node: HTMLElement,
+  top: number,
+) {
+  // A plain scrollTop assignment does not reliably take ownership from an
+  // in-flight native smooth-scroll animation in Blink. Abort that animation
+  // with an explicit auto landing before publishing the synchronous value
+  // that scroll persistence and virtualizer reconciliation read back.
+  if (typeof node.scrollTo === "function") {
+    node.scrollTo({ top, behavior: "auto" });
+  }
+  node.scrollTop = top;
+}
+
 // Synchronous request seam for layout owners that need to preserve an existing
 // bottom pin without becoming another transcript scroll writer. Requests may
 // start on the message stack or bubble from a descendant layout owner;

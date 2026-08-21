@@ -49,9 +49,16 @@ function makeMarker(
 type MarkerJumpApi = ReturnType<typeof useConversationMarkerJump>;
 
 function makeVirtualizerHandle(
-  jumpToMessageId = vi.fn(() => true),
+  jumpToMessageId: VirtualizedConversationMessageListHandle["jumpToMessageId"] =
+    vi.fn(() => true),
 ): VirtualizedConversationMessageListHandle {
+  let userScrollGeneration = 0;
   return {
+    beginUserScrollNavigation: vi.fn(() => {
+      userScrollGeneration += 1;
+      return userScrollGeneration;
+    }),
+    getUserScrollGeneration: vi.fn(() => userScrollGeneration),
     getLayoutSnapshot: vi.fn(),
     getViewportSnapshot: vi.fn(),
     jumpToMessageId,
@@ -63,6 +70,7 @@ function MarkerJumpHarness({
   historyWindowKey = "window-1",
   onMissingMessageJump,
   onReady,
+  requestMarkerHistoryAround,
   scrollRoot,
   sessionId,
   virtualizerHandle,
@@ -70,6 +78,7 @@ function MarkerJumpHarness({
   historyWindowKey?: string;
   onMissingMessageJump?: () => boolean;
   onReady: (api: MarkerJumpApi) => void;
+  requestMarkerHistoryAround?: (position: number) => Promise<boolean>;
   scrollRoot: HTMLElement;
   sessionId: string;
   virtualizerHandle: VirtualizedConversationMessageListHandle;
@@ -83,6 +92,7 @@ function MarkerJumpHarness({
     historyWindowKey,
     onMissingMessageJump,
     onConversationSearchItemMount: () => {},
+    requestMarkerHistoryAround,
     scrollContainerRef,
     sessionId,
     virtualizerHandleRef,
@@ -93,6 +103,14 @@ function MarkerJumpHarness({
   }, [api, onReady]);
 
   return null;
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 function installManualAnimationFrames({
@@ -531,7 +549,7 @@ describe("conversation marker helpers", () => {
   it("requests bounded history pages until an off-window marker target becomes reachable", () => {
     const frames = installManualAnimationFrames();
     const scrollRoot = document.createElement("section");
-    const jumpToMessageId = vi.fn(() => false);
+    const jumpToMessageId = vi.fn((_messageId: string) => false);
     const virtualizerHandle = makeVirtualizerHandle(jumpToMessageId);
     const onMissingMessageJump = vi.fn(() => true);
     let markerJump: MarkerJumpApi | null = null;
@@ -597,6 +615,256 @@ describe("conversation marker helpers", () => {
         flush: true,
       });
       expect(onMissingMessageJump).toHaveBeenCalledTimes(2);
+    } finally {
+      frames.restore();
+    }
+  });
+
+  it.each([
+    { label: "newer", position: 9_400 },
+    { label: "older", position: 120 },
+  ])(
+    "uses one centered page to reach a $label non-resident marker",
+    async ({ position }) => {
+      const frames = installManualAnimationFrames();
+      const jumpToMessageId = vi.fn((_messageId: string) => false);
+      const virtualizerHandle = makeVirtualizerHandle(jumpToMessageId);
+      const requestMarkerHistoryAround = vi.fn(async () => {
+        jumpToMessageId.mockReturnValue(true);
+        return true;
+      });
+      let markerJump: MarkerJumpApi | null = null;
+      try {
+        render(
+          createElement(MarkerJumpHarness, {
+            onReady: (api) => {
+              markerJump = api;
+            },
+            requestMarkerHistoryAround,
+            scrollRoot: document.createElement("section"),
+            sessionId: "session-1",
+            virtualizerHandle,
+          }),
+        );
+
+        await act(async () => {
+          markerJump?.jumpToMarker(
+            makeMarker("marker-centered", {
+              messageId: "message-centered",
+              messageIndexHint: position,
+            }),
+          );
+          await Promise.resolve();
+        });
+        act(() => frames.flushNextFrame());
+
+        expect(requestMarkerHistoryAround).toHaveBeenCalledOnce();
+        expect(requestMarkerHistoryAround).toHaveBeenCalledWith(position);
+        expect(jumpToMessageId).toHaveBeenLastCalledWith(
+          "message-centered",
+          { align: "center", flush: true },
+        );
+      } finally {
+        frames.restore();
+      }
+    },
+  );
+
+  it("cancels the adopted marker retry after newer user scroll input", async () => {
+    const frames = installManualAnimationFrames();
+    const deferred = createDeferred<boolean>();
+    const jumpToMessageId = vi.fn((_messageId: string) => false);
+    const virtualizerHandle = makeVirtualizerHandle(jumpToMessageId);
+    const requestMarkerHistoryAround = vi.fn(() => deferred.promise);
+    let markerJump: MarkerJumpApi | null = null;
+    try {
+      render(
+        createElement(MarkerJumpHarness, {
+          onReady: (api) => {
+            markerJump = api;
+          },
+          requestMarkerHistoryAround,
+          scrollRoot: document.createElement("section"),
+          sessionId: "session-1",
+          virtualizerHandle,
+        }),
+      );
+      act(() =>
+        markerJump?.jumpToMarker(
+          makeMarker("marker-late", {
+            messageId: "message-late",
+            messageIndexHint: 500,
+          }),
+        ),
+      );
+      expect(virtualizerHandle.beginUserScrollNavigation).toHaveBeenCalledOnce();
+
+      // Models a wheel/PageUp/thumb event advancing the shared arbiter while
+      // the around-page request is in flight.
+      virtualizerHandle.beginUserScrollNavigation();
+      await act(async () => {
+        deferred.resolve(true);
+        await deferred.promise;
+      });
+
+      expect(jumpToMessageId).toHaveBeenCalledTimes(1);
+      expect(frames.callbacks.size).toBe(0);
+    } finally {
+      frames.restore();
+    }
+  });
+
+  it("cancels an in-flight centered marker jump when the session changes", async () => {
+    const frames = installManualAnimationFrames();
+    const deferred = createDeferred<boolean>();
+    const jumpToMessageId = vi.fn((_messageId: string) => false);
+    const virtualizerHandle = makeVirtualizerHandle(jumpToMessageId);
+    const requestMarkerHistoryAround = vi.fn(() => deferred.promise);
+    let markerJump: MarkerJumpApi | null = null;
+    try {
+      const { rerender } = render(
+        createElement(MarkerJumpHarness, {
+          onReady: (api) => {
+            markerJump = api;
+          },
+          requestMarkerHistoryAround,
+          scrollRoot: document.createElement("section"),
+          sessionId: "session-1",
+          virtualizerHandle,
+        }),
+      );
+      act(() =>
+        markerJump?.jumpToMarker(
+          makeMarker("marker-old-session", {
+            messageId: "message-old-session",
+            messageIndexHint: 700,
+          }),
+        ),
+      );
+      rerender(
+        createElement(MarkerJumpHarness, {
+          onReady: (api) => {
+            markerJump = api;
+          },
+          requestMarkerHistoryAround,
+          scrollRoot: document.createElement("section"),
+          sessionId: "session-2",
+          virtualizerHandle,
+        }),
+      );
+      await act(async () => {
+        deferred.resolve(true);
+        await deferred.promise;
+      });
+
+      expect(jumpToMessageId).toHaveBeenCalledTimes(1);
+      expect(frames.callbacks.size).toBe(0);
+    } finally {
+      frames.restore();
+    }
+  });
+
+  it("stops after one centered request when the hinted target stays absent", async () => {
+    const frames = installManualAnimationFrames();
+    const jumpToMessageId = vi.fn((_messageId: string) => false);
+    const virtualizerHandle = makeVirtualizerHandle(jumpToMessageId);
+    const requestMarkerHistoryAround = vi.fn(async () => true);
+    let markerJump: MarkerJumpApi | null = null;
+    try {
+      render(
+        createElement(MarkerJumpHarness, {
+          onReady: (api) => {
+            markerJump = api;
+          },
+          requestMarkerHistoryAround,
+          scrollRoot: document.createElement("section"),
+          sessionId: "session-1",
+          virtualizerHandle,
+        }),
+      );
+      await act(async () => {
+        markerJump?.jumpToMarker(
+          makeMarker("marker-stale-hint", {
+            messageId: "message-not-in-page",
+            messageIndexHint: 800,
+          }),
+        );
+        await Promise.resolve();
+      });
+      act(() => {
+        frames.flushNextFrame();
+        frames.flushNextFrame();
+      });
+
+      expect(requestMarkerHistoryAround).toHaveBeenCalledOnce();
+      expect(jumpToMessageId).toHaveBeenCalledTimes(3);
+      expect(frames.callbacks.size).toBe(0);
+    } finally {
+      frames.restore();
+    }
+  });
+
+  it("lets a marker re-click supersede an older in-flight jump", async () => {
+    const frames = installManualAnimationFrames();
+    const firstRequest = createDeferred<boolean>();
+    const secondRequest = createDeferred<boolean>();
+    const jumpToMessageId = vi.fn((_messageId: string) => false);
+    const virtualizerHandle = makeVirtualizerHandle(jumpToMessageId);
+    const requestMarkerHistoryAround = vi
+      .fn()
+      .mockImplementationOnce(() => firstRequest.promise)
+      .mockImplementationOnce(() => secondRequest.promise);
+    let markerJump: MarkerJumpApi | null = null;
+    try {
+      render(
+        createElement(MarkerJumpHarness, {
+          onReady: (api) => {
+            markerJump = api;
+          },
+          requestMarkerHistoryAround,
+          scrollRoot: document.createElement("section"),
+          sessionId: "session-1",
+          virtualizerHandle,
+        }),
+      );
+      act(() => {
+        markerJump?.jumpToMarker(
+          makeMarker("marker-first", {
+            messageId: "message-first",
+            messageIndexHint: 100,
+          }),
+        );
+        markerJump?.jumpToMarker(
+          makeMarker("marker-second", {
+            messageId: "message-second",
+            messageIndexHint: 900,
+          }),
+        );
+      });
+      jumpToMessageId.mockImplementation((messageId: string) =>
+        messageId === "message-second",
+      );
+      await act(async () => {
+        firstRequest.resolve(true);
+        secondRequest.resolve(true);
+        await Promise.all([firstRequest.promise, secondRequest.promise]);
+      });
+      act(() => frames.flushNextFrame());
+
+      expect(requestMarkerHistoryAround).toHaveBeenCalledTimes(2);
+      expect(jumpToMessageId).toHaveBeenCalledWith("message-first", {
+        align: "center",
+        flush: true,
+      });
+      expect(jumpToMessageId).toHaveBeenLastCalledWith("message-second", {
+        align: "center",
+        flush: true,
+      });
+      expect(
+        jumpToMessageId.mock.calls.filter(([messageId]) =>
+          messageId === "message-first",
+        ),
+      ).toHaveLength(1);
     } finally {
       frames.restore();
     }

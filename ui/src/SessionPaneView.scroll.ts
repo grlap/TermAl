@@ -28,10 +28,12 @@ import {
   MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
   notifyMessageStackScrollWrite,
+  writeMessageStackScrollTopImmediately,
   type MessageStackBottomRepinRequestDetail,
   type MessageStackScrollWriteKind,
 } from "./message-stack-scroll-sync";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
+import type { PaneScrollPosition } from "./pane-scroll-position-migration";
 import {
   requestSessionHistoryStartPage,
   requestSessionHistoryTailPage,
@@ -161,19 +163,11 @@ export function resolveNewResponseIndicatorVisibility({
   return hasUnloadedNewerHistory || (!liveTailPinned && indicatorKind !== null);
 }
 
-type PaneScrollPosition = {
-  top: number;
-  shouldStick: boolean;
-};
-
 type UseSessionPaneScrollStateParams = {
   activeSession: Session | null;
   activeSessionSearchMatch: SessionSearchMatch | null;
   defaultScrollToBottom: boolean;
   deferContentScrollEffects: boolean;
-  forceSessionScrollToBottomRef: MutableRefObject<
-    Record<string, true | undefined>
-  >;
   hasSessionFindQuery: boolean;
   isActive: boolean;
   isSending: boolean;
@@ -204,7 +198,6 @@ export function useSessionPaneScrollState({
   activeSessionSearchMatch,
   defaultScrollToBottom,
   deferContentScrollEffects,
-  forceSessionScrollToBottomRef,
   hasSessionFindQuery,
   isActive,
   isSending,
@@ -577,7 +570,7 @@ export function useSessionPaneScrollState({
 
     const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
     if (Math.abs(node.scrollTop - nextScrollTop) > 0.5) {
-      node.scrollTop = nextScrollTop;
+      writeMessageStackScrollTopImmediately(node, nextScrollTop);
     }
     notifyMessageStackScrollWrite(node, {
       scrollKind: options.scrollKind ?? "bottom_pin",
@@ -973,7 +966,12 @@ export function useSessionPaneScrollState({
       markTailFollowDetachedByUser();
     }
     cancelPaneProgrammaticBottomFollow();
-    node.scrollTop = nextScrollTop;
+    // A pane-owned PageUp/PageDown or wheel delta must also abort any native
+    // smooth bottom-follow animation already running in Blink. The old stale
+    // prepend restore used to cancel that animation as an accidental side
+    // effect; generation-based stale-restore rejection correctly performs no
+    // DOM write, so ownership transfer must be explicit at the input writer.
+    writeMessageStackScrollTopImmediately(node, nextScrollTop);
     notifyMessageStackScrollWrite(node, {
       scrollKind: options.scrollKind,
       scrollSource: "user",
@@ -1710,7 +1708,10 @@ export function useSessionPaneScrollState({
     // tab's offset and then visibly jump it to the bottom. Establish attached
     // geometry during the layout phase; the settled follow below remains
     // responsible for measurements that arrive after this commit.
-    node.scrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
+    writeMessageStackScrollTopImmediately(
+      node,
+      Math.max(node.scrollHeight - node.clientHeight, 0),
+    );
     notifyMessageStackScrollWrite(node, {
       scrollKind: "bottom_pin",
     });
@@ -1733,25 +1734,7 @@ export function useSessionPaneScrollState({
       return undefined;
     }
 
-    const shouldForceBottomAfterWorkspaceRebuild =
-      defaultScrollToBottom &&
-      activeSession &&
-      forceSessionScrollToBottomRef.current[activeSession.id];
-    if (shouldForceBottomAfterWorkspaceRebuild) {
-      delete forceSessionScrollToBottomRef.current[activeSession.id];
-      setTailFollowIntent(true);
-      paneScrollPositions[scrollStateKey] = {
-        top: Number.MAX_SAFE_INTEGER,
-        shouldStick: true,
-      };
-      node.scrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-      scrollMessageStackToBoundary("bottom");
-      if (!node.querySelector(".virtualized-message-list")) {
-        restoreCleanup = scheduleSettledScrollToBottom("auto", {
-          maxAttempts: 60,
-        });
-      }
-    } else if (paneScrollPositions[scrollStateKey]) {
+    if (paneScrollPositions[scrollStateKey]) {
       const saved = paneScrollPositions[scrollStateKey];
       if (saved.shouldStick || getTailFollowIntent()) {
         restorePinnedMessageStackBeforePaint(node);
@@ -1777,7 +1760,7 @@ export function useSessionPaneScrollState({
         preferVirtualizedBoundary: true,
       });
     } else {
-      node.scrollTop = 0;
+      writeMessageStackScrollTopImmediately(node, 0);
       notifyMessageStackScrollWrite(node);
       setTailFollowIntent(false);
       paneScrollPositions[scrollStateKey] = {

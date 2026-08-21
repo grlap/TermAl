@@ -1,4 +1,5 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
+import { flushSync } from "react-dom";
 import {
   deleteProject,
   fetchGitDiff,
@@ -56,6 +57,7 @@ import {
 } from "./workspace";
 import { resolveWorkspaceTabProjectId } from "./workspace-queries";
 import { workspacePaneHasRoomForViewerSplit } from "./workspace-viewer-layout";
+import type { PaneScrollPositionMigration } from "./pane-scroll-position-migration";
 import type {
   OrchestratorRuntimeAction,
   StandaloneControlSurfaceViewState,
@@ -77,9 +79,6 @@ type UseAppWorkspaceActionsParams = {
   isMountedRef: MutableRefObject<boolean>;
   gitDiffPreviewRefreshVersionsRef: MutableRefObject<Map<string, number>>;
   attemptedGitDiffDocumentContentRestoreKeysRef: MutableRefObject<Set<string>>;
-  forceSessionScrollToBottomRef: MutableRefObject<
-    Record<string, true | undefined>
-  >;
   newSessionAgent: AgentType;
   newSessionModel: string;
   createSessionPaneId: string | null;
@@ -108,9 +107,16 @@ type UseAppWorkspaceActionsParams = {
     nextWorkspace: WorkspaceState,
     side?: "left" | "right",
   ) => WorkspaceState;
-  markSessionTabsForBottomAfterWorkspaceRebuild: (
-    nextWorkspace: WorkspaceState,
-  ) => void;
+  migrateSessionTabScrollPosition: (input: {
+    sessionId: string;
+    sourcePaneId: string;
+    targetPaneId: string;
+  }) => boolean;
+  beginSessionTabScrollPositionMigration: (input: {
+    sessionId: string;
+    sourcePaneId: string;
+    targetPaneId: string;
+  }) => PaneScrollPositionMigration | null;
   reportRequestError: (error: unknown, options?: { message?: string }) => void;
   adoptState: (nextState: StateResponse) => boolean;
   handleNewSession: (options: {
@@ -270,7 +276,6 @@ export function useAppWorkspaceActions({
   isMountedRef,
   gitDiffPreviewRefreshVersionsRef,
   attemptedGitDiffDocumentContentRestoreKeysRef,
-  forceSessionScrollToBottomRef,
   newSessionAgent,
   newSessionModel,
   createSessionPaneId,
@@ -288,7 +293,8 @@ export function useAppWorkspaceActions({
   setPendingOrchestratorActionById,
   setIsCreateSessionOpen,
   applyControlPanelLayout,
-  markSessionTabsForBottomAfterWorkspaceRebuild,
+  beginSessionTabScrollPositionMigration,
+  migrateSessionTabScrollPosition,
   reportRequestError,
   adoptState,
   handleNewSession,
@@ -577,13 +583,6 @@ export function useAppWorkspaceActions({
       }
     }
 
-    // An ordinary session-tab selection supersedes a stale workspace-rebuild
-    // override that the inactive tab could not consume. A first visit has no
-    // saved position and defaults to the tail, an attached revisit follows the
-    // tail, and a detached revisit must preserve its reading position.
-    if (tab?.kind === "session") {
-      delete forceSessionScrollToBottomRef.current[tab.sessionId];
-    }
     setWorkspace((current) => activatePane(current, paneId, tabId));
   }
 
@@ -594,10 +593,51 @@ export function useAppWorkspaceActions({
   }
 
   function handleSplitPane(paneId: string, direction: "row" | "column") {
-    markSessionTabsForBottomAfterWorkspaceRebuild(workspaceRef.current);
-    setWorkspace((current) =>
-      applyControlPanelLayout(splitPane(current, paneId, direction)),
+    const newPaneId = crypto.randomUUID();
+    const sourcePane = workspaceRef.current.panes.find(
+      (candidate) => candidate.id === paneId,
     );
+    const sourceActiveTab = sourcePane?.tabs.find(
+      (tab) => tab.id === sourcePane.activeTabId,
+    );
+    const expectedMovedSessionId =
+      sourcePane &&
+      sourcePane.tabs.length > 1 &&
+      sourceActiveTab?.kind === "session"
+        ? sourceActiveTab.sessionId
+        : null;
+    const migration = expectedMovedSessionId
+      ? beginSessionTabScrollPositionMigration({
+          sessionId: expectedMovedSessionId,
+          sourcePaneId: paneId,
+          targetPaneId: newPaneId,
+        })
+      : null;
+    let movedSessionId: string | null = null;
+    flushSync(() => {
+      setWorkspace((current) => {
+        const next = applyControlPanelLayout(
+          splitPane(current, paneId, direction, newPaneId),
+        );
+        const newPane = next.panes.find(
+          (candidate) => candidate.id === newPaneId,
+        );
+        const movedTab = newPane?.tabs[0] ?? null;
+        movedSessionId =
+          movedTab?.kind === "session" ? movedTab.sessionId : null;
+        return next;
+      });
+    });
+    if (movedSessionId !== expectedMovedSessionId) {
+      migration?.rollback();
+    }
+    if (movedSessionId && movedSessionId !== expectedMovedSessionId) {
+      migrateSessionTabScrollPosition({
+        sessionId: movedSessionId,
+        sourcePaneId: paneId,
+        targetPaneId: newPaneId,
+      });
+    }
   }
 
   function handleDraftChange(sessionId: string, nextValue: string) {

@@ -106,6 +106,11 @@ export type VirtualizedConversationMessageListHandle = {
   // without retriggering on every virtualized layout update.
   getLayoutSnapshot: () => VirtualizedConversationLayoutSnapshot;
   getViewportSnapshot: () => VirtualizedConversationViewportSnapshot;
+  // Imperative navigation is user-owned even when its eventual DOM write is
+  // delayed by bounded history adoption. The generation token lets callers
+  // cancel that delayed write if any newer wheel/key/thumb input takes over.
+  beginUserScrollNavigation: () => number;
+  getUserScrollGeneration: () => number;
   // Returns false when the list is inactive, the scroll node is missing, or the
   // target cannot be resolved from the currently loaded transcript.
   jumpToMessageId: (

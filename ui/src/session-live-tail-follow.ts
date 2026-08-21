@@ -2,7 +2,7 @@
 // Does not own DOM writes, virtualizer notifications, or user-detach input.
 // Split from: ui/src/SessionPaneView.scroll.ts.
 
-import { buildMessageListSignature } from "./app-utils";
+import { buildMessageListSignature, messageChangeMarker } from "./app-utils";
 import type { Message } from "./types";
 
 export const SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS = 1000 / 60;
@@ -128,6 +128,7 @@ export function resolveLatestTurnOutputState(
 export function resolveLatestTurnTailSignature(
   messages: readonly Message[],
 ) {
+  let promptMessageIndex = -1;
   let promptMessageId: string | null = null;
   let tailMessage: Message | undefined;
 
@@ -138,19 +139,34 @@ export function resolveLatestTurnTailSignature(
     }
     tailMessage ??= message;
     if (message.author === "you") {
+      promptMessageIndex = index;
       promptMessageId = message.id;
       break;
     }
   }
 
-  // Deliberately exclude the resident-window length. Trimming old messages
-  // must not look like new output for a post-live turn; an appended/reparsed
-  // tail still changes the last message marker, and a new prompt changes its
-  // identity even before the agent responds.
-  return [
-    promptMessageId ?? "no-prompt",
-    buildMessageListSignature(tailMessage ? [tailMessage] : []),
-  ].join("|");
+  // This is a latest-turn CONTENT signature anchored at the latest resident
+  // user prompt. Resident-prefix trims must not change it, while insertion,
+  // replacement, or mutation anywhere inside the latest turn must. When that
+  // prompt is not resident, hashing the whole resident window would confuse a
+  // history reveal with new output, so deliberately degrade to the old
+  // tail-only signature until the prompt becomes available.
+  if (promptMessageIndex < 0 || promptMessageId === null) {
+    return [
+      "no-prompt",
+      buildMessageListSignature(tailMessage ? [tailMessage] : []),
+    ].join("|");
+  }
+
+  const latestTurnMessages = messages.slice(promptMessageIndex);
+  return JSON.stringify([
+    promptMessageId,
+    latestTurnMessages.length,
+    latestTurnMessages.map((message) => [
+      message.id,
+      messageChangeMarker(message),
+    ]),
+  ]);
 }
 
 export function isFirstAgentOutputForObservedPrompt(

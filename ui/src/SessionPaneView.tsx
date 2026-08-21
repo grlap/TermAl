@@ -160,7 +160,6 @@ export function SessionPaneView({
   paneScrollPositionsRef,
   paneContentSignaturesRef,
   paneMessageContentSignaturesRef,
-  forceSessionScrollToBottomRef,
   pendingScrollToBottomRequest,
   windowId,
   draggedTab,
@@ -670,7 +669,6 @@ export function SessionPaneView({
     activeSessionSearchMatch,
     defaultScrollToBottom,
     deferContentScrollEffects: deferStoreBackedScrollEffects,
-    forceSessionScrollToBottomRef,
     hasSessionFindQuery,
     isActive,
     isSending,
@@ -1831,6 +1829,7 @@ export function SessionPaneView({
             paneId={pane.id}
             viewMode={pane.viewMode}
             liveTailPinned={liveTailPinned}
+            scrollStateKey={scrollStateKey}
             scrollContainerRef={messageStackRef}
             activeSessionId={activeSession?.id ?? null}
             isLoading={isLoading}

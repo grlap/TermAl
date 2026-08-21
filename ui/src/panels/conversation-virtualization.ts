@@ -48,6 +48,8 @@
 // `AgentSessionPanel.test.tsx`) import directly from here.
 
 import type { Message } from "../types";
+import { shouldCollapseDelegationFanInMessage } from "../delegation-fan-in";
+import { shouldCollapseLongPeerMessage } from "../long-peer-message";
 import {
   SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX,
   SESSION_STICKY_BOTTOM_BAND_PX,
@@ -76,6 +78,16 @@ const MAX_ESTIMATED_TEXT_MESSAGE_HEIGHT = 4800;
 // plus `.command-success-summary`; status and command/output length do not
 // affect the collapsed presentation.
 const ESTIMATED_COLLAPSED_COMMAND_HEIGHT_PX = 120;
+// Production CSS measured 127.39 px in headless Chrome at default density,
+// Avenir Next, and the 34rem user-bubble width. Round up by ~13% so an unseen
+// card is slightly more likely to shrink than grow when its real measurement
+// replaces this estimate.
+const ESTIMATED_COLLAPSED_DELEGATION_FAN_IN_HEIGHT_PX = 144;
+// The collapsed long-peer card measured the same 127.39 px under the same
+// production Chrome/CSS conditions. Keep a separate named constant because
+// this renderer owns a different preview and may diverge later; apply the same
+// ~13% upward measurement bias today.
+const ESTIMATED_COLLAPSED_LONG_PEER_HEIGHT_PX = 144;
 
 function resolveEstimatedTextContentWidthPx(
   availableWidthPx: number | undefined,
@@ -280,6 +292,12 @@ export function estimateConversationMessageHeight(
 ) {
   switch (message.type) {
     case "text": {
+      if (shouldCollapseDelegationFanInMessage(message)) {
+        return ESTIMATED_COLLAPSED_DELEGATION_FAN_IN_HEIGHT_PX;
+      }
+      if (shouldCollapseLongPeerMessage(message)) {
+        return ESTIMATED_COLLAPSED_LONG_PEER_HEIGHT_PX;
+      }
       if (message.author === "assistant") {
         const assistantCharactersPerLine = estimateCharactersPerLineForWidth(
           resolveEstimatedTextContentWidthPx(

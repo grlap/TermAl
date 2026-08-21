@@ -19,6 +19,10 @@ import {
   fetchSessionOverview,
   type SessionOverviewResponse,
 } from "../api";
+import {
+  notifyMessageStackScrollWrite,
+  writeMessageStackScrollTopImmediately,
+} from "../message-stack-scroll-sync";
 import { requestSessionHistoryAroundPage } from "../session-history-demand";
 import { CONVERSATION_OVERVIEW_MIN_MESSAGES } from "./ConversationOverviewRail";
 import type { ConversationOverviewViewport } from "./conversation-overview-map";
@@ -43,24 +47,34 @@ type ConversationOverviewRailFrame = {
   topPx: number;
 };
 
+type PendingOverviewLayoutScrollRestore = {
+  scrollStateKey: string;
+  sessionId: string;
+};
+
 export function useConversationOverviewController({
   isActive,
   messageCount,
   messageStartIndex,
   renderedMessageCount,
   scrollContainerRef,
+  scrollStateKey,
   sessionId,
   sessionMutationStamp,
+  tailFollowIntent,
 }: {
   isActive: boolean;
   messageCount: number;
   messageStartIndex: number;
   renderedMessageCount: number;
   scrollContainerRef: RefObject<HTMLElement | null>;
+  scrollStateKey: string;
   sessionId: string;
   sessionMutationStamp: number;
+  tailFollowIntent: boolean;
 }) {
-  const shouldRender = messageCount >= CONVERSATION_OVERVIEW_MIN_MESSAGES;
+  const isOverviewEligible =
+    messageCount >= CONVERSATION_OVERVIEW_MIN_MESSAGES;
   const virtualizerHandleRef =
     useRef<VirtualizedConversationMessageListHandle | null>(null);
   const navigationFrameIdsRef = useRef<Set<number>>(new Set());
@@ -68,7 +82,12 @@ export function useConversationOverviewController({
   const overviewRefreshBurstStartedAtRef = useRef<number | null>(null);
   const overviewRefreshTimerRef = useRef<number | null>(null);
   const overviewRequestIdRef = useRef(0);
+  const readyOverviewSessionIdRef = useRef<string | null>(null);
+  const pendingLayoutScrollRestoreRef =
+    useRef<PendingOverviewLayoutScrollRestore | null>(null);
+  const scrollStateKeyRef = useRef(scrollStateKey);
   const sessionIdRef = useRef(sessionId);
+  const tailFollowIntentRef = useRef(tailFollowIntent);
   const messageStartIndexRef = useRef(messageStartIndex);
   const renderedMessageCountRef = useRef(renderedMessageCount);
   const [overview, setOverview] = useState<SessionOverviewResponse | null>(null);
@@ -77,7 +96,17 @@ export function useConversationOverviewController({
   );
   const [railFrame, setRailFrame] =
     useState<ConversationOverviewRailFrame | null>(null);
+  const hasReadyOverview = overview?.sessionId === sessionId;
+  // Eligibility starts/refreshes the server request. Readiness alone enables
+  // the wrapper and CSS that replace the native scrollbar with the overview
+  // rail, so pending, failed, or stale-session data never removes the only
+  // working scroll affordance.
+  const shouldRequestOverview = isActive && isOverviewEligible;
+  const shouldRender = shouldRequestOverview && hasReadyOverview;
+  readyOverviewSessionIdRef.current = overview?.sessionId ?? null;
+  scrollStateKeyRef.current = scrollStateKey;
   sessionIdRef.current = sessionId;
+  tailFollowIntentRef.current = tailFollowIntent;
   messageStartIndexRef.current = messageStartIndex;
   renderedMessageCountRef.current = renderedMessageCount;
 
@@ -102,6 +131,15 @@ export function useConversationOverviewController({
         ) {
           return;
         }
+        if (readyOverviewSessionIdRef.current !== expectedSessionId) {
+          const scrollNode = scrollContainerRef.current;
+          if (scrollNode) {
+            pendingLayoutScrollRestoreRef.current = {
+              scrollStateKey: scrollStateKeyRef.current,
+              sessionId: expectedSessionId,
+            };
+          }
+        }
         setOverview(response);
       },
       () => {
@@ -113,7 +151,7 @@ export function useConversationOverviewController({
         }
       },
     );
-  }, []);
+  }, [scrollContainerRef]);
 
   const refreshViewport = useCallback(() => {
     const scrollNode = scrollContainerRef.current;
@@ -170,7 +208,7 @@ export function useConversationOverviewController({
   }, [scrollContainerRef]);
 
   useEffect(() => {
-    if (!isActive || !shouldRender) {
+    if (!shouldRequestOverview) {
       cancelOverviewRefreshTimer();
       overviewRequestIdRef.current += 1;
       overviewRefreshBurstStartedAtRef.current = null;
@@ -209,12 +247,11 @@ export function useConversationOverviewController({
     );
   }, [
     cancelOverviewRefreshTimer,
-    isActive,
     messageCount,
     requestOverview,
     sessionId,
     sessionMutationStamp,
-    shouldRender,
+    shouldRequestOverview,
   ]);
 
   useEffect(
@@ -226,7 +263,7 @@ export function useConversationOverviewController({
   );
 
   useLayoutEffect(() => {
-    if (!isActive || !shouldRender) {
+    if (!shouldRequestOverview) {
       setViewport(EMPTY_OVERVIEW_VIEWPORT);
       setRailFrame(null);
       return undefined;
@@ -252,13 +289,47 @@ export function useConversationOverviewController({
       resizeObserver?.disconnect();
     };
   }, [
-    isActive,
     refreshRailFrame,
     refreshViewport,
     scrollContainerRef,
     sessionId,
-    shouldRender,
+    shouldRequestOverview,
   ]);
+
+  useLayoutEffect(() => {
+    const pendingRestore = pendingLayoutScrollRestoreRef.current;
+    if (!hasReadyOverview || !pendingRestore) {
+      return;
+    }
+    pendingLayoutScrollRestoreRef.current = null;
+    if (
+      pendingRestore.sessionId !== sessionId ||
+      pendingRestore.scrollStateKey !== scrollStateKey
+    ) {
+      return;
+    }
+    // The overview response can resolve after a tab switch or pane migration.
+    // Its pre-render DOM geometry is not scroll authority: the outgoing view
+    // may still be at the bottom while the incoming session has a detached
+    // saved position. Re-read the current session-scoped intent at write time.
+    // Detached restoration is owned by SessionPaneView and must not be replayed
+    // (or adopted) here after the wrapper transition.
+    if (!tailFollowIntentRef.current) {
+      return;
+    }
+    const scrollNode = scrollContainerRef.current;
+    if (!scrollNode) {
+      return;
+    }
+    const nextScrollTop = Math.max(
+      0,
+      scrollNode.scrollHeight - scrollNode.clientHeight,
+    );
+    writeMessageStackScrollTopImmediately(scrollNode, nextScrollTop);
+    notifyMessageStackScrollWrite(scrollNode, {
+      scrollKind: "bottom_pin",
+    });
+  }, [hasReadyOverview, scrollContainerRef, scrollStateKey, sessionId]);
 
   const cancelNavigationFrames = useCallback(() => {
     for (const frameId of navigationFrameIdsRef.current) {
@@ -344,14 +415,14 @@ export function useConversationOverviewController({
   );
 
   return {
-    isRailReady: overview !== null,
+    isRailReady: hasReadyOverview,
     navigate,
     overview,
     railHeightPx: railFrame?.heightPx ?? null,
     railPortalTarget: railFrame?.portalTarget ?? null,
     railRightPx: railFrame?.rightPx ?? null,
     railTopPx: railFrame?.topPx ?? null,
-    shouldRenderRail: isActive && shouldRender,
+    shouldRenderRail: shouldRender,
     shouldRender,
     viewport,
     virtualizerHandleRef,

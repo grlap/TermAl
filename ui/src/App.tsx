@@ -88,9 +88,10 @@ import {
 } from "./app-session-actions";
 import { useAppDragResize } from "./app-drag-resize";
 import {
-  beginSessionScrollBottomRebuild,
-  type SessionScrollRebuildMarkerOptions,
-} from "./session-scroll-rebuild-markers";
+  beginSessionPaneScrollPositionMigration,
+  migrateSessionPaneScrollPosition,
+  type PaneScrollPositionsByPane,
+} from "./pane-scroll-position-migration";
 import { useAppDialogState } from "./app-dialog-state";
 import { useAppWorkspaceActions } from "./app-workspace-actions";
 import { useAppControlPanelState } from "./app-control-panel-state";
@@ -558,17 +559,50 @@ export default function App() {
   const paneShouldStickToBottomRef = useRef<
     Record<string, boolean | undefined>
   >({});
-  const paneScrollPositionsRef = useRef<
-    Record<string, Record<string, { top: number; shouldStick: boolean }>>
-  >({});
+  const paneScrollPositionsRef = useRef<PaneScrollPositionsByPane>({});
+  const beginSessionTabScrollPositionMigration = useCallback(
+    ({
+      sessionId,
+      sourcePaneId,
+      targetPaneId,
+    }: {
+      sessionId: string;
+      sourcePaneId: string;
+      targetPaneId: string;
+    }) =>
+      beginSessionPaneScrollPositionMigration({
+        paneShouldStickToBottom: paneShouldStickToBottomRef.current,
+        paneScrollPositions: paneScrollPositionsRef.current,
+        sessionId,
+        sourcePaneId,
+        targetPaneId,
+      }),
+    [],
+  );
+  const migrateSessionTabScrollPosition = useCallback(
+    ({
+      sessionId,
+      sourcePaneId,
+      targetPaneId,
+    }: {
+      sessionId: string;
+      sourcePaneId: string;
+      targetPaneId: string;
+    }) =>
+      migrateSessionPaneScrollPosition({
+        paneShouldStickToBottom: paneShouldStickToBottomRef.current,
+        paneScrollPositions: paneScrollPositionsRef.current,
+        sessionId,
+        sourcePaneId,
+        targetPaneId,
+      }),
+    [],
+  );
   const paneContentSignaturesRef = useRef<
     Record<string, Record<string, string>>
   >({});
   const paneMessageContentSignaturesRef = useRef<
     Record<string, Record<string, string>>
-  >({});
-  const forceSessionScrollToBottomRef = useRef<
-    Record<string, true | undefined>
   >({});
 
   const projectLookup = useMemo(
@@ -1166,7 +1200,6 @@ export default function App() {
     isMountedRef,
     gitDiffPreviewRefreshVersionsRef,
     attemptedGitDiffDocumentContentRestoreKeysRef,
-    forceSessionScrollToBottomRef,
     newSessionAgent,
     newSessionModel,
     createSessionPaneId,
@@ -1184,7 +1217,8 @@ export default function App() {
     setPendingOrchestratorActionById,
     setIsCreateSessionOpen,
     applyControlPanelLayout,
-    markSessionTabsForBottomAfterWorkspaceRebuild,
+    beginSessionTabScrollPositionMigration,
+    migrateSessionTabScrollPosition,
     reportRequestError,
     adoptState,
     handleNewSession,
@@ -1237,17 +1271,6 @@ export default function App() {
     );
   }
 
-  function markSessionTabsForBottomAfterWorkspaceRebuild(
-    workspaceState: WorkspaceState,
-    options?: SessionScrollRebuildMarkerOptions,
-  ) {
-    return beginSessionScrollBottomRebuild(
-      () => forceSessionScrollToBottomRef.current,
-      workspaceState,
-      options,
-    );
-  }
-
   const {
     activeDraggedTab,
     getKnownWorkspaceTabDrag,
@@ -1267,7 +1290,8 @@ export default function App() {
     applyControlPanelLayout,
     workspaceLayoutLoadPendingRef,
     ignoreFetchedWorkspaceLayoutRef,
-    markSessionTabsForBottomAfterWorkspaceRebuild,
+    beginSessionTabScrollPositionMigration,
+    migrateSessionTabScrollPosition,
   });
 
   async function persistAppPreferences(payload: {
@@ -2127,7 +2151,6 @@ export default function App() {
               paneMessageContentSignaturesRef={
                 paneMessageContentSignaturesRef
               }
-              forceSessionScrollToBottomRef={forceSessionScrollToBottomRef}
               pendingScrollToBottomRequest={pendingScrollToBottomRequest}
               windowId={windowId}
               draggedTab={activeDraggedTab}

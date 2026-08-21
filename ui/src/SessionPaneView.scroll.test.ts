@@ -66,7 +66,6 @@ function params(activeSession: Session) {
     activeSessionSearchMatch: null,
     defaultScrollToBottom: false,
     deferContentScrollEffects: false,
-    forceSessionScrollToBottomRef: { current: {} },
     hasSessionFindQuery: false,
     isActive: false,
     isSending: false,
@@ -381,6 +380,163 @@ describe("session pane historical-window tail state", () => {
       awaitingPostLivePromptMessageId: undefined,
       shouldFollowPostLiveMessage: true,
     });
+  });
+
+  it("changes the latest-turn signature when earlier output changes before an unchanged tail", () => {
+    const prompt: Message = {
+      id: "prompt-1",
+      type: "text",
+      timestamp: "12:00",
+      author: "you",
+      text: "Prompt",
+    };
+    const progress: Message = {
+      id: "progress-1",
+      type: "text",
+      timestamp: "12:01",
+      author: "assistant",
+      text: "Working",
+    };
+    const finalMessage: Message = {
+      id: "final-1",
+      type: "text",
+      timestamp: "12:02",
+      author: "assistant",
+      text: "Done",
+    };
+
+    expect(
+      resolveLatestTurnTailSignature([prompt, progress, finalMessage]),
+    ).not.toBe(
+      resolveLatestTurnTailSignature([
+        prompt,
+        { ...progress, text: "Working harder" },
+        finalMessage,
+      ]),
+    );
+  });
+
+  it("changes the latest-turn signature when output is inserted before an unchanged tail", () => {
+    const prompt: Message = {
+      id: "prompt-1",
+      type: "text",
+      timestamp: "12:00",
+      author: "you",
+      text: "Prompt",
+    };
+    const finalMessage: Message = {
+      id: "final-1",
+      type: "text",
+      timestamp: "12:02",
+      author: "assistant",
+      text: "Done",
+    };
+
+    expect(resolveLatestTurnTailSignature([prompt, finalMessage])).not.toBe(
+      resolveLatestTurnTailSignature([
+        prompt,
+        {
+          id: "progress-1",
+          type: "text",
+          timestamp: "12:01",
+          author: "assistant",
+          text: "Working",
+        },
+        finalMessage,
+      ]),
+    );
+  });
+
+  it("ignores changes in a turn before the latest prompt", () => {
+    const previousPrompt: Message = {
+      id: "prompt-previous",
+      type: "text",
+      timestamp: "11:00",
+      author: "you",
+      text: "Previous prompt",
+    };
+    const previousReply: Message = {
+      id: "reply-previous",
+      type: "text",
+      timestamp: "11:01",
+      author: "assistant",
+      text: "Previous reply",
+    };
+    const latestPrompt: Message = {
+      id: "prompt-latest",
+      type: "text",
+      timestamp: "12:00",
+      author: "you",
+      text: "Latest prompt",
+    };
+    const latestReply: Message = {
+      id: "reply-latest",
+      type: "text",
+      timestamp: "12:01",
+      author: "assistant",
+      text: "Latest reply",
+    };
+
+    expect(
+      resolveLatestTurnTailSignature([
+        previousPrompt,
+        previousReply,
+        latestPrompt,
+        latestReply,
+      ]),
+    ).toBe(
+      resolveLatestTurnTailSignature([
+        previousPrompt,
+        { ...previousReply, text: "Changed previous reply" },
+        latestPrompt,
+        latestReply,
+      ]),
+    );
+  });
+
+  it("still observes a final-message change marker update", () => {
+    const prompt: Message = {
+      id: "prompt-1",
+      type: "text",
+      timestamp: "12:00",
+      author: "you",
+      text: "Prompt",
+    };
+    const finalMessage: Message = {
+      id: "final-1",
+      type: "text",
+      timestamp: "12:01",
+      author: "assistant",
+      text: "Done",
+    };
+
+    expect(resolveLatestTurnTailSignature([prompt, finalMessage])).not.toBe(
+      resolveLatestTurnTailSignature([
+        prompt,
+        { ...finalMessage, text: "Done with details" },
+      ]),
+    );
+  });
+
+  it("keeps the no-prompt tail fallback stable across older-history reveal and trim", () => {
+    const oldHistory: Message = {
+      id: "history-1",
+      type: "text",
+      timestamp: "11:00",
+      author: "assistant",
+      text: "Older history",
+    };
+    const residentTail: Message = {
+      id: "tail-1",
+      type: "text",
+      timestamp: "12:00",
+      author: "assistant",
+      text: "Resident tail",
+    };
+
+    expect(resolveLatestTurnTailSignature([residentTail])).toBe(
+      resolveLatestTurnTailSignature([oldHistory, residentTail]),
+    );
   });
 
   it("does not re-pin when older history reveals the prompt behind resident output", () => {

@@ -95,6 +95,7 @@ export type AgentSessionPanelProps = {
   viewMode: PaneViewMode;
   activeSessionId: string | null;
   liveTailPinned?: boolean;
+  scrollStateKey?: string;
   isLoading: boolean;
   isUpdating: boolean;
   showWaitingIndicator: boolean;
@@ -153,6 +154,7 @@ export type SessionBodyProps = {
   scrollContainerRef: RefObject<HTMLElement | null>;
   activeSessionId: string | null;
   liveTailPinned: boolean;
+  scrollStateKey: string;
   isLoading: boolean;
   isUpdating: boolean;
   showWaitingIndicator: boolean;
@@ -288,6 +290,7 @@ export type SessionConversationPageProps = {
   renderMessageCard: RenderMessageCard;
   session: Session;
   liveTailPinned: boolean;
+  scrollStateKey: string;
   scrollContainerRef: RefObject<HTMLElement | null>;
   isActive: boolean;
   isLoading: boolean;

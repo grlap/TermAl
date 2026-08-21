@@ -17,17 +17,17 @@ import { MailboxMessageLink } from "./mailbox-message-link";
 import { StreamingMarkdownHeightGuard } from "./message-card-streaming-height";
 import {
   DELEGATION_FAN_IN_AUTHOR_LABEL,
-  isDelegationFanInText,
+  shouldCollapseDelegationFanInMessage,
 } from "./delegation-fan-in";
 import { DelegationFanInMessage } from "./delegation-fan-in-message";
 import { DiffCard } from "./diff-card";
 import { FileChangesCard } from "./file-changes-card";
 import { DeferredHighlightedCodeBlock } from "./highlighted-code-block";
 import {
-  isLongPeerMessage,
   isPeerMessageBatch,
   LongPeerMessage,
   PEER_MESSAGE_BATCH_AUTHOR_LABEL,
+  shouldCollapseLongPeerMessage,
 } from "./long-peer-message";
 import {
   CodexAppRequestCard,
@@ -98,7 +98,10 @@ const NOOP_CODEX_APP_REQUEST_SUBMIT: (
 export type { MarkdownFileLinkTarget } from "./markdown-links";
 export { areMarkdownLineMarkersEqual } from "./markdown-line-markers";
 export { DiffCard } from "./diff-card";
-export { isDelegationFanInText } from "./delegation-fan-in";
+export {
+  isDelegationFanInText,
+  shouldCollapseDelegationFanInMessage,
+} from "./delegation-fan-in";
 export { MarkdownContent } from "./markdown-content";
 export { MessageMetaMarkerMenuProvider } from "./message-meta-marker-menu-context";
 
@@ -172,15 +175,11 @@ export const MessageCard = memo(
             ? promptCommandMetaLabel(message.text, message.expandedText)
             : null;
         const isDelegationFanIn =
-          message.author === "you" &&
-          !message.source &&
-          isDelegationFanInText(message.text);
+          shouldCollapseDelegationFanInMessage(message);
         const isPeerBatch =
           message.author === "you" && isPeerMessageBatch(message.source);
         const shouldCollapsePeerMessage =
-          message.author === "you" &&
-          (Boolean(message.source) || isPeerBatch) &&
-          isLongPeerMessage(message.text);
+          shouldCollapseLongPeerMessage(message);
         // One chip slot: a fan-in is never also a slash command, so `commandLabel`
         // wins if both somehow matched.
         const metaTag =

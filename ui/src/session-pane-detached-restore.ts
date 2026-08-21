@@ -6,6 +6,8 @@
 // decisions through the host callbacks below.
 // Split from: ui/src/SessionPaneView.scroll.ts.
 
+import { writeMessageStackScrollTopImmediately } from "./message-stack-scroll-sync";
+
 const DETACHED_RESTORE_MAX_ATTEMPTS = 60;
 const SCROLL_TOP_TOLERANCE_PX = 0.5;
 const NATIVE_SCROLL_TOLERANCE_PX = 1;
@@ -169,7 +171,7 @@ export function createDetachedScrollRestoreController() {
       detachedRestore.expectedNativeTop = null;
       host.publishSavedTarget(targetTop);
       if (Math.abs(node.scrollTop - nextTop) > SCROLL_TOP_TOLERANCE_PX) {
-        node.scrollTop = nextTop;
+        writeMessageStackScrollTopImmediately(node, nextTop);
         detachedRestore.expectedNativeTop = node.scrollTop;
       }
       // The virtualizer must adopt restore authority even when the reused DOM

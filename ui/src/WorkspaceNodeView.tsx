@@ -104,7 +104,6 @@ export function WorkspaceNodeView({
   paneScrollPositionsRef,
   paneContentSignaturesRef,
   paneMessageContentSignaturesRef,
-  forceSessionScrollToBottomRef,
   pendingScrollToBottomRequest,
   windowId,
   draggedTab,
@@ -197,9 +196,6 @@ export function WorkspaceNodeView({
   >;
   paneMessageContentSignaturesRef: React.MutableRefObject<
     Record<string, Record<string, string>>
-  >;
-  forceSessionScrollToBottomRef: React.MutableRefObject<
-    Record<string, true | undefined>
   >;
   pendingScrollToBottomRequest: {
     reattach?: boolean;
@@ -391,6 +387,7 @@ export function WorkspaceNodeView({
 
     return (
       <SessionPaneView
+        key={pane.id}
         pane={pane}
         codexState={codexState}
         projectLookup={projectLookup}
@@ -465,7 +462,6 @@ export function WorkspaceNodeView({
         paneScrollPositionsRef={paneScrollPositionsRef}
         paneContentSignaturesRef={paneContentSignaturesRef}
         paneMessageContentSignaturesRef={paneMessageContentSignaturesRef}
-        forceSessionScrollToBottomRef={forceSessionScrollToBottomRef}
         pendingScrollToBottomRequest={pendingScrollToBottomRequest}
         windowId={windowId}
         draggedTab={draggedTab}
@@ -596,7 +592,6 @@ export function WorkspaceNodeView({
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
           paneMessageContentSignaturesRef={paneMessageContentSignaturesRef}
-          forceSessionScrollToBottomRef={forceSessionScrollToBottomRef}
           pendingScrollToBottomRequest={pendingScrollToBottomRequest}
           windowId={windowId}
           draggedTab={draggedTab}
@@ -694,7 +689,6 @@ export function WorkspaceNodeView({
           paneScrollPositionsRef={paneScrollPositionsRef}
           paneContentSignaturesRef={paneContentSignaturesRef}
           paneMessageContentSignaturesRef={paneMessageContentSignaturesRef}
-          forceSessionScrollToBottomRef={forceSessionScrollToBottomRef}
           pendingScrollToBottomRequest={pendingScrollToBottomRequest}
           windowId={windowId}
           draggedTab={draggedTab}

@@ -970,6 +970,445 @@ describe("App scroll behaviour", () => {
     });
   });
 
+  it("restores a detached session before paint when its real tab drag lands in another pane", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 10_000,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const makeMessages = (sessionId: string): Session["messages"] =>
+        Array.from({ length: 80 }, (_, index) => ({
+          id: `${sessionId}-message-${index}`,
+          type: "text" as const,
+          timestamp: `10:${String(index).padStart(2, "0")}`,
+          author: "assistant" as const,
+          text: `${sessionId} response ${index}`,
+        }));
+      const session1OverviewResolvers: Array<(response: Response) => void> = [];
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const requestUrl = new URL(String(input), "http://localhost");
+        if (requestUrl.pathname === "/api/state") {
+          return jsonResponse(
+            makeStateResponse({
+              revision: 1,
+              projects: [
+                {
+                  id: "project-termal",
+                  name: "TermAl",
+                  rootPath: "/projects/termal",
+                },
+              ],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [
+                makeSession("session-1", {
+                  name: "Session 1",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                  messages: makeMessages("session-1"),
+                }),
+                makeSession("session-2", {
+                  name: "Session 2",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                  messages: makeMessages("session-2"),
+                }),
+                makeSession("session-3", {
+                  name: "Session 3",
+                  projectId: "project-termal",
+                  workdir: "/projects/termal",
+                  messages: makeMessages("session-3"),
+                }),
+              ],
+            }),
+          );
+        }
+        const overviewMatch = requestUrl.pathname.match(
+          /^\/api\/sessions\/([^/]+)\/overview$/,
+        );
+        if (overviewMatch) {
+          const sessionId = decodeURIComponent(overviewMatch[1] ?? "");
+          const response = jsonResponse({
+            sessionId,
+            messageCount: 80,
+            sessionMutationStamp: 1,
+            buckets: [{ c: 80, k: "text", u: 8, m: false }],
+            markers: [],
+            latestPosition: 79,
+          });
+          if (sessionId === "session-1") {
+            return new Promise<Response>((resolve) => {
+              session1OverviewResolvers.push(resolve);
+            });
+          }
+          return response;
+        }
+        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+      });
+
+      const layoutStorageKey = `${WORKSPACE_LAYOUT_STORAGE_KEY}:test-tab-drag-scroll-restore`;
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=test-tab-drag-scroll-restore",
+      );
+      window.localStorage.clear();
+      window.localStorage.setItem(
+        layoutStorageKey,
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            root: {
+              id: "split-root",
+              type: "split",
+              direction: "row",
+              ratio: 0.5,
+              first: { type: "pane", paneId: "pane-source" },
+              second: { type: "pane", paneId: "pane-target" },
+            },
+            panes: [
+              {
+                id: "pane-source",
+                tabs: [
+                  {
+                    id: "tab-session-1",
+                    kind: "session",
+                    sessionId: "session-1",
+                  },
+                  {
+                    id: "tab-session-3",
+                    kind: "session",
+                    sessionId: "session-3",
+                  },
+                ],
+                activeTabId: "tab-session-1",
+                activeSessionId: "session-1",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+              {
+                id: "pane-target",
+                tabs: [
+                  {
+                    id: "tab-session-2",
+                    kind: "session",
+                    sessionId: "session-2",
+                  },
+                ],
+                activeTabId: "tab-session-2",
+                activeSessionId: "session-2",
+                viewMode: "session",
+                lastSessionViewMode: "session",
+                sourcePath: null,
+              },
+            ],
+            activePaneId: "pane-source",
+          },
+        }),
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+        act(() => {
+          latestEventSource().dispatchError();
+        });
+        await settleAsyncUi();
+        expect(session1OverviewResolvers).toHaveLength(1);
+
+        const session1Tab = screen.getByRole("tab", { name: "Session 1" });
+        const session2Tab = screen.getByRole("tab", { name: "Session 2" });
+        const sourcePane = session1Tab.closest(".workspace-pane");
+        const targetPane = session2Tab.closest(".workspace-pane");
+        const sourceStack = sourcePane?.querySelector(".message-stack");
+        const targetStack = targetPane?.querySelector(".message-stack");
+        const targetTablist = session2Tab.closest('[role="tablist"]');
+        if (
+          !(sourceStack instanceof HTMLElement) ||
+          !(targetStack instanceof HTMLElement) ||
+          !(targetTablist instanceof HTMLElement)
+        ) {
+          throw new Error("Expected both session panes and the target tab rail");
+        }
+
+        sourceStack.scrollTop = 5_001;
+        act(() => {
+          fireEvent.wheel(sourceStack, { deltaY: -1 });
+        });
+        expect(sourceStack.scrollTop).toBe(5_000);
+
+        let pendingNativeSmoothTarget: number | null = 9_800;
+        const targetScrollTo = vi.fn(
+          (optionsOrX?: ScrollToOptions | number, y?: number) => {
+            const options =
+              typeof optionsOrX === "object" && optionsOrX !== null
+                ? optionsOrX
+                : { top: y ?? 0 };
+            if (options.behavior === "auto") {
+              pendingNativeSmoothTarget = null;
+            }
+            if (typeof options.top === "number") {
+              targetStack.scrollTop = options.top;
+            }
+          },
+        );
+        targetStack.scrollTo = targetScrollTo as typeof targetStack.scrollTo;
+        const targetScrollKinds: Array<string | undefined> = [];
+        targetStack.addEventListener(
+          MESSAGE_STACK_SCROLL_WRITE_EVENT,
+          (event) => {
+            targetScrollKinds.push(
+              event instanceof CustomEvent
+                ? (event.detail as { scrollKind?: string } | undefined)
+                    ?.scrollKind
+                : undefined,
+            );
+          },
+        );
+        scrollToMock.mockClear();
+
+        const dragGrip = within(session1Tab).getByRole("button", {
+          name: "Drag Session 1",
+        });
+        const dataTransfer = createDragDataTransfer();
+        await act(async () => {
+          fireEvent.dragStart(dragGrip, { dataTransfer });
+          fireEvent.dragEnter(targetTablist, { dataTransfer });
+          fireEvent.dragOver(targetTablist, { dataTransfer });
+          fireEvent.drop(targetTablist, { clientX: 0, dataTransfer });
+          fireEvent.dragEnd(dragGrip, { dataTransfer });
+        });
+        await settleAsyncUi();
+        expect(session1OverviewResolvers).toHaveLength(2);
+
+        const movedSessionTab = screen.getByRole("tab", {
+          name: "Session 1",
+          selected: true,
+        });
+        const movedPane = movedSessionTab.closest(".workspace-pane");
+        const movedStack = movedPane?.querySelector(".message-stack");
+        expect(movedPane).toHaveAttribute(
+          "data-workspace-pane-id",
+          "pane-target",
+        );
+        expect(movedStack).toBe(targetStack);
+        if (pendingNativeSmoothTarget !== null) {
+          targetStack.scrollTop = pendingNativeSmoothTarget;
+        }
+        expect(targetStack.scrollTop).toBe(5_000);
+        expect(movedStack).not.toHaveClass("is-tail-following");
+        expect(targetScrollTo).toHaveBeenCalledWith({
+          top: 5_000,
+          behavior: "auto",
+        });
+        expect(targetScrollKinds).toContain("position_restore");
+        expect(targetScrollKinds).not.toContain("bottom_pin");
+
+        targetScrollKinds.length = 0;
+        session1OverviewResolvers[1]?.(
+          jsonResponse({
+            sessionId: "session-1",
+            messageCount: 80,
+            sessionMutationStamp: 1,
+            buckets: [{ c: 80, k: "text", u: 8, m: false }],
+            markers: [],
+            latestPosition: 79,
+          }),
+        );
+        await settleAsyncUi();
+        await waitFor(() =>
+          expect(
+            movedPane?.querySelector(".conversation-with-overview"),
+          ).not.toBeNull(),
+        );
+        expect(targetStack.scrollTop).toBe(5_000);
+        expect(targetScrollKinds).not.toContain("bottom_pin");
+        expect(targetScrollKinds).not.toContain("position_restore");
+
+        targetStack.scrollTop = 4_001;
+        act(() => {
+          fireEvent.wheel(targetStack, { deltaY: -1 });
+        });
+        expect(targetStack.scrollTop).toBe(4_000);
+
+        const remainingSessionTab = screen.getByRole("tab", {
+          name: "Session 3",
+        });
+        const remainingPane = remainingSessionTab.closest(".workspace-pane");
+        if (!(remainingPane instanceof HTMLElement)) {
+          throw new Error("Expected the source pane to survive the first move");
+        }
+        const movedDragGrip = within(movedSessionTab).getByRole("button", {
+          name: "Drag Session 1",
+        });
+        const dispatchEventSpy = vi.spyOn(
+          HTMLElement.prototype,
+          "dispatchEvent",
+        );
+        const edgeDataTransfer = createDragDataTransfer();
+        act(() => {
+          fireEvent.dragStart(movedDragGrip, {
+            dataTransfer: edgeDataTransfer,
+          });
+        });
+        const leftDropZone = remainingPane.querySelector(
+          ".pane-drop-zone-left",
+        );
+        if (!(leftDropZone instanceof HTMLElement)) {
+          throw new Error("Expected the real pane-edge drop overlay");
+        }
+        await act(async () => {
+          fireEvent.dragEnter(leftDropZone, {
+            dataTransfer: edgeDataTransfer,
+          });
+          fireEvent.dragOver(leftDropZone, {
+            dataTransfer: edgeDataTransfer,
+          });
+          fireEvent.drop(leftDropZone, { dataTransfer: edgeDataTransfer });
+          fireEvent.dragEnd(movedDragGrip, {
+            dataTransfer: edgeDataTransfer,
+          });
+        });
+        await settleAsyncUi();
+        expect(session1OverviewResolvers).toHaveLength(3);
+
+        const edgeMovedSessionTab = screen.getByRole("tab", {
+          name: "Session 1",
+          selected: true,
+        });
+        const edgeMovedPane = edgeMovedSessionTab.closest(".workspace-pane");
+        const edgeMovedStack = edgeMovedPane?.querySelector(".message-stack");
+        expect(edgeMovedPane).not.toHaveAttribute(
+          "data-workspace-pane-id",
+          "pane-source",
+        );
+        expect(edgeMovedPane).not.toHaveAttribute(
+          "data-workspace-pane-id",
+          "pane-target",
+        );
+        expect(edgeMovedStack).toBeInstanceOf(HTMLElement);
+        const edgeScrollKinds = dispatchEventSpy.mock.calls.flatMap(
+          (call, index) => {
+            const event = call[0];
+            return dispatchEventSpy.mock.contexts[index] === edgeMovedStack &&
+              event instanceof CustomEvent &&
+              event.type === MESSAGE_STACK_SCROLL_WRITE_EVENT
+              ? [
+                  (event.detail as { scrollKind?: string } | undefined)
+                    ?.scrollKind,
+                ]
+              : [];
+          },
+        );
+        expect(edgeScrollKinds).toContain("position_restore");
+        expect(edgeScrollKinds).not.toContain("bottom_pin");
+        const edgeScrollToCalls = scrollToMock.mock.calls.filter(
+          (_call, index) => scrollToMock.mock.contexts[index] === edgeMovedStack,
+        );
+        expect(edgeScrollToCalls.length).toBeGreaterThan(0);
+        expect(
+          edgeScrollToCalls.every((call) => {
+            const options = call[0];
+            return (
+              typeof options === "object" &&
+              options?.top === 4_000 &&
+              options.behavior === "auto"
+            );
+          }),
+        ).toBe(true);
+        expect((edgeMovedStack as HTMLElement).scrollTop).toBe(4_000);
+        expect(edgeMovedStack).not.toHaveClass("is-tail-following");
+
+        session1OverviewResolvers[2]?.(
+          jsonResponse({
+            sessionId: "session-1",
+            messageCount: 80,
+            sessionMutationStamp: 1,
+            buckets: [{ c: 80, k: "text", u: 8, m: false }],
+            markers: [],
+            latestPosition: 79,
+          }),
+        );
+        await settleAsyncUi();
+        await waitFor(() =>
+          expect(
+            edgeMovedPane?.querySelector(".conversation-with-overview"),
+          ).not.toBeNull(),
+        );
+        const edgeScrollKindsAfterOverview = dispatchEventSpy.mock.calls.flatMap(
+          (call, index) => {
+            const event = call[0];
+            return dispatchEventSpy.mock.contexts[index] === edgeMovedStack &&
+              event instanceof CustomEvent &&
+              event.type === MESSAGE_STACK_SCROLL_WRITE_EVENT
+              ? [
+                  (event.detail as { scrollKind?: string } | undefined)
+                    ?.scrollKind,
+                ]
+              : [];
+          },
+        );
+        expect(edgeScrollKindsAfterOverview).not.toContain("bottom_pin");
+        expect((edgeMovedStack as HTMLElement).scrollTop).toBe(4_000);
+
+        const freshSessionTab = screen.getByRole("tab", {
+          name: "Session 3",
+        });
+        const freshDragGrip = within(freshSessionTab).getByRole("button", {
+          name: "Drag Session 3",
+        });
+        const freshDataTransfer = createDragDataTransfer();
+        act(() => {
+          fireEvent.dragStart(freshDragGrip, {
+            dataTransfer: freshDataTransfer,
+          });
+        });
+        const rightDropZone = edgeMovedPane?.querySelector(
+          ".pane-drop-zone-right",
+        );
+        if (!(rightDropZone instanceof HTMLElement)) {
+          throw new Error("Expected a pane edge for the fresh-session move");
+        }
+        await act(async () => {
+          fireEvent.dragEnter(rightDropZone, {
+            dataTransfer: freshDataTransfer,
+          });
+          fireEvent.dragOver(rightDropZone, {
+            dataTransfer: freshDataTransfer,
+          });
+          fireEvent.drop(rightDropZone, { dataTransfer: freshDataTransfer });
+          fireEvent.dragEnd(freshDragGrip, {
+            dataTransfer: freshDataTransfer,
+          });
+        });
+        await settleAsyncUi();
+
+        const freshMovedTab = screen.getByRole("tab", {
+          name: "Session 3",
+          selected: true,
+        });
+        const freshMovedPane = freshMovedTab.closest(".workspace-pane");
+        const freshMovedStack = freshMovedPane?.querySelector(".message-stack");
+        expect(freshMovedStack).toBeInstanceOf(HTMLElement);
+        expect((freshMovedStack as HTMLElement).scrollTop).toBe(9_800);
+        expect(freshMovedStack).toHaveClass("is-tail-following");
+      } finally {
+        restoreScrollGeometry();
+      }
+    });
+  });
+
   it("ignores nested editable PageDown targets outside the active pane", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -1051,7 +1490,13 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         expect(messageStack.scrollTop).toBe(570);
-        expect(scrollToMock).not.toHaveBeenCalled();
+        expect(
+          scrollToTopsForElementWithBehavior(
+            scrollToMock,
+            messageStack,
+            "auto",
+          ),
+        ).toContain(570);
 
         await dispatchStateEvent(latestEventSource(), {
           revision: 2,
@@ -1120,7 +1565,13 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         expect(messageStack.scrollTop).toBe(630);
-        expect(scrollToMock).not.toHaveBeenCalled();
+        expect(
+          scrollToTopsForElementWithBehavior(
+            scrollToMock,
+            messageStack,
+            "auto",
+          ),
+        ).toContain(630);
 
         await dispatchStateEvent(latestEventSource(), {
           revision: 2,
@@ -3285,7 +3736,12 @@ describe("App scroll behaviour", () => {
           }
 
           expect(messageStack.scrollTop).toBe(800);
-          expect(filterScrollToCallsAt(scrollToMock, 800, "auto")).toEqual([]);
+          // The boundary command performs one immediate ownership-transfer
+          // write so any native smooth scroll is cancelled; the virtualizer
+          // must not add settled-scroll retries after that single landing.
+          expect(filterScrollToCallsAt(scrollToMock, 800, "auto")).toHaveLength(
+            1,
+          );
         } finally {
           teardown();
         }
@@ -3349,10 +3805,14 @@ describe("App scroll behaviour", () => {
           expect(messageStack).not.toBeNull();
 
           // The layout effect must establish `top: 800` synchronously before
-          // the first animation frame. A post-frame `scrollTo` would let the
-          // newly active tab paint once at the previous tab's offset.
+          // the first animation frame. The auto write explicitly aborts any
+          // stale native smooth animation before the direct readback value is
+          // published, so neither operation may be deferred to a later frame.
           expect((messageStack as HTMLElement).scrollTop).toBe(800);
-          expect(scrollToMock).not.toHaveBeenCalled();
+          expect(scrollToMock).toHaveBeenCalledWith({
+            top: 800,
+            behavior: "auto",
+          });
         } finally {
           teardown();
         }

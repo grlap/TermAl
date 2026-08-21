@@ -37,7 +37,7 @@ import {
 import type { ControlPanelSectionId } from "./panels/ControlPanelSurface";
 import type { ControlPanelSide } from "./workspace-storage";
 import { TAB_DRAG_STALE_TIMEOUT_MS } from "./app-shell-internals";
-import type { SessionScrollRebuildMarkerOptions } from "./session-scroll-rebuild-markers";
+import type { PaneScrollPositionMigration } from "./pane-scroll-position-migration";
 
 // Each accepted reducer result receives a per-drop Symbol token. It is
 // enumerable so same-flush workspace spreads preserve the commit evidence,
@@ -63,8 +63,8 @@ type UseAppDragResizeArgs = {
   // production app passes the raw setter. All cross-window transfers allocate a
   // fresh id, so their acknowledgement retains structural evidence even if a
   // wrapper strips the token. Only ambiguous same-window existing-tab drops
-  // deliberately fail closed: temporary markers are rolled back, the previous
-  // dock side is restored, and the invariant violation is warned once.
+  // deliberately fail closed: the previous dock side is restored and the
+  // invariant violation is warned once.
   setWorkspace: Dispatch<SetStateAction<WorkspaceState>>;
   applyControlPanelLayout: (
     nextWorkspace: WorkspaceState,
@@ -72,14 +72,22 @@ type UseAppDragResizeArgs = {
   ) => WorkspaceState;
   workspaceLayoutLoadPendingRef: MutableRefObject<boolean>;
   ignoreFetchedWorkspaceLayoutRef: MutableRefObject<boolean>;
-  markSessionTabsForBottomAfterWorkspaceRebuild: (
-    workspaceState: WorkspaceState,
-    options?: SessionScrollRebuildMarkerOptions,
-  ) => (() => void) | void;
+  migrateSessionTabScrollPosition: (input: {
+    sessionId: string;
+    sourcePaneId: string;
+    targetPaneId: string;
+  }) => boolean;
+  beginSessionTabScrollPositionMigration: (input: {
+    sessionId: string;
+    sourcePaneId: string;
+    targetPaneId: string;
+  }) => PaneScrollPositionMigration | null;
 };
 
 type WorkspaceDropExpectation = {
   allowsControlPanelSideOnly?: boolean;
+  migrateSessionId?: string;
+  migrateSessionSourcePaneId?: string;
   sourcePaneId?: string;
   structuralPlacementIsCommitEvidence?: boolean;
   tabId: string;
@@ -137,11 +145,8 @@ function workspaceContainsGestureTabId(
 function workspacePaneContainsTab(
   workspace: WorkspaceState,
   paneId: string,
-  tabId: string | undefined,
+  tabId: string,
 ) {
-  if (!tabId) {
-    return false;
-  }
   return workspace.panes.some(
     (pane) =>
       pane.id === paneId && pane.tabs.some((tab) => tab.id === tabId),
@@ -178,7 +183,8 @@ export function useAppDragResize({
   applyControlPanelLayout,
   workspaceLayoutLoadPendingRef,
   ignoreFetchedWorkspaceLayoutRef,
-  markSessionTabsForBottomAfterWorkspaceRebuild,
+  beginSessionTabScrollPositionMigration,
+  migrateSessionTabScrollPosition,
 }: UseAppDragResizeArgs): UseAppDragResizeResult {
   const [draggedTab, setDraggedTab] = useState<WorkspaceTabDrag | null>(null);
   const [launcherDraggedTab, setLauncherDraggedTab] =
@@ -332,7 +338,6 @@ export function useAppDragResize({
   const commitWorkspaceDrop = useCallback(
     (
       placeWorkspace: (current: WorkspaceState) => WorkspaceState,
-      options: SessionScrollRebuildMarkerOptions,
       expectation: WorkspaceDropExpectation,
       nextControlPanelSide: ControlPanelSide = controlPanelSide,
     ) => {
@@ -347,20 +352,26 @@ export function useAppDragResize({
         return false;
       }
 
-      // The preview rejects known no-ops before scroll restoration is armed.
-      // The synchronous functional update then safely rebases the accepted
-      // drop over queued workspace state. After the commit, verify the actual
-      // pane/tab placement so a rebase-time refusal cannot acknowledge a
-      // cross-window drop or leave temporary restoration markers behind.
+      // The preview rejects known no-ops. The synchronous functional update
+      // then safely rebases the accepted drop over queued workspace state.
+      // After the commit, verify the actual pane/tab placement so a rebase-time
+      // refusal cannot acknowledge a cross-window drop or migrate saved state.
       const commitToken = Symbol("workspaceDropCommit");
-      let rollbackScrollMarkers: (() => void) | undefined;
+      const speculativeScrollMigration =
+        expectation.migrateSessionId &&
+        expectation.migrateSessionSourcePaneId
+          ? beginSessionTabScrollPositionMigration({
+              sessionId: expectation.migrateSessionId,
+              sourcePaneId: expectation.migrateSessionSourcePaneId,
+              targetPaneId: expectation.targetPaneId,
+            })
+          : null;
       let appliedNextControlPanelSide = false;
+      let rebasedPlacementAccepted = false;
       flushSync(() => {
-        rollbackScrollMarkers =
-          markSessionTabsForBottomAfterWorkspaceRebuild(workspace, options) ??
-          undefined;
         setWorkspace((current) => {
           const placedWorkspace = placeWorkspace(current);
+          rebasedPlacementAccepted = placedWorkspace !== current;
           const commitsExistingControlPanelSide =
             allowsControlPanelSideOnly &&
             workspacePaneContainsTab(
@@ -419,6 +430,7 @@ export function useAppDragResize({
         );
       }
       const missingCommitEvidenceAfterStateChange =
+        rebasedPlacementAccepted &&
         !reducerCommitted &&
         !structurallyCommittedWithoutToken &&
         !commitsExistingControlPanelSide &&
@@ -432,7 +444,7 @@ export function useAppDragResize({
           "[TermAl] Could not verify a workspace drop after state changed; " +
             "the rebased reducer may have refused it, or a workspace setter " +
             "wrapper may have stripped enumerable Symbol commit evidence. " +
-            "Rolling back temporary scroll markers.",
+            "Rejecting post-commit side effects.",
         );
       }
       const didCommit =
@@ -440,7 +452,7 @@ export function useAppDragResize({
         structurallyCommittedWithoutToken ||
         commitsExistingControlPanelSide;
       if (!didCommit) {
-        rollbackScrollMarkers?.();
+        speculativeScrollMigration?.rollback();
         if (appliedNextControlPanelSide) {
           // The placement reducer may have committed before an invalid setter
           // wrapper stripped its token. Keep the visible dock consistent with
@@ -457,12 +469,35 @@ export function useAppDragResize({
         // the sole side-only commit because it moves the existing dock.
         flushSync(() => setControlPanelSide(nextControlPanelSide));
       }
+      if (
+        didCommit &&
+        expectation.migrateSessionId &&
+        expectation.migrateSessionSourcePaneId
+      ) {
+        const committedPane = workspaceRef.current.panes.find((pane) =>
+          pane.tabs.some((tab) => tab.id === expectation.tabId),
+        );
+        if (committedPane?.id !== expectation.targetPaneId) {
+          speculativeScrollMigration?.rollback();
+        }
+        if (
+          committedPane &&
+          committedPane.id !== expectation.targetPaneId
+        ) {
+          migrateSessionTabScrollPosition({
+            sessionId: expectation.migrateSessionId,
+            sourcePaneId: expectation.migrateSessionSourcePaneId,
+            targetPaneId: committedPane.id,
+          });
+        }
+      }
       return didCommit;
     },
     [
       applyControlPanelLayout,
+      beginSessionTabScrollPositionMigration,
       controlPanelSide,
-      markSessionTabsForBottomAfterWorkspaceRebuild,
+      migrateSessionTabScrollPosition,
       setControlPanelSide,
       setWorkspace,
       workspace,
@@ -482,6 +517,15 @@ export function useAppDragResize({
         // create a tab. Its final presence is therefore unambiguous fallback
         // evidence when an outer state wrapper sheds the commit token.
         const newSessionTabId = crypto.randomUUID();
+        const existingSessionTab = workspace.panes
+          .flatMap((pane) =>
+            pane.tabs.map((tab) => ({ paneId: pane.id, tab })),
+          )
+          .find(
+            (entry) =>
+              entry.tab.kind === "session" &&
+              entry.tab.sessionId === droppedSession.sessionId,
+          );
         commitWorkspaceDrop(
           (current) =>
             placeSessionDropInWorkspaceState(
@@ -492,10 +536,13 @@ export function useAppDragResize({
               tabIndex,
               newSessionTabId,
             ),
-          { sessionIds: [droppedSession.sessionId] },
           {
-            structuralPlacementIsCommitEvidence: true,
-            tabId: newSessionTabId,
+            migrateSessionId: existingSessionTab
+              ? droppedSession.sessionId
+              : undefined,
+            migrateSessionSourcePaneId: existingSessionTab?.paneId,
+            structuralPlacementIsCommitEvidence: !existingSessionTab,
+            tabId: existingSessionTab?.tab.id ?? newSessionTabId,
             targetPaneId,
           },
         );
@@ -529,6 +576,16 @@ export function useAppDragResize({
 
       if (currentDraggedTab) {
         const drop = currentDraggedTab;
+        const splitPaneId =
+          placement === "tabs" ? null : crypto.randomUUID();
+        const expectedCommittedPaneId =
+          splitPaneId &&
+          !(
+            drop.tab.kind === "controlPanel" &&
+            drop.sourcePaneId === targetPaneId
+          )
+            ? splitPaneId
+            : targetPaneId;
         draggedTabRef.current = null;
         setDraggedTab(null);
         const nextControlPanelSide = resolveControlPanelSideAfterDrop(
@@ -545,15 +602,19 @@ export function useAppDragResize({
               targetPaneId,
               placement,
               tabIndex,
+              splitPaneId ?? undefined,
             ),
-          { tabs: [drop.tab] },
           {
             allowsControlPanelSideOnly:
               drop.tab.kind === "controlPanel" &&
               (placement === "left" || placement === "right"),
             sourcePaneId: drop.sourcePaneId,
+            migrateSessionId:
+              drop.tab.kind === "session" ? drop.tab.sessionId : undefined,
+            migrateSessionSourcePaneId:
+              drop.tab.kind === "session" ? drop.sourcePaneId : undefined,
             tabId: drop.tabId,
-            targetPaneId,
+            targetPaneId: expectedCommittedPaneId,
           },
           nextControlPanelSide,
         );
@@ -575,7 +636,6 @@ export function useAppDragResize({
               tabIndex,
               transferredTabId,
             ),
-          { tabs: [drop.tab] },
           {
             structuralPlacementIsCommitEvidence: true,
             tabId: transferredTabId,
@@ -609,7 +669,6 @@ export function useAppDragResize({
             tabIndex,
             transferredTabId,
           ),
-        { tabs: [drop.tab] },
         {
           structuralPlacementIsCommitEvidence: true,
           tabId: transferredTabId,

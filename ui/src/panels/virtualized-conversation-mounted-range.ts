@@ -15,11 +15,20 @@ import type { UserScrollKind } from "./virtualized-conversation-types";
 
 const IDLE_MOUNTED_COMPACTION_PAGE_HYSTERESIS = 2;
 
-type MountedPrependRestore = {
+export type MountedPrependRestore = {
   anchor: VisibleMessageAnchor | null;
   scrollHeight: number;
   scrollTop: number;
+  writeIntent: "bottom" | "mounted-range";
+  userScrollGeneration: number;
 };
+
+export function mountedPrependRestoreIsCurrent(
+  restore: MountedPrependRestore,
+  userScrollGeneration: number,
+) {
+  return restore.userScrollGeneration === userScrollGeneration;
+}
 
 function rangesEqual(first: VirtualizedRange, second: VirtualizedRange) {
   return (

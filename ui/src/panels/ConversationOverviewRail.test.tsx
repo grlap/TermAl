@@ -163,7 +163,11 @@ describe("ConversationOverviewRail", () => {
 
     fireEvent.keyDown(rail, { key: "ArrowDown" });
     expect(onNavigate).toHaveBeenCalledWith(50);
+    fireEvent.keyDown(rail, { key: "PageUp" });
+    expect(onNavigate).toHaveBeenLastCalledWith(0);
+    fireEvent.keyDown(rail, { key: "Home" });
+    expect(onNavigate).toHaveBeenLastCalledWith(0);
     fireEvent.keyDown(rail, { key: "End" });
-    expect(onNavigate).toHaveBeenLastCalledWith(75);
+    expect(onNavigate).toHaveBeenLastCalledWith(99);
   });
 });

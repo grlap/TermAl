@@ -129,6 +129,7 @@ export function useConversationMarkerJump({
   historyWindowKey,
   onMissingMessageJump,
   onConversationSearchItemMount,
+  requestMarkerHistoryAround,
   scrollContainerRef,
   sessionId,
   virtualizerHandleRef,
@@ -140,12 +141,15 @@ export function useConversationMarkerJump({
     itemKey: string,
     node: HTMLElement | null,
   ) => void;
+  requestMarkerHistoryAround?: (position: number) => Promise<boolean>;
   scrollContainerRef: RefObject<HTMLElement | null>;
   sessionId: string;
   virtualizerHandleRef: RefObject<VirtualizedConversationMessageListHandle | null>;
 }) {
   const correctionFrameRef = useRef<number | null>(null);
   const correctionTokenRef = useRef(0);
+  const markerRequestTokenRef = useRef(0);
+  const markerRetryFrameRef = useRef<number | null>(null);
   const activeSessionIdRef = useRef(sessionId);
   const messageSlotNodesRef = useRef<Map<string, HTMLElement>>(new Map());
   const messageSlotNodesSessionIdRef = useRef(sessionId);
@@ -167,6 +171,14 @@ export function useConversationMarkerJump({
     if (correctionFrameRef.current !== null) {
       window.cancelAnimationFrame(correctionFrameRef.current);
       correctionFrameRef.current = null;
+    }
+  }, []);
+
+  const cancelPendingMarkerJump = useCallback(() => {
+    markerRequestTokenRef.current += 1;
+    if (markerRetryFrameRef.current !== null) {
+      window.cancelAnimationFrame(markerRetryFrameRef.current);
+      markerRetryFrameRef.current = null;
     }
   }, []);
 
@@ -312,7 +324,10 @@ export function useConversationMarkerJump({
   useEffect(() => {
     requestedHistoryWindowKeyRef.current = null;
     setPendingHydratedJumpMessageId(null);
-  }, [sessionId]);
+    cancelPendingMarkerJump();
+  }, [cancelPendingMarkerJump, sessionId]);
+
+  useEffect(() => cancelPendingMarkerJump, [cancelPendingMarkerJump]);
 
   useEffect(() => cancelCorrectionFrame, [
     cancelCorrectionFrame,
@@ -325,9 +340,11 @@ export function useConversationMarkerJump({
   // correction frames for off-band messages.
   const jumpToMessageId = useCallback(
     (messageId: string) => {
+      cancelPendingMarkerJump();
       cancelCorrectionFrame();
       setPendingHydratedJumpMessageId(null);
       requestedHistoryWindowKeyRef.current = null;
+      virtualizerHandleRef.current?.beginUserScrollNavigation();
       if (tryJumpToMessageId(messageId)) {
         return;
       }
@@ -337,6 +354,7 @@ export function useConversationMarkerJump({
       }
     },
     [
+      cancelPendingMarkerJump,
       cancelCorrectionFrame,
       historyWindowKey,
       onMissingMessageJump,
@@ -346,9 +364,72 @@ export function useConversationMarkerJump({
 
   const jumpToMarker = useCallback(
     (marker: ConversationMarker) => {
-      jumpToMessageId(marker.messageId);
+      cancelPendingMarkerJump();
+      cancelCorrectionFrame();
+      setPendingHydratedJumpMessageId(null);
+      requestedHistoryWindowKeyRef.current = null;
+      const virtualizerHandle = virtualizerHandleRef.current;
+      const userScrollGeneration =
+        virtualizerHandle?.beginUserScrollNavigation() ?? null;
+      if (tryJumpToMessageId(marker.messageId)) {
+        return;
+      }
+      if (
+        !requestMarkerHistoryAround ||
+        marker.messageIndexHint === null ||
+        !Number.isFinite(marker.messageIndexHint)
+      ) {
+        if (onMissingMessageJump?.()) {
+          requestedHistoryWindowKeyRef.current = historyWindowKey;
+          setPendingHydratedJumpMessageId(marker.messageId);
+        }
+        return;
+      }
+
+      const requestToken = markerRequestTokenRef.current;
+      const expectedSessionId = sessionId;
+      const markerJumpIsCurrent = () =>
+        markerRequestTokenRef.current === requestToken &&
+        activeSessionIdRef.current === expectedSessionId &&
+        (userScrollGeneration === null ||
+          virtualizerHandleRef.current?.getUserScrollGeneration() ===
+            userScrollGeneration);
+      void requestMarkerHistoryAround(marker.messageIndexHint).then(
+        (applied) => {
+          if (!applied || !markerJumpIsCurrent()) {
+            return;
+          }
+          let remainingAttempts = 2;
+          const retryAfterAdoption = () => {
+            markerRetryFrameRef.current = window.requestAnimationFrame(() => {
+              markerRetryFrameRef.current = null;
+              if (!markerJumpIsCurrent()) {
+                return;
+              }
+              if (tryJumpToMessageId(marker.messageId)) {
+                return;
+              }
+              remainingAttempts -= 1;
+              if (remainingAttempts > 0) {
+                retryAfterAdoption();
+              }
+            });
+          };
+          retryAfterAdoption();
+        },
+        () => {},
+      );
     },
-    [jumpToMessageId],
+    [
+      cancelCorrectionFrame,
+      cancelPendingMarkerJump,
+      historyWindowKey,
+      onMissingMessageJump,
+      requestMarkerHistoryAround,
+      sessionId,
+      tryJumpToMessageId,
+      virtualizerHandleRef,
+    ],
   );
 
   return {

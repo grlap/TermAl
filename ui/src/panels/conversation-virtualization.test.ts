@@ -38,6 +38,53 @@ function makeCommandMessage(
 }
 
 describe("estimateConversationMessageHeight", () => {
+  it("estimates a default-collapsed delegation fan-in from its compact card", () => {
+    const fanInText = [
+      "Codex and Claude /review-code",
+      "",
+      "Wait id: `delegation-wait-123`",
+      "",
+      "Delegations:",
+      "- reviewer-a",
+      "",
+      "Results:",
+      "### reviewer-a",
+      "x".repeat(20_000),
+    ].join("\n");
+    const fanIn = makeTextMessage({ text: fanInText });
+
+    expect(estimateConversationMessageHeight(fanIn)).toBe(144);
+  });
+
+  it("keeps ordinary text estimates unchanged by fan-in classification", () => {
+    expect(
+      estimateConversationMessageHeight(
+        makeTextMessage({ text: "x".repeat(160) }),
+      ),
+    ).toBe(126);
+    expect(
+      estimateConversationMessageHeight({
+        ...makeTextMessage({ text: "x".repeat(160) }),
+        author: "assistant",
+      }),
+    ).toBe(136);
+  });
+
+  it("estimates a default-collapsed long peer message from its compact card", () => {
+    const longPeerMessage = makeTextMessage({
+      text: "peer result ".repeat(2_000),
+      source: { sessionId: "session-peer", name: "Peer reviewer" },
+    });
+    const shortPeerMessage = makeTextMessage({
+      id: "short-peer",
+      text: "Short peer result",
+      source: { sessionId: "session-peer", name: "Peer reviewer" },
+    });
+
+    expect(estimateConversationMessageHeight(longPeerMessage)).toBe(144);
+    expect(estimateConversationMessageHeight(shortPeerMessage)).toBe(102);
+  });
+
   it("accounts for soft-wrapped long prompts instead of only explicit newlines", () => {
     const longSingleLinePrompt = "wrap me ".repeat(180).trimEnd();
     const legacyEstimate = Math.min(1800, Math.max(92, 78 + 24));

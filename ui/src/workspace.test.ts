@@ -4329,6 +4329,33 @@ describe("workspace helpers", () => {
     });
   });
 
+  it("placeDraggedTab uses the gesture-owned pane id for an edge split", () => {
+    const next = placeDraggedTab(
+      makeSplitWorkspace(
+        makePane("pane-a", [
+          makeSessionTab("tab-a", "session-a"),
+          makeSessionTab("tab-remaining", "session-remaining"),
+        ]),
+        makePane("pane-b", [makeSessionTab("tab-b", "session-b")]),
+      ),
+      "pane-a",
+      "tab-a",
+      "pane-b",
+      "left",
+      undefined,
+      "pane-gesture-owned",
+    );
+
+    expect(next.activePaneId).toBe("pane-gesture-owned");
+    expect(
+      next.panes.find((pane) => pane.id === "pane-gesture-owned"),
+    ).toMatchObject({
+      tabs: [makeSessionTab("tab-a", "session-a")],
+      activeTabId: "tab-a",
+      activeSessionId: "session-a",
+    });
+  });
+
   it("placeDraggedTab preserves source and target pane visit histories", () => {
     const sourcePane = makePane(
       "pane-a",

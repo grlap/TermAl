@@ -17,7 +17,10 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { isExpandedPromptOpen } from "../ExpandedPromptPanel";
-import { requestMessageStackBottomRepin } from "../message-stack-scroll-sync";
+import {
+  requestMessageStackBottomRepin,
+  writeMessageStackScrollTopImmediately,
+} from "../message-stack-scroll-sync";
 import {
   DEFERRED_RENDER_RESUME_EVENT,
   DEFERRED_RENDER_SUSPENDED_ATTRIBUTE,
@@ -69,7 +72,9 @@ import {
 } from "./virtualized-conversation-controller";
 import { useVirtualizedConversationHandle } from "./virtualized-conversation-handle";
 import {
+  mountedPrependRestoreIsCurrent,
   resolveRenderedMountedPageRange,
+  type MountedPrependRestore,
   useVirtualizedConversationMountedRangeEffects,
 } from "./virtualized-conversation-mounted-range";
 import { useVirtualizedConversationPageHeightChange } from "./virtualized-conversation-page-heights";
@@ -136,6 +141,7 @@ export function VirtualizedConversationMessageList({
   messages,
   scrollContainerRef,
   tailFollowIntent = false,
+  tailFollowIntentIsAuthoritative = false,
   conversationSearchQuery = "",
   conversationSearchMatchedItemKeys = EMPTY_MATCHED_ITEM_KEYS,
   conversationSearchActiveItemKey = null,
@@ -154,6 +160,7 @@ export function VirtualizedConversationMessageList({
   messages: Message[];
   scrollContainerRef: RefObject<HTMLElement | null>;
   tailFollowIntent?: boolean;
+  tailFollowIntentIsAuthoritative?: boolean;
   conversationSearchQuery?: string;
   conversationSearchMatchedItemKeys?: ReadonlySet<string>;
   conversationSearchActiveItemKey?: string | null;
@@ -209,6 +216,13 @@ export function VirtualizedConversationMessageList({
   >(new WeakMap());
   const shouldKeepBottomAfterLayoutRef = useRef(false);
   const isDetachedFromBottomRef = useRef(false);
+  const tailFollowIntentRef = useRef(tailFollowIntent);
+  tailFollowIntentRef.current = tailFollowIntent;
+  const tailFollowIntentIsAuthoritativeRef = useRef(
+    tailFollowIntentIsAuthoritative,
+  );
+  tailFollowIntentIsAuthoritativeRef.current =
+    tailFollowIntentIsAuthoritative;
   const skipNextMountedPrependRestoreRef = useRef(false);
   const lastPinnedConversationSearchPositionKeyRef = useRef<string | null>(
     null,
@@ -219,12 +233,11 @@ export function VirtualizedConversationMessageList({
   const lastTouchClientYRef = useRef<number | null>(null);
   const pendingAggressiveIdleCompactionRef = useRef(false);
   const lastNativeScrollTopRef = useRef(0);
+  const lastNativeScrollHeightRef = useRef(0);
+  const userScrollGenerationRef = useRef(0);
   const pendingProgrammaticScrollTopRef = useRef<number | null>(null);
-  const pendingMountedPrependRestoreRef = useRef<{
-    anchor: VisibleMessageAnchor | null;
-    scrollHeight: number;
-    scrollTop: number;
-  } | null>(null);
+  const pendingMountedPrependRestoreRef =
+    useRef<MountedPrependRestore | null>(null);
   const pendingDeferredLayoutAnchorRef = useRef<{
     messageId: string;
     viewportOffsetPx: number;
@@ -355,28 +368,67 @@ export function VirtualizedConversationMessageList({
   }, []);
 
   const writeScrollTopAndSyncViewport = useCallback(
-    (node: HTMLElement, nextScrollTop: number) => {
+    (
+      node: HTMLElement,
+      nextScrollTop: number,
+      options: { intent?: "bottom" | "mounted-range" | "position" } = {},
+    ): number | null => {
       const requestedScrollTop = Number.isFinite(nextScrollTop)
         ? Math.max(nextScrollTop, 0)
         : 0;
+      const realDomBottom = Math.max(
+        node.scrollHeight - node.clientHeight,
+        0,
+      );
+      if (
+        options.intent === "bottom" &&
+        ((tailFollowIntentIsAuthoritativeRef.current &&
+          !tailFollowIntentRef.current) ||
+          isDetachedFromBottomRef.current ||
+          hasUserScrollInteractionRef.current)
+      ) {
+        // Delayed mount/measurement work may have captured a literal bottom
+        // before pane-owned position restoration detached this session. The
+        // current scroll authority wins: bottom intent becomes a no-op rather
+        // than replaying that stale literal over the restored position.
+        syncViewportFromScrollNode(node);
+        return null;
+      }
+      if (
+        options.intent === "mounted-range" &&
+        tailFollowIntentIsAuthoritativeRef.current &&
+        !tailFollowIntentRef.current &&
+        !hasUserScrollInteractionRef.current
+      ) {
+        // Pane-owned restoration has already established the detached
+        // session's absolute position. A mounted-band correction captured
+        // during that rebuild is derived from provisional DOM height, not
+        // fresh reader input, so it must not overwrite the saved position.
+        syncViewportFromScrollNode(node);
+        return null;
+      }
       // Anchor and mounted-band restores are captured before React commits the
       // next layout. If the pane re-enters bottom-follow before that delayed
       // restore executes, its captured target is stale. Resolve authority at
       // write time: while pinned, the only valid target is the current DOM
       // bottom. Search, history, and real user navigation clear these refs
       // synchronously before requesting their own target.
-      const targetScrollTop = resolveVirtualizedScrollWriteTarget({
-        hasUserScrollInteraction: hasUserScrollInteractionRef.current,
-        isDetachedFromBottom: isDetachedFromBottomRef.current,
-        realDomBottom: Math.max(node.scrollHeight - node.clientHeight, 0),
-        requestedScrollTop,
-        shouldKeepBottom: shouldKeepBottomAfterLayoutRef.current,
-      });
+      const targetScrollTop =
+        options.intent === "bottom"
+          ? realDomBottom
+          : resolveVirtualizedScrollWriteTarget({
+              hasUserScrollInteraction: hasUserScrollInteractionRef.current,
+              isDetachedFromBottom: isDetachedFromBottomRef.current,
+              realDomBottom,
+              requestedScrollTop,
+              shouldKeepBottom: shouldKeepBottomAfterLayoutRef.current,
+            });
       if (Math.abs(node.scrollTop - targetScrollTop) >= 1) {
         pendingProgrammaticScrollTopRef.current = targetScrollTop;
-        node.scrollTop = targetScrollTop;
+        writeMessageStackScrollTopImmediately(node, targetScrollTop);
       }
       syncViewportFromScrollNode(node);
+      return targetScrollTop;
     },
     [syncViewportFromScrollNode],
   );
@@ -535,7 +587,9 @@ export function VirtualizedConversationMessageList({
               node.scrollHeight - node.clientHeight,
               0,
             );
-          writeScrollTopAndSyncViewport(node, maxScrollTop);
+          writeScrollTopAndSyncViewport(node, maxScrollTop, {
+            intent: "bottom",
+          });
 
           if (attempts + 1 < BOTTOM_BOUNDARY_REVEAL_SETTLE_FRAMES) {
             step(attempts + 1);
@@ -580,7 +634,9 @@ export function VirtualizedConversationMessageList({
       const node = scrollContainerRef.current;
       if (node) {
         const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
-        writeScrollTopAndSyncViewport(node, maxScrollTop);
+        writeScrollTopAndSyncViewport(node, maxScrollTop, {
+          intent: "bottom",
+        });
       }
       finishPostActivationMeasuring();
     }, BOTTOM_BOUNDARY_REVEAL_DELAY_MS);
@@ -925,14 +981,31 @@ export function VirtualizedConversationMessageList({
     [],
   );
   const captureMountedPrependRestore = useCallback(
-    (node: HTMLElement) => ({
+    (node: HTMLElement): MountedPrependRestore => ({
       anchor: captureFirstVisibleMountedMessageAnchor(
         renderedListRef.current,
         node,
       ),
       scrollHeight: node.scrollHeight,
       scrollTop: node.scrollTop,
+      writeIntent:
+        !hasUserScrollInteractionRef.current &&
+        isScrollContainerNearBottom(node)
+          ? "bottom"
+          : "mounted-range",
+      userScrollGeneration: userScrollGenerationRef.current,
     }),
+    [],
+  );
+  const advanceUserScrollGeneration = useCallback(() => {
+    userScrollGenerationRef.current += 1;
+  }, []);
+  const beginUserScrollNavigation = useCallback(() => {
+    advanceUserScrollGeneration();
+    return userScrollGenerationRef.current;
+  }, [advanceUserScrollGeneration]);
+  const getUserScrollGeneration = useCallback(
+    () => userScrollGenerationRef.current,
     [],
   );
   const captureLatestVisibleMessageAnchor = useCallback((node: HTMLElement) => {
@@ -1392,11 +1465,13 @@ export function VirtualizedConversationMessageList({
   });
 
   useVirtualizedConversationHandle({
+    beginUserScrollNavigation,
     applyMountedPageRange,
     buildWorkingMountedRangeForScrollTop,
     clearPendingDeferredLayoutTimer,
     clearPendingIdleCompactionTimer,
     estimateMessageHeight,
+    getUserScrollGeneration,
     isActive,
     isDetachedFromBottomRef,
     lastUserScrollInputTimeRef,
@@ -1588,6 +1663,19 @@ export function VirtualizedConversationMessageList({
     if (!isActive || !node) {
       return;
     }
+    if (
+      !mountedPrependRestoreIsCurrent(
+        pendingRestore,
+        userScrollGenerationRef.current,
+      )
+    ) {
+      // The reader moved after this delayed restore was captured. Their live
+      // DOM position wins; a second inferred correction would reintroduce the
+      // stale writer this guard is removing.
+      lastNativeScrollTopRef.current = node.scrollTop;
+      syncViewportFromScrollNode(node);
+      return;
+    }
 
     const anchorSlot = pendingRestore.anchor
       ? findMountedMessageSlotById(
@@ -1604,12 +1692,17 @@ export function VirtualizedConversationMessageList({
         )
       : pendingRestore.scrollTop +
         (node.scrollHeight - pendingRestore.scrollHeight);
-    writeScrollTopAndSyncViewport(node, targetScrollTop);
-    lastNativeScrollTopRef.current = targetScrollTop;
+    const appliedScrollTop = writeScrollTopAndSyncViewport(
+      node,
+      targetScrollTop,
+      { intent: pendingRestore.writeIntent },
+    );
+    lastNativeScrollTopRef.current = appliedScrollTop ?? node.scrollTop;
   }, [
     isActive,
     mountedPageRange,
     scrollContainerRef,
+    syncViewportFromScrollNode,
     writeScrollTopAndSyncViewport,
   ]);
 
@@ -1693,7 +1786,7 @@ export function VirtualizedConversationMessageList({
     const node = scrollContainerRef.current;
     if (node) {
       const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-      writeScrollTopAndSyncViewport(node, target);
+      writeScrollTopAndSyncViewport(node, target, { intent: "bottom" });
     }
     if (pendingBottomBoundaryRevealFrameRef.current !== null) {
       return;
@@ -1727,7 +1820,7 @@ export function VirtualizedConversationMessageList({
     const node = scrollContainerRef.current;
     if (node) {
       const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-      writeScrollTopAndSyncViewport(node, target);
+      writeScrollTopAndSyncViewport(node, target, { intent: "bottom" });
     }
     if (pendingBottomBoundaryRevealFrameRef.current !== null) {
       return;
@@ -1786,7 +1879,7 @@ export function VirtualizedConversationMessageList({
     // visible transcript by its full height in one frame.
     if (!requestMessageStackBottomRepin(node)) {
       const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-      writeScrollTopAndSyncViewport(node, target);
+      writeScrollTopAndSyncViewport(node, target, { intent: "bottom" });
     }
   }, [
     isActive,
@@ -1810,7 +1903,7 @@ export function VirtualizedConversationMessageList({
     shouldKeepBottomAfterLayoutRef.current = true;
     isDetachedFromBottomRef.current = false;
     const target = Math.max(node.scrollHeight - node.clientHeight, 0);
-    writeScrollTopAndSyncViewport(node, target);
+    writeScrollTopAndSyncViewport(node, target, { intent: "bottom" });
   }, [
     bottomBoundarySeekVersion,
     isActive,
@@ -1822,6 +1915,7 @@ export function VirtualizedConversationMessageList({
 
   useVirtualizedConversationScrollEvents({
     applyMountedPageRange,
+    advanceUserScrollGeneration,
     buildBottomMountedRange,
     cancelPostActivationBottomRestore,
     captureLatestVisibleMessageAnchor,
@@ -1832,6 +1926,7 @@ export function VirtualizedConversationMessageList({
     isDetachedFromBottomRef,
     isMeasuringPostActivation,
     lastNativeScrollTopRef,
+    lastNativeScrollHeightRef,
     lastTouchClientYRef,
     lastUserScrollInputTimeRef,
     lastUserScrollKindRef,

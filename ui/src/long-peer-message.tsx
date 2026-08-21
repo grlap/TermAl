@@ -8,7 +8,7 @@ import {
   renderHighlightedText,
   type SearchHighlightTone,
 } from "./search-highlight";
-import type { MessageSource } from "./types";
+import type { MessageSource, PendingPrompt, TextMessage } from "./types";
 
 const LONG_PEER_MESSAGE_CHARACTER_THRESHOLD = 640;
 const LONG_PEER_MESSAGE_LINE_THRESHOLD = 12;
@@ -29,6 +29,23 @@ export function isLongPeerMessage(text: string): boolean {
     trimmed.length > LONG_PEER_MESSAGE_CHARACTER_THRESHOLD ||
     trimmed.split("\n").length > LONG_PEER_MESSAGE_LINE_THRESHOLD
   );
+}
+
+export function shouldCollapseLongPeerText(
+  message: Pick<PendingPrompt, "source" | "text">,
+): boolean {
+  return (
+    (Boolean(message.source) || isPeerMessageBatch(message.source)) &&
+    isLongPeerMessage(message.text)
+  );
+}
+
+// Source of truth shared by delivered-message rendering and its virtualizer
+// estimate. Assistant messages never use the compact peer presentation.
+export function shouldCollapseLongPeerMessage(
+  message: Pick<TextMessage, "author" | "source" | "text">,
+): boolean {
+  return message.author === "you" && shouldCollapseLongPeerText(message);
 }
 
 function splitLongPeerMessage(text: string): { preview: string; body: string } {

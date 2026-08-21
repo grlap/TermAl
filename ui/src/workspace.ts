@@ -1458,6 +1458,7 @@ export function splitPane(
   workspace: WorkspaceState,
   paneId: string,
   direction: "row" | "column",
+  newPaneId: string = crypto.randomUUID(),
 ): WorkspaceState {
   const pane = workspace.panes.find((candidate) => candidate.id === paneId);
   if (!pane || !workspace.root) {
@@ -1467,7 +1468,11 @@ export function splitPane(
   const activeTab =
     pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? null;
   const tabToMove = pane.tabs.length > 1 ? activeTab : null;
-  const newPane = createPane(tabToMove, pane.lastSessionViewMode);
+  const newPane = createPane(
+    tabToMove,
+    pane.lastSessionViewMode,
+    newPaneId,
+  );
   const panes = workspace.panes.map((candidate) => {
     if (candidate.id !== paneId || !tabToMove) {
       return candidate;
@@ -1513,6 +1518,7 @@ export function placeDraggedTab(
   targetPaneId: string,
   placement: TabDropPlacement,
   tabIndex?: number,
+  newPaneId: string = crypto.randomUUID(),
 ): WorkspaceState {
   const sourcePane = workspace.panes.find((pane) => pane.id === sourcePaneId);
   const targetPane = workspace.panes.find((pane) => pane.id === targetPaneId);
@@ -1565,7 +1571,11 @@ export function placeDraggedTab(
     return workspace;
   }
 
-  const newPane = createPane(draggedTab, targetPane.lastSessionViewMode);
+  const newPane = createPane(
+    draggedTab,
+    targetPane.lastSessionViewMode,
+    newPaneId,
+  );
   const direction =
     placement === "left" || placement === "right" ? "row" : "column";
   const placeBefore = placement === "left" || placement === "top";
@@ -1665,9 +1675,10 @@ export function updateSplitRatio(
 export function createPane(
   initialTab?: WorkspaceTab | null,
   sessionViewMode: SessionPaneViewMode = "session",
+  paneId: string = crypto.randomUUID(),
 ): WorkspacePane {
   return syncPaneState({
-    id: crypto.randomUUID(),
+    id: paneId,
     tabs: initialTab ? [initialTab] : [],
     activeTabId: initialTab?.id ?? null,
     activeSessionId: null,

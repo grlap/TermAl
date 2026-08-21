@@ -2,6 +2,8 @@
 // text. It deliberately does not render messages or manage delegation waits.
 // Split out of `message-cards.tsx`.
 
+import type { TextMessage } from "./types";
+
 export const DELEGATION_FAN_IN_AUTHOR_LABEL = "Fan-in";
 
 // Whether a "you" text message is a delegation fan-in prompt — the block that
@@ -18,5 +20,18 @@ export function isDelegationFanInText(text: string): boolean {
     text.includes("\nWait id: `") &&
     text.includes("\nDelegations:\n") &&
     text.includes("\nResults:\n")
+  );
+}
+
+// Source of truth shared by the renderer and virtualizer estimator. A peer
+// message may contain the same protocol-shaped text, but it keeps its peer
+// presentation instead of using the default-collapsed fan-in card.
+export function shouldCollapseDelegationFanInMessage(
+  message: Pick<TextMessage, "author" | "source" | "text">,
+): boolean {
+  return (
+    message.author === "you" &&
+    !message.source &&
+    isDelegationFanInText(message.text)
   );
 }

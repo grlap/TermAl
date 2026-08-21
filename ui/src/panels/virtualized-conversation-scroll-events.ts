@@ -25,6 +25,7 @@ import {
   type VirtualizedRange,
   type VisibleMessageAnchor,
 } from "./virtualized-conversation-measurement";
+import type { MountedPrependRestore } from "./virtualized-conversation-mounted-range";
 import type { UserScrollKind } from "./virtualized-conversation-types";
 
 export function resolveBottomReentryScrollKind(): UserScrollKind {
@@ -49,11 +50,20 @@ function classifyScrollKind(
     : "incremental";
 }
 
-type MountedPrependRestore = {
-  anchor: VisibleMessageAnchor | null;
-  scrollHeight: number;
-  scrollTop: number;
-};
+export function nativeScrollAdvancesUserScrollGeneration({
+  currentScrollHeight,
+  previousScrollHeight,
+  scrollDelta,
+}: {
+  currentScrollHeight: number;
+  previousScrollHeight: number;
+  scrollDelta: number;
+}) {
+  return (
+    Math.abs(scrollDelta) >= 0.5 &&
+    Math.abs(currentScrollHeight - previousScrollHeight) < 1
+  );
+}
 
 type DeferredLayoutAnchor = {
   messageId: string;
@@ -62,6 +72,7 @@ type DeferredLayoutAnchor = {
 
 export function useVirtualizedConversationScrollEvents({
   applyMountedPageRange,
+  advanceUserScrollGeneration,
   buildBottomMountedRange,
   cancelPostActivationBottomRestore,
   captureLatestVisibleMessageAnchor,
@@ -72,6 +83,7 @@ export function useVirtualizedConversationScrollEvents({
   isDetachedFromBottomRef,
   isMeasuringPostActivation,
   lastNativeScrollTopRef,
+  lastNativeScrollHeightRef,
   lastTouchClientYRef,
   lastUserScrollInputTimeRef,
   lastUserScrollKindRef,
@@ -106,6 +118,7 @@ export function useVirtualizedConversationScrollEvents({
     nextRange: VirtualizedRange,
     options?: { flush?: boolean; preserveCoveringRange?: boolean },
   ) => void;
+  advanceUserScrollGeneration: () => void;
   buildBottomMountedRange: (clientHeight: number) => VirtualizedRange;
   cancelPostActivationBottomRestore: () => void;
   captureLatestVisibleMessageAnchor: (node: HTMLElement) => VisibleMessageAnchor | null;
@@ -116,6 +129,7 @@ export function useVirtualizedConversationScrollEvents({
   isDetachedFromBottomRef: MutableRefObject<boolean>;
   isMeasuringPostActivation: boolean;
   lastNativeScrollTopRef: MutableRefObject<number>;
+  lastNativeScrollHeightRef: MutableRefObject<number>;
   lastTouchClientYRef: MutableRefObject<number | null>;
   lastUserScrollInputTimeRef: MutableRefObject<number>;
   lastUserScrollKindRef: MutableRefObject<UserScrollKind>;
@@ -180,6 +194,8 @@ export function useVirtualizedConversationScrollEvents({
         pendingProgrammaticBottomFollowUntilRef.current >= performance.now() &&
         node.scrollTop >= lastNativeScrollTopRef.current - 1;
       if (options.isNativeScrollEvent) {
+        const previousNativeScrollHeight = lastNativeScrollHeightRef.current;
+        lastNativeScrollHeightRef.current = node.scrollHeight;
         const pendingProgrammaticScrollTop = pendingProgrammaticScrollTopRef.current;
         const isProgrammaticScrollEvent =
           pendingProgrammaticScrollTop !== null &&
@@ -200,6 +216,18 @@ export function useVirtualizedConversationScrollEvents({
           pendingDeferredLayoutAnchorRef.current = null;
           const scrollDelta = node.scrollTop - lastNativeScrollTopRef.current;
           lastNativeScrollTopRef.current = node.scrollTop;
+          if (
+            nativeScrollAdvancesUserScrollGeneration({
+              currentScrollHeight: node.scrollHeight,
+              previousScrollHeight: previousNativeScrollHeight,
+              scrollDelta,
+            })
+          ) {
+            // Scrollbar drags and touch inertia can arrive without an input
+            // prelude. A height-changing native event can instead be caused by
+            // the prepend/compaction reflow whose restore is still valid.
+            advanceUserScrollGeneration();
+          }
           if (Math.abs(scrollDelta) >= 0.5) {
             pendingPrependedBottomGapRef.current = null;
           }
@@ -321,6 +349,7 @@ export function useVirtualizedConversationScrollEvents({
         }
       }
       const inputScrollDeltaY = wheelDeltaY ?? touchDeltaY;
+      advanceUserScrollGeneration();
       const bottomGapBeforeInput = getScrollContainerBottomGap(node);
       const upwardInputDeltaPx =
         inputScrollDeltaY !== null && inputScrollDeltaY < 0
@@ -415,8 +444,23 @@ export function useVirtualizedConversationScrollEvents({
           ? ((event.detail as MessageStackScrollWriteDetail | undefined)
               ?.scrollSource ?? "programmatic")
           : "programmatic";
+      if (explicitScrollSource === "user") {
+        advanceUserScrollGeneration();
+        // Direct pane-owned page/seek writes have no native wheel/touch
+        // prelude. Transfer scroll ownership here as well so residual native
+        // events from a canceled smooth bottom-follow animation cannot be
+        // mistaken for continuation of that animation.
+        pendingProgrammaticBottomFollowUntilRef.current =
+          Number.NEGATIVE_INFINITY;
+      }
 
       if (explicitScrollKind === "position_restore") {
+        // A pane-owned detached restore is newer authority than any mounted-
+        // range or anchor correction captured from the outgoing DOM. Those
+        // delayed records already carry this generation; advance it before
+        // reconciling the restored range so a literal old-bottom target cannot
+        // land after the absolute saved position.
+        advanceUserScrollGeneration();
         const previousScrollTop = lastNativeScrollTopRef.current;
         const scrollDelta = node.scrollTop - previousScrollTop;
         pendingProgrammaticBottomFollowUntilRef.current =
@@ -603,6 +647,7 @@ export function useVirtualizedConversationScrollEvents({
     const cancelBottomFollowOnMouseDown = (event: MouseEvent) => {
       pendingProgrammaticBottomFollowUntilRef.current = Number.NEGATIVE_INFINITY;
       if (event.target === node) {
+        advanceUserScrollGeneration();
         pendingProgrammaticScrollTopRef.current = null;
         shouldKeepBottomAfterLayoutRef.current = false;
         isDetachedFromBottomRef.current = true;
@@ -619,6 +664,7 @@ export function useVirtualizedConversationScrollEvents({
 
     syncViewport();
     lastNativeScrollTopRef.current = node.scrollTop;
+    lastNativeScrollHeightRef.current = node.scrollHeight;
     const onNativeScroll = () => {
       syncViewport({ isNativeScrollEvent: true });
     };
@@ -653,6 +699,7 @@ export function useVirtualizedConversationScrollEvents({
       resizeObserver?.disconnect();
     };
   }, [
+    advanceUserScrollGeneration,
     applyMountedPageRange,
     buildBottomMountedRange,
     cancelPostActivationBottomRestore,
@@ -661,6 +708,7 @@ export function useVirtualizedConversationScrollEvents({
     clearPendingIdleCompactionTimer,
     isActive,
     isMeasuringPostActivation,
+    lastNativeScrollHeightRef,
     mountBottomBoundary,
     prewarmMountedRangeForUpwardWheel,
     reconcileMountedRangeForNativeScroll,

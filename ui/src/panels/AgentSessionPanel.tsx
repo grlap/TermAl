@@ -110,6 +110,7 @@ export function AgentSessionPanel({
   viewMode,
   activeSessionId,
   liveTailPinned = true,
+  scrollStateKey = `${paneId}:${viewMode}:${activeSessionId ?? "empty"}`,
   isLoading,
   isUpdating,
   showWaitingIndicator,
@@ -161,6 +162,7 @@ export function AgentSessionPanel({
       scrollContainerRef={scrollContainerRef}
       activeSessionId={activeSessionId}
       liveTailPinned={liveTailPinned}
+      scrollStateKey={scrollStateKey}
       isLoading={isLoading}
       isUpdating={isUpdating}
       showWaitingIndicator={showWaitingIndicator}
@@ -274,6 +276,7 @@ const SessionBody = memo(
     scrollContainerRef,
     activeSessionId,
     liveTailPinned,
+    scrollStateKey,
     isLoading,
     isUpdating,
     showWaitingIndicator,
@@ -369,6 +372,7 @@ const SessionBody = memo(
             renderMessageCard={renderMessageCard}
             session={activeSession}
             liveTailPinned={liveTailPinned}
+            scrollStateKey={scrollStateKey}
             scrollContainerRef={scrollContainerRef}
             isActive
             isLoading={isLoading}
@@ -456,6 +460,7 @@ const SessionBody = memo(
     previous.scrollContainerRef === next.scrollContainerRef &&
     previous.activeSessionId === next.activeSessionId &&
     previous.liveTailPinned === next.liveTailPinned &&
+    previous.scrollStateKey === next.scrollStateKey &&
     previous.isLoading === next.isLoading &&
     previous.isUpdating === next.isUpdating &&
     previous.showWaitingIndicator === next.showWaitingIndicator &&
@@ -500,6 +505,7 @@ const SessionConversationPage = memo(
     renderMessageCard,
     session,
     liveTailPinned,
+    scrollStateKey,
     scrollContainerRef,
     isActive,
     isLoading,
@@ -625,8 +631,10 @@ const SessionConversationPage = memo(
       messageStartIndex: overviewMessageStartIndex,
       renderedMessageCount: overviewMessages.length,
       scrollContainerRef,
+      scrollStateKey,
       sessionId: session.id,
       sessionMutationStamp: session.sessionMutationStamp ?? 0,
+      tailFollowIntent: liveTailPinned,
     });
     const markersByMessageId = useMemo(
       () => groupConversationMarkersByMessageId(visibleMarkers),
@@ -765,6 +773,8 @@ const SessionConversationPage = memo(
       historyWindowKey: `${visibleMessages[0]?.id ?? ""}:${visibleMessages[visibleMessages.length - 1]?.id ?? ""}:${hasOlderHistory}`,
       onMissingMessageJump: requestOlderTranscriptPage,
       onConversationSearchItemMount,
+      requestMarkerHistoryAround: (position) =>
+        requestSessionHistoryAroundPage(session.id, position),
       scrollContainerRef,
       sessionId: session.id,
       virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
@@ -1290,6 +1300,7 @@ const SessionConversationPage = memo(
     previous.renderMessageCard === next.renderMessageCard &&
     previous.session === next.session &&
     previous.liveTailPinned === next.liveTailPinned &&
+    previous.scrollStateKey === next.scrollStateKey &&
     previous.scrollContainerRef === next.scrollContainerRef &&
     previous.isActive === next.isActive &&
     previous.isLoading === next.isLoading &&
@@ -1385,6 +1396,7 @@ function ConversationMessageList({
       messages={messages}
       scrollContainerRef={scrollContainerRef}
       tailFollowIntent={tailFollowIntent}
+      tailFollowIntentIsAuthoritative
       preferInitialEstimatedBottomViewport
       virtualizerHandleRef={virtualizerHandleRef}
       conversationSearchQuery={conversationSearchQuery}

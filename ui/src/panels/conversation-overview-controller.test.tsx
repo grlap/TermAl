@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionOverviewResponse } from "../api";
+import { MESSAGE_STACK_SCROLL_WRITE_EVENT } from "../message-stack-scroll-sync";
 import {
   conversationOverviewViewportFromResidentWindow,
   useConversationOverviewController,
@@ -26,9 +27,12 @@ vi.mock("../session-history-demand", async (importOriginal) => {
   return { ...actual, requestSessionHistoryAroundPage };
 });
 
-function overview(stamp = 1): SessionOverviewResponse {
+function overview(
+  stamp = 1,
+  sessionId = "session-overview",
+): SessionOverviewResponse {
   return {
-    sessionId: "session-overview",
+    sessionId,
     messageCount: 100,
     sessionMutationStamp: stamp,
     buckets: [{ c: 100, k: "text", u: 10, m: false }],
@@ -48,8 +52,10 @@ function controllerProps(
     messageStartIndex: 70,
     renderedMessageCount: 30,
     scrollContainerRef: { current: null },
+    scrollStateKey: "pane-overview:session:session-overview",
     sessionId: "session-overview",
     sessionMutationStamp: 1,
+    tailFollowIntent: true,
     ...overrides,
   };
 }
@@ -79,6 +85,252 @@ describe("useConversationOverviewController", () => {
       expect(result.current.overview?.sessionMutationStamp).toBe(2),
     );
     expect(fetchSessionOverview).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the native-scroll layout while the initial overview is pending", async () => {
+    fetchSessionOverview.mockImplementationOnce(
+      () => new Promise<SessionOverviewResponse>(() => {}),
+    );
+
+    const { result } = renderHook(() =>
+      useConversationOverviewController(controllerProps()),
+    );
+
+    await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(1));
+    expect(result.current.overview).toBeNull();
+    expect(result.current.isRailReady).toBe(false);
+    expect(result.current.shouldRender).toBe(false);
+    expect(result.current.shouldRenderRail).toBe(false);
+  });
+
+  it("keeps the native-scroll layout after an overview request is rejected", async () => {
+    fetchSessionOverview.mockRejectedValueOnce(new Error("overview unavailable"));
+
+    const { result } = renderHook(() =>
+      useConversationOverviewController(controllerProps()),
+    );
+
+    await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.overview).toBeNull());
+    expect(result.current.isRailReady).toBe(false);
+    expect(result.current.shouldRender).toBe(false);
+    expect(result.current.shouldRenderRail).toBe(false);
+  });
+
+  it("enables the overview layout atomically when the response becomes ready", async () => {
+    let resolveOverview: ((value: SessionOverviewResponse) => void) | null = null;
+    fetchSessionOverview.mockImplementationOnce(
+      () =>
+        new Promise<SessionOverviewResponse>((resolve) => {
+          resolveOverview = resolve;
+        }),
+    );
+    const { result } = renderHook(() =>
+      useConversationOverviewController(controllerProps()),
+    );
+
+    await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(1));
+    expect(result.current.shouldRender).toBe(false);
+    act(() => resolveOverview?.(overview()));
+
+    await waitFor(() => expect(result.current.shouldRender).toBe(true));
+    expect(result.current.overview).toEqual(overview());
+    expect(result.current.isRailReady).toBe(true);
+    expect(result.current.shouldRenderRail).toBe(true);
+  });
+
+  it("does not replay an outgoing bottom observation over a detached tab after its overview resolves", async () => {
+    let resolveNextOverview:
+      | ((value: SessionOverviewResponse) => void)
+      | null = null;
+    fetchSessionOverview
+      .mockResolvedValueOnce(overview(1, "session-attached"))
+      .mockImplementationOnce(
+        () =>
+          new Promise<SessionOverviewResponse>((resolve) => {
+            resolveNextOverview = resolve;
+          }),
+      );
+    const scrollNode = document.createElement("section");
+    let scrollTop = 900;
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (nextValue: number) => {
+          scrollTop = nextValue;
+        },
+      },
+    });
+    const scrollTo = vi.fn((options?: ScrollToOptions | number) => {
+      if (typeof options === "object") {
+        scrollTop = options.top ?? scrollTop;
+      }
+    });
+    scrollNode.scrollTo = scrollTo as typeof scrollNode.scrollTo;
+    const scrollKinds: Array<string | undefined> = [];
+    scrollNode.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, (event) => {
+      scrollKinds.push(
+        (event as CustomEvent<{ scrollKind?: string }>).detail?.scrollKind,
+      );
+    });
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      {
+        initialProps: controllerProps({
+          scrollContainerRef: { current: scrollNode },
+          scrollStateKey: "pane-1:session:session-attached",
+          sessionId: "session-attached",
+          tailFollowIntent: true,
+        }),
+      },
+    );
+    await waitFor(() => expect(result.current.shouldRender).toBe(true));
+    scrollTo.mockClear();
+    scrollKinds.length = 0;
+
+    rerender(
+      controllerProps({
+        scrollContainerRef: { current: scrollNode },
+        scrollStateKey: "pane-1:session:session-detached",
+        sessionId: "session-detached",
+        tailFollowIntent: false,
+      }),
+    );
+    await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(2));
+    expect(scrollTop).toBe(900);
+
+    act(() => resolveNextOverview?.(overview(1, "session-detached")));
+    await waitFor(() => expect(result.current.shouldRender).toBe(true));
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(scrollKinds).not.toContain("bottom_pin");
+    expect(scrollKinds).not.toContain("position_restore");
+    expect(scrollTop).toBe(900);
+  });
+
+  it("re-derives an attached overview transition from current tail intent", async () => {
+    const scrollNode = document.createElement("section");
+    let scrollTop = 300;
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (nextValue: number) => {
+          scrollTop = nextValue;
+        },
+      },
+    });
+    const scrollTo = vi.fn((options?: ScrollToOptions | number) => {
+      if (typeof options === "object") {
+        scrollTop = options.top ?? scrollTop;
+      }
+    });
+    scrollNode.scrollTo = scrollTo as typeof scrollNode.scrollTo;
+    const scrollKinds: Array<string | undefined> = [];
+    scrollNode.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, (event) => {
+      scrollKinds.push(
+        (event as CustomEvent<{ scrollKind?: string }>).detail?.scrollKind,
+      );
+    });
+
+    const { result } = renderHook(() =>
+      useConversationOverviewController(
+        controllerProps({
+          scrollContainerRef: { current: scrollNode },
+          tailFollowIntent: true,
+        }),
+      ),
+    );
+    await waitFor(() => expect(result.current.shouldRender).toBe(true));
+
+    expect(scrollTop).toBe(900);
+    expect(scrollTo).toHaveBeenCalledWith({ top: 900, behavior: "auto" });
+    expect(scrollKinds).toContain("bottom_pin");
+    expect(scrollKinds).not.toContain("position_restore");
+  });
+
+  it("never enables the layout from a stale-session response", async () => {
+    let resolveOverview: ((value: SessionOverviewResponse) => void) | null = null;
+    fetchSessionOverview.mockImplementationOnce(
+      () =>
+        new Promise<SessionOverviewResponse>((resolve) => {
+          resolveOverview = resolve;
+        }),
+    );
+    fetchSessionOverview.mockImplementationOnce(
+      () => new Promise<SessionOverviewResponse>(() => {}),
+    );
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      { initialProps: controllerProps() },
+    );
+
+    await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(1));
+    rerender(controllerProps({ sessionId: "session-next" }));
+    await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(2));
+    act(() => resolveOverview?.(overview()));
+    await act(async () => Promise.resolve());
+
+    expect(result.current.overview).toBeNull();
+    expect(result.current.shouldRender).toBe(false);
+    expect(result.current.shouldRenderRail).toBe(false);
+  });
+
+  it("keeps a ready same-session rail while refreshing its overview", async () => {
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      { initialProps: controllerProps() },
+    );
+    await waitFor(() => expect(result.current.shouldRender).toBe(true));
+    fetchSessionOverview.mockImplementationOnce(
+      () => new Promise<SessionOverviewResponse>(() => {}),
+    );
+
+    rerender(controllerProps({ sessionMutationStamp: 2 }));
+
+    expect(result.current.overview).toEqual(overview());
+    expect(result.current.shouldRender).toBe(true);
+    expect(result.current.shouldRenderRail).toBe(true);
+  });
+
+  it("recovers from a rejected request on a later activation", async () => {
+    fetchSessionOverview.mockRejectedValueOnce(new Error("overview unavailable"));
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      { initialProps: controllerProps() },
+    );
+    await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(1));
+    expect(result.current.shouldRender).toBe(false);
+
+    rerender(controllerProps({ isActive: false }));
+    rerender(controllerProps({ isActive: true }));
+
+    await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.shouldRender).toBe(true));
+    expect(result.current.overview).toEqual(overview());
+  });
+
+  it("requests at the message threshold without flashing the overview layout", async () => {
+    fetchSessionOverview.mockImplementationOnce(
+      () => new Promise<SessionOverviewResponse>(() => {}),
+    );
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      { initialProps: controllerProps({ messageCount: 29 }) },
+    );
+    expect(fetchSessionOverview).not.toHaveBeenCalled();
+    expect(result.current.shouldRender).toBe(false);
+
+    rerender(controllerProps({ messageCount: 30 }));
+
+    await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(1));
+    expect(result.current.shouldRender).toBe(false);
+    expect(result.current.shouldRenderRail).toBe(false);
   });
 
   it("coalesces a burst of overview freshness changes", async () => {

@@ -68,9 +68,6 @@ export type SessionPaneViewProps = {
   paneMessageContentSignaturesRef: MutableRefObject<
     Record<string, Record<string, string>>
   >;
-  forceSessionScrollToBottomRef: MutableRefObject<
-    Record<string, true | undefined>
-  >;
   pendingScrollToBottomRequest: {
     reattach?: boolean;
     sessionId: string;

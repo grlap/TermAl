@@ -46,10 +46,10 @@ import {
 import { DelegationFanInMessage } from "../delegation-fan-in-message";
 import { ExpandedPromptPanel } from "../ExpandedPromptPanel";
 import {
-  isLongPeerMessage,
   isPeerMessageBatch,
   LongPeerMessage,
   PEER_MESSAGE_BATCH_AUTHOR_LABEL,
+  shouldCollapseLongPeerText,
 } from "../long-peer-message";
 import { MailboxMessageLink } from "../mailbox-message-link";
 import {
@@ -184,8 +184,7 @@ export const PendingPromptCard = memo(
     const isPeerBatch = isPeerMessageBatch(prompt.source);
     const mailboxSource =
       prompt.source?.kind === "mailbox" ? prompt.source.mailbox : null;
-    const shouldCollapsePeerMessage =
-      (Boolean(prompt.source) || isPeerBatch) && isLongPeerMessage(prompt.text);
+    const shouldCollapsePeerMessage = shouldCollapseLongPeerText(prompt);
 
     return (
       <article className="message-card bubble bubble-you pending-prompt-card">

@@ -24,6 +24,7 @@ import {
   type VirtualizedRange,
   type VisibleMessageAnchor,
 } from "./virtualized-conversation-measurement";
+import type { MountedPrependRestore } from "./virtualized-conversation-mounted-range";
 import type {
   VirtualizedConversationJumpOptions,
   VirtualizedConversationLayoutMessage,
@@ -45,12 +46,6 @@ type DeferredLayoutAnchor = {
   viewportOffsetPx: number;
 };
 
-type MountedPrependRestore = {
-  anchor: VisibleMessageAnchor | null;
-  scrollHeight: number;
-  scrollTop: number;
-};
-
 type VirtualizerHandleState = {
   buildLayoutSnapshot: () => VirtualizedConversationLayoutSnapshot;
   buildViewportSnapshot: () => VirtualizedConversationViewportSnapshot;
@@ -64,11 +59,13 @@ type VirtualizerHandleState = {
 };
 
 export function useVirtualizedConversationHandle({
+  beginUserScrollNavigation,
   applyMountedPageRange,
   buildWorkingMountedRangeForScrollTop,
   clearPendingDeferredLayoutTimer,
   clearPendingIdleCompactionTimer,
   estimateMessageHeight,
+  getUserScrollGeneration,
   isActive,
   isDetachedFromBottomRef,
   lastUserScrollInputTimeRef,
@@ -98,6 +95,7 @@ export function useVirtualizedConversationHandle({
   visiblePageRange,
   writeScrollTopAndSyncViewport,
 }: {
+  beginUserScrollNavigation: () => number;
   applyMountedPageRange: (nextRange: VirtualizedRange, options?: { flush?: boolean }) => void;
   buildWorkingMountedRangeForScrollTop: (
     scrollTop: number,
@@ -134,6 +132,7 @@ export function useVirtualizedConversationHandle({
   virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
   visiblePageRange: VirtualizedRange;
   writeScrollTopAndSyncViewport: (node: HTMLElement, nextScrollTop: number) => void;
+  getUserScrollGeneration: () => number;
 }) {
   const resolveScrollTopForMessageLocation = useCallback(
     (
@@ -387,8 +386,10 @@ export function useVirtualizedConversationHandle({
 
   const virtualizerStableHandle = useMemo<VirtualizedConversationMessageListHandle>(
     () => ({
+      beginUserScrollNavigation,
       getLayoutSnapshot: () =>
         readVirtualizerHandleState().buildLayoutSnapshot(),
+      getUserScrollGeneration,
       getViewportSnapshot: () =>
         readVirtualizerHandleState().buildViewportSnapshot(),
       jumpToMessageId: (messageId, options) => {
@@ -431,7 +432,11 @@ export function useVirtualizedConversationHandle({
         );
       },
     }),
-    [readVirtualizerHandleState],
+    [
+      beginUserScrollNavigation,
+      getUserScrollGeneration,
+      readVirtualizerHandleState,
+    ],
   );
 
   useLayoutEffect(() => {

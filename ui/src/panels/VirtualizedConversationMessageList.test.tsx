@@ -32,6 +32,7 @@ import {
   DEFERRED_RENDER_SUSPENDED_ATTRIBUTE,
 } from "../deferred-render";
 import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
+import { mountedPrependRestoreIsCurrent } from "./virtualized-conversation-mounted-range";
 import type { Message } from "../types";
 
 function makeTextMessages(count: number): Message[] {
@@ -542,6 +543,46 @@ describe("VirtualizedConversationMessageList foundation", () => {
       await waitFor(() => {
         expect(screen.getByText("message-7")).toBeInTheDocument();
       });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("advances the shared generation when imperative user navigation begins", async () => {
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      messages: makeTextMessages(80),
+      virtualizerHandleRef,
+    });
+
+    try {
+      await waitFor(() => expect(virtualizerHandleRef.current).not.toBeNull());
+      const handle = virtualizerHandleRef.current!;
+      const capturedRestore = {
+        anchor: null,
+        scrollHeight: 8_000,
+        scrollTop: 1_200,
+        writeIntent: "mounted-range" as const,
+        userScrollGeneration: handle.getUserScrollGeneration(),
+      };
+      expect(
+        mountedPrependRestoreIsCurrent(
+          capturedRestore,
+          handle.getUserScrollGeneration(),
+        ),
+      ).toBe(true);
+
+      const navigationGeneration = handle.beginUserScrollNavigation();
+
+      expect(navigationGeneration).toBe(handle.getUserScrollGeneration());
+      expect(
+        mountedPrependRestoreIsCurrent(
+          capturedRestore,
+          handle.getUserScrollGeneration(),
+        ),
+      ).toBe(false);
     } finally {
       harness.restore();
     }
@@ -1877,6 +1918,79 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
       expect(renderCount).toBe(settledRenderCount);
       expect(screen.getByText("message-80")).toBeInTheDocument();
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("keeps a user page jump detached after the previous bottom-follow cooldown expires", async () => {
+    const messages = makeTextMessages(160);
+    const clientHeight = 240;
+    const harness = renderVirtualizedHarness({
+      clientHeight,
+      messages,
+      preferInitialEstimatedBottomViewport: true,
+      tailFollowIntent: true,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-160")).toBeInTheDocument();
+      });
+
+      act(() => {
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "bottom_follow",
+        });
+      });
+      const pageJumpTarget = Math.max(
+        harness.scrollTop - clientHeight * 0.85,
+        0,
+      );
+
+      vi.useFakeTimers();
+      act(() => {
+        harness.setScrollTop(pageJumpTarget);
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "page_jump",
+          scrollSource: "user",
+        });
+      });
+      await act(async () => {
+        // Outlive MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS. jsdom does not run a
+        // real native smooth-scroll animation, so the App-level writer test
+        // locks the behavior:auto cancellation and Fable's live browser check
+        // remains the authoritative animation regression.
+        await vi.advanceTimersByTimeAsync(1_500);
+      });
+      const bottomAfterCooldown = Math.max(
+        harness.estimatedLayout.totalHeight - clientHeight,
+        0,
+      );
+      expect(harness.scrollTop).toBeLessThan(
+        bottomAfterCooldown - clientHeight * 0.8,
+      );
+
+      act(() => {
+        harness.rerenderWithMessages([
+          ...messages,
+          {
+            author: "assistant",
+            id: "message-161",
+            text: "Message 161 streamed after the page jump",
+            timestamp: "10:161",
+            type: "text",
+          },
+        ]);
+      });
+
+      const bottomAfterStream = Math.max(
+        harness.estimatedLayout.totalHeight - clientHeight,
+        0,
+      );
+      expect(harness.scrollTop).toBeLessThan(
+        bottomAfterStream - clientHeight * 0.8,
+      );
     } finally {
       harness.restore();
     }
