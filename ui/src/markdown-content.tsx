@@ -25,6 +25,7 @@ import { HighlightedCodeBlock } from "./highlighted-code-block";
 import { CheckIcon, CopyIcon } from "./message-card-icons";
 import {
   buildMarkdownHrefDisplayLabel,
+  extractMarkdownTextContent,
   isExternalMarkdownHref,
   MARKDOWN_INTERNAL_LINK_HREF_ATTRIBUTE,
   resolveMarkdownFileLinkTarget,
@@ -48,6 +49,7 @@ import {
   renderMermaidDiagramWithBundleFallback,
 } from "./mermaid-render";
 import type { MonacoAppearance } from "./monaco";
+import { renderPlainTextWithSoftBreaks } from "./plain-text-wrapping";
 import {
   highlightReactNodeText,
   type SearchHighlightTone,
@@ -765,7 +767,7 @@ export function MarkdownContent({
               MarkdownLineNumberSuppressedContext,
             );
             const language = className?.match(/language-([\w-]+)/)?.[1] ?? null;
-            const code = String(children).replace(/\n$/, "");
+            const code = extractMarkdownTextContent(children).replace(/\n$/, "");
             const inlineFileLinkTarget = inline
               ? resolveMarkdownFileLinkTarget(code, workspaceRoot, documentPath)
               : null;
@@ -794,7 +796,11 @@ export function MarkdownContent({
                     onClick={handleInlineCodeClick}
                   >
                     <code className={className} {...props}>
-                      {highlightChildren(children)}
+                      {renderPlainTextWithSoftBreaks(
+                        code,
+                        searchQuery,
+                        searchHighlightTone,
+                      )}
                     </code>
                   </a>
                 );
@@ -802,7 +808,11 @@ export function MarkdownContent({
 
               return (
                 <code className={className} {...props}>
-                  {highlightChildren(children)}
+                  {renderPlainTextWithSoftBreaks(
+                    code,
+                    searchQuery,
+                    searchHighlightTone,
+                  )}
                 </code>
               );
             }

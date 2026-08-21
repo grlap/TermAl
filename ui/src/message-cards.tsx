@@ -65,6 +65,7 @@ import {
 } from "./connection-retry";
 import { ConnectionRetryCard } from "./connection-retry-card";
 import { ParallelAgentsCard } from "./parallel-agents-card";
+import { renderPlainTextWithSoftBreaks } from "./plain-text-wrapping";
 import type { MonacoAppearance } from "./monaco";
 import { MessageNavigationButtons } from "./panels/conversation-navigation";
 
@@ -295,7 +296,7 @@ export const MessageCard = memo(
               ) : (
                 <>
                   <p className="plain-text-copy">
-                    {renderHighlightedText(
+                    {renderPlainTextWithSoftBreaks(
                       message.text,
                       searchQuery,
                       searchHighlightTone,

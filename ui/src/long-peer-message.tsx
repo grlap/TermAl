@@ -4,10 +4,8 @@
 
 import { useEffect, useState } from "react";
 
-import {
-  renderHighlightedText,
-  type SearchHighlightTone,
-} from "./search-highlight";
+import { renderPlainTextWithSoftBreaks } from "./plain-text-wrapping";
+import type { SearchHighlightTone } from "./search-highlight";
 import type { MessageSource, PendingPrompt, TextMessage } from "./types";
 
 const LONG_PEER_MESSAGE_CHARACTER_THRESHOLD = 640;
@@ -97,7 +95,11 @@ export function LongPeerMessage({
       className={`expandable-session-message long-peer-message${isExpanded ? " is-expanded" : ""}`}
     >
       <p className="plain-text-copy">
-        {renderHighlightedText(preview, searchQuery, searchHighlightTone)}
+        {renderPlainTextWithSoftBreaks(
+          preview,
+          searchQuery,
+          searchHighlightTone,
+        )}
       </p>
       <div className="prompt-expansion">
         <button
@@ -112,7 +114,11 @@ export function LongPeerMessage({
           <div className="prompt-expansion-shell long-peer-message-results">
             <div className="card-label">Full message</div>
             <p className="plain-text-copy long-peer-message-copy">
-              {renderHighlightedText(body, searchQuery, searchHighlightTone)}
+              {renderPlainTextWithSoftBreaks(
+                body,
+                searchQuery,
+                searchHighlightTone,
+              )}
             </p>
             <button
               className="ghost-button expandable-session-message-hide"

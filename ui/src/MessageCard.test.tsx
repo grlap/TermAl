@@ -598,6 +598,32 @@ describe("MessageCard", () => {
     );
   });
 
+  it("adds non-destructive soft breaks to long paths in user bubbles", () => {
+    const path =
+      "supabase/migrations/20260821000000_restore_explicit_public_table_grants.sql";
+    const message: TextMessage = {
+      id: "message-long-path",
+      type: "text",
+      author: "you",
+      timestamp: "20:43",
+      text: path,
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+      />,
+    );
+    const copy = container.querySelector(".bubble-you .plain-text-copy");
+
+    expect(copy?.textContent).toBe(path);
+    expect(copy?.querySelectorAll("wbr").length).toBeGreaterThan(0);
+    expect(copy?.innerHTML).toContain("grants.sql");
+    expect(copy?.innerHTML).not.toContain("grants.<wbr>sql");
+  });
+
   // Mirrors `build_delegation_wait_resume_prompt` in `src/delegations.rs`.
   const FAN_IN_TEXT = [
     "review-changes fan-in (round 5)",

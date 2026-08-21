@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from "react";
 
+import { renderPlainTextWithSoftBreaks } from "./plain-text-wrapping";
 import {
   renderHighlightedText,
   type SearchHighlightTone,
@@ -50,7 +51,7 @@ export function DelegationFanInMessage({
       className={`expandable-session-message delegation-fan-in-message${isExpanded ? " is-expanded" : ""}`}
     >
       <p className="plain-text-copy">
-        {renderHighlightedText(
+        {renderPlainTextWithSoftBreaks(
           title || text,
           searchQuery,
           searchHighlightTone,

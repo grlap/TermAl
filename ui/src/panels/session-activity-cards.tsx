@@ -29,8 +29,9 @@
 //   - `<MessageMeta>` / `<MessageAttachmentList>` /
 //     `promptCommandMetaLabel` / `imageAttachmentSummaryLabel` —
 //     live in `./session-message-leaves`.
-//   - Search-highlight rendering (`renderHighlightedText`,
-//     `SearchHighlightTone`) — lives in `../search-highlight`.
+//   - Search-highlight types — live in `../search-highlight`; plain-text
+//     rendering and non-destructive path breaks live in
+//     `../plain-text-wrapping`.
 //   - The panel shell, virtualisation, composer, or any stateful
 //     session wiring — all of that stays in
 //     `./AgentSessionPanel.tsx`.
@@ -52,10 +53,8 @@ import {
   shouldCollapseLongPeerText,
 } from "../long-peer-message";
 import { MailboxMessageLink } from "../mailbox-message-link";
-import {
-  renderHighlightedText,
-  type SearchHighlightTone,
-} from "../search-highlight";
+import { renderPlainTextWithSoftBreaks } from "../plain-text-wrapping";
+import type { SearchHighlightTone } from "../search-highlight";
 import type { PendingPrompt, Session, SessionLiveActivity } from "../types";
 import {
   MessageAttachmentList,
@@ -248,7 +247,7 @@ export const PendingPromptCard = memo(
           ) : (
             <>
               <p className="plain-text-copy">
-                {renderHighlightedText(
+                {renderPlainTextWithSoftBreaks(
                   prompt.text,
                   searchQuery,
                   searchHighlightTone,

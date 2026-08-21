@@ -8,6 +8,7 @@ import {
 import { MarkdownContent } from "./markdown-content";
 import type { MarkdownFileLinkTarget } from "./markdown-links";
 import type { MonacoAppearance } from "./monaco";
+import { renderPlainTextWithSoftBreaks } from "./plain-text-wrapping";
 import {
   containsSearchMatch,
   type SearchHighlightTone,
@@ -124,7 +125,9 @@ export function DeferredMarkdownContent({
           shouldGate ? (
             <div className="markdown-copy deferred-markdown-placeholder">
               <p className="plain-text-copy">
-                {buildMarkdownPreviewText(markdown)}
+                {renderPlainTextWithSoftBreaks(
+                  buildMarkdownPreviewText(markdown),
+                )}
               </p>
             </div>
           ) : null

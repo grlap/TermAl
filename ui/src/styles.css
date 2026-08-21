@@ -8503,8 +8503,8 @@ textarea {
 
 .plain-text-copy {
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .prompt-expansion {
@@ -8658,8 +8658,8 @@ textarea {
 .markdown-copy a.inline-code-link {
   text-decoration: none;
   cursor: pointer;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .markdown-copy a.inline-code-link > code {
@@ -8799,9 +8799,9 @@ textarea {
   color: var(--inline-code-fg);
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   white-space: normal;
-  word-break: break-word;
+  word-break: normal;
 }
 
 .markdown-table-scroll {
