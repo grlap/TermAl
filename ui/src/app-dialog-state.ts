@@ -598,24 +598,6 @@ export function useAppDialogState({
     };
   }, [pendingSessionRename]);
 
-  useEffect(() => {
-    if (!isSettingsOpen) {
-      return;
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setIsSettingsOpen(false);
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isSettingsOpen]);
-
   return {
     isSettingsOpen,
     setIsSettingsOpen,

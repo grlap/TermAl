@@ -17,7 +17,7 @@
 // later throw opaquely at `fireEvent.mouseDown`.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { SettingsDialogShell } from "./SettingsDialogShell";
 
@@ -169,5 +169,24 @@ describe("SettingsDialogShell backdrop dismissal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes once when Escape is pressed", async () => {
+    const onClose = vi.fn();
+    renderShell(onClose);
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not close when Escape cancels IME composition", async () => {
+    const onClose = vi.fn();
+    renderShell(onClose);
+
+    fireEvent.keyDown(window, { key: "Escape", isComposing: true });
+    await Promise.resolve();
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

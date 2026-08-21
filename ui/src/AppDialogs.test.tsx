@@ -278,6 +278,46 @@ describe("AppDialogs create-dialog backdrop dismissal", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("closes the create-session dialog with Escape when idle", async () => {
+    const onClose = renderCreateSessionDialog();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the create-session dialog open on Escape while creating", async () => {
+    const onClose = renderCreateSessionDialog({ isCreating: true });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await Promise.resolve();
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("does not close the create-session dialog when Escape cancels IME composition", async () => {
+    const onClose = renderCreateSessionDialog();
+
+    fireEvent.keyDown(window, { key: "Escape", isComposing: true });
+    await Promise.resolve();
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes the Assistant combobox before the create-session dialog", async () => {
+    const onClose = renderCreateSessionDialog();
+    fireEvent.click(screen.getByRole("combobox", { name: "Assistant" }));
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
   it("offers OpenCode as a first-class session agent", () => {
     const onChangeNewSessionAgent = vi.fn();
     renderCreateSessionDialog({ onChangeNewSessionAgent });
@@ -314,9 +354,56 @@ describe("AppDialogs create-dialog backdrop dismissal", () => {
 
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it("closes the create-project dialog with Escape when idle", async () => {
+    const onClose = renderCreateProjectDialog();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the create-project dialog open on Escape while creating", async () => {
+    const onClose = renderCreateProjectDialog({ isCreatingProject: true });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await Promise.resolve();
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes the Remote combobox before the create-project dialog", async () => {
+    const onClose = renderCreateProjectDialog();
+    fireEvent.click(screen.getByRole("combobox", { name: "Remote" }));
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
 });
 
 describe("AppDialogs settings agent defaults", () => {
+  it("closes a settings combobox before the settings dialog", async () => {
+    const onClose = renderSettingsDialog("cursor");
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "Cursor default model" }),
+    );
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
   it("keeps the settings scroll observers stable across same-tab rerenders", () => {
     const observerInstances: Array<{
       disconnect: ReturnType<typeof vi.fn>;

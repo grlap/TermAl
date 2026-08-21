@@ -27,6 +27,7 @@
 
 import type { ReactNode } from "react";
 import { isDialogBackdropDismissMouseDown } from "../dialog-backdrop-dismiss";
+import { useDialogEscapeDismiss } from "../dialog-escape-dismiss";
 import { DialogCloseIcon } from "../message-card-icons";
 
 export function SettingsDialogShell({
@@ -36,6 +37,8 @@ export function SettingsDialogShell({
   onClose: () => void;
   children: ReactNode;
 }) {
+  useDialogEscapeDismiss({ isOpen: true, onDismiss: onClose });
+
   return (
     <div
       className="dialog-backdrop"

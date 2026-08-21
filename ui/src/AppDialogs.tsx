@@ -9,6 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
+import { useDialogEscapeDismiss } from "./dialog-escape-dismiss";
 import { DialogCloseIcon } from "./message-card-icons";
 import {
   createSessionModelHint,
@@ -477,6 +478,17 @@ export function AppDialogs({
   defaultClaudeApprovalMode,
   setDefaultClaudeApprovalMode,
 }: AppDialogsProps): JSX.Element {
+  useDialogEscapeDismiss({
+    isOpen: isCreateSessionOpen,
+    canDismiss: !isCreating,
+    onDismiss: closeCreateSessionDialog,
+  });
+  useDialogEscapeDismiss({
+    isOpen: isCreateProjectOpen,
+    canDismiss: !isCreatingProject,
+    onDismiss: closeCreateProjectDialog,
+  });
+
   return (
     <>
       {pendingKillSession && typeof document !== "undefined"
