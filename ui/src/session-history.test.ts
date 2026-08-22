@@ -639,6 +639,76 @@ describe("session history page merging", () => {
     }
   });
 
+  it("keeps forward-page freshness metadata monotonic", () => {
+    const current = session([message(63), message(64)], {
+      hasOlderHistory: true,
+      hasNewerHistory: true,
+      messageCount: 20_002,
+      sessionMutationStamp: 9,
+    });
+    const outcome = appendSessionHistoryPage({
+      current,
+      requestedAfter: "message-64",
+      page: {
+        messages: [message(65), message(66)],
+        hasMore: true,
+        nextBefore: "message-65",
+        hasNewer: true,
+        nextAfter: "message-66",
+        messageCount: 20_001,
+        revision: 11,
+        sessionMutationStamp: 8,
+        serverInstanceId: "server-1",
+      },
+    });
+
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind === "applied") {
+      expect(outcome.session.messages.map((entry) => entry.id)).toEqual([
+        "message-63",
+        "message-64",
+        "message-65",
+        "message-66",
+      ]);
+      expect(outcome.session.messageCount).toBe(20_002);
+      expect(outcome.session.sessionMutationStamp).toBe(9);
+    }
+  });
+
+  it("keeps a stale forward page detached from the live tail", () => {
+    const outcome = appendSessionHistoryPage({
+      current: session([message(1), message(2)], {
+        hasOlderHistory: false,
+        hasNewerHistory: true,
+        messageCount: 4,
+        sessionMutationStamp: 9,
+      }),
+      requestedAfter: "message-2",
+      page: {
+        messages: [message(3)],
+        hasMore: false,
+        hasNewer: false,
+        messageCount: 3,
+        revision: 11,
+        sessionMutationStamp: 8,
+        serverInstanceId: "server-1",
+      },
+    });
+
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind === "applied") {
+      expect(outcome.session.messages.map((entry) => entry.id)).toEqual([
+        "message-1",
+        "message-2",
+        "message-3",
+      ]);
+      expect(outcome.session.messagesLoaded).toBe(false);
+      expect(outcome.session.hasNewerHistory).toBe(true);
+      expect(outcome.session.messageCount).toBe(4);
+      expect(outcome.session.sessionMutationStamp).toBe(9);
+    }
+  });
+
   it("replaces a historical window with one bounded live-tail page", () => {
     const tailMessages = Array.from({ length: 64 }, (_, index) =>
       message(937 + index),

@@ -5084,8 +5084,10 @@ textarea {
 .conversation-message-entry-reveal {
   /* Animate only the newly mounted inner message shell. Opacity and a tiny
      compositor translation leave slot size, scroll height, virtualizer
-     measurement, and the pane's synchronous bottom-follow write unchanged. */
-  animation: conversation-message-entry-reveal 180ms ease-out both;
+     measurement, and the pane's synchronous bottom-follow write unchanged.
+     Backwards fill applies the pre-entry state without retaining transform
+     after completion, so message shells do not keep a stacking context. */
+  animation: conversation-message-entry-reveal 180ms ease-out backwards;
 }
 
 .conversation-message-entry-reveal[data-conversation-message-entry-reveal-cancelled] {

@@ -29,6 +29,16 @@ function residentMessageStartIndex(session: Session) {
   );
 }
 
+function maximumSessionMutationStamp(
+  current: Session,
+  page: SessionHistoryResponse,
+) {
+  return Math.max(
+    current.sessionMutationStamp ?? 0,
+    page.sessionMutationStamp,
+  );
+}
+
 function pageProtocolError(
   page: SessionHistoryResponse,
 ): SessionHistoryMergeOutcome | null {
@@ -168,10 +178,7 @@ export function replaceSessionWithHistoryStartPage({
         page.messageCount,
         page.messages.length,
       ),
-      sessionMutationStamp: Math.max(
-        currentMutationStamp,
-        page.sessionMutationStamp,
-      ),
+      sessionMutationStamp: maximumSessionMutationStamp(current, page),
     },
   };
 }
@@ -204,6 +211,16 @@ export function appendSessionHistoryPage({
     };
   }
   const messages = [...current.messages, ...page.messages];
+  const currentMessageCount = current.messageCount ?? current.messages.length;
+  const currentMutationStamp = current.sessionMutationStamp ?? 0;
+  // A delayed page remains usable when its exclusive cursor and message ids
+  // still line up, but older metadata cannot prove that it reached the live
+  // tail. Preserve the fresher resident metadata and keep newer history open
+  // so a later tail request can reconcile any concurrently changed content.
+  const hasNewerHistory =
+    page.hasNewer === true ||
+    page.messageCount < currentMessageCount ||
+    page.sessionMutationStamp < currentMutationStamp;
   const coversTranscriptStart =
     current.hasOlderHistory === false || current.messagesLoaded === true;
   return {
@@ -215,12 +232,16 @@ export function appendSessionHistoryPage({
       // history older than the already-resident window. The transcript becomes
       // complete only once that start-anchored window also reaches the live
       // tail.
-      messagesLoaded: coversTranscriptStart && page.hasNewer !== true,
+      messagesLoaded: coversTranscriptStart && !hasNewerHistory,
       hasOlderHistory: current.hasOlderHistory ?? false,
-      hasNewerHistory: page.hasNewer === true,
+      hasNewerHistory,
       messageStartIndex: residentMessageStartIndex(current),
-      messageCount: Math.max(page.messageCount, messages.length),
-      sessionMutationStamp: page.sessionMutationStamp,
+      messageCount: Math.max(
+        currentMessageCount,
+        page.messageCount,
+        messages.length,
+      ),
+      sessionMutationStamp: maximumSessionMutationStamp(current, page),
     },
   };
 }

@@ -1381,7 +1381,7 @@ describe("AgentSessionPanel conversation caching", () => {
       /(?:^|\n)\.conversation-message-entry-reveal\s*(?=\{)/,
     );
     expect(revealDeclarations).toMatch(
-      /animation\s*:\s*conversation-message-entry-reveal\s+180ms\s+ease-out\s+both\s*;/,
+      /animation\s*:\s*conversation-message-entry-reveal\s+180ms\s+ease-out\s+backwards\s*;/,
     );
     const cancelledRevealDeclarations = extractCssBlock(
       stylesCss,

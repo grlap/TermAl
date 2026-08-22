@@ -455,6 +455,26 @@ export function useSessionRenderCallbacks({
         : null,
     [activeSession?.messages, approvalRequiresHeadGating],
   );
+  const openMailboxFromMessage = useMemo(() => {
+    const originSessionId = activeSession?.id;
+    if (!originSessionId || !onOpenMailboxTab) {
+      return undefined;
+    }
+    const originProjectId = activeSession.projectId ?? null;
+    return (mailboxId: string) => {
+      onOpenMailboxTab(
+        paneId,
+        mailboxId,
+        originSessionId,
+        originProjectId,
+      );
+    };
+  }, [
+    activeSession?.id,
+    activeSession?.projectId,
+    onOpenMailboxTab,
+    paneId,
+  ]);
   const renderSessionMessageCard = useCallback<RenderMessageCard>(
     (
       message,
@@ -523,17 +543,13 @@ export function useSessionRenderCallbacks({
         connectionRetryDisplayState={getConnectionRetryDisplayState(message.id)}
         workspaceRoot={activeSession?.workdir ?? null}
         mailboxViewerSessionId={activeSession?.id ?? null}
-        onOpenMailbox={(mailboxId) => {
-          if (!activeSession) {
-            return;
-          }
-          onOpenMailboxTab?.(
-            paneId,
-            mailboxId,
-            activeSession.id,
-            activeSession.projectId ?? null,
-          );
-        }}
+        onOpenMailbox={
+          message.type === "text" &&
+          message.source?.kind === "mailbox" &&
+          message.source.mailbox
+            ? openMailboxFromMessage
+            : undefined
+        }
       />
     ),
     [
@@ -541,7 +557,6 @@ export function useSessionRenderCallbacks({
       approvalRequiresHeadGating,
       pendingApprovalHeadId,
       activeSession?.projectId,
-      activeSession?.status,
       activeSession?.workdir,
       activeSessionSearchMatchItemKey,
       canExposeLocalDelegationActions,
@@ -551,9 +566,9 @@ export function useSessionRenderCallbacks({
       handleInsertParallelAgentResult,
       handleOpenParallelAgentSession,
       latestAssistantMessageId,
+      openMailboxFromMessage,
       streamingAssistantTextMessageId,
       onOpenDiffPreviewTab,
-      onOpenMailboxTab,
       onOpenSourceTab,
       paneId,
       sessionFindQuery,

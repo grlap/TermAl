@@ -2903,6 +2903,303 @@ describe("hydration adoption side effects", () => {
     );
   });
 
+  it("shares one older-page load between passive hydration and completable navigation", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const messages = makeHydrationMessages(
+      SESSION_HISTORY_PAGE_MESSAGE_COUNT +
+        SESSION_TAIL_WINDOW_MESSAGE_COUNT,
+    );
+    const retainedTail = messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT);
+    const olderPage = messages.slice(0, SESSION_HISTORY_PAGE_MESSAGE_COUNT);
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: makeSession({
+        messages: retainedTail,
+        messagesLoaded: false,
+        messageCount: messages.length,
+        sessionMutationStamp: 1,
+      }),
+    });
+    let resolveHistoryPage:
+      | ((page: Awaited<ReturnType<typeof api.fetchSessionHistory>>) => void)
+      | null = null;
+    const fetchSessionHistory = vi
+      .spyOn(api, "fetchSessionHistory")
+      .mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveHistoryPage = resolve;
+          }),
+      );
+    const initialSession = makeSession({
+      messages: [],
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    renderLiveStateHarness(params, () => {});
+    await waitFor(() =>
+      expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toEqual(
+        retainedTail,
+      ),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => requestSessionHistoryPage("session-1"));
+    await waitFor(() => expect(fetchSessionHistory).toHaveBeenCalledOnce());
+    const completableDemand = requestSessionHistoryOlderPage("session-1");
+    expect(fetchSessionHistory).toHaveBeenCalledTimes(1);
+
+    let applied = false;
+    await act(async () => {
+      resolveHistoryPage?.({
+        hasMore: false,
+        messageCount: messages.length,
+        messages: olderPage,
+        nextBefore: null,
+        revision: 5,
+        serverInstanceId: "server-a",
+        sessionMutationStamp: 1,
+      });
+      applied = await completableDemand;
+    });
+
+    expect(applied).toBe(true);
+    expect(fetchSessionHistory).toHaveBeenCalledTimes(1);
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toEqual(
+      messages,
+    );
+  });
+
+  it.each([404, 409])(
+    "silently resyncs when passive older hydration fails with %i",
+    async (status) => {
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.spyOn(api, "fetchState").mockImplementation(
+        () => new Promise<StateResponse>(() => {}),
+      );
+      const messages = makeHydrationMessages(
+        SESSION_HISTORY_PAGE_MESSAGE_COUNT +
+          SESSION_TAIL_WINDOW_MESSAGE_COUNT,
+      );
+      const retainedTail = messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT);
+      vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+        revision: 5,
+        serverInstanceId: "server-a",
+        session: makeSession({
+          messages: retainedTail,
+          messagesLoaded: false,
+          messageCount: messages.length,
+          sessionMutationStamp: 1,
+        }),
+      });
+      const requestError = new api.ApiRequestError(
+        "request-failed",
+        "session history unavailable",
+        { status },
+      );
+      const fetchSessionHistory = vi
+        .spyOn(api, "fetchSessionHistory")
+        .mockRejectedValue(requestError);
+      const actionRecoveryInvocations = vi.fn();
+      const initialSession = makeSession({
+        messages: [],
+        messagesLoaded: false,
+        messageCount: messages.length,
+        sessionMutationStamp: 1,
+      });
+      const params = makeLiveStateParams(
+        initialSession,
+        actionRecoveryInvocations,
+      );
+      params.adoptionRefs.latestStateRevisionRef.current = 5;
+      params.adoptionRefs.sessionsRef.current = [initialSession];
+
+      renderLiveStateHarness(params, () => {});
+      await waitFor(() =>
+        expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toEqual(
+          retainedTail,
+        ),
+      );
+
+      act(() => requestSessionHistoryPage("session-1"));
+      await waitFor(() => expect(fetchSessionHistory).toHaveBeenCalledOnce());
+      await waitFor(() =>
+        expect(actionRecoveryInvocations).toHaveBeenCalledOnce(),
+      );
+
+      expect(params.reportRequestError).not.toHaveBeenCalled();
+      expect(fetchSessionHistory).toHaveBeenCalledWith("session-1", {
+        before: retainedTail[0]?.id,
+        limit: SESSION_HISTORY_PAGE_MESSAGE_COUNT,
+      });
+    },
+  );
+
+  it("releases an older-page load after failure so the same boundary can retry", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const messages = makeHydrationMessages(
+      SESSION_HISTORY_PAGE_MESSAGE_COUNT +
+        SESSION_TAIL_WINDOW_MESSAGE_COUNT,
+    );
+    const retainedTail = messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT);
+    const olderPage = messages.slice(0, SESSION_HISTORY_PAGE_MESSAGE_COUNT);
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: makeSession({
+        messages: retainedTail,
+        messagesLoaded: false,
+        messageCount: messages.length,
+        sessionMutationStamp: 1,
+      }),
+    });
+    const fetchSessionHistory = vi
+      .spyOn(api, "fetchSessionHistory")
+      .mockRejectedValueOnce(new Error("history unavailable"))
+      .mockResolvedValueOnce({
+        hasMore: false,
+        messageCount: messages.length,
+        messages: olderPage,
+        nextBefore: null,
+        revision: 5,
+        serverInstanceId: "server-a",
+        sessionMutationStamp: 1,
+      });
+    const initialSession = makeSession({
+      messages: [],
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    renderLiveStateHarness(params, () => {});
+    await waitFor(() =>
+      expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toEqual(
+        retainedTail,
+      ),
+    );
+
+    await expect(
+      requestSessionHistoryOlderPage("session-1"),
+    ).resolves.toBe(false);
+    await expect(
+      requestSessionHistoryOlderPage("session-1"),
+    ).resolves.toBe(true);
+
+    expect(fetchSessionHistory).toHaveBeenCalledTimes(2);
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toEqual(
+      messages,
+    );
+  });
+
+  it("releases an older-page load when its session disappears before adoption", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const messages = makeHydrationMessages(
+      SESSION_HISTORY_PAGE_MESSAGE_COUNT +
+        SESSION_TAIL_WINDOW_MESSAGE_COUNT,
+    );
+    const retainedTail = messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT);
+    const olderPage = messages.slice(0, SESSION_HISTORY_PAGE_MESSAGE_COUNT);
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: makeSession({
+        messages: retainedTail,
+        messagesLoaded: false,
+        messageCount: messages.length,
+        sessionMutationStamp: 1,
+      }),
+    });
+    let resolveFirstHistoryPage:
+      | ((page: Awaited<ReturnType<typeof api.fetchSessionHistory>>) => void)
+      | null = null;
+    const historyPage = {
+      hasMore: false,
+      messageCount: messages.length,
+      messages: olderPage,
+      nextBefore: null,
+      revision: 5,
+      serverInstanceId: "server-a",
+      sessionMutationStamp: 1,
+    };
+    const fetchSessionHistory = vi
+      .spyOn(api, "fetchSessionHistory")
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstHistoryPage = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(historyPage);
+    const initialSession = makeSession({
+      messages: [],
+      messagesLoaded: false,
+      messageCount: messages.length,
+      sessionMutationStamp: 1,
+    });
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    renderLiveStateHarness(params, () => {});
+    await waitFor(() =>
+      expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toEqual(
+        retainedTail,
+      ),
+    );
+    const retainedSession = params.adoptionRefs.sessionsRef.current[0]!;
+    const staleDemand = requestSessionHistoryOlderPage("session-1");
+    await waitFor(() => expect(fetchSessionHistory).toHaveBeenCalledOnce());
+    params.adoptionRefs.sessionsRef.current = [];
+
+    await act(async () => {
+      resolveFirstHistoryPage?.(historyPage);
+      await expect(staleDemand).resolves.toBe(false);
+    });
+
+    params.adoptionRefs.sessionsRef.current = [retainedSession];
+    await expect(
+      requestSessionHistoryOlderPage("session-1"),
+    ).resolves.toBe(true);
+
+    expect(fetchSessionHistory).toHaveBeenCalledTimes(2);
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toEqual(
+      messages,
+    );
+  });
+
   it("replaces residency with one centered around-position page", async () => {
     vi.stubGlobal(
       "EventSource",

@@ -16,6 +16,7 @@ import {
   type VirtualizedRange,
   type VisibleMessageAnchor,
 } from "./virtualized-conversation-measurement";
+import { useCommittedRef } from "./use-committed-ref";
 import { useStableEvent } from "./use-stable-event";
 
 export function useVirtualizedConversationPageHeightChange({
@@ -65,6 +66,7 @@ export function useVirtualizedConversationPageHeightChange({
   visiblePageRangeRef: MutableRefObject<VirtualizedRange>;
   writeScrollTopAndSyncViewport: (node: HTMLElement, nextScrollTop: number) => void;
 }) {
+  const isActiveRef = useCommittedRef(isActive);
   const handlePageHeightChange = (
     pageKey: string,
     pageIndex: number,
@@ -104,8 +106,9 @@ export function useVirtualizedConversationPageHeightChange({
     if (node && hasUserScrollInteractionRef.current && !isScrollContainerNearBottom(node)) {
       shouldKeepBottomAfterLayoutRef.current = false;
     }
+    const isCurrentlyActive = isActiveRef.current;
     const shouldKeepBottom =
-      isActive && node
+      isCurrentlyActive && node
         ? !isDetachedFromBottomRef.current &&
           (shouldKeepBottomAfterLayoutRef.current || isScrollContainerNearBottom(node))
         : false;
@@ -171,7 +174,7 @@ export function useVirtualizedConversationPageHeightChange({
     if (
       node &&
       hasSyncedNativeScrollTop &&
-      isActive &&
+      isCurrentlyActive &&
       !isMessagePrependCommitRef.current &&
       pageIndex <= latestVisiblePageRange.startIndex &&
       (hasUserScrollInteractionRef.current ||

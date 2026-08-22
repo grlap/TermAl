@@ -38,17 +38,37 @@ export function useResponseBoardSourceNavigation({
         const requestToken = activeRequestToken;
         cancelRetryFrame();
 
-        const virtualizerHandle = virtualizerHandleRef.current;
-        if (virtualizerHandle === null || request.sessionId !== sessionId) {
+        let virtualizerHandle = virtualizerHandleRef.current;
+        if (request.sessionId !== sessionId) {
           return;
         }
-        const userScrollGeneration =
-          virtualizerHandle.beginUserScrollNavigation();
-        const requestIsCurrent = () =>
-          !disposed &&
-          activeRequestToken === requestToken &&
-          virtualizerHandleRef.current === virtualizerHandle &&
-          virtualizerHandle.getUserScrollGeneration() === userScrollGeneration;
+        let userScrollGeneration =
+          virtualizerHandle?.beginUserScrollNavigation() ?? null;
+        const requestIsCurrent = () => {
+          if (disposed || activeRequestToken !== requestToken) {
+            return false;
+          }
+          const currentVirtualizerHandle = virtualizerHandleRef.current;
+          if (virtualizerHandle === null && currentVirtualizerHandle !== null) {
+            // A short DOM transcript may become virtualized after history is
+            // adopted. Join its generation guard only if no scroll/navigation
+            // has happened since that fresh handle mounted.
+            if (currentVirtualizerHandle.getUserScrollGeneration() !== 0) {
+              return false;
+            }
+            virtualizerHandle = currentVirtualizerHandle;
+            userScrollGeneration =
+              currentVirtualizerHandle.beginUserScrollNavigation();
+          }
+          if (virtualizerHandle === null) {
+            return currentVirtualizerHandle === null;
+          }
+          return (
+            currentVirtualizerHandle === virtualizerHandle &&
+            virtualizerHandle.getUserScrollGeneration() ===
+              userScrollGeneration
+          );
+        };
 
         void requestHistoryAround(request.messagePosition).then(
           (accepted) => {
@@ -62,7 +82,18 @@ export function useResponseBoardSourceNavigation({
               }
             });
           },
-          () => {},
+          (error) => {
+            if (!disposed && activeRequestToken === requestToken) {
+              console.warn(
+                "Response-board source navigation failed to load history.",
+                {
+                  error,
+                  messageId: request.messageId,
+                  sessionId: request.sessionId,
+                },
+              );
+            }
+          },
         );
       },
       subscriberKey,

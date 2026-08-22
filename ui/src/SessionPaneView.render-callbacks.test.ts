@@ -318,6 +318,67 @@ describe("SessionPaneView render callbacks", () => {
     );
   });
 
+  it("keeps the mailbox callback stable across same-session updates and omits it elsewhere", () => {
+    const mailboxMessage: Message = {
+      id: "mailbox-notification",
+      type: "text",
+      author: "you",
+      timestamp: "10:00",
+      text: "agent activation text",
+      source: {
+        kind: "mailbox",
+        name: "Termal::Fable",
+        mailbox: {
+          mailboxId: "mailbox-1",
+          messageId: "mailbox-message-1",
+          sequence: 1,
+          unreadCount: 1,
+        },
+      },
+    };
+    const ordinaryMessage: Message = {
+      id: "ordinary-message",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:01",
+      text: "ordinary response",
+    };
+    const { hook, params } = renderCallbacks({
+      activeSession: makeSession("idle", [mailboxMessage, ordinaryMessage]),
+    });
+    const renderCard = (message: Message) =>
+      hook.result.current.renderSessionMessageCard(
+        message,
+        false,
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+        vi.fn(),
+      );
+    const firstMailboxCard = renderCard(mailboxMessage);
+    const ordinaryCard = renderCard(ordinaryMessage);
+    const firstRenderMessageCard = hook.result.current.renderSessionMessageCard;
+
+    expect(firstMailboxCard?.props.onOpenMailbox).toBeTypeOf("function");
+    expect(ordinaryCard?.props.onOpenMailbox).toBeUndefined();
+
+    params.activeSession = makeSession("active", [
+      mailboxMessage,
+      ordinaryMessage,
+    ]);
+    act(() => {
+      hook.rerender();
+    });
+    const secondMailboxCard = renderCard(mailboxMessage);
+
+    expect(hook.result.current.renderSessionMessageCard).toBe(
+      firstRenderMessageCard,
+    );
+    expect(secondMailboxCard?.props.onOpenMailbox).toBe(
+      firstMailboxCard?.props.onOpenMailbox,
+    );
+  });
+
   it("streams only the active assistant text that is the last transcript item", () => {
     const session = makeSession("active", [assistantTable]);
     const streamingTextId = streamingAssistantTextMessageIdForSession(session);

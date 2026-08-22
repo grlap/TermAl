@@ -128,6 +128,11 @@ import type {
   Session,
   WorkspaceFilesChangedEvent,
 } from "./types";
+
+type OlderHistoryLoadResult =
+  | { kind: "applied"; session: Session }
+  | { kind: "failed" }
+  | { kind: "unavailable" };
 import {
   pruneSessionAttachmentValues,
   pruneSessionCommandValues,
@@ -291,6 +296,9 @@ export function useAppLiveState(
   const queuedHydrationSessionIdsRef = useRef<Set<string>>(new Set());
   const queuedTailRepairSessionIdsRef = useRef<Set<string>>(new Set());
   const queuedTextRepairHydrationSessionIdsRef = useRef<Set<string>>(new Set());
+  const olderHistoryLoadsRef = useRef<
+    Map<string, Promise<OlderHistoryLoadResult>>
+  >(new Map());
   const lastFullStateServerInstanceIdRef = useRef<string | null>(
     lastSeenServerInstanceIdRef.current,
   );
@@ -483,6 +491,7 @@ export function useAppLiveState(
   useEffect(() => {
     return () => {
       cancelHydrationRetries();
+      olderHistoryLoadsRef.current.clear();
     };
   }, []);
 
@@ -1040,6 +1049,95 @@ export function useAppLiveState(
     return true;
   }
 
+  function loadOlderHistoryPageOnce(
+    sessionId: string,
+    requestedBefore: string,
+  ): Promise<OlderHistoryLoadResult> {
+    // Passive hydration and explicit navigation share one request for the
+    // same exclusive boundary. The owner publishes the merged session once;
+    // every waiter observes that result, and the exact promise removes itself
+    // so failures, stale sessions, and instance changes cannot wedge retries.
+    const key = `${sessionId}:${requestedBefore}`;
+    const existing = olderHistoryLoadsRef.current.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const load = (async (): Promise<OlderHistoryLoadResult> => {
+      try {
+        const historyPage = await fetchSessionHistory(sessionId, {
+          before: requestedBefore,
+          limit: SESSION_HISTORY_PAGE_MESSAGE_COUNT,
+        });
+        if (!isMountedRef.current) {
+          return { kind: "unavailable" };
+        }
+        if (
+          isServerInstanceMismatch(
+            lastSeenServerInstanceIdRef.current,
+            historyPage.serverInstanceId,
+          )
+        ) {
+          requestActionRecoveryResyncRef.current({
+            allowUnknownServerInstance: true,
+          });
+          return { kind: "unavailable" };
+        }
+
+        const currentSession = sessionsRef.current.find(
+          (entry) => entry.id === sessionId,
+        );
+        if (!currentSession) {
+          return { kind: "unavailable" };
+        }
+        const mergeOutcome = prependSessionHistoryPage({
+          current: currentSession,
+          page: historyPage,
+          requestedBefore,
+        });
+        switch (mergeOutcome.kind) {
+          case "applied":
+            return publishHistorySession(mergeOutcome.session)
+              ? { kind: "applied", session: mergeOutcome.session }
+              : { kind: "unavailable" };
+          case "cursorChanged":
+          case "metadataChanged":
+            requestActionRecoveryResyncRef.current();
+            return { kind: "unavailable" };
+          case "protocolError":
+            throw new Error(mergeOutcome.message);
+          default: {
+            const _exhaustive: never = mergeOutcome;
+            void _exhaustive;
+            return { kind: "unavailable" };
+          }
+        }
+      } catch (error) {
+        if (!isMountedRef.current) {
+          return { kind: "unavailable" };
+        }
+        // Session disappearance and conflict are benign hydration races. Keep
+        // the established silent-recovery behavior even though this request
+        // is now shared with explicit history navigation.
+        if (
+          error instanceof ApiRequestError &&
+          (error.status === 404 || error.status === 409)
+        ) {
+          requestActionRecoveryResyncRef.current();
+          return { kind: "unavailable" };
+        }
+        reportRequestError(error);
+        return { kind: "failed" };
+      }
+    })().finally(() => {
+      if (olderHistoryLoadsRef.current.get(key) === load) {
+        olderHistoryLoadsRef.current.delete(key);
+      }
+    });
+    olderHistoryLoadsRef.current.set(key, load);
+    return load;
+  }
+
   async function loadBoundedHistoryWindow(
     demand: SessionHistoryPageDemand,
   ) {
@@ -1071,14 +1169,20 @@ export function useAppLiveState(
       if (direction === "older" && !requestedBefore) {
         return;
       }
+      if (direction === "older") {
+        const result = await loadOlderHistoryPageOnce(
+          sessionId,
+          requestedBefore!,
+        );
+        applied = result.kind === "applied";
+        return;
+      }
       const historyPage = await fetchSessionHistory(sessionId, {
         ...(direction === "start"
           ? { from: "start" as const }
           : direction === "newer"
             ? { after: requestedAfter }
-            : direction === "older"
-              ? { before: requestedBefore }
-              : direction === "around"
+            : direction === "around"
                 ? { around: demand.position ?? 0 }
               : {}),
         limit: SESSION_HISTORY_PAGE_MESSAGE_COUNT,
@@ -1113,13 +1217,7 @@ export function useAppLiveState(
                 page: historyPage,
                 requestedAfter: requestedAfter!,
               })
-            : direction === "older"
-              ? prependSessionHistoryPage({
-                  current: currentSession,
-                  page: historyPage,
-                  requestedBefore: requestedBefore!,
-                })
-              : direction === "around"
+            : direction === "around"
                 ? replaceSessionWithHistoryAroundPage({
                     current: currentSession,
                     page: historyPage,
@@ -1281,8 +1379,26 @@ export function useAppLiveState(
             shouldRetryHydration = true;
             return;
           }
+          if (!isTextRepair) {
+            const result = await loadOlderHistoryPageOnce(
+              sessionId,
+              requestedBefore!,
+            );
+            if (result.kind === "applied") {
+              if (result.session.messagesLoaded === true) {
+                completeSessionHydration(sessionId);
+              } else {
+                clearHydrationRetry(sessionId);
+              }
+            } else if (result.kind === "failed") {
+              shouldRetryHydration = true;
+              retryHydrationWithCap = true;
+            }
+            return;
+          }
+
           const historyPage = await fetchSessionHistory(sessionId, {
-            before: requestedBefore,
+            before: null,
             limit: SESSION_HISTORY_PAGE_MESSAGE_COUNT,
           });
           if (!isMountedRef.current) {
@@ -1306,16 +1422,10 @@ export function useAppLiveState(
           if (!currentSession) {
             return;
           }
-          const mergeOutcome = isTextRepair
-            ? repairSessionTailFromHistoryPage({
-                current: currentSession,
-                page: historyPage,
-              })
-            : prependSessionHistoryPage({
-                current: currentSession,
-                page: historyPage,
-                requestedBefore: requestedBefore!,
-              });
+          const mergeOutcome = repairSessionTailFromHistoryPage({
+            current: currentSession,
+            page: historyPage,
+          });
           switch (mergeOutcome.kind) {
             case "applied":
               if (!publishHistorySession(mergeOutcome.session)) {
@@ -1521,6 +1631,7 @@ export function useAppLiveState(
       queuedTailRepairSessionIdsRef.current.clear();
       queuedTextRepairHydrationSessionIdsRef.current.clear();
       tailLoadedSessionIdsRef.current.clear();
+      olderHistoryLoadsRef.current.clear();
       // Caller-requested EventSource recreation on instance change. See
       // `forceSseReconnect` for the full context. The flag is set
       // synchronously by `handleSend` BEFORE the recovery probe is in
