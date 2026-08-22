@@ -44,10 +44,7 @@ export function useResponseBoardSourceNavigation({
         }
         let userScrollGeneration =
           virtualizerHandle?.beginUserScrollNavigation() ?? null;
-        const requestIsCurrent = () => {
-          if (disposed || activeRequestToken !== requestToken) {
-            return false;
-          }
+        const tryJoinFreshVirtualizer = () => {
           const currentVirtualizerHandle = virtualizerHandleRef.current;
           if (virtualizerHandle === null && currentVirtualizerHandle !== null) {
             // A short DOM transcript may become virtualized after history is
@@ -60,6 +57,17 @@ export function useResponseBoardSourceNavigation({
             userScrollGeneration =
               currentVirtualizerHandle.beginUserScrollNavigation();
           }
+          return true;
+        };
+        const requestIsCurrent = () => {
+          if (
+            disposed ||
+            activeRequestToken !== requestToken ||
+            !tryJoinFreshVirtualizer()
+          ) {
+            return false;
+          }
+          const currentVirtualizerHandle = virtualizerHandleRef.current;
           if (virtualizerHandle === null) {
             return currentVirtualizerHandle === null;
           }

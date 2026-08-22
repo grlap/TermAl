@@ -348,10 +348,7 @@ export function replaceSessionWithHistoryAroundPage({
       hasNewerHistory,
       messageStartIndex: pageStart,
       messageCount,
-      sessionMutationStamp: Math.max(
-        currentMutationStamp,
-        page.sessionMutationStamp,
-      ),
+      sessionMutationStamp: maximumSessionMutationStamp(current, page),
     },
   };
 }

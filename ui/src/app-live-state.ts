@@ -38,6 +38,10 @@
 // from the hook) would force forward-declaration gymnastics in
 // App.tsx.
 //
+// Bounded history request admission, fetch/merge dispatch, and demand
+// completion are delegated to session-history-loading.ts. This hook retains
+// hydration scheduling and publishes accepted session records.
+//
 // Split out of: ui/src/App.tsx (Slice 13A + 13B of the
 // App-split plan, see docs/app-split-plan.md). Slice 13B moved
 // the EventSource lifecycle, reconnect/watchdog timers, and
@@ -101,13 +105,14 @@ import {
   type SessionHydrationRequestContext,
 } from "./session-hydration-adoption";
 import {
-  appendSessionHistoryPage,
-  prependSessionHistoryPage,
   repairSessionTailFromHistoryPage,
-  replaceSessionWithHistoryAroundPage,
-  replaceSessionWithHistoryTailPage,
-  replaceSessionWithHistoryStartPage,
 } from "./session-history";
+import {
+  loadBoundedSessionHistoryWindow,
+  loadOlderHistoryPageOnce,
+  type OlderHistoryLoadRegistry,
+  type SessionHistoryLoadingContext,
+} from "./session-history-loading";
 import {
   applyDelegationParentIdsFromSummaries,
   reconcileSessions,
@@ -129,10 +134,6 @@ import type {
   WorkspaceFilesChangedEvent,
 } from "./types";
 
-type OlderHistoryLoadResult =
-  | { kind: "applied"; session: Session }
-  | { kind: "failed" }
-  | { kind: "unavailable" };
 import {
   pruneSessionAttachmentValues,
   pruneSessionCommandValues,
@@ -166,8 +167,6 @@ import {
 } from "./app-live-state-hydration";
 import {
   addSessionHistoryPageDemandListener,
-  completeSessionHistoryPageDemand,
-  type SessionHistoryPageDemand,
 } from "./session-history-demand";
 import {
   enqueueWorkspaceFilesChangedEvent as enqueueWorkspaceFilesChangedEventInGate,
@@ -296,9 +295,7 @@ export function useAppLiveState(
   const queuedHydrationSessionIdsRef = useRef<Set<string>>(new Set());
   const queuedTailRepairSessionIdsRef = useRef<Set<string>>(new Set());
   const queuedTextRepairHydrationSessionIdsRef = useRef<Set<string>>(new Set());
-  const olderHistoryLoadsRef = useRef<
-    Map<string, Promise<OlderHistoryLoadResult>>
-  >(new Map());
+  const olderHistoryLoadsRef = useRef<OlderHistoryLoadRegistry>(new Map());
   const lastFullStateServerInstanceIdRef = useRef<string | null>(
     lastSeenServerInstanceIdRef.current,
   );
@@ -503,7 +500,10 @@ export function useAppLiveState(
           demand.direction !== "older" ||
           demand.requestId !== undefined
         ) {
-          void loadBoundedHistoryWindow(demand);
+          void loadBoundedSessionHistoryWindow({
+            context: createSessionHistoryLoadingContext(),
+            demand,
+          });
           return;
         }
         if (!isMountedRef.current || !sessionStillNeedsHydration(sessionId)) {
@@ -1049,204 +1049,19 @@ export function useAppLiveState(
     return true;
   }
 
-  function loadOlderHistoryPageOnce(
-    sessionId: string,
-    requestedBefore: string,
-  ): Promise<OlderHistoryLoadResult> {
-    // Passive hydration and explicit navigation share one request for the
-    // same exclusive boundary. The owner publishes the merged session once;
-    // every waiter observes that result, and the exact promise removes itself
-    // so failures, stale sessions, and instance changes cannot wedge retries.
-    const key = `${sessionId}:${requestedBefore}`;
-    const existing = olderHistoryLoadsRef.current.get(key);
-    if (existing) {
-      return existing;
-    }
-
-    const load = (async (): Promise<OlderHistoryLoadResult> => {
-      try {
-        const historyPage = await fetchSessionHistory(sessionId, {
-          before: requestedBefore,
-          limit: SESSION_HISTORY_PAGE_MESSAGE_COUNT,
-        });
-        if (!isMountedRef.current) {
-          return { kind: "unavailable" };
-        }
-        if (
-          isServerInstanceMismatch(
-            lastSeenServerInstanceIdRef.current,
-            historyPage.serverInstanceId,
-          )
-        ) {
-          requestActionRecoveryResyncRef.current({
-            allowUnknownServerInstance: true,
-          });
-          return { kind: "unavailable" };
-        }
-
-        const currentSession = sessionsRef.current.find(
-          (entry) => entry.id === sessionId,
-        );
-        if (!currentSession) {
-          return { kind: "unavailable" };
-        }
-        const mergeOutcome = prependSessionHistoryPage({
-          current: currentSession,
-          page: historyPage,
-          requestedBefore,
-        });
-        switch (mergeOutcome.kind) {
-          case "applied":
-            return publishHistorySession(mergeOutcome.session)
-              ? { kind: "applied", session: mergeOutcome.session }
-              : { kind: "unavailable" };
-          case "cursorChanged":
-          case "metadataChanged":
-            requestActionRecoveryResyncRef.current();
-            return { kind: "unavailable" };
-          case "protocolError":
-            throw new Error(mergeOutcome.message);
-          default: {
-            const _exhaustive: never = mergeOutcome;
-            void _exhaustive;
-            return { kind: "unavailable" };
-          }
-        }
-      } catch (error) {
-        if (!isMountedRef.current) {
-          return { kind: "unavailable" };
-        }
-        // Session disappearance and conflict are benign hydration races. Keep
-        // the established silent-recovery behavior even though this request
-        // is now shared with explicit history navigation.
-        if (
-          error instanceof ApiRequestError &&
-          (error.status === 404 || error.status === 409)
-        ) {
-          requestActionRecoveryResyncRef.current();
-          return { kind: "unavailable" };
-        }
-        reportRequestError(error);
-        return { kind: "failed" };
-      }
-    })().finally(() => {
-      if (olderHistoryLoadsRef.current.get(key) === load) {
-        olderHistoryLoadsRef.current.delete(key);
-      }
-    });
-    olderHistoryLoadsRef.current.set(key, load);
-    return load;
-  }
-
-  async function loadBoundedHistoryWindow(
-    demand: SessionHistoryPageDemand,
-  ) {
-    const { direction, requestId, sessionId } = demand;
-    let applied = false;
-    try {
-      if (!isMountedRef.current) {
-        return;
-      }
-      const requestedSession = sessionsRef.current.find(
-        (entry) => entry.id === sessionId,
-      );
-      if (!requestedSession) {
-        return;
-      }
-      const requestedAfter =
-        direction === "newer"
-          ? (requestedSession.messages[
-              requestedSession.messages.length - 1
-            ]?.id ?? null)
-          : null;
-      const requestedBefore =
-        direction === "older"
-          ? (requestedSession.messages[0]?.id ?? null)
-          : null;
-      if (direction === "newer" && !requestedAfter) {
-        return;
-      }
-      if (direction === "older" && !requestedBefore) {
-        return;
-      }
-      if (direction === "older") {
-        const result = await loadOlderHistoryPageOnce(
-          sessionId,
-          requestedBefore!,
-        );
-        applied = result.kind === "applied";
-        return;
-      }
-      const historyPage = await fetchSessionHistory(sessionId, {
-        ...(direction === "start"
-          ? { from: "start" as const }
-          : direction === "newer"
-            ? { after: requestedAfter }
-            : direction === "around"
-                ? { around: demand.position ?? 0 }
-              : {}),
-        limit: SESSION_HISTORY_PAGE_MESSAGE_COUNT,
-      });
-      if (
-        !isMountedRef.current ||
-        isServerInstanceMismatch(
-          lastSeenServerInstanceIdRef.current,
-          historyPage.serverInstanceId,
-        )
-      ) {
-        requestActionRecoveryResyncRef.current({
-          allowUnknownServerInstance: true,
-        });
-        return;
-      }
-      const currentSession = sessionsRef.current.find(
-        (entry) => entry.id === sessionId,
-      );
-      if (!currentSession) {
-        return;
-      }
-      const mergeOutcome =
-        direction === "start"
-          ? replaceSessionWithHistoryStartPage({
-              current: currentSession,
-              page: historyPage,
-            })
-          : direction === "newer"
-            ? appendSessionHistoryPage({
-                current: currentSession,
-                page: historyPage,
-                requestedAfter: requestedAfter!,
-              })
-            : direction === "around"
-                ? replaceSessionWithHistoryAroundPage({
-                    current: currentSession,
-                    page: historyPage,
-                    requestedPosition: demand.position ?? 0,
-                  })
-              : replaceSessionWithHistoryTailPage({
-                  current: currentSession,
-                  page: historyPage,
-                });
-      switch (mergeOutcome.kind) {
-        case "applied":
-          applied = publishHistorySession(mergeOutcome.session);
-          return;
-        case "cursorChanged":
-        case "metadataChanged":
-          requestActionRecoveryResyncRef.current();
-          return;
-        case "protocolError":
-          throw new Error(mergeOutcome.message);
-        default: {
-          const _exhaustive: never = mergeOutcome;
-          void _exhaustive;
-        }
-      }
-    } catch (error) {
-      reportRequestError(error);
-    } finally {
-      completeSessionHistoryPageDemand(requestId, applied);
-    }
+  function createSessionHistoryLoadingContext(): SessionHistoryLoadingContext {
+    return {
+      getLastSeenServerInstanceId: () =>
+        lastSeenServerInstanceIdRef.current,
+      getSession: (sessionId) =>
+        sessionsRef.current.find((entry) => entry.id === sessionId),
+      inFlightOlderLoads: olderHistoryLoadsRef.current,
+      isMounted: () => isMountedRef.current,
+      publishSession: publishHistorySession,
+      reportRequestError,
+      requestActionRecoveryResync: (options) =>
+        requestActionRecoveryResyncRef.current(options),
+    };
   }
 
   function startSessionHydration(
@@ -1380,10 +1195,11 @@ export function useAppLiveState(
             return;
           }
           if (!isTextRepair) {
-            const result = await loadOlderHistoryPageOnce(
+            const result = await loadOlderHistoryPageOnce({
+              context: createSessionHistoryLoadingContext(),
+              requestedBefore: requestedBefore!,
               sessionId,
-              requestedBefore!,
-            );
+            });
             if (result.kind === "applied") {
               if (result.session.messagesLoaded === true) {
                 completeSessionHydration(sessionId);
