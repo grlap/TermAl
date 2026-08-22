@@ -68,7 +68,7 @@ describe("useConversationOverviewController", () => {
     requestSessionHistoryAroundPage.mockResolvedValue(false);
   });
 
-  it("fetches once on pane activation and refreshes on mutation metadata", async () => {
+  it("refreshes on mutation metadata without replacing equal overview content", async () => {
     const { result, rerender } = renderHook(
       (props) => useConversationOverviewController(props),
       { initialProps: controllerProps() },
@@ -78,13 +78,33 @@ describe("useConversationOverviewController", () => {
     expect(fetchSessionOverview).toHaveBeenCalledTimes(1);
     expect(fetchSessionOverview).toHaveBeenCalledWith("session-overview");
 
+    const firstOverview = result.current.overview;
     fetchSessionOverview.mockResolvedValue(overview(2));
     rerender(controllerProps({ sessionMutationStamp: 2 }));
 
-    await waitFor(() =>
-      expect(result.current.overview?.sessionMutationStamp).toBe(2),
+    await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(2));
+    await act(async () => Promise.resolve());
+    expect(result.current.overview).toBe(firstOverview);
+    expect(result.current.overview?.sessionMutationStamp).toBe(1);
+  });
+
+  it("adopts a refreshed overview when its projected content changes", async () => {
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      { initialProps: controllerProps() },
     );
-    expect(fetchSessionOverview).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(result.current.overview).toEqual(overview()));
+    const firstOverview = result.current.overview;
+    const changedOverview: SessionOverviewResponse = {
+      ...overview(2),
+      buckets: [{ c: 100, k: "error", u: 10, m: false }],
+    };
+    fetchSessionOverview.mockResolvedValue(changedOverview);
+
+    rerender(controllerProps({ sessionMutationStamp: 2 }));
+
+    await waitFor(() => expect(result.current.overview).toBe(changedOverview));
+    expect(result.current.overview).not.toBe(firstOverview);
   });
 
   it("keeps the native-scroll layout while the initial overview is pending", async () => {
@@ -296,6 +316,49 @@ describe("useConversationOverviewController", () => {
     expect(result.current.overview).toEqual(overview());
     expect(result.current.shouldRender).toBe(true);
     expect(result.current.shouldRenderRail).toBe(true);
+  });
+
+  it("keeps a ready same-session rail after a background refresh fails", async () => {
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      { initialProps: controllerProps() },
+    );
+    await waitFor(() => expect(result.current.shouldRender).toBe(true));
+    const firstOverview = result.current.overview;
+    fetchSessionOverview.mockRejectedValueOnce(
+      new Error("overview temporarily unavailable"),
+    );
+
+    rerender(controllerProps({ sessionMutationStamp: 2 }));
+
+    await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(2));
+    await act(async () => Promise.resolve());
+    expect(result.current.overview).toBe(firstOverview);
+    expect(result.current.shouldRender).toBe(true);
+    expect(result.current.shouldRenderRail).toBe(true);
+  });
+
+  it("does not retain an outgoing overview when the next session refresh fails", async () => {
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      { initialProps: controllerProps() },
+    );
+    await waitFor(() => expect(result.current.shouldRender).toBe(true));
+    fetchSessionOverview.mockRejectedValueOnce(
+      new Error("next overview unavailable"),
+    );
+
+    rerender(
+      controllerProps({
+        scrollStateKey: "pane-overview:session:session-next",
+        sessionId: "session-next",
+      }),
+    );
+
+    await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.overview).toBeNull());
+    expect(result.current.shouldRender).toBe(false);
+    expect(result.current.shouldRenderRail).toBe(false);
   });
 
   it("recovers from a rejected request on a later activation", async () => {

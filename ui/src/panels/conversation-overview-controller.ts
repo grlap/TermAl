@@ -53,6 +53,43 @@ type PendingOverviewLayoutScrollRestore = {
   sessionId: string;
 };
 
+function conversationOverviewContentMatches(
+  current: SessionOverviewResponse | null,
+  next: SessionOverviewResponse,
+) {
+  if (
+    !current ||
+    current.sessionId !== next.sessionId ||
+    current.messageCount !== next.messageCount ||
+    current.latestPosition !== next.latestPosition ||
+    current.buckets.length !== next.buckets.length ||
+    current.markers.length !== next.markers.length
+  ) {
+    return false;
+  }
+  return (
+    current.buckets.every((bucket, index) => {
+      const nextBucket = next.buckets[index];
+      return (
+        nextBucket !== undefined &&
+        bucket.c === nextBucket.c &&
+        bucket.k === nextBucket.k &&
+        bucket.u === nextBucket.u &&
+        bucket.m === nextBucket.m
+      );
+    }) &&
+    current.markers.every((marker, index) => {
+      const nextMarker = next.markers[index];
+      return (
+        nextMarker !== undefined &&
+        marker.position === nextMarker.position &&
+        marker.kind === nextMarker.kind &&
+        (marker.label ?? null) === (nextMarker.label ?? null)
+      );
+    })
+  );
+}
+
 export function useConversationOverviewController({
   isActive,
   messageCount,
@@ -136,14 +173,29 @@ export function useConversationOverviewController({
             };
           }
         }
-        setOverview(response);
+        // Session mutation stamps deliberately invalidate broadly: command,
+        // approval, and interaction updates can change overview kinds without
+        // changing message count. Preserve the current object when the small
+        // server-authoritative projection is unchanged so background refreshes
+        // do not rerender or rebuild the rail merely to adopt a newer stamp.
+        setOverview((current) =>
+          conversationOverviewContentMatches(current, response)
+            ? current
+            : response,
+        );
       },
       () => {
         if (
           overviewRequestIdRef.current === requestId &&
           sessionIdRef.current === expectedSessionId
         ) {
-          setOverview(null);
+          // A stale-but-valid same-session rail is better than swapping the
+          // layout back to the native scrollbar during a transient refresh
+          // failure. Initial loads and session switches still have no matching
+          // snapshot and therefore remain on the native-scroll layout.
+          setOverview((current) =>
+            current?.sessionId === expectedSessionId ? current : null,
+          );
         }
       },
     );
