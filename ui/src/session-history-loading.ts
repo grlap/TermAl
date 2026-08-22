@@ -6,6 +6,9 @@
 // state publication, or action-recovery policy. Callers inject those through
 // a small context so this module stays independent of app-live-state.ts.
 //
+// Post-fetch unmounts fail silently: a dead hook can neither publish the page
+// nor consume a recovery resync. Completable demand still settles in `finally`.
+//
 // Split from: ui/src/app-live-state.ts.
 
 import { ApiRequestError, fetchSessionHistory } from "./api";
@@ -191,17 +194,37 @@ export async function loadBoundedSessionHistoryWindow({
       return;
     }
 
+    let historyRequest:
+      | { from: "start" }
+      | { after: string }
+      | { around: number }
+      | Record<string, never>;
+    switch (direction) {
+      case "start":
+        historyRequest = { from: "start" };
+        break;
+      case "newer":
+        historyRequest = { after: requestedAfter! };
+        break;
+      case "around":
+        historyRequest = { around: demand.position ?? 0 };
+        break;
+      case "tail":
+        historyRequest = {};
+        break;
+      default: {
+        const _exhaustive: never = direction;
+        void _exhaustive;
+        return;
+      }
+    }
     const historyPage = await fetchSessionHistory(sessionId, {
-      ...(direction === "start"
-        ? { from: "start" as const }
-        : direction === "newer"
-          ? { after: requestedAfter }
-          : direction === "around"
-            ? { around: demand.position ?? 0 }
-            : {}),
+      ...historyRequest,
       limit: SESSION_HISTORY_PAGE_MESSAGE_COUNT,
     });
     if (!context.isMounted()) {
+      // Do not schedule recovery work owned by a hook that has already gone
+      // away. The `finally` block remains responsible for settling demand.
       return;
     }
     if (
@@ -219,30 +242,48 @@ export async function loadBoundedSessionHistoryWindow({
     if (!currentSession) {
       return;
     }
-    const mergeOutcome =
-      direction === "start"
-        ? replaceSessionWithHistoryStartPage({
-            current: currentSession,
-            page: historyPage,
-          })
-        : direction === "newer"
-          ? appendSessionHistoryPage({
-              current: currentSession,
-              page: historyPage,
-              requestedAfter: requestedAfter!,
-            })
-          : direction === "around"
-            ? replaceSessionWithHistoryAroundPage({
-                current: currentSession,
-                page: historyPage,
-                requestedPosition: demand.position ?? 0,
-              })
-            : replaceSessionWithHistoryTailPage({
-                current: currentSession,
-                page: historyPage,
-              });
+    let mergeOutcome: SessionHistoryMergeOutcome;
+    switch (direction) {
+      case "start":
+        mergeOutcome = replaceSessionWithHistoryStartPage({
+          current: currentSession,
+          page: historyPage,
+        });
+        break;
+      case "newer":
+        mergeOutcome = appendSessionHistoryPage({
+          current: currentSession,
+          page: historyPage,
+          requestedAfter: requestedAfter!,
+        });
+        break;
+      case "around":
+        mergeOutcome = replaceSessionWithHistoryAroundPage({
+          current: currentSession,
+          page: historyPage,
+          requestedPosition: demand.position ?? 0,
+        });
+        break;
+      case "tail":
+        mergeOutcome = replaceSessionWithHistoryTailPage({
+          current: currentSession,
+          page: historyPage,
+        });
+        break;
+      default: {
+        const _exhaustive: never = direction;
+        void _exhaustive;
+        return;
+      }
+    }
     applied = applyHistoryMergeOutcome(mergeOutcome, context);
   } catch (error) {
+    if (!context.isMounted()) {
+      return;
+    }
+    // Non-older directions are explicit navigation requests, so preserve
+    // their existing user-visible error posture. The shared older loader also
+    // serves passive hydration and separately treats 404/409 as benign races.
     context.reportRequestError(error);
   } finally {
     completeSessionHistoryPageDemand(requestId, applied);
