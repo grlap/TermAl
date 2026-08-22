@@ -1,8 +1,12 @@
 import { render } from "@testing-library/react";
 import { createElement } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  CONVERSATION_MESSAGE_ENTRY_REVEAL_CLASS_NAME,
+  cancelConversationMessageEntryReveals,
+  getConversationMessageRevealRegistrySizeForTesting,
+  resetConversationMessageRevealRegistryForTesting,
   resolveConversationMessageRevealTransition,
   useConversationMessageRevealIds,
   useConversationMessageRevealOnMount,
@@ -10,6 +14,10 @@ import {
   type ConversationMessageRevealState,
 } from "./conversation-message-reveal";
 import type { Message } from "../types";
+
+afterEach(() => {
+  resetConversationMessageRevealRegistryForTesting();
+});
 
 const input = (
   messageIds: readonly string[],
@@ -31,6 +39,26 @@ function advance(
 }
 
 describe("conversation message reveal continuity", () => {
+  it("cancels active reveal classes without touching unrelated message shells", () => {
+    const root = document.createElement("section");
+    const revealing = document.createElement("div");
+    const settled = document.createElement("div");
+    revealing.classList.add(CONVERSATION_MESSAGE_ENTRY_REVEAL_CLASS_NAME);
+    root.append(revealing, settled);
+
+    cancelConversationMessageEntryReveals(root);
+
+    expect(revealing).not.toHaveClass(
+      CONVERSATION_MESSAGE_ENTRY_REVEAL_CLASS_NAME,
+    );
+    expect(revealing).toHaveAttribute(
+      "data-conversation-message-entry-reveal-cancelled",
+    );
+    expect(settled).not.toHaveAttribute(
+      "data-conversation-message-entry-reveal-cancelled",
+    );
+  });
+
   it("seeds an initial resident window without revealing hydrated content", () => {
     const transition = advance(null, input(["message-1", "message-2"]));
 
@@ -186,22 +214,22 @@ function makeMessages(messageIds: readonly string[]): Message[] {
 
 function RevealMount({
   messageId,
+  revealScopeKey,
   revealInCurrentCommit,
   revealUserScrollGeneration,
-  sessionId,
   userScrollGeneration,
 }: {
   messageId: string;
+  revealScopeKey: string;
   revealInCurrentCommit: boolean;
   revealUserScrollGeneration: number;
-  sessionId: string;
   userScrollGeneration: number;
 }) {
   const shouldReveal = useConversationMessageRevealOnMount({
     messageId,
+    revealScopeKey,
     revealInCurrentCommit,
     revealUserScrollGeneration,
-    sessionId,
     userScrollGeneration,
   });
   return createElement("div", {
@@ -213,12 +241,12 @@ function RevealMount({
 function DelayedMountHarness({
   messageIds,
   mountTail,
-  sessionId,
+  revealScopeKey,
   userScrollGeneration,
 }: {
   messageIds: readonly string[];
   mountTail: boolean;
-  sessionId: string;
+  revealScopeKey: string;
   userScrollGeneration: number;
 }) {
   const revealIds = useConversationMessageRevealIds({
@@ -226,29 +254,122 @@ function DelayedMountHarness({
     liveTurnVisible: false,
     messages: makeMessages(messageIds),
     pendingPromptIds: [],
-    sessionId,
+    revealScopeKey,
     userScrollGeneration,
   });
   const tailMessageId = messageIds[messageIds.length - 1] ?? null;
   return mountTail && tailMessageId
     ? createElement(RevealMount, {
         messageId: tailMessageId,
+        revealScopeKey,
         revealInCurrentCommit: revealIds.has(tailMessageId),
         revealUserScrollGeneration: userScrollGeneration,
-        sessionId,
         userScrollGeneration,
       })
     : null;
 }
 
+function RevealScopeProbe({
+  messageIds,
+  revealScopeKey,
+  testId,
+}: {
+  messageIds: readonly string[];
+  revealScopeKey: string;
+  testId: string;
+}) {
+  const revealIds = useConversationMessageRevealIds({
+    isActive: true,
+    liveTurnVisible: false,
+    messages: makeMessages(messageIds),
+    pendingPromptIds: [],
+    revealScopeKey,
+    userScrollGeneration: 0,
+  });
+  return createElement("div", {
+    "data-reveal-ids": [...revealIds].join(","),
+    "data-testid": testId,
+  });
+}
+
+function DuplicateSessionScopesHarness({
+  newerMessageIds,
+  olderMessageIds,
+}: {
+  newerMessageIds: readonly string[];
+  olderMessageIds: readonly string[];
+}) {
+  return createElement(
+    "div",
+    null,
+    createElement(RevealScopeProbe, {
+      messageIds: newerMessageIds,
+      revealScopeKey: "pane-newer:session-shared",
+      testId: "newer-scope",
+    }),
+    createElement(RevealScopeProbe, {
+      messageIds: olderMessageIds,
+      revealScopeKey: "pane-older:session-shared",
+      testId: "older-scope",
+    }),
+  );
+}
+
 describe("conversation message reveal mount handoff", () => {
+  it("keeps disjoint panes of the same session on independent watermarks", () => {
+    const { getByTestId, rerender } = render(
+      createElement(DuplicateSessionScopesHarness, {
+        newerMessageIds: ["message-100", "message-101"],
+        olderMessageIds: ["message-1", "message-2"],
+      }),
+    );
+
+    rerender(
+      createElement(DuplicateSessionScopesHarness, {
+        newerMessageIds: ["message-100", "message-101", "message-102"],
+        olderMessageIds: ["message-1", "message-2"],
+      }),
+    );
+
+    expect(getByTestId("newer-scope")).toHaveAttribute(
+      "data-reveal-ids",
+      "message-102",
+    );
+    expect(getByTestId("older-scope")).toHaveAttribute(
+      "data-reveal-ids",
+      "",
+    );
+  });
+
+  it("bounds retained reveal scopes while preserving recent continuity", () => {
+    const { rerender } = render(
+      createElement(RevealScopeProbe, {
+        messageIds: ["message-1"],
+        revealScopeKey: "pane-0:session-0",
+        testId: "bounded-scope",
+      }),
+    );
+
+    for (let index = 1; index <= 300; index += 1) {
+      rerender(
+        createElement(RevealScopeProbe, {
+          messageIds: ["message-1"],
+          revealScopeKey: `pane-${index}:session-${index}`,
+          testId: "bounded-scope",
+        }),
+      );
+    }
+
+    expect(getConversationMessageRevealRegistrySizeForTesting()).toBe(256);
+  });
+
   it("keeps an appended id pending until a later virtualized mount consumes it", () => {
-    const sessionId = "session-delayed-virtual-mount";
+    const revealScopeKey = "pane-1:session-delayed-virtual-mount";
     const { queryByTestId, rerender } = render(
       createElement(DelayedMountHarness, {
         messageIds: ["message-1"],
         mountTail: false,
-        sessionId,
+        revealScopeKey,
         userScrollGeneration: 0,
       }),
     );
@@ -257,7 +378,7 @@ describe("conversation message reveal mount handoff", () => {
       createElement(DelayedMountHarness, {
         messageIds: ["message-1", "message-2"],
         mountTail: false,
-        sessionId,
+        revealScopeKey,
         userScrollGeneration: 0,
       }),
     );
@@ -267,7 +388,7 @@ describe("conversation message reveal mount handoff", () => {
       createElement(DelayedMountHarness, {
         messageIds: ["message-1", "message-2"],
         mountTail: true,
-        sessionId,
+        revealScopeKey,
         userScrollGeneration: 0,
       }),
     );
@@ -280,7 +401,7 @@ describe("conversation message reveal mount handoff", () => {
       createElement(DelayedMountHarness, {
         messageIds: ["message-1", "message-2"],
         mountTail: false,
-        sessionId,
+        revealScopeKey,
         userScrollGeneration: 0,
       }),
     );
@@ -288,7 +409,7 @@ describe("conversation message reveal mount handoff", () => {
       createElement(DelayedMountHarness, {
         messageIds: ["message-1", "message-2"],
         mountTail: true,
-        sessionId,
+        revealScopeKey,
         userScrollGeneration: 0,
       }),
     );
@@ -299,12 +420,12 @@ describe("conversation message reveal mount handoff", () => {
   });
 
   it("prunes a pending id when user navigation advances before mount", () => {
-    const sessionId = "session-stale-virtual-mount";
+    const revealScopeKey = "pane-1:session-stale-virtual-mount";
     const { queryByTestId, rerender } = render(
       createElement(DelayedMountHarness, {
         messageIds: ["message-1"],
         mountTail: false,
-        sessionId,
+        revealScopeKey,
         userScrollGeneration: 0,
       }),
     );
@@ -313,7 +434,7 @@ describe("conversation message reveal mount handoff", () => {
       createElement(DelayedMountHarness, {
         messageIds: ["message-1", "message-2"],
         mountTail: false,
-        sessionId,
+        revealScopeKey,
         userScrollGeneration: 0,
       }),
     );
@@ -321,7 +442,7 @@ describe("conversation message reveal mount handoff", () => {
       createElement(DelayedMountHarness, {
         messageIds: ["message-1", "message-2"],
         mountTail: true,
-        sessionId,
+        revealScopeKey,
         userScrollGeneration: 1,
       }),
     );

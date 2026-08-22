@@ -3,6 +3,7 @@ import type {
   FocusEvent as ReactFocusEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
+  TouchEvent as ReactTouchEvent,
   UIEvent as ReactUIEvent,
 } from "react";
 import { useLayoutEffect } from "react";
@@ -978,6 +979,7 @@ describe("session pane historical-window tail state", () => {
     const conversationPage = document.createElement("div");
     conversationPage.className = "session-conversation-page is-active";
     const transcriptCard = document.createElement("article");
+    transcriptCard.className = "conversation-message-entry-reveal";
     const liveTail = document.createElement("div");
     liveTail.className = "conversation-live-tail";
     liveTail.setAttribute("data-tail-follow", "attached");
@@ -1054,6 +1056,12 @@ describe("session pane historical-window tail state", () => {
     expect(scrollNode.scrollTop).toBe(780);
     expect(transcriptDelta).toBe(20);
     expect(liveTailDelta).toBe(transcriptDelta);
+    expect(transcriptCard).not.toHaveClass(
+      "conversation-message-entry-reveal",
+    );
+    expect(transcriptCard).toHaveAttribute(
+      "data-conversation-message-entry-reveal-cancelled",
+    );
     expect(paneScrollPositions[scrollStateKey]).toEqual({
       top: 780,
       shouldStick: false,
@@ -1390,6 +1398,59 @@ describe("session pane historical-window tail state", () => {
       shouldStick: false,
     });
     expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
+  });
+
+  it("cancels active message reveals for touch and PageUp navigation", () => {
+    const activeSession = session(false);
+    const scrollNode = document.createElement("section");
+    const revealShell = document.createElement("article");
+    scrollNode.append(revealShell);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 500 },
+    });
+    const hook = renderHook(() =>
+      useSessionPaneScrollState({
+        ...params(activeSession),
+        isActive: true,
+        isSessionTabActive: true,
+      }),
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+    const armReveal = () => {
+      revealShell.removeAttribute(
+        "data-conversation-message-entry-reveal-cancelled",
+      );
+      revealShell.classList.add("conversation-message-entry-reveal");
+    };
+
+    armReveal();
+    act(() => {
+      hook.result.current.handleMessageStackTouchStart({
+        touches: [{ clientY: 100 }],
+      } as unknown as ReactTouchEvent<HTMLElement>);
+      hook.result.current.handleMessageStackUserScrollIntent({
+        currentTarget: scrollNode,
+        target: scrollNode,
+        touches: [{ clientY: 140 }],
+        type: "touchmove",
+      } as unknown as ReactTouchEvent<HTMLElement>);
+    });
+    expect(revealShell).not.toHaveClass(
+      "conversation-message-entry-reveal",
+    );
+
+    armReveal();
+    act(() => {
+      hook.result.current.scrollSessionMessageStackByPageJump(-1);
+    });
+    expect(revealShell).not.toHaveClass(
+      "conversation-message-entry-reveal",
+    );
+    expect(revealShell).toHaveAttribute(
+      "data-conversation-message-entry-reveal-cancelled",
+    );
   });
 
   it("does not advertise phantom newer content while explicitly tail-pinned", () => {

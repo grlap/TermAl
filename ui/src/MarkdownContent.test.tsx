@@ -1541,6 +1541,27 @@ describe("MarkdownContent", () => {
       expect(fragment?.textContent).toBe(markdown);
     });
 
+    it("keeps one stable streaming status region across fragment updates", () => {
+      const { container, rerender } = render(
+        <MarkdownContent isStreaming markdown="| Col A | Col B |" />,
+      );
+      const status = screen.getByRole("status");
+      expect(status).toHaveTextContent("Response still streaming…");
+
+      rerender(
+        <MarkdownContent
+          isStreaming
+          markdown={"| Col A | Col B |\n| --- | --- |\n| 42 |"}
+        />,
+      );
+
+      expect(screen.getByRole("status")).toBe(status);
+      expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
+      expect(
+        container.querySelector(".markdown-streaming-fragment")?.textContent,
+      ).toBe("| Col A | Col B |\n| --- | --- |\n| 42 |");
+    });
+
     it("defers header + complete separator (no body row yet) to the placeholder", () => {
       const markdown = "| Col A | Col B |\n| --- | --- |";
       const { container } = render(

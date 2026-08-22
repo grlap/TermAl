@@ -1381,18 +1381,26 @@ describe("AgentSessionPanel conversation caching", () => {
       /(?:^|\n)\.conversation-message-entry-reveal\s*(?=\{)/,
     );
     expect(revealDeclarations).toMatch(
-      /animation\s*:\s*conversation-message-entry-reveal\s+160ms\s+ease-out\s+both\s*;/,
+      /animation\s*:\s*conversation-message-entry-reveal\s+180ms\s+ease-out\s+both\s*;/,
     );
+    const cancelledRevealDeclarations = extractCssBlock(
+      stylesCss,
+      /(?:^|\n)\.conversation-message-entry-reveal\[\s*data-conversation-message-entry-reveal-cancelled\s*\]\s*(?=\{)/,
+    );
+    expect(cancelledRevealDeclarations).toMatch(/animation\s*:\s*none\s*;/);
     const revealKeyframes = extractCssBlock(
       stylesCss,
       /@keyframes\s+conversation-message-entry-reveal\s*(?=\{)/,
     );
     expect(revealKeyframes).toMatch(/from\s*\{\s*opacity\s*:\s*0\s*;/s);
+    expect(revealKeyframes).toMatch(/transform\s*:\s*translateY\(6px\)\s*;/);
     expect(revealKeyframes).toMatch(/to\s*\{\s*opacity\s*:\s*1\s*;/s);
+    expect(revealKeyframes).toMatch(/transform\s*:\s*translateY\(0\)\s*;/);
 
     const forbiddenGeometryProperty =
-      /(?:^|[;{}\s])(?:block-size|bottom|gap|height|inset|left|margin|max-height|min-height|padding|position|right|scroll-margin|top|transform|translate)\s*:/m;
+      /(?:^|[;{}\s])(?:block-size|bottom|gap|height|inset|left|margin|max-height|min-height|padding|position|right|scroll-margin|top)\s*:/m;
     expect(revealDeclarations).not.toMatch(forbiddenGeometryProperty);
+    expect(revealDeclarations).not.toMatch(/(?:transform|translate)\s*:/);
     expect(revealKeyframes).not.toMatch(forbiddenGeometryProperty);
 
     const reducedMotionRules = extractCssBlock(

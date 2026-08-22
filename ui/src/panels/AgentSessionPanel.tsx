@@ -35,6 +35,7 @@ import {
 } from "./ConversationOverviewRail";
 import { useConversationOverviewController } from "./conversation-overview-controller";
 import {
+  CONVERSATION_MESSAGE_ENTRY_REVEAL_CLASS_NAME,
   useConversationMessageRevealIds,
   useConversationMessageRevealOnMount,
 } from "./conversation-message-reveal";
@@ -59,7 +60,7 @@ import {
   requestSessionHistoryAroundPage,
 } from "../session-history-demand";
 import { writeResponseBoardMessageDragData } from "../response-board";
-import { subscribeResponseBoardSourceNavigation } from "../response-board-navigation";
+import { useResponseBoardSourceNavigation } from "./response-board-source-navigation";
 import {
   renderHighlightedText,
   type SearchHighlightTone,
@@ -114,16 +115,16 @@ const CONVERSATION_VIRTUALIZATION_MIN_MESSAGES =
 function ConversationMessageRevealShell({
   className,
   messageId,
+  revealScopeKey,
   revealInCurrentCommit,
   revealUserScrollGeneration,
-  sessionId,
   userScrollGeneration,
   ...props
 }: ComponentPropsWithoutRef<"div"> & {
   messageId: string;
+  revealScopeKey: string;
   revealInCurrentCommit: boolean;
   revealUserScrollGeneration: number;
-  sessionId: string;
   userScrollGeneration: number;
 }) {
   // The class is a mount property, not live render state. A streamed update to
@@ -132,15 +133,15 @@ function ConversationMessageRevealShell({
   // and receives false for an identity the reader has already seen.
   const shouldReveal = useConversationMessageRevealOnMount({
     messageId,
+    revealScopeKey,
     revealInCurrentCommit,
     revealUserScrollGeneration,
-    sessionId,
     userScrollGeneration,
   });
   return (
     <div
       {...props}
-      className={`${className ?? ""}${shouldReveal ? " conversation-message-entry-reveal" : ""}`}
+      className={`${className ?? ""}${shouldReveal ? ` ${CONVERSATION_MESSAGE_ENTRY_REVEAL_CLASS_NAME}` : ""}`}
     />
   );
 }
@@ -690,7 +691,7 @@ const SessionConversationPage = memo(
         waitingIndicatorKind !== "delegationWait",
       messages: visibleMessages,
       pendingPromptIds: visiblePendingPromptIds,
-      sessionId: session.id,
+      revealScopeKey: scrollStateKey,
       userScrollGeneration: messageRevealUserScrollGeneration,
     });
     const markersByMessageId = useMemo(
@@ -841,27 +842,13 @@ const SessionConversationPage = memo(
       sessionId: session.id,
       virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
     });
-    useEffect(
-      () =>
-        subscribeResponseBoardSourceNavigation(
-          session.id,
-          (request) => {
-            void requestSessionHistoryAroundPage(
-              request.sessionId,
-              request.messagePosition,
-            ).then((accepted) => {
-              if (!accepted) {
-                return;
-              }
-              window.requestAnimationFrame(() =>
-                jumpToMessageId(request.messageId),
-              );
-            });
-          },
-          conversationPageRef,
-        ),
-      [jumpToMessageId, session.id],
-    );
+    useResponseBoardSourceNavigation({
+      jumpToMessageId,
+      requestHistoryAround: requestMarkerHistoryWindow,
+      sessionId: session.id,
+      subscriberKey: conversationPageRef,
+      virtualizerHandleRef: conversationOverview.virtualizerHandleRef,
+    });
     const requestOlderPromptNavigationPage = useCallback(
       () => requestSessionHistoryOlderPage(session.id),
       [session.id],
@@ -1121,9 +1108,9 @@ const SessionConversationPage = memo(
           <ConversationMessageRevealShell
             className={`conversation-message-marker-shell can-open-marker-menu${isActiveMarkerMessage ? " is-active-marker" : ""}`}
             messageId={message.id}
+            revealScopeKey={scrollStateKey}
             revealInCurrentCommit={messageRevealIds.has(message.id)}
             revealUserScrollGeneration={messageRevealUserScrollGeneration}
-            sessionId={session.id}
             style={markerShellStyle}
             tabIndex={-1}
             userScrollGeneration={currentUserScrollGeneration}
@@ -1174,6 +1161,7 @@ const SessionConversationPage = memo(
         renderMessageCard,
         conversationOverview.virtualizerHandleRef,
         session.id,
+        scrollStateKey,
       ],
     );
 

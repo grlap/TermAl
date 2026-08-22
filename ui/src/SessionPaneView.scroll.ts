@@ -24,6 +24,9 @@ import {
   clamp,
   normalizeWheelDelta,
 } from "./app-utils";
+import { cancelConversationMessageEntryReveals } from "./panels/conversation-message-reveal";
+import { useCommittedRef } from "./panels/use-committed-ref";
+import { useStableEvent } from "./panels/use-stable-event";
 import {
   MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
@@ -231,7 +234,9 @@ export function useSessionPaneScrollState({
     key: string | null;
     until: number;
   }>({ key: null, until: Number.NEGATIVE_INFINITY });
-  const liveFlowActiveRef = useRef(false);
+  const liveFlowActiveRef = useCommittedRef(
+    isSending || showWaitingIndicator,
+  );
   const paneTailFollowDetachedByKeyRef = useRef<
     Record<string, true | undefined>
   >({});
@@ -243,7 +248,7 @@ export function useSessionPaneScrollState({
   }
   const detachedScrollRestoreController =
     detachedScrollRestoreControllerRef.current;
-  const currentScrollStateKeyRef = useRef(scrollStateKey);
+  const currentScrollStateKeyRef = useCommittedRef(scrollStateKey);
   const pendingStartHistoryDemandRef = useRef<{ key: string } | null>(null);
   const pendingTailHistoryDemandRef = useRef<{ key: string } | null>(null);
   const paneLastTouchClientYRef = useRef<number | null>(null);
@@ -256,9 +261,9 @@ export function useSessionPaneScrollState({
   const [liveTailPinnedByKey, setLiveTailPinnedByKey] = useState<
     Record<string, boolean | undefined>
   >({});
-  currentScrollStateKeyRef.current = scrollStateKey;
-  renderSequenceRef.current += 1;
-  liveFlowActiveRef.current = isSending || showWaitingIndicator;
+  useLayoutEffect(() => {
+    renderSequenceRef.current += 1;
+  });
 
   useEffect(() => {
     // Leaving a pane/session must not let its unresolved boundary demand block
@@ -911,6 +916,8 @@ export function useSessionPaneScrollState({
       return;
     }
 
+    cancelConversationMessageEntryReveals(node);
+
     const maxScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
     const nextScrollTop = clamp(node.scrollTop + deltaY, 0, maxScrollTop);
     const landsAtPhysicalBottom = isMessageStackAtPhysicalBottom(
@@ -987,6 +994,10 @@ export function useSessionPaneScrollState({
   }
 
   function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
+    const currentNode = messageStackRef.current;
+    if (currentNode) {
+      cancelConversationMessageEntryReveals(currentNode);
+    }
     if (boundary === "bottom") {
       const applyBottomBoundary = () => {
         // Explicit navigation owns the viewport before it emits any scroll
@@ -1093,122 +1104,112 @@ export function useSessionPaneScrollState({
     });
   }
 
-  const handleMessageStackWheelRef = useRef<
-    ((event: WheelEvent) => void) | null
-  >(null);
-  handleMessageStackWheelRef.current = function handleMessageStackWheel(
-    event: WheelEvent,
-  ) {
-    if (event.defaultPrevented || event.ctrlKey) {
-      return;
-    }
+  const handleMessageStackWheel = useStableEvent(
+    function handleMessageStackWheel(event: WheelEvent) {
+      if (event.defaultPrevented || event.ctrlKey) {
+        return;
+      }
 
-    const node = messageStackRef.current;
-    if (!node) {
-      return;
-    }
+      const node = messageStackRef.current;
+      if (!node) {
+        return;
+      }
 
-    const deltaY = normalizeWheelDelta(event, node);
-    if (Math.abs(deltaY) < 0.5) {
-      return;
-    }
+      const deltaY = normalizeWheelDelta(event, node);
+      if (Math.abs(deltaY) < 0.5) {
+        return;
+      }
 
-    if (canNestedScrollableConsumeWheel(event.target, node, deltaY)) {
-      return;
-    }
+      if (canNestedScrollableConsumeWheel(event.target, node, deltaY)) {
+        return;
+      }
 
-    // A wheel gesture at the physical boundary (or in a transcript shorter
-    // than its viewport) did not navigate away from the live tail. Detaching
-    // here would turn harmless trackpad overscroll into a silent follow-off.
-    if (
-      !canMoveMessageStackByDelta(
-        node.scrollTop,
-        node.scrollHeight,
-        node.clientHeight,
-        deltaY,
-      )
-    ) {
-      return;
-    }
+      // A wheel gesture at the physical boundary (or in a transcript shorter
+      // than its viewport) did not navigate away from the live tail. Detaching
+      // here would turn harmless trackpad overscroll into a silent follow-off.
+      if (
+        !canMoveMessageStackByDelta(
+          node.scrollTop,
+          node.scrollHeight,
+          node.clientHeight,
+          deltaY,
+        )
+      ) {
+        return;
+      }
 
-    event.preventDefault();
-    scrollMessageStackByDelta(deltaY, {
-      scrollKind: "incremental",
-    });
-  };
+      event.preventDefault();
+      scrollMessageStackByDelta(deltaY, {
+        scrollKind: "incremental",
+      });
+    },
+  );
 
   useEffect(() => {
     const node = messageStackRef.current;
     if (!node) {
       return;
     }
-    const listener = (event: WheelEvent) => {
-      handleMessageStackWheelRef.current?.(event);
-    };
+    const listener = (event: WheelEvent) => handleMessageStackWheel(event);
     node.addEventListener("wheel", listener, { passive: false });
     return () => {
       node.removeEventListener("wheel", listener);
     };
-  }, []);
+  }, [handleMessageStackWheel]);
 
-  const handleNestedTargetPageKeyRef = useRef<
-    ((event: KeyboardEvent) => void) | null
-  >(null);
-  handleNestedTargetPageKeyRef.current = function handleNestedTargetPageKey(
-    event: KeyboardEvent,
-  ) {
-    if (
-      event.defaultPrevented ||
-      (event.key !== "PageUp" && event.key !== "PageDown") ||
-      !isNestedEditablePageKeyTarget(event.target)
-    ) {
-      return;
-    }
-    if (
-      !(event.target instanceof Node) ||
-      !paneRootRef.current?.contains(event.target)
-    ) {
-      return;
-    }
+  const handleNestedTargetPageKey = useStableEvent(
+    function handleNestedTargetPageKey(event: KeyboardEvent) {
+      if (
+        event.defaultPrevented ||
+        (event.key !== "PageUp" && event.key !== "PageDown") ||
+        !isNestedEditablePageKeyTarget(event.target)
+      ) {
+        return;
+      }
+      if (
+        !(event.target instanceof Node) ||
+        !paneRootRef.current?.contains(event.target)
+      ) {
+        return;
+      }
 
-    const command = resolvePaneScrollCommand(
-      {
-        altKey: event.altKey,
-        ctrlKey: event.ctrlKey,
-        key: event.key,
-        metaKey: event.metaKey,
-        shiftKey: event.shiftKey,
-      },
-      event.target,
-    );
-    if (!command) {
-      return;
-    }
-
-    event.preventDefault();
-    if (command.kind === "boundary") {
-      scrollMessageStackToBoundary(
-        command.direction === "up" ? "top" : "bottom",
+      const command = resolvePaneScrollCommand(
+        {
+          altKey: event.altKey,
+          ctrlKey: event.ctrlKey,
+          key: event.key,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+        },
+        event.target,
       );
-      return;
-    }
+      if (!command) {
+        return;
+      }
 
-    scrollSessionMessageStackByPageJump(command.direction === "up" ? -1 : 1);
-  };
+      event.preventDefault();
+      if (command.kind === "boundary") {
+        scrollMessageStackToBoundary(
+          command.direction === "up" ? "top" : "bottom",
+        );
+        return;
+      }
+
+      scrollSessionMessageStackByPageJump(command.direction === "up" ? -1 : 1);
+    },
+  );
 
   useEffect(() => {
     if (!isActive || paneViewMode !== "session") {
       return;
     }
 
-    const listener = (event: KeyboardEvent) => {
-      handleNestedTargetPageKeyRef.current?.(event);
-    };
+    const listener = (event: KeyboardEvent) => handleNestedTargetPageKey(event);
     window.addEventListener("keydown", listener, true);
     return () => {
       window.removeEventListener("keydown", listener, true);
     };
-  }, [isActive, paneViewMode]);
+  }, [handleNestedTargetPageKey, isActive, paneViewMode]);
 
   function scheduleSettledScrollToBottom(
     behavior: ScrollBehavior,
@@ -1470,6 +1471,9 @@ export function useSessionPaneScrollState({
     }
     if (!isManualMessageStackScrollInput(event)) {
       return;
+    }
+    if (node) {
+      cancelConversationMessageEntryReveals(node);
     }
     cancelDetachedMessageStackRestore(scrollStateKey);
     cancelPaneProgrammaticBottomFollow();

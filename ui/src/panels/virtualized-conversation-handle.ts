@@ -347,17 +347,14 @@ export function useVirtualizedConversationHandle({
       visiblePageRange,
     ]);
 
-  const virtualizerHandleStateRef = useRef<VirtualizerHandleState | null>(null);
-  if (virtualizerHandleStateRef.current === null) {
-    virtualizerHandleStateRef.current = {
-      buildLayoutSnapshot,
-      buildViewportSnapshot,
-      jumpToMessageLocation,
-      messageLocationById,
-      messagesLength: messages.length,
-      pages,
-    };
-  }
+  const virtualizerHandleStateRef = useRef<VirtualizerHandleState>({
+    buildLayoutSnapshot,
+    buildViewportSnapshot,
+    jumpToMessageLocation,
+    messageLocationById,
+    messagesLength: messages.length,
+    pages,
+  });
   useLayoutEffect(() => {
     virtualizerHandleStateRef.current = {
       buildLayoutSnapshot,
@@ -377,11 +374,7 @@ export function useVirtualizedConversationHandle({
   ]);
 
   const readVirtualizerHandleState = useCallback(() => {
-    const state = virtualizerHandleStateRef.current;
-    if (state === null) {
-      throw new Error("virtualizer handle state is not initialized");
-    }
-    return state;
+    return virtualizerHandleStateRef.current;
   }, []);
 
   const virtualizerStableHandle = useMemo<VirtualizedConversationMessageListHandle>(

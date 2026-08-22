@@ -2,8 +2,6 @@
 // Does not own page rendering, range scheduling, or scroll event listeners.
 // Split from: ui/src/panels/VirtualizedConversationMessageList.tsx.
 import {
-  useCallback,
-  useRef,
   type MutableRefObject,
   type RefObject,
 } from "react";
@@ -18,6 +16,7 @@ import {
   type VirtualizedRange,
   type VisibleMessageAnchor,
 } from "./virtualized-conversation-measurement";
+import { useStableEvent } from "./use-stable-event";
 
 export function useVirtualizedConversationPageHeightChange({
   bumpLayoutVersion,
@@ -66,21 +65,11 @@ export function useVirtualizedConversationPageHeightChange({
   visiblePageRangeRef: MutableRefObject<VirtualizedRange>;
   writeScrollTopAndSyncViewport: (node: HTMLElement, nextScrollTop: number) => void;
 }) {
-  const handlePageHeightChangeRef = useRef<
-    ((
-      pageKey: string,
-      pageIndex: number,
-      nextHeight: number,
-      pageNode?: HTMLElement | null,
-      flushLayout?: boolean,
-    ) => void) | null
-  >(null);
-
-  handlePageHeightChangeRef.current = (
-    pageKey,
-    pageIndex,
-    nextHeight,
-    pageNode,
+  const handlePageHeightChange = (
+    pageKey: string,
+    pageIndex: number,
+    nextHeight: number,
+    pageNode?: HTMLElement | null,
     flushLayout = false,
   ) => {
     if (!Number.isFinite(nextHeight) || nextHeight <= 0) {
@@ -247,22 +236,5 @@ export function useVirtualizedConversationPageHeightChange({
     restoreBottomAfterLayout();
   };
 
-  return useCallback(
-    (
-      pageKey: string,
-      pageIndex: number,
-      nextHeight: number,
-      pageNode?: HTMLElement | null,
-      flushLayout?: boolean,
-    ) => {
-      handlePageHeightChangeRef.current?.(
-        pageKey,
-        pageIndex,
-        nextHeight,
-        pageNode,
-        flushLayout,
-      );
-    },
-    [],
-  );
+  return useStableEvent(handlePageHeightChange);
 }

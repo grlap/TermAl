@@ -1,5 +1,5 @@
-// Owns: session-scoped continuity for one-shot, paint-only reveals of newly
-// appended resident transcript messages.
+// Owns: pane-scroll-scoped continuity for one-shot, paint-only reveals of
+// newly appended resident transcript messages.
 // Does not own: card layout, scroll anchoring, virtualization measurements,
 // message hydration, or LIVE TURN presentation.
 
@@ -17,9 +17,6 @@ export type ConversationMessageRevealInput = {
 
 export type ConversationMessageRevealState = {
   liveTurnVisible: boolean;
-  // Workspace routing currently keeps one session tab (and therefore one
-  // virtualizer generation) per session. If duplicate session panes become a
-  // supported layout, pending reveals must be keyed by pane/scroll-state too.
   pendingRevealIds: ReadonlyMap<string, number>;
   pendingPromptIds: ReadonlySet<string>;
   tailMessageId: string | null;
@@ -32,10 +29,66 @@ export type ConversationMessageRevealTransition = {
 };
 
 const EMPTY_REVEAL_MESSAGE_IDS: ReadonlySet<string> = new Set();
-const revealStateBySessionId = new Map<
+export const CONVERSATION_MESSAGE_ENTRY_REVEAL_CLASS_NAME =
+  "conversation-message-entry-reveal";
+const CONVERSATION_MESSAGE_ENTRY_REVEAL_CANCELLED_ATTRIBUTE =
+  "data-conversation-message-entry-reveal-cancelled";
+const MAX_CONVERSATION_MESSAGE_REVEAL_SCOPES = 256;
+const revealStateByScopeKey = new Map<
   string,
   ConversationMessageRevealState
 >();
+
+function getConversationMessageRevealState(revealScopeKey: string) {
+  return revealStateByScopeKey.get(revealScopeKey) ?? null;
+}
+
+function setConversationMessageRevealState(
+  revealScopeKey: string,
+  state: ConversationMessageRevealState,
+) {
+  // Refresh recency only from committed/effect work, never during render.
+  // Bounding the registry preserves remount continuity without retaining
+  // every deleted session/pane scope for the lifetime of the application.
+  revealStateByScopeKey.delete(revealScopeKey);
+  revealStateByScopeKey.set(revealScopeKey, state);
+  while (
+    revealStateByScopeKey.size > MAX_CONVERSATION_MESSAGE_REVEAL_SCOPES
+  ) {
+    const oldestScopeKey = revealStateByScopeKey.keys().next().value;
+    if (oldestScopeKey === undefined) {
+      break;
+    }
+    revealStateByScopeKey.delete(oldestScopeKey);
+  }
+}
+
+export function resetConversationMessageRevealRegistryForTesting() {
+  revealStateByScopeKey.clear();
+}
+
+export function getConversationMessageRevealRegistrySizeForTesting() {
+  return revealStateByScopeKey.size;
+}
+
+export function cancelConversationMessageEntryReveals(root: ParentNode) {
+  root
+    .querySelectorAll<HTMLElement>(
+      `.${CONVERSATION_MESSAGE_ENTRY_REVEAL_CLASS_NAME}`,
+    )
+    .forEach((element) => {
+      // User navigation owns the viewport immediately. Remove the animation
+      // class in the same input task so the browser cannot paint another fade
+      // frame after wheel, touch, or keyboard scrolling starts. The unmanaged
+      // marker prevents a later React className update from restarting this
+      // one-shot animation on the same mounted message shell.
+      element.setAttribute(
+        CONVERSATION_MESSAGE_ENTRY_REVEAL_CANCELLED_ATTRIBUTE,
+        "",
+      );
+      element.classList.remove(CONVERSATION_MESSAGE_ENTRY_REVEAL_CLASS_NAME);
+    });
+}
 
 export function resolveConversationMessageRevealTransition(
   previous: ConversationMessageRevealState | null,
@@ -109,14 +162,14 @@ export function useConversationMessageRevealIds({
   liveTurnVisible,
   messages,
   pendingPromptIds,
-  sessionId,
+  revealScopeKey,
   userScrollGeneration,
 }: {
   isActive: boolean;
   liveTurnVisible: boolean;
   messages: readonly Message[];
   pendingPromptIds: readonly string[];
-  sessionId: string;
+  revealScopeKey: string;
   userScrollGeneration: number;
 }): ReadonlySet<string> {
   const messageIds = useMemo(
@@ -140,7 +193,7 @@ export function useConversationMessageRevealIds({
     ],
   );
   const transition = resolveConversationMessageRevealTransition(
-    revealStateBySessionId.get(sessionId) ?? null,
+    getConversationMessageRevealState(revealScopeKey),
     input,
   );
 
@@ -148,15 +201,17 @@ export function useConversationMessageRevealIds({
     // Commit after the DOM commit so StrictMode/concurrent render replays see
     // the same transition. Keeping the watermark outside the component makes
     // tab remounts and virtualizer recycling non-events rather than replays.
-    // Re-resolve from the latest committed watermark: the same session can be
-    // visible in two panes, and an older-window layout effect must never move a
-    // newer pane's watermark backwards.
+    // Re-resolve from the latest committed watermark for this pane/scroll
+    // scope so concurrent render replays cannot publish stale transition data.
     const committedTransition = resolveConversationMessageRevealTransition(
-      revealStateBySessionId.get(sessionId) ?? null,
+      getConversationMessageRevealState(revealScopeKey),
       input,
     );
-    revealStateBySessionId.set(sessionId, committedTransition.nextState);
-  }, [input, sessionId]);
+    setConversationMessageRevealState(
+      revealScopeKey,
+      committedTransition.nextState,
+    );
+  }, [input, revealScopeKey]);
 
   return useMemo(
     () =>
@@ -168,22 +223,22 @@ export function useConversationMessageRevealIds({
 }
 
 function pendingRevealMatches(
-  sessionId: string,
+  revealScopeKey: string,
   messageId: string,
   userScrollGeneration: number,
 ) {
   return (
-    revealStateBySessionId
-      .get(sessionId)
+    revealStateByScopeKey
+      .get(revealScopeKey)
       ?.pendingRevealIds.get(messageId) === userScrollGeneration
   );
 }
 
 function consumePendingReveal(
-  sessionId: string,
+  revealScopeKey: string,
   messageId: string,
 ) {
-  const current = revealStateBySessionId.get(sessionId);
+  const current = getConversationMessageRevealState(revealScopeKey);
   if (!current?.pendingRevealIds.has(messageId)) {
     return;
   }
@@ -192,7 +247,7 @@ function consumePendingReveal(
   // A matching entry has now painted once. A mismatched entry became stale
   // because the reader navigated before its virtualized shell mounted.
   nextPendingRevealIds.delete(messageId);
-  revealStateBySessionId.set(sessionId, {
+  setConversationMessageRevealState(revealScopeKey, {
     ...current,
     pendingRevealIds: nextPendingRevealIds,
   });
@@ -200,15 +255,15 @@ function consumePendingReveal(
 
 export function useConversationMessageRevealOnMount({
   messageId,
+  revealScopeKey,
   revealInCurrentCommit,
   revealUserScrollGeneration,
-  sessionId,
   userScrollGeneration,
 }: {
   messageId: string;
+  revealScopeKey: string;
   revealInCurrentCommit: boolean;
   revealUserScrollGeneration: number;
-  sessionId: string;
   userScrollGeneration: number;
 }) {
   const shouldRevealRef = useRef<boolean | null>(null);
@@ -216,7 +271,7 @@ export function useConversationMessageRevealOnMount({
     shouldRevealRef.current =
       (revealInCurrentCommit &&
         revealUserScrollGeneration === userScrollGeneration) ||
-      pendingRevealMatches(sessionId, messageId, userScrollGeneration);
+      pendingRevealMatches(revealScopeKey, messageId, userScrollGeneration);
   }
 
   useEffect(() => {
@@ -224,8 +279,8 @@ export function useConversationMessageRevealOnMount({
     // this commit's pending ids. That ordering makes both an immediate mount
     // and the virtualizer's later mounted-range commit exactly-once, including
     // StrictMode's render/effect replay.
-    consumePendingReveal(sessionId, messageId);
-  }, [messageId, sessionId, userScrollGeneration]);
+    consumePendingReveal(revealScopeKey, messageId);
+  }, [messageId, revealScopeKey, userScrollGeneration]);
 
   return shouldRevealRef.current;
 }

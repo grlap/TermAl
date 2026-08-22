@@ -5082,9 +5082,14 @@ textarea {
 }
 
 .conversation-message-entry-reveal {
-  /* Opacity is deliberately the only animated property: it cannot change
-     layout, scroll height, containing blocks, or pane bottom-follow geometry. */
-  animation: conversation-message-entry-reveal 160ms ease-out both;
+  /* Animate only the newly mounted inner message shell. Opacity and a tiny
+     compositor translation leave slot size, scroll height, virtualizer
+     measurement, and the pane's synchronous bottom-follow write unchanged. */
+  animation: conversation-message-entry-reveal 180ms ease-out both;
+}
+
+.conversation-message-entry-reveal[data-conversation-message-entry-reveal-cancelled] {
+  animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -5096,10 +5101,12 @@ textarea {
 @keyframes conversation-message-entry-reveal {
   from {
     opacity: 0;
+    transform: translateY(6px);
   }
 
   to {
     opacity: 1;
+    transform: translateY(0);
   }
 }
 

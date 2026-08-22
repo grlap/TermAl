@@ -81,6 +81,7 @@ import { useVirtualizedConversationPageHeightChange } from "./virtualized-conver
 import { useVirtualizedConversationPrependEffects } from "./virtualized-conversation-prepend";
 import { MeasuredPageBand } from "./virtualized-conversation-rendering";
 import { useVirtualizedConversationScrollEvents } from "./virtualized-conversation-scroll-events";
+import { useCommittedRef } from "./use-committed-ref";
 import type {
   BoundCodexAppRequestSubmitHandler,
   BoundMcpElicitationSubmitHandler,
@@ -216,18 +217,17 @@ export function VirtualizedConversationMessageList({
   >(new WeakMap());
   const shouldKeepBottomAfterLayoutRef = useRef(false);
   const isDetachedFromBottomRef = useRef(false);
-  const tailFollowIntentRef = useRef(tailFollowIntent);
-  tailFollowIntentRef.current = tailFollowIntent;
-  const tailFollowIntentIsAuthoritativeRef = useRef(
+  const tailFollowIntentRef = useCommittedRef(tailFollowIntent);
+  const tailFollowIntentIsAuthoritativeRef = useCommittedRef(
     tailFollowIntentIsAuthoritative,
   );
-  tailFollowIntentIsAuthoritativeRef.current =
-    tailFollowIntentIsAuthoritative;
   const skipNextMountedPrependRestoreRef = useRef(false);
   const lastPinnedConversationSearchPositionKeyRef = useRef<string | null>(
     null,
   );
-  const activeConversationSearchPositionKeyRef = useRef<string | null>(null);
+  const activeConversationSearchPositionKeyRef = useCommittedRef(
+    activeConversationSearchPositionKey,
+  );
   const lastUserScrollInputTimeRef = useRef(Number.NEGATIVE_INFINITY);
   const lastUserScrollKindRef = useRef<UserScrollKind>(null);
   const lastTouchClientYRef = useRef<number | null>(null);
@@ -256,13 +256,13 @@ export function VirtualizedConversationMessageList({
     ids: messages.map((message) => message.id),
     sessionId,
   });
-  const isMessagePrependCommitRef = useRef(false);
-  isMessagePrependCommitRef.current =
+  const isMessagePrependCommit =
     resolvePrependedMessageCount(
       previousMessageWindowRef.current,
       messages,
       sessionId,
     ) !== null;
+  const isMessagePrependCommitRef = useCommittedRef(isMessagePrependCommit);
   const latestVisibleMessageAnchorRef = useRef<VisibleMessageAnchor | null>(
     null,
   );
@@ -278,9 +278,6 @@ export function VirtualizedConversationMessageList({
   const pendingBottomBoundarySeekRef = useRef(false);
   const renderedListRef = useRef<HTMLDivElement | null>(null);
   const hasUserScrollInteractionRef = useRef(false);
-  activeConversationSearchPositionKeyRef.current =
-    activeConversationSearchPositionKey;
-
   const [viewport, setViewport] = useState({
     height: DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
     scrollTop: 0,
@@ -302,10 +299,6 @@ export function VirtualizedConversationMessageList({
     useState(false);
   const [bottomBoundaryRevealToken, setBottomBoundaryRevealToken] = useState(0);
   const previousIsActiveRef = useRef(isActive);
-  const visiblePageRangeRef = useRef<VirtualizedRange>({
-    startIndex: 0,
-    endIndex: 0,
-  });
 
   const setHasUserScrollInteraction = useCallback((nextValue: boolean) => {
     hasUserScrollInteractionRef.current = nextValue;
@@ -691,18 +684,22 @@ export function VirtualizedConversationMessageList({
     () => new Set(pages.map((page) => page.key)),
     [pages],
   );
-  const currentPageIdentityRef = useRef<
-    Record<string, PageMeasurementIdentity>
-  >({});
-  currentPageIdentityRef.current = Object.fromEntries(
-    pages.map((page) => [
-      page.key,
-      {
-        hasTrailingGap: page.hasTrailingGap,
-        messages: page.messages,
-      },
-    ]),
+  const currentPageIdentity = useMemo(
+    () =>
+      Object.fromEntries(
+        pages.map((page) => [
+          page.key,
+          {
+            hasTrailingGap: page.hasTrailingGap,
+            messages: page.messages,
+          },
+        ]),
+      ),
+    [pages],
   );
+  const currentPageIdentityRef = useCommittedRef<
+    Record<string, PageMeasurementIdentity>
+  >(currentPageIdentity);
   const messageLocationById = useMemo(() => {
     const locations = new Map<string, MessageLocation>();
     pages.forEach((page) => {
@@ -802,9 +799,18 @@ export function VirtualizedConversationMessageList({
       }),
     [estimateMessageHeight, layoutVersion, pages, viewportWidth],
   );
-  const layoutPageHeightsRef = useRef<Record<string, number>>({});
-  layoutPageHeightsRef.current = Object.fromEntries(
-    pages.map((page, pageIndex) => [page.key, pageHeights[pageIndex] ?? 0]),
+  const layoutPageHeights = useMemo(
+    () =>
+      Object.fromEntries(
+        pages.map((page, pageIndex) => [
+          page.key,
+          pageHeights[pageIndex] ?? 0,
+        ]),
+      ),
+    [pageHeights, pages],
+  );
+  const layoutPageHeightsRef = useCommittedRef<Record<string, number>>(
+    layoutPageHeights,
   );
   const pageLayout = useMemo(() => buildPageLayout(pageHeights), [pageHeights]);
   const estimatedBottomScrollTop = clampVirtualizedViewportScrollTop({
@@ -850,7 +856,7 @@ export function VirtualizedConversationMessageList({
     viewportHeight,
     viewportScrollTop,
   ]);
-  visiblePageRangeRef.current = visiblePageRange;
+  const visiblePageRangeRef = useCommittedRef(visiblePageRange);
 
   const activeConversationSearchLocation =
     activeConversationSearchMessageId !== null
@@ -946,8 +952,7 @@ export function VirtualizedConversationMessageList({
   const [mountedPageRange, setMountedPageRange] = useState<VirtualizedRange>(
     workingMountedPageRange,
   );
-  const mountedPageRangeRef = useRef(mountedPageRange);
-  mountedPageRangeRef.current = mountedPageRange;
+  const mountedPageRangeRef = useCommittedRef(mountedPageRange);
   const applyMountedPageRange = useCallback(
     (
       nextRange: VirtualizedRange,
@@ -1018,16 +1023,15 @@ export function VirtualizedConversationMessageList({
     }
     return anchor;
   }, []);
-  const pageLayoutTopsRef = useRef(pageLayout.tops);
-  pageLayoutTopsRef.current = pageLayout.tops;
-  const pageHeightsRefForScroll = useRef(pageHeights);
-  pageHeightsRefForScroll.current = pageHeights;
-  const pagesLengthRef = useRef(pages.length);
-  pagesLengthRef.current = pages.length;
-  const activeMountedBufferAbovePxRef = useRef(activeMountedBufferAbovePx);
-  activeMountedBufferAbovePxRef.current = activeMountedBufferAbovePx;
-  const activeMountedBufferBelowPxRef = useRef(activeMountedBufferBelowPx);
-  activeMountedBufferBelowPxRef.current = activeMountedBufferBelowPx;
+  const pageLayoutTopsRef = useCommittedRef(pageLayout.tops);
+  const pageHeightsRefForScroll = useCommittedRef(pageHeights);
+  const pagesLengthRef = useCommittedRef(pages.length);
+  const activeMountedBufferAbovePxRef = useCommittedRef(
+    activeMountedBufferAbovePx,
+  );
+  const activeMountedBufferBelowPxRef = useCommittedRef(
+    activeMountedBufferBelowPx,
+  );
 
   // See the search pin state-machine comment above
   // `releaseConversationSearchPinForUserScroll`.
@@ -1073,7 +1077,7 @@ export function VirtualizedConversationMessageList({
     viewportHeight,
   ]);
   const preserveMountedPageRangeForPrepend =
-    isMessagePrependCommitRef.current ||
+    isMessagePrependCommit ||
     pendingPrependedMessageAnchorRef.current !== null;
   const renderedMountedPageRange = useMemo(() => {
     return resolveRenderedMountedPageRange({

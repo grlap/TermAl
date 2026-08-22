@@ -405,6 +405,46 @@ describe("useConversationOverviewController", () => {
     });
   });
 
+  it("refreshes the viewport when a same-size resident window shifts", () => {
+    fetchSessionOverview.mockImplementationOnce(
+      () => new Promise<SessionOverviewResponse>(() => {}),
+    );
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, value: 400, writable: true },
+    });
+    const scrollContainerRef = { current: scrollNode };
+    const { result, rerender } = renderHook(
+      (props) => useConversationOverviewController(props),
+      {
+        initialProps: controllerProps({
+          messageStartIndex: 69,
+          renderedMessageCount: 30,
+          scrollContainerRef,
+        }),
+      },
+    );
+    expect(result.current.viewport).toEqual({
+      startPosition: 81,
+      endPosition: 87,
+    });
+
+    rerender(
+      controllerProps({
+        messageStartIndex: 70,
+        renderedMessageCount: 30,
+        scrollContainerRef,
+      }),
+    );
+
+    expect(result.current.viewport).toEqual({
+      startPosition: 82,
+      endPosition: 88,
+    });
+  });
+
   it("keeps the rail frame anchored to the scroll viewport across wheel scrolls", async () => {
     const pane = document.createElement("section");
     pane.className = "workspace-pane";

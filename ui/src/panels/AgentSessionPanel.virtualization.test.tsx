@@ -676,84 +676,64 @@ describe("AgentSessionPanel virtualization", () => {
       `${runtimeProcess.cwd()}/src/styles.css`,
       "utf8",
     );
+    const productionStyles = document.createElement("style");
+    productionStyles.dataset.testProductionStyles = "true";
+    productionStyles.textContent = stylesCss;
+    document.head.append(productionStyles);
     const messages = makeTextMessages(40);
     stubConversationOverview("wide-session", messages.length);
-    const paneClientWidth = 689;
-    const blownOutPaneScrollWidth = 1_175;
-    const { container } = renderSessionPanelWithDefaults({
-      activeSession: makeSession("wide-session", { messages }),
-      renderMessageCard: (message) => (
-        <article
-          className={`message-card ${
-            message.author === "you" ? "bubble-you" : "bubble-assistant"
-          }`}
-        >
-          {message.id === "message-40" ? (
-            <pre>
-              <code>{"unbreakable".repeat(200)}</code>
-            </pre>
-          ) : (
-            message.id
-          )}
-        </article>
-      ),
-    });
-    await screen.findByLabelText(/^Conversation overview,/);
+    try {
+      const { container } = renderSessionPanelWithDefaults({
+        activeSession: makeSession("wide-session", { messages }),
+        renderMessageCard: (message) => (
+          <article
+            className={`message-card ${
+              message.author === "you" ? "bubble-you" : "bubble-assistant"
+            }`}
+          >
+            {message.id === "message-40" ? (
+              <pre>
+                <code>{"unbreakable".repeat(200)}</code>
+              </pre>
+            ) : (
+              message.id
+            )}
+          </article>
+        ),
+      });
+      await screen.findByLabelText(/^Conversation overview,/);
 
-    const pane = container.querySelector<HTMLElement>(
-      ".session-conversation-page.has-conversation-overview-scroll",
-    );
-    expect(pane).not.toBeNull();
-    expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
-    expect(container.querySelector(".bubble-you")).not.toBeNull();
+      const widthConstraintSelectors = [
+        ".session-conversation-page",
+        ".conversation-with-overview",
+        ".conversation-overview-content",
+        ".virtualized-message-list",
+        ".virtualized-message-page",
+        ".virtualized-message-range",
+        ".virtualized-message-slot",
+        ".message-slot",
+      ];
+      widthConstraintSelectors.forEach((selector) => {
+        const node = container.querySelector<HTMLElement>(selector);
+        expect(
+          node,
+          `missing production width constraint ${selector}`,
+        ).not.toBeNull();
+        expect(
+          window.getComputedStyle(node as HTMLElement).minWidth,
+          `${selector} must remain shrinkable in the production cascade`,
+        ).toMatch(/^0(?:px)?$/);
+      });
 
-    const widthConstraintSelectors = [
-      ".session-conversation-page",
-      ".conversation-with-overview",
-      ".conversation-overview-content",
-      ".virtualized-message-list",
-      ".virtualized-message-page",
-      ".virtualized-message-range",
-      ".virtualized-message-slot",
-      ".message-slot",
-    ];
-    expect(stylesCss).toContain(".session-conversation-page");
-    widthConstraintSelectors.forEach((selector) => {
-      const node = container.querySelector<HTMLElement>(selector);
-      expect(node, `missing production width constraint ${selector}`).not.toBeNull();
-    });
-    const selectorHasMinWidthZero = (selector: string) => {
-      const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      return new RegExp(
-        `${escapedSelector}\\s*\\{[^}]*min-width:\\s*0(?:px)?\\s*;`,
-        "m",
-      ).test(stylesCss);
-    };
-    const nonShrinkableGridItems = () =>
-      widthConstraintSelectors.filter(
-        (selector) => !selectorHasMinWidthZero(selector),
-      );
-    const hasOnlyShrinkableGridItems = () =>
-      nonShrinkableGridItems().length === 0;
-
-    Object.defineProperties(pane as HTMLElement, {
-      clientWidth: {
-        configurable: true,
-        value: paneClientWidth,
-      },
-      scrollWidth: {
-        configurable: true,
-        get: () =>
-          hasOnlyShrinkableGridItems()
-            ? paneClientWidth
-            : blownOutPaneScrollWidth,
-      },
-    });
-
-    expect(nonShrinkableGridItems()).toEqual([]);
-    expect((pane as HTMLElement).scrollWidth).toBe(
-      (pane as HTMLElement).clientWidth,
-    );
+      expect(container.querySelector(".bubble-you")).not.toBeNull();
+      expect(
+        window.getComputedStyle(
+          container.querySelector<HTMLElement>(".conversation-with-overview")!,
+        ).gridTemplateColumns,
+      ).toContain("minmax(0, 1fr)");
+    } finally {
+      productionStyles.remove();
+    }
   });
 
   it("keeps the overview mounted and globally positioned for a 20-message tail of a large session", async () => {

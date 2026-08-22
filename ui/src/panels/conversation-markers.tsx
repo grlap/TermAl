@@ -16,6 +16,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type RefObject,
 } from "react";
+import { useCommittedRef } from "./use-committed-ref";
 import { createPortal } from "react-dom";
 
 import { DiffNavArrow } from "./DiffPanelIcons";
@@ -153,14 +154,12 @@ export function useConversationMarkerJump({
   const correctionTokenRef = useRef(0);
   const markerRequestTokenRef = useRef(0);
   const markerRetryFrameRef = useRef<number | null>(null);
-  const activeSessionIdRef = useRef(sessionId);
+  const activeSessionIdRef = useCommittedRef(sessionId);
   const messageSlotNodesRef = useRef<Map<string, HTMLElement>>(new Map());
   const messageSlotNodesSessionIdRef = useRef(sessionId);
   const [pendingHydratedJumpMessageId, setPendingHydratedJumpMessageId] =
     useState<string | null>(null);
   const requestedHistoryWindowKeyRef = useRef<string | null>(null);
-  activeSessionIdRef.current = sessionId;
-
   const ensureMessageSlotCacheForCurrentSession = useCallback(() => {
     if (messageSlotNodesSessionIdRef.current !== sessionId) {
       messageSlotNodesRef.current = new Map();
@@ -664,15 +663,13 @@ export function useConversationMarkerContextMenu({
 }) {
   const [contextMenu, setContextMenu] =
     useState<ConversationMarkerContextMenuState | null>(null);
-  const contextMenuRef = useRef<ConversationMarkerContextMenuState | null>(null);
+  const contextMenuRef = useCommittedRef(contextMenu);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const firstMenuItemRef = useRef<HTMLButtonElement | null>(null);
   const createNameInputRef = useRef<HTMLInputElement | null>(null);
   const createNameLimitId = useId();
   const focusRestoreFrameRef = useRef<number | null>(null);
   const isContextMenuOpen = contextMenu !== null;
-  contextMenuRef.current = contextMenu;
-
   const cancelFocusRestoreFrame = useCallback(() => {
     if (focusRestoreFrameRef.current !== null) {
       window.cancelAnimationFrame(focusRestoreFrameRef.current);

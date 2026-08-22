@@ -14,6 +14,7 @@ import {
   useState,
   type RefObject,
 } from "react";
+import { useCommittedRef } from "./use-committed-ref";
 
 import {
   fetchSessionOverview,
@@ -82,20 +83,22 @@ export function useConversationOverviewController({
   const overviewRefreshBurstStartedAtRef = useRef<number | null>(null);
   const overviewRefreshTimerRef = useRef<number | null>(null);
   const overviewRequestIdRef = useRef(0);
-  const readyOverviewSessionIdRef = useRef<string | null>(null);
   const pendingLayoutScrollRestoreRef =
     useRef<PendingOverviewLayoutScrollRestore | null>(null);
-  const scrollStateKeyRef = useRef(scrollStateKey);
-  const sessionIdRef = useRef(sessionId);
-  const tailFollowIntentRef = useRef(tailFollowIntent);
-  const messageStartIndexRef = useRef(messageStartIndex);
-  const renderedMessageCountRef = useRef(renderedMessageCount);
+  const scrollStateKeyRef = useCommittedRef(scrollStateKey);
+  const sessionIdRef = useCommittedRef(sessionId);
+  const tailFollowIntentRef = useCommittedRef(tailFollowIntent);
+  const messageStartIndexRef = useCommittedRef(messageStartIndex);
+  const renderedMessageCountRef = useCommittedRef(renderedMessageCount);
   const [overview, setOverview] = useState<SessionOverviewResponse | null>(null);
   const [viewport, setViewport] = useState<ConversationOverviewViewport>(
     EMPTY_OVERVIEW_VIEWPORT,
   );
   const [railFrame, setRailFrame] =
     useState<ConversationOverviewRailFrame | null>(null);
+  const readyOverviewSessionIdRef = useCommittedRef(
+    overview?.sessionId ?? null,
+  );
   const hasReadyOverview = overview?.sessionId === sessionId;
   // Eligibility starts/refreshes the server request. Readiness alone enables
   // the wrapper and CSS that replace the native scrollbar with the overview
@@ -103,13 +106,6 @@ export function useConversationOverviewController({
   // working scroll affordance.
   const shouldRequestOverview = isActive && isOverviewEligible;
   const shouldRender = shouldRequestOverview && hasReadyOverview;
-  readyOverviewSessionIdRef.current = overview?.sessionId ?? null;
-  scrollStateKeyRef.current = scrollStateKey;
-  sessionIdRef.current = sessionId;
-  tailFollowIntentRef.current = tailFollowIntent;
-  messageStartIndexRef.current = messageStartIndex;
-  renderedMessageCountRef.current = renderedMessageCount;
-
   const cancelOverviewRefreshTimer = useCallback(() => {
     if (overviewRefreshTimerRef.current !== null) {
       window.clearTimeout(overviewRefreshTimerRef.current);
