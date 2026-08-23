@@ -673,6 +673,7 @@ impl AppState {
                 }
                 record.runtime = SessionRuntime::None;
                 record.pending_claude_approvals.clear();
+                record.pending_claude_user_inputs.clear();
                 record.runtime_reset_required = false;
             }
 
@@ -695,6 +696,7 @@ impl AppState {
                     })?;
                     record.runtime = SessionRuntime::None;
                     record.pending_claude_approvals.clear();
+                    record.pending_claude_user_inputs.clear();
                 }
                 SessionRuntime::None => {}
             }

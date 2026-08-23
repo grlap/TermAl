@@ -4465,7 +4465,6 @@ textarea {
   align-content: start;
 }
 
-.message-stack:has(.conversation-with-overview),
 .message-stack:has(
   .session-conversation-page.has-conversation-overview-scroll
 ) {
@@ -4484,7 +4483,6 @@ textarea {
   overflow-anchor: none;
 }
 
-.message-stack:has(.conversation-with-overview)::-webkit-scrollbar,
 .message-stack:has(
     .session-conversation-page.has-conversation-overview-scroll
   )::-webkit-scrollbar {
@@ -4911,9 +4909,8 @@ textarea {
 }
 
 .conversation-overview-rail.is-pending {
-  cursor: default;
+  cursor: pointer;
   opacity: 0.55;
-  pointer-events: none;
 }
 
 .conversation-overview-rail.is-pending::before {
@@ -11852,13 +11849,22 @@ textarea {
 }
 
 .message-stack.response-board-panel-stack {
+  display: flex;
+  flex-direction: column;
+  align-content: stretch;
+  gap: 0;
   padding: 0;
   overflow: hidden;
 }
 
+.message-stack.response-board-panel-stack > .response-board-panel {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
 .response-board-panel {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   width: 100%;
   min-width: 0;
   min-height: 0;
@@ -11970,6 +11976,7 @@ textarea {
 
 .response-board-surface {
   position: relative;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -11990,6 +11997,243 @@ textarea {
   background-size:
     1.25rem 1.25rem,
     auto;
+}
+
+.response-board-tabs {
+  z-index: 3;
+  flex: none;
+  min-width: 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-card) 94%, transparent);
+  scrollbar-width: thin;
+}
+
+.response-board-tab-list {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+  width: max-content;
+  min-width: 100%;
+  padding: 0.35rem 0.55rem;
+}
+
+.response-board-tab-wrap {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+}
+
+.response-board-tab-wrap:has(> button.is-active) {
+  border-color: color-mix(in srgb, var(--signal-blue) 55%, var(--line));
+  background: color-mix(in srgb, var(--signal-blue) 10%, var(--surface-white));
+}
+
+.response-board-tab-wrap > button,
+.response-board-add-tab,
+.response-board-tab-actions button {
+  min-height: 2rem;
+  border: 0;
+  background: transparent;
+}
+
+.response-board-tab-wrap > button {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.65rem;
+  color: var(--muted);
+}
+
+.response-board-tab-wrap > button.is-active {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.response-board-tab-wrap small {
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 55%, transparent);
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.response-board-tab-actions {
+  display: flex;
+  padding-right: 0.2rem;
+}
+
+.response-board-tab-actions button {
+  min-width: 1.55rem;
+  min-height: 1.55rem;
+  padding: 0;
+  color: var(--muted);
+}
+
+.response-board-tab-actions button:disabled {
+  opacity: 0.35;
+}
+
+.response-board-add-tab {
+  min-width: 2rem;
+  color: var(--signal-blue);
+  font-size: 1rem;
+}
+
+.response-board-tab-edit {
+  display: flex;
+  align-items: center;
+}
+
+.response-board-tab-edit input {
+  width: 9rem;
+  min-height: 2rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--signal-blue);
+  border-radius: 0.5rem;
+  background: var(--surface-white);
+  color: var(--ink);
+}
+
+.response-board-staging {
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.7rem;
+  flex: none;
+  min-width: 0;
+  padding: 0.42rem 0.65rem;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-warm) 86%, var(--panel));
+}
+
+.response-board-staging > header {
+  display: grid;
+  min-width: 4.5rem;
+}
+
+.response-board-staging > header strong {
+  color: var(--ink);
+  font-size: 0.72rem;
+}
+
+.response-board-staging > header span,
+.response-board-staging-empty {
+  color: var(--muted);
+  font-size: 0.64rem;
+}
+
+.response-board-staging-list {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0.08rem 0 0.2rem;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.response-board-staged-card-item {
+  flex: 0 0 auto;
+}
+
+.response-board-staged-card {
+  display: grid;
+  grid-template-columns: auto minmax(5rem, 1fr) auto;
+  align-items: center;
+  gap: 0.38rem;
+  flex: 0 0 auto;
+  max-width: 15rem;
+  min-height: 2.05rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  background: var(--surface-card);
+  color: var(--ink);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--shadow-color, black) 8%, transparent);
+  cursor: grab;
+}
+
+.response-board-staged-card.is-previewing {
+  border-color: var(--signal-blue);
+}
+
+.response-board-staged-card > span:nth-child(2) {
+  overflow: hidden;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.response-board-staged-card small {
+  color: var(--muted);
+  font-size: 0.6rem;
+}
+
+.response-board-preview {
+  position: absolute;
+  z-index: 4;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  width: min(46rem, calc(100% - 1.5rem));
+  max-height: min(24rem, calc(100% - 1.5rem));
+  padding: 0.55rem 0.7rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface-card);
+  box-shadow: 0 16px 36px color-mix(in srgb, var(--shadow-color, black) 22%, transparent);
+}
+
+.response-board-preview-content {
+  min-width: 0;
+  overflow: auto;
+}
+
+.response-board-preview-content > .message-card {
+  margin: 0;
+  box-shadow: none;
+}
+
+.response-board-preview-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  max-width: 24rem;
+}
+
+.response-board-preview-actions label,
+.response-board-card-footer label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.66rem;
+}
+
+.response-board-preview-actions select,
+.response-board-card-footer select {
+  max-width: 8rem;
+  min-height: 1.8rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  background: var(--surface-white);
+  color: var(--ink);
+  font-size: 0.68rem;
+}
+
+.response-board-preview-actions .is-danger {
+  color: var(--signal-red);
 }
 
 .response-board-surface.is-panning {
@@ -12124,7 +12368,9 @@ textarea {
 
 .response-board-card-footer {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 0.4rem;
   padding: 0.4rem 0.6rem;
   border-top: 1px solid var(--line);
 }

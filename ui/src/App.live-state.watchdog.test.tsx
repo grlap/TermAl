@@ -448,10 +448,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
         screen.getByRole("button", { name: "Approve" }),
       ).toBeInTheDocument();
 
-      await advanceTimers(
-        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS +
-          LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,
-      );
+      await crossStaleTransportWindowAndRunOneWatchdogTick();
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(0);
@@ -464,10 +461,12 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       ).toBeInTheDocument();
       fetchMock.mockClear();
 
-      await advanceTimers(
-        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS +
-          LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,
-      );
+      // The stale-threshold classification for a resolved approval is pinned
+      // by live-updates.test.ts. This integration assertion owns the distinct
+      // contract that accepting the approval does not trigger a resync on the
+      // next scheduled watchdog tick. Jumping the clock here would fabricate a
+      // wake gap, which intentionally follows a broader recovery path.
+      await advanceTimers(LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS);
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(0);

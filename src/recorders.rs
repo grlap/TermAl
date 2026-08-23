@@ -211,6 +211,35 @@ impl SessionRecorder {
         )
     }
 
+    /// Records a Claude AskUserQuestion dialog and retains its routing data
+    /// until the browser submits every answer.
+    fn push_claude_user_input_request(
+        &mut self,
+        title: &str,
+        detail: &str,
+        questions: Vec<UserInputQuestion>,
+        request: ClaudePendingUserInput,
+    ) -> Result<()> {
+        recorder_finish_streaming_text(self)?;
+        let state = self.state.clone();
+        let session_id = self.session_id.clone();
+        let message_id = state.allocate_message_id();
+        state.push_message(
+            &session_id,
+            Message::UserInputRequest {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: title.to_owned(),
+                detail: detail.to_owned(),
+                questions,
+                state: InteractionRequestState::Pending,
+                submitted_answers: None,
+            },
+        )?;
+        state.register_claude_pending_user_input(&session_id, message_id, request)
+    }
+
     /// ACP-specific approval entry point. Mirrors `push_claude_approval` but
     /// registers the pending approval against the ACP runtime handle so the
     /// user's decision gets forwarded to the ACP agent's permission request.

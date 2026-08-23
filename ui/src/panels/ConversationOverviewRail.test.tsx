@@ -24,6 +24,7 @@ describe("ConversationOverviewRail", () => {
   it("waits for complete pane-local geometry before mounting a loading rail", () => {
     const { rerender } = render(
       <ConversationOverviewRail
+        messageCount={100}
         overview={null}
         portalTarget={document.body}
         viewport={{ startPosition: 0, endPosition: 1 }}
@@ -36,6 +37,7 @@ describe("ConversationOverviewRail", () => {
     rerender(
       <ConversationOverviewRail
         heightPx={480}
+        messageCount={100}
         rightPx={28}
         topPx={96}
         overview={null}
@@ -46,8 +48,53 @@ describe("ConversationOverviewRail", () => {
     );
     const rail = screen.getByTestId("conversation-overview-rail");
     expect(rail).toHaveClass("is-pending");
-    expect(rail).toHaveAttribute("aria-label", "Loading conversation overview");
+    expect(rail).toHaveAttribute(
+      "aria-label",
+      "Conversation overview loading, message 1 of 100",
+    );
     expect(rail).toHaveStyle({ position: "absolute" });
+    expect(rail).toHaveAttribute("tabindex", "0");
+  });
+
+  it("keeps pointer and keyboard scrolling available while overview data loads", () => {
+    const onNavigate = vi.fn();
+    render(
+      <ConversationOverviewRail
+        heightPx={480}
+        messageCount={100}
+        rightPx={28}
+        topPx={96}
+        overview={null}
+        portalTarget={document.body}
+        viewport={{ startPosition: 40, endPosition: 60 }}
+        onNavigate={onNavigate}
+      />,
+    );
+    const rail = screen.getByTestId("conversation-overview-rail");
+    rail.getBoundingClientRect = () =>
+      ({
+        top: 100,
+        height: 400,
+        bottom: 500,
+        left: 0,
+        right: 40,
+        width: 40,
+        x: 0,
+        y: 100,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    fireEvent.pointerDown(rail, {
+      button: 0,
+      clientY: 300,
+      pointerId: 1,
+    });
+    expect(onNavigate).toHaveBeenLastCalledWith(50);
+
+    fireEvent.keyDown(rail, { key: "PageDown" });
+    expect(onNavigate).toHaveBeenLastCalledWith(50);
+    fireEvent.keyDown(rail, { key: "End" });
+    expect(onNavigate).toHaveBeenLastCalledWith(99);
   });
 
   it("anchors the rail inside its owning pane instead of the global body", () => {
@@ -57,6 +104,7 @@ describe("ConversationOverviewRail", () => {
     const { unmount } = render(
       <ConversationOverviewRail
         heightPx={480}
+        messageCount={100}
         rightPx={28}
         topPx={96}
         overview={overview()}
@@ -82,6 +130,7 @@ describe("ConversationOverviewRail", () => {
     render(
       <ConversationOverviewRail
         heightPx={480}
+        messageCount={100}
         rightPx={28}
         topPx={96}
         overview={overview()}
@@ -115,6 +164,7 @@ describe("ConversationOverviewRail", () => {
     render(
       <ConversationOverviewRail
         heightPx={480}
+        messageCount={100}
         rightPx={28}
         topPx={96}
         overview={overview()}
@@ -151,6 +201,7 @@ describe("ConversationOverviewRail", () => {
     render(
       <ConversationOverviewRail
         heightPx={480}
+        messageCount={100}
         rightPx={28}
         topPx={96}
         overview={overview()}

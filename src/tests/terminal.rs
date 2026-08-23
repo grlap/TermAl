@@ -1702,8 +1702,8 @@ fn run_terminal_shell_command_timeout_kills_process_tree() {
     fs::remove_dir_all(root).unwrap();
 }
 
-// Pins `run_terminal_shell_command_with_timeout` succeeding on a
-// normal shell exit and — on Windows — still reaping a backgrounded
+// Pins `run_terminal_shell_command` succeeding on a normal shell exit and —
+// on Windows — still reaping a backgrounded
 // grandchild via `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Unix deliberately
 // skips `killpg` on clean exit (PID-reuse race), so there is no Unix cleanup
 // contract to test here; ordinary Unix shell exit is covered separately.
@@ -1715,7 +1715,7 @@ fn run_terminal_shell_command_cleans_up_background_children_after_shell_exit() {
     let marker = root.join("background-marker.txt");
     let command = terminal_background_process_tree_command(&marker);
 
-    let response = run_terminal_shell_command_with_timeout(&command, &root, Duration::from_secs(3))
+    let response = run_terminal_shell_command(&command, &root)
         .expect("background command should return a response");
 
     assert!(!response.timed_out);
@@ -1738,48 +1738,49 @@ fn run_terminal_shell_command_cleans_up_background_children_after_shell_exit() {
     fs::remove_dir_all(root).unwrap();
 }
 
-// Pins the configured-timeout success path on Unix P0 platforms while a
-// backgrounded grandchild is still alive. Unix clean exit deliberately skips
-// killpg to avoid a PID-reuse race, so the child is released explicitly after
-// the parent response proves the live-grandchild path returned pre-deadline.
+// Pins the production clean-exit path on Unix while a backgrounded grandchild
+// is still alive. Timeout behavior is covered separately by process-status and
+// process-tree timeout tests; combining an arbitrary wall-clock deadline with
+// this clean-exit contract would test host scheduler latency instead. The
+// parent shell reports the PID returned by `$!` immediately after creating a
+// long-lived background process. The test proves that process remains live
+// beyond the parent response, then terminates that exact PID while it is still
+// known to be ours.
 #[cfg(not(windows))]
 #[test]
-fn run_terminal_shell_command_with_timeout_succeeds_with_live_unix_grandchild() {
+fn run_terminal_shell_command_succeeds_with_live_unix_grandchild() {
     let root = std::env::temp_dir().join(format!(
-        "termal-terminal-timeout-success-{}",
+        "termal-terminal-live-grandchild-{}",
         Uuid::new_v4()
     ));
     fs::create_dir_all(&root).unwrap();
-    let started = root.join("background-started.txt");
-    let release = root.join("background-release.txt");
-    let finished = root.join("background-finished.txt");
-    let command = terminal_live_background_success_command(&started, &release, &finished);
+    let command = terminal_live_background_success_command();
 
-    let response = run_terminal_shell_command_with_timeout(&command, &root, Duration::from_secs(3));
-    let started_before_release = started.exists();
-    let finished_before_release = finished.exists();
-    fs::write(&release, b"release").expect("background grandchild should be released");
-    if started_before_release {
-        wait_for_path_to_exist(
-            &finished,
-            Duration::from_secs(2),
-            "released background grandchild should finish",
-        );
-    }
+    let response = run_terminal_shell_command(&command, &root);
+    let background_pid = response
+        .as_ref()
+        .ok()
+        .and_then(|response| terminal_background_pid(&response.stdout));
+    let background_alive_after_response =
+        background_pid.map(unix_process_is_alive).unwrap_or(false);
+    let termination_result = background_pid.map(terminate_unix_test_process).transpose();
     fs::remove_dir_all(root).unwrap();
 
-    let response = response.expect("pre-deadline Unix command should return a response");
+    let response = response.expect("Unix command should return a response");
     assert!(!response.timed_out);
     assert!(response.success);
     assert!(response.stdout.contains("done"));
     assert!(
-        started_before_release,
-        "parent shell must observe the grandchild before exiting"
+        background_pid.is_some(),
+        "parent shell must report the background grandchild PID"
     );
     assert!(
-        !finished_before_release,
-        "grandchild should still be live when the parent response returns"
+        background_alive_after_response,
+        "background grandchild should remain live after the parent response"
     );
+    termination_result
+        .expect("terminating the known background grandchild PID should succeed")
+        .expect("background grandchild PID should be available for cleanup");
 }
 
 /// Polls `path` every 50ms for the entire `timeout` window, asserting that
@@ -1813,18 +1814,6 @@ fn assert_path_absent_throughout(path: &FsPath, timeout: Duration, message: &str
     assert!(!path.exists(), "{message}");
 }
 
-#[cfg(not(windows))]
-fn wait_for_path_to_exist(path: &FsPath, timeout: Duration, message: &str) {
-    let deadline = std::time::Instant::now() + timeout;
-    while std::time::Instant::now() < deadline {
-        if path.exists() {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    assert!(path.exists(), "{message}");
-}
-
 #[cfg(windows)]
 fn terminal_timeout_process_tree_command(marker: &FsPath) -> String {
     let marker = marker.to_string_lossy().replace('\'', "''");
@@ -1850,18 +1839,37 @@ fn terminal_background_process_tree_command(marker: &FsPath) -> String {
 }
 
 #[cfg(not(windows))]
-fn terminal_live_background_success_command(
-    started: &FsPath,
-    release: &FsPath,
-    finished: &FsPath,
-) -> String {
-    format!(
-        "(touch {started}; while [ ! -f {release} ]; do sleep 0.05; done; touch {finished}) \
-         >/dev/null 2>&1 & while [ ! -f {started} ]; do sleep 0.05; done; echo done",
-        started = shell_single_quote(started.to_string_lossy().as_ref()),
-        release = shell_single_quote(release.to_string_lossy().as_ref()),
-        finished = shell_single_quote(finished.to_string_lossy().as_ref()),
-    )
+fn terminal_live_background_success_command() -> String {
+    "(exec sleep 3600) >/dev/null 2>&1 & printf 'background-pid=%s\\ndone\\n' \"$!\"".to_owned()
+}
+
+#[cfg(not(windows))]
+fn terminal_background_pid(stdout: &str) -> Option<u32> {
+    stdout.lines().find_map(|line| {
+        line.strip_prefix("background-pid=")
+            .and_then(|pid| pid.parse().ok())
+    })
+}
+
+#[cfg(not(windows))]
+fn unix_process_is_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+    io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(windows))]
+fn terminate_unix_test_process(pid: u32) -> io::Result<()> {
+    let pid = libc::pid_t::try_from(pid)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "PID does not fit pid_t"))?;
+    if unsafe { libc::kill(pid, libc::SIGKILL) } == 0 {
+        return Ok(());
+    }
+    Err(io::Error::last_os_error())
 }
 
 #[cfg(not(windows))]

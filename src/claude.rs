@@ -50,6 +50,14 @@ struct ClaudeToolPermissionRequest {
     tool_input: Value,
 }
 
+/// Represents Claude Code's blocking AskUserQuestion dialog payload.
+struct ClaudeUserInputDialogRequest {
+    detail: String,
+    questions: Vec<UserInputQuestion>,
+    request: ClaudePendingUserInput,
+    title: String,
+}
+
 /// Classifies Claude control request.
 fn classify_claude_control_request(
     message: &Value,
@@ -58,6 +66,33 @@ fn classify_claude_control_request(
     cwd: &str,
     delegation_control_plane_access: bool,
 ) -> Result<Option<ClaudeControlRequestAction>> {
+    let parsed_dialog = match parse_claude_user_input_dialog_request(message) {
+        Ok(request) => request,
+        Err(err) if claude_user_input_dialog_request_id(message).is_some() => {
+            return Ok(Some(ClaudeControlRequestAction::RespondError(
+                ClaudeControlErrorResponse {
+                    error: format!("invalid Claude AskUserQuestion dialog: {err:#}"),
+                    request_id: claude_user_input_dialog_request_id(message)
+                        .expect("guard proved that the dialog request id exists")
+                        .to_owned(),
+                },
+            )));
+        }
+        Err(err) => return Err(err),
+    };
+    if let Some(request) = parsed_dialog {
+        let key = format!("user-dialog\n{}", request.request.request_id);
+        if !state.approval_keys_this_turn.insert(key) {
+            return Ok(None);
+        }
+        return Ok(Some(ClaudeControlRequestAction::QueueUserInput {
+            title: request.title,
+            detail: request.detail,
+            questions: request.questions,
+            request: request.request,
+        }));
+    }
+
     let Some(request) = parse_claude_tool_permission_request(message) else {
         return Ok(None);
     };
@@ -106,6 +141,167 @@ fn classify_claude_control_request(
                     .to_owned(),
             })
         }
+    }))
+}
+
+fn claude_user_input_dialog_request_id(message: &Value) -> Option<&str> {
+    let request = message.get("request")?;
+    (message.get("type").and_then(Value::as_str) == Some("control_request")
+        && request.get("subtype").and_then(Value::as_str) == Some("request_user_dialog")
+        && request.get("dialog_kind").and_then(Value::as_str)
+            == Some("permission_ask_user_question"))
+    .then(|| {
+        message
+            .get("request_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|request_id| !request_id.is_empty())
+    })
+    .flatten()
+}
+
+/// Parses the Claude Code 2.1 user-dialog channel used by AskUserQuestion.
+///
+/// The host opts into this exact dialog kind during `initialize`. Claude's
+/// opaque payload contains the original tool input plus one to four questions;
+/// TermAl gives each question a stable transport id while retaining the
+/// original question text because Claude indexes `updatedInput.answers` by
+/// that text rather than by an id.
+fn parse_claude_user_input_dialog_request(
+    message: &Value,
+) -> Result<Option<ClaudeUserInputDialogRequest>> {
+    if message.get("type").and_then(Value::as_str) != Some("control_request") {
+        return Ok(None);
+    }
+    let Some(request) = message.get("request") else {
+        return Ok(None);
+    };
+    if request.get("subtype").and_then(Value::as_str) != Some("request_user_dialog")
+        || request.get("dialog_kind").and_then(Value::as_str)
+            != Some("permission_ask_user_question")
+    {
+        return Ok(None);
+    }
+
+    let request_id = message
+        .get("request_id")
+        .and_then(Value::as_str)
+        .filter(|request_id| !request_id.trim().is_empty())
+        .ok_or_else(|| anyhow!("Claude user dialog is missing request_id"))?
+        .to_owned();
+    let payload = request
+        .get("payload")
+        .and_then(Value::as_object)
+        .ok_or_else(|| anyhow!("Claude AskUserQuestion dialog is missing its payload"))?;
+    let input = payload
+        .get("input")
+        .filter(|input| input.is_object())
+        .cloned()
+        .ok_or_else(|| anyhow!("Claude AskUserQuestion dialog is missing its original input"))?;
+    let raw_questions = payload
+        .get("questions")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("Claude AskUserQuestion dialog is missing questions"))?;
+    if !(1..=4).contains(&raw_questions.len()) {
+        return Err(anyhow!(
+            "Claude AskUserQuestion dialog contained {} questions; expected 1 to 4",
+            raw_questions.len()
+        ));
+    }
+
+    let mut question_texts = HashSet::new();
+    let mut questions = Vec::with_capacity(raw_questions.len());
+    for (index, raw_question) in raw_questions.iter().enumerate() {
+        let raw_question = raw_question
+            .as_object()
+            .ok_or_else(|| anyhow!("Claude question {} is not an object", index + 1))?;
+        let question = raw_question
+            .get("question")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|question| !question.is_empty())
+            .ok_or_else(|| anyhow!("Claude question {} has no text", index + 1))?;
+        if !question_texts.insert(question.to_owned()) {
+            return Err(anyhow!(
+                "Claude AskUserQuestion dialog contains duplicate question text"
+            ));
+        }
+        let header = raw_question
+            .get("header")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|header| !header.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("Question {}", index + 1));
+        let options = raw_question
+            .get("options")
+            .and_then(Value::as_array)
+            .map(|raw_options| {
+                raw_options
+                    .iter()
+                    .enumerate()
+                    .map(|(option_index, raw_option)| {
+                        let raw_option = raw_option.as_object().ok_or_else(|| {
+                            anyhow!(
+                                "Claude question {} option {} is not an object",
+                                index + 1,
+                                option_index + 1
+                            )
+                        })?;
+                        let label = raw_option
+                            .get("label")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|label| !label.is_empty())
+                            .ok_or_else(|| {
+                                anyhow!(
+                                    "Claude question {} option {} has no label",
+                                    index + 1,
+                                    option_index + 1
+                                )
+                            })?;
+                        Ok(UserInputQuestionOption {
+                            description: raw_option
+                                .get("description")
+                                .and_then(Value::as_str)
+                                .map(str::trim)
+                                .unwrap_or_default()
+                                .to_owned(),
+                            label: label.to_owned(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?;
+
+        questions.push(UserInputQuestion {
+            header,
+            id: format!("claude-question-{}", index + 1),
+            is_other: true,
+            is_secret: false,
+            multi_select: raw_question
+                .get("multiSelect")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            options,
+            question: question.to_owned(),
+        });
+    }
+
+    let question_count = questions.len();
+    Ok(Some(ClaudeUserInputDialogRequest {
+        detail: if question_count == 1 {
+            "Answer Claude's question to continue.".to_owned()
+        } else {
+            format!("Answer Claude's {question_count} questions to continue.")
+        },
+        request: ClaudePendingUserInput {
+            input,
+            questions: questions.clone(),
+            request_id,
+        },
+        questions,
+        title: "Claude needs your input".to_owned(),
     }))
 }
 

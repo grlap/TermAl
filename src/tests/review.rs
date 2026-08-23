@@ -717,6 +717,7 @@ async fn submit_codex_user_input_route_updates_message_and_publishes_message_upd
         id: "choice".to_owned(),
         is_other: false,
         is_secret: false,
+        multi_select: false,
         options: Some(vec![UserInputQuestionOption {
             description: "Use the recommended option".to_owned(),
             label: "Yes".to_owned(),
@@ -848,6 +849,445 @@ async fn submit_codex_user_input_route_updates_message_and_publishes_message_upd
     assert!(record.pending_codex_user_inputs.is_empty());
     drop(inner);
     let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+fn claude_user_input_validation_fixture() -> ClaudePendingUserInput {
+    ClaudePendingUserInput {
+        input: json!({"questions": [], "metadata": {"source": "validation-test"}}),
+        questions: vec![
+            UserInputQuestion {
+                header: "Scope".to_owned(),
+                id: "scope".to_owned(),
+                is_other: false,
+                is_secret: false,
+                multi_select: false,
+                options: Some(vec![UserInputQuestionOption {
+                    description: "Only the changed module".to_owned(),
+                    label: "Focused".to_owned(),
+                }]),
+                question: "Which scope should I use?".to_owned(),
+            },
+            UserInputQuestion {
+                header: "Checks".to_owned(),
+                id: "checks".to_owned(),
+                is_other: true,
+                is_secret: false,
+                multi_select: true,
+                options: Some(vec![
+                    UserInputQuestionOption {
+                        description: "Run tests".to_owned(),
+                        label: "Tests".to_owned(),
+                    },
+                    UserInputQuestionOption {
+                        description: "Run lint".to_owned(),
+                        label: "Lint".to_owned(),
+                    },
+                ]),
+                question: "Which checks should I run?".to_owned(),
+            },
+            UserInputQuestion {
+                header: "Token".to_owned(),
+                id: "token".to_owned(),
+                is_other: false,
+                is_secret: true,
+                multi_select: false,
+                options: None,
+                question: "Which token should I use?".to_owned(),
+            },
+        ],
+        request_id: "claude-validation-request".to_owned(),
+    }
+}
+
+#[test]
+fn validate_claude_user_input_answers_rejects_invalid_answer_shapes() {
+    let pending = claude_user_input_validation_fixture();
+    let valid = || {
+        BTreeMap::from([
+            ("scope".to_owned(), vec!["Focused".to_owned()]),
+            ("checks".to_owned(), vec!["Tests".to_owned()]),
+            ("token".to_owned(), vec!["secret-value".to_owned()]),
+        ])
+    };
+
+    let mut unknown = valid();
+    unknown.insert("unknown".to_owned(), vec!["answer".to_owned()]);
+    assert!(
+        validate_claude_user_input_answers(&pending, unknown)
+            .unwrap_err()
+            .message
+            .contains("does not match any requested question")
+    );
+
+    let mut missing = valid();
+    missing.remove("scope");
+    assert!(
+        validate_claude_user_input_answers(&pending, missing)
+            .unwrap_err()
+            .message
+            .contains("missing an answer")
+    );
+
+    let mut multiple = valid();
+    multiple.insert(
+        "scope".to_owned(),
+        vec!["Focused".to_owned(), "Broad".to_owned()],
+    );
+    assert!(
+        validate_claude_user_input_answers(&pending, multiple)
+            .unwrap_err()
+            .message
+            .contains("exactly one answer")
+    );
+
+    let mut outside_options = valid();
+    outside_options.insert("scope".to_owned(), vec!["Broad".to_owned()]);
+    assert!(
+        validate_claude_user_input_answers(&pending, outside_options)
+            .unwrap_err()
+            .message
+            .contains("outside the provided options")
+    );
+}
+
+#[test]
+fn validate_claude_user_input_answers_joins_multi_select_and_masks_secrets() {
+    let pending = claude_user_input_validation_fixture();
+    let (updated_input, display_answers) = validate_claude_user_input_answers(
+        &pending,
+        BTreeMap::from([
+            ("scope".to_owned(), vec!["Focused".to_owned()]),
+            (
+                "checks".to_owned(),
+                vec!["Tests".to_owned(), "custom smoke check".to_owned()],
+            ),
+            ("token".to_owned(), vec!["secret-value".to_owned()]),
+        ]),
+    )
+    .expect("valid Claude answers should be normalized");
+
+    assert_eq!(
+        updated_input["answers"]["Which checks should I run?"],
+        "Tests, custom smoke check"
+    );
+    assert_eq!(
+        updated_input["answers"]["Which token should I use?"],
+        "secret-value"
+    );
+    assert_eq!(
+        display_answers["token"],
+        vec!["[secret provided]".to_owned()]
+    );
+}
+
+#[tokio::test]
+async fn submit_claude_user_input_route_delivers_all_dialog_answers() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, input_rx) = test_claude_runtime_handle("claude-user-input-route");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+    }
+    let message_id = "claude-user-input-route-1".to_owned();
+    let questions = vec![
+        UserInputQuestion {
+            header: "Scope".to_owned(),
+            id: "claude-question-1".to_owned(),
+            is_other: true,
+            is_secret: false,
+            multi_select: false,
+            options: Some(vec![UserInputQuestionOption {
+                description: "Only the changed module".to_owned(),
+                label: "Focused".to_owned(),
+            }]),
+            question: "Which scope should I use?".to_owned(),
+        },
+        UserInputQuestion {
+            header: "Checks".to_owned(),
+            id: "claude-question-2".to_owned(),
+            is_other: true,
+            is_secret: false,
+            multi_select: true,
+            options: Some(vec![
+                UserInputQuestionOption {
+                    description: "Run tests".to_owned(),
+                    label: "Tests".to_owned(),
+                },
+                UserInputQuestionOption {
+                    description: "Run lint".to_owned(),
+                    label: "Lint".to_owned(),
+                },
+            ]),
+            question: "Which checks should I run?".to_owned(),
+        },
+    ];
+    let original_input = json!({
+        "questions": [
+            {"question": "Which scope should I use?"},
+            {"question": "Which checks should I run?"}
+        ],
+        "metadata": {"source": "test"}
+    });
+    state
+        .push_message(
+            &session_id,
+            Message::UserInputRequest {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Claude needs your input".to_owned(),
+                detail: "Answer Claude's 2 questions to continue.".to_owned(),
+                questions: questions.clone(),
+                state: InteractionRequestState::Pending,
+                submitted_answers: None,
+            },
+        )
+        .expect("user input request should be recorded");
+    state
+        .register_claude_pending_user_input(
+            &session_id,
+            message_id.clone(),
+            ClaudePendingUserInput {
+                input: original_input.clone(),
+                questions,
+                request_id: "claude-dialog-request".to_owned(),
+            },
+        )
+        .expect("pending Claude user input should be registered");
+    let mut state_rx = state.subscribe_events();
+    let mut delta_rx = state.subscribe_delta_events();
+    let app = app_router(state.clone());
+    let body = serde_json::to_vec(&json!({
+        "answers": {
+            "claude-question-1": ["Focused"],
+            "claude-question-2": ["Tests", "custom smoke check"]
+        }
+    }))
+    .expect("user input body should serialize");
+
+    let (status, response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/sessions/{session_id}/user-input/{message_id}"
+            ))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let session = response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated Claude session should be present");
+    assert_eq!(session.status, SessionStatus::Active);
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::UserInputRequest {
+            state: InteractionRequestState::Submitted,
+            submitted_answers: Some(answers),
+            ..
+        }) if answers == &BTreeMap::from([
+            ("claude-question-1".to_owned(), vec!["Focused".to_owned()]),
+            (
+                "claude-question-2".to_owned(),
+                vec!["Tests".to_owned(), "custom smoke check".to_owned()],
+            ),
+        ])
+    ));
+
+    match input_rx.recv_timeout(Duration::from_millis(50)) {
+        Ok(ClaudeRuntimeCommand::UserInputResponse(response)) => {
+            assert_eq!(response.request_id, "claude-dialog-request");
+            let mut expected_input = original_input;
+            expected_input.as_object_mut().unwrap().insert(
+                "answers".to_owned(),
+                json!({
+                    "Which scope should I use?": "Focused",
+                    "Which checks should I run?": "Tests, custom smoke check"
+                }),
+            );
+            assert_eq!(response.updated_input, expected_input);
+        }
+        Ok(_) => panic!("expected Claude user-dialog response"),
+        Err(err) => panic!("Claude user-dialog response should arrive: {err}"),
+    }
+    let expected_preview =
+        user_input_request_preview_text(session.agent.name(), InteractionRequestState::Submitted);
+    let delta_message = assert_no_state_and_one_message_updated_delta(
+        &mut state_rx,
+        &mut delta_rx,
+        &session_id,
+        &message_id,
+        response.revision,
+        0,
+        1,
+        &expected_preview,
+        SessionStatus::Active,
+        session.session_mutation_stamp,
+    );
+    assert!(matches!(
+        delta_message,
+        Message::UserInputRequest {
+            state: InteractionRequestState::Submitted,
+            ..
+        }
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert!(record.pending_claude_user_inputs.is_empty());
+    drop(inner);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+fn register_single_question_claude_input(
+    state: &AppState,
+    session_id: &str,
+    runtime_id: &str,
+    message_id: &str,
+) -> std::sync::mpsc::Receiver<ClaudeRuntimeCommand> {
+    let (runtime, input_rx) = test_claude_runtime_handle(runtime_id);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+    }
+    let question = UserInputQuestion {
+        header: "Scope".to_owned(),
+        id: "scope".to_owned(),
+        is_other: false,
+        is_secret: false,
+        multi_select: false,
+        options: Some(vec![UserInputQuestionOption {
+            description: "Use the focused scope".to_owned(),
+            label: "Focused".to_owned(),
+        }]),
+        question: "Which scope?".to_owned(),
+    };
+    state
+        .push_message(
+            session_id,
+            Message::UserInputRequest {
+                id: message_id.to_owned(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Claude needs your input".to_owned(),
+                detail: "Choose a scope.".to_owned(),
+                questions: vec![question.clone()],
+                state: InteractionRequestState::Pending,
+                submitted_answers: None,
+            },
+        )
+        .unwrap();
+    state
+        .register_claude_pending_user_input(
+            session_id,
+            message_id.to_owned(),
+            ClaudePendingUserInput {
+                input: json!({ "questions": [{ "question": "Which scope?" }] }),
+                questions: vec![question],
+                request_id: format!("request-{message_id}"),
+            },
+        )
+        .unwrap();
+    input_rx
+}
+
+#[test]
+fn concurrent_claude_user_input_submissions_deliver_exactly_one_runtime_response() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let message_id = "claude-concurrent-input-message".to_owned();
+    let input_rx = register_single_question_claude_input(
+        &state,
+        &session_id,
+        "claude-concurrent-input",
+        &message_id,
+    );
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let answers = BTreeMap::from([("scope".to_owned(), vec!["Focused".to_owned()])]);
+
+    let results = std::thread::scope(|scope| {
+        let mut workers = Vec::new();
+        for _ in 0..2 {
+            let state = state.clone();
+            let barrier = Arc::clone(&barrier);
+            let session_id = session_id.clone();
+            let message_id = message_id.clone();
+            let answers = answers.clone();
+            workers.push(scope.spawn(move || {
+                barrier.wait();
+                state.submit_user_input(&session_id, &message_id, answers)
+            }));
+        }
+        barrier.wait();
+        workers
+            .into_iter()
+            .map(|worker| worker.join().expect("submission worker should not panic"))
+            .collect::<Vec<_>>()
+    });
+
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_millis(50)),
+        Ok(ClaudeRuntimeCommand::UserInputResponse(_))
+    ));
+    assert!(
+        input_rx.try_recv().is_err(),
+        "the runtime must receive exactly one response for one pending request"
+    );
+}
+
+#[test]
+fn failed_claude_user_input_delivery_restores_the_pending_claim() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let message_id = "claude-failed-input-message".to_owned();
+    let input_rx = register_single_question_claude_input(
+        &state,
+        &session_id,
+        "claude-failed-input",
+        &message_id,
+    );
+    drop(input_rx);
+
+    let error = match state.submit_user_input(
+        &session_id,
+        &message_id,
+        BTreeMap::from([("scope".to_owned(), vec!["Focused".to_owned()])]),
+    ) {
+        Ok(_) => panic!("closed runtime channel should reject the response"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .unwrap();
+    assert!(record.pending_claude_user_inputs.contains_key(&message_id));
+    assert!(matches!(
+        record.session.messages.last(),
+        Some(Message::UserInputRequest {
+            state: InteractionRequestState::Pending,
+            ..
+        })
+    ));
 }
 
 #[tokio::test]

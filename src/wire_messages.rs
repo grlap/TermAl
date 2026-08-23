@@ -52,6 +52,8 @@ struct UserInputQuestion {
     is_other: bool,
     #[serde(default, rename = "isSecret")]
     is_secret: bool,
+    #[serde(default, rename = "multiSelect")]
+    multi_select: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     options: Option<Vec<UserInputQuestionOption>>,
     question: String,

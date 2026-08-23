@@ -76,7 +76,9 @@ export function isWorkspaceTab(value: unknown): value is WorkspaceTab {
       return (
         isNullableString(value.originSessionId) &&
         isString(value.refreshToken) &&
-        isOptionalNullableString(value.originProjectId)
+        isOptionalNullableString(value.originProjectId) &&
+        isOptionalNullableString(value.activeBoardTabId) &&
+        isOptionalResponseBoardViews(value.boardViews)
       );
     case "controlPanel":
       return (
@@ -154,6 +156,24 @@ function isWorkspaceCanvasCard(value: unknown) {
 
 function isOptionalWorkspaceCanvasZoom(value: unknown) {
   return typeof value === "undefined" || isWorkspaceCanvasZoom(value);
+}
+
+function isOptionalResponseBoardViews(value: unknown) {
+  return (
+    typeof value === "undefined" ||
+    (isRecord(value) &&
+      Object.values(value).every(
+        (view) =>
+          isRecord(view) &&
+          typeof view.panX === "number" &&
+          Number.isFinite(view.panX) &&
+          typeof view.panY === "number" &&
+          Number.isFinite(view.panY) &&
+          typeof view.zoom === "number" &&
+          Number.isFinite(view.zoom) &&
+          view.zoom > 0,
+      ))
+  );
 }
 
 function isWorkspaceCanvasZoom(value: unknown) {

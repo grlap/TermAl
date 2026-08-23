@@ -1140,6 +1140,11 @@ struct StateInner {
     /// fence/cascade succeeds, then wakes primary persistence to durably clear
     /// it; a crash leaves the on-disk item for the next boot.
     pending_coordination_scope_deletions: BTreeSet<String>,
+    /// Durable outbox of deleted projects whose project-default response-board
+    /// tabs must become ordinary custom tabs. Values retain the project's last
+    /// live name so an idempotent retry cannot fall back to the creation-time
+    /// tab label after the project record has disappeared.
+    pending_response_board_project_detachments: BTreeMap<String, String>,
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
     /// Broad remote state is metadata-only. Focused bounded-tail responses use
     /// `remote_session_transcript_applied_revisions` so a same-revision delta is
@@ -1208,6 +1213,7 @@ impl StateInner {
             next_message_number: 1,
             projects: Vec::new(),
             pending_coordination_scope_deletions: BTreeSet::new(),
+            pending_response_board_project_detachments: BTreeMap::new(),
             ignored_discovered_codex_thread_ids: BTreeSet::new(),
             remote_applied_revisions: HashMap::new(),
             remote_snapshot_applied_revisions: HashMap::new(),
@@ -1341,6 +1347,7 @@ struct SessionRecord {
     codex_sandbox_mode: CodexSandboxMode,
     external_session_id: Option<String>,
     pending_claude_approvals: HashMap<String, ClaudePendingApproval>,
+    pending_claude_user_inputs: HashMap<String, ClaudePendingUserInput>,
     pending_codex_approvals: HashMap<String, CodexPendingApproval>,
     pending_codex_user_inputs: HashMap<String, CodexPendingUserInput>,
     pending_codex_mcp_elicitations: HashMap<String, CodexPendingMcpElicitation>,

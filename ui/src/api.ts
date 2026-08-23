@@ -144,8 +144,13 @@ export type SessionOverviewResponse = {
   latestPosition: number;
 };
 
+export const RESPONSE_BOARD_DEFAULT_TAB_ID = "response-board-default";
+
 export type ResponseBoardCard = {
   id: string;
+  tabId: string;
+  placement: "staged" | "placed";
+  hasCanvasPosition: boolean;
   x: number;
   y: number;
   w: number;
@@ -161,6 +166,27 @@ export type ResponseBoardCard = {
 
 export type ResponseBoard = {
   cards: ResponseBoardCard[];
+};
+
+export type ResponseBoardTab = {
+  id: string;
+  name: string;
+  kind: "custom" | "projectDefault";
+  projectId?: string | null;
+  sortOrder: number;
+  createdAt: string;
+  placedCardCount: number;
+};
+
+export type ResponseBoardTabs = {
+  tabs: ResponseBoardTab[];
+  stagedCardCount: number;
+};
+
+export type ResponseBoardTabView = {
+  tab: ResponseBoardTab;
+  cards: ResponseBoardCard[];
+  stagedCards: ResponseBoardCard[];
 };
 
 export type CreateProjectResponse = {
@@ -604,6 +630,61 @@ export function fetchResponseBoard() {
   return requestJsonFirst<ResponseBoard>("/api/response-board");
 }
 
+export function fetchResponseBoardTabs() {
+  return requestJsonFirst<ResponseBoardTabs>("/api/response-board/tabs");
+}
+
+export function fetchResponseBoardTab(tabId: string) {
+  return requestJsonFirst<ResponseBoardTabView>(
+    `/api/response-board/tabs/${encodeURIComponent(tabId)}`,
+  );
+}
+
+export function createResponseBoardTab(name: string) {
+  return request<ResponseBoardTab>("/api/response-board/tabs", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function updateResponseBoardTab(tabId: string, name: string) {
+  return request<ResponseBoardTab>(
+    `/api/response-board/tabs/${encodeURIComponent(tabId)}`,
+    { method: "PATCH", body: JSON.stringify({ name }) },
+  );
+}
+
+export function deleteResponseBoardTab(tabId: string) {
+  return request<void>(
+    `/api/response-board/tabs/${encodeURIComponent(tabId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function reorderResponseBoardTabs(tabIds: string[]) {
+  return request<ResponseBoardTabs>("/api/response-board/tabs/reorder", {
+    method: "POST",
+    body: JSON.stringify({ tabIds }),
+  });
+}
+
+export function stageResponseBoardCard(payload: {
+  sessionId: string;
+  messageId: string;
+  tabId?: string | null;
+  projectId?: string | null;
+}) {
+  return request<ResponseBoardCard>("/api/response-board/cards/stage", {
+    method: "POST",
+    body: JSON.stringify({
+      sessionId: payload.sessionId,
+      messageId: payload.messageId,
+      ...(payload.tabId ? { tabId: payload.tabId } : {}),
+      ...(payload.projectId ? { projectId: payload.projectId } : {}),
+    }),
+  });
+}
+
 export function createResponseBoardCard(payload: {
   sessionId: string;
   messageId: string;
@@ -618,7 +699,14 @@ export function createResponseBoardCard(payload: {
 
 export function updateResponseBoardCard(
   cardId: string,
-  payload: { x: number; y: number; w: number; h: number },
+  payload: Partial<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    tabId: string;
+    placement: "staged" | "placed";
+  }>,
 ) {
   return request<ResponseBoardCard>(
     `/api/response-board/cards/${encodeURIComponent(cardId)}`,

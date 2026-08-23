@@ -21,6 +21,7 @@ import {
   type DraftImageAttachment,
 } from "./app-utils";
 import { syncComposerDraftForSession } from "./session-store";
+import { notifyResponseBoardChanged } from "./response-board";
 import {
   activatePane,
   closeWorkspaceTab,
@@ -45,6 +46,7 @@ import {
   resolveWorkspaceViewerSplitAnchorPaneId,
   rescopeControlSurfacePane,
   setCanvasZoom,
+  setResponseBoardWorkspaceState,
   setPaneSourcePath,
   setPaneViewMode,
   splitPane,
@@ -52,6 +54,7 @@ import {
   upsertCanvasSessionCard,
   type SessionPaneViewMode,
   type WorkspacePane,
+  type WorkspaceResponseBoardView,
   type WorkspaceState,
   type WorkspaceTab,
 } from "./workspace";
@@ -175,6 +178,13 @@ type UseAppWorkspaceActionsReturn = {
     paneId: string,
     originSessionId: string | null,
     originProjectId: string | null,
+    activeBoardTabId?: string | null,
+  ) => void;
+  handleSetResponseBoardWorkspaceState: (
+    workspaceTabId: string,
+    activeBoardTabId: string,
+    view: WorkspaceResponseBoardView,
+    knownBoardTabIds?: readonly string[],
   ) => void;
   handleOpenDiffPreviewTab: (
     paneId: string,
@@ -743,6 +753,7 @@ export function useAppWorkspaceActions({
     paneId: string,
     originSessionId: string | null,
     originProjectId: string | null,
+    activeBoardTabId: string | null = null,
   ) {
     setWorkspace((current) =>
       applyControlPanelLayout(
@@ -751,7 +762,25 @@ export function useAppWorkspaceActions({
           paneId,
           originSessionId,
           originProjectId,
+          activeBoardTabId,
         ),
+      ),
+    );
+  }
+
+  function handleSetResponseBoardWorkspaceState(
+    workspaceTabId: string,
+    activeBoardTabId: string,
+    view: WorkspaceResponseBoardView,
+    knownBoardTabIds?: readonly string[],
+  ) {
+    setWorkspace((current) =>
+      setResponseBoardWorkspaceState(
+        current,
+        workspaceTabId,
+        activeBoardTabId,
+        view,
+        knownBoardTabIds,
       ),
     );
   }
@@ -1194,6 +1223,7 @@ export function useAppWorkspaceActions({
 
     try {
       const state = await deleteProject(project.id);
+      notifyResponseBoardChanged(null);
       if (!isMountedRef.current) {
         return;
       }
@@ -1226,6 +1256,7 @@ export function useAppWorkspaceActions({
     handleOpenSourceTab,
     handleOpenMailboxTab,
     handleOpenResponseBoardTab,
+    handleSetResponseBoardWorkspaceState,
     handleOpenDiffPreviewTab,
     handleOpenGitStatusDiffPreviewTab,
     handleOpenFilesystemTab,

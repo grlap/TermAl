@@ -20,7 +20,7 @@ import type {
 
 type UserInputDraftField = {
   customAnswer: string;
-  selectedOption: string;
+  selectedOptions: string[];
 };
 
 type McpElicitationDraftField = {
@@ -35,21 +35,20 @@ function buildUserInputDraft(
 ): Record<string, UserInputDraftField> {
   const next: Record<string, UserInputDraftField> = {};
   for (const question of questions) {
-    const answer = submittedAnswers?.[question.id]?.[0] ?? "";
+    const answers = submittedAnswers?.[question.id] ?? [];
     const optionLabels = new Set(
       (question.options ?? []).map((option) => option.label),
     );
-    if (optionLabels.has(answer)) {
-      next[question.id] = {
-        customAnswer: "",
-        selectedOption: answer,
-      };
-      continue;
-    }
-
+    const selectedOptions = answers.filter((answer) => optionLabels.has(answer));
+    const customAnswers = answers.filter((answer) => !optionLabels.has(answer));
     next[question.id] = {
-      customAnswer: answer === "[secret provided]" ? "" : answer,
-      selectedOption: question.isOther && answer ? "__other__" : "",
+      customAnswer: customAnswers.includes("[secret provided]")
+        ? ""
+        : customAnswers.join(", "),
+      selectedOptions: [
+        ...selectedOptions,
+        ...(question.isOther && customAnswers.length ? ["__other__"] : []),
+      ],
     };
   }
   return next;
@@ -113,7 +112,7 @@ export function UserInputRequestCard({
       ...current,
       [questionId]: {
         customAnswer: current[questionId]?.customAnswer ?? "",
-        selectedOption: current[questionId]?.selectedOption ?? "",
+        selectedOptions: current[questionId]?.selectedOptions ?? [],
         ...nextField,
       },
     }));
@@ -124,26 +123,34 @@ export function UserInputRequestCard({
     for (const question of message.questions) {
       const field = draft[question.id] ?? {
         customAnswer: "",
-        selectedOption: "",
+        selectedOptions: [],
       };
+      const options = question.options ?? [];
       const optionLabels = new Set(
-        (question.options ?? []).map((option) => option.label),
+        options.map((option) => option.label),
       );
-      let answer = "";
-      if (field.selectedOption && field.selectedOption !== "__other__") {
-        answer = field.selectedOption;
-      } else {
-        answer = field.customAnswer.trim();
+      const selectedAnswers = field.selectedOptions.filter(
+        (answer) => answer !== "__other__",
+      );
+      const customAnswer = field.customAnswer.trim();
+      if (
+        (options.length === 0 || field.selectedOptions.includes("__other__")) &&
+        customAnswer
+      ) {
+        selectedAnswers.push(customAnswer);
       }
 
-      if (!answer) {
+      if (
+        selectedAnswers.length === 0 ||
+        (!question.multiSelect && selectedAnswers.length !== 1)
+      ) {
         setValidationError(`Answer "${question.header}" before submitting.`);
         return;
       }
       if (
         optionLabels.size > 0 &&
-        !optionLabels.has(answer) &&
-        !question.isOther
+        selectedAnswers.filter((answer) => !optionLabels.has(answer)).length >
+          (question.isOther ? 1 : 0)
       ) {
         setValidationError(
           `"${question.header}" must use one of the provided options.`,
@@ -151,7 +158,7 @@ export function UserInputRequestCard({
         return;
       }
 
-      answers[question.id] = [answer];
+      answers[question.id] = selectedAnswers;
     }
 
     setValidationError(null);
@@ -179,13 +186,13 @@ export function UserInputRequestCard({
         {message.questions.map((question) => {
           const field = draft[question.id] ?? {
             customAnswer: "",
-            selectedOption: "",
+            selectedOptions: [],
           };
           const options = question.options ?? [];
           const inputType = question.isSecret ? "password" : "text";
           const usesOther = !!question.isOther;
           const showFreeform =
-            options.length === 0 || field.selectedOption === "__other__";
+            options.length === 0 || field.selectedOptions.includes("__other__");
 
           return (
             <section key={question.id} className="user-input-question">
@@ -209,14 +216,22 @@ export function UserInputRequestCard({
                   {options.map((option) => (
                     <label key={option.label} className="user-input-option">
                       <input
-                        type="radio"
+                        type={question.multiSelect ? "checkbox" : "radio"}
                         name={`user-input-${message.id}-${question.id}`}
-                        checked={field.selectedOption === option.label}
+                        checked={field.selectedOptions.includes(option.label)}
                         disabled={!pending}
                         onChange={() =>
                           updateField(question.id, {
-                            customAnswer: "",
-                            selectedOption: option.label,
+                            customAnswer: question.multiSelect
+                              ? field.customAnswer
+                              : "",
+                            selectedOptions: question.multiSelect
+                              ? field.selectedOptions.includes(option.label)
+                                ? field.selectedOptions.filter(
+                                    (selected) => selected !== option.label,
+                                  )
+                                : [...field.selectedOptions, option.label]
+                              : [option.label],
                           })
                         }
                       />
@@ -241,13 +256,19 @@ export function UserInputRequestCard({
                   {usesOther ? (
                     <label className="user-input-option">
                       <input
-                        type="radio"
+                        type={question.multiSelect ? "checkbox" : "radio"}
                         name={`user-input-${message.id}-${question.id}`}
-                        checked={field.selectedOption === "__other__"}
+                        checked={field.selectedOptions.includes("__other__")}
                         disabled={!pending}
                         onChange={() =>
                           updateField(question.id, {
-                            selectedOption: "__other__",
+                            selectedOptions: question.multiSelect
+                              ? field.selectedOptions.includes("__other__")
+                                ? field.selectedOptions.filter(
+                                    (selected) => selected !== "__other__",
+                                  )
+                                : [...field.selectedOptions, "__other__"]
+                              : ["__other__"],
                           })
                         }
                       />

@@ -57,7 +57,33 @@ describe("App Response Board launcher", () => {
     vi.spyOn(api, "saveWorkspaceLayout").mockResolvedValue(
       makeWorkspaceLayoutResponse(),
     );
-    vi.spyOn(api, "fetchResponseBoard").mockResolvedValue({ cards: [] });
+    vi.spyOn(api, "fetchResponseBoardTabs").mockResolvedValue({
+      stagedCardCount: 0,
+      tabs: [
+        {
+          id: "response-board-default",
+          name: "Board",
+          kind: "custom",
+          projectId: null,
+          sortOrder: 0,
+          createdAt: "2026-08-22T00:00:00Z",
+          placedCardCount: 0,
+        },
+      ],
+    });
+    vi.spyOn(api, "fetchResponseBoardTab").mockResolvedValue({
+      tab: {
+        id: "response-board-default",
+        name: "Board",
+        kind: "custom",
+        projectId: null,
+        sortOrder: 0,
+        createdAt: "2026-08-22T00:00:00Z",
+        placedCardCount: 0,
+      },
+      cards: [],
+      stagedCards: [],
+    });
   });
 
   afterEach(async () => {
@@ -71,7 +97,7 @@ describe("App Response Board launcher", () => {
     vi.unstubAllGlobals();
   });
 
-  it("opens the real singleton board tab from the left panel", async () => {
+  it("opens the real partitioned board tab from the left panel", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       vi.spyOn(api, "fetchState").mockResolvedValue(
         makeStateResponse({
@@ -102,10 +128,13 @@ describe("App Response Board launcher", () => {
 
       expect(
         await screen.findByText(
-          "Drop an agent response anywhere on the board.",
+          "Drag a staged response here, or drop a transcript message.",
         ),
       ).toBeInTheDocument();
-      expect(api.fetchResponseBoard).toHaveBeenCalledOnce();
+      expect(api.fetchResponseBoardTabs).toHaveBeenCalled();
+      expect(api.fetchResponseBoardTab).toHaveBeenCalledWith(
+        "response-board-default",
+      );
     });
   });
 });

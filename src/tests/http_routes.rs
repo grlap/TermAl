@@ -94,14 +94,90 @@ fn seed_loaded_history_messages(
     message_ids
 }
 
-fn fastest_duration(sample_count: usize, mut operation: impl FnMut()) -> Duration {
+#[cfg(unix)]
+fn current_thread_cpu_time() -> Duration {
+    let mut timestamp = std::mem::MaybeUninit::<libc::timespec>::uninit();
+    let result =
+        unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, timestamp.as_mut_ptr()) };
+    assert_eq!(
+        result,
+        0,
+        "thread CPU clock should be available: {}",
+        std::io::Error::last_os_error()
+    );
+    let timestamp = unsafe { timestamp.assume_init() };
+    Duration::new(
+        u64::try_from(timestamp.tv_sec).expect("thread CPU seconds should be non-negative"),
+        u32::try_from(timestamp.tv_nsec).expect("thread CPU nanoseconds should fit in a duration"),
+    )
+}
+
+#[cfg(unix)]
+fn measured_service_duration(operation: impl FnOnce()) -> Duration {
+    let started = current_thread_cpu_time();
+    operation();
+    current_thread_cpu_time().saturating_sub(started)
+}
+
+#[cfg(windows)]
+fn current_thread_cpu_time() -> Duration {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::{GetCurrentThread, GetThreadTimes};
+
+    let mut creation = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut exit = creation;
+    let mut kernel = creation;
+    let mut user = creation;
+    let result = unsafe {
+        GetThreadTimes(
+            GetCurrentThread(),
+            &mut creation,
+            &mut exit,
+            &mut kernel,
+            &mut user,
+        )
+    };
+    assert_ne!(
+        result,
+        0,
+        "thread CPU clock should be available: {}",
+        std::io::Error::last_os_error()
+    );
+    let filetime_ticks =
+        |value: FILETIME| (u64::from(value.dwHighDateTime) << 32) | u64::from(value.dwLowDateTime);
+    // FILETIME CPU counters use 100-nanosecond units.
+    Duration::from_nanos(
+        filetime_ticks(kernel)
+            .saturating_add(filetime_ticks(user))
+            .saturating_mul(100),
+    )
+}
+
+#[cfg(windows)]
+fn measured_service_duration(operation: impl FnOnce()) -> Duration {
+    let started = current_thread_cpu_time();
+    operation();
+    current_thread_cpu_time().saturating_sub(started)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn measured_service_duration(operation: impl FnOnce()) -> Duration {
+    // Rust's standard library has no portable per-thread CPU clock. Keep the
+    // latency assertion available on uncommon targets with a wall-clock
+    // fallback; Unix and Windows CI use thread CPU time so scheduler
+    // contention cannot masquerade as product latency.
+    let started = std::time::Instant::now();
+    operation();
+    started.elapsed()
+}
+
+fn fastest_service_duration(sample_count: usize, mut operation: impl FnMut()) -> Duration {
     assert!(sample_count > 0, "timing sample count must be positive");
     (0..sample_count)
-        .map(|_| {
-            let started = std::time::Instant::now();
-            operation();
-            started.elapsed()
-        })
+        .map(|_| measured_service_duration(&mut operation))
         .min()
         .expect("positive timing sample count should produce a duration")
 }
@@ -744,11 +820,11 @@ async fn get_session_overview_meets_large_transcript_latency_and_network_budgets
         .get_session_overview(&session_id, SESSION_OVERVIEW_MAX_BUCKETS)
         .expect("large overview should load");
     assert_eq!(overview.buckets.len(), SESSION_OVERVIEW_MAX_BUCKETS);
-    // A single wall-clock observation measures unrelated test-runner
-    // descheduling as well as this synchronous operation. The best of several
-    // warm samples keeps the service-time budget strict without making the
-    // parallel suite depend on which test thread the OS happens to schedule.
-    let elapsed = fastest_duration(5, || {
+    // Measure this synchronous operation's thread CPU service time rather than
+    // wall time so the parallel suite cannot fail merely because the host
+    // descheduled this test. The best warm sample still excludes cold-cache
+    // setup while preserving the strict product budget.
+    let elapsed = fastest_service_duration(5, || {
         std::hint::black_box(
             state
                 .get_session_overview(&session_id, SESSION_OVERVIEW_MAX_BUCKETS)
@@ -780,7 +856,7 @@ async fn get_session_overview_meets_large_transcript_latency_and_network_budgets
         bounded_overview, overview,
         "large overview must not depend on transcript residency"
     );
-    let bounded_elapsed = fastest_duration(5, || {
+    let bounded_elapsed = fastest_service_duration(5, || {
         std::hint::black_box(
             state
                 .get_session_overview(&session_id, SESSION_OVERVIEW_MAX_BUCKETS)

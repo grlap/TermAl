@@ -37,6 +37,251 @@ fn claude_permission_request(tool_name: &str, tool_input: Value) -> Value {
     })
 }
 
+fn claude_user_dialog_request() -> Value {
+    let questions = json!([
+        {
+            "header": "Scope",
+            "question": "Which scope should I use?",
+            "multiSelect": false,
+            "options": [
+                {"label": "Focused", "description": "Only the changed module"},
+                {"label": "Broad", "description": "The whole workspace"}
+            ]
+        },
+        {
+            "header": "Checks",
+            "question": "Which checks should I run?",
+            "multiSelect": true,
+            "options": [
+                {"label": "Tests", "description": "Run tests"},
+                {"label": "Lint", "description": "Run lint"}
+            ]
+        }
+    ]);
+    json!({
+        "type": "control_request",
+        "request_id": "dialog-request-1",
+        "request": {
+            "subtype": "request_user_dialog",
+            "dialog_kind": "permission_ask_user_question",
+            "tool_use_id": "tool-use-1",
+            "payload": {
+                "requestId": "tool-use-1",
+                "toolName": "AskUserQuestion",
+                "permissionResult": {"behavior": "ask"},
+                "questions": questions,
+                "input": {"questions": questions}
+            }
+        }
+    })
+}
+
+#[test]
+fn claude_ask_user_question_dialog_is_classified_with_every_question() {
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &claude_user_dialog_request(),
+        &mut turn_state,
+        ClaudeApprovalMode::AutoApprove,
+        "/tmp",
+        false,
+    )
+    .expect("dialog should parse")
+    .expect("dialog should be classified");
+
+    let ClaudeControlRequestAction::QueueUserInput {
+        title,
+        detail,
+        questions,
+        request,
+    } = action
+    else {
+        panic!("AskUserQuestion must wait for user input in every approval mode");
+    };
+    assert_eq!(title, "Claude needs your input");
+    assert!(detail.contains("2 questions"));
+    assert_eq!(request.request_id, "dialog-request-1");
+    assert_eq!(questions.len(), 2);
+    assert_eq!(questions[0].id, "claude-question-1");
+    assert!(questions[0].is_other);
+    assert!(!questions[0].multi_select);
+    assert_eq!(questions[1].id, "claude-question-2");
+    assert!(questions[1].multi_select);
+    assert_eq!(request.questions, questions);
+}
+
+#[test]
+fn claude_initialize_declares_question_dialog_and_response_uses_completed_envelope() {
+    let mut initialize = Vec::new();
+    write_claude_initialize(&mut initialize).expect("initialize should serialize");
+    let initialize: Value =
+        serde_json::from_slice(initialize.trim_ascii_end()).expect("initialize should be JSON");
+    assert_eq!(
+        initialize.pointer("/request/supportedDialogKinds"),
+        Some(&json!(["permission_ask_user_question"]))
+    );
+
+    let mut response = Vec::new();
+    write_claude_user_input_response(
+        &mut response,
+        &ClaudeUserInputResponse {
+            request_id: "dialog-request-1".to_owned(),
+            updated_input: json!({
+                "questions": [],
+                "answers": {"Which scope should I use?": "Focused"}
+            }),
+        },
+    )
+    .expect("dialog response should serialize");
+    let response: Value =
+        serde_json::from_slice(response.trim_ascii_end()).expect("response should be JSON");
+    assert_eq!(
+        response,
+        json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": "dialog-request-1",
+                "response": {
+                    "behavior": "completed",
+                    "result": {
+                        "behavior": "allow",
+                        "updatedInput": {
+                            "questions": [],
+                            "answers": {"Which scope should I use?": "Focused"}
+                        }
+                    }
+                }
+            }
+        })
+    );
+}
+
+#[test]
+fn malformed_claude_question_dialog_is_answered_with_a_control_error() {
+    let mut request = claude_user_dialog_request();
+    request["request"]["payload"]["questions"] = json!([{}, {}, {}, {}, {}]);
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &request,
+        &mut turn_state,
+        ClaudeApprovalMode::Ask,
+        "/tmp",
+        false,
+    )
+    .expect("malformed identified dialog should produce a response")
+    .expect("malformed identified dialog should not be ignored");
+    let ClaudeControlRequestAction::RespondError(response) = action else {
+        panic!("malformed dialog should produce a protocol error response");
+    };
+    assert_eq!(response.request_id, "dialog-request-1");
+    assert!(response.error.contains("expected 1 to 4"));
+
+    let mut wire = Vec::new();
+    write_claude_control_error_response(&mut wire, &response)
+        .expect("control error should serialize");
+    let wire: Value =
+        serde_json::from_slice(wire.trim_ascii_end()).expect("response should be JSON");
+    assert_eq!(
+        wire,
+        json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "error",
+                "request_id": "dialog-request-1",
+                "error": response.error,
+            }
+        })
+    );
+}
+
+#[test]
+fn claude_cancel_request_clears_pending_user_dialog_and_updates_its_card() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let message_id = "claude-canceled-dialog".to_owned();
+    let questions = vec![UserInputQuestion {
+        header: "Scope".to_owned(),
+        id: "claude-question-1".to_owned(),
+        is_other: true,
+        is_secret: false,
+        multi_select: false,
+        options: None,
+        question: "Which scope should I use?".to_owned(),
+    }];
+    state
+        .push_message(
+            &session_id,
+            Message::UserInputRequest {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Claude needs your input".to_owned(),
+                detail: "Answer Claude's question to continue.".to_owned(),
+                questions: questions.clone(),
+                state: InteractionRequestState::Pending,
+                submitted_answers: None,
+            },
+        )
+        .expect("user input request should be recorded");
+    state
+        .register_claude_pending_user_input(
+            &session_id,
+            message_id.clone(),
+            ClaudePendingUserInput {
+                input: json!({"questions": []}),
+                questions,
+                request_id: "dialog-request-canceled-by-claude".to_owned(),
+            },
+        )
+        .expect("pending Claude user input should be registered");
+    let mut delta_rx = state.subscribe_delta_events();
+
+    state
+        .clear_claude_pending_interaction_by_request(
+            &session_id,
+            "dialog-request-canceled-by-claude",
+        )
+        .expect("Claude cancellation should clear the dialog");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert!(record.pending_claude_user_inputs.is_empty());
+    assert!(!has_pending_requests(record));
+    assert!(matches!(
+        record.session.messages.last(),
+        Some(Message::UserInputRequest {
+            state: InteractionRequestState::Canceled,
+            submitted_answers: None,
+            ..
+        })
+    ));
+    drop(inner);
+
+    let delta: DeltaEvent = serde_json::from_str(
+        &delta_rx
+            .try_recv()
+            .expect("canceled dialog should publish its message update"),
+    )
+    .expect("canceled dialog delta should decode");
+    assert!(matches!(
+        delta,
+        DeltaEvent::MessageUpdated {
+            message_id: ref updated_message_id,
+            message: Message::UserInputRequest {
+                state: InteractionRequestState::Canceled,
+                ..
+            },
+            ..
+        } if updated_message_id == &message_id
+    ));
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 #[test]
 fn claude_transient_api_retry_prefers_numeric_status_over_result_prose() {
     let overloaded = json!({

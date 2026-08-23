@@ -927,6 +927,15 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
               value_json TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS response_board_tabs (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              project_id TEXT UNIQUE,
+              sort_order INTEGER NOT NULL,
+              created_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS board_cards (
               id TEXT PRIMARY KEY,
               x REAL NOT NULL,
@@ -936,12 +945,16 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
               snapshot_json TEXT NOT NULL,
               source_session_id TEXT NOT NULL,
               source_message_id TEXT NOT NULL,
-              created_at TEXT NOT NULL
+              created_at TEXT NOT NULL,
+              tab_id TEXT NOT NULL DEFAULT 'response-board-default',
+              placement TEXT NOT NULL DEFAULT 'placed',
+              has_canvas_position INTEGER NOT NULL DEFAULT 1
             );
             ",
         )
         .context("failed to initialize SQLite state schema")?;
     ensure_sqlite_message_overview_columns(connection)?;
+    ensure_sqlite_response_board_schema(connection)?;
     if stored_schema_version.as_deref() == Some(SQLITE_PREVIOUS_SCHEMA_VERSION) {
         migrate_sqlite_state_schema_v1_to_v2(connection)?;
     }

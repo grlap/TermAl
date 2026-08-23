@@ -83,6 +83,14 @@ export type WorkspaceResponseBoardTab = {
   originSessionId: string | null;
   originProjectId?: string | null;
   refreshToken: string;
+  activeBoardTabId?: string | null;
+  boardViews?: Record<string, WorkspaceResponseBoardView>;
+};
+
+export type WorkspaceResponseBoardView = {
+  panX: number;
+  panY: number;
+  zoom: number;
 };
 
 export type WorkspaceControlPanelTab = {

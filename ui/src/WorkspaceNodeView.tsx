@@ -68,6 +68,7 @@ import {
   type TabDropPlacement,
   type WorkspaceNode,
   type WorkspacePane,
+  type WorkspaceResponseBoardView,
 } from "./workspace";
 import type { MonacoAppearance } from "./monaco";
 import {
@@ -122,6 +123,7 @@ export function WorkspaceNodeView({
   onOpenSourceTab,
   onOpenMailboxTab,
   onOpenResponseBoardTab,
+  onSetResponseBoardWorkspaceState,
   onOpenDiffPreviewTab,
   onOpenGitStatusDiffPreviewTab,
   onOpenFilesystemTab,
@@ -242,6 +244,13 @@ export function WorkspaceNodeView({
     paneId: string,
     originSessionId: string | null,
     originProjectId: string | null,
+    activeBoardTabId?: string | null,
+  ) => void;
+  onSetResponseBoardWorkspaceState: (
+    workspaceTabId: string,
+    activeBoardTabId: string,
+    view: WorkspaceResponseBoardView,
+    knownBoardTabIds?: readonly string[],
   ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,
@@ -479,6 +488,7 @@ export function WorkspaceNodeView({
         onOpenSourceTab={onOpenSourceTab}
         onOpenMailboxTab={onOpenMailboxTab}
         onOpenResponseBoardTab={onOpenResponseBoardTab}
+        onSetResponseBoardWorkspaceState={onSetResponseBoardWorkspaceState}
         onOpenDiffPreviewTab={onOpenDiffPreviewTab}
         onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
         onOpenFilesystemTab={onOpenFilesystemTab}
@@ -610,6 +620,7 @@ export function WorkspaceNodeView({
           onOpenSourceTab={onOpenSourceTab}
           onOpenMailboxTab={onOpenMailboxTab}
           onOpenResponseBoardTab={onOpenResponseBoardTab}
+          onSetResponseBoardWorkspaceState={onSetResponseBoardWorkspaceState}
           onOpenDiffPreviewTab={onOpenDiffPreviewTab}
           onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
           onOpenFilesystemTab={onOpenFilesystemTab}
@@ -707,6 +718,7 @@ export function WorkspaceNodeView({
           onOpenSourceTab={onOpenSourceTab}
           onOpenMailboxTab={onOpenMailboxTab}
           onOpenResponseBoardTab={onOpenResponseBoardTab}
+          onSetResponseBoardWorkspaceState={onSetResponseBoardWorkspaceState}
           onOpenDiffPreviewTab={onOpenDiffPreviewTab}
           onOpenGitStatusDiffPreviewTab={onOpenGitStatusDiffPreviewTab}
           onOpenFilesystemTab={onOpenFilesystemTab}

@@ -28,7 +28,7 @@
 //   graceful and hard-kill variants respectively.
 // - `proxy_remote_update_approval` — answers a pending approval
 //   with the user's decision.
-// - `proxy_remote_submit_codex_user_input` /
+// - `proxy_remote_submit_user_input` /
 //   `proxy_remote_submit_codex_mcp_elicitation` /
 //   `proxy_remote_submit_codex_app_request` — forward the three
 //   Codex-specific answer-back submission paths.
@@ -242,7 +242,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
-    fn proxy_remote_submit_codex_user_input(
+    fn proxy_remote_submit_user_input(
         &self,
         session_id: &str,
         message_id: &str,

@@ -954,6 +954,7 @@ fn borrowed_session_recorder_uses_shared_message_and_request_logic() {
         id: "scope".to_owned(),
         is_other: false,
         is_secret: false,
+        multi_select: false,
         options: None,
         question: "What should Codex review?".to_owned(),
     }];

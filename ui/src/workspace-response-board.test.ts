@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   activatePane,
   openResponseBoardInWorkspaceState,
+  setResponseBoardWorkspaceState,
   type WorkspaceState,
 } from "./workspace";
 import { isWorkspaceTab } from "./workspace-tab-validation";
@@ -44,12 +45,13 @@ function splitWorkspace(): WorkspaceState {
 }
 
 describe("response-board workspace tab", () => {
-  it("keeps exactly one restorable board beside the source session", () => {
+  it("keeps one restorable board per pane with independent inner-tab state", () => {
     const opened = openResponseBoardInWorkspaceState(
       splitWorkspace(),
       "pane-board",
       "session-1",
       "project-1",
+      "project-board-1",
     );
     const boardTabs = opened.panes.flatMap((pane) =>
       pane.tabs.filter((tab) => tab.kind === "responseBoard"),
@@ -59,6 +61,7 @@ describe("response-board workspace tab", () => {
       opened.panes.find((pane) => pane.id === "pane-board")?.viewMode,
     ).toBe("responseBoard");
     expect(isWorkspaceTab(boardTabs[0])).toBe(true);
+    expect(boardTabs[0]?.activeBoardTabId).toBe("project-board-1");
 
     const returnedToSession = activatePane(
       opened,
@@ -70,14 +73,80 @@ describe("response-board workspace tab", () => {
       "pane-session",
       "session-2",
       "project-2",
+      "project-board-2",
     );
     expect(
       reopened.panes.flatMap((pane) =>
         pane.tabs.filter((tab) => tab.kind === "responseBoard"),
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(
       reopened.panes.find((pane) => pane.id === "pane-board")?.tabVisitHistory,
-    ).toEqual([boardTabs[0]?.id, "session-tab-2"]);
+    ).toEqual(["session-tab-2", boardTabs[0]?.id]);
+
+    const secondBoard = reopened.panes
+      .find((pane) => pane.id === "pane-session")
+      ?.tabs.find((tab) => tab.kind === "responseBoard");
+    expect(secondBoard?.activeBoardTabId).toBe("project-board-2");
+    const firstBoardAfterSecondOpen = reopened.panes
+      .find((pane) => pane.id === "pane-board")
+      ?.tabs.find((tab) => tab.kind === "responseBoard");
+    expect(firstBoardAfterSecondOpen?.activeBoardTabId).toBe(
+      "project-board-1",
+    );
+
+    const persistedView = setResponseBoardWorkspaceState(
+      reopened,
+      secondBoard?.id ?? "",
+      "custom-board",
+      { panX: 18, panY: -9, zoom: 1.25 },
+    );
+    const persistedBoard = persistedView.panes
+      .find((pane) => pane.id === "pane-session")
+      ?.tabs.find((tab) => tab.kind === "responseBoard");
+    expect(persistedBoard).toMatchObject({
+      activeBoardTabId: "custom-board",
+      boardViews: {
+        "custom-board": { panX: 18, panY: -9, zoom: 1.25 },
+      },
+    });
+  });
+
+  it("prunes camera state for board tabs that no longer exist", () => {
+    const opened = openResponseBoardInWorkspaceState(
+      splitWorkspace(),
+      "pane-board",
+      "session-1",
+      "project-1",
+      "kept-board",
+    );
+    const workspaceTabId = opened.panes
+      .find((pane) => pane.id === "pane-board")
+      ?.tabs.find((tab) => tab.kind === "responseBoard")?.id;
+    const withTwoViews = setResponseBoardWorkspaceState(
+      setResponseBoardWorkspaceState(
+        opened,
+        workspaceTabId ?? "",
+        "kept-board",
+        { panX: 10, panY: 20, zoom: 1.1 },
+      ),
+      workspaceTabId ?? "",
+      "removed-board",
+      { panX: 30, panY: 40, zoom: 0.8 },
+    );
+
+    const pruned = setResponseBoardWorkspaceState(
+      withTwoViews,
+      workspaceTabId ?? "",
+      "kept-board",
+      { panX: 10, panY: 20, zoom: 1.1 },
+      ["kept-board"],
+    );
+    const boardTab = pruned.panes
+      .find((pane) => pane.id === "pane-board")
+      ?.tabs.find((tab) => tab.kind === "responseBoard");
+    expect(boardTab?.boardViews).toEqual({
+      "kept-board": { panX: 10, panY: 20, zoom: 1.1 },
+    });
   });
 });

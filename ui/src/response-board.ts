@@ -3,6 +3,36 @@ import type { ResponseBoardCard } from "./api";
 export const RESPONSE_BOARD_MESSAGE_MIME =
   "application/x-termal-response-board-message+json";
 
+export type ResponseBoardInvalidationSource = object;
+
+type ResponseBoardInvalidationListener = (
+  source: ResponseBoardInvalidationSource | null,
+) => void;
+
+const responseBoardInvalidationListeners =
+  new Set<ResponseBoardInvalidationListener>();
+
+export function createResponseBoardInvalidationSource(): ResponseBoardInvalidationSource {
+  return {};
+}
+
+export function notifyResponseBoardChanged(
+  source: ResponseBoardInvalidationSource | null,
+) {
+  for (const listener of [...responseBoardInvalidationListeners]) {
+    listener(source);
+  }
+}
+
+export function subscribeResponseBoardInvalidation(
+  listener: ResponseBoardInvalidationListener,
+) {
+  responseBoardInvalidationListeners.add(listener);
+  return () => {
+    responseBoardInvalidationListeners.delete(listener);
+  };
+}
+
 export type ResponseBoardMessageDrag = {
   sessionId: string;
   messageId: string;

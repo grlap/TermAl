@@ -195,6 +195,8 @@ export type UseAppLiveStateParams = {
     }) => void
   >;
   activeSession: Session | null;
+  /** Session whose transcript is mounted in the active pane, if any. */
+  activeTranscriptSessionId: string | null;
   visibleSessionHydrationTargets: readonly SessionHydrationTarget[];
 };
 

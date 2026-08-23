@@ -28,7 +28,7 @@
 // interactions differently: Claude uses a `request_id` string the CLI
 // assigns, Codex uses a JSON-RPC `message_id`, ACP uses its own
 // `message_id`. That's why the store is split per-protocol rather than
-// shared. `clear_claude_pending_approval_by_request` is the inverse
+// shared. `clear_claude_pending_interaction_by_request` is the inverse
 // lookup Claude needs because its cancellation path arrives with a
 // `request_id` rather than the message_id key the register is stored
 // under. The pending store is consumed from `src/state.rs` by
@@ -594,6 +594,24 @@ impl AppState {
         Ok(())
     }
 
+    /// Stores a Claude AskUserQuestion dialog keyed by transcript message id
+    /// so the generic user-input route can answer the still-running runtime.
+    fn register_claude_pending_user_input(
+        &self,
+        session_id: &str,
+        message_id: String,
+        request: ClaudePendingUserInput,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        inner.sessions[index]
+            .pending_claude_user_inputs
+            .insert(message_id, request);
+        Ok(())
+    }
+
     /// Stores a Codex pending approval keyed by `message_id`.
     /// `update_approval` in `src/state.rs` looks it up on user action
     /// and sends the decision back over JSON-RPC.
@@ -614,7 +632,7 @@ impl AppState {
     }
 
     /// Stores a Codex pending user-input request keyed by `message_id`.
-    /// `submit_codex_user_input` in `src/state.rs` looks it up when the
+    /// `submit_user_input` in `src/state.rs` looks it up when the
     /// user answers the form and returns the answers to Codex.
     fn register_codex_pending_user_input(
         &self,
@@ -692,13 +710,13 @@ impl AppState {
         Ok(())
     }
 
-    /// Drops any Claude pending approval entries matching `request_id` and
-    /// marks the backing transcript messages as `Canceled`. Claude's
+    /// Drops any Claude pending approval or user-input entries matching
+    /// `request_id` and marks the backing transcript messages as canceled. Claude's
     /// cancellation events carry a `request_id` (the Claude CLI's internal
     /// identifier) rather than the `message_id` that keys the register —
     /// so this is the only clear path that walks the map to find matching
     /// entries instead of looking up by the store's key directly.
-    fn clear_claude_pending_approval_by_request(
+    fn clear_claude_pending_interaction_by_request(
         &self,
         session_id: &str,
         request_id: &str,
@@ -710,27 +728,55 @@ impl AppState {
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
-        let message_ids: Vec<String> = record
+        let approval_message_ids: Vec<String> = record
             .pending_claude_approvals
             .iter()
             .filter(|(_, approval)| approval.request_id == request_id)
             .map(|(message_id, _)| message_id.clone())
             .collect();
+        let user_input_message_ids: Vec<String> = record
+            .pending_claude_user_inputs
+            .iter()
+            .filter(|(_, request)| request.request_id == request_id)
+            .map(|(message_id, _)| message_id.clone())
+            .collect();
 
-        if message_ids.is_empty() {
+        if approval_message_ids.is_empty() && user_input_message_ids.is_empty() {
             return Ok(());
         }
 
-        for message_id in &message_ids {
-            set_approval_decision_on_record(record, message_id, ApprovalDecision::Canceled)?;
+        let mut changed_message_indices = Vec::new();
+        for message_id in &approval_message_ids {
+            changed_message_indices.push(set_approval_decision_on_record(
+                record,
+                message_id,
+                ApprovalDecision::Canceled,
+            )?);
             record.pending_claude_approvals.remove(message_id);
         }
+        for message_id in &user_input_message_ids {
+            changed_message_indices.push(set_user_input_request_state_on_record(
+                record,
+                message_id,
+                InteractionRequestState::Canceled,
+                None,
+            )?);
+            record.pending_claude_user_inputs.remove(message_id);
+        }
 
-        sync_session_interaction_state(
-            record,
-            approval_preview_text(record.session.agent.name(), ApprovalDecision::Canceled),
-        );
-        self.commit_locked(&mut inner)?;
+        let resolved_preview = if !user_input_message_ids.is_empty() {
+            user_input_request_preview_text(
+                record.session.agent.name(),
+                InteractionRequestState::Canceled,
+            )
+        } else {
+            approval_preview_text(record.session.agent.name(), ApprovalDecision::Canceled)
+        };
+        sync_session_interaction_state(record, resolved_preview);
+        let updates = message_updated_delta_parts_for_indices(record, changed_message_indices);
+        let revision = self.commit_locked(&mut inner)?;
+        drop(inner);
+        self.publish_message_updated_delta_parts(revision, updates);
         Ok(())
     }
 }

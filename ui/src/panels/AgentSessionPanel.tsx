@@ -1322,7 +1322,10 @@ const SessionConversationPage = memo(
         {liveTail}
       </>
     );
-    const conversationPageClassName = `session-conversation-page${isActive ? " is-active" : ""}${conversationOverview.shouldRender ? " has-conversation-overview-scroll" : ""}`;
+    // Overview eligibility, rather than async response readiness, owns the
+    // scrollbar replacement. The rail renders a visible pending state until
+    // data is ready, preserving both the layout width and a scroll affordance.
+    const conversationPageClassName = `session-conversation-page${isActive ? " is-active" : ""}${conversationOverview.shouldRequestOverview ? " has-conversation-overview-scroll" : ""}`;
 
     return (
       <MessageNavigationProvider value={messageNavigationContextValue}>
@@ -1332,7 +1335,7 @@ const SessionConversationPage = memo(
           hidden={!isActive}
           tabIndex={-1}
         >
-          {conversationOverview.shouldRender ? (
+          {conversationOverview.shouldRequestOverview ? (
             <div className="conversation-with-overview">
               <div className="conversation-overview-content">
                 {conversationContent}
@@ -1340,6 +1343,7 @@ const SessionConversationPage = memo(
               {conversationOverview.shouldRenderRail ? (
                 <ConversationOverviewRail
                   heightPx={conversationOverview.railHeightPx}
+                  messageCount={overviewMessageCount}
                   portalTarget={conversationOverview.railPortalTarget}
                   rightPx={conversationOverview.railRightPx}
                   topPx={conversationOverview.railTopPx}

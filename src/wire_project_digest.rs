@@ -426,6 +426,7 @@ fn registered_pending_interaction_message_id(record: &SessionRecord) -> Option<S
         record
             .pending_codex_user_inputs
             .keys()
+            .chain(record.pending_claude_user_inputs.keys())
             .chain(record.pending_codex_mcp_elicitations.keys())
             .chain(record.pending_codex_app_requests.keys()),
     )

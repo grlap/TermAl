@@ -15,10 +15,9 @@ import type {
 } from "monaco-editor/esm/vs/editor/editor.api";
 import { InlineZoneErrorBoundary } from "./InlineZoneErrorBoundary";
 import {
-  applyMonacoTheme,
   ensureMonacoEnvironment,
-  monacoThemeName,
   resolveMonacoLanguage,
+  syncMonacoTheme,
   type MonacoAppearance,
   type MonacoModule,
 } from "./monaco";
@@ -676,8 +675,7 @@ export const MonacoCodeEditor = forwardRef<MonacoCodeEditorHandle, MonacoCodeEdi
   }, [highlightedColumnNumber, highlightedLineNumber, highlightToken, path, value]);
 
   function syncTheme(monacoModule: MonacoModule) {
-    applyMonacoTheme(monacoModule, appearance);
-    monacoModule.editor.setTheme(monacoThemeName(appearance));
+    syncMonacoTheme(monacoModule, appearance);
   }
 
   function layoutEditor() {

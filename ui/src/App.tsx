@@ -628,6 +628,8 @@ export default function App() {
   const activeSession = activePane?.activeSessionId
     ? (sessionLookup.get(activePane.activeSessionId) ?? null)
     : null;
+  const activeTranscriptSessionId =
+    activePane?.viewMode === "session" ? (activeSession?.id ?? null) : null;
   const visibleSessionHydrationTargets = useMemo<
     readonly SessionHydrationTarget[]
   >(
@@ -940,6 +942,7 @@ export default function App() {
     requestBackendReconnectRef,
     requestActionRecoveryResyncRef,
     activeSession,
+    activeTranscriptSessionId,
     visibleSessionHydrationTargets,
   });
 
@@ -1173,6 +1176,7 @@ export default function App() {
     handleOpenSourceTab,
     handleOpenMailboxTab,
     handleOpenResponseBoardTab,
+    handleSetResponseBoardWorkspaceState,
     handleOpenDiffPreviewTab,
     handleOpenGitStatusDiffPreviewTab,
     handleOpenFilesystemTab,
@@ -2169,6 +2173,9 @@ export default function App() {
               onOpenSourceTab={handleOpenSourceTab}
               onOpenMailboxTab={handleOpenMailboxTab}
               onOpenResponseBoardTab={handleOpenResponseBoardTab}
+              onSetResponseBoardWorkspaceState={
+                handleSetResponseBoardWorkspaceState
+              }
               onOpenDiffPreviewTab={handleOpenDiffPreviewTab}
               onOpenGitStatusDiffPreviewTab={handleOpenGitStatusDiffPreviewTab}
               onOpenFilesystemTab={handleOpenFilesystemTab}

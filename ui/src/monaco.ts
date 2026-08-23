@@ -67,6 +67,14 @@ export function applyMonacoTheme(monacoModule: MonacoModule, appearance: MonacoA
   monacoModule.editor.defineTheme(monacoThemeName(appearance), buildMonacoTheme(appearance));
 }
 
+export function syncMonacoTheme(
+  monacoModule: MonacoModule,
+  appearance: MonacoAppearance,
+) {
+  applyMonacoTheme(monacoModule, appearance);
+  monacoModule.editor.setTheme(monacoThemeName(appearance));
+}
+
 export function resolveMonacoLanguage(language?: string | null, path?: string | null) {
   switch (language) {
     case "bash":
@@ -185,6 +193,12 @@ function buildMonacoTheme(appearance: MonacoAppearance): MonacoThemeData {
       "scrollbarSlider.background": toColorHex(withAlpha(palette.muted, 0.2)),
       "scrollbarSlider.hoverBackground": toColorHex(withAlpha(palette.muted, 0.32)),
       "scrollbarSlider.activeBackground": toColorHex(withAlpha(palette.signalBlue, 0.38)),
+      // Monaco paints the minimap into a canvas, so its base cannot rely on
+      // the editor DOM compositing a translucent color over the pane paper.
+      "minimap.background": toColorHex(palette.surface),
+      "minimapSlider.background": toColorHex(withAlpha(palette.muted, 0.2)),
+      "minimapSlider.hoverBackground": toColorHex(withAlpha(palette.muted, 0.32)),
+      "minimapSlider.activeBackground": toColorHex(withAlpha(palette.signalBlue, 0.38)),
       "diffEditor.diagonalFill": toColorHex(withAlpha(palette.line, 0.48)),
       "diffEditor.insertedLineBackground": toColorHex(withAlpha(palette.signalGreen, appearance === "dark" ? 0.17 : 0.1)),
       "diffEditor.insertedTextBackground": toColorHex(withAlpha(palette.signalGreen, appearance === "dark" ? 0.3 : 0.18)),
@@ -201,7 +215,15 @@ function readMonacoPalette(appearance: MonacoAppearance) {
     ink: readCssColor("--ink", appearance === "dark" ? "#f4f2ec" : "#1d1718"),
     muted: readCssColor("--muted", appearance === "dark" ? "#9b9387" : "#766a6f"),
     line: readCssColor("--line", appearance === "dark" ? "rgba(198, 183, 159, 0.18)" : "rgba(38, 29, 33, 0.12)"),
-    surface: readCssColor("--surface-white", appearance === "dark" ? "rgba(24, 26, 30, 0.92)" : "rgba(255, 255, 255, 0.88)"),
+    // `--surface-white` is intentionally a translucent highlight wash in dark
+    // themes. Monaco needs a real surface, and its canvas consumers require
+    // that surface to be fully opaque.
+    surface: opaqueColor(
+      readCssColor(
+        "--panel-strong",
+        appearance === "dark" ? "#181a1e" : "#fffffd",
+      ),
+    ),
     panel: readCssColor("--panel-strong", appearance === "dark" ? "rgba(22, 23, 27, 0.96)" : "rgba(255, 255, 253, 0.96)"),
     signalBlue: readCssColor("--signal-blue", appearance === "dark" ? "#79d4ff" : "#667fbb"),
     signalGold: readCssColor("--signal-gold", appearance === "dark" ? "#f3cf7a" : "#c29a53"),
@@ -286,6 +308,10 @@ function withAlpha(color: RGBA, alpha: number): RGBA {
     ...color,
     a: clampAlpha(color.a * alpha),
   };
+}
+
+function opaqueColor(color: RGBA): RGBA {
+  return { ...color, a: 1 };
 }
 
 function clampChannel(value: number) {

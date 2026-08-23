@@ -127,14 +127,14 @@ import { useSessionPaneScrollState } from "./SessionPaneView.scroll";
 import { useSessionPaneSourceFileState } from "./SessionPaneView.source-file";
 import type { SessionPaneViewProps } from "./SessionPaneView.types";
 import {
-  createResponseBoardCard,
-  fetchResponseBoard,
+  stageResponseBoardCard,
   type ResponseBoardCard,
 } from "./api";
-import { nextResponseBoardCardPosition } from "./response-board";
+import { notifyResponseBoardChanged } from "./response-board";
 import { requestResponseBoardSourceNavigation } from "./response-board-navigation";
 
 const NOOP_OPEN_RESPONSE_BOARD_TAB = () => {};
+const NOOP_SET_RESPONSE_BOARD_WORKSPACE_STATE = () => {};
 
 export function SessionPaneView({
   pane,
@@ -177,6 +177,7 @@ export function SessionPaneView({
   onOpenSourceTab,
   onOpenMailboxTab,
   onOpenResponseBoardTab = NOOP_OPEN_RESPONSE_BOARD_TAB,
+  onSetResponseBoardWorkspaceState = NOOP_SET_RESPONSE_BOARD_WORKSPACE_STATE,
   onOpenDiffPreviewTab,
   onOpenGitStatusDiffPreviewTab,
   onOpenFilesystemTab,
@@ -267,14 +268,18 @@ export function SessionPaneView({
     async (sessionId: string, messageId: string) => {
       try {
         onComposerError(null);
-        const board = await fetchResponseBoard();
-        const position = nextResponseBoardCardPosition(board.cards);
-        await createResponseBoardCard({ sessionId, messageId, ...position });
         const sourceSession = activeContextSessionLookup.get(sessionId) ?? null;
+        const card = await stageResponseBoardCard({
+          sessionId,
+          messageId,
+          projectId: sourceSession?.projectId ?? null,
+        });
+        notifyResponseBoardChanged(null);
         onOpenResponseBoardTab(
           pane.id,
           sessionId,
           sourceSession?.projectId ?? null,
+          card.tabId,
         );
       } catch (error) {
         onComposerError(getErrorMessage(error));
@@ -1640,6 +1645,10 @@ export function SessionPaneView({
           <ResponseBoardPanel
             key={`${activeResponseBoardTab.id}:${activeResponseBoardTab.refreshToken}`}
             refreshToken={activeResponseBoardTab.refreshToken}
+            workspaceTabId={activeResponseBoardTab.id}
+            activeBoardTabId={activeResponseBoardTab.activeBoardTabId ?? null}
+            boardViews={activeResponseBoardTab.boardViews ?? {}}
+            onWorkspaceStateChange={onSetResponseBoardWorkspaceState}
             onOpenSource={handleOpenResponseBoardSource}
           />
         ) : activeTerminalTab ? (

@@ -144,12 +144,15 @@ export function createMailboxTab(
 export function createResponseBoardTab(
   originSessionId: string | null = null,
   originProjectId: string | null = null,
+  activeBoardTabId: string | null = null,
 ): WorkspaceResponseBoardTab {
   return {
     id: crypto.randomUUID(),
     kind: "responseBoard",
     originSessionId: normalizeWorkspaceIdentifier(originSessionId),
     refreshToken: crypto.randomUUID(),
+    activeBoardTabId: normalizeWorkspaceIdentifier(activeBoardTabId),
+    boardViews: {},
     ...projectOriginProps(normalizeWorkspaceIdentifier(originProjectId)),
   };
 }

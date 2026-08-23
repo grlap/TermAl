@@ -434,6 +434,56 @@ fn coordination_cleanup_pass_retains_non_retryable_failures_without_blocking_pri
 }
 
 #[test]
+fn response_board_detachment_pass_retains_failures_and_retries_with_the_last_name() {
+    let project_id = "project-response-board-detach-retry";
+    let last_project_name = "Renamed before deletion";
+    let mut inner = StateInner::new();
+    inner
+        .pending_response_board_project_detachments
+        .insert(project_id.to_owned(), last_project_name.to_owned());
+    let inner = Arc::new(StateMutex::new(inner));
+
+    let failed = process_pending_response_board_project_detachments(
+        &inner,
+        |observed_project_id, observed_project_name| {
+            assert_eq!(observed_project_id, project_id);
+            assert_eq!(observed_project_name, last_project_name);
+            Err("response-board database is temporarily unavailable".to_owned())
+        },
+    );
+    assert_eq!(failed.completed, 0);
+    assert!(failed.pending);
+    assert_eq!(
+        inner
+            .lock()
+            .expect("state mutex poisoned")
+            .pending_response_board_project_detachments
+            .get(project_id)
+            .map(String::as_str),
+        Some(last_project_name),
+        "failed conversion must retain both the durable intent and final name"
+    );
+
+    let retried = process_pending_response_board_project_detachments(
+        &inner,
+        |observed_project_id, observed_project_name| {
+            assert_eq!(observed_project_id, project_id);
+            assert_eq!(observed_project_name, last_project_name);
+            Ok(())
+        },
+    );
+    assert_eq!(retried.completed, 1);
+    assert!(!retried.pending);
+    assert!(
+        inner
+            .lock()
+            .expect("state mutex poisoned")
+            .pending_response_board_project_detachments
+            .is_empty()
+    );
+}
+
+#[test]
 fn coordination_cleanup_pass_handles_multiple_scopes_and_a_large_cascade_outside_primary_worker() {
     let state_root = PersistTestRoot::new("coordination-cleanup-large-cascade");
     let coordination_path = state_root.path().join("coordination.sqlite");

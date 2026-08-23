@@ -21,6 +21,15 @@ const delegationCommandMocks = vi.hoisted(() => ({
   getDelegationStatusCommand: vi.fn(),
 }));
 
+const responseBoardMocks = vi.hoisted(() => ({
+  stageResponseBoardCard: vi.fn(),
+}));
+
+vi.mock("./api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./api")>()),
+  stageResponseBoardCard: responseBoardMocks.stageResponseBoardCard,
+}));
+
 vi.mock("./panels/AgentSessionPanel", async () => {
   const React = await import("react");
 
@@ -49,6 +58,10 @@ vi.mock("./panels/AgentSessionPanel", async () => {
 
   function AgentSessionPanel(props: {
     renderMessageCard: (...args: unknown[]) => React.ReactElement;
+    onPinResponseBoardMessage?: (
+      sessionId: string,
+      messageId: string,
+    ) => Promise<void>;
   }) {
     const card = props.renderMessageCard(
       delegationMessage,
@@ -107,6 +120,16 @@ vi.mock("./panels/AgentSessionPanel", async () => {
         {actionsEnabled &&
         typeof cardProps.onCancelParallelAgent === "function" ? (
           <button type="button">Cancel delegation</button>
+        ) : null}
+        {props.onPinResponseBoardMessage ? (
+          <button
+            type="button"
+            onClick={() => {
+              void props.onPinResponseBoardMessage?.("session-1", "message-1");
+            }}
+          >
+            Pin fixture response
+          </button>
         ) : null}
       </div>
     );
@@ -213,6 +236,7 @@ function renderSessionPaneView({
   const onOpenConversationFromDiff = vi.fn();
   const onComposerError = vi.fn();
   const onInsertReviewIntoPrompt = vi.fn();
+  const onOpenResponseBoardTab = vi.fn();
   const props: ComponentProps<typeof SessionPaneView> = {
     pane: makePane(session.id),
     codexState: {},
@@ -259,6 +283,7 @@ function renderSessionPaneView({
     onOpenTerminalTab: vi.fn(),
     onOpenInstructionDebuggerTab: vi.fn(),
     onOpenCanvasTab: vi.fn(),
+    onOpenResponseBoardTab,
     onUpsertCanvasSessionCard: vi.fn(),
     onRemoveCanvasSessionCard: vi.fn(),
     onSetCanvasZoom: vi.fn(),
@@ -302,6 +327,7 @@ function renderSessionPaneView({
     onComposerError,
     onInsertReviewIntoPrompt,
     onOpenConversationFromDiff,
+    onOpenResponseBoardTab,
   };
 }
 
@@ -328,6 +354,7 @@ describe("SessionPaneView delegation action wiring", () => {
     delegationCommandMocks.cancelDelegationCommand.mockReset();
     delegationCommandMocks.getDelegationResultCommand.mockReset();
     delegationCommandMocks.getDelegationStatusCommand.mockReset();
+    responseBoardMocks.stageResponseBoardCard.mockReset();
   });
 
   it.each([
@@ -459,6 +486,35 @@ describe("SessionPaneView delegation action wiring", () => {
       );
     });
     expect(onComposerError).not.toHaveBeenCalled();
+  });
+
+  it("stages a pinned response for its project and opens the returned board tab", async () => {
+    responseBoardMocks.stageResponseBoardCard.mockResolvedValue({
+      tabId: "project-board-tab",
+    });
+    const { onOpenResponseBoardTab } = renderSessionPaneView({
+      session: makeSession({
+        id: "session-1",
+        projectId: "project-local",
+      }),
+      projects: [makeProject({ id: "project-local" })],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Pin fixture response" }));
+
+    await waitFor(() => {
+      expect(responseBoardMocks.stageResponseBoardCard).toHaveBeenCalledWith({
+        sessionId: "session-1",
+        messageId: "message-1",
+        projectId: "project-local",
+      });
+    });
+    expect(onOpenResponseBoardTab).toHaveBeenCalledWith(
+      "pane-1",
+      "session-1",
+      "project-local",
+      "project-board-tab",
+    );
   });
 
   it("warns when inserting failed delegation results", async () => {

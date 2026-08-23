@@ -587,7 +587,7 @@ describe("AgentSessionPanel virtualization", () => {
       scrollKind: "bottom_pin",
     },
   ] as const)(
-    "uses current $label intent when overview readiness changes the wrapper",
+    "keeps scrollbar eligibility stable and uses current $label intent when overview readiness changes the wrapper",
     async ({ liveTailPinned, scrollKind, scrollTop }) => {
       const scrollNode = document.createElement("section");
       scrollNode.className = "message-stack";
@@ -625,8 +625,11 @@ describe("AgentSessionPanel virtualization", () => {
           container.querySelector(
             ".session-conversation-page.has-conversation-overview-scroll",
           ),
-        ).toBeNull();
-        expect(container.querySelector(".conversation-with-overview")).toBeNull();
+        ).not.toBeNull();
+        expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
+        expect(
+          screen.getByLabelText(/Conversation overview loading/),
+        ).toHaveClass("is-pending");
 
         act(() => {
           scrollMocks.setScrollTop(scrollTop);
@@ -661,6 +664,89 @@ describe("AgentSessionPanel virtualization", () => {
       }
     },
   );
+
+  it("keeps a visible pending rail when an eligible overview request fails", async () => {
+    const overviewSpy = vi
+      .spyOn(api, "fetchSessionOverview")
+      .mockRejectedValueOnce(new Error("overview unavailable"));
+    const { container } = renderSessionPanelWithDefaults({
+      activeSession: makeSession("overview-failure", {
+        messages: makeTextMessages(40),
+      }),
+    });
+
+    await waitFor(() => expect(overviewSpy).toHaveBeenCalledTimes(1));
+    await act(async () => Promise.resolve());
+    expect(
+      container.querySelector(
+        ".session-conversation-page.has-conversation-overview-scroll",
+      ),
+    ).not.toBeNull();
+    expect(container.querySelector(".conversation-with-overview")).not.toBeNull();
+    expect(screen.getByLabelText(/Conversation overview loading/)).toHaveClass(
+      "is-pending",
+    );
+  });
+
+  it("keeps the native scrollbar for a transcript below the overview threshold", () => {
+    const overviewSpy = vi.spyOn(api, "fetchSessionOverview");
+    const { container } = renderSessionPanelWithDefaults({
+      activeSession: makeSession("short-session", {
+        messages: makeTextMessages(29),
+      }),
+    });
+
+    expect(overviewSpy).not.toHaveBeenCalled();
+    expect(
+      container.querySelector(
+        ".session-conversation-page.has-conversation-overview-scroll",
+      ),
+    ).toBeNull();
+  });
+
+  it("never restores the native scrollbar during a large-session switch", async () => {
+    const overviewSpy = vi
+      .spyOn(api, "fetchSessionOverview")
+      .mockImplementation(
+        () =>
+          new Promise<ReturnType<typeof makeConversationOverviewResponse>>(
+            () => {},
+          ),
+      );
+    const firstSession = makeSession("large-session-a", {
+      messages: makeTextMessages(40),
+    });
+    const secondSession = makeSession("large-session-b", {
+      messages: makeTextMessages(40),
+    });
+    const panel = createAgentSessionPanelHarness({
+      activeSession: firstSession,
+    });
+    const rendered = render(panel());
+
+    await waitFor(() => expect(overviewSpy).toHaveBeenCalledTimes(1));
+    expect(
+      rendered.container.querySelector(
+        ".session-conversation-page.has-conversation-overview-scroll",
+      ),
+    ).not.toBeNull();
+
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [firstSession, secondSession],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+    rendered.rerender(panel({ activeSessionId: secondSession.id }));
+
+    await waitFor(() => expect(overviewSpy).toHaveBeenCalledTimes(2));
+    expect(
+      rendered.container.querySelector(
+        ".session-conversation-page.has-conversation-overview-scroll",
+      ),
+    ).not.toBeNull();
+  });
 
   it("keeps the production rail wrapper from widening the transcript pane", async () => {
     const nodeFsModule = "node:fs";

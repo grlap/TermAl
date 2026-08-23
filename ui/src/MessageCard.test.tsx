@@ -2796,6 +2796,66 @@ describe("MessageCard", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("submits every Claude question including multi-select and Other", () => {
+    const onUserInputSubmit = vi.fn();
+    const message: UserInputRequestMessage = {
+      id: "message-claude-user-input",
+      type: "userInputRequest",
+      author: "assistant",
+      timestamp: "10:04",
+      title: "Claude needs your input",
+      detail: "Answer Claude's 2 questions to continue.",
+      state: "pending",
+      questions: [
+        {
+          header: "Scope",
+          id: "claude-question-1",
+          isOther: true,
+          question: "Which scope should I use?",
+          options: [
+            { label: "Focused", description: "Only this module." },
+            { label: "Broad", description: "The whole workspace." },
+          ],
+        },
+        {
+          header: "Checks",
+          id: "claude-question-2",
+          isOther: true,
+          multiSelect: true,
+          question: "Which checks should I run?",
+          options: [
+            { label: "Tests", description: "Run tests." },
+            { label: "Lint", description: "Run lint." },
+          ],
+        },
+      ],
+    };
+
+    render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onUserInputSubmit={onUserInputSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: /Focused/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Tests/ }));
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Other" })[0]!);
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Smoke check" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+
+    expect(onUserInputSubmit).toHaveBeenCalledWith(
+      "message-claude-user-input",
+      {
+        "claude-question-1": ["Focused"],
+        "claude-question-2": ["Tests", "Smoke check"],
+      },
+    );
+  });
+
   it("submits MCP elicitation form content", () => {
     const onMcpElicitationSubmit = vi.fn();
     const message: McpElicitationRequestMessage = {

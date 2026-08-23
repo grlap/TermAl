@@ -107,7 +107,7 @@ describe("useConversationOverviewController", () => {
     expect(result.current.overview).not.toBe(firstOverview);
   });
 
-  it("keeps the native-scroll layout while the initial overview is pending", async () => {
+  it("renders a pending rail while the initial overview is loading", async () => {
     fetchSessionOverview.mockImplementationOnce(
       () => new Promise<SessionOverviewResponse>(() => {}),
     );
@@ -120,10 +120,10 @@ describe("useConversationOverviewController", () => {
     expect(result.current.overview).toBeNull();
     expect(result.current.isRailReady).toBe(false);
     expect(result.current.shouldRender).toBe(false);
-    expect(result.current.shouldRenderRail).toBe(false);
+    expect(result.current.shouldRenderRail).toBe(true);
   });
 
-  it("keeps the native-scroll layout after an overview request is rejected", async () => {
+  it("keeps the pending rail after an overview request is rejected", async () => {
     fetchSessionOverview.mockRejectedValueOnce(new Error("overview unavailable"));
 
     const { result } = renderHook(() =>
@@ -134,7 +134,7 @@ describe("useConversationOverviewController", () => {
     await waitFor(() => expect(result.current.overview).toBeNull());
     expect(result.current.isRailReady).toBe(false);
     expect(result.current.shouldRender).toBe(false);
-    expect(result.current.shouldRenderRail).toBe(false);
+    expect(result.current.shouldRenderRail).toBe(true);
   });
 
   it("enables the overview layout atomically when the response becomes ready", async () => {
@@ -298,7 +298,7 @@ describe("useConversationOverviewController", () => {
 
     expect(result.current.overview).toBeNull();
     expect(result.current.shouldRender).toBe(false);
-    expect(result.current.shouldRenderRail).toBe(false);
+    expect(result.current.shouldRenderRail).toBe(true);
   });
 
   it("keeps a ready same-session rail while refreshing its overview", async () => {
@@ -358,7 +358,7 @@ describe("useConversationOverviewController", () => {
     await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(result.current.overview).toBeNull());
     expect(result.current.shouldRender).toBe(false);
-    expect(result.current.shouldRenderRail).toBe(false);
+    expect(result.current.shouldRenderRail).toBe(true);
   });
 
   it("recovers from a rejected request on a later activation", async () => {
@@ -378,7 +378,7 @@ describe("useConversationOverviewController", () => {
     expect(result.current.overview).toEqual(overview());
   });
 
-  it("requests at the message threshold without flashing the overview layout", async () => {
+  it("requests at the message threshold and renders the pending rail immediately", async () => {
     fetchSessionOverview.mockImplementationOnce(
       () => new Promise<SessionOverviewResponse>(() => {}),
     );
@@ -393,7 +393,7 @@ describe("useConversationOverviewController", () => {
 
     await waitFor(() => expect(fetchSessionOverview).toHaveBeenCalledTimes(1));
     expect(result.current.shouldRender).toBe(false);
-    expect(result.current.shouldRenderRail).toBe(false);
+    expect(result.current.shouldRenderRail).toBe(true);
   });
 
   it("coalesces a burst of overview freshness changes", async () => {

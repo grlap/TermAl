@@ -7,9 +7,9 @@
 // `/user-input/`, `/mcp-elicitation/`, `/codex/requests/`), and these
 // methods route the response back into the still-running agent.
 //
-// Per-agent split: Claude uses a `ClaudePermissionDecision` queued onto
-// the runtime's input channel (ultimately an NDJSON control_request
-// response over the CLI pipe); Codex uses a JSON-RPC `sendResponse`
+// Per-agent split: Claude uses a `ClaudePermissionDecision` or completed
+// user-dialog response queued onto the runtime's input channel (ultimately
+// an NDJSON control_response over the CLI pipe); Codex uses a JSON-RPC `sendResponse`
 // whose `result` shape depends on the approval kind — built here by
 // `codex_approval_result` and sent via `send_codex_json_rpc_request`
 // from `src/codex_rpc.rs`; ACP uses an `AcpRuntimeCommand::JsonRpcMessage`
@@ -18,9 +18,9 @@
 // The pending lookup fans out across all three agents' maps:
 // `update_approval` searches `pending_claude_approvals` (keyed by
 // message_id), `pending_codex_approvals`, and `pending_acp_approvals`
-// to find the right response channel. The `submit_codex_*` trio look
-// up their Codex-specific maps (`pending_codex_user_inputs` /
-// `pending_codex_mcp_elicitations` / `pending_codex_app_requests`),
+// to find the right response channel. `submit_user_input` handles both
+// Claude and Codex; the remaining `submit_codex_*` methods look up their
+// Codex-specific maps (`pending_codex_mcp_elicitations` / `pending_codex_app_requests`),
 // validate payloads through `src/codex_validation.rs`, then dispatch
 // via `CodexRuntimeCommand::JsonRpcResponse`. See
 // `src/turn_lifecycle.rs` for the `register_*_pending_*` methods that
@@ -37,6 +37,158 @@
 // `CodexAppRequestSubmissionRequest`; `src/session_interaction.rs` for
 // `set_approval_decision_on_record` + the `set_*_request_state_on_record`
 // helpers; `src/tests/http_routes.rs` for end-to-end route coverage.
+
+enum PendingUserInputRuntimeAction {
+    Claude {
+        handle: ClaudeRuntimeHandle,
+        pending: ClaudePendingUserInput,
+        response: ClaudeUserInputResponse,
+    },
+    Codex {
+        handle: CodexRuntimeHandle,
+        pending: CodexPendingUserInput,
+        response_answers: BTreeMap<String, BTreeMap<String, Vec<String>>>,
+    },
+}
+
+impl PendingUserInputRuntimeAction {
+    fn send(&self) -> std::result::Result<(), ApiError> {
+        match self {
+            Self::Claude {
+                handle, response, ..
+            } => handle
+                .input_tx
+                .send(ClaudeRuntimeCommand::UserInputResponse(response.clone()))
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to deliver user input response to Claude: {err}"
+                    ))
+                }),
+            Self::Codex {
+                handle,
+                pending,
+                response_answers,
+            } => handle
+                .input_tx
+                .send(CodexRuntimeCommand::JsonRpcResponse {
+                    response: CodexJsonRpcResponseCommand {
+                        request_id: pending.request_id.clone(),
+                        payload: CodexJsonRpcResponsePayload::Result(
+                            json!({ "answers": response_answers }),
+                        ),
+                    },
+                })
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to deliver user input response to Codex: {err}"
+                    ))
+                }),
+        }
+    }
+
+    fn restore_claim(&self, record: &mut SessionRecord, message_id: &str) {
+        match self {
+            Self::Claude { pending, .. } => {
+                record
+                    .pending_claude_user_inputs
+                    .entry(message_id.to_owned())
+                    .or_insert_with(|| pending.clone());
+            }
+            Self::Codex { pending, .. } => {
+                record
+                    .pending_codex_user_inputs
+                    .entry(message_id.to_owned())
+                    .or_insert_with(|| pending.clone());
+            }
+        }
+    }
+}
+
+fn validate_claude_user_input_answers(
+    pending: &ClaudePendingUserInput,
+    answers: BTreeMap<String, Vec<String>>,
+) -> std::result::Result<(Value, BTreeMap<String, Vec<String>>), ApiError> {
+    let question_ids: HashSet<&str> = pending
+        .questions
+        .iter()
+        .map(|question| question.id.as_str())
+        .collect();
+    for answer_id in answers.keys() {
+        if !question_ids.contains(answer_id.as_str()) {
+            return Err(ApiError::bad_request(format!(
+                "answer `{answer_id}` does not match any requested question"
+            )));
+        }
+    }
+
+    let mut claude_answers = serde_json::Map::new();
+    let mut display_answers = BTreeMap::new();
+    for question in &pending.questions {
+        let raw_answers = answers.get(&question.id).ok_or_else(|| {
+            ApiError::bad_request(format!("question `{}` is missing an answer", question.header))
+        })?;
+        let mut normalized_answers = Vec::new();
+        for answer in raw_answers {
+            let answer = answer.trim();
+            if !answer.is_empty() && !normalized_answers.iter().any(|seen| seen == answer) {
+                normalized_answers.push(answer.to_owned());
+            }
+        }
+        let valid_count = if question.multi_select {
+            !normalized_answers.is_empty()
+        } else {
+            normalized_answers.len() == 1
+        };
+        if !valid_count {
+            return Err(ApiError::bad_request(format!(
+                "question `{}` requires {}",
+                question.header,
+                if question.multi_select {
+                    "at least one answer"
+                } else {
+                    "exactly one answer"
+                }
+            )));
+        }
+
+        if let Some(options) = question.options.as_ref() {
+            let unknown_count = normalized_answers
+                .iter()
+                .filter(|answer| {
+                    !options
+                        .iter()
+                        .any(|option| option.label == answer.as_str())
+                })
+                .count();
+            if unknown_count > usize::from(question.is_other) {
+                return Err(ApiError::bad_request(format!(
+                    "question `{}` contains answers outside the provided options",
+                    question.header
+                )));
+            }
+        }
+
+        claude_answers.insert(
+            question.question.clone(),
+            Value::String(normalized_answers.join(", ")),
+        );
+        display_answers.insert(
+            question.id.clone(),
+            if question.is_secret {
+                vec!["[secret provided]".to_owned()]
+            } else {
+                normalized_answers
+            },
+        );
+    }
+
+    let mut updated_input = pending.input.clone();
+    updated_input
+        .as_object_mut()
+        .expect("Claude pending user input was validated as an object")
+        .insert("answers".to_owned(), Value::Object(claude_answers));
+    Ok((updated_input, display_answers))
+}
 
 fn interaction_message_update_parts(
     record: &SessionRecord,
@@ -375,24 +527,20 @@ impl AppState {
         })
     }
 
-    /// Submits user-input-request answers back to Codex. Looks up the
-    /// pending entry in `pending_codex_user_inputs` by message_id,
-    /// runs `validate_codex_user_input_answers` (from
-    /// `src/codex_validation.rs`) to normalize + schema-check each
-    /// answer against the questions, and dispatches a JSON-RPC
-    /// `sendResponse` with `result = { "answers": <per-question
-    /// answers map> }` via `CodexRuntimeCommand::JsonRpcResponse`.
-    fn submit_codex_user_input(
+    /// Submits a structured user-input response to the live Claude or Codex
+    /// runtime that owns the transcript card. Claude receives a completed
+    /// `request_user_dialog` response; Codex receives its JSON-RPC result.
+    fn submit_user_input(
         &self,
         session_id: &str,
         message_id: &str,
         answers: BTreeMap<String, Vec<String>>,
     ) -> std::result::Result<StateResponse, ApiError> {
         if self.remote_session_target(session_id)?.is_some() {
-            return self.proxy_remote_submit_codex_user_input(session_id, message_id, answers);
+            return self.proxy_remote_submit_user_input(session_id, message_id, answers);
         }
 
-        let (handle, pending, response_answers, display_answers) = {
+        let display_answers = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -405,43 +553,94 @@ impl AppState {
                     "session is not currently waiting for input",
                 ));
             }
-            if record.session.agent != Agent::Codex {
-                return Err(ApiError::conflict(
-                    "only Codex sessions currently support structured user input",
-                ));
-            }
 
-            let pending = record
-                .pending_codex_user_inputs
-                .get(message_id)
-                .cloned()
-                .ok_or_else(|| ApiError::conflict("user input request is no longer live"))?;
-            let handle = match &record.runtime {
-                SessionRuntime::Codex(handle) => handle.clone(),
-                SessionRuntime::Claude(_) | SessionRuntime::None | SessionRuntime::Acp(_) => {
-                    return Err(ApiError::conflict("Codex session is not currently running"));
+            let (action, display_answers) = match record.session.agent {
+                Agent::Claude => {
+                    let pending = record
+                        .pending_claude_user_inputs
+                        .get(message_id)
+                        .cloned()
+                        .ok_or_else(|| {
+                            ApiError::conflict("user input request is no longer live")
+                        })?;
+                    let handle = match &record.runtime {
+                        SessionRuntime::Claude(handle) => handle.clone(),
+                        SessionRuntime::Codex(_)
+                        | SessionRuntime::None
+                        | SessionRuntime::Acp(_) => {
+                            return Err(ApiError::conflict(
+                                "Claude session is not currently running",
+                            ));
+                        }
+                    };
+                    let (updated_input, display_answers) =
+                        validate_claude_user_input_answers(&pending, answers)?;
+                    let pending = record
+                        .pending_claude_user_inputs
+                        .remove(message_id)
+                        .expect("validated Claude input should still be pending");
+                    (
+                        PendingUserInputRuntimeAction::Claude {
+                            handle,
+                            response: ClaudeUserInputResponse {
+                                request_id: pending.request_id.clone(),
+                                updated_input,
+                            },
+                            pending,
+                        },
+                        display_answers,
+                    )
+                }
+                Agent::Codex => {
+                    let pending = record
+                        .pending_codex_user_inputs
+                        .get(message_id)
+                        .cloned()
+                        .ok_or_else(|| {
+                            ApiError::conflict("user input request is no longer live")
+                        })?;
+                    let handle = match &record.runtime {
+                        SessionRuntime::Codex(handle) => handle.clone(),
+                        SessionRuntime::Claude(_)
+                        | SessionRuntime::None
+                        | SessionRuntime::Acp(_) => {
+                            return Err(ApiError::conflict(
+                                "Codex session is not currently running",
+                            ));
+                        }
+                    };
+                    let (response_answers, display_answers) =
+                        validate_codex_user_input_answers(&pending.questions, answers)?;
+                    let pending = record
+                        .pending_codex_user_inputs
+                        .remove(message_id)
+                        .expect("validated Codex input should still be pending");
+                    (
+                        PendingUserInputRuntimeAction::Codex {
+                            handle,
+                            pending,
+                            response_answers,
+                        },
+                        display_answers,
+                    )
+                }
+                Agent::Cursor | Agent::Gemini | Agent::OpenCode => {
+                    return Err(ApiError::conflict(
+                        "this agent does not support structured user input",
+                    ));
                 }
             };
-            let (response_answers, display_answers) =
-                validate_codex_user_input_answers(&pending.questions, answers)?;
-            (handle, pending, response_answers, display_answers)
+            // Delivery and claim removal form one critical section. Runtime
+            // channels are nonblocking std mpsc senders, so keeping the state
+            // mutex here prevents a second HTTP request from observing the
+            // same pending interaction without introducing an await/lock
+            // inversion. A failed send restores the claim before unlock.
+            if let Err(err) = action.send() {
+                action.restore_claim(record, message_id);
+                return Err(err);
+            }
+            display_answers
         };
-
-        handle
-            .input_tx
-            .send(CodexRuntimeCommand::JsonRpcResponse {
-                response: CodexJsonRpcResponseCommand {
-                    request_id: pending.request_id.clone(),
-                    payload: CodexJsonRpcResponsePayload::Result(
-                        json!({ "answers": response_answers }),
-                    ),
-                },
-            })
-            .map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to deliver user input response to Codex: {err}"
-                ))
-            })?;
 
         self.commit_interaction_message_update(session_id, message_id, |record| {
             let message_index = set_user_input_request_state_on_record(
@@ -451,7 +650,6 @@ impl AppState {
                 Some(display_answers),
             )
             .map_err(|_| ApiError::not_found("user input request not found"))?;
-            record.pending_codex_user_inputs.remove(message_id);
             sync_session_interaction_state(
                 record,
                 user_input_request_preview_text(

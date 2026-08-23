@@ -248,6 +248,8 @@ enum ClaudeRuntimeCommand {
         retry_detail: String,
     },
     PermissionResponse(ClaudePermissionDecision),
+    UserInputResponse(ClaudeUserInputResponse),
+    ControlErrorResponse(ClaudeControlErrorResponse),
     SetModel(String),
     SetPermissionMode(String),
 }
@@ -265,6 +267,28 @@ struct ClaudePendingApproval {
     permission_mode_for_session: Option<String>,
     request_id: String,
     tool_input: Value,
+}
+
+/// Represents a Claude user-dialog request waiting for structured answers.
+#[derive(Clone)]
+struct ClaudePendingUserInput {
+    input: Value,
+    questions: Vec<UserInputQuestion>,
+    request_id: String,
+}
+
+/// Represents the completed Claude user-dialog response written to stdin.
+#[derive(Clone)]
+struct ClaudeUserInputResponse {
+    request_id: String,
+    updated_input: Value,
+}
+
+/// Represents a protocol-level rejection of a malformed Claude control request.
+#[derive(Clone)]
+struct ClaudeControlErrorResponse {
+    error: String,
+    request_id: String,
 }
 
 /// Enumerates Claude permission decisions.
@@ -288,7 +312,14 @@ enum ClaudeControlRequestAction {
         detail: String,
         approval: ClaudePendingApproval,
     },
+    QueueUserInput {
+        title: String,
+        detail: String,
+        questions: Vec<UserInputQuestion>,
+        request: ClaudePendingUserInput,
+    },
     Respond(ClaudePermissionDecision),
+    RespondError(ClaudeControlErrorResponse),
 }
 
 /// Represents a ACP runtime command.

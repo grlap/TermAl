@@ -200,6 +200,12 @@ fn write_claude_runtime_command(
         ClaudeRuntimeCommand::PermissionResponse(decision) => {
             write_claude_permission_response(writer, &decision)
         }
+        ClaudeRuntimeCommand::UserInputResponse(response) => {
+            write_claude_user_input_response(writer, &response)
+        }
+        ClaudeRuntimeCommand::ControlErrorResponse(response) => {
+            write_claude_control_error_response(writer, &response)
+        }
         ClaudeRuntimeCommand::SetModel(model) => write_claude_set_model(writer, &model),
         ClaudeRuntimeCommand::SetPermissionMode(mode) => {
             write_claude_set_permission_mode(writer, &mode)
@@ -572,10 +578,26 @@ fn spawn_claude_runtime(
                                 detail,
                                 approval,
                             } => recorder.push_claude_approval(&title, &command, &detail, approval),
+                            ClaudeControlRequestAction::QueueUserInput {
+                                title,
+                                detail,
+                                questions,
+                                request,
+                            } => recorder.push_claude_user_input_request(
+                                &title,
+                                &detail,
+                                questions,
+                                request,
+                            ),
                             ClaudeControlRequestAction::Respond(decision) => reader_input_tx
                                 .send(ClaudeRuntimeCommand::PermissionResponse(decision))
                                 .map_err(|err| {
                                     anyhow!("failed to auto-approve Claude tool request: {err}")
+                                }),
+                            ClaudeControlRequestAction::RespondError(response) => reader_input_tx
+                                .send(ClaudeRuntimeCommand::ControlErrorResponse(response))
+                                .map_err(|err| {
+                                    anyhow!("failed to reject malformed Claude control request: {err}")
                                 }),
                         }
                                 });
@@ -593,10 +615,24 @@ fn spawn_claude_runtime(
                 } else if message_type == Some("control_cancel_request") {
                     turn_state.replay_became_unsafe = true;
                     if let Some(request_id) = message.get("request_id").and_then(Value::as_str) {
-                        let _ = reader_state.clear_claude_pending_approval_by_request(
-                            &reader_session_id,
-                            request_id,
-                        );
+                        if let Err(err) = reader_state
+                            .clear_claude_pending_interaction_by_request(
+                                &reader_session_id,
+                                request_id,
+                            )
+                        {
+                            // Without the owning session, the cancellation cannot be
+                            // reconciled with the persisted request card. Stop this reader
+                            // instead of accepting more control traffic for stale state.
+                            let _ = reader_state.fail_turn_if_runtime_matches(
+                                &reader_session_id,
+                                &reader_runtime_token,
+                                &format!(
+                                    "failed to cancel Claude interaction request: {err:#}"
+                                ),
+                            );
+                            break;
+                        }
                     }
                     continue;
                 }
@@ -764,6 +800,7 @@ fn write_claude_initialize(writer: &mut impl Write) -> Result<()> {
                 "hooks": {},
                 "systemPrompt": "",
                 "appendSystemPrompt": "",
+                "supportedDialogKinds": ["permission_ask_user_question"],
             }
         }),
     )
@@ -841,6 +878,51 @@ fn write_claude_permission_response(
     };
 
     write_claude_message(writer, &message)
+}
+
+/// Writes the opaque completion envelope expected by Claude Code's
+/// `request_user_dialog` transport for AskUserQuestion.
+fn write_claude_user_input_response(
+    writer: &mut impl Write,
+    response: &ClaudeUserInputResponse,
+) -> Result<()> {
+    write_claude_message(
+        writer,
+        &json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": response.request_id,
+                "response": {
+                    "behavior": "completed",
+                    "result": {
+                        "behavior": "allow",
+                        "updatedInput": response.updated_input,
+                    }
+                }
+            }
+        }),
+    )
+}
+
+/// Writes the protocol error envelope accepted by Claude Code for a malformed
+/// control request. Returning an error keeps Claude from waiting forever on a
+/// request that TermAl cannot safely render or answer.
+fn write_claude_control_error_response(
+    writer: &mut impl Write,
+    response: &ClaudeControlErrorResponse,
+) -> Result<()> {
+    write_claude_message(
+        writer,
+        &json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "error",
+                "request_id": response.request_id,
+                "error": response.error,
+            }
+        }),
+    )
 }
 
 /// Writes Claude set permission mode.

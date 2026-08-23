@@ -447,6 +447,24 @@ fn app_router(state: AppState) -> Router {
         )
         .route("/api/response-board", get(get_response_board))
         .route(
+            "/api/response-board/tabs",
+            get(list_response_board_tabs).post(create_response_board_tab),
+        )
+        .route(
+            "/api/response-board/tabs/reorder",
+            post(reorder_response_board_tabs),
+        )
+        .route(
+            "/api/response-board/tabs/{id}",
+            get(get_response_board_tab)
+                .patch(update_response_board_tab)
+                .delete(delete_response_board_tab),
+        )
+        .route(
+            "/api/response-board/cards/stage",
+            post(stage_response_board_card),
+        )
+        .route(
             "/api/response-board/cards",
             post(create_response_board_card),
         )

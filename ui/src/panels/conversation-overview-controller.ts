@@ -137,10 +137,10 @@ export function useConversationOverviewController({
     overview?.sessionId ?? null,
   );
   const hasReadyOverview = overview?.sessionId === sessionId;
-  // Eligibility starts/refreshes the server request. Readiness alone enables
-  // the wrapper and CSS that replace the native scrollbar with the overview
-  // rail, so pending, failed, or stale-session data never removes the only
-  // working scroll affordance.
+  // Eligibility is also the stable layout key used by AgentSessionPanel to
+  // replace the native scrollbar. While data is unavailable, the rail renders
+  // its visible pending state so readiness cannot either change transcript
+  // width or remove every scroll affordance.
   const shouldRequestOverview = isActive && isOverviewEligible;
   const shouldRender = shouldRequestOverview && hasReadyOverview;
   const cancelOverviewRefreshTimer = useCallback(() => {
@@ -189,10 +189,9 @@ export function useConversationOverviewController({
           overviewRequestIdRef.current === requestId &&
           sessionIdRef.current === expectedSessionId
         ) {
-          // A stale-but-valid same-session rail is better than swapping the
-          // layout back to the native scrollbar during a transient refresh
-          // failure. Initial loads and session switches still have no matching
-          // snapshot and therefore remain on the native-scroll layout.
+          // A stale-but-valid same-session rail is better than replacing it
+          // during a transient refresh failure. Initial loads and session
+          // switches keep the visible pending rail until matching data arrives.
           setOverview((current) =>
             current?.sessionId === expectedSessionId ? current : null,
           );
@@ -470,7 +469,8 @@ export function useConversationOverviewController({
     railPortalTarget: railFrame?.portalTarget ?? null,
     railRightPx: railFrame?.rightPx ?? null,
     railTopPx: railFrame?.topPx ?? null,
-    shouldRenderRail: shouldRender,
+    shouldRequestOverview,
+    shouldRenderRail: shouldRequestOverview,
     shouldRender,
     viewport,
     virtualizerHandleRef,

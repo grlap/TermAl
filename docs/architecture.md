@@ -312,9 +312,13 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | GET | `/api/sessions/{id}/board` | List one local project's coordination-board entries through a local root session. Supports generation-aware pagination and an unchanged fast path. |
 | GET | `/api/sessions/{id}/board/keys/{key}` | Read one active coordination-board head, including its CAS revision, `updatedAtGeneration` (when the key last changed), and current `scopeGeneration`. Missing and tombstoned keys return `404` with reconciliation detail when available. |
 | POST | `/api/sessions/{id}/board/set` | Create, update, deliberately restore, or delete one coordination-board key with revision CAS and a sender-scoped idempotency key. A successful first create returns `201`; duplicate replays and later mutations return `200`; conflicts return `409`. |
-| GET | `/api/response-board` | Read the singleton visual Response Board and its immutable response snapshots. |
-| POST | `/api/response-board/cards` | Pin one durable transcript message by source session/message ids. The server resolves and snapshots the durable message; callers cannot submit replacement snapshot content. |
-| PATCH | `/api/response-board/cards/{id}` | Persist bounded card position and dimensions. |
+| GET | `/api/response-board` | Compatibility view of placed cards in the default Response Board tab. |
+| GET/POST | `/api/response-board/tabs` | List durable board canvases and the global staged-card count, or create a custom board. |
+| POST | `/api/response-board/tabs/reorder` | Persist a validated complete ordering of board partitions. |
+| GET/PATCH/DELETE | `/api/response-board/tabs/{id}` | Read one canvas plus the shared staging inbox, rename it, or delete a custom canvas without placed cards. |
+| POST | `/api/response-board/cards/stage` | Snapshot a durable transcript message into the global staging inbox with a tab/project destination hint. Returns `201` for a new card and `200` when reusing the source's existing card; reusing a placed card pulls that same card off its prior canvas and returns it to staging rather than creating a copy. |
+| POST | `/api/response-board/cards` | Legacy placed-card create in the default tab. The server owns snapshot content. |
+| PATCH | `/api/response-board/cards/{id}` | Persist bounded geometry, explicit staged/placed state, or tab membership. |
 | DELETE | `/api/response-board/cards/{id}` | Remove one visual response card. |
 | POST | `/api/sessions/{id}/delegations` | Create a Phase 1 local child delegation session with `readOnly` or `isolatedWorktree` write policy. Returns `201` with `DelegationResponse`; unsupported worker/`sharedWorktree`/remote-backed variants return `501`, active-limit conflicts return `409`, handler-level prompt/scope validation returns `400`, and JSON schema/deserialization failures return `422`. |
 | GET | `/api/sessions/{id}/delegations` | List compact summaries for delegations owned by this parent -> `DelegationListResponse`. This recovery endpoint returns exact delegation/child-session ids, title, agent, and fresh lifecycle status without prompts or transcripts; same-title delegations remain distinct. Unknown parent ids return `404`. Backs `termal_list_delegations`. |

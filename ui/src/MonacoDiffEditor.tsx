@@ -7,10 +7,9 @@ import {
 } from "react";
 import type { IDisposable, editor as MonacoEditor } from "monaco-editor/esm/vs/editor/editor.api";
 import {
-  applyMonacoTheme,
   ensureMonacoEnvironment,
-  monacoThemeName,
   resolveMonacoLanguage,
+  syncMonacoTheme,
   type MonacoAppearance,
   type MonacoModule,
 } from "./monaco";
@@ -334,8 +333,7 @@ export const MonacoDiffEditor = forwardRef<MonacoDiffEditorHandle, MonacoDiffEdi
   }, [modifiedValue, originalValue]);
 
   function syncTheme(monacoModule: MonacoModule) {
-    applyMonacoTheme(monacoModule, appearance);
-    monacoModule.editor.setTheme(monacoThemeName(appearance));
+    syncMonacoTheme(monacoModule, appearance);
   }
 
   function layoutEditor() {

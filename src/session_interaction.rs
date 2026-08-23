@@ -38,6 +38,7 @@
 /// Returns whether pending requests.
 fn has_pending_requests(record: &SessionRecord) -> bool {
     !record.pending_claude_approvals.is_empty()
+        || !record.pending_claude_user_inputs.is_empty()
         || !record.pending_codex_approvals.is_empty()
         || !record.pending_codex_user_inputs.is_empty()
         || !record.pending_codex_mcp_elicitations.is_empty()
@@ -48,6 +49,7 @@ fn has_pending_requests(record: &SessionRecord) -> bool {
 /// Clears all pending requests.
 fn clear_all_pending_requests(record: &mut SessionRecord) {
     record.pending_claude_approvals.clear();
+    record.pending_claude_user_inputs.clear();
     record.pending_codex_approvals.clear();
     record.pending_codex_user_inputs.clear();
     record.pending_codex_mcp_elicitations.clear();

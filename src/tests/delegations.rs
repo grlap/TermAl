@@ -651,6 +651,7 @@ fn test_user_input_message(message_id: &str) -> Message {
             id: "depth".to_owned(),
             is_other: false,
             is_secret: false,
+            multi_select: false,
             options: Some(vec![UserInputQuestionOption {
                 description: "Run the focused review path.".to_owned(),
                 label: "Focused".to_owned(),
@@ -6121,6 +6122,7 @@ fn removing_delegation_parent_deletes_child_runtime_and_session() {
             id: "choice".to_owned(),
             is_other: false,
             is_secret: false,
+            multi_select: false,
             options: None,
             question: "Continue?".to_owned(),
         }];

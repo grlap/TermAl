@@ -141,6 +141,7 @@ type AppControlSurfaceProps = {
     paneId: string,
     originSessionId: string | null,
     originProjectId: string | null,
+    activeBoardTabId?: string | null,
   ) => void;
   openCreateProjectDialog: () => void;
   openCreateSessionDialog: (preferredPaneId?: string | null, defaultProjectSelectionId?: string | null) => void;

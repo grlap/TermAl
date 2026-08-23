@@ -32,6 +32,8 @@ struct PersistedState {
     projects: Vec<Project>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pending_coordination_scope_deletions: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pending_response_board_project_detachments: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -74,6 +76,9 @@ impl PersistedState {
             projects: inner.projects.clone(),
             pending_coordination_scope_deletions: inner
                 .pending_coordination_scope_deletions
+                .clone(),
+            pending_response_board_project_detachments: inner
+                .pending_response_board_project_detachments
                 .clone(),
             ignored_discovered_codex_thread_ids: inner.ignored_discovered_codex_thread_ids.clone(),
             orchestrator_instances: inner.orchestrator_instances.clone(),
@@ -120,6 +125,9 @@ impl PersistedState {
             pending_coordination_scope_deletions: self
                 .pending_coordination_scope_deletions
                 .clone(),
+            pending_response_board_project_detachments: self
+                .pending_response_board_project_detachments
+                .clone(),
             ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids.clone(),
             orchestrator_instances: self.orchestrator_instances.clone(),
             delegations: Vec::new(),
@@ -163,6 +171,8 @@ impl PersistedState {
             projects: self.projects,
             pending_coordination_scope_deletions: self
                 .pending_coordination_scope_deletions,
+            pending_response_board_project_detachments: self
+                .pending_response_board_project_detachments,
             ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids,
             remote_applied_revisions: HashMap::new(),
             remote_snapshot_applied_revisions: HashMap::new(),
@@ -386,6 +396,7 @@ impl PersistedSessionRecord {
             codex_sandbox_mode: self.codex_sandbox_mode,
             external_session_id: self.external_session_id,
             pending_claude_approvals: HashMap::new(),
+            pending_claude_user_inputs: HashMap::new(),
             pending_codex_approvals: HashMap::new(),
             pending_codex_user_inputs: HashMap::new(),
             pending_codex_mcp_elicitations: HashMap::new(),

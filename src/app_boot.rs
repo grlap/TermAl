@@ -257,10 +257,64 @@ where
     }
 }
 
+fn process_pending_response_board_project_detachments<F>(
+    inner: &Arc<StateMutex<StateInner>>,
+    mut detach_project_tab: F,
+) -> CoordinationCleanupPass
+where
+    F: FnMut(&str, &str) -> std::result::Result<(), String>,
+{
+    let pending_detachments = {
+        inner
+            .lock()
+            .expect("state mutex poisoned")
+            .pending_response_board_project_detachments
+            .iter()
+            .map(|(project_id, last_project_name)| {
+                (project_id.clone(), last_project_name.clone())
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut completed = Vec::new();
+    for (project_id, last_project_name) in pending_detachments {
+        match detach_project_tab(&project_id, &last_project_name) {
+            Ok(()) => completed.push((project_id, last_project_name)),
+            Err(err) => {
+                eprintln!(
+                    "[termal] response-board tab detachment for deleted project \
+                     `{project_id}` failed; leaving its durable outbox item queued for a \
+                     later cleanup pass: {err}"
+                );
+            }
+        }
+    }
+    let mut inner = inner.lock().expect("state mutex poisoned");
+    let mut completed_count = 0;
+    for (project_id, last_project_name) in completed {
+        if inner
+            .pending_response_board_project_detachments
+            .get(&project_id)
+            .is_some_and(|pending_name| pending_name == &last_project_name)
+        {
+            inner
+                .pending_response_board_project_detachments
+                .remove(&project_id);
+            completed_count += 1;
+        }
+    }
+    CoordinationCleanupPass {
+        completed: completed_count,
+        pending: !inner
+            .pending_response_board_project_detachments
+            .is_empty(),
+    }
+}
+
 fn run_coordination_cleanup_worker(
     cleanup_rx: mpsc::Receiver<CoordinationCleanupRequest>,
     inner: Arc<StateMutex<StateInner>>,
     coordination_board_store: Arc<CoordinationBoardStore>,
+    persistence_path: Arc<PathBuf>,
     persist_tx: mpsc::Sender<PersistRequest>,
 ) {
     let mut retry_state = CoordinationCleanupRetryState::default();
@@ -284,16 +338,30 @@ fn run_coordination_cleanup_worker(
             break;
         }
 
-        let pass = process_pending_coordination_scope_deletions(&inner, |scope_project_id| {
+        let coordination_pass =
+            process_pending_coordination_scope_deletions(&inner, |scope_project_id| {
             coordination_board_store.delete_scope_for_project_lifecycle(scope_project_id)
         });
-        if pass.completed > 0 && persist_tx.send(PersistRequest::Delta).is_err() {
+        let response_board_pass = process_pending_response_board_project_detachments(
+            &inner,
+            |project_id, last_project_name| {
+                convert_deleted_project_response_board_tab(
+                    persistence_path.as_path(),
+                    project_id,
+                    last_project_name,
+                )
+                .map_err(|err| err.message)
+            },
+        );
+        if coordination_pass.completed + response_board_pass.completed > 0
+            && persist_tx.send(PersistRequest::Delta).is_err()
+        {
             // The primary worker has stopped. The on-disk outbox deliberately
             // still contains these idempotently completed scopes, so the next
             // boot can replay them and durably clear the bookkeeping.
             break;
         }
-        retry_state.record_pending(pass.pending);
+        retry_state.record_pending(coordination_pass.pending || response_board_pass.pending);
     }
 }
 
@@ -385,6 +453,7 @@ impl AppState {
         let inner_for_coordination_cleanup = Arc::clone(&inner_arc);
         let coordination_board_store_for_persist = Arc::clone(&coordination_board_store);
         let coordination_board_store_for_cleanup = Arc::clone(&coordination_board_store);
+        let persist_path_for_coordination_cleanup = Arc::clone(&persist_path_for_persist);
         let persist_tx_for_coordination_cleanup = persist_tx.clone();
         let (coordination_cleanup_tx, coordination_cleanup_rx) =
             mpsc::channel::<CoordinationCleanupRequest>();
@@ -402,6 +471,7 @@ impl AppState {
                     coordination_cleanup_rx,
                     inner_for_coordination_cleanup,
                     coordination_board_store_for_cleanup,
+                    persist_path_for_coordination_cleanup,
                     persist_tx_for_coordination_cleanup,
                 );
                 let _ = coordination_cleanup_done_tx.send(());
@@ -475,6 +545,10 @@ impl AppState {
                             .iter()
                             .cloned()
                             .collect::<Vec<_>>();
+                        let has_pending_response_board_detachments = !delta
+                            .metadata
+                            .pending_response_board_project_detachments
+                            .is_empty();
                         // Always upsert metadata (revision, preferences,
                         // projects, orchestrators, workspace_layouts).
                         // Mutation stamps only cover per-session changes,
@@ -534,7 +608,9 @@ impl AppState {
                         }
                         watermark = next_watermark;
                         prompt_history_carry = next_prompt_history_carry;
-                        if !pending_scope_deletions.is_empty() {
+                        if !pending_scope_deletions.is_empty()
+                            || has_pending_response_board_detachments
+                        {
                             // Only a successful primary commit authorizes
                             // secondary cleanup. The dedicated worker removes
                             // completed outbox items in memory and wakes this

@@ -1544,17 +1544,39 @@ async fn collect_sse_events(response: axum::response::Response) -> Vec<(String, 
         .collect()
 }
 
-// Tests that wait for shared child exit timeout returns status for completed process.
+// Tests that the timeout helper returns an already-cached exit status even at
+// a zero deadline. Waiting for completion before starting the deadline keeps
+// this assertion independent of host scheduler latency.
 #[test]
-fn wait_for_shared_child_exit_timeout_returns_status_for_completed_process() {
+fn wait_for_shared_child_exit_timeout_returns_cached_status_for_completed_process() {
     let child = test_exit_success_child();
     let process = Arc::new(SharedChild::new(child).unwrap());
+    let completed_status = process.wait().expect("test child should exit");
 
-    let status = wait_for_shared_child_exit_timeout(&process, Duration::from_secs(1), "test child")
+    let status = wait_for_shared_child_exit_timeout(&process, Duration::ZERO, "test child")
         .unwrap()
-        .expect("completed process should return a status");
+        .expect("completed process should return its cached status");
 
     assert!(status.success());
+    assert_eq!(status.code(), completed_status.code());
+}
+
+#[test]
+fn wait_for_terminal_command_status_with_timeout_returns_cached_status() {
+    let child = test_exit_success_child();
+    let process = Arc::new(SharedChild::new(child).unwrap());
+    let completed_status = process.wait().expect("test child should exit");
+
+    let (status, cancelled) =
+        wait_for_terminal_command_status(&process, Some(Duration::ZERO), None).unwrap();
+
+    assert!(!cancelled);
+    assert_eq!(
+        status
+            .expect("completed process should return its cached status")
+            .code(),
+        completed_status.code()
+    );
 }
 
 // Tests that wait for shared child exit timeout returns none for running process.

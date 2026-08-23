@@ -545,6 +545,7 @@ fn upsert_remote_proxy_session_record(
             .unwrap_or_else(default_codex_sandbox_mode),
         external_session_id: session.external_session_id.clone(),
         pending_claude_approvals: HashMap::new(),
+        pending_claude_user_inputs: HashMap::new(),
         pending_codex_approvals: HashMap::new(),
         pending_codex_user_inputs: HashMap::new(),
         pending_codex_mcp_elicitations: HashMap::new(),

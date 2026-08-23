@@ -34,6 +34,7 @@ import type {
   SessionPaneViewMode,
   TabDropPlacement,
   WorkspacePane,
+  WorkspaceResponseBoardView,
 } from "./workspace";
 
 export type SessionPaneViewProps = {
@@ -108,6 +109,13 @@ export type SessionPaneViewProps = {
     paneId: string,
     originSessionId: string | null,
     originProjectId: string | null,
+    activeBoardTabId?: string | null,
+  ) => void;
+  onSetResponseBoardWorkspaceState?: (
+    workspaceTabId: string,
+    activeBoardTabId: string,
+    view: WorkspaceResponseBoardView,
+    knownBoardTabIds?: readonly string[],
   ) => void;
   onOpenDiffPreviewTab: (
     paneId: string,

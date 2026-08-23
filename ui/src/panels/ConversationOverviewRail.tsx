@@ -28,6 +28,7 @@ export const CONVERSATION_OVERVIEW_VIEWPORT_HANDLE_HEIGHT_PX = 24;
 
 export function ConversationOverviewRail({
   overview,
+  messageCount,
   viewport,
   heightPx = null,
   rightPx = null,
@@ -37,6 +38,7 @@ export function ConversationOverviewRail({
   onNavigate,
 }: {
   overview: SessionOverviewResponse | null;
+  messageCount: number;
   viewport: ConversationOverviewViewport;
   heightPx?: number | null;
   rightPx?: number | null;
@@ -60,12 +62,18 @@ export function ConversationOverviewRail({
     () => (overview ? projectConversationOverviewMarkers(overview) : []),
     [overview],
   );
+  const boundedMessageCount = Math.max(0, messageCount);
+  const latestPosition =
+    overview?.latestPosition ?? Math.max(0, boundedMessageCount - 1);
   const viewportProjection = useMemo(
     () =>
       overview
         ? projectConversationOverviewViewport(overview, viewport)
-        : { topPercent: 0, heightPercent: 100 },
-    [overview, viewport],
+        : projectPendingConversationOverviewViewport(
+            boundedMessageCount,
+            viewport,
+          ),
+    [boundedMessageCount, overview, viewport],
   );
   const currentBucketIndex = overview
     ? conversationOverviewBucketIndexForPosition(
@@ -108,23 +116,26 @@ export function ConversationOverviewRail({
 
   const positionFromClientY = useCallback(
     (clientY: number) => {
-      if (!overview || !railRef.current) {
+      if (boundedMessageCount <= 0 || !railRef.current) {
         return null;
       }
       const bounds = railRef.current.getBoundingClientRect();
       if (bounds.height <= 0) {
         return null;
       }
-      return conversationOverviewPositionAtFraction(
-        overview,
-        (clientY - bounds.top) / bounds.height,
-      );
+      const fraction = (clientY - bounds.top) / bounds.height;
+      return overview
+        ? conversationOverviewPositionAtFraction(overview, fraction)
+        : Math.min(
+            latestPosition,
+            Math.max(0, Math.floor(fraction * boundedMessageCount)),
+          );
     },
-    [overview],
+    [boundedMessageCount, latestPosition, overview],
   );
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (!overview || event.button !== 0) {
+    if (boundedMessageCount <= 0 || event.button !== 0) {
       return;
     }
     dragPointerIdRef.current = event.pointerId;
@@ -168,32 +179,55 @@ export function ConversationOverviewRail({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!overview || overview.buckets.length === 0) {
+    if (boundedMessageCount <= 0) {
       return;
     }
-    const pageStep = Math.max(1, Math.floor(overview.buckets.length / 10));
+    const bucketCount = overview?.buckets.length ?? 0;
+    const pageStep = Math.max(
+      1,
+      bucketCount > 0
+        ? Math.floor(bucketCount / 10)
+        : Math.floor(boundedMessageCount / 10),
+    );
     let nextBucketIndex = currentBucketIndex;
+    let pendingPosition = viewport.startPosition;
     let boundaryPosition: number | null = null;
     switch (event.key) {
       case "ArrowDown":
       case "ArrowRight":
-        nextBucketIndex += 1;
+        if (bucketCount > 0) {
+          nextBucketIndex += 1;
+        } else {
+          pendingPosition += 1;
+        }
         break;
       case "ArrowUp":
       case "ArrowLeft":
-        nextBucketIndex -= 1;
+        if (bucketCount > 0) {
+          nextBucketIndex -= 1;
+        } else {
+          pendingPosition -= 1;
+        }
         break;
       case "PageDown":
-        nextBucketIndex += pageStep;
+        if (bucketCount > 0) {
+          nextBucketIndex += pageStep;
+        } else {
+          pendingPosition += pageStep;
+        }
         break;
       case "PageUp":
-        nextBucketIndex -= pageStep;
+        if (bucketCount > 0) {
+          nextBucketIndex -= pageStep;
+        } else {
+          pendingPosition -= pageStep;
+        }
         break;
       case "Home":
         boundaryPosition = 0;
         break;
       case "End":
-        boundaryPosition = overview.latestPosition;
+        boundaryPosition = latestPosition;
         break;
       default:
         return;
@@ -201,6 +235,12 @@ export function ConversationOverviewRail({
     event.preventDefault();
     if (boundaryPosition !== null) {
       onNavigateRef.current(boundaryPosition);
+      return;
+    }
+    if (!overview || bucketCount === 0) {
+      onNavigateRef.current(
+        Math.min(latestPosition, Math.max(0, pendingPosition)),
+      );
       return;
     }
     const clampedBucketIndex = Math.min(
@@ -214,8 +254,7 @@ export function ConversationOverviewRail({
     onNavigateRef.current(position);
   };
 
-  const messageCount = overview?.messageCount ?? 0;
-  if (overview && messageCount < minMessages) {
+  if (boundedMessageCount < minMessages) {
     return null;
   }
   if (
@@ -236,12 +275,15 @@ export function ConversationOverviewRail({
               overview.messageCount,
               viewport.startPosition + 1,
             )} of ${overview.messageCount}`
-          : "Loading conversation overview"
+          : `Conversation overview loading, message ${Math.min(
+              boundedMessageCount,
+              viewport.startPosition + 1,
+            )} of ${boundedMessageCount}`
       }
       aria-orientation="vertical"
-      aria-valuemax={overview?.latestPosition ?? 0}
+      aria-valuemax={latestPosition}
       aria-valuemin={0}
-      aria-valuenow={overview ? viewport.startPosition : 0}
+      aria-valuenow={viewport.startPosition}
       className={`conversation-overview-rail${overview ? "" : " is-pending"}`}
       data-testid="conversation-overview-rail"
       onKeyDown={handleKeyDown}
@@ -257,7 +299,7 @@ export function ConversationOverviewRail({
         right: `${rightPx}px`,
         top: `${topPx}px`,
       }}
-      tabIndex={overview ? 0 : -1}
+      tabIndex={0}
     >
       <span
         aria-hidden="true"
@@ -323,6 +365,28 @@ export function ConversationOverviewRail({
   // coordinates escape over a neighboring/control-panel pane when the layout
   // moves. React still preserves the logical owner/event tree.
   return createPortal(rail, portalTarget);
+}
+
+function projectPendingConversationOverviewViewport(
+  messageCount: number,
+  viewport: ConversationOverviewViewport,
+) {
+  const boundedMessageCount = Math.max(1, messageCount);
+  const startPosition = Math.min(
+    Math.max(0, viewport.startPosition),
+    Math.max(0, messageCount - 1),
+  );
+  const endPosition = Math.min(
+    Math.max(startPosition + 1, viewport.endPosition),
+    boundedMessageCount,
+  );
+  return {
+    topPercent: (startPosition / boundedMessageCount) * 100,
+    heightPercent: Math.max(
+      100 / boundedMessageCount,
+      ((endPosition - startPosition) / boundedMessageCount) * 100,
+    ),
+  };
 }
 
 function conversationOverviewMarkerColor(kind: ConversationMarkerKind) {

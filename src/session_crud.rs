@@ -590,6 +590,9 @@ impl AppState {
                 .pending_coordination_scope_deletions
                 .insert(project_id.to_owned());
         }
+        inner
+            .pending_response_board_project_detachments
+            .insert(project_id.to_owned(), removed_project.name.clone());
 
         let (_, persist_dispatch) = self
             .commit_locked_with_persist_dispatch(&mut inner)
@@ -613,6 +616,7 @@ impl AppState {
                         "failed to finish project coordination cleanup: {err:#}"
                     ))
                 })?;
+            self.replay_pending_response_board_project_detachments();
         }
 
         self.prune_telegram_config_for_deleted_project(&project_id)?;
@@ -640,5 +644,35 @@ impl AppState {
         }
         let inner = self.inner.lock().expect("state mutex poisoned");
         self.persist_internal_locked(&inner)
+    }
+
+    fn replay_pending_response_board_project_detachments(&self) {
+        // The project removal and this outbox entry are already durable. A
+        // secondary SQLite failure must not turn that irreversible success
+        // into an HTTP 500: retain the entry and retry on the next worker pass
+        // or process boot. Conversion and bookkeeping removal are idempotent.
+        let pass = process_pending_response_board_project_detachments(
+            &self.inner,
+            |project_id, last_project_name| {
+                convert_deleted_project_response_board_tab(
+                    self.persistence_path.as_path(),
+                    project_id,
+                    last_project_name,
+                )
+                .map_err(|err| err.message)
+            },
+        );
+        if pass.completed == 0 {
+            return;
+        }
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        if let Err(err) = self.persist_internal_locked(&inner) {
+            // The durable copy still contains the outbox item, so restart will
+            // safely repeat the already-applied conversion.
+            eprintln!(
+                "[termal] failed to persist completed response-board project-tab \
+                 detachment bookkeeping: {err:#}"
+            );
+        }
     }
 }

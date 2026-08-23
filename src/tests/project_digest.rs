@@ -288,6 +288,57 @@ fn project_digest_inputs_keep_deep_live_requests_from_routing_registries() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn project_digest_inputs_surface_pending_claude_user_questions() {
+    let state = test_app_state();
+    let root = std::env::temp_dir().join(format!(
+        "termal-project-digest-claude-input-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let project_id = create_test_project(&state, &root, "Claude Input Project");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let message_id = "claude-project-digest-input".to_owned();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let session_index = inner.find_session_index(&session_id).unwrap();
+        let record = &mut inner.sessions[session_index];
+        record.session.status = SessionStatus::Approval;
+        record.session.messages.push(Message::UserInputRequest {
+            id: message_id.clone(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            title: "Claude needs your input".to_owned(),
+            detail: "Choose a scope.".to_owned(),
+            questions: Vec::new(),
+            state: InteractionRequestState::Pending,
+            submitted_answers: None,
+        });
+        record.message_positions = build_message_positions(&record.session.messages);
+        record.pending_claude_user_inputs.insert(
+            message_id.clone(),
+            ClaudePendingUserInput {
+                input: json!({ "questions": [] }),
+                questions: Vec::new(),
+                request_id: "claude-project-digest-request".to_owned(),
+            },
+        );
+    }
+
+    let inputs = state.project_digest_inputs(&project_id).unwrap();
+    let projected = inputs
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("Claude session should be included in digest inputs");
+    assert_eq!(
+        projected.pending_interaction_message_id.as_deref(),
+        Some(message_id.as_str())
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 // ACP approvals resolve FIFO within their protocol, but project digests must
 // still choose the newest renderable candidate across protocol families. If
 // the ACP queue head is no longer resident, fall back to a retained ACP card.

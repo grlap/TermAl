@@ -671,6 +671,7 @@ export type UserInputQuestion = {
   id: string;
   isOther?: boolean;
   isSecret?: boolean;
+  multiSelect?: boolean;
   options?: UserInputQuestionOption[] | null;
   question: string;
 };

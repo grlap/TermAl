@@ -23,6 +23,10 @@ import {
   SESSION_TAIL_WINDOW_MESSAGE_COUNT,
 } from "./session-tail-policy";
 import {
+  __resetSessionHydrationPerformanceForTests,
+  sessionTranscriptCommitToken,
+} from "./session-hydration-performance";
+import {
   requestSessionHistoryAroundPage,
   requestSessionHistoryOlderPage,
   requestSessionHistoryPage,
@@ -349,6 +353,7 @@ function makeLiveStateParams(
       actionRecoveryInvocations,
     ),
     activeSession: session,
+    activeTranscriptSessionId: session.id,
     visibleSessionHydrationTargets: [{ id: session.id, messagesLoaded: false }],
   } as UseAppLiveStateParams;
 }
@@ -437,6 +442,7 @@ afterEach(() => {
     composer.remove();
   }
   resetSessionStoreForTesting();
+  __resetSessionHydrationPerformanceForTests();
   EventSourceMock.instances = [];
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -2253,6 +2259,90 @@ describe("hydration mismatch recovery gate", () => {
 });
 
 describe("hydration adoption side effects", () => {
+  it("publishes the active transcript record before scheduling the parent session list", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const initialSession = makeSession({
+      messageCount: 100,
+      messagesLoaded: false,
+      sessionMutationStamp: 1,
+    });
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: makeSession({
+        messageCount: 100,
+        messages: makeHydrationMessages(20),
+        messagesLoaded: false,
+        sessionMutationStamp: 1,
+      }),
+    });
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+    const setSessions = vi.fn((nextSessions: Session[]) => {
+      expect(
+        getSessionRecordSnapshotForTesting(initialSession.id)?.messages,
+      ).toHaveLength(20);
+      expect(nextSessions[0]?.messages).toHaveLength(20);
+    });
+    params.stateSetters.setSessions =
+      setSessions as typeof params.stateSetters.setSessions;
+
+    renderLiveStateHarness(params, () => {});
+
+    await waitFor(() => expect(setSessions).toHaveBeenCalled());
+    const reconciledSessions =
+      setSessions.mock.calls[setSessions.mock.calls.length - 1]?.[0];
+    expect(reconciledSessions).toHaveLength(1);
+    expect(reconciledSessions?.[0]?.messages).toHaveLength(20);
+  });
+
+  it("does not arm transcript-commit timing when the active pane shows another view", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const initialSession = makeSession({
+      messageCount: 100,
+      messagesLoaded: false,
+      sessionMutationStamp: 1,
+    });
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: makeSession({
+        messageCount: 100,
+        messages: makeHydrationMessages(20),
+        messagesLoaded: false,
+        sessionMutationStamp: 1,
+      }),
+    });
+    const params = makeLiveStateParams(initialSession);
+    params.activeTranscriptSessionId = null;
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    renderLiveStateHarness(params, () => {});
+
+    await waitFor(() =>
+      expect(params.adoptionRefs.sessionsRef.current[0]?.messages).toHaveLength(
+        20,
+      ),
+    );
+    const adoptedSession = params.adoptionRefs.sessionsRef.current[0];
+    expect(adoptedSession).toBeDefined();
+    expect(sessionTranscriptCommitToken(adoptedSession!)).toBeNull();
+  });
+
   it("adopts queued prompts from a fresh partial-tail hydration", async () => {
     vi.stubGlobal(
       "EventSource",

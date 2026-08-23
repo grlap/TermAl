@@ -217,6 +217,7 @@ export function useAppLiveState(
     requestBackendReconnectRef,
     requestActionRecoveryResyncRef,
     activeSession,
+    activeTranscriptSessionId,
     visibleSessionHydrationTargets,
   } = params;
   const {
@@ -285,6 +286,8 @@ export function useAppLiveState(
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
   const activeSessionIdRef = useRef(activeSession?.id ?? null);
   activeSessionIdRef.current = activeSession?.id ?? null;
+  const activeTranscriptSessionIdRef = useRef(activeTranscriptSessionId);
+  activeTranscriptSessionIdRef.current = activeTranscriptSessionId;
   const hydratedSessionIdsRef = useRef<Set<string>>(new Set());
   // Records sessions whose current browser state already includes an
   // authoritative recent tail. A partial transcript can remain
@@ -1016,7 +1019,7 @@ export function useAppLiveState(
       lastSeenServerInstanceIdRef.current = serverInstanceId;
     }
     sessionsRef.current = nextSessions;
-    if (activeSessionIdRef.current === session.id) {
+    if (activeTranscriptSessionIdRef.current === session.id) {
       // Attach an explicit adoption generation to the exact session object that
       // enters the record store. The transcript commit consumes that token;
       // message sampling cannot collide and an async request cannot use a stale
@@ -1025,7 +1028,12 @@ export function useAppLiveState(
     }
     upsertSessionSlice(reconciledHydratedSession);
     flushAndCancelPendingSessionRender(nextSessions);
-    setSessions(nextSessions);
+    // The active pane already receives this exact record synchronously through
+    // session-store. Keep the 2k+ session parent-list reconciliation off the
+    // urgent transcript commit so hydration cannot sit behind a broad App
+    // render; SessionPaneView deliberately defers scroll effects until this
+    // transition catches up.
+    startTransition(() => setSessions(nextSessions));
     hydrationMismatchSessionIdsRef.current.delete(session.id);
     return adoptOutcome;
   }
@@ -1044,7 +1052,7 @@ export function useAppLiveState(
     sessionsRef.current = nextSessions;
     upsertSessionSlice(session);
     flushAndCancelPendingSessionRender(nextSessions);
-    setSessions(nextSessions);
+    startTransition(() => setSessions(nextSessions));
     hydrationMismatchSessionIdsRef.current.delete(session.id);
     return true;
   }
