@@ -1087,10 +1087,15 @@ describe("ResponseBoardPanel", () => {
       placement: "placed",
       hasCanvasPosition: true,
     };
-    vi.mocked(fetchResponseBoardTabs).mockResolvedValue({
-      stagedCardCount: 0,
-      tabs: [tab],
-    });
+    vi.mocked(fetchResponseBoardTabs)
+      .mockResolvedValueOnce({
+        stagedCardCount: 0,
+        tabs: [tab],
+      })
+      .mockResolvedValue({
+        stagedCardCount: 0,
+        tabs: [{ ...tab, placedCardCount: 1 }],
+      });
     vi.mocked(fetchResponseBoardTab).mockResolvedValue({
       tab,
       cards: [],
@@ -1136,6 +1141,112 @@ describe("ResponseBoardPanel", () => {
     expect(
       await screen.findByText("Server-owned immutable response"),
     ).toBeInTheDocument();
+    await waitFor(() => expect(fetchResponseBoardTabs).toHaveBeenCalledTimes(2));
+    expect(
+      within(screen.getByRole("tab", { name: /Project A/ })).getByText("1"),
+    ).toBeInTheDocument();
+  });
+
+  it("reconciles global staging when atomic placement resolves after a tab switch", async () => {
+    const destinationTab = {
+      id: "project-tab",
+      name: "Project A",
+      kind: "projectDefault" as const,
+      projectId: "project-a",
+      sortOrder: 0,
+      createdAt: "2026-07-31T12:01:00Z",
+      placedCardCount: 0,
+    };
+    const otherTab = {
+      id: "other-tab",
+      name: "Project B",
+      kind: "custom" as const,
+      projectId: null,
+      sortOrder: 1,
+      createdAt: "2026-07-31T12:02:00Z",
+      placedCardCount: 0,
+    };
+    const stagedCard: ResponseBoardCard = {
+      ...pinnedCard,
+      id: "staged-drop",
+      tabId: destinationTab.id,
+      placement: "staged",
+      hasCanvasPosition: false,
+    };
+    const placedCard: ResponseBoardCard = {
+      ...stagedCard,
+      placement: "placed",
+      hasCanvasPosition: true,
+      x: 120,
+      y: 80,
+    };
+    const placement = deferred<ResponseBoardCard>();
+    vi.mocked(fetchResponseBoardTabs)
+      .mockResolvedValueOnce({
+        stagedCardCount: 1,
+        tabs: [destinationTab, otherTab],
+      })
+      .mockResolvedValue({
+        stagedCardCount: 0,
+        tabs: [
+          { ...destinationTab, placedCardCount: 1 },
+          otherTab,
+        ],
+      });
+    vi.mocked(fetchResponseBoardTab).mockImplementation(async (tabId) => ({
+      tab: tabId === destinationTab.id ? destinationTab : otherTab,
+      cards: [],
+      stagedCards: [stagedCard],
+    }));
+    vi.mocked(stageResponseBoardCard).mockReturnValue(placement.promise);
+    const dataTransfer = new MemoryDataTransfer();
+    writeResponseBoardMessageDragData(
+      dataTransfer as unknown as DataTransfer,
+      { sessionId: "session-1", messageId: "message-1" },
+    );
+    const { container } = render(
+      <ResponseBoardPanel
+        refreshToken="partitioned-drop-tab-switch"
+        workspaceTabId="workspace-board-1"
+        activeBoardTabId={destinationTab.id}
+        onOpenSource={() => {}}
+      />,
+    );
+    await screen.findByRole("button", { name: /Codex research/ });
+    const surface = container.querySelector(
+      ".response-board-surface",
+    ) as HTMLElement;
+    mockSurfaceRect(surface);
+
+    fireEvent.drop(surface, {
+      dataTransfer,
+      clientX: 400,
+      clientY: 250,
+    });
+    await waitFor(() => expect(stageResponseBoardCard).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("tab", { name: /Project B/ }));
+    await waitFor(() =>
+      expect(fetchResponseBoardTab).toHaveBeenCalledWith(otherTab.id),
+    );
+    expect(
+      screen.getByRole("button", { name: /Codex research/ }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      placement.resolve(placedCard);
+      await placement.promise;
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /Codex research/ }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("0 waiting")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("tab", { name: /Project A/ })).getByText("1"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Server-owned immutable response")).toBeNull();
   });
 
   it("surfaces a staging failure from a partitioned transcript drop", async () => {

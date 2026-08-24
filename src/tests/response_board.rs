@@ -495,7 +495,7 @@ async fn response_board_stage_route_places_transcript_drops_atomically() {
     assert_eq!(tab_status, StatusCode::CREATED);
     let tab_id = tab["id"].as_str().unwrap();
 
-    let place_request = |x: f64, y: f64| {
+    let place_request = |destination_tab_id: &str, x: f64, y: f64| {
         Request::builder()
             .method("POST")
             .uri("/api/response-board/cards/stage")
@@ -504,7 +504,7 @@ async fn response_board_stage_route_places_transcript_drops_atomically() {
                 serde_json::to_vec(&json!({
                     "sessionId": session_id,
                     "messageId": message_id,
-                    "tabId": tab_id,
+                    "tabId": destination_tab_id,
                     "placement": "placed",
                     "x": x,
                     "y": y,
@@ -514,14 +514,14 @@ async fn response_board_stage_route_places_transcript_drops_atomically() {
             .unwrap()
     };
     let (first_status, first): (StatusCode, Value) =
-        request_json(&app, place_request(120.0, 80.0)).await;
+        request_json(&app, place_request(tab_id, 120.0, 80.0)).await;
     assert_eq!(first_status, StatusCode::CREATED);
     assert_eq!(first["placement"], "placed");
     assert_eq!(first["hasCanvasPosition"], true);
     assert_eq!(first["x"], 120.0);
 
     let (repeat_status, repeated): (StatusCode, Value) =
-        request_json(&app, place_request(240.0, 160.0)).await;
+        request_json(&app, place_request(tab_id, 240.0, 160.0)).await;
     assert_eq!(repeat_status, StatusCode::OK);
     assert_eq!(repeated["id"], first["id"]);
     assert_eq!(repeated["x"], 240.0);
@@ -561,6 +561,150 @@ async fn response_board_stage_route_places_transcript_drops_atomically() {
     assert_eq!(
         invalid["error"],
         "x and y are required when placement is placed"
+    );
+
+    for placement in [None, Some("staged")] {
+        let mut body = json!({
+            "sessionId": session_id,
+            "messageId": message_id,
+            "tabId": tab_id,
+            "x": 10.0,
+            "y": 20.0,
+        });
+        if let Some(placement) = placement {
+            body["placement"] = json!(placement);
+        }
+        let (status, error): (StatusCode, Value) = request_json(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/response-board/cards/stage")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error["error"],
+            "x and y are only supported when placement is placed"
+        );
+    }
+
+    let (_, second_tab): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/response-board/tabs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({ "name": "Second atomic" })).unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    let second_tab_id = second_tab["id"].as_str().unwrap();
+    let (move_status, moved): (StatusCode, Value) =
+        request_json(&app, place_request(second_tab_id, 360.0, 220.0)).await;
+    assert_eq!(move_status, StatusCode::OK);
+    assert_eq!(moved["id"], first["id"]);
+    assert_eq!(moved["tabId"], second_tab_id);
+
+    let (_, original_view): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/response-board/tabs/{tab_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let (_, second_view): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/response-board/tabs/{second_tab_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(original_view["cards"].as_array().map(Vec::len), Some(0));
+    assert_eq!(second_view["cards"].as_array().map(Vec::len), Some(1));
+    assert_eq!(second_view["cards"][0]["id"], first["id"]);
+}
+
+#[tokio::test]
+async fn response_board_atomic_stage_route_enforces_destination_capacity() {
+    let state = test_app_state();
+    let _files = ResponseBoardTestFiles::capture(&state);
+    let persistence_path = state.persistence_path.as_ref().clone();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let message_id =
+        push_response_board_message(&state, &session_id, "Response beyond canvas capacity");
+    persist_response_board_fixture(&state);
+    let app = app_router(state);
+
+    let (_, tab): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/response-board/tabs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({ "name": "Full canvas" })).unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    let tab_id = tab["id"].as_str().unwrap();
+    let connection = rusqlite::Connection::open(&persistence_path).unwrap();
+    let transaction = connection.unchecked_transaction().unwrap();
+    for index in 0..RESPONSE_BOARD_MAX_CARDS {
+        transaction
+            .execute(
+                "INSERT INTO board_cards(
+                   id, tab_id, placement, has_canvas_position, x, y, w, h,
+                   snapshot_json, source_session_id, source_message_id, created_at
+                 ) VALUES (?1, ?2, 'placed', 1, 0, 0, ?3, ?4, '{}', ?5, ?6, ?7)",
+                rusqlite::params![
+                    format!("canvas-capacity-card-{index}"),
+                    tab_id,
+                    RESPONSE_BOARD_DEFAULT_WIDTH,
+                    RESPONSE_BOARD_DEFAULT_HEIGHT,
+                    format!("canvas-capacity-session-{index}"),
+                    format!("canvas-capacity-message-{index}"),
+                    format!("2026-08-24T00:00:00.{index:03}Z"),
+                ],
+            )
+            .unwrap();
+    }
+    transaction.commit().unwrap();
+    drop(connection);
+
+    let (status, error): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/response-board/cards/stage")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({
+                    "sessionId": session_id,
+                    "messageId": message_id,
+                    "tabId": tab_id,
+                    "placement": "placed",
+                    "x": 10.0,
+                    "y": 20.0,
+                }))
+                .unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        error["error"],
+        format!("a response-board tab is limited to {RESPONSE_BOARD_MAX_CARDS} cards")
     );
 }
 

@@ -987,23 +987,29 @@ export function ResponseBoardPanel({
       x,
       y,
     })
-      .then((card) => {
+      .then(async (card) => {
         notifySiblingBoards();
-        if (
-          isMountedRef.current &&
-          selectedTabIdRef.current === destinationTabId
-        ) {
-          replaceStagedCards(
-            stagedCardsRef.current.filter(
-              (candidate) => candidate.id !== card.id,
-            ),
-          );
+        if (!isMountedRef.current) {
+          return;
+        }
+        // Staging is global across every inner tab, so reconcile it even when
+        // the user switched canvases while the atomic placement was pending.
+        replaceStagedCards(
+          stagedCardsRef.current.filter(
+            (candidate) => candidate.id !== card.id,
+          ),
+        );
+        if (selectedTabIdRef.current === destinationTabId) {
           replaceCards([
             ...cardsRef.current.filter(
               (candidate) => candidate.id !== card.id,
             ),
             card,
           ]);
+        }
+        const nextTabs = await refreshTabs();
+        if (isMountedRef.current) {
+          setTabs(nextTabs);
         }
       })
       .catch((reason) => {
@@ -1014,6 +1020,7 @@ export function ResponseBoardPanel({
   }, [
     handlePlaceStagedCard,
     notifySiblingBoards,
+    refreshTabs,
     replaceCards,
     replaceStagedCards,
     selectedTabId,

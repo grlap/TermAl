@@ -95,6 +95,9 @@ hint, so it disappears from its previous canvas. Supplying `placement:
 reuse, destination-capacity check, and canvas placement in one transaction;
 transcript drops use this form and therefore cannot leave a half-applied staged
 card. Moving the source to another tab reuses the card rather than copying it.
+The route returns `409` when the destination already contains another placed
+card for the same source, when the destination canvas has reached its 256-card
+limit, or when a staging action would exceed the 256-card global inbox limit.
 
 The create route returns `404` when the requested source message is not yet in
 durable history. Geometry is finite and bounded: coordinates are limited to
