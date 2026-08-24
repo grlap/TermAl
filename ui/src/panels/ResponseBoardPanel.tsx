@@ -15,7 +15,6 @@ import {
   fetchResponseBoard,
   fetchResponseBoardTab,
   fetchResponseBoardTabs,
-  RESPONSE_BOARD_DEFAULT_TAB_ID,
   reorderResponseBoardTabs,
   stageResponseBoardCard,
   updateResponseBoardCard,
@@ -33,22 +32,33 @@ import {
   subscribeResponseBoardInvalidation,
 } from "../response-board";
 import type { WorkspaceResponseBoardView } from "../workspace";
+import {
+  clampBoardZoom,
+  fitResponseBoardCardsInView,
+  readStoredBoardZoom,
+  RESPONSE_BOARD_ZOOM_STORAGE_KEY,
+  responseBoardViewShowsAnyCard,
+  wheelRequestsBoardZoom,
+  zoomBoardViewAtPoint,
+} from "./response-board-camera";
+import {
+  RESPONSE_BOARD_STAGED_CARD_MIME,
+  ResponseBoardPreview,
+  ResponseBoardStagingTray,
+} from "./ResponseBoardStagingTray";
+import { ResponseBoardTabStrip } from "./ResponseBoardTabStrip";
 import { useCommittedRef } from "./use-committed-ref";
+
+export {
+  fitResponseBoardCardsInView,
+  RESPONSE_BOARD_ZOOM_STORAGE_KEY,
+  responseBoardViewShowsAnyCard,
+} from "./response-board-camera";
 
 const BOARD_PADDING = 72;
 const CARD_PATCH_DEBOUNCE_MS = 250;
-export const RESPONSE_BOARD_ZOOM_STORAGE_KEY = "termal.response-board.zoom.v1";
-const MIN_BOARD_ZOOM = 0.25;
-const MAX_BOARD_ZOOM = 2;
 const BOARD_ZOOM_BUTTON_FACTOR = 1.2;
 const BOARD_WHEEL_ZOOM_SENSITIVITY = 0.0015;
-const RESPONSE_BOARD_STAGED_CARD_MIME =
-  "application/x-termal-response-board-staged-card";
-
-function wheelRequestsBoardZoom(event: WheelEvent) {
-  return event.ctrlKey || event.getModifierState("Fn");
-}
-
 type BoardView = WorkspaceResponseBoardView;
 
 type CardGesture = {
@@ -76,79 +86,6 @@ type PendingCameraRepair = {
   cards: ResponseBoardCard[];
   tabId: string;
 };
-
-function clampBoardZoom(value: number) {
-  return Math.min(MAX_BOARD_ZOOM, Math.max(MIN_BOARD_ZOOM, value));
-}
-
-function readStoredBoardZoom() {
-  try {
-    const stored = Number(window.localStorage.getItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY));
-    return Number.isFinite(stored) && stored > 0 ? clampBoardZoom(stored) : 1;
-  } catch {
-    return 1;
-  }
-}
-
-function zoomBoardViewAtPoint(
-  view: BoardView,
-  requestedZoom: number,
-  surfaceX: number,
-  surfaceY: number,
-): BoardView {
-  const zoom = clampBoardZoom(requestedZoom);
-  if (zoom === view.zoom) {
-    return view;
-  }
-  const logicalX = (surfaceX - view.panX) / view.zoom;
-  const logicalY = (surfaceY - view.panY) / view.zoom;
-  return {
-    zoom,
-    panX: surfaceX - logicalX * zoom,
-    panY: surfaceY - logicalY * zoom,
-  };
-}
-
-export function responseBoardViewShowsAnyCard(
-  view: BoardView,
-  cards: ResponseBoardCard[],
-  viewportWidth: number,
-  viewportHeight: number,
-) {
-  return cards.some((card) => {
-    const left = card.x * view.zoom + view.panX;
-    const top = card.y * view.zoom + view.panY;
-    const right = (card.x + card.w) * view.zoom + view.panX;
-    const bottom = (card.y + card.h) * view.zoom + view.panY;
-    return right > 0 && bottom > 0 && left < viewportWidth && top < viewportHeight;
-  });
-}
-
-export function fitResponseBoardCardsInView(
-  cards: ResponseBoardCard[],
-  viewportWidth: number,
-  viewportHeight: number,
-): BoardView | null {
-  if (cards.length === 0 || viewportWidth <= 0 || viewportHeight <= 0) {
-    return null;
-  }
-  const minX = Math.min(...cards.map((card) => card.x));
-  const minY = Math.min(...cards.map((card) => card.y));
-  const maxX = Math.max(...cards.map((card) => card.x + card.w));
-  const maxY = Math.max(...cards.map((card) => card.y + card.h));
-  const contentWidth = Math.max(1, maxX - minX);
-  const contentHeight = Math.max(1, maxY - minY);
-  const availableWidth = Math.max(1, viewportWidth - BOARD_PADDING * 2);
-  const availableHeight = Math.max(1, viewportHeight - BOARD_PADDING * 2);
-  const zoom = clampBoardZoom(
-    Math.min(1, availableWidth / contentWidth, availableHeight / contentHeight),
-  );
-  return {
-    zoom,
-    panX: (viewportWidth - contentWidth * zoom) / 2 - minX * zoom,
-    panY: (viewportHeight - contentHeight * zoom) / 2 - minY * zoom,
-  };
-}
 
 export function ResponseBoardPanel({
   refreshToken,
@@ -1042,36 +979,41 @@ export function ResponseBoardPanel({
       );
       return;
     }
-    void stageResponseBoardCard({ ...source, tabId: selectedTabId })
+    const destinationTabId = selectedTabId;
+    void stageResponseBoardCard({
+      ...source,
+      tabId: destinationTabId,
+      placement: "placed",
+      x,
+      y,
+    })
       .then((card) => {
         notifySiblingBoards();
-        if (isMountedRef.current) {
-          replaceStagedCards([
-            ...stagedCardsRef.current.filter(
+        if (
+          isMountedRef.current &&
+          selectedTabIdRef.current === destinationTabId
+        ) {
+          replaceStagedCards(
+            stagedCardsRef.current.filter(
+              (candidate) => candidate.id !== card.id,
+            ),
+          );
+          replaceCards([
+            ...cardsRef.current.filter(
               (candidate) => candidate.id !== card.id,
             ),
             card,
           ]);
         }
-        return persistCardUpdate(card, {
-          tabId: selectedTabId,
-          placement: "placed",
-          x,
-          y,
-        });
       })
-      .then(
-        () => {},
-        (reason) => {
-          if (isMountedRef.current) {
-            setError(getErrorMessage(reason));
-          }
-        },
-      );
+      .catch((reason) => {
+        if (isMountedRef.current) {
+          setError(getErrorMessage(reason));
+        }
+      });
   }, [
     handlePlaceStagedCard,
     notifySiblingBoards,
-    persistCardUpdate,
     replaceCards,
     replaceStagedCards,
     selectedTabId,
@@ -1282,168 +1224,34 @@ export function ResponseBoardPanel({
         </div>
       </header>
       {usesPartitionedBoard ? (
-        <nav className="response-board-tabs" aria-label="Response board tabs">
-          <div className="response-board-tab-list" role="tablist">
-            {tabs.map((tab) =>
-              renamingTabId === tab.id ? (
-                <form
-                  key={tab.id}
-                  className="response-board-tab-edit"
-                  role="presentation"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    handleRenameTab(tab.id);
-                  }}
-                >
-                  <input
-                    autoFocus
-                    value={renameValue}
-                    aria-label="Rename board tab"
-                    onChange={(event) => setRenameValue(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        setRenamingTabId(null);
-                      }
-                    }}
-                  />
-                </form>
-              ) : (
-                <div
-                  key={tab.id}
-                  className="response-board-tab-wrap"
-                  role="presentation"
-                >
-                  <button
-                    type="button"
-                    role="tab"
-                    id={`response-board-tab-${workspaceTabId}-${tab.id}`}
-                    aria-controls={`response-board-tabpanel-${workspaceTabId}-${tab.id}`}
-                    tabIndex={tab.id === selectedTabId ? 0 : -1}
-                    aria-selected={tab.id === selectedTabId}
-                    className={tab.id === selectedTabId ? "is-active" : ""}
-                    ref={(node) => {
-                      if (node) {
-                        tabButtonRefs.current.set(tab.id, node);
-                      } else {
-                        tabButtonRefs.current.delete(tab.id);
-                      }
-                    }}
-                    onClick={() => setSelectedTabId(tab.id)}
-                    onKeyDown={(event) => {
-                      const currentIndex = tabs.findIndex(
-                        (candidate) => candidate.id === tab.id,
-                      );
-                      const targetIndex =
-                        event.key === "ArrowRight"
-                          ? Math.min(tabs.length - 1, currentIndex + 1)
-                          : event.key === "ArrowLeft"
-                            ? Math.max(0, currentIndex - 1)
-                            : event.key === "Home"
-                              ? 0
-                              : event.key === "End"
-                                ? tabs.length - 1
-                                : null;
-                      if (targetIndex === null || targetIndex === currentIndex) {
-                        return;
-                      }
-                      event.preventDefault();
-                      const target = tabs[targetIndex];
-                      setSelectedTabId(target.id);
-                      tabButtonRefs.current.get(target.id)?.focus();
-                    }}
-                    onDoubleClick={() => {
-                      if (tab.kind === "custom") {
-                        setRenameValue(tab.name);
-                        setRenamingTabId(tab.id);
-                      }
-                    }}
-                  >
-                    <span>{tab.name}</span>
-                    <small>
-                      {tab.placedCardCount}
-                    </small>
-                  </button>
-                  {tab.id === selectedTabId && tab.kind === "custom" ? (
-                    <div className="response-board-tab-actions">
-                      <button
-                        type="button"
-                        aria-label={`Move ${tab.name} left`}
-                        disabled={isReorderingTabs || tabs[0]?.id === tab.id}
-                        onClick={() => handleReorderTab(tab.id, -1)}
-                      >
-                        ‹
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Move ${tab.name} right`}
-                        disabled={
-                          isReorderingTabs || tabs[tabs.length - 1]?.id === tab.id
-                        }
-                        onClick={() => handleReorderTab(tab.id, 1)}
-                      >
-                        ›
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Rename ${tab.name}`}
-                        onClick={() => {
-                          setRenameValue(tab.name);
-                          setRenamingTabId(tab.id);
-                        }}
-                      >
-                        ✎
-                      </button>
-                      {tab.id !== RESPONSE_BOARD_DEFAULT_TAB_ID ? (
-                        <button
-                          type="button"
-                          aria-label={`Delete ${tab.name}`}
-                          disabled={
-                            tab.placedCardCount > 0
-                          }
-                          onClick={() => handleDeleteTab(tab)}
-                        >
-                          ×
-                        </button>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              ),
-            )}
-            {isAddingTab ? (
-              <form
-                className="response-board-tab-edit"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  handleCreateTab();
-                }}
-              >
-                <input
-                  autoFocus
-                  value={newTabName}
-                  aria-label="New board tab name"
-                  placeholder="Tab name"
-                  onChange={(event) => setNewTabName(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") {
-                      setIsAddingTab(false);
-                      setNewTabName("");
-                    }
-                  }}
-                />
-              </form>
-            ) : (
-              <button
-                type="button"
-                className="response-board-add-tab"
-                aria-label="Add response board tab"
-                onClick={() => setIsAddingTab(true)}
-              >
-                +
-              </button>
-            )}
-          </div>
-        </nav>
+        <ResponseBoardTabStrip
+          tabs={tabs}
+          workspaceTabId={workspaceTabId}
+          selectedTabId={selectedTabId}
+          renamingTabId={renamingTabId}
+          renameValue={renameValue}
+          isAddingTab={isAddingTab}
+          newTabName={newTabName}
+          isReorderingTabs={isReorderingTabs}
+          tabButtonRefs={tabButtonRefs}
+          onSelectTab={setSelectedTabId}
+          onRenameValueChange={setRenameValue}
+          onCancelRename={() => setRenamingTabId(null)}
+          onSubmitRename={handleRenameTab}
+          onStartRename={(tab) => {
+            setRenameValue(tab.name);
+            setRenamingTabId(tab.id);
+          }}
+          onReorderTab={handleReorderTab}
+          onDeleteTab={handleDeleteTab}
+          onNewTabNameChange={setNewTabName}
+          onCancelAdd={() => {
+            setIsAddingTab(false);
+            setNewTabName("");
+          }}
+          onSubmitAdd={handleCreateTab}
+          onStartAdd={() => setIsAddingTab(true)}
+        />
       ) : null}
       {error ? (
         <div className="response-board-error" role="alert">
@@ -1454,44 +1262,11 @@ export function ResponseBoardPanel({
         </div>
       ) : null}
       {usesPartitionedBoard && selectedTab ? (
-        <section className="response-board-staging" aria-label="Staging tray">
-          <header>
-            <strong>Staging</strong>
-            <span>{stagedCards.length} waiting</span>
-          </header>
-          <ul className="response-board-staging-list">
-            {stagedCards.length === 0 ? (
-              <li className="response-board-staging-empty">
-                Pin responses here, then place them on any board.
-              </li>
-            ) : (
-              stagedCardsNewestFirst.map((card) => (
-                <li key={card.id} className="response-board-staged-card-item">
-                  <button
-                    type="button"
-                    draggable
-                    className={`response-board-staged-card${previewCardId === card.id ? " is-previewing" : ""}`}
-                    onDragStart={(event) => {
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData(
-                        RESPONSE_BOARD_STAGED_CARD_MIME,
-                        card.id,
-                      );
-                    }}
-                    onClick={() => setPreviewCardId(card.id)}
-                  >
-                    <span
-                      className={`response-board-agent-dot is-${card.sourceAgent.toLowerCase()}`}
-                      aria-hidden="true"
-                    />
-                    <span>{card.sourceSessionName}</span>
-                    <small>{card.snapshot.timestamp}</small>
-                  </button>
-                </li>
-              ))
-            )}
-          </ul>
-        </section>
+        <ResponseBoardStagingTray
+          cards={stagedCardsNewestFirst}
+          previewCardId={previewCardId}
+          onPreview={setPreviewCardId}
+        />
       ) : null}
       <div
         ref={surfaceRef}
@@ -1527,44 +1302,14 @@ export function ResponseBoardPanel({
         onKeyDown={handleBoardKeyDown}
       >
         {usesPartitionedBoard && previewCard ? (
-          <section
-            className="response-board-preview"
-            aria-label="Staged card preview"
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <div className="response-board-preview-content">
-              <MessageCard
-                message={previewCard.snapshot}
-                approvalActionsEnabled={false}
-                parallelAgentActionsEnabled={false}
-                preferImmediateHeavyRender
-                onApprovalDecision={() => {}}
-                onUserInputSubmit={() => {}}
-              />
-            </div>
-            <div className="response-board-preview-actions">
-              <button type="button" onClick={() => handlePlaceStagedCard(previewCard)}>
-                Place on {selectedTab?.name ?? "board"}
-              </button>
-              <button type="button" onClick={() => onOpenSource(previewCard)}>
-                Open source
-              </button>
-              <button
-                type="button"
-                className="is-danger"
-                onClick={() => handleRemove(previewCard.id)}
-              >
-                Delete
-              </button>
-              <button
-                type="button"
-                aria-label="Close staged card preview"
-                onClick={() => setPreviewCardId(null)}
-              >
-                ×
-              </button>
-            </div>
-          </section>
+          <ResponseBoardPreview
+            card={previewCard}
+            selectedTabName={selectedTab?.name ?? null}
+            onPlace={() => handlePlaceStagedCard(previewCard)}
+            onOpenSource={() => onOpenSource(previewCard)}
+            onDelete={() => handleRemove(previewCard.id)}
+            onClose={() => setPreviewCardId(null)}
+          />
         ) : null}
         <div
           className="response-board-plane"

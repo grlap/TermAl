@@ -1070,7 +1070,7 @@ describe("ResponseBoardPanel", () => {
     );
   });
 
-  it("stages and places a transcript drop on the selected partitioned tab", async () => {
+  it("atomically places a transcript drop on the selected partitioned tab", async () => {
     const tab = {
       id: "project-tab",
       name: "Project A",
@@ -1080,12 +1080,12 @@ describe("ResponseBoardPanel", () => {
       createdAt: "2026-07-31T12:01:00Z",
       placedCardCount: 0,
     };
-    const stagedCard: ResponseBoardCard = {
+    const placedCard: ResponseBoardCard = {
       ...pinnedCard,
       id: "staged-drop",
       tabId: tab.id,
-      placement: "staged",
-      hasCanvasPosition: false,
+      placement: "placed",
+      hasCanvasPosition: true,
     };
     vi.mocked(fetchResponseBoardTabs).mockResolvedValue({
       stagedCardCount: 0,
@@ -1096,10 +1096,7 @@ describe("ResponseBoardPanel", () => {
       cards: [],
       stagedCards: [],
     });
-    vi.mocked(stageResponseBoardCard).mockResolvedValue(stagedCard);
-    vi.mocked(updateResponseBoardCard).mockImplementation(
-      async (_cardId, update) => ({ ...stagedCard, ...update }),
-    );
+    vi.mocked(stageResponseBoardCard).mockResolvedValue(placedCard);
     const dataTransfer = new MemoryDataTransfer();
     writeResponseBoardMessageDragData(
       dataTransfer as unknown as DataTransfer,
@@ -1130,17 +1127,15 @@ describe("ResponseBoardPanel", () => {
         sessionId: "session-1",
         messageId: "message-1",
         tabId: tab.id,
-      }),
-    );
-    expect(updateResponseBoardCard).toHaveBeenCalledWith(
-      "staged-drop",
-      expect.objectContaining({
-        tabId: tab.id,
         placement: "placed",
         x: expect.any(Number),
         y: expect.any(Number),
       }),
     );
+    expect(updateResponseBoardCard).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText("Server-owned immutable response"),
+    ).toBeInTheDocument();
   });
 
   it("surfaces a staging failure from a partitioned transcript drop", async () => {
@@ -1192,7 +1187,7 @@ describe("ResponseBoardPanel", () => {
     expect(updateResponseBoardCard).not.toHaveBeenCalled();
   });
 
-  it("keeps a newly staged card visible when transcript-drop placement fails", async () => {
+  it("does not leave a partial staged card when atomic transcript placement fails", async () => {
     const tab = {
       id: "project-tab",
       name: "Project A",
@@ -1201,13 +1196,6 @@ describe("ResponseBoardPanel", () => {
       sortOrder: 0,
       createdAt: "2026-07-31T12:01:00Z",
       placedCardCount: 0,
-    };
-    const stagedCard: ResponseBoardCard = {
-      ...pinnedCard,
-      id: "staged-after-place-failure",
-      tabId: tab.id,
-      placement: "staged",
-      hasCanvasPosition: false,
     };
     vi.mocked(fetchResponseBoardTabs).mockResolvedValue({
       stagedCardCount: 0,
@@ -1218,8 +1206,7 @@ describe("ResponseBoardPanel", () => {
       cards: [],
       stagedCards: [],
     });
-    vi.mocked(stageResponseBoardCard).mockResolvedValue(stagedCard);
-    vi.mocked(updateResponseBoardCard).mockRejectedValue(
+    vi.mocked(stageResponseBoardCard).mockRejectedValue(
       new Error("Could not place staged response"),
     );
     const dataTransfer = new MemoryDataTransfer();
@@ -1246,9 +1233,10 @@ describe("ResponseBoardPanel", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could not place staged response",
     );
+    expect(updateResponseBoardCard).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("button", { name: /Codex research/ }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: /Codex research/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("debounces explicit move geometry and removes cards through the API", async () => {

@@ -149,6 +149,9 @@ struct StageResponseBoardCardRequest {
     message_id: String,
     tab_id: Option<String>,
     project_id: Option<String>,
+    placement: Option<ResponseBoardCardPlacement>,
+    x: Option<f64>,
+    y: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1068,6 +1071,29 @@ fn stage_response_board_card_in_storage(
             "tabId and projectId cannot be supplied together",
         ));
     }
+    let requested_placement = request
+        .placement
+        .unwrap_or(ResponseBoardCardPlacement::Staged);
+    let requested_position = match requested_placement {
+        ResponseBoardCardPlacement::Staged => {
+            if request.x.is_some() || request.y.is_some() {
+                return Err(ApiError::bad_request(
+                    "x and y are only supported when placement is placed",
+                ));
+            }
+            None
+        }
+        ResponseBoardCardPlacement::Placed => {
+            let (Some(x), Some(y)) = (request.x, request.y) else {
+                return Err(ApiError::bad_request(
+                    "x and y are required when placement is placed",
+                ));
+            };
+            validate_response_board_coordinate("x", x)?;
+            validate_response_board_coordinate("y", y)?;
+            Some((x, y))
+        }
+    };
     let connection = open_sqlite_state_connection(path)
         .map_err(|err| response_board_storage_error("open the response board", err))?;
     let write_lock = sqlite_state_write_lock(path);
@@ -1091,7 +1117,8 @@ fn stage_response_board_card_in_storage(
         )
         .optional()
         .map_err(|err| response_board_storage_error("find the staged response", err))?;
-    if let Some(card) = existing.as_ref()
+    if requested_placement == ResponseBoardCardPlacement::Staged
+        && let Some(card) = existing.as_ref()
         && card.placement == ResponseBoardCardPlacement::Staged
     {
         transaction
@@ -1101,9 +1128,10 @@ fn stage_response_board_card_in_storage(
     }
 
     // A repeated Pin is a workflow action, not only an idempotent lookup:
-    // already placed content returns to the shared staging inbox. Resolve the
-    // destination only after the lookup so an already staged card cannot
-    // create an unused project-default tab as a side effect.
+    // already placed content returns to the shared staging inbox. A direct
+    // canvas drop can instead atomically create/reuse and place the card.
+    // Resolve the destination only after the staged-card lookup so a repeated
+    // Pin cannot create an unused project-default tab as a side effect.
     let tab_id = if let Some((project_id, project_name)) = project {
         ensure_project_response_board_tab(&transaction, &project_id, &project_name)?
     } else {
@@ -1115,18 +1143,68 @@ fn stage_response_board_card_in_storage(
     if !response_board_tab_exists(&transaction, &tab_id)? {
         return Err(ApiError::not_found("response-board tab not found"));
     }
-    enforce_response_board_staging_capacity(&transaction)?;
+    if requested_placement == ResponseBoardCardPlacement::Placed {
+        let existing_id = existing.as_ref().map(|card| card.id.as_str()).unwrap_or("");
+        let duplicate: bool = transaction
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM board_cards
+                   WHERE tab_id = ?1 AND placement = 'placed'
+                     AND source_session_id = ?2 AND source_message_id = ?3
+                     AND id <> ?4
+                 )",
+                rusqlite::params![
+                    &tab_id,
+                    &request.session_id,
+                    &request.message_id,
+                    existing_id,
+                ],
+                |row| row.get(0),
+            )
+            .map_err(|err| response_board_storage_error("check response-board duplicates", err))?;
+        if duplicate {
+            return Err(ApiError::conflict(
+                "that response is already pinned in the destination tab",
+            ));
+        }
+        let needs_capacity = match existing.as_ref() {
+            Some(card) => {
+                card.placement != ResponseBoardCardPlacement::Placed || card.tab_id != tab_id
+            }
+            None => true,
+        };
+        if needs_capacity {
+            enforce_response_board_tab_capacity(&transaction, &tab_id)?;
+        }
+    } else {
+        enforce_response_board_staging_capacity(&transaction)?;
+    }
     if let Some(mut card) = existing {
+        let (has_canvas_position, x, y) = match requested_position {
+            Some((x, y)) => (true, x, y),
+            None => (card.has_canvas_position, card.x, card.y),
+        };
         transaction
             .execute(
                 "UPDATE board_cards
-                 SET tab_id = ?2, placement = 'staged'
+                 SET tab_id = ?2, placement = ?3, has_canvas_position = ?4,
+                     x = ?5, y = ?6
                  WHERE id = ?1",
-                rusqlite::params![&card.id, &tab_id],
+                rusqlite::params![
+                    &card.id,
+                    &tab_id,
+                    requested_placement.as_db_str(),
+                    has_canvas_position,
+                    x,
+                    y,
+                ],
             )
-            .map_err(|err| response_board_storage_error("restage the response", err))?;
+            .map_err(|err| response_board_storage_error("place the staged response", err))?;
         card.tab_id = tab_id;
-        card.placement = ResponseBoardCardPlacement::Staged;
+        card.placement = requested_placement;
+        card.has_canvas_position = has_canvas_position;
+        card.x = x;
+        card.y = y;
         transaction
             .commit()
             .map_err(|err| response_board_storage_error("finish the staged response", err))?;
@@ -1138,13 +1216,17 @@ fn stage_response_board_card_in_storage(
         &request.session_id,
         &request.message_id,
     )?;
+    let (has_canvas_position, x, y) = match requested_position {
+        Some((x, y)) => (true, x, y),
+        None => (false, 0.0, 0.0),
+    };
     let card = ResponseBoardCard {
         id: Uuid::new_v4().to_string(),
         tab_id,
-        placement: ResponseBoardCardPlacement::Staged,
-        has_canvas_position: false,
-        x: 0.0,
-        y: 0.0,
+        placement: requested_placement,
+        has_canvas_position,
+        x,
+        y,
         w: RESPONSE_BOARD_DEFAULT_WIDTH,
         h: RESPONSE_BOARD_DEFAULT_HEIGHT,
         snapshot: snapshot.message,

@@ -472,6 +472,99 @@ async fn response_board_tabs_stage_cards_idempotently_and_keep_legacy_view_place
 }
 
 #[tokio::test]
+async fn response_board_stage_route_places_transcript_drops_atomically() {
+    let state = test_app_state();
+    let _files = ResponseBoardTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Codex);
+    let message_id = push_response_board_message(&state, &session_id, "Atomic board response");
+    persist_response_board_fixture(&state);
+    let app = app_router(state);
+
+    let (tab_status, tab): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/response-board/tabs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({ "name": "Atomic" })).unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(tab_status, StatusCode::CREATED);
+    let tab_id = tab["id"].as_str().unwrap();
+
+    let place_request = |x: f64, y: f64| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/response-board/cards/stage")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({
+                    "sessionId": session_id,
+                    "messageId": message_id,
+                    "tabId": tab_id,
+                    "placement": "placed",
+                    "x": x,
+                    "y": y,
+                }))
+                .unwrap(),
+            ))
+            .unwrap()
+    };
+    let (first_status, first): (StatusCode, Value) =
+        request_json(&app, place_request(120.0, 80.0)).await;
+    assert_eq!(first_status, StatusCode::CREATED);
+    assert_eq!(first["placement"], "placed");
+    assert_eq!(first["hasCanvasPosition"], true);
+    assert_eq!(first["x"], 120.0);
+
+    let (repeat_status, repeated): (StatusCode, Value) =
+        request_json(&app, place_request(240.0, 160.0)).await;
+    assert_eq!(repeat_status, StatusCode::OK);
+    assert_eq!(repeated["id"], first["id"]);
+    assert_eq!(repeated["x"], 240.0);
+
+    let (_, view): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/api/response-board/tabs/{tab_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(view["cards"].as_array().map(Vec::len), Some(1));
+    assert_eq!(view["stagedCards"].as_array().map(Vec::len), Some(0));
+
+    let (invalid_status, invalid): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/response-board/cards/stage")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({
+                    "sessionId": session_id,
+                    "messageId": message_id,
+                    "tabId": tab_id,
+                    "placement": "placed",
+                    "x": 10.0,
+                }))
+                .unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(invalid_status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        invalid["error"],
+        "x and y are required when placement is placed"
+    );
+}
+
+#[tokio::test]
 async fn response_board_rejects_duplicate_source_on_legacy_create_and_same_tab_place() {
     let state = test_app_state();
     let _files = ResponseBoardTestFiles::capture(&state);
@@ -1172,6 +1265,26 @@ async fn response_board_project_tab_becomes_custom_when_its_project_is_deleted()
     .await;
     let tab_id = staged["tabId"].as_str().unwrap().to_owned();
     {
+        let mut connection = rusqlite::Connection::open(state.persistence_path.as_ref()).unwrap();
+        let transaction = connection.transaction().unwrap();
+        for index in 0..RESPONSE_BOARD_MAX_CUSTOM_TABS {
+            transaction
+                .execute(
+                    "INSERT INTO response_board_tabs(
+                       id, name, kind, project_id, sort_order, created_at
+                     ) VALUES (?1, ?2, 'custom', NULL, ?3, ?4)",
+                    rusqlite::params![
+                        format!("pre-detach-custom-{index}"),
+                        format!("Pre-detach {index}"),
+                        10_000 + index as i64,
+                        format!("2026-08-23T01:00:{index:02}Z"),
+                    ],
+                )
+                .unwrap();
+        }
+        transaction.commit().unwrap();
+    }
+    {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         inner
             .projects
@@ -1203,6 +1316,16 @@ async fn response_board_project_tab_becomes_custom_when_its_project_is_deleted()
     assert_eq!(detached_tab["name"], "Final Deleted Project Name");
     assert_eq!(detached_tab["kind"], "custom");
     assert_eq!(detached_tab["projectId"], Value::Null);
+    assert_eq!(
+        tabs["tabs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|tab| { tab["kind"] == "custom" && tab["id"] != RESPONSE_BOARD_DEFAULT_TAB_ID })
+            .count(),
+        RESPONSE_BOARD_MAX_CUSTOM_TABS + 1,
+        "project deletion must preserve the detached tab even at the creation cap",
+    );
 
     let (_, view): (StatusCode, Value) = request_json(
         &app,
@@ -1345,6 +1468,33 @@ async fn response_board_custom_tabs_can_be_reordered_renamed_and_deleted_when_em
     }
 
     let desired_order = json!(["response-board-default", created_ids[1], created_ids[0]]);
+    for invalid_order in [
+        json!(["response-board-default", created_ids[0]]),
+        json!(["response-board-default", created_ids[0], created_ids[0],]),
+        json!([
+            "response-board-default",
+            created_ids[0],
+            "unknown-response-board-tab",
+        ]),
+    ] {
+        let (status, error): (StatusCode, Value) = request_json(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri("/api/response-board/tabs/reorder")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({ "tabIds": invalid_order })).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error["error"],
+            "tabIds must contain every response-board tab exactly once"
+        );
+    }
     let (reorder_status, reordered): (StatusCode, Value) = request_json(
         &app,
         Request::builder()

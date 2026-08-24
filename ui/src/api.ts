@@ -673,6 +673,9 @@ export function stageResponseBoardCard(payload: {
   messageId: string;
   tabId?: string | null;
   projectId?: string | null;
+  placement?: "staged" | "placed";
+  x?: number;
+  y?: number;
 }) {
   return request<ResponseBoardCard>("/api/response-board/cards/stage", {
     method: "POST",
@@ -681,6 +684,9 @@ export function stageResponseBoardCard(payload: {
       messageId: payload.messageId,
       ...(payload.tabId ? { tabId: payload.tabId } : {}),
       ...(payload.projectId ? { projectId: payload.projectId } : {}),
+      ...(payload.placement ? { placement: payload.placement } : {}),
+      ...(payload.x !== undefined ? { x: payload.x } : {}),
+      ...(payload.y !== undefined ? { y: payload.y } : {}),
     }),
   });
 }

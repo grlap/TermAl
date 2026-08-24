@@ -67,10 +67,12 @@ two board panes remain independent.
 The durable collection remains global and does not wake sessions. Tabs provide
 project organization without creating separate board databases. Card snapshots
 are capped at 1 MiB; the shared staging inbox and each placed-card canvas are
-independently capped at 256 cards. The board supports up to 64 custom tabs;
-project-default tabs are derived from projects and do not consume that limit.
-After project deletion converts one to a normal custom tab, it counts toward
-the custom-tab limit.
+independently capped at 256 cards. Creating a custom tab is allowed while fewer
+than 64 custom tabs exist; project-default tabs are derived from projects and
+do not consume that creation limit. Project deletion always preserves and
+detaches its tab even when 64 custom tabs already exist, because retaining the
+board data takes precedence over the creation cap. The detached tab then counts
+as custom for subsequent create requests.
 
 ## HTTP API
 
@@ -80,7 +82,7 @@ the custom-tab limit.
 | GET/POST | `/api/response-board/tabs` | List tabs or create a custom tab. |
 | POST | `/api/response-board/tabs/reorder` | Persist the complete tab order. |
 | GET/PATCH/DELETE | `/api/response-board/tabs/{id}` | Read a tab's placed cards plus the shared staged cards, rename it, or delete a custom tab without placed cards. |
-| POST | `/api/response-board/cards/stage` | Idempotently stage `{ sessionId, messageId, tabId? | projectId? }`. |
+| POST | `/api/response-board/cards/stage` | Idempotently stage `{ sessionId, messageId, tabId? | projectId? }`, or atomically place it when `placement: "placed"` and finite `x`/`y` are supplied. |
 | POST | `/api/response-board/cards` | Legacy create in the default tab from `{ sessionId, messageId, x, y }`. |
 | PATCH | `/api/response-board/cards/{id}` | Update supplied geometry, `placement`, or `tabId`. |
 | DELETE | `/api/response-board/cards/{id}` | Remove a card; returns `204`. |
@@ -88,8 +90,11 @@ the custom-tab limit.
 The staging route returns `201` when it creates a new durable card and `200`
 when it reuses an existing source card. Reusing a placed card moves that same
 card back to the shared staging inbox and applies the supplied destination
-hint, so it disappears from its previous canvas; a later placement (including
-a transcript drop onto another tab) moves the card rather than copying it.
+hint, so it disappears from its previous canvas. Supplying `placement:
+"placed"` with `x` and `y` performs the source lookup, snapshot creation or
+reuse, destination-capacity check, and canvas placement in one transaction;
+transcript drops use this form and therefore cannot leave a half-applied staged
+card. Moving the source to another tab reuses the card rather than copying it.
 
 The create route returns `404` when the requested source message is not yet in
 durable history. Geometry is finite and bounded: coordinates are limited to
