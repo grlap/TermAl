@@ -323,6 +323,7 @@ describe("App smoke", () => {
       const context = await renderAppWithProjectAndSession();
       try {
         expect(await screen.findByLabelText("Message Session 1")).toBeInTheDocument();
+        expect(document.title).toBe("Session 1 · TermAl");
       } finally {
         context.cleanup();
       }

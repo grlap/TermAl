@@ -59,6 +59,7 @@ import { SettingsTabBar } from "./preferences/SettingsTabBar";
 import type { PreferencesTabId } from "./preferences/preferences-tabs";
 import { resolveStandaloneControlPanelDockWidthRatio } from "./control-panel-layout";
 import {
+  getActiveWorkspacePaneTab,
   getWorkspaceSplitResizeBounds,
   resolveControlSurfaceSectionIdForWorkspaceTab,
   resolveWorkspaceTabProjectId,
@@ -95,6 +96,7 @@ import {
 import { useAppDialogState } from "./app-dialog-state";
 import { useAppWorkspaceActions } from "./app-workspace-actions";
 import { useAppControlPanelState } from "./app-control-panel-state";
+import { useLastActiveSessionDocumentTitle } from "./browser-session-title";
 import { AppControlSurface } from "./AppControlSurface";
 import { AppDialogs } from "./AppDialogs";
 import { appTestHooks } from "./app-test-hooks";
@@ -628,6 +630,14 @@ export default function App() {
   const activeSession = activePane?.activeSessionId
     ? (sessionLookup.get(activePane.activeSessionId) ?? null)
     : null;
+  const activeWorkspaceTab = activePane
+    ? getActiveWorkspacePaneTab(activePane)
+    : null;
+  const activeBrowserTitleSession =
+    activeWorkspaceTab?.kind === "session"
+      ? (sessionLookup.get(activeWorkspaceTab.sessionId) ?? null)
+      : null;
+  useLastActiveSessionDocumentTitle(activeBrowserTitleSession?.name);
   const activeTranscriptSessionId =
     activePane?.viewMode === "session" ? (activeSession?.id ?? null) : null;
   const visibleSessionHydrationTargets = useMemo<
