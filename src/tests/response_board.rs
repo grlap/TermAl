@@ -709,6 +709,83 @@ async fn response_board_atomic_stage_route_enforces_destination_capacity() {
 }
 
 #[tokio::test]
+async fn response_board_stage_route_enforces_global_staging_capacity() {
+    let state = test_app_state();
+    let _files = ResponseBoardTestFiles::capture(&state);
+    let persistence_path = state.persistence_path.as_ref().clone();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let message_id =
+        push_response_board_message(&state, &session_id, "Response beyond staging capacity");
+    persist_response_board_fixture(&state);
+    let app = app_router(state);
+
+    // The capacity fixture inserts rows directly, so initialize the lazy schema first.
+    let (bootstrap_status, _): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/response-board/tabs")
+            .body(Body::empty())
+            .expect("build response-board schema bootstrap request"),
+    )
+    .await;
+    assert_eq!(bootstrap_status, StatusCode::OK);
+    let connection = rusqlite::Connection::open(&persistence_path)
+        .expect("open response-board capacity fixture database");
+    let transaction = connection
+        .unchecked_transaction()
+        .expect("start response-board capacity fixture transaction");
+    // Minimal snapshots are sufficient because the capacity check rejects the
+    // request before any fixture row is deserialized. Tests that read these
+    // rows must insert a real serialized message snapshot instead.
+    for index in 0..RESPONSE_BOARD_MAX_CARDS {
+        transaction
+            .execute(
+                "INSERT INTO board_cards(
+                   id, tab_id, placement, has_canvas_position, x, y, w, h,
+                   snapshot_json, source_session_id, source_message_id, created_at
+                 ) VALUES (?1, ?2, 'staged', 0, 0, 0, ?3, ?4, '{}', ?5, ?6, ?7)",
+                rusqlite::params![
+                    format!("stage-route-capacity-card-{index}"),
+                    RESPONSE_BOARD_DEFAULT_TAB_ID,
+                    RESPONSE_BOARD_DEFAULT_WIDTH,
+                    RESPONSE_BOARD_DEFAULT_HEIGHT,
+                    format!("stage-route-capacity-session-{index}"),
+                    format!("stage-route-capacity-message-{index}"),
+                    format!("2026-08-24T00:00:01.{index:03}Z"),
+                ],
+            )
+            .expect("insert staged response-board capacity fixture row");
+    }
+    transaction
+        .commit()
+        .expect("commit response-board capacity fixture rows");
+    drop(connection);
+
+    let (status, error): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/response-board/cards/stage")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({
+                    "sessionId": session_id,
+                    "messageId": message_id,
+                }))
+                .expect("serialize response-board staging request"),
+            ))
+            .expect("build response-board staging request"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        error["error"],
+        format!("response-board staging is limited to {RESPONSE_BOARD_MAX_CARDS} cards")
+    );
+}
+
+#[tokio::test]
 async fn response_board_rejects_duplicate_source_on_legacy_create_and_same_tab_place() {
     let state = test_app_state();
     let _files = ResponseBoardTestFiles::capture(&state);

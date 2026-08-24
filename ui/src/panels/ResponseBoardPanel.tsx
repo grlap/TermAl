@@ -14,7 +14,6 @@ import {
   deleteResponseBoardCard,
   fetchResponseBoard,
   fetchResponseBoardTab,
-  fetchResponseBoardTabs,
   reorderResponseBoardTabs,
   stageResponseBoardCard,
   updateResponseBoardCard,
@@ -48,6 +47,7 @@ import {
 } from "./ResponseBoardStagingTray";
 import { ResponseBoardTabStrip } from "./ResponseBoardTabStrip";
 import { useCommittedRef } from "./use-committed-ref";
+import { useResponseBoardTabs } from "./use-response-board-tabs";
 
 export {
   fitResponseBoardCardsInView,
@@ -108,10 +108,6 @@ export function ResponseBoardPanel({
   onOpenSource: (card: ResponseBoardCard) => void;
 }) {
   const usesPartitionedBoard = workspaceTabId.length > 0;
-  const [tabs, setTabs] = useState<ResponseBoardTab[]>([]);
-  const [selectedTabId, setSelectedTabId] = useState<string | null>(
-    activeBoardTabId,
-  );
   const [cards, setCards] = useState<ResponseBoardCard[]>([]);
   const [stagedCards, setStagedCards] = useState<ResponseBoardCard[]>([]);
   const [previewCardId, setPreviewCardId] = useState<string | null>(null);
@@ -120,10 +116,9 @@ export function ResponseBoardPanel({
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [isReorderingTabs, setIsReorderingTabs] = useState(false);
-  const [invalidationSource] = useState(
-    createResponseBoardInvalidationSource,
-  );
+  const [invalidationSource] = useState(createResponseBoardInvalidationSource);
   const [invalidationRevision, setInvalidationRevision] = useState(0);
+  const [tabViewRefreshRevision, setTabViewRefreshRevision] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<BoardView>(() => {
@@ -147,6 +142,7 @@ export function ResponseBoardPanel({
   const patchTimersRef = useRef(new Map<string, number>());
   const patchRequestsRef = useRef(new Map<string, number>());
   const patchVersionsRef = useRef(new Map<string, number>());
+  const tabViewRequestVersionRef = useRef(0);
   const visibleTabIdRef = useRef<string | null>(null);
   const viewPersistTimerRef = useRef<number | null>(null);
   const pendingViewPersistRef = useRef<{
@@ -159,30 +155,71 @@ export function ResponseBoardPanel({
   const isUnmountingRef = useRef(false);
   const tabButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const boardViewsRef = useCommittedRef(boardViews);
-  const activeBoardTabIdRef = useCommittedRef(activeBoardTabId);
-  const selectedTabIdRef = useCommittedRef(selectedTabId);
-  const viewRef = useCommittedRef(view);
   const onWorkspaceStateChangeRef = useCommittedRef(onWorkspaceStateChange);
   const replaceCards = useCallback((nextCards: ResponseBoardCard[]) => {
     cardsRef.current = nextCards;
     setCards(nextCards);
   }, []);
-  const replaceStagedCards = useCallback(
-    (nextCards: ResponseBoardCard[]) => {
-      stagedCardsRef.current = nextCards;
-      setStagedCards(nextCards);
-    },
-    [],
-  );
-
-  const refreshTabs = useCallback(async () => {
-    const response = await fetchResponseBoardTabs();
-    return response.tabs;
+  const replaceStagedCards = useCallback((nextCards: ResponseBoardCard[]) => {
+    stagedCardsRef.current = nextCards;
+    setStagedCards(nextCards);
   }, []);
+  const handleNoResponseBoardTabs = useCallback(() => {
+    visibleTabIdRef.current = null;
+    replaceCards([]);
+    replaceStagedCards([]);
+    setIsLoading(false);
+  }, [replaceCards, replaceStagedCards]);
+  const {
+    applyRenamedTab,
+    beginTabReorder,
+    clearTabRefreshError,
+    commitTabReorder,
+    finishTabReorder,
+    refreshTabs,
+    refreshTabsAfterCommittedMutation,
+    removeDeletedTab,
+    rollbackTabReorder,
+    selectCreatedTab,
+    selectedTabId,
+    selectedTabIdRef,
+    selectResponseBoardTab,
+    tabRefreshError,
+    tabs,
+  } = useResponseBoardTabs({
+    activeBoardTabId,
+    boardViews,
+    onNoTabs: handleNoResponseBoardTabs,
+    onWorkspaceStateChange,
+    view,
+    workspaceTabId,
+  });
 
   const notifySiblingBoards = useCallback(
     () => notifyResponseBoardChanged(invalidationSource),
     [invalidationSource],
+  );
+
+  const finishCommittedCardMutation = useCallback(
+    (refreshFailureMessage: string) => {
+      notifySiblingBoards();
+      if (!isMountedRef.current || !usesPartitionedBoard) {
+        return;
+      }
+      // Ignore any tab view served before the mutation committed and follow it
+      // with an authoritative in-place read of the currently selected board.
+      tabViewRequestVersionRef.current += 1;
+      setTabViewRefreshRevision((current) => current + 1);
+      void refreshTabsAfterCommittedMutation(
+        "a committed card mutation",
+        refreshFailureMessage,
+      );
+    },
+    [
+      notifySiblingBoards,
+      refreshTabsAfterCommittedMutation,
+      usesPartitionedBoard,
+    ],
   );
 
   useEffect(
@@ -238,75 +275,26 @@ export function ResponseBoardPanel({
         active = false;
       };
     }
-    void refreshTabs().then(
-      (nextTabs) => {
-        if (!active) {
-          return;
-        }
-        setTabs(nextTabs);
-        const current = selectedTabIdRef.current;
-        const requested = activeBoardTabIdRef.current;
-        const nextSelectedTabId =
-          (current && nextTabs.some((tab) => tab.id === current)
-            ? current
-            : requested && nextTabs.some((tab) => tab.id === requested)
-              ? requested
-              : nextTabs[0]?.id) ?? null;
-        setSelectedTabId(nextSelectedTabId);
-        if (nextSelectedTabId) {
-          const nextWorkspaceView =
-            nextSelectedTabId === selectedTabIdRef.current
-              ? viewRef.current
-              : (boardViewsRef.current[nextSelectedTabId] ?? {
-                  panX: 0,
-                  panY: 0,
-                  zoom: 1,
-                });
-          onWorkspaceStateChangeRef.current(
-            workspaceTabId,
-            nextSelectedTabId,
-            nextWorkspaceView,
-            nextTabs.map((tab) => tab.id),
-          );
-        }
-        if (nextTabs.length === 0) {
-          visibleTabIdRef.current = null;
-          replaceCards([]);
-          replaceStagedCards([]);
-          setIsLoading(false);
-        }
-      },
-      (reason) => {
+    void refreshTabs({
+      onFailure: (reason) => {
         if (!active) {
           return;
         }
         setError(getErrorMessage(reason));
         setIsLoading(false);
       },
-    );
+    });
     return () => {
       active = false;
     };
   }, [
-    activeBoardTabIdRef,
-    boardViewsRef,
     invalidationRevision,
-    onWorkspaceStateChangeRef,
     refreshTabs,
     refreshToken,
     replaceCards,
     replaceStagedCards,
-    selectedTabIdRef,
     usesPartitionedBoard,
-    viewRef,
-    workspaceTabId,
   ]);
-
-  useEffect(() => {
-    if (activeBoardTabId) {
-      setSelectedTabId(activeBoardTabId);
-    }
-  }, [activeBoardTabId]);
 
   useEffect(() => {
     if (!usesPartitionedBoard || !selectedTabId) {
@@ -322,6 +310,7 @@ export function ResponseBoardPanel({
       return;
     }
     let active = true;
+    const requestVersion = ++tabViewRequestVersionRef.current;
     const refreshInPlace = visibleTabIdRef.current === selectedTabId;
     if (!refreshInPlace) {
       setIsLoading(true);
@@ -332,7 +321,7 @@ export function ResponseBoardPanel({
     setError(null);
     void fetchResponseBoardTab(selectedTabId).then(
       (tabView) => {
-        if (!active) {
+        if (!active || requestVersion !== tabViewRequestVersionRef.current) {
           return;
         }
         const localCardsById = new Map(
@@ -376,7 +365,7 @@ export function ResponseBoardPanel({
         }
       },
       (reason) => {
-        if (!active) {
+        if (!active || requestVersion !== tabViewRequestVersionRef.current) {
           return;
         }
         setError(getErrorMessage(reason));
@@ -391,6 +380,7 @@ export function ResponseBoardPanel({
   }, [
     refreshToken,
     invalidationRevision,
+    tabViewRefreshRevision,
     replaceCards,
     replaceStagedCards,
     selectedTabId,
@@ -531,58 +521,71 @@ export function ResponseBoardPanel({
     }
   }, [usesPartitionedBoard, view.zoom]);
 
-  const scheduleCardPatch = useCallback((card: ResponseBoardCard) => {
-    const currentTimer = patchTimersRef.current.get(card.id);
-    if (currentTimer !== undefined) {
-      window.clearTimeout(currentTimer);
-    }
-    const version = (patchVersionsRef.current.get(card.id) ?? 0) + 1;
-    patchVersionsRef.current.set(card.id, version);
-    const timer = window.setTimeout(() => {
-      patchTimersRef.current.delete(card.id);
-      patchRequestsRef.current.set(card.id, version);
-      const finishRequest = () => {
-        if (patchRequestsRef.current.get(card.id) === version) {
-          patchRequestsRef.current.delete(card.id);
-        }
-      };
-      void updateResponseBoardCard(card.id, {
-        x: card.x,
-        y: card.y,
-        w: card.w,
-        h: card.h,
-      }).then(
-        (persisted) => {
-          finishRequest();
-          notifySiblingBoards();
-          if (
-            !isMountedRef.current ||
-            patchVersionsRef.current.get(card.id) !== version
-          ) {
-            return;
+  const scheduleCardPatch = useCallback(
+    (card: ResponseBoardCard) => {
+      const currentTimer = patchTimersRef.current.get(card.id);
+      if (currentTimer !== undefined) {
+        window.clearTimeout(currentTimer);
+      }
+      const version = (patchVersionsRef.current.get(card.id) ?? 0) + 1;
+      patchVersionsRef.current.set(card.id, version);
+      const timer = window.setTimeout(() => {
+        patchTimersRef.current.delete(card.id);
+        patchRequestsRef.current.set(card.id, version);
+        const finishRequest = () => {
+          if (patchRequestsRef.current.get(card.id) === version) {
+            patchRequestsRef.current.delete(card.id);
           }
-          replaceCards(
-            cardsRef.current.map((candidate) =>
-              candidate.id === persisted.id ? persisted : candidate,
-            ),
-          );
-        },
-        (reason) => {
-          finishRequest();
-          if (
-            isMountedRef.current &&
-            patchVersionsRef.current.get(card.id) === version
-          ) {
-            setError(getErrorMessage(reason));
-          }
-        },
-      );
-    }, CARD_PATCH_DEBOUNCE_MS);
-    patchTimersRef.current.set(card.id, timer);
-  }, [notifySiblingBoards, replaceCards]);
+        };
+        void updateResponseBoardCard(card.id, {
+          x: card.x,
+          y: card.y,
+          w: card.w,
+          h: card.h,
+        }).then(
+          (persisted) => {
+            // The PATCH committed after any tab view already in flight. Ignore
+            // those older snapshots even after the local pending marker clears,
+            // then replace them with an authoritative read of the visible board.
+            tabViewRequestVersionRef.current += 1;
+            if (isMountedRef.current && usesPartitionedBoard) {
+              setTabViewRefreshRevision((current) => current + 1);
+            }
+            finishRequest();
+            notifySiblingBoards();
+            if (
+              !isMountedRef.current ||
+              patchVersionsRef.current.get(card.id) !== version
+            ) {
+              return;
+            }
+            replaceCards(
+              cardsRef.current.map((candidate) =>
+                candidate.id === persisted.id ? persisted : candidate,
+              ),
+            );
+          },
+          (reason) => {
+            finishRequest();
+            if (
+              isMountedRef.current &&
+              patchVersionsRef.current.get(card.id) === version
+            ) {
+              setError(getErrorMessage(reason));
+            }
+          },
+        );
+      }, CARD_PATCH_DEBOUNCE_MS);
+      patchTimersRef.current.set(card.id, timer);
+    },
+    [notifySiblingBoards, replaceCards, usesPartitionedBoard],
+  );
 
   const updateCardGeometry = useCallback(
-    (cardId: string, update: (card: ResponseBoardCard) => ResponseBoardCard) => {
+    (
+      cardId: string,
+      update: (card: ResponseBoardCard) => ResponseBoardCard,
+    ) => {
       const currentCard = cardsRef.current.find((card) => card.id === cardId);
       if (!currentCard) {
         return;
@@ -623,13 +626,16 @@ export function ResponseBoardPanel({
     [updateCardGeometry],
   );
 
-  const finishCardGesture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (cardGestureRef.current?.pointerId !== event.pointerId) {
-      return;
-    }
-    cardGestureRef.current = null;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-  }, []);
+  const finishCardGesture = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      if (cardGestureRef.current?.pointerId !== event.pointerId) {
+        return;
+      }
+      cardGestureRef.current = null;
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    },
+    [],
+  );
 
   const beginCardGesture = useCallback(
     (
@@ -662,44 +668,41 @@ export function ResponseBoardPanel({
     [view.zoom],
   );
 
-  const handleRemove = useCallback((cardId: string) => {
-    const timer = patchTimersRef.current.get(cardId);
-    if (timer !== undefined) {
-      window.clearTimeout(timer);
-      patchTimersRef.current.delete(cardId);
-    }
-    patchVersionsRef.current.set(cardId, (patchVersionsRef.current.get(cardId) ?? 0) + 1);
-    void (async () => {
-      try {
-        await deleteResponseBoardCard(cardId);
-        notifySiblingBoards();
-        if (!isMountedRef.current) {
-          return;
-        }
-        replaceCards(cardsRef.current.filter((card) => card.id !== cardId));
-        replaceStagedCards(
-          stagedCardsRef.current.filter((card) => card.id !== cardId),
-        );
-        setPreviewCardId((current) => (current === cardId ? null : current));
-        if (usesPartitionedBoard) {
-          const nextTabs = await refreshTabs();
+  const handleRemove = useCallback(
+    (cardId: string) => {
+      const timer = patchTimersRef.current.get(cardId);
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        patchTimersRef.current.delete(cardId);
+      }
+      patchVersionsRef.current.set(
+        cardId,
+        (patchVersionsRef.current.get(cardId) ?? 0) + 1,
+      );
+      void (async () => {
+        try {
+          await deleteResponseBoardCard(cardId);
           if (isMountedRef.current) {
-            setTabs(nextTabs);
+            replaceCards(cardsRef.current.filter((card) => card.id !== cardId));
+            replaceStagedCards(
+              stagedCardsRef.current.filter((card) => card.id !== cardId),
+            );
+            setPreviewCardId((current) =>
+              current === cardId ? null : current,
+            );
+          }
+          finishCommittedCardMutation(
+            "Response deleted, but board tab counts could not be refreshed.",
+          );
+        } catch (reason) {
+          if (isMountedRef.current) {
+            setError(getErrorMessage(reason));
           }
         }
-      } catch (reason) {
-        if (isMountedRef.current) {
-          setError(getErrorMessage(reason));
-        }
-      }
-    })();
-  }, [
-    notifySiblingBoards,
-    refreshTabs,
-    replaceCards,
-    replaceStagedCards,
-    usesPartitionedBoard,
-  ]);
+      })();
+    },
+    [finishCommittedCardMutation, replaceCards, replaceStagedCards],
+  );
 
   const persistCardUpdate = useCallback(
     async (
@@ -707,36 +710,32 @@ export function ResponseBoardPanel({
       update: Parameters<typeof updateResponseBoardCard>[1],
     ) => {
       const persisted = await updateResponseBoardCard(card.id, update);
-      notifySiblingBoards();
-      if (!isMountedRef.current) {
-        return persisted;
-      }
-      const withoutPersistedCard = cardsRef.current.filter(
-        (candidate) => candidate.id !== persisted.id,
-      );
-      const withoutPersistedStagedCard = stagedCardsRef.current.filter(
-        (candidate) => candidate.id !== persisted.id,
-      );
-      if (persisted.placement === "staged") {
-        replaceCards(withoutPersistedCard);
-        replaceStagedCards([...withoutPersistedStagedCard, persisted]);
-      } else {
-        replaceStagedCards(withoutPersistedStagedCard);
-        replaceCards(
-          persisted.tabId === selectedTabIdRef.current
-            ? [...withoutPersistedCard, persisted]
-            : withoutPersistedCard,
-        );
-      }
-      const nextTabs = await refreshTabs();
       if (isMountedRef.current) {
-        setTabs(nextTabs);
+        const withoutPersistedCard = cardsRef.current.filter(
+          (candidate) => candidate.id !== persisted.id,
+        );
+        const withoutPersistedStagedCard = stagedCardsRef.current.filter(
+          (candidate) => candidate.id !== persisted.id,
+        );
+        if (persisted.placement === "staged") {
+          replaceCards(withoutPersistedCard);
+          replaceStagedCards([...withoutPersistedStagedCard, persisted]);
+        } else {
+          replaceStagedCards(withoutPersistedStagedCard);
+          replaceCards(
+            persisted.tabId === selectedTabIdRef.current
+              ? [...withoutPersistedCard, persisted]
+              : withoutPersistedCard,
+          );
+        }
       }
+      finishCommittedCardMutation(
+        "Response updated, but board tab counts could not be refreshed.",
+      );
       return persisted;
     },
     [
-      notifySiblingBoards,
-      refreshTabs,
+      finishCommittedCardMutation,
       replaceCards,
       replaceStagedCards,
       selectedTabIdRef,
@@ -813,21 +812,28 @@ export function ResponseBoardPanel({
       try {
         const tab = await createResponseBoardTab(name);
         notifySiblingBoards();
-        const nextTabs = await refreshTabs();
         if (!isMountedRef.current) {
           return;
         }
-        setTabs(nextTabs);
-        setSelectedTabId(tab.id);
+        selectCreatedTab(tab);
         setNewTabName("");
         setIsAddingTab(false);
+        await refreshTabsAfterCommittedMutation(
+          "a committed tab create",
+          "Board tab created, but the board tab list could not be refreshed.",
+        );
       } catch (reason) {
         if (isMountedRef.current) {
           setError(getErrorMessage(reason));
         }
       }
     })();
-  }, [newTabName, notifySiblingBoards, refreshTabs]);
+  }, [
+    newTabName,
+    notifySiblingBoards,
+    refreshTabsAfterCommittedMutation,
+    selectCreatedTab,
+  ]);
 
   const handleRenameTab = useCallback(
     (tabId: string) => {
@@ -838,14 +844,17 @@ export function ResponseBoardPanel({
       setError(null);
       void (async () => {
         try {
-          await updateResponseBoardTab(tabId, name);
+          const tab = await updateResponseBoardTab(tabId, name);
           notifySiblingBoards();
-          const nextTabs = await refreshTabs();
           if (!isMountedRef.current) {
             return;
           }
-          setTabs(nextTabs);
+          applyRenamedTab(tab);
           setRenamingTabId(null);
+          await refreshTabsAfterCommittedMutation(
+            "a committed tab rename",
+            "Board tab renamed, but the board tab list could not be refreshed.",
+          );
         } catch (reason) {
           if (isMountedRef.current) {
             setError(getErrorMessage(reason));
@@ -853,7 +862,12 @@ export function ResponseBoardPanel({
         }
       })();
     },
-    [notifySiblingBoards, refreshTabs, renameValue],
+    [
+      applyRenamedTab,
+      notifySiblingBoards,
+      refreshTabsAfterCommittedMutation,
+      renameValue,
+    ],
   );
 
   const handleDeleteTab = useCallback(
@@ -863,13 +877,13 @@ export function ResponseBoardPanel({
         try {
           await deleteResponseBoardTab(tab.id);
           notifySiblingBoards();
-          const nextTabs = await refreshTabs();
           if (!isMountedRef.current) {
             return;
           }
-          setTabs(nextTabs);
-          setSelectedTabId((current) =>
-            current === tab.id ? (nextTabs[0]?.id ?? null) : current,
+          removeDeletedTab(tab.id);
+          await refreshTabsAfterCommittedMutation(
+            "a committed tab delete",
+            "Board tab deleted, but the board tab list could not be refreshed.",
           );
         } catch (reason) {
           if (isMountedRef.current) {
@@ -878,7 +892,11 @@ export function ResponseBoardPanel({
         }
       })();
     },
-    [notifySiblingBoards, refreshTabs],
+    [
+      notifySiblingBoards,
+      removeDeletedTab,
+      refreshTabsAfterCommittedMutation,
+    ],
   );
 
   const handleReorderTab = useCallback(
@@ -896,7 +914,7 @@ export function ResponseBoardPanel({
         nextTabs[targetIndex],
         nextTabs[index],
       ];
-      setTabs(nextTabs);
+      beginTabReorder(nextTabs);
       setError(null);
       tabReorderPendingRef.current = true;
       setIsReorderingTabs(true);
@@ -906,129 +924,141 @@ export function ResponseBoardPanel({
             nextTabs.map((tab) => tab.id),
           );
           notifySiblingBoards();
-          if (isMountedRef.current) {
-            setTabs(response.tabs);
+          if (!isMountedRef.current) {
+            return;
           }
+          // The mutation response owns ordering only. Preserve any fresher tab
+          // metadata already accepted while the reorder request was pending.
+          commitTabReorder(response.tabs);
+          void refreshTabsAfterCommittedMutation(
+            "a committed tab reorder",
+            "Board tabs reordered, but the board tab list could not be refreshed.",
+          );
         } catch (reason) {
           if (isMountedRef.current) {
-            setTabs(tabs);
+            rollbackTabReorder(tabs);
             setError(getErrorMessage(reason));
           }
         } finally {
           tabReorderPendingRef.current = false;
+          finishTabReorder();
           if (isMountedRef.current) {
             setIsReorderingTabs(false);
           }
         }
       })();
     },
-    [notifySiblingBoards, tabs],
+    [
+      beginTabReorder,
+      commitTabReorder,
+      finishTabReorder,
+      notifySiblingBoards,
+      refreshTabsAfterCommittedMutation,
+      rollbackTabReorder,
+      tabs,
+    ],
   );
 
-  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const surface = surfaceRef.current;
-    if (!surface) {
-      return;
-    }
-    const rect = surface.getBoundingClientRect();
-    const clientX = Number.isFinite(event.clientX)
-      ? event.clientX
-      : rect.left + surface.clientWidth / 2;
-    const clientY = Number.isFinite(event.clientY)
-      ? event.clientY
-      : rect.top + surface.clientHeight / 2;
-    const x = Math.max(
-      0,
-      (clientX - rect.left - view.panX) / view.zoom - 180,
-    );
-    const y = Math.max(
-      0,
-      (clientY - rect.top - view.panY) / view.zoom - 28,
-    );
-    setError(null);
-    const stagedCardId = event.dataTransfer.getData(
-      RESPONSE_BOARD_STAGED_CARD_MIME,
-    );
-    if (usesPartitionedBoard && stagedCardId) {
-      const card = stagedCardsRef.current.find(
-        (candidate) => candidate.id === stagedCardId,
-      );
-      if (card) {
-        handlePlaceStagedCard(card, { x, y });
+  const handleDrop = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const surface = surfaceRef.current;
+      if (!surface) {
+        return;
       }
-      return;
-    }
-    const source = readResponseBoardMessageDragData(event.dataTransfer);
-    if (!source) {
-      return;
-    }
-    if (!usesPartitionedBoard || !selectedTabId) {
-      void createResponseBoardCard({ ...source, x, y }).then(
-        (card) => {
-          notifySiblingBoards();
+      const rect = surface.getBoundingClientRect();
+      const clientX = Number.isFinite(event.clientX)
+        ? event.clientX
+        : rect.left + surface.clientWidth / 2;
+      const clientY = Number.isFinite(event.clientY)
+        ? event.clientY
+        : rect.top + surface.clientHeight / 2;
+      const x = Math.max(
+        0,
+        (clientX - rect.left - view.panX) / view.zoom - 180,
+      );
+      const y = Math.max(0, (clientY - rect.top - view.panY) / view.zoom - 28);
+      setError(null);
+      const stagedCardId = event.dataTransfer.getData(
+        RESPONSE_BOARD_STAGED_CARD_MIME,
+      );
+      if (usesPartitionedBoard && stagedCardId) {
+        const card = stagedCardsRef.current.find(
+          (candidate) => candidate.id === stagedCardId,
+        );
+        if (card) {
+          handlePlaceStagedCard(card, { x, y });
+        }
+        return;
+      }
+      const source = readResponseBoardMessageDragData(event.dataTransfer);
+      if (!source) {
+        return;
+      }
+      if (!usesPartitionedBoard || !selectedTabId) {
+        void createResponseBoardCard({ ...source, x, y }).then(
+          (card) => {
+            notifySiblingBoards();
+            if (isMountedRef.current) {
+              replaceCards([...cardsRef.current, card]);
+            }
+          },
+          (reason) => {
+            if (isMountedRef.current) {
+              setError(getErrorMessage(reason));
+            }
+          },
+        );
+        return;
+      }
+      const destinationTabId = selectedTabId;
+      void stageResponseBoardCard({
+        ...source,
+        tabId: destinationTabId,
+        placement: "placed",
+        x,
+        y,
+      })
+        .then((card) => {
           if (isMountedRef.current) {
-            replaceCards([...cardsRef.current, card]);
+            // Staging is global across every inner tab, so reconcile it even when
+            // the user switched canvases while the atomic placement was pending.
+            replaceStagedCards(
+              stagedCardsRef.current.filter(
+                (candidate) => candidate.id !== card.id,
+              ),
+            );
+            if (selectedTabIdRef.current === destinationTabId) {
+              replaceCards([
+                ...cardsRef.current.filter(
+                  (candidate) => candidate.id !== card.id,
+                ),
+                card,
+              ]);
+            }
           }
-        },
-        (reason) => {
+          finishCommittedCardMutation(
+            "Response placed, but board tab counts could not be refreshed.",
+          );
+        })
+        .catch((reason) => {
           if (isMountedRef.current) {
             setError(getErrorMessage(reason));
           }
-        },
-      );
-      return;
-    }
-    const destinationTabId = selectedTabId;
-    void stageResponseBoardCard({
-      ...source,
-      tabId: destinationTabId,
-      placement: "placed",
-      x,
-      y,
-    })
-      .then(async (card) => {
-        notifySiblingBoards();
-        if (!isMountedRef.current) {
-          return;
-        }
-        // Staging is global across every inner tab, so reconcile it even when
-        // the user switched canvases while the atomic placement was pending.
-        replaceStagedCards(
-          stagedCardsRef.current.filter(
-            (candidate) => candidate.id !== card.id,
-          ),
-        );
-        if (selectedTabIdRef.current === destinationTabId) {
-          replaceCards([
-            ...cardsRef.current.filter(
-              (candidate) => candidate.id !== card.id,
-            ),
-            card,
-          ]);
-        }
-        const nextTabs = await refreshTabs();
-        if (isMountedRef.current) {
-          setTabs(nextTabs);
-        }
-      })
-      .catch((reason) => {
-        if (isMountedRef.current) {
-          setError(getErrorMessage(reason));
-        }
-      });
-  }, [
-    handlePlaceStagedCard,
-    notifySiblingBoards,
-    refreshTabs,
-    replaceCards,
-    replaceStagedCards,
-    selectedTabId,
-    usesPartitionedBoard,
-    view.panX,
-    view.panY,
-    view.zoom,
-  ]);
+        });
+    },
+    [
+      finishCommittedCardMutation,
+      handlePlaceStagedCard,
+      replaceCards,
+      replaceStagedCards,
+      selectedTabId,
+      usesPartitionedBoard,
+      view.panX,
+      view.panY,
+      view.zoom,
+    ],
+  );
 
   const zoomAtSurfaceCenter = useCallback(
     (resolveZoom: (currentZoom: number) => number) => {
@@ -1172,6 +1202,7 @@ export function ResponseBoardPanel({
     [previewCardId, stagedCards],
   );
   const selectedTab = tabs.find((tab) => tab.id === selectedTabId) ?? null;
+  const displayedError = error ?? tabRefreshError;
 
   const planeSize = useMemo(
     () => ({
@@ -1195,7 +1226,10 @@ export function ResponseBoardPanel({
           <span>Drag any transcript message here or use Pin to board.</span>
         </div>
         <div className="response-board-toolbar-actions">
-          <div className="response-board-zoom-controls" aria-label="Board zoom controls">
+          <div
+            className="response-board-zoom-controls"
+            aria-label="Board zoom controls"
+          >
             <button
               type="button"
               aria-label="Zoom out"
@@ -1241,7 +1275,7 @@ export function ResponseBoardPanel({
           newTabName={newTabName}
           isReorderingTabs={isReorderingTabs}
           tabButtonRefs={tabButtonRefs}
-          onSelectTab={setSelectedTabId}
+          onSelectTab={selectResponseBoardTab}
           onRenameValueChange={setRenameValue}
           onCancelRename={() => setRenamingTabId(null)}
           onSubmitRename={handleRenameTab}
@@ -1260,10 +1294,17 @@ export function ResponseBoardPanel({
           onStartAdd={() => setIsAddingTab(true)}
         />
       ) : null}
-      {error ? (
+      {displayedError ? (
         <div className="response-board-error" role="alert">
-          {error}
-          <button type="button" onClick={() => setError(null)} aria-label="Dismiss error">
+          {displayedError}
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              clearTabRefreshError();
+            }}
+            aria-label="Dismiss error"
+          >
             ×
           </button>
         </div>
@@ -1419,7 +1460,9 @@ export function ResponseBoardPanel({
                 type="button"
                 className="response-board-resize-handle"
                 aria-label={`Resize response from ${card.sourceSessionName}`}
-                onPointerDown={(event) => beginCardGesture(event, card, "resize")}
+                onPointerDown={(event) =>
+                  beginCardGesture(event, card, "resize")
+                }
               />
             </article>
           ))}
