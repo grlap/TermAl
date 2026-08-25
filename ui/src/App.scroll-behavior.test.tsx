@@ -723,6 +723,8 @@ describe("App scroll behaviour", () => {
           author: "assistant" as const,
           text: `${sessionId} response ${index}`,
         }));
+      const session1Messages = makeVirtualizedMessages("session-1");
+      const session2Messages = makeVirtualizedMessages("session-2");
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const requestUrl = new URL(String(input), "http://localhost");
         if (requestUrl.pathname === "/api/state") {
@@ -740,13 +742,13 @@ describe("App scroll behaviour", () => {
                 name: "Session 1",
                 projectId: "project-termal",
                 workdir: "/projects/termal",
-                messages: makeVirtualizedMessages("session-1"),
+                messages: session1Messages,
               }),
               makeSession("session-2", {
                 name: "Session 2",
                 projectId: "project-termal",
                 workdir: "/projects/termal",
-                messages: makeVirtualizedMessages("session-2"),
+                messages: session2Messages,
               }),
             ],
           });
@@ -833,6 +835,54 @@ describe("App scroll behaviour", () => {
         if (!(messageStack instanceof HTMLElement)) {
           throw new Error("Active message stack not found");
         }
+        let session2GeometryShiftPx = 0;
+        const originalGetBoundingClientRect =
+          HTMLElement.prototype.getBoundingClientRect;
+        vi.spyOn(
+          HTMLElement.prototype,
+          "getBoundingClientRect",
+        ).mockImplementation(function (this: HTMLElement) {
+          if (this === messageStack) {
+            return {
+              bottom: 200,
+              height: 200,
+              left: 0,
+              right: 800,
+              top: 0,
+              width: 800,
+              x: 0,
+              y: 0,
+              toJSON: () => ({}),
+            } as DOMRect;
+          }
+          const messageId = this.dataset.messageId;
+          const session2Match = messageId?.match(
+            /^session-2-message-(\d+)$/,
+          );
+          if (
+            session2Match &&
+            this.classList.contains("virtualized-message-slot")
+          ) {
+            const messageIndex = Number(session2Match[1]);
+            const top =
+              messageIndex * 125 +
+              20 +
+              session2GeometryShiftPx -
+              messageStack.scrollTop;
+            return {
+              bottom: top + 100,
+              height: 100,
+              left: 0,
+              right: 800,
+              top,
+              width: 800,
+              x: 0,
+              y: top,
+              toJSON: () => ({}),
+            } as DOMRect;
+          }
+          return originalGetBoundingClientRect.call(this);
+        });
         expect(
           messageStack.querySelector(".virtualized-message-list"),
         ).not.toBeNull();
@@ -844,6 +894,7 @@ describe("App scroll behaviour", () => {
           // the resulting detached geometry through the production handler.
           messageStack.scrollTop = 5001;
           fireEvent.wheel(messageStack, { deltaY: -1 });
+          fireEvent.scroll(messageStack);
         });
         // Commit the wheel/detach update before advancing timers. Keeping
         // flushUiWork inside one async act lets jsdom run an old activation
@@ -929,6 +980,34 @@ describe("App scroll behaviour", () => {
               .length,
           ).toBeGreaterThanOrEqual(1);
 
+          await act(async () => {
+            upsertSessionStoreSession({
+              committedDraft: "",
+              draftAttachments: [],
+              session: makeSession("session-2", {
+                name: "Session 2",
+                projectId: "project-termal",
+                workdir: "/projects/termal",
+                messages: [
+                  ...session2Messages,
+                  {
+                    id: "session-2-message-80",
+                    type: "text",
+                    timestamp: "11:20",
+                    author: "assistant",
+                    text: "Session 2 response received while inactive",
+                  },
+                ],
+              }),
+            });
+            await flushUiWork();
+          });
+
+          // Session 2's virtualizer remounts when its tab is reactivated. Its
+          // fresh estimates and measurements can shift document-space pixels
+          // above the reader, so restoring only the old absolute scrollTop
+          // would display a different part of the conversation.
+          session2GeometryShiftPx = 400;
           scrollKinds.length = 0;
           const session1Tablist = screen
             .getAllByRole("tablist", { name: "Tile tabs" })
@@ -949,15 +1028,15 @@ describe("App scroll behaviour", () => {
             );
           });
 
-          expect(messageStack.scrollTop).toBe(5000);
+          expect(messageStack.scrollTop).toBe(5400);
           expect(scrollKinds).toContain("position_restore");
           expect(scrollKinds).not.toContain("bottom_pin");
           expect(scrollKinds).not.toContain("bottom_boundary");
-          expect(
-            messageStack.querySelector(
-              '[data-message-id="session-2-message-40"]',
-            ),
-          ).not.toBeNull();
+          const restoredAnchor = messageStack.querySelector(
+            '[data-message-id="session-2-message-40"]',
+          );
+          expect(restoredAnchor).not.toBeNull();
+          expect(restoredAnchor?.getBoundingClientRect().top).toBe(20);
         } finally {
           messageStack.removeEventListener(
             MESSAGE_STACK_SCROLL_WRITE_EVENT,

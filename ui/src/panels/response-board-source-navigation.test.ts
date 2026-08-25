@@ -30,6 +30,7 @@ function makeVirtualizerHandle() {
     getViewportSnapshot: vi.fn(),
     jumpToMessageId: vi.fn(),
     jumpToMessageIndex: vi.fn(),
+    restoreViewportAnchor: vi.fn(),
   };
   return {
     handle,

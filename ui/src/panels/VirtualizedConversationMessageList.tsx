@@ -1480,6 +1480,7 @@ export function VirtualizedConversationMessageList({
     isDetachedFromBottomRef,
     lastUserScrollInputTimeRef,
     lastUserScrollKindRef,
+    latestVisibleMessageAnchorRef,
     messageLocationById,
     messages,
     mountedPageRangeRef,

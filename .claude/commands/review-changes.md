@@ -43,6 +43,19 @@ If there are no staged, unstaged, or untracked changes, tell the user there is n
 
 This parent session is the only session in this workflow allowed to run quality gates. Run every command in this step before spawning reviewers; delegated `/review-code` children inspect code only and must not repeat these commands.
 
+If any quality gate in this step produces a failure or error, stop the remaining
+gate sequence and do not spawn reviewers, but do not stop at merely presenting
+the raw output. Immediately investigate the failing path in this parent session
+with focused reproduction and diagnostics, then classify the root cause as a
+product defect, test defect, or environment/resource issue. An intermittent
+symptom is never resolved by labeling it "flaky." Search Beads for existing work
+and create or update the matching item with the failure evidence and next action.
+This pre-review gate-failure record is an explicit exception to the Step 5
+tracker-timing rule; it must cover only the failed gate, not unreviewed code
+findings. Present the original output together with the diagnosis and tracker
+action. Do not resume the gate sequence or spawn reviewers until the original
+required gate succeeds.
+
 Run `cargo check` in the parent session before spawning reviewers.
 If it produces ANY errors, stop immediately and present the output.
 Warnings are acceptable; report them and continue.

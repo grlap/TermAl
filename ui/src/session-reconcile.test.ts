@@ -462,6 +462,334 @@ describe("reconcileSessions", () => {
     expect(merged[0].messageCount).toBe(3);
   });
 
+  it("atomically replaces an optimistic prompt when a summary adopts its persisted message", () => {
+    const retainedMessage = {
+      id: "message-79",
+      type: "text" as const,
+      timestamp: "10:00",
+      author: "assistant" as const,
+      text: "Ready",
+    };
+    const optimisticPrompt = {
+      id: "optimistic-1",
+      timestamp: "10:01",
+      text: "hello",
+      localOnly: true,
+    };
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageStartIndex: 79,
+        messageCount: 80,
+        sessionMutationStamp: 10,
+        messages: [retainedMessage],
+        pendingPrompts: [optimisticPrompt],
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageStartIndex: 79,
+        messageCount: 81,
+        sessionMutationStamp: 11,
+        messages: [
+          { ...retainedMessage },
+          {
+            id: "message-80",
+            type: "text",
+            timestamp: "10:01",
+            author: "you",
+            text: "hello",
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].messages).toHaveLength(2);
+    expect(merged[0].messages[1]).toEqual(next[0].messages[1]);
+    expect(merged[0].pendingPrompts).toBeUndefined();
+  });
+
+  it("uses a persisted message id to consume only its matching server queue entry", () => {
+    const localPrompt = {
+      id: "optimistic-1",
+      timestamp: "10:01",
+      text: "same text",
+      localOnly: true,
+    };
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageStartIndex: 80,
+        messageCount: 80,
+        sessionMutationStamp: 10,
+        pendingPrompts: [
+          {
+            id: "message-80",
+            timestamp: "10:00",
+            text: "same text",
+          },
+          localPrompt,
+        ],
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageStartIndex: 80,
+        messageCount: 81,
+        sessionMutationStamp: 11,
+        messages: [
+          {
+            id: "message-80",
+            type: "text",
+            timestamp: "10:02",
+            author: "assistant",
+            text: "same text",
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].pendingPrompts).toEqual([localPrompt]);
+  });
+
+  it("preserves optimistic prompts when a summary adopts metadata without messages", () => {
+    const optimisticPrompt = {
+      id: "optimistic-1",
+      timestamp: "10:01",
+      text: "hello",
+      localOnly: true,
+    };
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageStartIndex: 79,
+        messageCount: 80,
+        sessionMutationStamp: 10,
+        pendingPrompts: [optimisticPrompt],
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageCount: 81,
+        sessionMutationStamp: 11,
+        preview: "summary advanced",
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].pendingPrompts).toBe(previous[0].pendingPrompts);
+  });
+
+  it("does not consume an optimistic prompt for an old message outside the previous window", () => {
+    const optimisticPrompt = {
+      id: "optimistic-1",
+      timestamp: "10:01",
+      text: "continue",
+      localOnly: true,
+    };
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageStartIndex: 40,
+        messageCount: 80,
+        sessionMutationStamp: 10,
+        messages: [
+          {
+            id: "message-40",
+            type: "text",
+            timestamp: "09:40",
+            author: "assistant",
+            text: "Retained window",
+          },
+        ],
+        pendingPrompts: [optimisticPrompt],
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageStartIndex: 25,
+        messageCount: 80,
+        sessionMutationStamp: 11,
+        messages: [
+          {
+            id: "message-25",
+            type: "text",
+            timestamp: "09:25",
+            author: "you",
+            text: "continue",
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].pendingPrompts).toBe(previous[0].pendingPrompts);
+  });
+
+  it("consumes only the first identical optimistic prompt for one new message", () => {
+    const secondPrompt = {
+      id: "optimistic-2",
+      timestamp: "10:02",
+      text: "continue",
+      localOnly: true,
+    };
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageStartIndex: 80,
+        messageCount: 80,
+        sessionMutationStamp: 10,
+        pendingPrompts: [
+          {
+            id: "optimistic-1",
+            timestamp: "10:01",
+            text: "continue",
+            localOnly: true,
+          },
+          secondPrompt,
+        ],
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageStartIndex: 80,
+        messageCount: 81,
+        sessionMutationStamp: 11,
+        messages: [
+          {
+            id: "message-80",
+            type: "text",
+            timestamp: "10:03",
+            author: "you",
+            text: "continue",
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].pendingPrompts).toEqual([secondPrompt]);
+  });
+
+  it("consumes each matching optimistic prompt when a summary adopts multiple new messages", () => {
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageStartIndex: 80,
+        messageCount: 80,
+        sessionMutationStamp: 10,
+        pendingPrompts: [
+          {
+            id: "optimistic-1",
+            timestamp: "10:01",
+            text: "first prompt",
+            localOnly: true,
+          },
+          {
+            id: "optimistic-2",
+            timestamp: "10:02",
+            text: "second prompt",
+            localOnly: true,
+          },
+        ],
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageStartIndex: 80,
+        messageCount: 82,
+        sessionMutationStamp: 11,
+        messages: [
+          {
+            id: "message-80",
+            type: "text",
+            timestamp: "10:03",
+            author: "you",
+            text: "first prompt",
+          },
+          {
+            id: "message-81",
+            type: "text",
+            timestamp: "10:04",
+            author: "you",
+            text: "second prompt",
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].messages).toHaveLength(2);
+    expect(merged[0].pendingPrompts).toBeUndefined();
+  });
+
+  it("uses the retained window end when prior messageCount is unavailable", () => {
+    const optimisticPrompt = {
+      id: "optimistic-1",
+      timestamp: "10:01",
+      text: "continue",
+      localOnly: true,
+    };
+    const previous = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageStartIndex: 40,
+        sessionMutationStamp: 10,
+        messages: [
+          {
+            id: "message-40",
+            type: "text",
+            timestamp: "09:40",
+            author: "assistant",
+            text: "First retained message",
+          },
+          {
+            id: "message-41",
+            type: "text",
+            timestamp: "09:41",
+            author: "assistant",
+            text: "Second retained message",
+          },
+        ],
+        pendingPrompts: [optimisticPrompt],
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        messageStartIndex: 25,
+        sessionMutationStamp: 11,
+        messages: [
+          {
+            id: "message-25",
+            type: "text",
+            timestamp: "09:25",
+            author: "you",
+            text: "continue",
+          },
+        ],
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].pendingPrompts).toBe(previous[0].pendingPrompts);
+  });
+
   it("adopts targeted partial-tail residency flags instead of preserving a detached window", () => {
     const queuedPrompt = {
       id: "prompt-1",

@@ -11,6 +11,7 @@ import {
   type RefObject,
 } from "react";
 import { SESSION_STICKY_BOTTOM_BAND_PX } from "../scroll-position";
+import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
 import {
   VIRTUALIZED_MESSAGE_GAP_PX,
   clampVirtualizedViewportScrollTop,
@@ -56,6 +57,7 @@ type VirtualizerHandleState = {
   messageLocationById: Map<string, MessageLocation>;
   messagesLength: number;
   pages: MessagePage[];
+  restoreViewportAnchor: (anchor: VisibleMessageAnchor) => boolean;
 };
 
 export function useVirtualizedConversationHandle({
@@ -70,6 +72,7 @@ export function useVirtualizedConversationHandle({
   isDetachedFromBottomRef,
   lastUserScrollInputTimeRef,
   lastUserScrollKindRef,
+  latestVisibleMessageAnchorRef,
   messageLocationById,
   messages,
   mountedPageRangeRef,
@@ -108,6 +111,7 @@ export function useVirtualizedConversationHandle({
   isDetachedFromBottomRef: MutableRefObject<boolean>;
   lastUserScrollInputTimeRef: MutableRefObject<number>;
   lastUserScrollKindRef: MutableRefObject<UserScrollKind>;
+  latestVisibleMessageAnchorRef: MutableRefObject<VisibleMessageAnchor | null>;
   messageLocationById: Map<string, MessageLocation>;
   messages: Message[];
   mountedPageRangeRef: MutableRefObject<VirtualizedRange>;
@@ -174,9 +178,11 @@ export function useVirtualizedConversationHandle({
         messageHeight = estimateMessageHeight(location.message);
       }
 
+      const viewportOffsetPx = options.viewportOffsetPx;
       const align = options.align ?? "center";
-      const rawScrollTop =
-        align === "start"
+      const rawScrollTop = Number.isFinite(viewportOffsetPx)
+        ? messageTop - viewportOffsetPx!
+        : align === "start"
           ? messageTop
           : align === "end"
             ? messageTop - Math.max(viewportHeight - messageHeight, 0)
@@ -231,8 +237,14 @@ export function useVirtualizedConversationHandle({
       const bottomTarget = Math.max(node.scrollHeight - node.clientHeight, 0);
       const targetNearBottom =
         bottomTarget - nextScrollTop < SESSION_STICKY_BOTTOM_BAND_PX;
-      shouldKeepBottomAfterLayoutRef.current = targetNearBottom;
-      isDetachedFromBottomRef.current = !targetNearBottom;
+      const preserveDetachedAuthority =
+        options.preserveDetachedAuthority === true;
+      shouldKeepBottomAfterLayoutRef.current = preserveDetachedAuthority
+        ? false
+        : targetNearBottom;
+      isDetachedFromBottomRef.current = preserveDetachedAuthority
+        ? true
+        : !targetNearBottom;
 
       const nextMountedRange = buildWorkingMountedRangeForScrollTop(
         nextScrollTop,
@@ -347,6 +359,42 @@ export function useVirtualizedConversationHandle({
       visiblePageRange,
     ]);
 
+  const restoreViewportAnchor = useCallback(
+    (anchor: VisibleMessageAnchor) => {
+      const location = messageLocationById.get(anchor.messageId);
+      if (!location) {
+        return false;
+      }
+      const node = isActive ? scrollContainerRef.current : null;
+      if (!node) {
+        return false;
+      }
+
+      // Establish restore authority before jumpToMessageLocation installs the
+      // persisted correction. The synchronous position_restore listener
+      // clears stale outgoing-session anchors, so dispatching after the jump
+      // would erase this restore before the next layout commit.
+      notifyMessageStackScrollWrite(node, {
+        scrollKind: "position_restore",
+      });
+      if (
+        !jumpToMessageLocation(location, {
+          preserveDetachedAuthority: true,
+          viewportOffsetPx: anchor.viewportOffsetPx,
+        })
+      ) {
+        return false;
+      }
+
+      // The initial write already honors the offset when the slot is mounted;
+      // this deferred copy refines estimated geometry after its page mounts.
+      pendingDeferredLayoutAnchorRef.current = anchor;
+      latestVisibleMessageAnchorRef.current = anchor;
+      return true;
+    },
+    [isActive, jumpToMessageLocation, messageLocationById, scrollContainerRef],
+  );
+
   const virtualizerHandleStateRef = useRef<VirtualizerHandleState>({
     buildLayoutSnapshot,
     buildViewportSnapshot,
@@ -354,6 +402,7 @@ export function useVirtualizedConversationHandle({
     messageLocationById,
     messagesLength: messages.length,
     pages,
+    restoreViewportAnchor,
   });
   useLayoutEffect(() => {
     virtualizerHandleStateRef.current = {
@@ -363,6 +412,7 @@ export function useVirtualizedConversationHandle({
       messageLocationById,
       messagesLength: messages.length,
       pages,
+      restoreViewportAnchor,
     };
   }, [
     buildLayoutSnapshot,
@@ -371,6 +421,7 @@ export function useVirtualizedConversationHandle({
     messageLocationById,
     messages.length,
     pages,
+    restoreViewportAnchor,
   ]);
 
   const readVirtualizerHandleState = useCallback(() => {
@@ -424,6 +475,8 @@ export function useVirtualizedConversationHandle({
           options,
         );
       },
+      restoreViewportAnchor: (anchor) =>
+        readVirtualizerHandleState().restoreViewportAnchor(anchor),
     }),
     [
       beginUserScrollNavigation,

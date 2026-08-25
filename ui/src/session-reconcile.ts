@@ -19,6 +19,7 @@ import type {
   UserInputQuestion,
   UserInputRequestMessage,
 } from "./types";
+import { removePendingPromptForCreatedMessage } from "./app-utils";
 import { conversationMarkerColorsMatchForState } from "./conversation-marker-state-equality";
 
 type ReconcileSessionsOptions = {
@@ -284,14 +285,6 @@ function reconcileSummarySession(
     return previous;
   }
 
-  // Metadata-only summaries redact prompt bodies; an empty list on that path
-  // means "not included", not "the backend has no queued prompts". Targeted
-  // bounded-tail responses are different: they carry the authoritative queue
-  // and must adopt or clear it together with transcript residency.
-  const pendingPrompts =
-    options?.adoptPartialMessages === true
-      ? reconcilePendingPrompts(previous.pendingPrompts, next.pendingPrompts)
-      : previous.pendingPrompts;
   const nextMessageCount =
     typeof next.messageCount === "number" ? next.messageCount : null;
   const previousMessageCount =
@@ -316,6 +309,22 @@ function reconcileSummarySession(
   const messages = shouldAdoptPartialMessages
     ? reconcileMessages(previous.messages, next.messages)
     : previous.messages;
+  // Metadata-only summaries redact prompt bodies; an empty list on that path
+  // means "not included", not "the backend has no queued prompts". Targeted
+  // bounded-tail responses are different: they carry the authoritative queue
+  // and must adopt or clear it together with transcript residency. A summary
+  // that does adopt newly appended messages must consume their matching local
+  // optimistic entries in the same commit so the prompt never renders twice.
+  const pendingPrompts =
+    options?.adoptPartialMessages === true
+      ? reconcilePendingPrompts(previous.pendingPrompts, next.pendingPrompts)
+      : shouldAdoptPartialMessages
+        ? reconcilePendingPromptsForAdoptedSummaryMessages(
+            previous,
+            next,
+            nextMessageCount,
+          )
+        : previous.pendingPrompts;
   const hasCompleteMessages =
     nextMessageCount === null || messages.length >= nextMessageCount;
   // After a backend restart the server's persisted `sessionMutationStamp`
@@ -365,6 +374,52 @@ function reconcileSummarySession(
 
   const { pendingPrompts: _discard, ...rest } = base;
   return rest;
+}
+
+function reconcilePendingPromptsForAdoptedSummaryMessages(
+  previous: Session,
+  next: Session,
+  nextMessageCount: number | null,
+): PendingPrompt[] | undefined {
+  let pendingPrompts = previous.pendingPrompts;
+  if (!pendingPrompts?.length) {
+    return pendingPrompts;
+  }
+
+  const previousMessageIds = new Set(
+    previous.messages.map((message) => message.id),
+  );
+  // An absent id alone does not prove that a bounded summary message is new:
+  // it may merely sit outside the previous resident window. Only messages at
+  // or beyond the previously known global transcript end can acknowledge a
+  // pending prompt without risking a blank frame for a newer identical send.
+  const previousGlobalEnd = Math.max(
+    previous.messageCount ?? 0,
+    (previous.messageStartIndex ?? 0) + previous.messages.length,
+  );
+  const nextMessageStartIndex =
+    next.messageStartIndex ??
+    (nextMessageCount === null
+      ? 0
+      : Math.max(0, nextMessageCount - next.messages.length));
+
+  for (const [index, message] of next.messages.entries()) {
+    if (
+      previousMessageIds.has(message.id) ||
+      nextMessageStartIndex + index < previousGlobalEnd
+    ) {
+      continue;
+    }
+    pendingPrompts = removePendingPromptForCreatedMessage(
+      pendingPrompts,
+      message,
+    );
+    if (!pendingPrompts) {
+      return undefined;
+    }
+  }
+
+  return pendingPrompts;
 }
 
 function sameOptionalStringArray(

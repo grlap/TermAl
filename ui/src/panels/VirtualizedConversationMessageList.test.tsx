@@ -720,6 +720,111 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("restores a mounted message at its exact saved viewport offset", async () => {
+    const messages = makeTextMessages(48);
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      messages,
+      virtualizerHandleRef,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(virtualizerHandleRef.current).not.toBeNull();
+      });
+      act(() => {
+        expect(
+          virtualizerHandleRef.current!.jumpToMessageId("message-32", {
+            align: "start",
+            flush: true,
+          }),
+        ).toBe(true);
+      });
+      await waitFor(() => {
+        expect(
+          harness.container.querySelector(
+            '[data-message-id="message-32"]',
+          ),
+        ).not.toBeNull();
+      });
+
+      act(() => {
+        expect(
+          virtualizerHandleRef.current!.restoreViewportAnchor({
+            messageId: "message-32",
+            viewportOffsetPx: 20,
+          }),
+        ).toBe(true);
+      });
+
+      const restoredSlot = harness.container.querySelector(
+        '[data-message-id="message-32"]',
+      );
+      expect(restoredSlot?.getBoundingClientRect().top).toBe(20);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("keeps a restored anchor detached inside the sticky-bottom band", async () => {
+    const messages = makeTextMessages(56);
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      clientHeight: 500,
+      messages,
+      scrollHeight: () => 5_000,
+      slotRect: (message, _messageIndex, scrollTop) =>
+        message.id === "message-48"
+          ? { height: 80, top: 4_480 - scrollTop }
+          : null,
+      virtualizerHandleRef,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(virtualizerHandleRef.current).not.toBeNull();
+      });
+      act(() => {
+        expect(
+          virtualizerHandleRef.current!.jumpToMessageId("message-48", {
+            align: "start",
+            flush: true,
+          }),
+        ).toBe(true);
+      });
+      await waitFor(() => {
+        expect(
+          harness.container.querySelector(
+            '[data-message-id="message-48"]',
+          ),
+        ).not.toBeNull();
+      });
+
+      await act(async () => {
+        expect(
+          virtualizerHandleRef.current!.restoreViewportAnchor({
+            messageId: "message-48",
+            viewportOffsetPx: 20,
+          }),
+        ).toBe(true);
+        await Promise.resolve();
+      });
+
+      expect(harness.scrollTop).toBe(4_460);
+      expect(
+        harness.container
+          .querySelector('[data-message-id="message-48"]')
+          ?.getBoundingClientRect().top,
+      ).toBe(20);
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("mounts a long active transcript from the estimated bottom window", async () => {
     const messages = makeTextMessages(240);
     const harness = renderVirtualizedHarness({

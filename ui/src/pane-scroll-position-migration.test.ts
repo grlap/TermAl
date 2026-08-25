@@ -40,7 +40,14 @@ describe("migrateSessionPaneScrollPosition", () => {
     );
     const duplicateKey = scrollKey("pane-duplicate", "session-a");
     const otherKey = scrollKey("pane-other", "session-b");
-    const savedPosition = { shouldStick: false, top: 12_345.75 };
+    const savedPosition = {
+      anchor: {
+        messageId: "message-reader-anchor",
+        viewportOffsetPx: -18.5,
+      },
+      shouldStick: false,
+      top: 12_345.75,
+    };
     const duplicatePosition = { shouldStick: true, top: 98_765.5 };
     const otherPosition = { shouldStick: false, top: 321.25 };
     const paneScrollPositions: PaneScrollPositionsByPane = {

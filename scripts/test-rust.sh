@@ -5,6 +5,8 @@ set -eu
 # inherit a 256-descriptor soft limit. SQLite WAL files, HTTP fixtures, Tokio
 # runtimes, and child-process pipes can otherwise exhaust that budget when
 # libtest runs several FD-heavy tests concurrently.
+# Keep this file LF-only through the repository attributes so POSIX shells can
+# execute the same gate from Windows checkouts.
 
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 cd "$repo_root"

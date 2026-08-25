@@ -30,7 +30,9 @@ function run(command, args, cwd) {
     }
   }
   env.GIT_CONFIG_NOSYSTEM = "1";
-  env.GIT_CONFIG_GLOBAL = devNull;
+  // Git for Windows rejects Node's `\\.\nul` device path when it is used as
+  // GIT_CONFIG_GLOBAL, while the native DOS device name is accepted.
+  env.GIT_CONFIG_GLOBAL = process.platform === "win32" ? "NUL" : devNull;
   env.GIT_TERMINAL_PROMPT = "0";
   const result = spawnSync(command, args, {
     cwd,

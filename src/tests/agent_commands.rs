@@ -2773,8 +2773,9 @@ fn rejects_note_for_native_slash_command_resolution() {
 }
 
 fn assert_command_contains(command: &str, expected: &str, reason: &str) {
+    let normalized_command = command.replace("\r\n", "\n");
     assert!(
-        command.contains(expected),
+        normalized_command.contains(expected),
         "expected command text to contain `{expected}`: {reason}"
     );
 }
@@ -2827,6 +2828,21 @@ fn review_changes_pins_two_child_resume_wait_flow() {
         review_changes,
         "The parent session exclusively owns all compilation, build, test, type-check, lint, and formatting gates",
         "/review-changes must own quality gates instead of delegated reviewers",
+    );
+    assert_command_contains(
+        review_changes,
+        "do not stop at merely presenting\nthe raw output",
+        "/review-changes must investigate gate failures instead of only relaying output",
+    );
+    assert_command_contains(
+        review_changes,
+        "product defect, test defect, or environment/resource issue",
+        "/review-changes must classify the root cause of a failed gate",
+    );
+    assert_command_contains(
+        review_changes,
+        "Do not resume the gate sequence or spawn reviewers until the original\nrequired gate succeeds.",
+        "/review-changes must keep review blocked until the failed gate is fixed",
     );
     assert_command_contains(
         review_changes,

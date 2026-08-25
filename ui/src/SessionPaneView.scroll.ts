@@ -25,6 +25,8 @@ import {
   normalizeWheelDelta,
 } from "./app-utils";
 import { cancelConversationMessageEntryReveals } from "./panels/conversation-message-reveal";
+import { captureFirstVisibleMountedMessageAnchor } from "./panels/virtualized-conversation-measurement";
+import type { VirtualizedConversationMessageListHandle } from "./panels/VirtualizedConversationMessageList";
 import { useCommittedRef } from "./panels/use-committed-ref";
 import { useStableEvent } from "./panels/use-stable-event";
 import {
@@ -202,6 +204,8 @@ export function useSessionPaneScrollState({
   visibleMessageContentSignature,
 }: UseSessionPaneScrollStateParams) {
   const messageStackRef = useRef<HTMLElement | null>(null);
+  const virtualizerHandleRef =
+    useRef<VirtualizedConversationMessageListHandle | null>(null);
   const settledScrollToBottomCancelRef = useRef<(() => void) | null>(null);
   const settledScrollToBottomKindRef =
     useRef<MessageStackScrollWriteKind | null>(null);
@@ -358,6 +362,36 @@ export function useSessionPaneScrollState({
     paneScrollPositions[scrollStateKey] = {
       top: node.scrollTop,
       shouldStick: true,
+    };
+  }
+
+  function buildDetachedPaneScrollPosition(
+    node: HTMLElement,
+    top = node.scrollTop,
+  ): PaneScrollPosition {
+    const virtualizedList = node.querySelector<HTMLElement>(
+      ".virtualized-message-list",
+    );
+    const anchor = captureFirstVisibleMountedMessageAnchor(
+      virtualizedList,
+      node,
+    );
+    return {
+      ...(anchor ? { anchor } : {}),
+      shouldStick: false,
+      top,
+    };
+  }
+
+  function preserveDetachedPaneScrollAnchor(
+    key: string,
+    top: number,
+  ): PaneScrollPosition {
+    const anchor = paneScrollPositions[key]?.anchor;
+    return {
+      ...(anchor ? { anchor } : {}),
+      shouldStick: false,
+      top,
     };
   }
 
@@ -1502,10 +1536,10 @@ export function useSessionPaneScrollState({
         node,
         publishSavedTarget: (targetTop) => {
           setTailFollowIntent(false, { preserveDetachedRestore: true });
-          paneScrollPositions[scrollStateKey] = {
-            top: targetTop,
-            shouldStick: false,
-          };
+          paneScrollPositions[scrollStateKey] = preserveDetachedPaneScrollAnchor(
+            scrollStateKey,
+            targetTop,
+          );
           if (hasUnloadedNewerHistory) {
             setNewResponseIndicator(scrollStateKey, true);
           }
@@ -1534,10 +1568,8 @@ export function useSessionPaneScrollState({
       cancelPaneProgrammaticBottomFollow();
       cancelSettledScrollToBottom();
       setTailFollowIntent(false);
-      paneScrollPositions[scrollStateKey] = {
-        top: node.scrollTop,
-        shouldStick: false,
-      };
+      paneScrollPositions[scrollStateKey] =
+        buildDetachedPaneScrollPosition(node);
       setNewResponseIndicator(scrollStateKey, true);
       return;
     }
@@ -1557,10 +1589,8 @@ export function useSessionPaneScrollState({
       return;
     }
     if (movedUpAfterUserEscape) {
-      paneScrollPositions[scrollStateKey] = {
-        top: node.scrollTop,
-        shouldStick: false,
-      };
+      paneScrollPositions[scrollStateKey] =
+        buildDetachedPaneScrollPosition(node);
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
     } else if (
@@ -1571,10 +1601,8 @@ export function useSessionPaneScrollState({
       // The wider sticky-bottom band is useful for absorbing layout jitter
       // while attached, but must never re-enable bottom-follow intent after a
       // small deliberate scroll away from the tail.
-      paneScrollPositions[scrollStateKey] = {
-        top: node.scrollTop,
-        shouldStick: false,
-      };
+      paneScrollPositions[scrollStateKey] =
+        buildDetachedPaneScrollPosition(node);
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
     } else if (shouldStick) {
@@ -1590,10 +1618,8 @@ export function useSessionPaneScrollState({
       movedUpFromRecordedPosition ||
       !getTailFollowIntent()
     ) {
-      paneScrollPositions[scrollStateKey] = {
-        top: node.scrollTop,
-        shouldStick: false,
-      };
+      paneScrollPositions[scrollStateKey] =
+        buildDetachedPaneScrollPosition(node);
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
     } else {
@@ -1616,17 +1642,17 @@ export function useSessionPaneScrollState({
         },
         publishReachablePosition: (top) => {
           setTailFollowIntent(false, { preserveDetachedRestore: true });
-          paneScrollPositions[restoreKey] = {
+          paneScrollPositions[restoreKey] = preserveDetachedPaneScrollAnchor(
+            restoreKey,
             top,
-            shouldStick: false,
-          };
+          );
         },
         publishSavedTarget: (top) => {
           setTailFollowIntent(false, { preserveDetachedRestore: true });
-          paneScrollPositions[restoreKey] = {
+          paneScrollPositions[restoreKey] = preserveDetachedPaneScrollAnchor(
+            restoreKey,
             top,
-            shouldStick: false,
-          };
+          );
         },
         publishUnloadedNewerHistory: () => {
           if (hasUnloadedNewerHistory) {
@@ -1688,7 +1714,19 @@ export function useSessionPaneScrollState({
         cancelPaneProgrammaticBottomFollow();
         cancelSettledScrollToBottom();
         setTailFollowIntent(false, { preserveDetachedRestore: true });
-        restoreCleanup = scheduleDetachedMessageStackRestore(saved.top);
+        const restoredAnchor =
+          saved.anchor !== undefined &&
+          virtualizerHandleRef.current?.restoreViewportAnchor(saved.anchor) ===
+            true;
+        if (restoredAnchor) {
+          paneScrollPositions[scrollStateKey] = {
+            anchor: saved.anchor,
+            shouldStick: false,
+            top: node.scrollTop,
+          };
+        } else {
+          restoreCleanup = scheduleDetachedMessageStackRestore(saved.top);
+        }
       }
     } else if (defaultScrollToBottom) {
       restorePinnedMessageStackBeforePaint(node);
@@ -1965,6 +2003,7 @@ export function useSessionPaneScrollState({
     scrollMessageStackToBoundary,
     scrollSessionMessageStackByPageJump,
     showNewResponseIndicator,
+    virtualizerHandleRef,
   };
 }
 

@@ -35,6 +35,7 @@ import type {
   RenderMessageCard,
   UserInputSubmitHandler,
   VirtualizedConversationMessageListHandle,
+  VirtualizedConversationMessageListHandleRef,
 } from "./VirtualizedConversationMessageList";
 import type { SpawnDelegationOptions } from "./agent-session-panel-helpers";
 
@@ -104,6 +105,7 @@ export type AgentSessionPanelProps = {
   commandMessages: CommandMessage[];
   diffMessages: DiffMessage[];
   scrollContainerRef: RefObject<HTMLElement | null>;
+  virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
   onApprovalDecision: (
     sessionId: string,
     messageId: string,
@@ -152,6 +154,7 @@ export type SessionBodyProps = {
   paneId: string;
   viewMode: PaneViewMode;
   scrollContainerRef: RefObject<HTMLElement | null>;
+  virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
   activeSessionId: string | null;
   liveTailPinned: boolean;
   scrollStateKey: string;
@@ -292,6 +295,7 @@ export type SessionConversationPageProps = {
   liveTailPinned: boolean;
   scrollStateKey: string;
   scrollContainerRef: RefObject<HTMLElement | null>;
+  virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
   isActive: boolean;
   isLoading: boolean;
   showWaitingIndicator: boolean;

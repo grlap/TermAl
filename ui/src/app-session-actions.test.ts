@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
 import { useAppSessionActions } from "./app-session-actions";
+import { reconcileSessions } from "./session-reconcile";
 import type { StateResponse } from "./api";
 import type { AgentType, ConversationMarker, Project, Session } from "./types";
 import type { WorkspaceState } from "./workspace";
@@ -584,6 +585,80 @@ describe("useAppSessionActions", () => {
     expect(params.setters.setSessions).toHaveBeenCalledWith(
       params.refs.sessionsRef.current,
     );
+  });
+
+  it("adopts a send response without retaining a duplicate optimistic prompt", async () => {
+    const retainedMessage = {
+      id: "message-79",
+      type: "text" as const,
+      timestamp: "10:00",
+      author: "assistant" as const,
+      text: "Ready",
+    };
+    const previousSession = makeSession("session-1", {
+      messagesLoaded: false,
+      messageStartIndex: 79,
+      messageCount: 80,
+      sessionMutationStamp: 10,
+      messages: [retainedMessage],
+    });
+    const response = {
+      ...makeStateResponse(6),
+      sessions: [
+        makeSession("session-1", {
+          messagesLoaded: false,
+          messageStartIndex: 79,
+          messageCount: 81,
+          sessionMutationStamp: 11,
+          messages: [
+            { ...retainedMessage },
+            {
+              id: "message-80",
+              type: "text",
+              timestamp: "10:01",
+              author: "you",
+              text: "hello",
+            },
+          ],
+        }),
+      ],
+    } satisfies StateResponse;
+    vi.spyOn(api, "sendMessage").mockResolvedValue(response);
+    let params!: ReturnType<typeof makeSessionActionsParams>;
+    const adoptState = vi.fn((state: StateResponse) => {
+      const sessions = reconcileSessions(
+        params.refs.sessionsRef.current,
+        state.sessions,
+      );
+      params.refs.sessionsRef.current = sessions;
+      params.setters.setSessions(sessions);
+      return true;
+    });
+    params = makeSessionActionsParams({ adoptState });
+    params.refs.sessionsRef.current = [previousSession];
+    params.lookups.sessionLookup.set(previousSession.id, previousSession);
+    params.lookups.activeSession = previousSession;
+    const actions = useAppSessionActions(params);
+
+    expect(actions.handleSend("session-1", "hello")).toBe(true);
+    expect(params.refs.sessionsRef.current[0]?.pendingPrompts).toEqual([
+      expect.objectContaining({ localOnly: true, text: "hello" }),
+    ]);
+
+    await waitFor(() => expect(adoptState).toHaveBeenCalledWith(response));
+
+    const adoptedSession = params.refs.sessionsRef.current[0]!;
+    const persistedCopies = adoptedSession.messages.filter(
+      (message) =>
+        message.type === "text" &&
+        message.author === "you" &&
+        message.text === "hello",
+    ).length;
+    const queuedCopies = (adoptedSession.pendingPrompts ?? []).filter(
+      (prompt) => prompt.text === "hello",
+    ).length;
+    expect(persistedCopies + queuedCopies).toBe(1);
+    expect(adoptedSession.pendingPrompts).toBeUndefined();
   });
 
   it("keeps the optimistic pending prompt after a stale send response", async () => {

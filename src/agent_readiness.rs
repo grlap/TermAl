@@ -24,6 +24,14 @@ fn collect_agent_readiness(default_workdir: &str) -> Vec<AgentReadiness> {
 
 /// Validates agent session setup.
 fn validate_agent_session_setup(agent: Agent, workdir: &str) -> std::result::Result<(), String> {
+    // OpenCode unit tests use in-memory ACP handles and never launch the CLI.
+    // Its executable discovery has dedicated coverage below, so keep those
+    // protocol tests independent of optional developer-machine tooling.
+    #[cfg(test)]
+    if agent == Agent::OpenCode {
+        return Ok(());
+    }
+
     let readiness = agent_readiness_for(agent, workdir);
     if readiness.blocking {
         return Err(readiness.detail);

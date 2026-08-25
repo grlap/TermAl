@@ -160,6 +160,7 @@ export function AgentSessionPanel({
   commandMessages: fallbackCommandMessages,
   diffMessages: fallbackDiffMessages,
   scrollContainerRef,
+  virtualizerHandleRef,
   onApprovalDecision,
   onUserInputSubmit,
   onMcpElicitationSubmit,
@@ -201,6 +202,7 @@ export function AgentSessionPanel({
       paneId={paneId}
       viewMode={viewMode}
       scrollContainerRef={scrollContainerRef}
+      virtualizerHandleRef={virtualizerHandleRef}
       activeSessionId={activeSessionId}
       liveTailPinned={liveTailPinned}
       scrollStateKey={scrollStateKey}
@@ -315,6 +317,7 @@ const SessionBody = memo(
     paneId,
     viewMode,
     scrollContainerRef,
+    virtualizerHandleRef,
     activeSessionId,
     liveTailPinned,
     scrollStateKey,
@@ -415,6 +418,7 @@ const SessionBody = memo(
             liveTailPinned={liveTailPinned}
             scrollStateKey={scrollStateKey}
             scrollContainerRef={scrollContainerRef}
+            virtualizerHandleRef={virtualizerHandleRef}
             isActive
             isLoading={isLoading}
             showWaitingIndicator={showWaitingIndicator}
@@ -499,6 +503,7 @@ const SessionBody = memo(
     previous.paneId === next.paneId &&
     previous.viewMode === next.viewMode &&
     previous.scrollContainerRef === next.scrollContainerRef &&
+    previous.virtualizerHandleRef === next.virtualizerHandleRef &&
     previous.activeSessionId === next.activeSessionId &&
     previous.liveTailPinned === next.liveTailPinned &&
     previous.scrollStateKey === next.scrollStateKey &&
@@ -548,6 +553,7 @@ const SessionConversationPage = memo(
     liveTailPinned,
     scrollStateKey,
     scrollContainerRef,
+    virtualizerHandleRef,
     isActive,
     isLoading,
     showWaitingIndicator,
@@ -680,6 +686,7 @@ const SessionConversationPage = memo(
       sessionId: session.id,
       sessionMutationStamp: session.sessionMutationStamp ?? 0,
       tailFollowIntent: liveTailPinned,
+      virtualizerHandleRef,
     });
     const messageRevealUserScrollGeneration =
       conversationOverview.virtualizerHandleRef.current?.getUserScrollGeneration() ??

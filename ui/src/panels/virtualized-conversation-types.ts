@@ -7,7 +7,10 @@ import type {
   McpElicitationAction,
   Message,
 } from "../types";
-import type { VirtualizedRange } from "./virtualized-conversation-measurement";
+import type {
+  VirtualizedRange,
+  VisibleMessageAnchor,
+} from "./virtualized-conversation-measurement";
 
 export type UserInputSubmitHandler = (
   sessionId: string,
@@ -58,6 +61,12 @@ export type VirtualizedConversationJumpOptions = {
   // mounted before the next browser paint.
   align?: "start" | "center" | "end";
   flush?: boolean;
+  // Detached viewport restoration must not let proximity to the physical
+  // bottom silently transfer authority back to tail-follow.
+  preserveDetachedAuthority?: boolean;
+  // When present, message identity is restored at this exact viewport offset
+  // instead of using a generic alignment.
+  viewportOffsetPx?: number;
 };
 
 export type VirtualizedConversationLayoutMessage = {
@@ -121,6 +130,10 @@ export type VirtualizedConversationMessageListHandle = {
     messageIndex: number,
     options?: VirtualizedConversationJumpOptions,
   ) => boolean;
+  // Restores reader-owned identity rather than an absolute pixel. The first
+  // write mounts the anchor's page; a layout-phase correction then preserves
+  // the message's exact viewport offset against fresh measurements.
+  restoreViewportAnchor: (anchor: VisibleMessageAnchor) => boolean;
 };
 
 export type VirtualizedConversationMessageListHandleRef = {

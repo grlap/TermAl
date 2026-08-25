@@ -80,6 +80,11 @@ fn opencode_agent_readiness_matches_runtime_resolution() {
     }
 }
 
+#[test]
+fn opencode_test_session_setup_does_not_require_the_optional_cli() {
+    assert_eq!(validate_agent_session_setup(Agent::OpenCode, "/tmp"), Ok(()));
+}
+
 #[cfg(windows)]
 #[test]
 fn opencode_command_wraps_batch_shims_with_cmd_exe() {

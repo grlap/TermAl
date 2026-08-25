@@ -27,7 +27,10 @@ import {
 import { requestSessionHistoryAroundPage } from "../session-history-demand";
 import { CONVERSATION_OVERVIEW_MIN_MESSAGES } from "./ConversationOverviewRail";
 import type { ConversationOverviewViewport } from "./conversation-overview-map";
-import type { VirtualizedConversationMessageListHandle } from "./VirtualizedConversationMessageList";
+import type {
+  VirtualizedConversationMessageListHandle,
+  VirtualizedConversationMessageListHandleRef,
+} from "./VirtualizedConversationMessageList";
 
 const EMPTY_OVERVIEW_VIEWPORT: ConversationOverviewViewport = {
   startPosition: 0,
@@ -100,6 +103,7 @@ export function useConversationOverviewController({
   sessionId,
   sessionMutationStamp,
   tailFollowIntent,
+  virtualizerHandleRef: suppliedVirtualizerHandleRef,
 }: {
   isActive: boolean;
   messageCount: number;
@@ -110,11 +114,14 @@ export function useConversationOverviewController({
   sessionId: string;
   sessionMutationStamp: number;
   tailFollowIntent: boolean;
+  virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
 }) {
   const isOverviewEligible =
     messageCount >= CONVERSATION_OVERVIEW_MIN_MESSAGES;
-  const virtualizerHandleRef =
+  const internalVirtualizerHandleRef =
     useRef<VirtualizedConversationMessageListHandle | null>(null);
+  const virtualizerHandleRef =
+    suppliedVirtualizerHandleRef ?? internalVirtualizerHandleRef;
   const navigationFrameIdsRef = useRef<Set<number>>(new Set());
   const overviewRequestSessionIdRef = useRef<string | null>(null);
   const overviewRefreshBurstStartedAtRef = useRef<number | null>(null);

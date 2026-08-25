@@ -13,6 +13,10 @@ const SESSION_SCROLL_VIEW_MODES: readonly SessionPaneViewMode[] = [
 ];
 
 export type PaneScrollPosition = {
+  anchor?: {
+    messageId: string;
+    viewportOffsetPx: number;
+  };
   shouldStick: boolean;
   top: number;
 };

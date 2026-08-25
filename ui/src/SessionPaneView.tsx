@@ -669,6 +669,7 @@ export function SessionPaneView({
     scrollMessageStackToBoundary,
     scrollSessionMessageStackByPageJump,
     showNewResponseIndicator,
+    virtualizerHandleRef,
   } = useSessionPaneScrollState({
     activeSession,
     activeSessionSearchMatch,
@@ -1840,6 +1841,7 @@ export function SessionPaneView({
             liveTailPinned={liveTailPinned}
             scrollStateKey={scrollStateKey}
             scrollContainerRef={messageStackRef}
+            virtualizerHandleRef={virtualizerHandleRef}
             activeSessionId={activeSession?.id ?? null}
             isLoading={isLoading}
             isUpdating={isUpdating}
