@@ -1020,7 +1020,10 @@ impl AppState {
         let (state, orchestrator) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             for template_session in &template.sessions {
-                validate_agent_session_setup(template_session.agent, &project.root_path)
+                self.validate_agent_session_setup_for_state(
+                    template_session.agent,
+                    &project.root_path,
+                )
                     .map_err(ApiError::bad_request)?;
             }
 

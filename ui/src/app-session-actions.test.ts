@@ -580,6 +580,7 @@ describe("useAppSessionActions", () => {
         expandedText: null,
         localOnly: true,
         text: "hello",
+        transcriptEndIndexAtEnqueue: 0,
       }),
     ]);
     expect(params.setters.setSessions).toHaveBeenCalledWith(
@@ -642,7 +643,11 @@ describe("useAppSessionActions", () => {
 
     expect(actions.handleSend("session-1", "hello")).toBe(true);
     expect(params.refs.sessionsRef.current[0]?.pendingPrompts).toEqual([
-      expect.objectContaining({ localOnly: true, text: "hello" }),
+      expect.objectContaining({
+        localOnly: true,
+        text: "hello",
+        transcriptEndIndexAtEnqueue: 80,
+      }),
     ]);
 
     await waitFor(() => expect(adoptState).toHaveBeenCalledWith(response));

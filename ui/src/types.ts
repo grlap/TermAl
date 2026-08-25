@@ -549,6 +549,8 @@ export type PendingPrompt = {
   expandedText?: string | null;
   attachments?: ImageAttachment[];
   localOnly?: boolean;
+  /** Global transcript end observed when this in-memory optimistic send was queued. */
+  transcriptEndIndexAtEnqueue?: number;
   source?: MessageSource | null;
 };
 

@@ -57,15 +57,15 @@ action. Do not resume the gate sequence or spawn reviewers until the original
 required gate succeeds.
 
 Run `cargo check` in the parent session before spawning reviewers.
-If it produces ANY errors, stop immediately and present the output.
+If it produces ANY errors, apply the gate-failure protocol above.
 Warnings are acceptable; report them and continue.
 
 Then run `cd ui && npx tsc --noEmit`.
-If it produces ANY errors, stop immediately and present the output.
+If it produces ANY errors, apply the gate-failure protocol above.
 
 Then run `node --test scripts/review-freeze-fingerprint.test.mjs`.
-If it produces ANY failures or errors, stop immediately and present the
-output. The freeze helper is the integrity boundary for the delegated review,
+If it produces ANY failures or errors, apply the gate-failure protocol above.
+The freeze helper is the integrity boundary for the delegated review,
 so its HEAD/index/worktree identity, path-safety, executable-mode, streaming,
 and concurrent-drift contracts must pass before the worktree is declared
 frozen.
@@ -73,10 +73,10 @@ frozen.
 Then run `scripts/test-rust.sh` in the parent session. This wrapper raises the
 Unix file-descriptor soft limit where possible and bounds Rust test
 parallelism so FD-heavy fixtures do not exhaust the process descriptor budget.
-If it produces ANY failures or errors, stop immediately and present the output.
+If it produces ANY failures or errors, apply the gate-failure protocol above.
 
 Then run `cd ui && npx vitest run` in the parent session.
-If it produces ANY failures or errors, stop immediately and present the output.
+If it produces ANY failures or errors, apply the gate-failure protocol above.
 
 These checks and tests intentionally run in the parent session rather than read-only delegated children because Cargo and frontend tooling may need to write build artifacts, caches, or lock files such as `target/debug/.cargo-lock`.
 

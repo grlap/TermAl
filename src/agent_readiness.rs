@@ -24,19 +24,50 @@ fn collect_agent_readiness(default_workdir: &str) -> Vec<AgentReadiness> {
 
 /// Validates agent session setup.
 fn validate_agent_session_setup(agent: Agent, workdir: &str) -> std::result::Result<(), String> {
-    // OpenCode unit tests use in-memory ACP handles and never launch the CLI.
-    // Its executable discovery has dedicated coverage below, so keep those
-    // protocol tests independent of optional developer-machine tooling.
-    #[cfg(test)]
-    if agent == Agent::OpenCode {
-        return Ok(());
-    }
+    validate_agent_session_setup_with(agent, workdir, agent_readiness_for)
+}
 
-    let readiness = agent_readiness_for(agent, workdir);
+fn validate_agent_session_setup_with(
+    agent: Agent,
+    workdir: &str,
+    readiness_for: impl FnOnce(Agent, &str) -> AgentReadiness,
+) -> std::result::Result<(), String> {
+    let readiness = readiness_for(agent, workdir);
     if readiness.blocking {
         return Err(readiness.detail);
     }
     Ok(())
+}
+
+impl AppState {
+    fn validate_agent_session_setup_for_state(
+        &self,
+        agent: Agent,
+        workdir: &str,
+    ) -> std::result::Result<(), String> {
+        #[cfg(test)]
+        if let Some(detail) = self.test_agent_setup_failure(agent) {
+            return Err(detail);
+        }
+
+        // Lightweight states cannot launch local agent processes, so their
+        // protocol tests do not depend on optional machine CLIs. Production
+        // states always have runtime spawning enabled and take the real path.
+        if !self.agent_runtime_spawning_enabled {
+            return Ok(());
+        }
+        validate_agent_session_setup(agent, workdir)
+    }
+
+    #[cfg(test)]
+    fn test_agent_setup_failure(&self, agent: Agent) -> Option<String> {
+        self.test_agent_setup_failures
+            .lock()
+            .expect("test agent setup failures mutex poisoned")
+            .iter()
+            .find(|(candidate, _)| *candidate == agent)
+            .map(|(_, detail)| detail.clone())
+    }
 }
 
 /// Handles agent readiness for.

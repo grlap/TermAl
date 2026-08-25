@@ -25,7 +25,6 @@ import {
   normalizeWheelDelta,
 } from "./app-utils";
 import { cancelConversationMessageEntryReveals } from "./panels/conversation-message-reveal";
-import { captureFirstVisibleMountedMessageAnchor } from "./panels/virtualized-conversation-measurement";
 import type { VirtualizedConversationMessageListHandle } from "./panels/VirtualizedConversationMessageList";
 import { useCommittedRef } from "./panels/use-committed-ref";
 import { useStableEvent } from "./panels/use-stable-event";
@@ -44,7 +43,9 @@ import {
   requestSessionHistoryTailPage,
 } from "./session-history-demand";
 import {
+  captureDetachedPaneScrollPosition,
   createDetachedScrollRestoreController,
+  preserveDetachedPaneScrollAnchor,
   type DetachedScrollRestoreController,
 } from "./session-pane-detached-restore";
 import {
@@ -362,36 +363,6 @@ export function useSessionPaneScrollState({
     paneScrollPositions[scrollStateKey] = {
       top: node.scrollTop,
       shouldStick: true,
-    };
-  }
-
-  function buildDetachedPaneScrollPosition(
-    node: HTMLElement,
-    top = node.scrollTop,
-  ): PaneScrollPosition {
-    const virtualizedList = node.querySelector<HTMLElement>(
-      ".virtualized-message-list",
-    );
-    const anchor = captureFirstVisibleMountedMessageAnchor(
-      virtualizedList,
-      node,
-    );
-    return {
-      ...(anchor ? { anchor } : {}),
-      shouldStick: false,
-      top,
-    };
-  }
-
-  function preserveDetachedPaneScrollAnchor(
-    key: string,
-    top: number,
-  ): PaneScrollPosition {
-    const anchor = paneScrollPositions[key]?.anchor;
-    return {
-      ...(anchor ? { anchor } : {}),
-      shouldStick: false,
-      top,
     };
   }
 
@@ -1537,7 +1508,7 @@ export function useSessionPaneScrollState({
         publishSavedTarget: (targetTop) => {
           setTailFollowIntent(false, { preserveDetachedRestore: true });
           paneScrollPositions[scrollStateKey] = preserveDetachedPaneScrollAnchor(
-            scrollStateKey,
+            paneScrollPositions[scrollStateKey],
             targetTop,
           );
           if (hasUnloadedNewerHistory) {
@@ -1569,7 +1540,7 @@ export function useSessionPaneScrollState({
       cancelSettledScrollToBottom();
       setTailFollowIntent(false);
       paneScrollPositions[scrollStateKey] =
-        buildDetachedPaneScrollPosition(node);
+        captureDetachedPaneScrollPosition(node);
       setNewResponseIndicator(scrollStateKey, true);
       return;
     }
@@ -1590,7 +1561,7 @@ export function useSessionPaneScrollState({
     }
     if (movedUpAfterUserEscape) {
       paneScrollPositions[scrollStateKey] =
-        buildDetachedPaneScrollPosition(node);
+        captureDetachedPaneScrollPosition(node);
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
     } else if (
@@ -1602,7 +1573,7 @@ export function useSessionPaneScrollState({
       // while attached, but must never re-enable bottom-follow intent after a
       // small deliberate scroll away from the tail.
       paneScrollPositions[scrollStateKey] =
-        buildDetachedPaneScrollPosition(node);
+        captureDetachedPaneScrollPosition(node);
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
     } else if (shouldStick) {
@@ -1619,7 +1590,7 @@ export function useSessionPaneScrollState({
       !getTailFollowIntent()
     ) {
       paneScrollPositions[scrollStateKey] =
-        buildDetachedPaneScrollPosition(node);
+        captureDetachedPaneScrollPosition(node);
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
     } else {
@@ -1643,14 +1614,14 @@ export function useSessionPaneScrollState({
         publishReachablePosition: (top) => {
           setTailFollowIntent(false, { preserveDetachedRestore: true });
           paneScrollPositions[restoreKey] = preserveDetachedPaneScrollAnchor(
-            restoreKey,
+            paneScrollPositions[restoreKey],
             top,
           );
         },
         publishSavedTarget: (top) => {
           setTailFollowIntent(false, { preserveDetachedRestore: true });
           paneScrollPositions[restoreKey] = preserveDetachedPaneScrollAnchor(
-            restoreKey,
+            paneScrollPositions[restoreKey],
             top,
           );
         },

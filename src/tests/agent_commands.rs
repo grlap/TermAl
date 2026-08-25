@@ -2773,10 +2773,20 @@ fn rejects_note_for_native_slash_command_resolution() {
 }
 
 fn assert_command_contains(command: &str, expected: &str, reason: &str) {
-    let normalized_command = command.replace("\r\n", "\n");
+    let normalized_command = command.split_whitespace().collect::<Vec<_>>().join(" ");
+    let normalized_expected = expected.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        normalized_command.contains(expected),
+        normalized_command.contains(&normalized_expected),
         "expected command text to contain `{expected}`: {reason}"
+    );
+}
+
+fn assert_command_excludes(command: &str, unexpected: &str, reason: &str) {
+    let normalized_command = command.split_whitespace().collect::<Vec<_>>().join(" ");
+    let normalized_unexpected = unexpected.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        !normalized_command.contains(&normalized_unexpected),
+        "expected command text to exclude `{unexpected}`: {reason}"
     );
 }
 
@@ -2843,6 +2853,11 @@ fn review_changes_pins_two_child_resume_wait_flow() {
         review_changes,
         "Do not resume the gate sequence or spawn reviewers until the original\nrequired gate succeeds.",
         "/review-changes must keep review blocked until the failed gate is fixed",
+    );
+    assert_command_excludes(
+        review_changes,
+        "stop immediately and present the output",
+        "/review-changes gate clauses must not bypass the investigation protocol",
     );
     assert_command_contains(
         review_changes,

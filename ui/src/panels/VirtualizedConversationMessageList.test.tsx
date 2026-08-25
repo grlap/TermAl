@@ -31,7 +31,10 @@ import {
   DEFERRED_RENDER_RESUME_EVENT,
   DEFERRED_RENDER_SUSPENDED_ATTRIBUTE,
 } from "../deferred-render";
-import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
+import {
+  MESSAGE_STACK_SCROLL_WRITE_EVENT,
+  notifyMessageStackScrollWrite,
+} from "../message-stack-scroll-sync";
 import { mountedPrependRestoreIsCurrent } from "./virtualized-conversation-mounted-range";
 import type { Message } from "../types";
 
@@ -763,6 +766,44 @@ describe("VirtualizedConversationMessageList foundation", () => {
         '[data-message-id="message-32"]',
       );
       expect(restoredSlot?.getBoundingClientRect().top).toBe(20);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("does not announce a position restore when the anchor jump fails", async () => {
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      messages: makeTextMessages(48),
+      virtualizerHandleRef,
+    });
+    const scrollKinds: Array<string | undefined> = [];
+    harness.scrollNode.addEventListener(
+      MESSAGE_STACK_SCROLL_WRITE_EVENT,
+      (event) => {
+        scrollKinds.push(
+          (event as CustomEvent<{ scrollKind?: string }>).detail?.scrollKind,
+        );
+      },
+    );
+
+    try {
+      await waitFor(() => {
+        expect(virtualizerHandleRef.current).not.toBeNull();
+      });
+
+      act(() => {
+        expect(
+          virtualizerHandleRef.current!.restoreViewportAnchor({
+            messageId: "missing-message",
+            viewportOffsetPx: 20,
+          }),
+        ).toBe(false);
+      });
+
+      expect(scrollKinds).not.toContain("position_restore");
     } finally {
       harness.restore();
     }

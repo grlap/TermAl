@@ -27,7 +27,10 @@ import {
   AgentSessionPanelFooter,
   splitAgentCommandResolverTail,
 } from "./AgentSessionPanel";
-import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
+import {
+  VirtualizedConversationMessageList,
+  type VirtualizedConversationMessageListHandleRef,
+} from "./VirtualizedConversationMessageList";
 import { RunningIndicator } from "./session-activity-cards";
 import {
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
@@ -397,6 +400,30 @@ function lastJsonRequestBody(fetchMock: ReturnType<typeof stubResolvedAgentComma
 }
 
 describe("AgentSessionPanel virtualization", () => {
+  it("moves the virtualizer handle when its caller replaces the ref", async () => {
+    stubConversationOverview("active-session", 40);
+    const firstHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const secondHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const panel = createAgentSessionPanelHarness({
+      activeSession: makeSession("active-session", {
+        messages: makeTextMessages(40),
+      }),
+    });
+    const { rerender } = render(
+      panel({ virtualizerHandleRef: firstHandleRef }),
+    );
+    await waitFor(() => expect(firstHandleRef.current).not.toBeNull());
+
+    rerender(panel({ virtualizerHandleRef: secondHandleRef }));
+
+    await waitFor(() => expect(secondHandleRef.current).not.toBeNull());
+    expect(firstHandleRef.current).toBeNull();
+  });
+
   it("renders only the active session transcript DOM", () => {
     const cachedSession = makeSession("cached-session", {
       messages: makeTextMessages(85).map((message, index) => ({

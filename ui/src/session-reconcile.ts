@@ -306,6 +306,16 @@ function reconcileSummarySession(
       previous.messages.length < next.messages.length ||
       hasDifferentKnownSummaryMutation ||
       hasDifferentKnownMessageCount);
+  const previousResidentMessageStartIndex =
+    resolveResidentMessageStartIndex(previous);
+  const adoptedMessageStartIndex = shouldAdoptPartialMessages
+    ? resolveAdoptedSummaryMessageStartIndex(
+        previous,
+        next,
+        nextMessageCount,
+        previousResidentMessageStartIndex,
+      )
+    : null;
   const messages = shouldAdoptPartialMessages
     ? reconcileMessages(previous.messages, next.messages)
     : previous.messages;
@@ -322,7 +332,7 @@ function reconcileSummarySession(
         ? reconcilePendingPromptsForAdoptedSummaryMessages(
             previous,
             next,
-            nextMessageCount,
+            adoptedMessageStartIndex,
           )
         : previous.pendingPrompts;
   const hasCompleteMessages =
@@ -351,8 +361,10 @@ function reconcileSummarySession(
     messages,
     messagesLoaded,
     messageStartIndex: shouldAdoptPartialMessages
-      ? next.messageStartIndex
-      : previous.messageStartIndex,
+      ? (adoptedMessageStartIndex ?? next.messageStartIndex)
+      : previous.messages.length > 0
+        ? previousResidentMessageStartIndex
+        : previous.messageStartIndex,
     // Targeted bounded-tail hydration owns the resident window, including
     // which transcript sides remain unloaded. Metadata-only summaries do not:
     // they must preserve the reader's current attachment state.
@@ -379,7 +391,7 @@ function reconcileSummarySession(
 function reconcilePendingPromptsForAdoptedSummaryMessages(
   previous: Session,
   next: Session,
-  nextMessageCount: number | null,
+  adoptedMessageStartIndex: number | null,
 ): PendingPrompt[] | undefined {
   let pendingPrompts = previous.pendingPrompts;
   if (!pendingPrompts?.length) {
@@ -389,30 +401,16 @@ function reconcilePendingPromptsForAdoptedSummaryMessages(
   const previousMessageIds = new Set(
     previous.messages.map((message) => message.id),
   );
-  // An absent id alone does not prove that a bounded summary message is new:
-  // it may merely sit outside the previous resident window. Only messages at
-  // or beyond the previously known global transcript end can acknowledge a
-  // pending prompt without risking a blank frame for a newer identical send.
-  const previousGlobalEnd = Math.max(
-    previous.messageCount ?? 0,
-    (previous.messageStartIndex ?? 0) + previous.messages.length,
-  );
-  const nextMessageStartIndex =
-    next.messageStartIndex ??
-    (nextMessageCount === null
-      ? 0
-      : Math.max(0, nextMessageCount - next.messages.length));
-
   for (const [index, message] of next.messages.entries()) {
-    if (
-      previousMessageIds.has(message.id) ||
-      nextMessageStartIndex + index < previousGlobalEnd
-    ) {
+    if (previousMessageIds.has(message.id)) {
       continue;
     }
     pendingPrompts = removePendingPromptForCreatedMessage(
       pendingPrompts,
       message,
+      adoptedMessageStartIndex === null
+        ? null
+        : adoptedMessageStartIndex + index,
     );
     if (!pendingPrompts) {
       return undefined;
@@ -420,6 +418,44 @@ function reconcilePendingPromptsForAdoptedSummaryMessages(
   }
 
   return pendingPrompts;
+}
+
+function resolveResidentMessageStartIndex(session: Session) {
+  if (typeof session.messageStartIndex === "number") {
+    return Math.max(0, session.messageStartIndex);
+  }
+  if (typeof session.messageCount === "number") {
+    return Math.max(0, session.messageCount - session.messages.length);
+  }
+  return 0;
+}
+
+function resolveAdoptedSummaryMessageStartIndex(
+  previous: Session,
+  next: Session,
+  nextMessageCount: number | null,
+  previousResidentMessageStartIndex: number,
+) {
+  if (typeof next.messageStartIndex === "number") {
+    return Math.max(0, next.messageStartIndex);
+  }
+  if (nextMessageCount !== null) {
+    return Math.max(0, nextMessageCount - next.messages.length);
+  }
+
+  const previousMessageIndexById = new Map(
+    previous.messages.map((message, index) => [message.id, index]),
+  );
+  for (const [nextIndex, message] of next.messages.entries()) {
+    const previousIndex = previousMessageIndexById.get(message.id);
+    if (previousIndex !== undefined) {
+      return Math.max(
+        0,
+        previousResidentMessageStartIndex + previousIndex - nextIndex,
+      );
+    }
+  }
+  return null;
 }
 
 function sameOptionalStringArray(

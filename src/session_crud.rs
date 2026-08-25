@@ -189,7 +189,8 @@ impl AppState {
                 )));
             }
         }
-        validate_agent_session_setup(agent, &workdir).map_err(ApiError::bad_request)?;
+        self.validate_agent_session_setup_for_state(agent, &workdir)
+            .map_err(ApiError::bad_request)?;
         // Refresh the agent readiness cache before the critical section so that
         // commit_locked's SSE publish and the API response snapshot both carry
         // up-to-date readiness without filesystem I/O under the inner mutex.

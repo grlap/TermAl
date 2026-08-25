@@ -1373,6 +1373,7 @@ const SessionConversationPage = memo(
     previous.liveTailPinned === next.liveTailPinned &&
     previous.scrollStateKey === next.scrollStateKey &&
     previous.scrollContainerRef === next.scrollContainerRef &&
+    previous.virtualizerHandleRef === next.virtualizerHandleRef &&
     previous.isActive === next.isActive &&
     previous.isLoading === next.isLoading &&
     previous.showWaitingIndicator === next.showWaitingIndicator &&

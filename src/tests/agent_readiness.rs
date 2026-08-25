@@ -81,8 +81,84 @@ fn opencode_agent_readiness_matches_runtime_resolution() {
 }
 
 #[test]
-fn opencode_test_session_setup_does_not_require_the_optional_cli() {
-    assert_eq!(validate_agent_session_setup(Agent::OpenCode, "/tmp"), Ok(()));
+fn agent_session_setup_validation_uses_the_supplied_readiness_result() {
+    let blocking =
+        validate_agent_session_setup_with(Agent::OpenCode, "/tmp", |agent, _| AgentReadiness {
+            agent,
+            status: AgentReadinessStatus::Missing,
+            blocking: true,
+            detail: "OpenCode is unavailable".to_owned(),
+            warning_detail: None,
+            command_path: None,
+        });
+    assert_eq!(blocking, Err("OpenCode is unavailable".to_owned()));
+
+    let ready =
+        validate_agent_session_setup_with(Agent::OpenCode, "/tmp", |agent, _| AgentReadiness {
+            agent,
+            status: AgentReadinessStatus::Ready,
+            blocking: false,
+            detail: "OpenCode is ready".to_owned(),
+            warning_detail: None,
+            command_path: Some("opencode".to_owned()),
+        });
+    assert_eq!(ready, Ok(()));
+}
+
+#[test]
+fn lightweight_state_agent_setup_failure_seam_rejects_session_creation() {
+    let state = test_app_state();
+    state
+        .test_agent_setup_failures
+        .lock()
+        .expect("test agent setup failures mutex poisoned")
+        .push((
+            Agent::OpenCode,
+            "injected OpenCode setup failure".to_owned(),
+        ));
+
+    let error = match state.create_session(CreateSessionRequest {
+        agent: Some(Agent::OpenCode),
+        name: Some("Rejected OpenCode".to_owned()),
+        workdir: Some("/tmp".to_owned()),
+        project_id: None,
+        model: Some("auto".to_owned()),
+        approval_policy: None,
+        reasoning_effort: None,
+        sandbox_mode: None,
+        cursor_mode: None,
+        claude_approval_mode: None,
+        claude_effort: None,
+        gemini_approval_mode: None,
+    }) {
+        Ok(_) => panic!("injected setup failure should reject session creation"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.message, "injected OpenCode setup failure");
+}
+
+#[test]
+fn lightweight_state_session_setup_does_not_require_the_optional_cli() {
+    let state = test_app_state();
+    let created = state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::OpenCode),
+            name: Some("Hermetic OpenCode".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("auto".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("lightweight state should not probe an unavailable optional CLI");
+
+    assert!(!created.session_id.is_empty());
 }
 
 #[cfg(windows)]

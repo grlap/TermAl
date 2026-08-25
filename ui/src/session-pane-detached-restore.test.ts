@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createDetachedScrollRestoreController } from "./session-pane-detached-restore";
+import {
+  captureDetachedPaneScrollPosition,
+  createDetachedScrollRestoreController,
+  preserveDetachedPaneScrollAnchor,
+} from "./session-pane-detached-restore";
 
 function installAnimationFrameQueue() {
   let nextFrameId = 1;
@@ -53,6 +57,52 @@ afterEach(() => {
 });
 
 describe("detached message-stack restore controller", () => {
+  it("captures the first visible virtualized message as the detached anchor", () => {
+    const { node } = createScrollNode({ scrollTop: 320 });
+    const virtualizedList = document.createElement("div");
+    virtualizedList.className = "virtualized-message-list";
+    const hiddenSlot = document.createElement("div");
+    hiddenSlot.className = "virtualized-message-slot";
+    hiddenSlot.dataset.messageId = "message-hidden";
+    const visibleSlot = document.createElement("div");
+    visibleSlot.className = "virtualized-message-slot";
+    visibleSlot.dataset.messageId = "message-visible";
+    virtualizedList.append(hiddenSlot, visibleSlot);
+    node.append(virtualizedList);
+    node.getBoundingClientRect = () =>
+      ({ top: 100, bottom: 300 } as DOMRect);
+    hiddenSlot.getBoundingClientRect = () =>
+      ({ top: 20, bottom: 80 } as DOMRect);
+    visibleSlot.getBoundingClientRect = () =>
+      ({ top: 124, bottom: 204 } as DOMRect);
+
+    expect(captureDetachedPaneScrollPosition(node)).toEqual({
+      anchor: {
+        messageId: "message-visible",
+        viewportOffsetPx: 24,
+      },
+      shouldStick: false,
+      top: 320,
+    });
+  });
+
+  it("preserves an existing anchor while absolute restore convergence advances", () => {
+    expect(
+      preserveDetachedPaneScrollAnchor(
+        {
+          anchor: { messageId: "message-42", viewportOffsetPx: 18 },
+          shouldStick: false,
+          top: 400,
+        },
+        460,
+      ),
+    ).toEqual({
+      anchor: { messageId: "message-42", viewportOffsetPx: 18 },
+      shouldStick: false,
+      top: 460,
+    });
+  });
+
   it("owns its native write until the matching event is consumed", () => {
     const frames = installAnimationFrameQueue();
     const { node } = createScrollNode();

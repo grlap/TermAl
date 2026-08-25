@@ -203,25 +203,12 @@ export function useVirtualizedConversationHandle({
     ],
   );
 
-  const jumpToMessageLocation = useCallback(
+  const commitResolvedMessageLocationJump = useCallback(
     (
-      location: MessageLocation,
-      options: VirtualizedConversationJumpOptions = {},
+      node: HTMLElement,
+      nextScrollTop: number,
+      options: VirtualizedConversationJumpOptions,
     ) => {
-      if (!isActive) {
-        return false;
-      }
-
-      const node = scrollContainerRef.current;
-      if (!node) {
-        return false;
-      }
-
-      const nextScrollTop = resolveScrollTopForMessageLocation(location, options);
-      if (nextScrollTop === null) {
-        return false;
-      }
-
       pendingProgrammaticBottomFollowUntilRef.current = Number.NEGATIVE_INFINITY;
       pendingProgrammaticScrollTopRef.current = nextScrollTop;
       pendingAggressiveIdleCompactionRef.current = true;
@@ -255,18 +242,44 @@ export function useVirtualizedConversationHandle({
         applyMountedPageRange(nextMountedRange, { flush: options.flush });
       }
       writeScrollTopAndSyncViewport(node, nextScrollTop);
-      return true;
     },
     [
       applyMountedPageRange,
       buildWorkingMountedRangeForScrollTop,
       clearPendingDeferredLayoutTimer,
       clearPendingIdleCompactionTimer,
+      setHasUserScrollInteraction,
+      writeScrollTopAndSyncViewport,
+    ],
+  );
+
+  const jumpToMessageLocation = useCallback(
+    (
+      location: MessageLocation,
+      options: VirtualizedConversationJumpOptions = {},
+    ) => {
+      if (!isActive) {
+        return false;
+      }
+
+      const node = scrollContainerRef.current;
+      if (!node) {
+        return false;
+      }
+
+      const nextScrollTop = resolveScrollTopForMessageLocation(location, options);
+      if (nextScrollTop === null) {
+        return false;
+      }
+
+      commitResolvedMessageLocationJump(node, nextScrollTop, options);
+      return true;
+    },
+    [
+      commitResolvedMessageLocationJump,
       isActive,
       resolveScrollTopForMessageLocation,
       scrollContainerRef,
-      setHasUserScrollInteraction,
-      writeScrollTopAndSyncViewport,
     ],
   );
 
@@ -370,13 +383,6 @@ export function useVirtualizedConversationHandle({
         return false;
       }
 
-      // Establish restore authority before jumpToMessageLocation installs the
-      // persisted correction. The synchronous position_restore listener
-      // clears stale outgoing-session anchors, so dispatching after the jump
-      // would erase this restore before the next layout commit.
-      notifyMessageStackScrollWrite(node, {
-        scrollKind: "position_restore",
-      });
       if (
         !jumpToMessageLocation(location, {
           preserveDetachedAuthority: true,
@@ -386,13 +392,25 @@ export function useVirtualizedConversationHandle({
         return false;
       }
 
+      // Announce only after the jump succeeds. The synchronous listener clears
+      // stale outgoing-session anchors, so install this restore's deferred
+      // anchor after notifying and before the next layout commit.
+      notifyMessageStackScrollWrite(node, {
+        scrollKind: "position_restore",
+      });
+
       // The initial write already honors the offset when the slot is mounted;
       // this deferred copy refines estimated geometry after its page mounts.
       pendingDeferredLayoutAnchorRef.current = anchor;
       latestVisibleMessageAnchorRef.current = anchor;
       return true;
     },
-    [isActive, jumpToMessageLocation, messageLocationById, scrollContainerRef],
+    [
+      isActive,
+      jumpToMessageLocation,
+      messageLocationById,
+      scrollContainerRef,
+    ],
   );
 
   const virtualizerHandleStateRef = useRef<VirtualizerHandleState>({

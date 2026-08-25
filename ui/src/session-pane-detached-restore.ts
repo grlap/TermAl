@@ -1,12 +1,14 @@
-// Owns detached message-stack restoration after a pane/session scroll-scope
-// change: animation-frame convergence, native-scroll write ownership, bounded
-// timeout, and cancellation.
+// Owns detached message-stack position capture and restoration after a
+// pane/session scroll-scope change: visible-message anchors, animation-frame
+// convergence, native-scroll write ownership, bounded timeout, and cancellation.
 // Does not own tail-follow policy, response indicators, history loading, or
 // virtualizer range selection; SessionPaneView.scroll.ts supplies those
 // decisions through the host callbacks below.
 // Split from: ui/src/SessionPaneView.scroll.ts.
 
 import { writeMessageStackScrollTopImmediately } from "./message-stack-scroll-sync";
+import type { PaneScrollPosition } from "./pane-scroll-position-migration";
+import { captureFirstVisibleMountedMessageAnchor } from "./panels/virtualized-conversation-measurement";
 
 const DETACHED_RESTORE_MAX_ATTEMPTS = 60;
 const SCROLL_TOP_TOLERANCE_PX = 0.5;
@@ -46,6 +48,36 @@ export type DetachedScrollRestoreController = ReturnType<
 
 function clampScrollTop(targetTop: number, maxScrollTop: number) {
   return Math.min(Math.max(targetTop, 0), maxScrollTop);
+}
+
+export function captureDetachedPaneScrollPosition(
+  node: HTMLElement,
+  top = node.scrollTop,
+): PaneScrollPosition {
+  const virtualizedList = node.querySelector<HTMLElement>(
+    ".virtualized-message-list",
+  );
+  const anchor = captureFirstVisibleMountedMessageAnchor(
+    virtualizedList,
+    node,
+  );
+  return {
+    ...(anchor ? { anchor } : {}),
+    shouldStick: false,
+    top,
+  };
+}
+
+export function preserveDetachedPaneScrollAnchor(
+  savedPosition: PaneScrollPosition | undefined,
+  top: number,
+): PaneScrollPosition {
+  const anchor = savedPosition?.anchor;
+  return {
+    ...(anchor ? { anchor } : {}),
+    shouldStick: false,
+    top,
+  };
 }
 
 export function createDetachedScrollRestoreController() {

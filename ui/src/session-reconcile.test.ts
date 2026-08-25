@@ -475,6 +475,7 @@ describe("reconcileSessions", () => {
       timestamp: "10:01",
       text: "hello",
       localOnly: true,
+      transcriptEndIndexAtEnqueue: 80,
     };
     const previous = [
       makeSession("session-a", {
@@ -518,6 +519,7 @@ describe("reconcileSessions", () => {
       timestamp: "10:01",
       text: "same text",
       localOnly: true,
+      transcriptEndIndexAtEnqueue: 80,
     };
     const previous = [
       makeSession("session-a", {
@@ -564,6 +566,7 @@ describe("reconcileSessions", () => {
       timestamp: "10:01",
       text: "hello",
       localOnly: true,
+      transcriptEndIndexAtEnqueue: 80,
     };
     const previous = [
       makeSession("session-a", {
@@ -588,12 +591,158 @@ describe("reconcileSessions", () => {
     expect(merged[0].pendingPrompts).toBe(previous[0].pendingPrompts);
   });
 
+  it("consumes an optimistic prompt when its message arrives after a metadata-only count advance", () => {
+    const optimisticPrompt = {
+      id: "optimistic-1",
+      timestamp: "10:01",
+      text: "hello",
+      localOnly: true,
+      transcriptEndIndexAtEnqueue: 80,
+    };
+    const retainedMessage = {
+      id: "message-79",
+      type: "text" as const,
+      timestamp: "10:00",
+      author: "assistant" as const,
+      text: "Ready",
+    };
+    const previous = makeSession("session-a", {
+      messagesLoaded: false,
+      messageCount: 80,
+      sessionMutationStamp: 10,
+      messages: [retainedMessage],
+      pendingPrompts: [optimisticPrompt],
+    });
+    const metadataOnly = makeSession("session-a", {
+      messagesLoaded: false,
+      messageCount: 81,
+      sessionMutationStamp: 11,
+      preview: "summary advanced",
+    });
+
+    const afterMetadata = reconcileSingleSession(previous, metadataOnly);
+
+    expect(afterMetadata.pendingPrompts).toBe(previous.pendingPrompts);
+    expect(afterMetadata.messageStartIndex).toBe(79);
+
+    const messageCarryingSummary = makeSession("session-a", {
+      messagesLoaded: false,
+      messageCount: 81,
+      sessionMutationStamp: 12,
+      messages: [
+        { ...retainedMessage },
+        {
+          id: "message-80",
+          type: "text",
+          timestamp: "10:01",
+          author: "you",
+          text: "hello",
+        },
+      ],
+    });
+    const merged = reconcileSingleSession(
+      afterMetadata,
+      messageCarryingSummary,
+    );
+
+    expect(merged.messages).toHaveLength(2);
+    expect(merged.messageStartIndex).toBe(79);
+    expect(merged.pendingPrompts).toBeUndefined();
+  });
+
+  it("derives an unknown adopted window start from an overlapping resident message", () => {
+    const optimisticPrompt = {
+      id: "optimistic-1",
+      timestamp: "10:02",
+      text: "continue",
+      localOnly: true,
+      transcriptEndIndexAtEnqueue: 42,
+    };
+    const previous = makeSession("session-a", {
+      messagesLoaded: false,
+      messageStartIndex: 40,
+      sessionMutationStamp: 10,
+      messages: [
+        {
+          id: "message-40",
+          type: "text",
+          timestamp: "09:40",
+          author: "assistant",
+          text: "First retained message",
+        },
+        {
+          id: "message-41",
+          type: "text",
+          timestamp: "09:41",
+          author: "assistant",
+          text: "Second retained message",
+        },
+      ],
+      pendingPrompts: [optimisticPrompt],
+    });
+    const next = makeSession("session-a", {
+      messagesLoaded: false,
+      sessionMutationStamp: 11,
+      messages: [
+        { ...previous.messages[1] },
+        {
+          id: "message-42",
+          type: "text",
+          timestamp: "10:02",
+          author: "you",
+          text: "continue",
+        },
+      ],
+    });
+
+    const merged = reconcileSingleSession(previous, next);
+
+    expect(merged.messageStartIndex).toBe(41);
+    expect(merged.pendingPrompts).toBeUndefined();
+  });
+
+  it("retains a guarded optimistic prompt when its enqueue boundary is unavailable", () => {
+    const optimisticPrompt = {
+      id: "optimistic-legacy",
+      timestamp: "10:01",
+      text: "continue",
+      localOnly: true,
+    };
+    const previous = makeSession("session-a", {
+      messagesLoaded: false,
+      messageStartIndex: 80,
+      messageCount: 80,
+      sessionMutationStamp: 10,
+      pendingPrompts: [optimisticPrompt],
+    });
+    const next = makeSession("session-a", {
+      messagesLoaded: false,
+      messageStartIndex: 80,
+      messageCount: 81,
+      sessionMutationStamp: 11,
+      messages: [
+        {
+          id: "message-80",
+          type: "text",
+          timestamp: "10:02",
+          author: "you",
+          text: "continue",
+        },
+      ],
+    });
+
+    const merged = reconcileSingleSession(previous, next);
+
+    expect(merged.pendingPrompts).toBe(previous.pendingPrompts);
+  });
+
   it("does not consume an optimistic prompt for an old message outside the previous window", () => {
     const optimisticPrompt = {
       id: "optimistic-1",
       timestamp: "10:01",
       text: "continue",
       localOnly: true,
+      transcriptEndIndexAtEnqueue: 80,
     };
     const previous = [
       makeSession("session-a", {
@@ -642,6 +791,7 @@ describe("reconcileSessions", () => {
       timestamp: "10:02",
       text: "continue",
       localOnly: true,
+      transcriptEndIndexAtEnqueue: 80,
     };
     const previous = [
       makeSession("session-a", {
@@ -655,6 +805,7 @@ describe("reconcileSessions", () => {
             timestamp: "10:01",
             text: "continue",
             localOnly: true,
+            transcriptEndIndexAtEnqueue: 80,
           },
           secondPrompt,
         ],
@@ -696,12 +847,14 @@ describe("reconcileSessions", () => {
             timestamp: "10:01",
             text: "first prompt",
             localOnly: true,
+            transcriptEndIndexAtEnqueue: 80,
           },
           {
             id: "optimistic-2",
             timestamp: "10:02",
             text: "second prompt",
             localOnly: true,
+            transcriptEndIndexAtEnqueue: 80,
           },
         ],
       }),
@@ -743,6 +896,7 @@ describe("reconcileSessions", () => {
       timestamp: "10:01",
       text: "continue",
       localOnly: true,
+      transcriptEndIndexAtEnqueue: 42,
     };
     const previous = [
       makeSession("session-a", {

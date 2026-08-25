@@ -288,6 +288,7 @@ export function removePendingPromptById(
 export function removePendingPromptForCreatedMessage(
   pendingPrompts: PendingPrompt[] | undefined,
   message: Message,
+  candidateGlobalIndex?: number | null,
 ) {
   const withoutMatchingServerId = removePendingPromptById(
     pendingPrompts,
@@ -309,7 +310,11 @@ export function removePendingPromptForCreatedMessage(
   const optimisticIndex = withoutMatchingServerId.findIndex(
     (prompt) =>
       prompt.localOnly === true &&
-      (prompt.text === message.text || prompt.expandedText === message.text),
+      (prompt.text === message.text || prompt.expandedText === message.text) &&
+      (candidateGlobalIndex === undefined ||
+        (candidateGlobalIndex !== null &&
+          typeof prompt.transcriptEndIndexAtEnqueue === "number" &&
+          candidateGlobalIndex >= prompt.transcriptEndIndexAtEnqueue)),
   );
   if (optimisticIndex < 0) {
     return withoutMatchingServerId;

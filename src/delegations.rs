@@ -518,11 +518,8 @@ impl AppState {
             }
         };
         if !has_test_runtime_override {
-            #[cfg(test)]
-            if let Some(detail) = self.test_agent_setup_failure(agent) {
-                return Err(ApiError::bad_request(detail));
-            }
-            validate_agent_session_setup(agent, &source_cwd).map_err(ApiError::bad_request)?;
+            self.validate_agent_session_setup_for_state(agent, &source_cwd)
+                .map_err(ApiError::bad_request)?;
         }
 
         {
@@ -733,16 +730,6 @@ impl AppState {
             child_session,
             server_instance_id: self.server_instance_id.clone(),
         })
-    }
-
-    #[cfg(test)]
-    fn test_agent_setup_failure(&self, agent: Agent) -> Option<String> {
-        self.test_agent_setup_failures
-            .lock()
-            .expect("test agent setup failures mutex poisoned")
-            .iter()
-            .find(|(candidate, _)| *candidate == agent)
-            .map(|(_, detail)| detail.clone())
     }
 
     fn delegation_response_from_state(

@@ -537,13 +537,23 @@ export function useAppSessionActions(
       attachments,
     );
     const optimisticPromptId = optimisticPendingPrompt.id;
-    updateSessionLocally(sessionId, (currentSession) => ({
-      ...currentSession,
-      pendingPrompts: [
-        ...(currentSession.pendingPrompts ?? []),
-        optimisticPendingPrompt,
-      ],
-    }));
+    updateSessionLocally(sessionId, (currentSession) => {
+      const transcriptEndIndexAtEnqueue = Math.max(
+        currentSession.messageCount ?? 0,
+        (currentSession.messageStartIndex ?? 0) +
+          currentSession.messages.length,
+      );
+      return {
+        ...currentSession,
+        pendingPrompts: [
+          ...(currentSession.pendingPrompts ?? []),
+          {
+            ...optimisticPendingPrompt,
+            transcriptEndIndexAtEnqueue,
+          },
+        ],
+      };
+    });
 
     void (async () => {
       try {
