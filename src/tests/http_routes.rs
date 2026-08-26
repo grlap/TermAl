@@ -2688,7 +2688,12 @@ async fn codex_mcp_servers_route_proxies_remote_sessions_to_their_owner() {
             }
         }
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let app = app_router(state);
     let (status, response): (StatusCode, CodexMcpServersResponse) = request_json(

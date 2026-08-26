@@ -119,6 +119,59 @@ Session-scoped routes resolve the session's remote mapping:
 The UI passes canonical local project/session ids. Remote-native ids stay inside
 the backend mapping layer.
 
+### Routing authority and endpoint replacement
+
+This contract is part of the broader [TermAl architecture](../architecture.md#system-overview).
+
+App preferences are the authority for a remote id. `RemoteRegistry` publishes
+that complete settings-owned configuration before reconciling cached
+connections. Each request receives an immutable lease pinned to the routing
+fields it observed: id, transport, enabled state, host, port, and user. The
+display name is intentionally excluded from routing identity. Persisting any
+remote edit still retires the cached connection and resets stream continuity,
+including a display-name-only edit. A rename therefore aborts overlapping work
+with the same retryable `409 Conflict`, even though a fresh request can use the
+unchanged endpoint immediately.
+
+Replacing or removing a remote retires the cached connection instead of
+retargeting it in place. Request dispatch, response localization, event-bridge
+frames, and terminal-stream consumption all revalidate their pinned authority.
+Work that crosses a replacement is rejected and must not be folded into local
+state or forwarded to the browser. A later A -> B -> A edit is accepted once A
+is authoritative again because the routing bytes match, but the B publication
+still retires the original A connection so an overlapping request cannot be
+silently retargeted.
+
+Concurrent authority changes use `409 Conflict` with stable messages:
+
+- `remote connection changed before request dispatch` for ordinary remote
+  actions and stream/fallback consumption
+- `remote connection changed during remote creation` for project, session,
+  orchestrator, lazy-binding, and fork round trips
+- `project remote binding changed during remote creation`
+
+These are retryable concurrency conflicts, distinct from transport failures.
+Disabling a remote also retires overlapping leases with the ordinary `409`
+connection-change response; retry cannot succeed until the operator re-enables
+that remote, so clients should not automatically loop on this status.
+Removal is the deliberate compatibility exception: work whose remote id is
+deleted while in flight retains the existing `400 Bad Request` `unknown remote`
+response, while replacement under the same id returns the stable `409`
+connection-change response.
+An unknown project retains the existing endpoint-specific API contract:
+session creation reports `400 Bad Request`, while orchestrator creation reports
+`404 Not Found`. Remote create responses that lose authority are rejected
+without reviving deleted projects or persisting proxies owned by the old
+endpoint.
+
+Remote routing settings are published to live in-memory authority before the
+old connection is torn down. The normal persistence path queues the SQLite
+write and returns before that background write completes; background failures
+are logged and retried. If the persistence queue is unavailable, the commit
+falls back to a synchronous write. A synchronous fallback failure is returned
+by the API and logged while the new in-memory route remains active until
+restart, so a restart can restore the last successfully persisted route.
+
 ## State and events
 
 The local server subscribes to each active remote's `/api/events` stream and

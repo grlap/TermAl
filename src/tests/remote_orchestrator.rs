@@ -152,7 +152,10 @@ fn create_orchestrator_instance_proxies_remote_projects_and_localizes_response()
         .insert(
             remote.id.clone(),
             Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
+                config: remote.clone(),
+                authority_generation: 0,
+                retired: AtomicBool::new(false),
+                state_continuity_generation: AtomicU64::new(1),
                 forwarded_port: port,
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
@@ -342,7 +345,10 @@ fn create_remote_orchestrator_proxy_localizes_launch_and_notes_revision() {
         .insert(
             remote.id.clone(),
             Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
+                config: remote.clone(),
+                authority_generation: 0,
+                retired: AtomicBool::new(false),
+                state_continuity_generation: AtomicU64::new(1),
                 forwarded_port: port,
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
@@ -509,7 +515,10 @@ fn create_remote_orchestrator_proxy_rolls_back_on_localization_failure() {
         .insert(
             remote.id.clone(),
             Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
+                config: remote.clone(),
+                authority_generation: 0,
+                retired: AtomicBool::new(false),
+                state_continuity_generation: AtomicU64::new(1),
                 forwarded_port: port,
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
@@ -690,7 +699,10 @@ fn create_orchestrator_instance_materializes_stale_remote_launch_response() {
         .insert(
             remote.id.clone(),
             Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
+                config: remote.clone(),
+                authority_generation: 0,
+                retired: AtomicBool::new(false),
+                state_continuity_generation: AtomicU64::new(1),
                 forwarded_port: port,
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
@@ -865,7 +877,10 @@ fn remote_orchestrator_create_requires_upgrade_when_remote_lacks_inline_template
         .insert(
             remote.id.clone(),
             Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
+                config: remote.clone(),
+                authority_generation: 0,
+                retired: AtomicBool::new(false),
+                state_continuity_generation: AtomicU64::new(1),
                 forwarded_port: port,
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
@@ -1031,7 +1046,10 @@ fn remote_orchestrator_create_requires_upgrade_when_inline_template_support_is_p
         .insert(
             remote.id.clone(),
             Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
+                config: remote.clone(),
+                authority_generation: 0,
+                retired: AtomicBool::new(false),
+                state_continuity_generation: AtomicU64::new(1),
                 forwarded_port: port,
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
@@ -1043,7 +1061,8 @@ fn remote_orchestrator_create_requires_upgrade_when_inline_template_support_is_p
     assert_eq!(
         state
             .remote_registry
-            .cached_supports_inline_orchestrator_templates(&remote),
+            .cached_supports_inline_orchestrator_templates(&remote)
+            .expect("current remote capability lookup should succeed"),
         Some(false)
     );
 
@@ -1265,7 +1284,10 @@ fn remote_orchestrator_lifecycle_actions_proxy_to_remote_backend_and_resync_loca
         .insert(
             remote.id.clone(),
             Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
+                config: remote.clone(),
+                authority_generation: 0,
+                retired: AtomicBool::new(false),
+                state_continuity_generation: AtomicU64::new(1),
                 forwarded_port: port,
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(false),
@@ -1589,8 +1611,12 @@ fn focused_remote_state_sync_rolls_back_proxy_sessions_when_orchestrator_localiz
         remote: remote.clone(),
         remote_session_id: "remote-session-1".to_owned(),
     };
+    let response_lease = state
+        .remote_registry
+        .connection(&target.remote)
+        .expect("focused sync lease should resolve");
     state
-        .sync_remote_state_for_target(&target, invalid_state)
+        .sync_remote_state_for_target(&target, invalid_state, &response_lease)
         .expect("focused remote sync should preserve the target session update");
 
     let snapshot = state.full_snapshot();
@@ -1715,8 +1741,12 @@ fn focused_remote_state_sync_skips_stale_revision() {
         remote: remote.clone(),
         remote_session_id: "remote-session-1".to_owned(),
     };
+    let response_lease = state
+        .remote_registry
+        .connection(&target.remote)
+        .expect("stale sync lease should resolve");
     state
-        .sync_remote_state_for_target(&target, stale_state)
+        .sync_remote_state_for_target(&target, stale_state, &response_lease)
         .expect("stale focused sync should be ignored");
 
     let snapshot = state.full_snapshot();
@@ -1735,6 +1765,325 @@ fn focused_remote_state_sync_skips_stale_revision() {
     drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn equal_remote_orchestrator_action_snapshot_retries_dirty_persistence() {
+    let mut state = test_app_state();
+    let original_persistence_path = state.persistence_path.clone();
+    let remote = RemoteConfig {
+        id: "ssh-orchestrator-dirty-retry".to_owned(),
+        name: "Orchestrator Dirty Retry".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/orchestrator-dirty-retry",
+        "Orchestrator Dirty Retry",
+        "remote-project-orchestrator-dirty-retry",
+    );
+    let remote_state = sample_remote_orchestrator_state(
+        "remote-project-orchestrator-dirty-retry",
+        "/remote/orchestrator-dirty-retry",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    let response_body =
+        serde_json::to_string(&remote_state).expect("equal orchestrator state should encode");
+    state
+        .apply_remote_state_snapshot(&remote.id, remote_state)
+        .expect("initial orchestrator state should apply");
+    let (local_orchestrator_id, local_session_id) = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let session_index = inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .expect("remote session should be mirrored");
+        (
+            inner
+                .orchestrator_instances
+                .iter()
+                .find(|instance| {
+                    instance.remote_orchestrator_id.as_deref() == Some("remote-orchestrator-1")
+                })
+                .expect("remote orchestrator should be mirrored")
+                .id
+                .clone(),
+            inner.sessions[session_index].session.id.clone(),
+        )
+    };
+    let target = state
+        .remote_orchestrator_target(&local_orchestrator_id)
+        .expect("remote orchestrator target should resolve")
+        .expect("orchestrator should be remote");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_test_connection(&listener, "orchestrator dirty retry listener");
+            let request = read_test_http_request(&mut stream);
+            if request.request_line.starts_with("GET /api/health ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    r#"{"ok":true}"#,
+                );
+                continue;
+            }
+            assert_eq!(
+                request.request_line,
+                "POST /api/orchestrators/remote-orchestrator-1/pause HTTP/1.1"
+            );
+            write_test_http_response(
+                &mut stream,
+                StatusCode::OK,
+                "application/json",
+                &response_body,
+            );
+        }
+    });
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
+    state.shutdown_persist_blocking();
+
+    let failing_persistence_path = std::env::temp_dir().join(format!(
+        "termal-orchestrator-dirty-retry-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("a directory at the persistence path should force failure");
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+    let mut peer_state_events = state.subscribe_events();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&local_session_id)
+            .expect("mirrored session should exist");
+        inner
+            .session_mut_by_index(index)
+            .expect("mirrored session index should remain valid")
+            .session
+            .preview = "Dirty orchestrator-owned preview.".to_owned();
+        state
+            .commit_remote_localization_locked(&mut inner)
+            .expect_err("the forced persistence failure should arm retry debt");
+        assert!(inner.remote_delta_persist_dirty);
+    }
+    assert!(
+        peer_state_events.try_recv().is_err(),
+        "the failed localization must not publish a snapshot"
+    );
+
+    fs::remove_dir_all(&failing_persistence_path)
+        .expect("failing persistence directory should be removable");
+    state.persistence_path = original_persistence_path.clone();
+    let snapshot = state
+        .proxy_remote_orchestrator_state_action(target, "pause")
+        .expect("an equal action snapshot should discharge persistence debt");
+    assert_eq!(
+        snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == local_session_id)
+            .expect("returned snapshot should include the mirrored session")
+            .preview,
+        "Dirty orchestrator-owned preview."
+    );
+    assert!(
+        !state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .remote_delta_persist_dirty
+    );
+    let peer_snapshot: StateResponse = serde_json::from_str(
+        &peer_state_events
+            .try_recv()
+            .expect("the dirty retry should publish the missed snapshot"),
+    )
+    .expect("peer snapshot should decode");
+    assert_eq!(
+        peer_snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == local_session_id)
+            .expect("peer snapshot should include the mirrored session")
+            .preview,
+        "Dirty orchestrator-owned preview."
+    );
+    let reloaded = load_state(original_persistence_path.as_path())
+        .expect("retried orchestrator state should load")
+        .expect("retried orchestrator state should exist");
+    assert_eq!(
+        reloaded
+            .sessions
+            .iter()
+            .find(|record| record.session.id == local_session_id)
+            .expect("mirrored session should survive reload")
+            .session
+            .preview,
+        "Dirty orchestrator-owned preview."
+    );
+
+    join_test_server(server);
+    let _ = fs::remove_file(original_persistence_path.as_path());
+}
+
+#[test]
+fn focused_remote_state_sync_stale_revision_retries_dirty_persistence() {
+    let mut state = test_app_state();
+    let original_persistence_path = state.persistence_path.clone();
+    let remote = RemoteConfig {
+        id: "ssh-focused-dirty-retry".to_owned(),
+        name: "Focused Dirty Retry".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/focused-dirty-retry",
+        "Focused Dirty Retry",
+        "remote-project-focused-dirty-retry",
+    );
+    let mut remote_session = sample_remote_orchestrator_state(
+        "remote-project-focused-dirty-retry",
+        "/remote/focused-dirty-retry",
+        3,
+        OrchestratorInstanceStatus::Running,
+    )
+    .sessions
+    .into_iter()
+    .find(|session| session.id == "remote-session-1")
+    .expect("sample remote session should exist");
+    remote_session.preview = "Persisted preview.".to_owned();
+    let local_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let local_session_id = upsert_remote_proxy_session_record(
+            &mut inner,
+            &remote.id,
+            &remote_session,
+            Some(local_project_id),
+        );
+        state
+            .commit_locked(&mut inner)
+            .expect("initial focused state should persist");
+        local_session_id
+    };
+    state.shutdown_persist_blocking();
+
+    let failing_persistence_path =
+        std::env::temp_dir().join(format!("termal-focused-dirty-retry-{}", Uuid::new_v4()));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("a directory at the persistence path should force failure");
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+    let mut peer_state_events = state.subscribe_events();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&local_session_id)
+            .expect("focused proxy should exist");
+        inner
+            .session_mut_by_index(index)
+            .expect("focused proxy index should remain valid")
+            .session
+            .preview = "Dirty authoritative preview.".to_owned();
+        inner.note_remote_applied_revision(&remote.id, 3);
+        state
+            .commit_remote_localization_locked(&mut inner)
+            .expect_err("the forced persistence failure should arm retry debt");
+        assert!(inner.remote_delta_persist_dirty);
+    }
+    assert!(
+        peer_state_events.try_recv().is_err(),
+        "the failed localization must not publish a snapshot"
+    );
+
+    fs::remove_dir_all(&failing_persistence_path)
+        .expect("failing persistence directory should be removable");
+    state.persistence_path = original_persistence_path.clone();
+    let target = RemoteSessionTarget {
+        local_session_id: local_session_id.clone(),
+        remote: remote.clone(),
+        remote_session_id: remote_session.id.clone(),
+    };
+    let response_lease = state
+        .remote_registry
+        .connection(&remote)
+        .expect("focused sync lease should resolve");
+    let mut stale_state = sample_remote_orchestrator_state(
+        "remote-project-focused-dirty-retry",
+        "/remote/focused-dirty-retry",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    stale_state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == remote_session.id)
+        .expect("stale focused session should exist")
+        .preview = "Stale preview must stay ignored.".to_owned();
+    state
+        .sync_remote_state_for_target(&target, stale_state, &response_lease)
+        .expect("a stale response should still discharge persistence debt");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.remote_delta_persist_dirty);
+    let index = inner
+        .find_session_index(&local_session_id)
+        .expect("focused proxy should remain");
+    assert_eq!(
+        inner
+            .session_by_index(index)
+            .expect("focused proxy index should remain valid")
+            .session
+            .preview,
+        "Dirty authoritative preview."
+    );
+    drop(inner);
+    let peer_snapshot: StateResponse = serde_json::from_str(
+        &peer_state_events
+            .try_recv()
+            .expect("the dirty retry should publish the missed snapshot"),
+    )
+    .expect("peer snapshot should decode");
+    assert_eq!(
+        peer_snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == local_session_id)
+            .expect("peer snapshot should include the focused proxy")
+            .preview,
+        "Dirty authoritative preview."
+    );
+    let reloaded = load_state(original_persistence_path.as_path())
+        .expect("retried focused state should load")
+        .expect("retried focused state should exist");
+    assert_eq!(
+        reloaded
+            .sessions
+            .iter()
+            .find(|record| record.session.id == local_session_id)
+            .expect("focused proxy should survive reload")
+            .session
+            .preview,
+        "Dirty authoritative preview."
+    );
+
+    let _ = fs::remove_file(original_persistence_path.as_path());
 }
 
 // Pins that a snapshot whose session list omits a previously mirrored

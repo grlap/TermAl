@@ -89,6 +89,21 @@ impl AppState {
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatch)> {
         let (revision, dispatch) = self.bump_revision_and_persist_locked_with_dispatch(inner)?;
+        // Dirty settings markers arise only when the disconnected-channel
+        // synchronous fallback failed. If any later commit reaches the same
+        // synchronous persistence path successfully, the full preferences
+        // snapshot is durable and those retry markers are no longer needed.
+        // The production receiver is owned by one worker and `persist_tx` is
+        // never replaced, so a disconnected queue cannot later recover into a
+        // background-queued path that would leave these markers stale.
+        if dispatch == PersistDispatch::Synchronous {
+            inner.settings_persist_dirty = false;
+            inner.remote_settings_persist_dirty = false;
+            // A failed remote-delta fallback also leaves memory authoritative.
+            // This successful full snapshot makes every such mutation durable,
+            // regardless of which later commit supplied the retry.
+            inner.remote_delta_persist_dirty = false;
+        }
         self.publish_state_locked(inner);
         Ok((revision, dispatch))
     }

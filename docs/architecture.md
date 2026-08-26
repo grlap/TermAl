@@ -57,7 +57,9 @@ errors.
 
 **Remote model:** The browser connects to a single local TermAl server. That
 server stores preferences, manages remote connections, and routes project work
-to local or remote TermAl servers over SSH-managed tunnels.
+to local or remote TermAl servers over SSH-managed tunnels. The settings-owned
+routing-authority, request-lease, retirement, and conflict contracts are
+documented in [Project-Scoped Remotes](features/project-scoped-remotes.md#routing-authority-and-endpoint-replacement).
 
 **Delegation status:** Phase 1 supports local read-only child delegation
 sessions and local `isolatedWorktree` child delegation sessions. Worker mode,

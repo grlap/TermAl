@@ -740,8 +740,20 @@ fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
         port: None,
         user: None,
     };
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.preferences.remotes.push(remote.clone());
+        let publication = state
+            .remote_registry
+            .publish_configs(&inner.preferences.remotes);
+        drop(inner);
+        state.remote_registry.finish_config_publication(publication);
+    }
     let connection = Arc::new(RemoteConnection {
-        config: Mutex::new(remote.clone()),
+        config: remote.clone(),
+        authority_generation: 0,
+        retired: AtomicBool::new(false),
+        state_continuity_generation: AtomicU64::new(1),
         forwarded_port: 47001,
         process: Mutex::new(None),
         event_bridge_started: AtomicBool::new(false),
@@ -755,7 +767,9 @@ fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
         .expect("remote registry mutex poisoned")
         .insert(remote.id.clone(), connection.clone());
 
-    connection.start_event_bridge(state.remote_registry.client.client().clone(), state.clone());
+    state
+        .remote_registry
+        .start_event_bridge_by_id(state.clone(), &remote.id);
     assert!(connection.event_bridge_started.load(Ordering::SeqCst));
 
     state.remote_registry.reconcile(&[RemoteConfig::local()]);
@@ -781,14 +795,23 @@ fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
             .contains_key(&remote.id)
     );
 
-    connection.start_event_bridge(state.remote_registry.client.client().clone(), state.clone());
-    assert!(connection.event_bridge_started.load(Ordering::SeqCst));
+    state
+        .remote_registry
+        .reconcile(&[RemoteConfig::local(), remote.clone()]);
+    let replacement = state
+        .remote_registry
+        .claim_event_bridge(&remote.id)
+        .expect("republished remote should resolve")
+        .expect("republished remote should permit a fresh bridge claim");
+    replacement
+        .spawn_claimed_event_bridge(state.remote_registry.client.client().clone(), state.clone());
+    assert!(replacement.event_bridge_started.load(Ordering::SeqCst));
 
-    connection.stop_event_bridge();
+    replacement.stop_event_bridge();
 
     let deadline = std::time::Instant::now() + Duration::from_secs(1);
     loop {
-        if !connection.event_bridge_started.load(Ordering::SeqCst) {
+        if !replacement.event_bridge_started.load(Ordering::SeqCst) {
             break;
         }
         assert!(
@@ -816,8 +839,20 @@ fn remote_event_bridge_retry_clears_fallback_resync_tracking() {
         port: None,
         user: None,
     };
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.preferences.remotes.push(remote.clone());
+        let publication = state
+            .remote_registry
+            .publish_configs(&inner.preferences.remotes);
+        drop(inner);
+        state.remote_registry.finish_config_publication(publication);
+    }
     let connection = Arc::new(RemoteConnection {
-        config: Mutex::new(remote.clone()),
+        config: remote.clone(),
+        authority_generation: 0,
+        retired: AtomicBool::new(false),
+        state_continuity_generation: AtomicU64::new(1),
         forwarded_port: 47001,
         process: Mutex::new(None),
         event_bridge_started: AtomicBool::new(false),
@@ -834,7 +869,9 @@ fn remote_event_bridge_retry_clears_fallback_resync_tracking() {
     state.note_remote_sse_fallback_resync(&remote.id, 4);
     assert!(state.should_skip_remote_sse_fallback_resync(&remote.id, 4));
 
-    connection.start_event_bridge(state.remote_registry.client.client().clone(), state.clone());
+    state
+        .remote_registry
+        .start_event_bridge_by_id(state.clone(), &remote.id);
 
     let deadline = std::time::Instant::now() + Duration::from_secs(1);
     loop {
@@ -882,8 +919,20 @@ fn remote_event_bridge_retry_clears_applied_revision_tracking() {
         port: None,
         user: None,
     };
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.preferences.remotes.push(remote.clone());
+        let publication = state
+            .remote_registry
+            .publish_configs(&inner.preferences.remotes);
+        drop(inner);
+        state.remote_registry.finish_config_publication(publication);
+    }
     let connection = Arc::new(RemoteConnection {
-        config: Mutex::new(remote.clone()),
+        config: remote.clone(),
+        authority_generation: 0,
+        retired: AtomicBool::new(false),
+        state_continuity_generation: AtomicU64::new(1),
         forwarded_port: 47001,
         process: Mutex::new(None),
         event_bridge_started: AtomicBool::new(false),
@@ -903,7 +952,9 @@ fn remote_event_bridge_retry_clears_applied_revision_tracking() {
         assert!(inner.should_skip_remote_applied_revision(&remote.id, 4));
     }
 
-    connection.start_event_bridge(state.remote_registry.client.client().clone(), state.clone());
+    state
+        .remote_registry
+        .start_event_bridge_by_id(state.clone(), &remote.id);
 
     let deadline = std::time::Instant::now() + Duration::from_secs(1);
     loop {
@@ -2545,6 +2596,15 @@ fn remote_review_put_sends_scope_via_query_params() {
         port: Some(22),
         user: Some("alice".to_owned()),
     };
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.preferences.remotes.push(remote.clone());
+        let publication = state
+            .remote_registry
+            .publish_configs(&inner.preferences.remotes);
+        drop(inner);
+        state.remote_registry.finish_config_publication(publication);
+    }
     state
         .remote_registry
         .connections
@@ -2553,7 +2613,10 @@ fn remote_review_put_sends_scope_via_query_params() {
         .insert(
             remote.id.clone(),
             Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
+                config: remote.clone(),
+                authority_generation: 0,
+                retired: AtomicBool::new(false),
+                state_continuity_generation: AtomicU64::new(1),
                 forwarded_port: port,
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(false),

@@ -209,6 +209,11 @@ export function useVirtualizedConversationHandle({
       nextScrollTop: number,
       options: VirtualizedConversationJumpOptions,
     ) => {
+      // This is the side-effecting half of a location jump. Callers must
+      // resolve and validate the target before reaching it so a failed
+      // restore can return without changing scroll or controller state.
+      // Do not update lastNativeScrollTopRef here: restoreViewportAnchor's
+      // synchronous notification needs its pre-jump value to detect the write.
       pendingProgrammaticBottomFollowUntilRef.current = Number.NEGATIVE_INFINITY;
       pendingProgrammaticScrollTopRef.current = nextScrollTop;
       pendingAggressiveIdleCompactionRef.current = true;
@@ -392,9 +397,11 @@ export function useVirtualizedConversationHandle({
         return false;
       }
 
-      // Announce only after the jump succeeds. The synchronous listener clears
-      // stale outgoing-session anchors, so install this restore's deferred
-      // anchor after notifying and before the next layout commit.
+      // Announce only after the jump succeeds. The synchronous listener needs
+      // the pre-jump lastNativeScrollTopRef to observe the final scroll delta,
+      // stamp the restored top, and arm the following native-scroll guard.
+      // It also clears stale outgoing-session anchors, so install this
+      // restore's deferred anchor only after notifying.
       notifyMessageStackScrollWrite(node, {
         scrollKind: "position_restore",
       });

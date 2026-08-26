@@ -53,7 +53,9 @@ impl AppState {
         let body = serde_json::to_value(request).map_err(|err| {
             ApiError::internal(format!("failed to encode remote session settings: {err}"))
         })?;
-        let remote_state: StateResponse = self.remote_registry.request_json_with_timeout(
+        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_timeout_and_lease(
             &target.remote,
             Method::POST,
             &format!(
@@ -64,7 +66,7 @@ impl AppState {
             Some(body),
             REMOTE_SESSION_SETTINGS_TIMEOUT,
         )?;
-        self.sync_remote_state_for_target(&target, remote_state)?;
+        self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
         Ok(self.snapshot())
     }
 
@@ -75,7 +77,9 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let remote_state: StateResponse = self.remote_registry.request_json(
+        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &target.remote,
             Method::POST,
             &format!(
@@ -85,7 +89,7 @@ impl AppState {
             &[],
             None,
         )?;
-        self.sync_remote_state_for_target(&target, remote_state)?;
+        self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
         Ok(self.snapshot())
     }
 
@@ -97,7 +101,9 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let remote_state: StateResponse = self.remote_registry.request_json(
+        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &target.remote,
             Method::POST,
             &format!(
@@ -111,7 +117,7 @@ impl AppState {
                 "attachments": request.attachments,
             })),
         )?;
-        self.sync_remote_state_for_target(&target, remote_state)?;
+        self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
         Ok(())
     }
 
@@ -123,7 +129,9 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let remote_state: StateResponse = self.remote_registry.request_json(
+        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &target.remote,
             Method::POST,
             &format!(
@@ -134,7 +142,7 @@ impl AppState {
             &[],
             None,
         )?;
-        self.sync_remote_state_for_target(&target, remote_state)?;
+        self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
         Ok(self.snapshot())
     }
 
@@ -142,7 +150,9 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let remote_state: StateResponse = self.remote_registry.request_json(
+        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &target.remote,
             Method::POST,
             &format!(
@@ -152,7 +162,7 @@ impl AppState {
             &[],
             None,
         )?;
-        self.sync_remote_state_for_target(&target, remote_state)?;
+        self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
         Ok(self.snapshot())
     }
 
@@ -164,7 +174,9 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let remote_state: StateResponse = self.remote_registry.request_json(
+        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &target.remote,
             Method::POST,
             &format!(
@@ -176,6 +188,13 @@ impl AppState {
         )?;
         let (snapshot, revision, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            self.ensure_remote_request_current_locked(&inner, &response_lease)?;
+            self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to retry dirty remote session persistence: {err:#}"
+                    ))
+                })?;
             let applied_remote_revision = apply_remote_state_if_newer_locked(
                 &mut inner,
                 &target.remote.id,
@@ -198,7 +217,7 @@ impl AppState {
                 inner.note_remote_applied_revision(&target.remote.id, remote_state.revision);
             }
             let revision = if applied_remote_revision || removed || wait_refresh.did_mutate() {
-                Some(self.commit_locked(&mut inner).map_err(|err| {
+                Some(self.commit_remote_localization_locked(&mut inner).map_err(|err| {
                     ApiError::internal(format!("failed to persist remote session removal: {err:#}"))
                 })?)
             } else {
@@ -227,7 +246,9 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let remote_state: StateResponse = self.remote_registry.request_json(
+        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &target.remote,
             Method::POST,
             &format!(
@@ -238,7 +259,7 @@ impl AppState {
             &[],
             Some(json!({ "decision": decision })),
         )?;
-        self.sync_remote_state_for_target(&target, remote_state)?;
+        self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
         Ok(self.snapshot())
     }
 
@@ -251,7 +272,9 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let remote_state: StateResponse = self.remote_registry.request_json(
+        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &target.remote,
             Method::POST,
             &format!(
@@ -262,7 +285,7 @@ impl AppState {
             &[],
             Some(json!({ "answers": answers })),
         )?;
-        self.sync_remote_state_for_target(&target, remote_state)?;
+        self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
         Ok(self.snapshot())
     }
 
@@ -276,7 +299,9 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let remote_state: StateResponse = self.remote_registry.request_json(
+        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &target.remote,
             Method::POST,
             &format!(
@@ -290,7 +315,7 @@ impl AppState {
                 "content": content,
             })),
         )?;
-        self.sync_remote_state_for_target(&target, remote_state)?;
+        self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
         Ok(self.snapshot())
     }
 
@@ -303,7 +328,9 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let remote_state: StateResponse = self.remote_registry.request_json(
+        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &target.remote,
             Method::POST,
             &format!(
@@ -314,7 +341,7 @@ impl AppState {
             &[],
             Some(json!({ "result": result })),
         )?;
-        self.sync_remote_state_for_target(&target, remote_state)?;
+        self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
         Ok(self.snapshot())
     }
 

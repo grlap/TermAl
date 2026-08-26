@@ -1428,7 +1428,10 @@ async fn terminal_run_route_limits_concurrent_commands() {
         .insert(
             remote.id.clone(),
             Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
+                config: remote.clone(),
+                authority_generation: 0,
+                retired: AtomicBool::new(false),
+                state_continuity_generation: AtomicU64::new(1),
                 forwarded_port: remote_port,
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),

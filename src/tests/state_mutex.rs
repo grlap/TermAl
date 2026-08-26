@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn state_mutex_owner_probe_rejects_the_current_thread_only() {
+    let state = Arc::new(StateMutex::new(()));
+    let guard = state.lock().expect("state lock should succeed");
+
+    assert!(
+        !state.is_not_held_by_current_thread_for_test(),
+        "the owning thread must fail the lock-scope probe"
+    );
+
+    let other_state = Arc::clone(&state);
+    let other_thread =
+        std::thread::spawn(move || other_state.is_not_held_by_current_thread_for_test());
+    assert!(
+        other_thread.join().expect("probe thread should finish"),
+        "contention from another thread must not look like same-thread lock re-entry"
+    );
+
+    drop(guard);
+    assert!(state.is_not_held_by_current_thread_for_test());
+}
+
+#[test]
 fn state_mutex_wait_diagnostic_is_reported_before_the_waiting_guard_drops() {
     let (diagnostic_sender, diagnostic_receiver) = std::sync::mpsc::channel();
     let reporter: StateMutexDiagnosticReporter = Arc::new(move |diagnostic| {

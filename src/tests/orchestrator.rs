@@ -97,6 +97,191 @@ async fn create_orchestrator_instance_route_uses_template_project_when_request_p
     let _ = fs::remove_dir_all(project_root);
 }
 
+// Pins launch validation as a pre-mutation phase: if any distinct template
+// agent is unavailable, no earlier template session or orchestrator instance
+// may remain behind.
+// Guards preflight validation from drifting between individual session
+// creations during future lock-scope changes.
+#[test]
+fn orchestrator_agent_setup_failure_is_side_effect_free() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-agent-setup-failure-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("setup-failure project root should exist");
+    let project_id = create_test_project(&state, &project_root, "Setup Failure Project");
+    let template = state
+        .create_orchestrator_template(sample_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    state
+        .test_agent_setup_failures
+        .lock()
+        .expect("test agent setup failures mutex poisoned")
+        .push((
+            Agent::Codex,
+            "forced orchestrator Codex setup failure".to_owned(),
+        ));
+    let (session_count_before, orchestrator_count_before) = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        (inner.sessions.len(), inner.orchestrator_instances.len())
+    };
+
+    let error = match state.create_orchestrator_instance(CreateOrchestratorInstanceRequest {
+        template_id: template.id,
+        project_id: Some(project_id),
+        template: None,
+    }) {
+        Ok(_) => panic!("forced setup failure should reject orchestrator creation"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(error.message, "forced orchestrator Codex setup failure");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(inner.sessions.len(), session_count_before);
+    assert_eq!(
+        inner.orchestrator_instances.len(),
+        orchestrator_count_before
+    );
+    drop(inner);
+
+    let _ = fs::remove_dir_all(project_root);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins project deletion at the unlocked readiness interleaving point. The
+// validator deliberately calls the public deletion path, which takes the
+// state mutex and runs the real detach sweep. A fail-fast lock probe turns a
+// future lock-scope regression into an assertion instead of a hung test.
+// Guards against recreating sessions or an orchestrator from a stale project
+// snapshot after deletion already completed.
+#[test]
+fn project_deleted_during_orchestrator_preflight_is_not_recreated() {
+    let state = test_app_state();
+    let project_root = std::env::temp_dir().join(format!(
+        "termal-orchestrator-project-delete-preflight-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&project_root).expect("project-delete root should exist");
+    let project_id = create_test_project(&state, &project_root, "Deleted During Preflight");
+    let template = state
+        .create_orchestrator_template(sample_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let (session_count_before, orchestrator_count_before) = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        (inner.sessions.len(), inner.orchestrator_instances.len())
+    };
+    let mut deleted_project = false;
+
+    let error = match state.create_orchestrator_instance_with_agent_setup_validator(
+        CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id.clone()),
+            template: None,
+        },
+        |_agent, _workdir| {
+            if !deleted_project {
+                assert!(
+                    state.inner.is_not_held_by_current_thread_for_test(),
+                    "readiness validation must run outside the state mutex"
+                );
+                state
+                    .delete_project(&project_id)
+                    .expect("project deletion during preflight should succeed");
+                deleted_project = true;
+            }
+            Ok(())
+        },
+    ) {
+        Ok(_) => panic!("deleted project should reject orchestrator creation"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::NOT_FOUND);
+    assert_eq!(error.message, format!("unknown project `{project_id}`"));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(inner.find_project(&project_id).is_none());
+    assert_eq!(inner.sessions.len(), session_count_before);
+    assert_eq!(
+        inner.orchestrator_instances.len(),
+        orchestrator_count_before
+    );
+    drop(inner);
+
+    let _ = fs::remove_dir_all(project_root);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn project_authority_drift_during_orchestrator_preflight_is_rejected() {
+    let state = test_app_state();
+    let unique = Uuid::new_v4();
+    let original_root =
+        std::env::temp_dir().join(format!("termal-orchestrator-original-root-{unique}"));
+    let replacement_root =
+        std::env::temp_dir().join(format!("termal-orchestrator-replacement-root-{unique}"));
+    fs::create_dir_all(&original_root).expect("original project root should exist");
+    fs::create_dir_all(&replacement_root).expect("replacement project root should exist");
+    let project_id = create_test_project(&state, &original_root, "Changed During Preflight");
+    let template = state
+        .create_orchestrator_template(sample_orchestrator_template_draft())
+        .expect("template should be created")
+        .template;
+    let (session_count_before, orchestrator_count_before) = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        (inner.sessions.len(), inner.orchestrator_instances.len())
+    };
+    let mut changed_project = false;
+
+    let error = match state.create_orchestrator_instance_with_agent_setup_validator(
+        CreateOrchestratorInstanceRequest {
+            template_id: template.id,
+            project_id: Some(project_id.clone()),
+            template: None,
+        },
+        |_agent, _workdir| {
+            if !changed_project {
+                assert!(
+                    state.inner.is_not_held_by_current_thread_for_test(),
+                    "readiness validation must run outside the state mutex"
+                );
+                let mut inner = state.inner.lock().expect("state mutex poisoned");
+                let project = inner
+                    .projects
+                    .iter_mut()
+                    .find(|project| project.id == project_id)
+                    .expect("project should exist during readiness preflight");
+                project.root_path = replacement_root.to_string_lossy().into_owned();
+                changed_project = true;
+            }
+            Ok(())
+        },
+    ) {
+        Ok(_) => panic!("changed project should reject orchestrator creation"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(
+        error.message,
+        "project changed while creating the orchestrator"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(inner.sessions.len(), session_count_before);
+    assert_eq!(
+        inner.orchestrator_instances.len(),
+        orchestrator_count_before
+    );
+    drop(inner);
+
+    let _ = fs::remove_dir_all(original_root);
+    let _ = fs::remove_dir_all(replacement_root);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Pins /api/orchestrators/{id}/{pause,resume,stop}: status transitions
 // flow through the HTTP layer, and a successful stop idles active child
 // sessions, clears their queued orchestrator follow-ups, and records a

@@ -129,7 +129,23 @@ impl AppState {
         &self,
         request: CreateSessionRequest,
     ) -> Result<CreateSessionResponse, ApiError> {
+        self.create_session_with_agent_setup_validator(request, |agent, workdir| {
+            self.validate_agent_session_setup_for_state(agent, workdir)
+        })
+    }
+
+    /// Creates a session with an injectable unlocked readiness preflight.
+    ///
+    /// The explicit interleaving point lets lifecycle tests remove a project
+    /// during validation without introducing test-only behavior into the
+    /// production readiness resolver.
+    fn create_session_with_agent_setup_validator(
+        &self,
+        request: CreateSessionRequest,
+        mut validate_agent_session_setup: impl FnMut(Agent, &str) -> Result<(), String>,
+    ) -> Result<CreateSessionResponse, ApiError> {
         let agent = request.agent.unwrap_or(Agent::Codex);
+        let has_explicit_project = request.project_id.is_some();
         let requested_workdir = request
             .workdir
             .as_deref()
@@ -189,8 +205,7 @@ impl AppState {
                 )));
             }
         }
-        self.validate_agent_session_setup_for_state(agent, &workdir)
-            .map_err(ApiError::bad_request)?;
+        validate_agent_session_setup(agent, &workdir).map_err(ApiError::bad_request)?;
         // Refresh the agent readiness cache before the critical section so that
         // commit_locked's SSE publish and the API response snapshot both carry
         // up-to-date readiness without filesystem I/O under the inner mutex.
@@ -263,7 +278,39 @@ impl AppState {
             _ => {}
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let project_id = project.as_ref().map(|entry| entry.id.clone());
+        let project_id = if let Some(preflight_project) = project.as_ref() {
+            match inner.find_project(&preflight_project.id).cloned() {
+                None if has_explicit_project => {
+                    return Err(ApiError::bad_request(format!(
+                        "unknown project `{}`",
+                        preflight_project.id
+                    )));
+                }
+                None => {
+                    // Workdir-derived project attachment is best-effort. If
+                    // that inferred owner disappears during readiness
+                    // preflight, keep the explicit workdir and create
+                    // projectless.
+                    None
+                }
+                Some(current_project)
+                    if current_project.remote_id != LOCAL_REMOTE_ID
+                        || current_project.root_path != preflight_project.root_path =>
+                {
+                    if has_explicit_project {
+                        return Err(ApiError::conflict(
+                            "project changed while creating the session",
+                        ));
+                    }
+                    // The caller did not select this project, so authority
+                    // drift invalidates only the inferred attachment.
+                    None
+                }
+                Some(current_project) => Some(current_project.id),
+            }
+        } else {
+            None
+        };
         let mut record = inner.create_session(
             agent,
             requested_name,
@@ -439,7 +486,7 @@ impl AppState {
             }
         }
 
-        let mut next_remotes: Option<Vec<RemoteConfig>> = None;
+        let mut remote_config_publication = None;
         if let Some(normalized_remotes) = normalized_remotes {
             let next_remote_ids: HashSet<&str> = normalized_remotes
                 .iter()
@@ -456,29 +503,87 @@ impl AppState {
                 )));
             }
             if inner.preferences.remotes != normalized_remotes {
+                let previous_remote_ids = inner
+                    .preferences
+                    .remotes
+                    .iter()
+                    .map(|remote| remote.id.as_str())
+                    .collect::<HashSet<_>>();
+                let event_bridge_rearms = normalized_remotes
+                    .iter()
+                    .filter(|remote| !previous_remote_ids.contains(remote.id.as_str()))
+                    .filter(|remote| {
+                        inner.sessions.iter().any(|record| {
+                            record.remote_id.as_deref() == Some(remote.id.as_str())
+                        })
+                    })
+                    .map(|remote| remote.id.clone())
+                    .collect::<Vec<_>>();
                 inner.preferences.remotes = normalized_remotes.clone();
-                next_remotes = Some(normalized_remotes);
+                // Publish registry authority before this state guard is
+                // released. Live connection teardown happens below, after the
+                // guard is dropped, but requests in that interval already fail
+                // closed against the new authoritative map.
+                let publication = self
+                    .remote_registry
+                    .publish_configs_with_event_bridge_rearms(
+                        &normalized_remotes,
+                        &event_bridge_rearms,
+                    );
+                for remote_id in &publication.changed_ids {
+                    let _ = self.clear_remote_applied_revision_locked(&mut inner, remote_id);
+                    let _ = self.clear_remote_sse_fallback_resync(remote_id);
+                }
+                remote_config_publication = Some(publication);
                 changed = true;
             }
         }
 
-        if changed {
+        let remote_routing_dirty =
+            inner.remote_settings_persist_dirty || remote_config_publication.is_some();
+        let commit_result = if changed || inner.settings_persist_dirty {
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist app settings: {err:#}"))
-            })?;
+            }).map(|_| ())
+        } else {
+            Ok(())
+        };
+        if commit_result.is_ok() {
+            inner.settings_persist_dirty = false;
+            inner.remote_settings_persist_dirty = false;
+        } else {
+            inner.settings_persist_dirty = true;
+            inner.remote_settings_persist_dirty = remote_routing_dirty;
+            // The settings mutation and registry publication remain
+            // authoritative in memory even though their synchronous write
+            // failed. Publish the already-advanced revision so peer SSE
+            // clients cannot keep displaying the pre-change route forever.
+            self.publish_state_locked(&inner);
         }
 
         let snapshot = self.snapshot_from_inner(&inner);
         drop(inner);
-        if let Some(remotes) = next_remotes {
-            let changed_ids = self.remote_registry.reconcile(&remotes);
-            // Clear revision watermarks synchronously so the first response
-            // from a newly pointed/restarted remote is not dropped as stale.
-            for remote_id in &changed_ids {
-                self.clear_remote_applied_revision(remote_id);
-                self.clear_remote_sse_fallback_resync(remote_id);
+        if let Some(publication) = remote_config_publication {
+            let bridges_to_restart = self
+                .remote_registry
+                .finish_config_publication(publication);
+            for remote_id in bridges_to_restart {
+                self.start_remote_event_bridge_by_id(&remote_id);
             }
         }
+        // Registry publication already retired the old route while the state
+        // mutex was held. Teardown and latest-route restart must finish even
+        // when persistence fails, otherwise the old process/reader leaks and
+        // the in-memory settings authority is left without a bridge.
+        if remote_routing_dirty {
+            if let Err(error) = &commit_result {
+                eprintln!(
+                    "app settings warning> remote routing changes are active in memory but failed to persist; a restart may restore the previous routing settings: {}",
+                    error.message
+                );
+            }
+        }
+        commit_result?;
         Ok(snapshot)
     }
 

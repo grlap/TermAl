@@ -156,6 +156,207 @@ fn seed_remote_proxy_session_via_apply_delta(
         .expect("remote full session create delta should apply");
 }
 
+fn assert_streaming_delta_persist_failure_replays_durably<F>(
+    seed_messages: Vec<Message>,
+    event: DeltaEvent,
+    assert_record: F,
+) where
+    F: Fn(&SessionRecord),
+{
+    let mut state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    seed_remote_proxy_session_via_apply_delta(&state, &remote, seed_messages);
+    state.shutdown_persist_blocking();
+
+    let original_persistence_path = state.persistence_path.as_path().to_path_buf();
+    let failing_persistence_path = std::env::temp_dir().join(format!(
+        "termal-streaming-delta-persist-failure-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("a directory at the persistence path should force commit failure");
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+    let remote_revision = delta_event_revision(&event);
+    let mut delta_receiver = state.subscribe_delta_events();
+
+    state
+        .apply_remote_delta_event(&remote.id, event.clone())
+        .expect_err("the post-shutdown streaming-delta persist should fail");
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "a failed narrow commit must not publish its delta"
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert!(inner.remote_delta_persist_dirty);
+        assert_eq!(
+            inner.remote_applied_revisions.get(&remote.id),
+            Some(&remote_revision),
+            "the in-memory mutation must fence non-idempotent exact replay"
+        );
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .expect("remote proxy session should remain after the failed persist");
+        assert_record(&inner.sessions[index]);
+    }
+
+    fs::remove_dir_all(&failing_persistence_path)
+        .expect("failing persistence directory should be removable");
+    state.persistence_path = Arc::new(original_persistence_path.clone());
+    state
+        .apply_remote_delta_event(&remote.id, event)
+        .expect("exact replay should persist the authoritative state without reapplying it");
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert!(!inner.remote_delta_persist_dirty);
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .expect("remote proxy session should remain after recovery");
+        assert_record(&inner.sessions[index]);
+    }
+    assert!(
+        delta_receiver.try_recv().is_err(),
+        "recovery publishes a full snapshot, not the already-applied narrow delta"
+    );
+
+    let reloaded = load_state(&original_persistence_path)
+        .expect("the recovered full snapshot should load from SQLite")
+        .expect("the recovered full snapshot should produce persisted state");
+    let index = reloaded
+        .find_remote_session_index(&remote.id, "remote-session-1")
+        .expect("the recovered remote proxy session should survive restart");
+    assert_record(&reloaded.sessions[index]);
+
+    let _ = fs::remove_file(original_persistence_path);
+}
+
+#[test]
+fn remote_text_delta_persist_failure_replay_is_durable_and_not_duplicated() {
+    assert_streaming_delta_persist_failure_replays_durably(
+        vec![remote_text_message("remote-message-1", "Hello")],
+        DeltaEvent::TextDelta {
+            revision: 3,
+            session_id: "remote-session-1".to_owned(),
+            message_id: "remote-message-1".to_owned(),
+            message_index: 0,
+            message_count: 1,
+            text_start_byte: None,
+            delta: " world".to_owned(),
+            preview: Some("Hello world".to_owned()),
+            session_mutation_stamp: Some(11),
+        },
+        |record| {
+            assert!(matches!(
+                &record.session.messages[0],
+                Message::Text { text, .. } if text == "Hello world"
+            ));
+            assert_eq!(record.session.preview, "Hello world");
+        },
+    );
+}
+
+#[test]
+fn remote_text_replace_persist_failure_replay_is_durable() {
+    assert_streaming_delta_persist_failure_replays_durably(
+        vec![remote_text_message("remote-message-1", "Before replace.")],
+        DeltaEvent::TextReplace {
+            revision: 3,
+            session_id: "remote-session-1".to_owned(),
+            message_id: "remote-message-1".to_owned(),
+            message_index: 0,
+            message_count: 1,
+            text: "After replace.".to_owned(),
+            preview: Some("After replace.".to_owned()),
+            session_mutation_stamp: Some(11),
+        },
+        |record| {
+            assert!(matches!(
+                &record.session.messages[0],
+                Message::Text { text, .. } if text == "After replace."
+            ));
+            assert_eq!(record.session.preview, "After replace.");
+        },
+    );
+}
+
+#[test]
+fn remote_command_update_persist_failure_replay_is_durable() {
+    assert_streaming_delta_persist_failure_replays_durably(
+        vec![remote_command_message(
+            "remote-command-1",
+            "cargo check",
+            "checking",
+        )],
+        DeltaEvent::CommandUpdate {
+            revision: 3,
+            session_id: "remote-session-1".to_owned(),
+            message_id: "remote-command-1".to_owned(),
+            message_index: 0,
+            message_count: 1,
+            command: "cargo check".to_owned(),
+            command_language: Some("shell".to_owned()),
+            output: "finished".to_owned(),
+            output_language: Some("text".to_owned()),
+            status: CommandStatus::Success,
+            preview: "cargo check finished".to_owned(),
+            session_mutation_stamp: Some(11),
+        },
+        |record| {
+            assert!(matches!(
+                &record.session.messages[0],
+                Message::Command { output, status, .. }
+                    if output == "finished" && *status == CommandStatus::Success
+            ));
+            assert_eq!(record.session.preview, "cargo check finished");
+        },
+    );
+}
+
+#[test]
+fn remote_parallel_agents_update_persist_failure_replay_is_durable() {
+    assert_streaming_delta_persist_failure_replays_durably(
+        vec![remote_parallel_agents_message(
+            "remote-parallel-1",
+            Vec::new(),
+        )],
+        DeltaEvent::ParallelAgentsUpdate {
+            revision: 3,
+            session_id: "remote-session-1".to_owned(),
+            message_id: "remote-parallel-1".to_owned(),
+            message_index: 0,
+            message_count: 1,
+            agents: vec![ParallelAgentProgress {
+                detail: Some("working".to_owned()),
+                id: "agent-1".to_owned(),
+                source: ParallelAgentSource::Tool,
+                status: ParallelAgentStatus::Running,
+                title: "Agent one".to_owned(),
+            }],
+            preview: "agent working".to_owned(),
+            session_mutation_stamp: Some(11),
+        },
+        |record| {
+            assert!(matches!(
+                &record.session.messages[0],
+                Message::ParallelAgents { agents, .. }
+                    if agents.len() == 1
+                        && agents[0].id == "agent-1"
+                        && agents[0].status == ParallelAgentStatus::Running
+            ));
+            assert_eq!(record.session.preview, "agent working");
+        },
+    );
+}
+
 fn assert_delta_publishes_once_then_replay_skips<F>(
     state: &AppState,
     remote: &RemoteConfig,
@@ -420,8 +621,15 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
                 }],
             },
         };
-        let replay_key = AppState::remote_delta_replay_key(&remote.id, &codex_updated())
-            .expect("codex replay key should serialize");
+        let replay_key = AppState::remote_delta_replay_key_for_generation(
+            &remote.id,
+            state
+                .remote_registry
+                .config_generation
+                .load(Ordering::Acquire),
+            &codex_updated(),
+        )
+        .expect("codex replay key should serialize");
 
         state
             .apply_remote_delta_event(&remote.id, codex_updated())
@@ -436,6 +644,70 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
             .expect("exact CodexUpdated replay should be consumed");
         let _ = fs::remove_file(state.persistence_path.as_path());
     }
+}
+
+fn assert_informational_delta_retries_dirty_persistence(event: DeltaEvent, revision: u64) {
+    let state = test_app_state();
+    let remote = local_replay_test_remote();
+    let recovered_model = format!("recovered-after-informational-{revision}");
+    let mut state_events = state.subscribe_events();
+    let state_for_hook = state.clone();
+    let recovered_model_for_hook = recovered_model.clone();
+    state
+        .remote_registry
+        .set_test_before_remote_informational_delta_watermark(move || {
+            let mut inner = state_for_hook.inner.lock().expect("state mutex poisoned");
+            inner.preferences.default_codex_model = recovered_model_for_hook;
+            inner.remote_delta_persist_dirty = true;
+        });
+
+    state
+        .apply_remote_delta_event(&remote.id, event)
+        .expect("informational delta should persist debt before consuming its revision");
+
+    let recovery_snapshot: StateResponse = serde_json::from_str(
+        &state_events
+            .try_recv()
+            .expect("dirty persistence retry should publish the recovered snapshot"),
+    )
+    .expect("recovery snapshot should decode");
+    assert_eq!(
+        recovery_snapshot.preferences.default_codex_model,
+        recovered_model
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.remote_delta_persist_dirty);
+    assert_eq!(
+        inner.remote_applied_revisions.get(&remote.id),
+        Some(&revision)
+    );
+    drop(inner);
+
+    let reloaded = load_state(state.persistence_path.as_path())
+        .expect("recovered informational state should load from SQLite")
+        .expect("recovered informational state should be persisted");
+    assert_eq!(reloaded.preferences.default_codex_model, recovered_model);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn informational_remote_delta_watermarks_retry_concurrent_dirty_persistence() {
+    assert_informational_delta_retries_dirty_persistence(
+        DeltaEvent::CodexUpdated {
+            revision: 17,
+            codex: CodexState::default(),
+        },
+        17,
+    );
+    assert_informational_delta_retries_dirty_persistence(
+        DeltaEvent::DelegationUpdated {
+            revision: 23,
+            delegation_id: "remote-delegation-1".to_owned(),
+            status: DelegationStatus::Running,
+            updated_at: "2026-08-26T05:30:00Z".to_owned(),
+        },
+        23,
+    );
 }
 
 #[test]
@@ -1583,6 +1855,7 @@ fn remote_delta_replay_cache_none_key_is_explicit_noop() {
 fn test_remote_delta_replay_key(remote_id: &str, revision: u64) -> RemoteDeltaReplayKey {
     RemoteDeltaReplayKey {
         remote_id: remote_id.to_owned(),
+        authority_generation: 0,
         revision,
         payload: RemoteDeltaReplayPayload::CodexUpdated {
             codex_fingerprint: format!("codex-{remote_id}-{revision}"),
@@ -1691,6 +1964,16 @@ fn clear_remote_applied_revision_preserves_other_remote_replay_keys() {
     let remote_a_key = Some(test_remote_delta_replay_key("ssh-lab-a", 10));
     let remote_a_second_key = Some(test_remote_delta_replay_key("ssh-lab-a", 11));
     let remote_b_key = Some(test_remote_delta_replay_key("ssh-lab-b", 10));
+    let remote_a_hydration = RemoteDeltaHydrationKey {
+        remote_id: "ssh-lab-a".to_owned(),
+        remote_session_id: "remote-session-a".to_owned(),
+        authority_generation: 1,
+    };
+    let remote_b_hydration = RemoteDeltaHydrationKey {
+        remote_id: "ssh-lab-b".to_owned(),
+        remote_session_id: "remote-session-b".to_owned(),
+        authority_generation: 1,
+    };
 
     state.note_remote_applied_delta_replay(&remote_a_key);
     state.note_remote_applied_delta_replay(&remote_a_second_key);
@@ -1705,8 +1988,8 @@ fn clear_remote_applied_revision_preserves_other_remote_replay_keys() {
             .remote_delta_hydrations_in_flight
             .lock()
             .expect("remote delta hydration mutex poisoned");
-        in_flight.insert(("ssh-lab-a".to_owned(), "remote-session-a".to_owned()));
-        in_flight.insert(("ssh-lab-b".to_owned(), "remote-session-b".to_owned()));
+        in_flight.insert(remote_a_hydration.clone());
+        in_flight.insert(remote_b_hydration.clone());
     }
 
     state.clear_remote_applied_revision("ssh-lab-a");
@@ -1741,12 +2024,12 @@ fn clear_remote_applied_revision_preserves_other_remote_replay_keys() {
             .lock()
             .expect("remote delta hydration mutex poisoned");
         assert!(
-            in_flight.contains(&("ssh-lab-a".to_owned(), "remote-session-a".to_owned())),
+            in_flight.contains(&remote_a_hydration),
             "clearing remote A must not remove live in-flight hydration markers; the owning \
              hydration guard retires them"
         );
         assert!(
-            in_flight.contains(&("ssh-lab-b".to_owned(), "remote-session-b".to_owned())),
+            in_flight.contains(&remote_b_hydration),
             "clearing remote A must preserve remote B's in-flight hydration markers"
         );
     }

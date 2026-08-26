@@ -735,9 +735,28 @@ impl AppState {
             stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
             inner: inner_arc,
         };
-        {
+        let remote_config_publication = {
             let inner = state.inner.lock().expect("state mutex poisoned");
+            // Persist first so a boot failure cannot abandon a publication
+            // before its retired-connection teardown phase. The registry is
+            // new here, but preserving the publish/finish invariant keeps this
+            // path safe if boot ever seeds connections earlier.
             state.persist_internal_locked(&inner)?;
+            // Seed settings-owned registry authority before any restored bridge
+            // can issue a remote request after restart.
+            state.remote_registry.publish_configs(&inner.preferences.remotes)
+        };
+        let bridges_to_restart = state
+            .remote_registry
+            .finish_config_publication(remote_config_publication);
+        if !bridges_to_restart.is_empty() {
+            eprintln!(
+                "[termal] boot remote registry unexpectedly returned bridge restarts before restore: {}",
+                bridges_to_restart.join(", ")
+            );
+            for remote_id in bridges_to_restart {
+                state.start_remote_event_bridge_by_id(&remote_id);
+            }
         }
         state.restore_remote_event_bridges();
         #[cfg(not(test))]

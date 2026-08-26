@@ -12,7 +12,7 @@
 // orchestrator mirroring (`localize_remote_orchestrator_instance`,
 // `ensure_remote_orchestrator_instance`, `sync_remote_orchestrators_inner`),
 // and the event-stream fan-out (`process_remote_event_stream`,
-// `dispatch_remote_event`, `resync_remote_state_snapshot`).
+// `dispatch_remote_event`, `resync_remote_state_snapshot_with_authority`).
 //
 // Extracted from remote.rs into its own `include!()` fragment so remote.rs
 // stays focused on SSH + HTTP transport and terminal stream forwarding.
@@ -166,7 +166,7 @@ impl RemoteSyncRollback {
 /// remote-sourced changes the same way a local mutation would.
 ///
 /// **Called from:** the SSE bridge (`process_remote_event_stream`),
-/// the periodic resync path (`resync_remote_state_snapshot`), the
+/// the periodic resync path (`resync_remote_state_snapshot_with_authority`), the
 /// remote-proxy session-creation helpers in
 /// `remote_create_proxies.rs`, and
 /// `sync_remote_state_for_target` in `remote_routes.rs`.
@@ -364,7 +364,7 @@ fn sync_remote_state_inner(
 /// deltas so fallback repair can materialize the rest of that revision.
 /// Broad-snapshot callers should always use this; focused
 /// per-session applies from the forced-resync path
-/// (`resync_remote_state_snapshot` → 404 retry) bypass the gate and
+/// (`resync_remote_state_snapshot_with_authority` → 404 retry) bypass the gate and
 /// call `sync_remote_state_inner` directly. The remote SSE bridge uses
 /// `RemoteSnapshotApplyMode::ForceAfterLaggedEvent` only for the state frame
 /// immediately following a remote `lagged` marker, matching the browser-side
@@ -1027,16 +1027,18 @@ fn sync_remote_orchestrators_inner(
 /// Processes remote event stream.
 fn process_remote_event_stream(
     state: &AppState,
-    remote_id: &str,
+    remote: &RemoteConfig,
+    connection: &RemoteConnection,
     response: BlockingHttpResponse,
 ) -> Result<()> {
     let reader = BufReader::new(response);
     let mut event_name = String::new();
     let mut data_lines = Vec::new();
     let mut recovery = RemoteEventStreamRecovery::default();
-    process_remote_event_stream_reader(
+    process_remote_event_stream_reader_with_authority(
         state,
-        remote_id,
+        &remote.id,
+        Some((remote, connection)),
         reader,
         &mut event_name,
         &mut data_lines,
@@ -1047,9 +1049,30 @@ fn process_remote_event_stream(
 /// Parses a remote SSE byte stream from any `BufRead`. The mutable buffers are
 /// caller-owned scratch state so tests can drive partial streams and keep the
 /// same lagged-recovery state across parser invocations.
+#[cfg(test)]
 fn process_remote_event_stream_reader<R: BufRead>(
     state: &AppState,
     remote_id: &str,
+    reader: R,
+    event_name: &mut String,
+    data_lines: &mut Vec<String>,
+    recovery: &mut RemoteEventStreamRecovery,
+) -> Result<()> {
+    process_remote_event_stream_reader_with_authority(
+        state,
+        remote_id,
+        None,
+        reader,
+        event_name,
+        data_lines,
+        recovery,
+    )
+}
+
+fn process_remote_event_stream_reader_with_authority<R: BufRead>(
+    state: &AppState,
+    remote_id: &str,
+    bridge_authority: Option<(&RemoteConfig, &RemoteConnection)>,
     reader: R,
     event_name: &mut String,
     data_lines: &mut Vec<String>,
@@ -1059,8 +1082,13 @@ fn process_remote_event_stream_reader<R: BufRead>(
         let line =
             line.with_context(|| format!("failed to read SSE line for remote `{remote_id}`"))?;
         if line.is_empty() {
-            dispatch_remote_event_with_recovery(
-                state, remote_id, event_name, data_lines, recovery,
+            dispatch_remote_event_with_recovery_and_authority(
+                state,
+                remote_id,
+                bridge_authority,
+                event_name,
+                data_lines,
+                recovery,
             )?;
             event_name.clear();
             data_lines.clear();
@@ -1081,7 +1109,14 @@ fn process_remote_event_stream_reader<R: BufRead>(
     // control-only frame such as `event: lagged\n` has no data lines but still
     // must arm recovery; data-bearing arms decide whether an empty body is valid.
     if !event_name.is_empty() || !data_lines.is_empty() {
-        dispatch_remote_event_with_recovery(state, remote_id, event_name, data_lines, recovery)?;
+        dispatch_remote_event_with_recovery_and_authority(
+            state,
+            remote_id,
+            bridge_authority,
+            event_name,
+            data_lines,
+            recovery,
+        )?;
         event_name.clear();
         data_lines.clear();
     }
@@ -1106,6 +1141,7 @@ fn dispatch_remote_event(
     dispatch_remote_event_with_recovery(state, remote_id, event_name, data_lines, &mut recovery)
 }
 
+#[cfg(test)]
 fn dispatch_remote_event_with_recovery(
     state: &AppState,
     remote_id: &str,
@@ -1113,12 +1149,44 @@ fn dispatch_remote_event_with_recovery(
     data_lines: &[String],
     recovery: &mut RemoteEventStreamRecovery,
 ) -> Result<()> {
+    dispatch_remote_event_with_recovery_and_authority(
+        state,
+        remote_id,
+        None,
+        event_name,
+        data_lines,
+        recovery,
+    )
+}
+
+fn dispatch_remote_event_with_recovery_and_authority(
+    state: &AppState,
+    remote_id: &str,
+    bridge_authority: Option<(&RemoteConfig, &RemoteConnection)>,
+    event_name: &str,
+    data_lines: &[String],
+    recovery: &mut RemoteEventStreamRecovery,
+) -> Result<()> {
+    if let Some((remote, connection)) = bridge_authority {
+        connection
+            .ensure_pinned_route(remote)
+            .map_err(|err| anyhow!(err.message))?;
+    }
     // Data-bearing events self-guard against empty bodies below. Control-only
     // events like `lagged` intentionally dispatch from the event name alone.
     match event_name {
         "lagged" => {
             recovery.lagged_recovery_baseline_revision = {
                 let inner = state.inner.lock().expect("state mutex poisoned");
+                if let Some((remote, connection)) = bridge_authority {
+                    state
+                        .ensure_remote_apply_authority_locked(
+                            &inner,
+                            remote,
+                            Some(connection),
+                        )
+                        .map_err(|err| anyhow!(err.message))?;
+                }
                 inner
                     .remote_applied_revisions
                     .get(remote_id)
@@ -1136,6 +1204,15 @@ fn dispatch_remote_event_with_recovery(
                 if std::mem::take(&mut recovery.force_next_state_after_lagged) {
                     let current_remote_revision = {
                         let inner = state.inner.lock().expect("state mutex poisoned");
+                        if let Some((remote, connection)) = bridge_authority {
+                            state
+                                .ensure_remote_apply_authority_locked(
+                                    &inner,
+                                    remote,
+                                    Some(connection),
+                                )
+                                .map_err(|err| anyhow!(err.message))?;
+                        }
                         inner
                             .remote_applied_revisions
                             .get(remote_id)
@@ -1153,21 +1230,63 @@ fn dispatch_remote_event_with_recovery(
             let remote_payload: StateEventPayload = serde_json::from_str(&payload)
                 .with_context(|| format!("failed to decode remote state event `{remote_id}`"))?;
             if remote_payload.sse_fallback {
-                if state.should_skip_remote_sse_fallback_resync(
-                    remote_id,
-                    remote_payload.state.revision,
-                ) {
+                let should_skip = if let Some((remote, connection)) = bridge_authority {
+                    state
+                        .should_skip_remote_sse_fallback_resync_for_bridge(
+                            remote,
+                            connection,
+                            remote_payload.state.revision,
+                        )
+                        .map_err(|err| anyhow!(err.message))?
+                } else {
+                    state.should_skip_remote_sse_fallback_resync(
+                        remote_id,
+                        remote_payload.state.revision,
+                    )
+                };
+                if should_skip {
                     return Ok(());
                 }
                 eprintln!(
                     "remote event warning> received fallback SSE state payload from `{remote_id}` at revision {}; forcing full state resync",
                     remote_payload.state.revision
                 );
-                resync_remote_state_snapshot(state, remote_id, force_lagged_recovery_state)?;
-                state.note_remote_sse_fallback_resync(remote_id, remote_payload.state.revision);
+                resync_remote_state_snapshot_with_authority(
+                    state,
+                    remote_id,
+                    bridge_authority,
+                    force_lagged_recovery_state,
+                )?;
+                if let Some((remote, connection)) = bridge_authority {
+                    state
+                        .note_remote_sse_fallback_resync_for_bridge(
+                            remote,
+                            connection,
+                            remote_payload.state.revision,
+                        )
+                        .map_err(|err| anyhow!(err.message))?;
+                } else {
+                    state.note_remote_sse_fallback_resync(
+                        remote_id,
+                        remote_payload.state.revision,
+                    );
+                }
                 return Ok(());
             }
-            if force_lagged_recovery_state {
+            if let Some((remote, connection)) = bridge_authority {
+                state
+                    .apply_remote_state_snapshot_for_bridge(
+                        remote,
+                        connection,
+                        remote_payload.state,
+                        if force_lagged_recovery_state {
+                            RemoteSnapshotApplyMode::ForceAfterLaggedEvent
+                        } else {
+                            RemoteSnapshotApplyMode::GateBySnapshotRevision
+                        },
+                    )
+                    .map_err(|err| anyhow!(err.message))?;
+            } else if force_lagged_recovery_state {
                 state
                     .apply_remote_lagged_recovery_state_snapshot(remote_id, remote_payload.state)
                     .map_err(|err| anyhow!(err.message))?;
@@ -1185,18 +1304,47 @@ fn dispatch_remote_event_with_recovery(
             let payload = data_lines.join("\n");
             let delta: DeltaEvent = serde_json::from_str(&payload)
                 .with_context(|| format!("failed to decode remote delta event `{remote_id}`"))?;
-            if let Err(err) = state.apply_remote_delta_event(remote_id, delta.clone()) {
+            let apply_result = if let Some((remote, connection)) = bridge_authority {
+                state.apply_remote_delta_event_for_bridge(remote, connection, delta.clone())
+            } else {
+                state.apply_remote_delta_event(remote_id, delta.clone())
+            };
+            if let Err(err) = apply_result {
                 eprintln!("remote delta apply failed for `{remote_id}`: {err:#}");
-                match state.repair_remote_session_tail_after_delta_error(remote_id, &delta) {
+                if let Some((remote, connection)) = bridge_authority {
+                    connection
+                        .ensure_pinned_route(remote)
+                        .map_err(|authority_err| anyhow!(authority_err.message))?;
+                }
+                let repair_result = if let Some((remote, connection)) = bridge_authority {
+                    state.repair_remote_session_tail_after_delta_error_for_bridge(
+                        remote,
+                        connection,
+                        &delta,
+                    )
+                } else {
+                    state.repair_remote_session_tail_after_delta_error(remote_id, &delta)
+                };
+                match repair_result {
                     Ok(true) => {}
                     Ok(false) => {
-                        resync_remote_state_snapshot(state, remote_id, false)?;
+                        resync_remote_state_snapshot_with_authority(
+                            state,
+                            remote_id,
+                            bridge_authority,
+                            false,
+                        )?;
                     }
                     Err(repair_err) => {
                         eprintln!(
                             "remote bounded-tail repair failed for `{remote_id}`: {repair_err:#}; falling back to a full state resync"
                         );
-                        resync_remote_state_snapshot(state, remote_id, false)?;
+                        resync_remote_state_snapshot_with_authority(
+                            state,
+                            remote_id,
+                            bridge_authority,
+                            false,
+                        )?;
                     }
                 }
             }
@@ -1206,25 +1354,50 @@ fn dispatch_remote_event_with_recovery(
     Ok(())
 }
 
-fn resync_remote_state_snapshot(
+fn resync_remote_state_snapshot_with_authority(
     state: &AppState,
     remote_id: &str,
+    bridge_authority: Option<(&RemoteConfig, &RemoteConnection)>,
     force_lagged_recovery_state: bool,
 ) -> Result<()> {
-    let remote = state
-        .lookup_remote_config(remote_id)
-        .map_err(|err| anyhow!(err.message))?;
-    let full_state: StateResponse = state
-        .remote_registry
-        .request_json(&remote, Method::GET, "/api/state", &[], None)
-        .map_err(|err| anyhow!(err.message))?;
-    if force_lagged_recovery_state {
+    let remote = if let Some((remote, connection)) = bridge_authority {
+        connection
+            .ensure_pinned_route(remote)
+            .map_err(|err| anyhow!(err.message))?;
+        remote.clone()
+    } else {
         state
-            .apply_remote_lagged_recovery_state_snapshot(remote_id, full_state)
+            .lookup_remote_config(remote_id)
+            .map_err(|err| anyhow!(err.message))?
+    };
+    let (full_state, response_lease): (StateResponse, RemoteRequestLease) = state
+        .remote_registry
+        .request_json_with_lease(&remote, Method::GET, "/api/state", &[], None)
+        .map_err(|err| anyhow!(err.message))?;
+    if let Some((expected_remote, connection)) = bridge_authority {
+        state
+            .apply_remote_state_snapshot_for_bridge(
+                expected_remote,
+                connection,
+                full_state,
+                if force_lagged_recovery_state {
+                    RemoteSnapshotApplyMode::ForceAfterLaggedEvent
+                } else {
+                    RemoteSnapshotApplyMode::GateBySnapshotRevision
+                },
+            )
             .map_err(|err| anyhow!(err.message))?;
     } else {
         state
-            .apply_remote_state_snapshot(remote_id, full_state)
+            .apply_remote_state_snapshot_for_request(
+                &response_lease,
+                full_state,
+                if force_lagged_recovery_state {
+                    RemoteSnapshotApplyMode::ForceAfterLaggedEvent
+                } else {
+                    RemoteSnapshotApplyMode::GateBySnapshotRevision
+                },
+            )
             .map_err(|err| anyhow!(err.message))?;
     }
     Ok(())

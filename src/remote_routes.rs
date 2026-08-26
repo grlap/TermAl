@@ -26,12 +26,13 @@
 // `sync_remote_state_for_target` / `apply_remote_state_snapshot` fold
 // those into local state only when the remote revision is newer, then
 // persist + publish. Out-of-band, `restore_remote_event_bridges` (called
-// on boot) and `RemoteRegistry::start_event_bridge` spawn a long-running
+// on boot) and `RemoteRegistry::start_event_bridge_by_id` spawn a long-running
 // thread per remote that opens `/api/events` and feeds it to
 // `process_remote_event_stream` in src/remote_sync.rs; that fan-out
-// calls back into `apply_remote_state_snapshot` / `apply_remote_delta_event`
-// here, and `resync_remote_state_snapshot` (src/remote_sync.rs) is the
-// recovery path when a delta fails or an SSE-fallback flag is set.
+// calls back into `apply_remote_state_snapshot` here and
+// `apply_remote_delta_event` in src/remote_delta_apply.rs;
+// `resync_remote_state_snapshot_with_authority` (src/remote_sync.rs) is the recovery path
+// when a delta fails or an SSE-fallback flag is set.
 //
 // Timeouts. Most calls use REMOTE_REQUEST_TIMEOUT (30s). Terminal streams
 // and `/api/events` reads use `request_without_timeout`; terminal command
@@ -64,8 +65,8 @@ enum RemoteDeltaHydrationOutcome {
 }
 
 struct RemoteDeltaHydrationInFlightGuard {
-    in_flight: Arc<Mutex<HashSet<(String, String)>>>,
-    key: (String, String),
+    in_flight: Arc<Mutex<HashSet<RemoteDeltaHydrationKey>>>,
+    key: RemoteDeltaHydrationKey,
 }
 
 impl Drop for RemoteDeltaHydrationInFlightGuard {
@@ -85,21 +86,47 @@ impl AppState {
     /// loaded so inbound SSE deltas keep flowing without waiting for a
     /// first outbound request to touch each remote.
     fn restore_remote_event_bridges(&self) {
-        let remotes = {
+        let mut remote_ids = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
                 .sessions
                 .iter()
                 .filter_map(|record| record.remote_id.as_deref())
-                .filter_map(|remote_id| inner.find_remote(remote_id))
-                .cloned()
+                // Persisted sessions can outlive a removed remote. They remain
+                // visible as detached history, but no bridge can be restored
+                // until settings define that authority again.
+                .filter(|remote_id| inner.find_remote(remote_id).is_some())
+                .map(str::to_owned)
+                .collect::<HashSet<_>>()
+                .into_iter()
                 .collect::<Vec<_>>()
         };
+        remote_ids.sort();
 
-        for remote in remotes {
-            self.remote_registry
-                .start_event_bridge(self.clone(), &remote);
+        for remote_id in remote_ids {
+            self.start_remote_event_bridge_by_id(&remote_id);
         }
+    }
+
+    /// Starts the event bridge from the current settings-owned configuration.
+    ///
+    /// Remote operations can retain a config snapshot while network I/O is in
+    /// flight. Resolving by id here prevents bridge startup from reintroducing
+    /// a stale endpoint after a concurrent settings update.
+    fn start_remote_event_bridge_by_id(&self, remote_id: &str) {
+        self.remote_registry
+            .start_event_bridge_by_id(self.clone(), remote_id);
+    }
+
+    /// Starts a bridge only if the decoded response's exact connection still
+    /// owns routing authority. Create flows use this instead of resolving by
+    /// id so a response from endpoint A cannot accidentally claim endpoint B.
+    fn start_remote_event_bridge_for_lease(
+        &self,
+        lease: &RemoteRequestLease,
+    ) -> Result<(), ApiError> {
+        self.remote_registry
+            .start_event_bridge_for_lease(self.clone(), lease)
     }
 
     // -- scope resolution --
@@ -289,12 +316,35 @@ impl AppState {
         )
     }
 
+    fn remote_post_json_with_timeout_and_authority_for_lease<T: DeserializeOwned>(
+        &self,
+        scope: &RemoteScope,
+        lease: RemoteRequestLease,
+        path: &str,
+        body: Value,
+        timeout: Duration,
+    ) -> Result<(T, RemoteStreamingAuthority), ApiError> {
+        if !same_remote_routing_config(&lease.pinned, &scope.remote) {
+            return Err(ApiError::internal(
+                "remote terminal fallback lease does not match its resolved scope",
+            ));
+        }
+        self.remote_registry.request_json_with_timeout_for_lease(
+            lease,
+            Method::POST,
+            path,
+            &[],
+            Some(apply_remote_scope_to_body(scope, body)),
+            timeout,
+        )
+    }
+
     fn remote_post_response_without_timeout(
         &self,
         scope: &RemoteScope,
         path: &str,
         body: Value,
-    ) -> Result<BlockingHttpResponse, ApiError> {
+    ) -> Result<RemoteStreamingResponse, ApiError> {
         self.remote_registry.request_without_timeout(
             &scope.remote,
             Method::POST,
@@ -353,12 +403,25 @@ impl AppState {
         &self,
         project_id: &str,
     ) -> Result<Option<RemoteProjectBinding>, ApiError> {
+        self.ensure_remote_project_binding_with_missing_status(
+            project_id,
+            RemoteCreateMissingProjectStatus::NotFound,
+        )
+    }
+
+    fn ensure_remote_project_binding_with_missing_status(
+        &self,
+        project_id: &str,
+        missing_project_status: RemoteCreateMissingProjectStatus,
+    ) -> Result<Option<RemoteProjectBinding>, ApiError> {
         let project = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
                 .find_project(project_id)
                 .cloned()
-                .ok_or_else(|| ApiError::not_found("project not found"))?
+                .ok_or_else(|| {
+                    missing_project_status.error(format!("unknown project `{project_id}`"))
+                })?
         };
         if project.remote_id == LOCAL_REMOTE_ID {
             return Ok(None);
@@ -367,14 +430,48 @@ impl AppState {
         let remote = self.lookup_remote_config(&project.remote_id)?;
         validate_remote_connection_config(&remote)?;
         if let Some(remote_project_id) = project.remote_project_id.clone() {
-            return Ok(Some(RemoteProjectBinding {
-                local_project_id: project.id,
-                remote,
-                remote_project_id,
-            }));
+            #[cfg(test)]
+            self.remote_registry
+                .run_test_before_existing_remote_project_revalidation();
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let current_project = inner.find_project(project_id).ok_or_else(|| {
+                missing_project_status.error(format!("unknown project `{project_id}`"))
+            })?;
+            if current_project.remote_id != project.remote_id
+                || current_project.remote_project_id.as_deref()
+                    != Some(remote_project_id.as_str())
+            {
+                return Err(ApiError::conflict(
+                    REMOTE_PROJECT_BINDING_CHANGED_DURING_CREATE,
+                ));
+            }
+            let current_remote = inner
+                .find_remote(&current_project.remote_id)
+                .cloned()
+                .ok_or_else(|| {
+                    ApiError::bad_request(format!(
+                        "unknown remote `{}`",
+                        current_project.remote_id
+                    ))
+                })?;
+            validate_remote_connection_config(&current_remote)?;
+            let binding = RemoteProjectBinding {
+                local_project_id: current_project.id.clone(),
+                remote: current_remote,
+                remote_project_id: remote_project_id.clone(),
+            };
+            self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to retry remote project binding persistence: {err:#}"
+                    ))
+                })?;
+            return Ok(Some(binding));
         }
 
-        let response: CreateProjectResponse = self.remote_registry.request_json(
+        let (response, response_lease): (CreateProjectResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &remote,
             Method::POST,
             "/api/projects",
@@ -384,25 +481,59 @@ impl AppState {
                 "rootPath": project.root_path,
                 "remoteId": LOCAL_REMOTE_ID,
             })),
-        )?;
+        )
+        .map_err(remote_create_authority_error)?;
 
-        let remote_project_id = response.project_id;
-        {
+        let response_remote_project_id = response.project_id;
+        let (remote, remote_project_id) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            self.ensure_remote_create_request_current_locked(&inner, &response_lease)?;
+            let current_remote = inner
+                .find_remote(&remote.id)
+                .cloned()
+                .ok_or_else(|| ApiError::bad_request(format!("unknown remote `{}`", remote.id)))?;
+            if !same_remote_routing_config(&current_remote, &remote) {
+                return Err(ApiError::conflict(
+                    REMOTE_CONNECTION_CHANGED_DURING_CREATE,
+                ));
+            }
             let index = inner
                 .projects
                 .iter()
                 .position(|candidate| candidate.id == project.id)
-                .ok_or_else(|| ApiError::not_found("project not found"))?;
-            if inner.projects[index].remote_project_id.as_deref()
-                != Some(remote_project_id.as_str())
+                .ok_or_else(|| {
+                    missing_project_status.error(format!("unknown project `{}`", project.id))
+                })?;
+            if inner.projects[index].remote_id != project.remote_id
+                || inner.projects[index].root_path != project.root_path
             {
-                inner.projects[index].remote_project_id = Some(remote_project_id.clone());
-                self.commit_locked(&mut inner).map_err(|err| {
+                return Err(ApiError::conflict(
+                    REMOTE_PROJECT_BINDING_CHANGED_DURING_CREATE,
+                ));
+            }
+            let remote_project_id = if let Some(existing) =
+                inner.projects[index].remote_project_id.clone()
+            {
+                // First writer wins when duplicate lazy-binding requests race.
+                // The later remote-side project may be orphaned, but local
+                // authority must never oscillate between POST responses.
+                self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to retry remote project binding persistence: {err:#}"
+                        ))
+                    })?;
+                existing
+            } else {
+                inner.projects[index].remote_project_id =
+                    Some(response_remote_project_id.clone());
+                self.commit_remote_localization_locked(&mut inner).map_err(|err| {
                     ApiError::internal(format!("failed to persist remote project binding: {err:#}"))
                 })?;
-            }
-        }
+                response_remote_project_id
+            };
+            (current_remote, remote_project_id)
+        };
 
         Ok(Some(RemoteProjectBinding {
             local_project_id: project.id,
@@ -433,8 +564,16 @@ impl AppState {
         &self,
         target: &RemoteSessionTarget,
         remote_state: StateResponse,
+        response_lease: &RemoteRequestLease,
     ) -> Result<(), ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        self.ensure_remote_request_current_locked(&inner, response_lease)?;
+        self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to retry dirty remote state persistence: {err:#}"
+                ))
+            })?;
         if !apply_remote_state_if_newer_locked(
             &mut inner,
             &target.remote.id,
@@ -445,7 +584,7 @@ impl AppState {
             return Ok(());
         }
         inner.note_remote_applied_revision(&target.remote.id, remote_state.revision);
-        self.commit_locked(&mut inner).map_err(|err| {
+        self.commit_remote_localization_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist remote state: {err:#}"))
         })?;
         Ok(())
@@ -498,8 +637,9 @@ impl AppState {
     /// Returns `None` when any payload field cannot be JSON-serialized. The
     /// monotonic `remote_applied_revisions` watermark remains the authoritative
     /// ordering defense, so the replay cache is safe to skip per delta.
-    fn remote_delta_replay_key(
+    fn remote_delta_replay_key_for_generation(
         remote_id: &str,
+        authority_generation: u64,
         event: &DeltaEvent,
     ) -> Option<RemoteDeltaReplayKey> {
         let payload = match event {
@@ -700,9 +840,18 @@ impl AppState {
         };
         Some(RemoteDeltaReplayKey {
             remote_id: remote_id.to_owned(),
+            authority_generation,
             revision: delta_event_revision(event),
             payload,
         })
+    }
+
+    #[cfg(test)]
+    fn remote_delta_replay_key(
+        remote_id: &str,
+        event: &DeltaEvent,
+    ) -> Option<RemoteDeltaReplayKey> {
+        Self::remote_delta_replay_key_for_generation(remote_id, 0, event)
     }
 
     /// Explicit no-op for `None` keys so callers can plumb optional replay
@@ -734,9 +883,14 @@ impl AppState {
         min_remote_revision: Option<u64>,
         delta_expectation: Option<RemoteDeltaHydrationExpectation>,
         request_timeout: Duration,
+        expected_remote: Option<&RemoteConfig>,
+        expected_connection: Option<&RemoteConnection>,
+        expected_state_continuity_generation: Option<u64>,
     ) -> Result<SessionResponse, ApiError> {
         let query = vec![("tail".to_owned(), message_limit.to_string())];
-        let remote_response: SessionResponse = self.remote_registry.request_json_with_timeout(
+        let (remote_response, response_lease): (SessionResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_timeout_and_lease(
             &target.remote,
             Method::GET,
             &format!(
@@ -748,59 +902,86 @@ impl AppState {
             request_timeout,
         )?;
 
-        if remote_response.session.id != target.remote_session_id {
-            return Err(ApiError::bad_gateway(format!(
+        let response_validation = (|| -> Result<(), ApiError> {
+            if remote_response.session.id != target.remote_session_id {
+                return Err(ApiError::bad_gateway(format!(
                 "remote session response id `{}` did not match requested session `{}`",
                 remote_response.session.id, target.remote_session_id
-            )));
-        }
-        if remote_response.session.messages.len() > message_limit {
-            return Err(ApiError::bad_gateway(format!(
-                "remote session tail returned {} messages, exceeding requested limit {message_limit}",
-                remote_response.session.messages.len()
-            )));
-        }
-        let loaded_message_count =
-            u32::try_from(remote_response.session.messages.len()).unwrap_or(u32::MAX);
-        if loaded_message_count > remote_response.session.message_count {
-            return Err(ApiError::bad_gateway(format!(
-                "remote session tail length {loaded_message_count} exceeded messageCount {}",
-                remote_response.session.message_count
-            )));
-        }
-        if remote_response.session.messages_loaded
-            != (loaded_message_count == remote_response.session.message_count)
-        {
-            return Err(ApiError::bad_gateway(
-                "remote session tail returned inconsistent messagesLoaded metadata",
-            ));
-        }
-        if let Some(min_revision) = min_remote_revision {
-            if remote_response.revision < min_revision {
-                return Err(ApiError::bad_gateway(format!(
-                    "remote session response revision {} is older than required revision {min_revision}",
-                    remote_response.revision
                 )));
             }
-            if remote_response.revision > min_revision {
-                let metadata_matches_triggering_delta =
-                    delta_expectation.is_some_and(|expectation| {
-                        expectation.session_mutation_stamp.is_some()
-                            && remote_response.session.message_count == expectation.message_count
-                            && remote_response.session.session_mutation_stamp
-                                == expectation.session_mutation_stamp
-                    });
-                if !metadata_matches_triggering_delta {
+            if remote_response.session.messages.len() > message_limit {
+                return Err(ApiError::bad_gateway(format!(
+                "remote session tail returned {} messages, exceeding requested limit {message_limit}",
+                remote_response.session.messages.len()
+                )));
+            }
+            let loaded_message_count =
+                u32::try_from(remote_response.session.messages.len()).unwrap_or(u32::MAX);
+            if loaded_message_count > remote_response.session.message_count {
+                return Err(ApiError::bad_gateway(format!(
+                "remote session tail length {loaded_message_count} exceeded messageCount {}",
+                remote_response.session.message_count
+                )));
+            }
+            if remote_response.session.messages_loaded
+                != (loaded_message_count == remote_response.session.message_count)
+            {
+                return Err(ApiError::bad_gateway(
+                    "remote session tail returned inconsistent messagesLoaded metadata",
+                ));
+            }
+            if let Some(min_revision) = min_remote_revision {
+                if remote_response.revision < min_revision {
                     return Err(ApiError::bad_gateway(format!(
-                        "remote session response revision {} is newer than targeted repair revision {min_revision} without matching session mutation metadata",
-                        remote_response.revision
+                    "remote session response revision {} is older than required revision {min_revision}",
+                    remote_response.revision
                     )));
                 }
+                if remote_response.revision > min_revision {
+                    let metadata_matches_triggering_delta =
+                        delta_expectation.is_some_and(|expectation| {
+                            expectation.session_mutation_stamp.is_some()
+                                && remote_response.session.message_count
+                                    == expectation.message_count
+                                && remote_response.session.session_mutation_stamp
+                                    == expectation.session_mutation_stamp
+                        });
+                    if !metadata_matches_triggering_delta {
+                        return Err(ApiError::bad_gateway(format!(
+                        "remote session response revision {} is newer than targeted repair revision {min_revision} without matching session mutation metadata",
+                        remote_response.revision
+                        )));
+                    }
+                }
             }
+            Ok(())
+        })();
+        if let Err(error) = response_validation {
+            return Err(self.prefer_current_remote_response_error(&response_lease, error));
         }
 
         let (revision, session) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(expected_remote) = expected_remote {
+                self.ensure_remote_apply_authority_locked(
+                    &inner,
+                    expected_remote,
+                    expected_connection,
+                )?;
+            }
+            if let (Some(connection), Some(generation)) = (
+                expected_connection,
+                expected_state_continuity_generation,
+            ) {
+                connection.ensure_state_continuity_generation(generation)?;
+            }
+            self.ensure_remote_request_current_locked(&inner, &response_lease)?;
+            self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to retry dirty remote session persistence: {err:#}"
+                    ))
+                })?;
             let index = inner
                 .find_remote_session_index(&target.remote.id, &target.remote_session_id)
                 .or_else(|| inner.find_session_index(&target.local_session_id))
@@ -895,7 +1076,7 @@ impl AppState {
             if let Some(remote_revision) = min_remote_revision {
                 inner.note_remote_applied_revision(&target.remote.id, remote_revision);
             }
-            let revision = self.commit_locked(&mut inner).map_err(|err| {
+            let revision = self.commit_remote_localization_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!(
                     "failed to persist bounded remote session tail: {err:#}"
                 ))
@@ -933,8 +1114,8 @@ impl AppState {
         if from_start {
             query.push(("from".to_owned(), "start".to_owned()));
         }
-        let remote_page: SessionHistoryResponse =
-            self.remote_registry.request_json_with_timeout(
+        let (remote_page, response_lease): (SessionHistoryResponse, RemoteRequestLease) =
+            self.remote_registry.request_json_with_timeout_and_lease(
                 &target.remote,
                 Method::GET,
                 &format!(
@@ -945,40 +1126,47 @@ impl AppState {
                 None,
                 request_timeout,
             )?;
-        if remote_page.messages.len() > message_limit {
-            return Err(ApiError::bad_gateway(format!(
+        let response_validation = (|| -> Result<(), ApiError> {
+            if remote_page.messages.len() > message_limit {
+                return Err(ApiError::bad_gateway(format!(
                 "remote session history returned {} messages, exceeding requested limit {message_limit}",
                 remote_page.messages.len()
-            )));
-        }
-        if remote_page.has_more != remote_page.next_before.is_some() {
-            return Err(ApiError::bad_gateway(
-                "remote session history returned inconsistent cursor metadata",
-            ));
-        }
-        if remote_page.has_newer != remote_page.next_after.is_some() {
-            return Err(ApiError::bad_gateway(
-                "remote session history returned inconsistent forward cursor metadata",
-            ));
-        }
-        if remote_page.has_newer
-            && remote_page.next_after.as_deref()
-                != remote_page.messages.last().map(|message| message.id())
-        {
-            return Err(ApiError::bad_gateway(
-                "remote session history forward cursor did not match the last returned message",
-            ));
-        }
-        if remote_page.has_more
-            && remote_page.next_before.as_deref()
-                != remote_page.messages.first().map(|message| message.id())
-        {
-            return Err(ApiError::bad_gateway(
-                "remote session history cursor did not match the first returned message",
-            ));
+                )));
+            }
+            if remote_page.has_more != remote_page.next_before.is_some() {
+                return Err(ApiError::bad_gateway(
+                    "remote session history returned inconsistent cursor metadata",
+                ));
+            }
+            if remote_page.has_newer != remote_page.next_after.is_some() {
+                return Err(ApiError::bad_gateway(
+                    "remote session history returned inconsistent forward cursor metadata",
+                ));
+            }
+            if remote_page.has_newer
+                && remote_page.next_after.as_deref()
+                    != remote_page.messages.last().map(|message| message.id())
+            {
+                return Err(ApiError::bad_gateway(
+                    "remote session history forward cursor did not match the last returned message",
+                ));
+            }
+            if remote_page.has_more
+                && remote_page.next_before.as_deref()
+                    != remote_page.messages.first().map(|message| message.id())
+            {
+                return Err(ApiError::bad_gateway(
+                    "remote session history cursor did not match the first returned message",
+                ));
+            }
+            Ok(())
+        })();
+        if let Err(error) = response_validation {
+            return Err(self.prefer_current_remote_response_error(&response_lease, error));
         }
 
         let inner = self.inner.lock().expect("state mutex poisoned");
+        self.ensure_remote_request_current_locked(&inner, &response_lease)?;
         let index = inner
             .find_remote_session_index(&target.remote.id, &target.remote_session_id)
             .or_else(|| inner.find_session_index(&target.local_session_id))
@@ -1027,8 +1215,10 @@ impl AppState {
         request_timeout: Duration,
     ) -> Result<SessionOverviewResponse, ApiError> {
         let query = vec![("buckets".to_owned(), bucket_count.to_string())];
-        let mut remote_overview: SessionOverviewResponse =
-            self.remote_registry.request_json_with_timeout(
+        let (mut remote_overview, response_lease):
+            (SessionOverviewResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_timeout_and_lease(
                 &target.remote,
                 Method::GET,
                 &format!(
@@ -1039,39 +1229,46 @@ impl AppState {
                 None,
                 request_timeout,
             )?;
-        if remote_overview.session_id != target.remote_session_id {
-            return Err(ApiError::bad_gateway(format!(
+        let response_validation = (|| -> Result<(), ApiError> {
+            if remote_overview.session_id != target.remote_session_id {
+                return Err(ApiError::bad_gateway(format!(
                 "remote session overview id `{}` did not match requested session `{}`",
                 remote_overview.session_id, target.remote_session_id
-            )));
-        }
-        if remote_overview.buckets.len() > bucket_count {
-            return Err(ApiError::bad_gateway(format!(
+                )));
+            }
+            if remote_overview.buckets.len() > bucket_count {
+                return Err(ApiError::bad_gateway(format!(
                 "remote session overview returned {} buckets, exceeding requested limit {bucket_count}",
                 remote_overview.buckets.len()
-            )));
-        }
-        let bucket_message_count: u64 = remote_overview
-            .buckets
-            .iter()
-            .map(|bucket| u64::from(bucket.c))
-            .sum();
-        if bucket_message_count != u64::from(remote_overview.message_count) {
-            return Err(ApiError::bad_gateway(
-                "remote session overview returned inconsistent bucket counts",
-            ));
-        }
-        if remote_overview
-            .buckets
-            .iter()
-            .any(|bucket| bucket.u > bucket.c)
-        {
-            return Err(ApiError::bad_gateway(
-                "remote session overview returned inconsistent author counts",
-            ));
+                )));
+            }
+            let bucket_message_count: u64 = remote_overview
+                .buckets
+                .iter()
+                .map(|bucket| u64::from(bucket.c))
+                .sum();
+            if bucket_message_count != u64::from(remote_overview.message_count) {
+                return Err(ApiError::bad_gateway(
+                    "remote session overview returned inconsistent bucket counts",
+                ));
+            }
+            if remote_overview
+                .buckets
+                .iter()
+                .any(|bucket| bucket.u > bucket.c)
+            {
+                return Err(ApiError::bad_gateway(
+                    "remote session overview returned inconsistent author counts",
+                ));
+            }
+            Ok(())
+        })();
+        if let Err(error) = response_validation {
+            return Err(self.prefer_current_remote_response_error(&response_lease, error));
         }
 
         let inner = self.inner.lock().expect("state mutex poisoned");
+        self.ensure_remote_request_current_locked(&inner, &response_lease)?;
         let index = inner
             .find_remote_session_index(&target.remote.id, &target.remote_session_id)
             .or_else(|| inner.find_session_index(&target.local_session_id))
@@ -1098,6 +1295,35 @@ impl AppState {
         remote_id: &str,
         event: &DeltaEvent,
     ) -> Result<bool, anyhow::Error> {
+        self.repair_remote_session_tail_after_delta_error_with_authority(
+            remote_id,
+            None,
+            None,
+            event,
+        )
+    }
+
+    fn repair_remote_session_tail_after_delta_error_for_bridge(
+        &self,
+        remote: &RemoteConfig,
+        connection: &RemoteConnection,
+        event: &DeltaEvent,
+    ) -> Result<bool, anyhow::Error> {
+        self.repair_remote_session_tail_after_delta_error_with_authority(
+            &remote.id,
+            Some(remote),
+            Some(connection),
+            event,
+        )
+    }
+
+    fn repair_remote_session_tail_after_delta_error_with_authority(
+        &self,
+        remote_id: &str,
+        expected_remote: Option<&RemoteConfig>,
+        expected_connection: Option<&RemoteConnection>,
+        event: &DeltaEvent,
+    ) -> Result<bool, anyhow::Error> {
         let Some((remote_session_id, message_count, session_mutation_stamp)) =
             remote_delta_session_transcript_metadata(event)
         else {
@@ -1105,6 +1331,14 @@ impl AppState {
         };
         let target = {
             let inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(expected_remote) = expected_remote {
+                self.ensure_remote_apply_authority_locked(
+                    &inner,
+                    expected_remote,
+                    expected_connection,
+                )
+                .map_err(|err| anyhow::Error::new(RemoteAuthorityApplyError(err)))?;
+            }
             let Some(index) =
                 inner.find_remote_session_index(remote_id, remote_session_id)
             else {
@@ -1130,6 +1364,9 @@ impl AppState {
                 session_mutation_stamp,
             }),
             REMOTE_REQUEST_TIMEOUT,
+            expected_remote,
+            expected_connection,
+            None,
         )
         .map_err(|err| {
             anyhow!(
@@ -1142,16 +1379,57 @@ impl AppState {
 
     /// Ensures an unloaded remote proxy has one bounded tail before applying a
     /// narrow delta. It never asks either backend for an unbounded transcript.
+    fn try_begin_remote_delta_hydration(
+        &self,
+        key: RemoteDeltaHydrationKey,
+    ) -> Option<RemoteDeltaHydrationInFlightGuard> {
+        let mut in_flight = self
+            .remote_delta_hydrations_in_flight
+            .lock()
+            .expect("remote delta hydration mutex poisoned");
+        if !in_flight.insert(key.clone()) {
+            return None;
+        }
+        Some(RemoteDeltaHydrationInFlightGuard {
+            in_flight: self.remote_delta_hydrations_in_flight.clone(),
+            key,
+        })
+    }
+
     fn hydrate_unloaded_remote_session_for_delta(
         &self,
         remote_id: &str,
         remote_session_id: &str,
+        authority_generation: u64,
         remote_revision: u64,
         remote_message_count: u32,
         remote_session_mutation_stamp: Option<u64>,
+        expected_remote: Option<&RemoteConfig>,
+        expected_connection: Option<&RemoteConnection>,
+        expected_state_continuity_generation: Option<u64>,
     ) -> Result<RemoteDeltaHydrationOutcome, anyhow::Error> {
+        #[cfg(test)]
+        self.remote_registry
+            .run_test_before_remote_delta_hydration_target();
         let target = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(expected_remote) = expected_remote {
+                self.ensure_remote_apply_authority_locked(
+                    &inner,
+                    expected_remote,
+                    expected_connection,
+                )
+                .map_err(|err| anyhow::Error::new(RemoteAuthorityApplyError(err)))?;
+            }
+            if let (Some(connection), Some(generation)) = (
+                expected_connection,
+                expected_state_continuity_generation,
+            ) {
+                connection
+                    .ensure_state_continuity_generation(generation)
+                    .map_err(|err| anyhow::Error::new(RemoteAuthorityApplyError(err)))?;
+            }
+            self.retry_remote_delta_persist_if_dirty_locked(&mut inner)?;
             if inner.should_skip_remote_session_applied_delta_revision(
                 remote_id,
                 remote_session_id,
@@ -1177,19 +1455,13 @@ impl AppState {
             }
         };
 
-        let hydration_key = (remote_id.to_owned(), remote_session_id.to_owned());
-        let _hydration_guard = {
-            let mut in_flight = self
-                .remote_delta_hydrations_in_flight
-                .lock()
-                .expect("remote delta hydration mutex poisoned");
-            if !in_flight.insert(hydration_key.clone()) {
-                return Ok(RemoteDeltaHydrationOutcome::SkipInFlight);
-            }
-            RemoteDeltaHydrationInFlightGuard {
-                in_flight: self.remote_delta_hydrations_in_flight.clone(),
-                key: hydration_key,
-            }
+        let hydration_key = RemoteDeltaHydrationKey {
+            remote_id: remote_id.to_owned(),
+            remote_session_id: remote_session_id.to_owned(),
+            authority_generation,
+        };
+        let Some(_hydration_guard) = self.try_begin_remote_delta_hydration(hydration_key) else {
+            return Ok(RemoteDeltaHydrationOutcome::SkipInFlight);
         };
 
         let hydration_result = self.fetch_remote_session_tail_target(
@@ -1201,6 +1473,9 @@ impl AppState {
                 session_mutation_stamp: remote_session_mutation_stamp,
             }),
             REMOTE_REQUEST_TIMEOUT,
+            expected_remote,
+            expected_connection,
+            expected_state_continuity_generation,
         );
         match hydration_result {
             Ok(_) => {
@@ -1276,7 +1551,9 @@ impl AppState {
         target: RemoteOrchestratorTarget,
         action: &str,
     ) -> Result<StateResponse, ApiError> {
-        let remote_state: StateResponse = self.remote_registry.request_json(
+        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &target.remote,
             Method::POST,
             &format!(
@@ -1288,6 +1565,13 @@ impl AppState {
             None,
         )?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        self.ensure_remote_request_current_locked(&inner, &response_lease)?;
+        self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to retry dirty remote orchestrator state persistence: {err:#}"
+                ))
+            })?;
         if apply_remote_state_if_newer_locked(
             &mut inner,
             &target.remote.id,
@@ -1300,7 +1584,7 @@ impl AppState {
                 &target.remote.id,
                 &remote_state,
             );
-            self.commit_locked(&mut inner).map_err(|err| {
+            self.commit_remote_localization_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!(
                     "failed to persist remote orchestrator `{}` state: {err:#}",
                     target.local_instance_id
@@ -1350,1204 +1634,86 @@ impl AppState {
         remote_state: StateResponse,
         mode: RemoteSnapshotApplyMode,
     ) -> Result<(), ApiError> {
+        self.apply_remote_state_snapshot_with_authority(
+            remote_id,
+            None,
+            None,
+            None,
+            remote_state,
+            mode,
+        )
+    }
+
+    fn apply_remote_state_snapshot_for_bridge(
+        &self,
+        remote: &RemoteConfig,
+        connection: &RemoteConnection,
+        remote_state: StateResponse,
+        mode: RemoteSnapshotApplyMode,
+    ) -> Result<(), ApiError> {
+        self.apply_remote_state_snapshot_with_authority(
+            &remote.id,
+            Some(remote),
+            Some(connection),
+            None,
+            remote_state,
+            mode,
+        )
+    }
+
+    fn apply_remote_state_snapshot_for_request(
+        &self,
+        lease: &RemoteRequestLease,
+        remote_state: StateResponse,
+        mode: RemoteSnapshotApplyMode,
+    ) -> Result<(), ApiError> {
+        self.apply_remote_state_snapshot_with_authority(
+            &lease.pinned.id,
+            Some(&lease.pinned),
+            Some(&lease.connection),
+            Some(lease.state_continuity_generation),
+            remote_state,
+            mode,
+        )
+    }
+
+    fn apply_remote_state_snapshot_with_authority(
+        &self,
+        remote_id: &str,
+        expected_remote: Option<&RemoteConfig>,
+        expected_connection: Option<&RemoteConnection>,
+        expected_state_continuity_generation: Option<u64>,
+        remote_state: StateResponse,
+        mode: RemoteSnapshotApplyMode,
+    ) -> Result<(), ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if let Some(expected_remote) = expected_remote {
+            self.ensure_remote_apply_authority_locked(
+                &inner,
+                expected_remote,
+                expected_connection,
+            )?;
+        }
+        if let (Some(connection), Some(generation)) = (
+            expected_connection,
+            expected_state_continuity_generation,
+        ) {
+            connection.ensure_state_continuity_generation(generation)?;
+        }
         if !apply_remote_state_if_newer_locked(&mut inner, remote_id, &remote_state, None, mode) {
+            self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to retry dirty remote state persistence: {err:#}"
+                    ))
+                })?;
             return Ok(());
         }
         note_remote_applied_state_snapshot_revision(&mut inner, remote_id, &remote_state);
-        self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!("failed to persist remote state: {err:#}"))
-        })?;
-        Ok(())
-    }
-
-    /// Applies a single `DeltaEvent` from a remote's SSE stream to local
-    /// state and re-publishes it under the matching local session /
-    /// orchestrator ids. Remote ids in the payload (session_id,
-    /// project_id, orchestrator_id) are remapped to their local proxy
-    /// counterparts before publish. Errors here cause
-    /// `dispatch_remote_event` (src/remote_sync.rs) to fall back to
-    /// `resync_remote_state_snapshot`.
-    fn apply_remote_delta_event(
-        &self,
-        remote_id: &str,
-        event: DeltaEvent,
-    ) -> Result<(), anyhow::Error> {
-        let remote_revision = delta_event_revision(&event);
-        {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
-                return Ok(());
-            }
-        }
-        let remote_delta_replay_key = Self::remote_delta_replay_key(remote_id, &event);
-        if self.should_skip_remote_applied_delta_replay(&remote_delta_replay_key) {
-            return Ok(());
-        }
-        match event {
-            DeltaEvent::SessionCreated {
-                session,
-                session_id,
-                ..
-            } => {
-                if session.id != session_id {
-                    return Err(anyhow!(
-                        "remote created session payload id `{}` did not match event id `{session_id}`",
-                        session.id
-                    ));
-                }
-                let Some((published_session_id, delta_session, revision)) = ({
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_session_applied_delta_revision(
-                        remote_id,
-                        &session_id,
-                        remote_revision,
-                    ) {
-                        return Ok(());
-                    }
-                    let local_project_ids_by_remote_project_id =
-                        remote_project_id_map(&inner, remote_id);
-                    let local_project_id = local_project_id_for_remote_project(
-                        &local_project_ids_by_remote_project_id,
-                        session.project_id.as_deref(),
-                    );
-                    let (local_session_id, changed) = ensure_remote_proxy_session_record(
-                        &mut inner,
-                        remote_id,
-                        &session,
-                        local_project_id.map(LocalProjectId::into_inner),
-                        true,
-                    );
-                    let local_index =
-                        inner.find_session_index(&local_session_id).ok_or_else(|| {
-                            anyhow!("local proxy session `{local_session_id}` not found")
-                        })?;
-                    if !changed {
-                        inner.note_remote_applied_revision(remote_id, remote_revision);
-                        None
-                    } else {
-                        let local_record =
-                            inner.sessions.get(local_index).cloned().ok_or_else(|| {
-                                anyhow!("local proxy session `{local_session_id}` not found")
-                            })?;
-                        let revision =
-                            self.commit_session_created_locked(&mut inner, &local_record)?;
-                        let local_record = inner.sessions.get(local_index).ok_or_else(|| {
-                            anyhow!("local proxy session `{local_session_id}` not found")
-                        })?;
-                        let delta_session =
-                            AppState::wire_session_summary_from_record(local_record);
-                        let published_session_id = delta_session.id.clone();
-                        inner.note_remote_applied_revision(remote_id, remote_revision);
-                        Some((published_session_id, delta_session, revision))
-                    }
-                }) else {
-                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-                    return Ok(());
-                };
-                self.publish_delta(&DeltaEvent::SessionCreated {
-                    revision,
-                    session_id: published_session_id,
-                    session: delta_session,
-                });
-                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-            }
-            DeltaEvent::MessageCreated {
-                message,
-                message_count: remote_message_count,
-                message_id,
-                message_index,
-                preview,
-                session_id,
-                session_mutation_stamp: remote_session_mutation_stamp,
-                status,
-                ..
-            } => {
-                if message.id() != message_id {
-                    return Err(anyhow!(
-                        "remote created message payload id `{}` did not match event id `{message_id}`",
-                        message.id()
-                    ));
-                }
-                if message_index >= usize::try_from(remote_message_count).unwrap_or(usize::MAX) {
-                    return Err(anyhow!(
-                        "remote MessageCreated index `{message_index}` is outside messageCount `{remote_message_count}` for session `{session_id}`"
-                    ));
-                }
-                let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
-                    remote_id,
-                    &session_id,
-                    remote_revision,
-                    remote_message_count,
-                    remote_session_mutation_stamp,
-                )?;
-                if self.should_skip_delta_after_remote_hydration(
-                    hydration_outcome,
-                    &remote_delta_replay_key,
-                ) {
-                    return Ok(());
-                }
-                let (
-                    local_session_id,
-                    applied_message_index,
-                    revision,
-                    message_count,
-                    session_mutation_stamp,
-                ) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_session_applied_delta_revision(
-                        remote_id,
-                        &session_id,
-                        remote_revision,
-                    ) {
-                        return Ok(());
-                    }
-                    let index = inner
-                        .find_remote_session_index(remote_id, &session_id)
-                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let (
-                        local_session_id,
-                        applied_message_index,
-                        message_count,
-                        session_mutation_stamp,
-                    ) = {
-                        let record = inner
-                            .session_mut_by_index(index)
-                            .expect("session index should be valid");
-                        let applied_message_index = if let Some(existing_index) =
-                            message_index_on_record(record, &message_id)
-                        {
-                            let local_message_index = message_index
-                                .checked_sub(record.message_start_index)
-                                .ok_or_else(|| {
-                                    anyhow!(
-                                        "remote MessageCreated index `{message_index}` predates the retained transcript window for existing message `{message_id}` in session `{session_id}`"
-                                    )
-                                })?;
-                            let max_index_after_removal =
-                                record.session.messages.len().saturating_sub(1);
-                            if local_message_index > max_index_after_removal {
-                                return Err(anyhow!(
-                                    "remote MessageCreated index `{message_index}` is out of bounds for existing message `{message_id}` in session `{session_id}`"
-                                ));
-                            }
-                            record.session.messages.remove(existing_index);
-                            record
-                                .session
-                                .messages
-                                .insert(local_message_index, message.clone());
-                            record.message_positions =
-                                build_message_positions(&record.session.messages);
-                            message_index
-                        } else {
-                            if record.session.messages.is_empty() {
-                                record.message_start_index = message_index;
-                            }
-                            let local_message_index = message_index
-                                .checked_sub(record.message_start_index)
-                                .ok_or_else(|| {
-                                    anyhow!(
-                                        "remote MessageCreated index `{message_index}` predates the retained transcript window in session `{session_id}`"
-                                    )
-                                })?;
-                            if local_message_index > record.session.messages.len() {
-                                return Err(anyhow!(
-                                    "remote MessageCreated index `{message_index}` leaves a gap in session `{session_id}`"
-                                ));
-                            }
-                            insert_message_on_record(
-                                record,
-                                local_message_index,
-                                message.clone(),
-                            );
-                            message_index
-                        };
-                        record.session.preview = preview.clone();
-                        record.session.status = status;
-                        if remote_session_mutation_stamp.is_some() {
-                            record.session.session_mutation_stamp = remote_session_mutation_stamp;
-                        }
-                        (
-                            record.session.id.clone(),
-                            applied_message_index,
-                            session_message_count(record),
-                            record.mutation_stamp,
-                        )
-                    };
-                    let revision = self.commit_persisted_delta_locked(&mut inner)?;
-                    inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (
-                        local_session_id,
-                        applied_message_index,
-                        revision,
-                        message_count,
-                        session_mutation_stamp,
-                    )
-                };
-                self.publish_delta(&DeltaEvent::MessageCreated {
-                    revision,
-                    session_id: local_session_id,
-                    message_id,
-                    message_index: applied_message_index,
-                    message_count,
-                    message,
-                    preview,
-                    status,
-                    session_mutation_stamp: Some(session_mutation_stamp),
-                });
-                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-            }
-            DeltaEvent::MessageUpdated {
-                message,
-                message_count: remote_message_count,
-                message_id,
-                message_index: _,
-                preview,
-                session_id,
-                session_mutation_stamp: remote_session_mutation_stamp,
-                status,
-                ..
-            } => {
-                {
-                    let inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_session_applied_delta_revision(
-                        remote_id,
-                        &session_id,
-                        remote_revision,
-                    ) {
-                        return Ok(());
-                    }
-                }
-                if message.id() != message_id {
-                    return Err(anyhow!(
-                        "remote updated message payload id `{}` did not match event id `{message_id}`",
-                        message.id()
-                    ));
-                }
-                let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
-                    remote_id,
-                    &session_id,
-                    remote_revision,
-                    remote_message_count,
-                    remote_session_mutation_stamp,
-                )?;
-                if self.should_skip_delta_after_remote_hydration(
-                    hydration_outcome,
-                    &remote_delta_replay_key,
-                ) {
-                    return Ok(());
-                }
-                {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_session_applied_delta_revision(
-                        remote_id,
-                        &session_id,
-                        remote_revision,
-                    ) {
-                        return Ok(());
-                    }
-                    let index = inner
-                        .find_remote_session_index(remote_id, &session_id)
-                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let (
-                        local_session_id,
-                        applied_message_index,
-                        message_count,
-                        session_mutation_stamp,
-                    ) = {
-                        let record = inner
-                            .session_mut_by_index(index)
-                            .expect("session index should be valid");
-                        let Some(local_message_index) =
-                            message_index_on_record(record, &message_id)
-                        else {
-                            return Err(anyhow!(
-                                "remote MessageUpdated for unknown message `{message_id}` in session `{session_id}`"
-                            ));
-                        };
-                        let existing_message = record
-                            .session
-                            .messages
-                            .get_mut(local_message_index)
-                            .expect("message_index_on_record returned an out-of-bounds index");
-                        *existing_message = message.clone();
-                        record.session.preview = preview.clone();
-                        record.session.status = status;
-                        if remote_session_mutation_stamp.is_some() {
-                            record.session.session_mutation_stamp = remote_session_mutation_stamp;
-                        }
-                        (
-                            record.session.id.clone(),
-                            global_message_index(record, local_message_index),
-                            session_message_count(record),
-                            record.mutation_stamp,
-                        )
-                    };
-                    let revision = self.commit_persisted_delta_locked(&mut inner)?;
-                    inner.note_remote_applied_revision(remote_id, remote_revision);
-                    self.publish_delta(&DeltaEvent::MessageUpdated {
-                        revision,
-                        session_id: local_session_id,
-                        message_id,
-                        message_index: applied_message_index,
-                        message_count,
-                        message,
-                        preview,
-                        status,
-                        session_mutation_stamp: Some(session_mutation_stamp),
-                    });
-                }
-                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-            }
-            DeltaEvent::TextDelta {
-                delta,
-                message_count: remote_message_count,
-                message_id,
-                preview,
-                session_id,
-                session_mutation_stamp: remote_session_mutation_stamp,
-                text_start_byte: remote_text_start_byte,
-                ..
-            } => {
-                let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
-                    remote_id,
-                    &session_id,
-                    remote_revision,
-                    remote_message_count,
-                    remote_session_mutation_stamp,
-                )?;
-                if self.should_skip_delta_after_remote_hydration(
-                    hydration_outcome,
-                    &remote_delta_replay_key,
-                ) {
-                    return Ok(());
-                }
-                let (
-                    local_session_id,
-                    message_index,
-                    message_count,
-                    revision,
-                    text_start_byte,
-                    session_mutation_stamp,
-                ) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_session_applied_delta_revision(
-                        remote_id,
-                        &session_id,
-                        remote_revision,
-                    ) {
-                        return Ok(());
-                    }
-                    let index = inner
-                        .find_remote_session_index(remote_id, &session_id)
-                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    if let Some(expected) = remote_text_start_byte {
-                        let record = inner
-                            .session_by_index(index)
-                            .expect("remote session index should be valid");
-                        let message = record
-                            .session
-                            .messages
-                            .iter()
-                            .find(|message| message.id() == message_id)
-                            .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
-                        let actual = match message {
-                            Message::Text { text, .. } => text.len(),
-                            _ => {
-                                return Err(anyhow!(
-                                    "remote message `{message_id}` is not a text message"
-                                ));
-                            }
-                        };
-                        if expected != actual {
-                            return Err(anyhow!(
-                                "remote text delta for message `{message_id}` starts at byte {expected} but the local mirror is at byte {actual}"
-                            ));
-                        }
-                    }
-                    let (
-                        local_session_id,
-                        message_index,
-                        message_count,
-                        text_start_byte,
-                        session_mutation_stamp,
-                    ) = {
-                        let record = inner
-                            .session_mut_by_index(index)
-                            .expect("session index should be valid");
-                        let local_message_index = message_index_on_record(record, &message_id)
-                            .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
-                        let Some(message) = record.session.messages.get_mut(local_message_index)
-                        else {
-                            return Err(anyhow!(
-                                "remote message index `{local_message_index}` is out of bounds"
-                            ));
-                        };
-                        let text_start_byte = match message {
-                            Message::Text { text, .. } => {
-                                let text_start_byte = text.len();
-                                text.push_str(&delta);
-                                text_start_byte
-                            }
-                            _ => {
-                                return Err(anyhow!(
-                                    "remote message `{message_id}` is not a text message"
-                                ));
-                            }
-                        };
-                        if let Some(next_preview) = preview.as_ref() {
-                            record.session.preview = next_preview.clone();
-                        }
-                        if remote_session_mutation_stamp.is_some() {
-                            record.session.session_mutation_stamp = remote_session_mutation_stamp;
-                        }
-                        (
-                            record.session.id.clone(),
-                            global_message_index(record, local_message_index),
-                            session_message_count(record),
-                            text_start_byte,
-                            record.mutation_stamp,
-                        )
-                    };
-                    let revision = self.commit_delta_locked(&mut inner)?;
-                    inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (
-                        local_session_id,
-                        message_index,
-                        message_count,
-                        revision,
-                        text_start_byte,
-                        session_mutation_stamp,
-                    )
-                };
-                self.publish_delta(&DeltaEvent::TextDelta {
-                    revision,
-                    session_id: local_session_id,
-                    message_id,
-                    message_index,
-                    message_count,
-                    text_start_byte: Some(text_start_byte),
-                    delta,
-                    preview,
-                    session_mutation_stamp: Some(session_mutation_stamp),
-                });
-                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-            }
-            DeltaEvent::TextReplace {
-                message_count: remote_message_count,
-                message_id,
-                preview,
-                session_id,
-                session_mutation_stamp: remote_session_mutation_stamp,
-                text,
-                ..
-            } => {
-                let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
-                    remote_id,
-                    &session_id,
-                    remote_revision,
-                    remote_message_count,
-                    remote_session_mutation_stamp,
-                )?;
-                if self.should_skip_delta_after_remote_hydration(
-                    hydration_outcome,
-                    &remote_delta_replay_key,
-                ) {
-                    return Ok(());
-                }
-                let (
-                    local_session_id,
-                    message_index,
-                    message_count,
-                    revision,
-                    session_mutation_stamp,
-                ) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_session_applied_delta_revision(
-                        remote_id,
-                        &session_id,
-                        remote_revision,
-                    ) {
-                        return Ok(());
-                    }
-                    let index = inner
-                        .find_remote_session_index(remote_id, &session_id)
-                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let (local_session_id, message_index, message_count, session_mutation_stamp) = {
-                        let record = inner
-                            .session_mut_by_index(index)
-                            .expect("session index should be valid");
-                        let local_message_index = message_index_on_record(record, &message_id)
-                            .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
-                        let Some(message) = record.session.messages.get_mut(local_message_index)
-                        else {
-                            return Err(anyhow!(
-                                "remote message index `{local_message_index}` is out of bounds"
-                            ));
-                        };
-                        match message {
-                            Message::Text {
-                                text: current_text, ..
-                            } => {
-                                current_text.clear();
-                                current_text.push_str(&text);
-                            }
-                            _ => {
-                                return Err(anyhow!(
-                                    "remote message `{message_id}` is not a text message"
-                                ));
-                            }
-                        }
-                        if let Some(next_preview) = preview.as_ref() {
-                            record.session.preview = next_preview.clone();
-                        }
-                        if remote_session_mutation_stamp.is_some() {
-                            record.session.session_mutation_stamp = remote_session_mutation_stamp;
-                        }
-                        (
-                            record.session.id.clone(),
-                            global_message_index(record, local_message_index),
-                            session_message_count(record),
-                            record.mutation_stamp,
-                        )
-                    };
-                    let revision = self.commit_delta_locked(&mut inner)?;
-                    inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (
-                        local_session_id,
-                        message_index,
-                        message_count,
-                        revision,
-                        session_mutation_stamp,
-                    )
-                };
-                self.publish_delta(&DeltaEvent::TextReplace {
-                    revision,
-                    session_id: local_session_id,
-                    message_id,
-                    message_index,
-                    message_count,
-                    text,
-                    preview,
-                    session_mutation_stamp: Some(session_mutation_stamp),
-                });
-                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-            }
-            DeltaEvent::CommandUpdate {
-                command,
-                command_language,
-                message_count: remote_message_count,
-                message_id,
-                message_index,
-                output,
-                output_language,
-                preview,
-                session_id,
-                session_mutation_stamp: remote_session_mutation_stamp,
-                status,
-                ..
-            } => {
-                if message_index >= usize::try_from(remote_message_count).unwrap_or(usize::MAX) {
-                    return Err(anyhow!(
-                        "remote CommandUpdate index `{message_index}` is outside messageCount `{remote_message_count}` for session `{session_id}`"
-                    ));
-                }
-                let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
-                    remote_id,
-                    &session_id,
-                    remote_revision,
-                    remote_message_count,
-                    remote_session_mutation_stamp,
-                )?;
-                if self.should_skip_delta_after_remote_hydration(
-                    hydration_outcome,
-                    &remote_delta_replay_key,
-                ) {
-                    return Ok(());
-                }
-                let (
-                    local_session_id,
-                    created_message,
-                    applied_message_index,
-                    message_count,
-                    revision,
-                    session_status,
-                    session_mutation_stamp,
-                ) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_session_applied_delta_revision(
-                        remote_id,
-                        &session_id,
-                        remote_revision,
-                    ) {
-                        return Ok(());
-                    }
-                    let index = inner
-                        .find_remote_session_index(remote_id, &session_id)
-                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let (
-                        local_session_id,
-                        created_message,
-                        applied_message_index,
-                        message_count,
-                        session_status,
-                        session_mutation_stamp,
-                    ) = {
-                        let record = inner
-                            .session_mut_by_index(index)
-                            .expect("session index should be valid");
-                        let (created_message, applied_message_index) = if let Some(existing_index) =
-                            message_index_on_record(record, &message_id)
-                        {
-                            let Some(message) = record.session.messages.get_mut(existing_index)
-                            else {
-                                return Err(anyhow!(
-                                    "remote message index `{existing_index}` is out of bounds"
-                                ));
-                            };
-                            match message {
-                                Message::Command {
-                                    command: existing_command,
-                                    command_language: existing_command_language,
-                                    output: existing_output,
-                                    output_language: existing_output_language,
-                                    status: existing_status,
-                                    ..
-                                } => {
-                                    *existing_command = command.clone();
-                                    *existing_command_language = command_language.clone();
-                                    *existing_output = output.clone();
-                                    *existing_output_language = output_language.clone();
-                                    *existing_status = status;
-                                    (None, global_message_index(record, existing_index))
-                                }
-                                _ => {
-                                    return Err(anyhow!(
-                                        "remote message `{message_id}` is not a command message"
-                                    ));
-                                }
-                            }
-                        } else {
-                            if record.session.messages.is_empty() {
-                                record.message_start_index = message_index;
-                            }
-                            let local_message_index = message_index
-                                .checked_sub(record.message_start_index)
-                                .ok_or_else(|| {
-                                    anyhow!(
-                                        "remote CommandUpdate index `{message_index}` predates the retained transcript window in session `{session_id}`"
-                                    )
-                                })?;
-                            if local_message_index > record.session.messages.len() {
-                                return Err(anyhow!(
-                                    "remote CommandUpdate index `{message_index}` leaves a gap in session `{session_id}`"
-                                ));
-                            }
-                            let message = Message::Command {
-                                id: message_id.clone(),
-                                timestamp: stamp_now(),
-                                author: Author::Assistant,
-                                command: command.clone(),
-                                command_language: command_language.clone(),
-                                output: output.clone(),
-                                output_language: output_language.clone(),
-                                status,
-                            };
-                            insert_message_on_record(
-                                record,
-                                local_message_index,
-                                message.clone(),
-                            );
-                            (Some(message), message_index)
-                        };
-                        record.session.preview = preview.clone();
-                        if remote_session_mutation_stamp.is_some() {
-                            record.session.session_mutation_stamp = remote_session_mutation_stamp;
-                        }
-                        (
-                            record.session.id.clone(),
-                            created_message,
-                            applied_message_index,
-                            session_message_count(record),
-                            record.session.status,
-                            record.mutation_stamp,
-                        )
-                    };
-                    let revision = if created_message.is_some() {
-                        self.commit_persisted_delta_locked(&mut inner)?
-                    } else {
-                        self.commit_delta_locked(&mut inner)?
-                    };
-                    inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (
-                        local_session_id,
-                        created_message,
-                        applied_message_index,
-                        message_count,
-                        revision,
-                        session_status,
-                        session_mutation_stamp,
-                    )
-                };
-                if let Some(message) = created_message {
-                    self.publish_delta(&DeltaEvent::MessageCreated {
-                        revision,
-                        session_id: local_session_id,
-                        message_id,
-                        message_index: applied_message_index,
-                        message_count,
-                        message,
-                        preview,
-                        status: session_status,
-                        session_mutation_stamp: Some(session_mutation_stamp),
-                    });
-                } else {
-                    self.publish_delta(&DeltaEvent::CommandUpdate {
-                        revision,
-                        session_id: local_session_id,
-                        message_id,
-                        message_index: applied_message_index,
-                        message_count,
-                        command,
-                        command_language,
-                        output,
-                        output_language,
-                        status,
-                        preview,
-                        session_mutation_stamp: Some(session_mutation_stamp),
-                    });
-                }
-                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-            }
-            DeltaEvent::ParallelAgentsUpdate {
-                agents,
-                message_count: remote_message_count,
-                message_id,
-                message_index,
-                preview,
-                session_id,
-                session_mutation_stamp: remote_session_mutation_stamp,
-                ..
-            } => {
-                if message_index >= usize::try_from(remote_message_count).unwrap_or(usize::MAX) {
-                    return Err(anyhow!(
-                        "remote ParallelAgentsUpdate index `{message_index}` is outside messageCount `{remote_message_count}` for session `{session_id}`"
-                    ));
-                }
-                let hydration_outcome = self.hydrate_unloaded_remote_session_for_delta(
-                    remote_id,
-                    &session_id,
-                    remote_revision,
-                    remote_message_count,
-                    remote_session_mutation_stamp,
-                )?;
-                if self.should_skip_delta_after_remote_hydration(
-                    hydration_outcome,
-                    &remote_delta_replay_key,
-                ) {
-                    return Ok(());
-                }
-                let (
-                    local_session_id,
-                    created_message,
-                    applied_message_index,
-                    message_count,
-                    revision,
-                    session_status,
-                    session_mutation_stamp,
-                ) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_session_applied_delta_revision(
-                        remote_id,
-                        &session_id,
-                        remote_revision,
-                    ) {
-                        return Ok(());
-                    }
-                    let index = inner
-                        .find_remote_session_index(remote_id, &session_id)
-                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let (
-                        local_session_id,
-                        created_message,
-                        applied_message_index,
-                        message_count,
-                        session_status,
-                        session_mutation_stamp,
-                    ) = {
-                        let record = inner
-                            .session_mut_by_index(index)
-                            .expect("session index should be valid");
-                        let (created_message, applied_message_index) = if let Some(existing_index) =
-                            message_index_on_record(record, &message_id)
-                        {
-                            let Some(message) = record.session.messages.get_mut(existing_index)
-                            else {
-                                return Err(anyhow!(
-                                    "remote message index `{existing_index}` is out of bounds"
-                                ));
-                            };
-                            match message {
-                                Message::ParallelAgents {
-                                    agents: existing_agents,
-                                    ..
-                                } => {
-                                    *existing_agents = agents.clone();
-                                    (None, global_message_index(record, existing_index))
-                                }
-                                _ => {
-                                    return Err(anyhow!(
-                                        "remote message `{message_id}` is not a parallel-agents message"
-                                    ));
-                                }
-                            }
-                        } else {
-                            if record.session.messages.is_empty() {
-                                record.message_start_index = message_index;
-                            }
-                            let local_message_index = message_index
-                                .checked_sub(record.message_start_index)
-                                .ok_or_else(|| {
-                                    anyhow!(
-                                        "remote ParallelAgentsUpdate index `{message_index}` predates the retained transcript window in session `{session_id}`"
-                                    )
-                                })?;
-                            if local_message_index > record.session.messages.len() {
-                                return Err(anyhow!(
-                                    "remote ParallelAgentsUpdate index `{message_index}` leaves a gap in session `{session_id}`"
-                                ));
-                            }
-                            let message = Message::ParallelAgents {
-                                id: message_id.clone(),
-                                timestamp: stamp_now(),
-                                author: Author::Assistant,
-                                agents: agents.clone(),
-                            };
-                            insert_message_on_record(
-                                record,
-                                local_message_index,
-                                message.clone(),
-                            );
-                            (Some(message), message_index)
-                        };
-                        record.session.preview = preview.clone();
-                        if remote_session_mutation_stamp.is_some() {
-                            record.session.session_mutation_stamp = remote_session_mutation_stamp;
-                        }
-                        (
-                            record.session.id.clone(),
-                            created_message,
-                            applied_message_index,
-                            session_message_count(record),
-                            record.session.status,
-                            record.mutation_stamp,
-                        )
-                    };
-                    let revision = if created_message.is_some() {
-                        self.commit_persisted_delta_locked(&mut inner)?
-                    } else {
-                        self.commit_delta_locked(&mut inner)?
-                    };
-                    inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (
-                        local_session_id,
-                        created_message,
-                        applied_message_index,
-                        message_count,
-                        revision,
-                        session_status,
-                        session_mutation_stamp,
-                    )
-                };
-                if let Some(message) = created_message {
-                    self.publish_delta(&DeltaEvent::MessageCreated {
-                        revision,
-                        session_id: local_session_id,
-                        message_id,
-                        message_index: applied_message_index,
-                        message_count,
-                        message,
-                        preview,
-                        status: session_status,
-                        session_mutation_stamp: Some(session_mutation_stamp),
-                    });
-                } else {
-                    self.publish_delta(&DeltaEvent::ParallelAgentsUpdate {
-                        revision,
-                        session_id: local_session_id,
-                        message_id,
-                        message_index: applied_message_index,
-                        message_count,
-                        agents,
-                        preview,
-                        session_mutation_stamp: Some(session_mutation_stamp),
-                    });
-                }
-                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-            }
-            DeltaEvent::ConversationMarkerCreated {
-                marker,
-                session_id,
-                session_mutation_stamp: remote_session_mutation_stamp,
-                ..
-            } => {
-                if marker.session_id != session_id {
-                    return Err(anyhow!(
-                        "remote marker payload session id `{}` did not match event id `{session_id}`",
-                        marker.session_id
-                    ));
-                }
-                let (local_session_id, localized_marker, revision, session_mutation_stamp) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_session_applied_delta_revision(
-                        remote_id,
-                        &session_id,
-                        remote_revision,
-                    ) {
-                        return Ok(());
-                    }
-                    let index = inner
-                        .find_remote_session_index(remote_id, &session_id)
-                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let local_session_id = inner.sessions[index].session.id.clone();
-                    let localized_marker =
-                        localize_remote_conversation_marker(marker, &local_session_id).map_err(
-                            |err| anyhow!("remote marker color was invalid: {}", err.message),
-                        )?;
-                    let session_mutation_stamp = {
-                        let record = inner
-                            .session_mut_by_index(index)
-                            .expect("session index should be valid");
-                        if let Some(existing_index) = record
-                            .session
-                            .markers
-                            .iter()
-                            .position(|entry| entry.id == localized_marker.id)
-                        {
-                            record.session.markers[existing_index] = localized_marker.clone();
-                        } else {
-                            record.session.markers.push(localized_marker.clone());
-                        }
-                        if remote_session_mutation_stamp.is_some() {
-                            record.session.session_mutation_stamp = remote_session_mutation_stamp;
-                        }
-                        record.mutation_stamp
-                    };
-                    let revision = self.commit_persisted_delta_locked(&mut inner)?;
-                    inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (
-                        local_session_id,
-                        localized_marker,
-                        revision,
-                        session_mutation_stamp,
-                    )
-                };
-                self.publish_delta(&DeltaEvent::ConversationMarkerCreated {
-                    revision,
-                    session_id: local_session_id,
-                    marker: localized_marker,
-                    session_mutation_stamp: Some(session_mutation_stamp),
-                });
-                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-            }
-            DeltaEvent::ConversationMarkerUpdated {
-                marker,
-                session_id,
-                session_mutation_stamp: remote_session_mutation_stamp,
-                ..
-            } => {
-                if marker.session_id != session_id {
-                    return Err(anyhow!(
-                        "remote marker payload session id `{}` did not match event id `{session_id}`",
-                        marker.session_id
-                    ));
-                }
-                let (local_session_id, localized_marker, revision, session_mutation_stamp) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_session_applied_delta_revision(
-                        remote_id,
-                        &session_id,
-                        remote_revision,
-                    ) {
-                        return Ok(());
-                    }
-                    let index = inner
-                        .find_remote_session_index(remote_id, &session_id)
-                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let local_session_id = inner.sessions[index].session.id.clone();
-                    let localized_marker =
-                        localize_remote_conversation_marker(marker, &local_session_id).map_err(
-                            |err| anyhow!("remote marker color was invalid: {}", err.message),
-                        )?;
-                    let session_mutation_stamp = {
-                        let record = inner
-                            .session_mut_by_index(index)
-                            .expect("session index should be valid");
-                        if let Some(existing_index) = record
-                            .session
-                            .markers
-                            .iter()
-                            .position(|entry| entry.id == localized_marker.id)
-                        {
-                            record.session.markers[existing_index] = localized_marker.clone();
-                        } else {
-                            record.session.markers.push(localized_marker.clone());
-                        }
-                        if remote_session_mutation_stamp.is_some() {
-                            record.session.session_mutation_stamp = remote_session_mutation_stamp;
-                        }
-                        record.mutation_stamp
-                    };
-                    let revision = self.commit_persisted_delta_locked(&mut inner)?;
-                    inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (
-                        local_session_id,
-                        localized_marker,
-                        revision,
-                        session_mutation_stamp,
-                    )
-                };
-                self.publish_delta(&DeltaEvent::ConversationMarkerUpdated {
-                    revision,
-                    session_id: local_session_id,
-                    marker: localized_marker,
-                    session_mutation_stamp: Some(session_mutation_stamp),
-                });
-                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-            }
-            DeltaEvent::ConversationMarkerDeleted {
-                marker_id,
-                session_id,
-                session_mutation_stamp: remote_session_mutation_stamp,
-                ..
-            } => {
-                let Some((local_session_id, revision, session_mutation_stamp)) = ({
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_session_applied_delta_revision(
-                        remote_id,
-                        &session_id,
-                        remote_revision,
-                    ) {
-                        return Ok(());
-                    }
-                    let index = inner
-                        .find_remote_session_index(remote_id, &session_id)
-                        .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    let existing_index = inner.sessions[index]
-                        .session
-                        .markers
-                        .iter()
-                        .position(|entry| entry.id == marker_id);
-                    let Some(existing_index) = existing_index else {
-                        inner.note_remote_applied_revision(remote_id, remote_revision);
-                        drop(inner);
-                        self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-                        return Ok(());
-                    };
-                    let (local_session_id, session_mutation_stamp) = {
-                        let record = inner
-                            .session_mut_by_index(index)
-                            .expect("session index should be valid");
-                        let local_session_id = record.session.id.clone();
-                        record.session.markers.remove(existing_index);
-                        if remote_session_mutation_stamp.is_some() {
-                            record.session.session_mutation_stamp = remote_session_mutation_stamp;
-                        }
-                        (local_session_id, record.mutation_stamp)
-                    };
-                    inner.note_remote_applied_revision(remote_id, remote_revision);
-                    let revision = self.commit_persisted_delta_locked(&mut inner)?;
-                    Some((local_session_id, revision, session_mutation_stamp))
-                }) else {
-                    self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-                    return Ok(());
-                };
-                self.publish_delta(&DeltaEvent::ConversationMarkerDeleted {
-                    revision,
-                    session_id: local_session_id,
-                    marker_id,
-                    session_mutation_stamp: Some(session_mutation_stamp),
-                });
-                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-            }
-            DeltaEvent::OrchestratorsUpdated {
-                orchestrators,
-                sessions,
-                ..
-            } => {
-                let (revision, localized_orchestrators) = {
-                    let mut inner = self.inner.lock().expect("state mutex poisoned");
-                    if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
-                        return Ok(());
-                    }
-                    let local_project_ids_by_remote_project_id =
-                        remote_project_id_map(&inner, remote_id);
-                    let remote_sessions_by_id = (!sessions.is_empty()).then(|| {
-                        sessions
-                            .iter()
-                            .map(|session| (session.id.as_str(), session))
-                            .collect::<HashMap<_, _>>()
-                    });
-                    let rollback_state = (
-                        inner.next_session_number,
-                        inner.sessions.clone(),
-                        inner.orchestrator_instances.clone(),
-                    );
-                    if let Err(err) = sync_remote_orchestrators_inner(
-                        &mut inner,
-                        remote_id,
-                        &orchestrators,
-                        &local_project_ids_by_remote_project_id,
-                        remote_sessions_by_id.as_ref(),
-                    ) {
-                        inner.next_session_number = rollback_state.0;
-                        inner.sessions = rollback_state.1;
-                        inner.orchestrator_instances = rollback_state.2;
-                        return Err(err);
-                    }
-                    let revision = self.commit_persisted_delta_locked(&mut inner)?;
-                    inner.note_remote_applied_revision(remote_id, remote_revision);
-                    (revision, inner.orchestrator_instances.clone())
-                };
-                self.publish_orchestrators_updated(revision, localized_orchestrators);
-                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-            }
-            DeltaEvent::CodexUpdated {
-                revision: _,
-                codex: _,
-            } => {
-                // CodexState is process-global runtime metadata, not localized
-                // remote proxy state. Mark the remote revision consumed for
-                // monotonicity, but intentionally do not fold the Codex payload
-                // into local state; this watermark means "consumed" for this
-                // informational variant, not "reflected in the proxy model".
-                let mut inner = self.inner.lock().expect("state mutex poisoned");
-                if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
-                    return Ok(());
-                }
-                inner.note_remote_applied_revision(remote_id, remote_revision);
-                drop(inner);
-                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-            }
-            DeltaEvent::DelegationCreated { .. }
-            | DeltaEvent::DelegationWaitCreated { .. }
-            | DeltaEvent::DelegationWaitConsumed { .. }
-            | DeltaEvent::DelegationWaitResumeDispatchFailed { .. }
-            | DeltaEvent::DelegationUpdated { .. }
-            | DeltaEvent::DelegationCompleted { .. }
-            | DeltaEvent::DelegationFailed { .. }
-            | DeltaEvent::DelegationCanceled { .. } => {
-                // Delegations are local parent/child session relationships.
-                // Cross-machine delegation is a non-goal for this phase, so
-                // consume the remote revision without mirroring the payload.
-                let mut inner = self.inner.lock().expect("state mutex poisoned");
-                if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
-                    return Ok(());
-                }
-                inner.note_remote_applied_revision(remote_id, remote_revision);
-                drop(inner);
-                self.note_remote_applied_delta_replay(&remote_delta_replay_key);
-            }
+        if let Err(err) = self.commit_remote_localization_locked(&mut inner) {
+            return Err(ApiError::internal(format!(
+                "failed to persist remote state: {err:#}"
+            )));
         }
         Ok(())
     }

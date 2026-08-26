@@ -5,6 +5,42 @@
 
 use super::*;
 
+fn replace_remote_settings_for_terminal_authority_test(state: &AppState, remote: RemoteConfig) {
+    state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: None,
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
+            default_opencode_model: None,
+            default_codex_reasoning_effort: None,
+            default_codex_sandbox_mode: None,
+            default_codex_approval_policy: None,
+            default_claude_approval_mode: None,
+            default_claude_effort: None,
+            remotes: Some(vec![RemoteConfig::local(), remote]),
+        })
+        .expect("remote settings replacement should succeed");
+}
+
+fn remove_remote_settings_for_terminal_authority_test(state: &AppState) {
+    state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: None,
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
+            default_opencode_model: None,
+            default_codex_reasoning_effort: None,
+            default_codex_sandbox_mode: None,
+            default_codex_approval_policy: None,
+            default_claude_approval_mode: None,
+            default_claude_effort: None,
+            remotes: Some(vec![RemoteConfig::local()]),
+        })
+        .expect("remote settings removal should succeed");
+}
+
 // Pins that when a remote responds 200 OK to /api/terminal/run/stream
 // with a non-SSE content-type (e.g. text/html), the local proxy emits
 // a BAD_GATEWAY "unexpected content type" error event and does not
@@ -113,7 +149,10 @@ async fn remote_terminal_stream_rejects_successful_non_sse_without_json_fallback
         .insert(
             remote.id.clone(),
             Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
+                config: remote.clone(),
+                authority_generation: 0,
+                retired: AtomicBool::new(false),
+                state_continuity_generation: AtomicU64::new(1),
                 forwarded_port: port,
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
@@ -248,7 +287,12 @@ async fn remote_terminal_stream_proxies_successful_sse_output() {
         "Remote Stream SSE",
         "remote-stream-sse-project",
     );
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
     let app = app_router(state);
 
     let response = request_response(
@@ -412,7 +456,12 @@ async fn assert_remote_terminal_stream_fallback_for_status(stream_status: Status
         &format!("Remote Stream Fallback {}", stream_status.as_u16()),
         &format!("remote-stream-fallback-project-{}", stream_status.as_u16()),
     );
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
     let app = app_router(state);
 
     let response = request_response(
@@ -466,6 +515,400 @@ async fn assert_remote_terminal_stream_fallback_for_status(stream_status: Status
             .any(|line| line.starts_with("POST /api/terminal/run ")),
         "fallback JSON route was not attempted: {request_lines:?}"
     );
+}
+
+#[tokio::test]
+async fn remote_terminal_legacy_fallback_rejects_display_name_retirement() {
+    assert_remote_terminal_legacy_fallback_rejects_retired_lease(false).await;
+}
+
+#[tokio::test]
+async fn remote_terminal_legacy_fallback_rejects_a_to_b_to_a_retirement() {
+    assert_remote_terminal_legacy_fallback_rejects_retired_lease(true).await;
+}
+
+#[tokio::test]
+async fn remote_terminal_legacy_fallback_completion_rejects_endpoint_replacement() {
+    assert_remote_terminal_legacy_fallback_completion_rechecks_authority(false).await;
+}
+
+#[tokio::test]
+async fn remote_terminal_legacy_fallback_completion_rejects_remote_removal() {
+    assert_remote_terminal_legacy_fallback_completion_rechecks_authority(true).await;
+}
+
+async fn assert_remote_terminal_legacy_fallback_completion_rechecks_authority(remove_remote: bool) {
+    let request_lines = Arc::new(Mutex::new(Vec::<String>::new()));
+    let request_lines_for_server = request_lines.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let fallback_response = serde_json::to_string(&TerminalCommandResponse {
+        command: "echo completion authority".to_owned(),
+        duration_ms: 1,
+        exit_code: Some(0),
+        output_truncated: false,
+        shell: "sh".to_owned(),
+        stderr: String::new(),
+        stdout: "retired completion\n".to_owned(),
+        success: true,
+        timed_out: false,
+        workdir: "/remote/repo".to_owned(),
+    })
+    .expect("terminal response should encode");
+    let server = std::thread::spawn(move || {
+        loop {
+            let mut stream = accept_test_connection_with_timeout(
+                &listener,
+                "remote terminal fallback completion listener",
+                std::time::Duration::from_secs(10),
+            );
+            let request = read_test_http_request(&mut stream);
+            request_lines_for_server
+                .lock()
+                .expect("request lines mutex poisoned")
+                .push(request.request_line.clone());
+
+            if request.request_line.starts_with("GET /api/health ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    r#"{"ok":true}"#,
+                );
+                continue;
+            }
+            if request
+                .request_line
+                .starts_with("POST /api/terminal/run/stream ")
+            {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::NOT_FOUND,
+                    "application/json",
+                    r#"{"error":"stream route unavailable"}"#,
+                );
+                continue;
+            }
+            if request.request_line.starts_with("POST /api/terminal/run ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    &fallback_response,
+                );
+                break;
+            }
+            panic!("unexpected request: {}", request.request_line);
+        }
+    });
+
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: if remove_remote {
+            "ssh-stream-fallback-completion-removal".to_owned()
+        } else {
+            "ssh-stream-fallback-completion-replacement".to_owned()
+        },
+        name: "SSH Stream Fallback Completion Authority".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Stream Fallback Completion Authority",
+        if remove_remote {
+            "remote-stream-fallback-completion-removal-project"
+        } else {
+            "remote-stream-fallback-completion-replacement-project"
+        },
+    );
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
+    let state_for_hook = state.clone();
+    let project_id_for_hook = project_id.clone();
+    let mut replacement = remote.clone();
+    replacement.host = Some("replacement.example.com".to_owned());
+    replacement.port = Some(2222);
+    state.remote_registry.set_test_after_json_decode(move || {
+        if remove_remote {
+            state_for_hook
+                .delete_project(&project_id_for_hook)
+                .expect("project deletion should detach the remote");
+            remove_remote_settings_for_terminal_authority_test(&state_for_hook);
+        } else {
+            replace_remote_settings_for_terminal_authority_test(&state_for_hook, replacement);
+        }
+    });
+    let app = app_router(state.clone());
+
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/terminal/run/stream")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "command": "echo completion authority",
+                    "projectId": project_id,
+                    "workdir": "/remote/repo",
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let events = collect_sse_events(response).await;
+    let error_events = events
+        .iter()
+        .filter(|(event_name, _)| event_name == "error")
+        .collect::<Vec<_>>();
+    assert_eq!(error_events.len(), 1, "events: {events:?}");
+    let error: Value = serde_json::from_str(&error_events[0].1).expect("error event should decode");
+    if remove_remote {
+        assert_eq!(
+            error["status"],
+            Value::from(StatusCode::BAD_REQUEST.as_u16())
+        );
+        assert_eq!(
+            error["error"],
+            Value::String(format!("unknown remote `{}`", remote.id))
+        );
+    } else {
+        assert_eq!(error["status"], Value::from(StatusCode::CONFLICT.as_u16()));
+        assert_eq!(
+            error["error"],
+            Value::String(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST.to_owned())
+        );
+    }
+    assert!(
+        events
+            .iter()
+            .all(|(event_name, _)| event_name != "complete"),
+        "retired fallback completion must not be emitted: {events:?}"
+    );
+
+    join_test_server(server);
+    let request_lines = request_lines.lock().expect("request lines mutex poisoned");
+    assert!(
+        request_lines
+            .iter()
+            .any(|line| line.starts_with("POST /api/terminal/run/stream ")),
+        "stream route was not attempted: {request_lines:?}"
+    );
+    assert!(
+        request_lines
+            .iter()
+            .any(|line| line.starts_with("POST /api/terminal/run ")),
+        "fallback JSON route was not attempted: {request_lines:?}"
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+async fn assert_remote_terminal_legacy_fallback_rejects_retired_lease(
+    restore_original_route: bool,
+) {
+    let request_lines = Arc::new(Mutex::new(Vec::<String>::new()));
+    let request_lines_for_server = request_lines.clone();
+    let fallback_executed = Arc::new(AtomicBool::new(false));
+    let fallback_executed_for_server = fallback_executed.clone();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let fallback_response = serde_json::to_string(&TerminalCommandResponse {
+        command: "echo authority fence".to_owned(),
+        duration_ms: 1,
+        exit_code: Some(0),
+        output_truncated: false,
+        shell: "sh".to_owned(),
+        stderr: String::new(),
+        stdout: "must not execute\n".to_owned(),
+        success: true,
+        timed_out: false,
+        workdir: "/remote/repo".to_owned(),
+    })
+    .expect("terminal response should encode");
+    let server = std::thread::spawn(move || {
+        let mut stream_response_sent = false;
+        listener
+            .set_nonblocking(true)
+            .expect("test listener should support nonblocking mode");
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    stream
+                        .set_nonblocking(false)
+                        .expect("accepted test socket should support blocking mode");
+                    let request = read_test_http_request(&mut stream);
+                    request_lines_for_server
+                        .lock()
+                        .expect("request lines mutex poisoned")
+                        .push(request.request_line.clone());
+                    if request.request_line.starts_with("GET /api/health ") {
+                        write_test_http_response(
+                            &mut stream,
+                            StatusCode::OK,
+                            "application/json",
+                            r#"{"ok":true}"#,
+                        );
+                    } else if request
+                        .request_line
+                        .starts_with("POST /api/terminal/run/stream ")
+                    {
+                        write_test_http_response(
+                            &mut stream,
+                            StatusCode::NOT_FOUND,
+                            "application/json",
+                            r#"{"error":"stream route unavailable"}"#,
+                        );
+                        stream_response_sent = true;
+                    } else if request.request_line.starts_with("POST /api/terminal/run ") {
+                        fallback_executed_for_server.store(true, Ordering::SeqCst);
+                        write_test_http_response(
+                            &mut stream,
+                            StatusCode::OK,
+                            "application/json",
+                            &fallback_response,
+                        );
+                    } else {
+                        panic!("unexpected request: {}", request.request_line);
+                    }
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    if stream_response_sent && done_rx.try_recv().is_ok() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(err) => panic!("remote terminal authority listener failed: {err}"),
+            }
+        }
+    });
+
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: if restore_original_route {
+            "ssh-stream-fallback-cycle".to_owned()
+        } else {
+            "ssh-stream-fallback-rename".to_owned()
+        },
+        name: "SSH Stream Fallback Authority".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Stream Fallback Authority",
+        if restore_original_route {
+            "remote-stream-fallback-cycle-project"
+        } else {
+            "remote-stream-fallback-rename-project"
+        },
+    );
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
+    let state_for_hook = state.clone();
+    let remote_for_hook = remote.clone();
+    state
+        .remote_registry
+        .set_test_before_remote_terminal_fallback(move || {
+            if restore_original_route {
+                let mut replacement = remote_for_hook.clone();
+                replacement.host = Some("replacement.example.com".to_owned());
+                replacement.port = Some(2222);
+                replace_remote_settings_for_terminal_authority_test(&state_for_hook, replacement);
+                replace_remote_settings_for_terminal_authority_test(
+                    &state_for_hook,
+                    remote_for_hook,
+                );
+            } else {
+                let mut renamed = remote_for_hook;
+                renamed.name = "Renamed SSH Stream Fallback Authority".to_owned();
+                replace_remote_settings_for_terminal_authority_test(&state_for_hook, renamed);
+            }
+        });
+    let app = app_router(state.clone());
+
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/terminal/run/stream")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "command": "echo authority fence",
+                    "projectId": project_id,
+                    "workdir": "/remote/repo",
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let events = collect_sse_events(response).await;
+    let error_events = events
+        .iter()
+        .filter(|(event_name, _)| event_name == "error")
+        .collect::<Vec<_>>();
+    assert_eq!(error_events.len(), 1, "events: {events:?}");
+    let error: Value = serde_json::from_str(&error_events[0].1).expect("error event should decode");
+    assert_eq!(error["status"], Value::from(StatusCode::CONFLICT.as_u16()));
+    assert_eq!(
+        error["error"],
+        Value::String(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST.to_owned())
+    );
+    assert!(
+        events
+            .iter()
+            .all(|(event_name, _)| event_name != "complete"),
+        "retired fallback must not complete: {events:?}"
+    );
+
+    done_tx.send(()).expect("server completion should send");
+    join_test_server(server);
+    assert!(
+        !fallback_executed.load(Ordering::SeqCst),
+        "the JSON fallback must not execute through a fresh connection"
+    );
+    let request_lines = request_lines.lock().expect("request lines mutex poisoned");
+    assert!(
+        request_lines
+            .iter()
+            .any(|line| line.starts_with("POST /api/terminal/run/stream ")),
+        "stream route was not attempted: {request_lines:?}"
+    );
+    assert!(
+        request_lines
+            .iter()
+            .all(|line| !line.starts_with("POST /api/terminal/run ")),
+        "retired lease reached fallback execution: {request_lines:?}"
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 // Pins parse_terminal_sse_frame's handling of default `message` event
@@ -879,6 +1322,470 @@ fn interruptible_remote_stream_reader_drains_partial_chunks_across_small_reads()
     assert_eq!(collected, b"abcdefghij");
 }
 
+// Pins the consumer-side half of the remote stream authority fence. The HTTP
+// producer may validate and enqueue a chunk while endpoint A is current, then
+// settings can replace A before the forwarding thread consumes that queue.
+// Buffered bytes from A must be discarded instead of crossing the replacement.
+#[tokio::test]
+async fn interruptible_remote_stream_reader_rejects_queued_bytes_after_endpoint_replacement() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "remote-terminal-queued-authority".to_owned(),
+        name: "Queued Authority Remote".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("old.example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let mut replacement = remote.clone();
+    replacement.host = Some("new.example.com".to_owned());
+    replacement.port = Some(2222);
+    replacement.user = Some("bob".to_owned());
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/terminal-queued-authority",
+        "Queued Authority Project",
+        "remote-project-terminal-queued-authority",
+    );
+    let lease = state
+        .remote_registry
+        .connection(&remote)
+        .expect("the original route should be current");
+    let authority = RemoteStreamingAuthority::new(
+        lease,
+        state.remote_registry.configs.clone(),
+        state.remote_registry.config_generation.clone(),
+    );
+    let (chunk_tx, chunk_rx) = std::sync::mpsc::sync_channel::<io::Result<Vec<u8>>>(1);
+    chunk_tx
+        .send(Ok(b"bytes from retired endpoint".to_vec()))
+        .expect("queued chunk should be accepted");
+    drop(chunk_tx);
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let mut reader = InterruptibleRemoteStreamReader::new_with_authority(
+        chunk_rx,
+        cancellation.clone(),
+        authority,
+    );
+
+    state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: None,
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
+            default_opencode_model: None,
+            default_codex_reasoning_effort: None,
+            default_codex_sandbox_mode: None,
+            default_codex_approval_policy: None,
+            default_claude_approval_mode: None,
+            default_claude_effort: None,
+            remotes: Some(vec![RemoteConfig::local(), replacement]),
+        })
+        .expect("endpoint replacement should publish");
+
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(TERMINAL_STREAM_EVENT_QUEUE_CAPACITY);
+    let error = match forward_remote_terminal_stream_reader(&mut reader, &event_tx, &cancellation) {
+        Ok(_) => panic!("queued bytes from the retired route must be rejected"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.message, REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST);
+
+    send_terminal_stream_result(&event_tx, Err(error)).await;
+    match event_rx
+        .recv()
+        .await
+        .expect("terminal error event should emit")
+    {
+        TerminalCommandStreamEvent::Error { error, status } => {
+            assert_eq!(status, StatusCode::CONFLICT.as_u16());
+            assert_eq!(error, REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST);
+        }
+        _ => panic!("expected terminal stream error event"),
+    }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[tokio::test]
+async fn terminal_stream_error_event_preserves_unknown_remote_status_after_removal() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "remote-terminal-queued-removal".to_owned(),
+        name: "Queued Removal Remote".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("old.example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/terminal-queued-removal",
+        "Queued Removal Project",
+        "remote-project-terminal-queued-removal",
+    );
+    let lease = state
+        .remote_registry
+        .connection(&remote)
+        .expect("the original route should be current");
+    let authority = RemoteStreamingAuthority::new(
+        lease,
+        state.remote_registry.configs.clone(),
+        state.remote_registry.config_generation.clone(),
+    );
+    let (chunk_tx, chunk_rx) = std::sync::mpsc::sync_channel::<io::Result<Vec<u8>>>(1);
+    chunk_tx
+        .send(Ok(b"bytes from removed endpoint".to_vec()))
+        .expect("queued chunk should be accepted");
+    drop(chunk_tx);
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let mut reader = InterruptibleRemoteStreamReader::new_with_authority(
+        chunk_rx,
+        cancellation.clone(),
+        authority,
+    );
+
+    state
+        .delete_project(&project_id)
+        .expect("test project deletion should detach the remote");
+    state
+        .update_app_settings(UpdateAppSettingsRequest {
+            default_codex_model: None,
+            default_claude_model: None,
+            default_cursor_model: None,
+            default_gemini_model: None,
+            default_opencode_model: None,
+            default_codex_reasoning_effort: None,
+            default_codex_sandbox_mode: None,
+            default_codex_approval_policy: None,
+            default_claude_approval_mode: None,
+            default_claude_effort: None,
+            remotes: Some(vec![RemoteConfig::local()]),
+        })
+        .expect("remote removal should publish");
+
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(TERMINAL_STREAM_EVENT_QUEUE_CAPACITY);
+    let error = match forward_remote_terminal_stream_reader(&mut reader, &event_tx, &cancellation) {
+        Ok(_) => panic!("queued bytes from the removed route must be rejected"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(error.message, format!("unknown remote `{}`", remote.id));
+
+    send_terminal_stream_result(&event_tx, Err(error)).await;
+    match event_rx
+        .recv()
+        .await
+        .expect("terminal error event should emit")
+    {
+        TerminalCommandStreamEvent::Error { error, status } => {
+            assert_eq!(status, StatusCode::BAD_REQUEST.as_u16());
+            assert_eq!(error, format!("unknown remote `{}`", remote.id));
+        }
+        _ => panic!("expected terminal stream error event"),
+    }
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins the free-queue dispatch boundary. Replacement after the optimistic
+// authority check but before enqueue must be observed by the locked dispatch
+// guard, so no old-endpoint event can enter the browser-facing channel after
+// settings publication wins the race.
+#[test]
+fn remote_terminal_free_queue_enqueue_is_atomic_with_route_publication() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "remote-terminal-free-queue-authority".to_owned(),
+        name: "Free Queue Authority Remote".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("old.example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let mut replacement = remote.clone();
+    replacement.host = Some("new.example.com".to_owned());
+    replacement.port = Some(2222);
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/terminal-free-queue-authority",
+        "Free Queue Authority Project",
+        "remote-project-terminal-free-queue-authority",
+    );
+    let lease = state
+        .remote_registry
+        .connection(&remote)
+        .expect("the original route should be current");
+    let authority = RemoteStreamingAuthority::new(
+        lease,
+        state.remote_registry.configs.clone(),
+        state.remote_registry.config_generation.clone(),
+    );
+    let state_for_hook = state.clone();
+    authority.set_test_before_terminal_event_enqueue(move || {
+        replace_remote_settings_for_terminal_authority_test(&state_for_hook, replacement);
+    });
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(1);
+
+    let error = send_remote_terminal_stream_event(
+        &event_tx,
+        TerminalCommandStreamEvent::Output {
+            stream: TerminalOutputStream::Stdout,
+            text: "stale".to_owned(),
+        },
+        Some(&cancellation),
+        Some(&authority),
+    )
+    .expect_err("replacement before enqueue must reject the retired event");
+
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.message, REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST);
+    assert!(event_rx.try_recv().is_err());
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins the final terminal forwarding boundary. A complete remote SSE chunk can
+// already be decoded into the outer pending buffer while the browser-facing
+// channel is full. Replacing the endpoint during that backpressure must abort
+// with the route conflict instead of forwarding the retired endpoint's queued
+// output or accepting its completion frame.
+#[tokio::test]
+async fn remote_terminal_frame_dispatch_rechecks_authority_during_backpressure() {
+    struct OneChunkReader {
+        bytes: Option<Vec<u8>>,
+        read_returned: Arc<AtomicBool>,
+    }
+
+    impl std::io::Read for OneChunkReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let Some(bytes) = self.bytes.take() else {
+                return Ok(0);
+            };
+            assert!(bytes.len() <= buf.len());
+            buf[..bytes.len()].copy_from_slice(&bytes);
+            self.read_returned.store(true, Ordering::SeqCst);
+            Ok(bytes.len())
+        }
+    }
+
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "remote-terminal-frame-dispatch-authority".to_owned(),
+        name: "Frame Dispatch Authority Remote".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("old.example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let mut replacement = remote.clone();
+    replacement.host = Some("new.example.com".to_owned());
+    replacement.port = Some(2222);
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/terminal-frame-dispatch-authority",
+        "Frame Dispatch Authority Project",
+        "remote-project-terminal-frame-dispatch-authority",
+    );
+    let lease = state
+        .remote_registry
+        .connection(&remote)
+        .expect("the original route should be current");
+    let authority = RemoteStreamingAuthority::new(
+        lease,
+        state.remote_registry.configs.clone(),
+        state.remote_registry.config_generation.clone(),
+    );
+    let response = TerminalCommandResponse {
+        command: "printf stale".to_owned(),
+        duration_ms: 1,
+        exit_code: Some(0),
+        output_truncated: false,
+        shell: "sh".to_owned(),
+        stderr: String::new(),
+        stdout: "stale".to_owned(),
+        success: true,
+        timed_out: false,
+        workdir: "/remote".to_owned(),
+    };
+    let bytes = format!(
+        "event: output\ndata: {}\n\nevent: complete\ndata: {}\n\n",
+        json!({ "stream": "stdout", "text": "stale" }),
+        serde_json::to_string(&response).expect("completion response should encode")
+    )
+    .into_bytes();
+    let read_returned = Arc::new(AtomicBool::new(false));
+    let mut reader = OneChunkReader {
+        bytes: Some(bytes),
+        read_returned: read_returned.clone(),
+    };
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(1);
+    assert!(
+        event_tx
+            .try_send(TerminalCommandStreamEvent::Error {
+                error: "sentinel".to_owned(),
+                status: StatusCode::IM_A_TEAPOT.as_u16(),
+            })
+            .is_ok()
+    );
+    let cancellation_for_forwarder = cancellation.clone();
+    let authority_for_forwarder = authority.clone();
+    let (result_tx, result_rx) = std::sync::mpsc::sync_channel(1);
+    let forwarder = std::thread::spawn(move || {
+        let result = forward_remote_terminal_stream_reader_with_authority(
+            &mut reader,
+            &event_tx,
+            &cancellation_for_forwarder,
+            &authority_for_forwarder,
+        );
+        let _ = result_tx.send(result);
+    });
+
+    let read_deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !read_returned.load(Ordering::SeqCst) {
+        assert!(
+            std::time::Instant::now() < read_deadline,
+            "the forwarder should read the combined remote frame"
+        );
+        std::thread::yield_now();
+    }
+    replace_remote_settings_for_terminal_authority_test(&state, replacement);
+
+    let error = match result_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("route retirement should interrupt terminal backpressure")
+    {
+        Ok(_) => panic!("retired buffered frames must not complete"),
+        Err(error) => error,
+    };
+    forwarder.join().expect("forwarder should exit cleanly");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.message, REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST);
+    match event_rx
+        .recv()
+        .await
+        .expect("sentinel should remain queued")
+    {
+        TerminalCommandStreamEvent::Error { error, status } => {
+            assert_eq!(error, "sentinel");
+            assert_eq!(status, StatusCode::IM_A_TEAPOT.as_u16());
+        }
+        _ => panic!("only the prefilled sentinel should be present"),
+    }
+    assert!(event_rx.try_recv().is_err());
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins that an idle HTTP producer cannot hide endpoint retirement. The worker
+// stays blocked in source.read() while the consumer wakes on recv_timeout and
+// independently rejects the retired streaming authority.
+#[test]
+fn interruptible_remote_stream_reader_rejects_retirement_while_producer_is_idle() {
+    struct BlockingSource {
+        read_called: Arc<AtomicBool>,
+        release: Arc<AtomicBool>,
+    }
+
+    impl std::io::Read for BlockingSource {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+            self.read_called.store(true, Ordering::SeqCst);
+            while !self.release.load(Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
+            Ok(0)
+        }
+    }
+
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "remote-terminal-idle-authority".to_owned(),
+        name: "Idle Authority Remote".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("old.example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let mut replacement = remote.clone();
+    replacement.host = Some("new.example.com".to_owned());
+    replacement.port = Some(2222);
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/terminal-idle-authority",
+        "Idle Authority Project",
+        "remote-project-terminal-idle-authority",
+    );
+    let lease = state
+        .remote_registry
+        .connection(&remote)
+        .expect("the original route should be current");
+    let authority = RemoteStreamingAuthority::new(
+        lease,
+        state.remote_registry.configs.clone(),
+        state.remote_registry.config_generation.clone(),
+    );
+    let read_called = Arc::new(AtomicBool::new(false));
+    let release = Arc::new(AtomicBool::new(false));
+    let source = BlockingSource {
+        read_called: read_called.clone(),
+        release: release.clone(),
+    };
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let mut reader = InterruptibleRemoteStreamReader::spawn_with_authority(
+        source,
+        cancellation.clone(),
+        authority,
+    );
+    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(TERMINAL_STREAM_EVENT_QUEUE_CAPACITY);
+    let cancellation_for_forwarder = cancellation.clone();
+    let (result_tx, result_rx) = std::sync::mpsc::sync_channel(1);
+    let forwarder = std::thread::spawn(move || {
+        let result = forward_remote_terminal_stream_reader(
+            &mut reader,
+            &event_tx,
+            &cancellation_for_forwarder,
+        );
+        let _ = result_tx.send(result);
+    });
+
+    let read_deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !read_called.load(Ordering::SeqCst) {
+        assert!(
+            std::time::Instant::now() < read_deadline,
+            "the producer should enter its blocking body read"
+        );
+        std::thread::yield_now();
+    }
+    replace_remote_settings_for_terminal_authority_test(&state, replacement);
+
+    let result = result_rx.recv_timeout(Duration::from_secs(5));
+    release.store(true, Ordering::SeqCst);
+    cancellation.store(true, Ordering::SeqCst);
+    let _ = forwarder.join();
+    let error =
+        match result.expect("idle retirement should wake the consumer through authority polling") {
+            Ok(_) => panic!("the retired route must be rejected"),
+            Err(error) => error,
+        };
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.message, REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // Pins that when the chunk channel is idle and cancellation flips,
 // forward_remote_terminal_stream_reader returns BAD_GATEWAY with
 // "terminal stream client disconnected" from the adapter-level
@@ -1214,7 +2121,10 @@ async fn terminal_run_route_proxies_valid_remote_multibyte_commands() {
         .insert(
             remote.id.clone(),
             Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
+                config: remote.clone(),
+                authority_generation: 0,
+                retired: AtomicBool::new(false),
+                state_continuity_generation: AtomicU64::new(1),
                 forwarded_port: port,
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),

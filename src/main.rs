@@ -628,10 +628,12 @@ impl Mode {
 }
 
 include!("process_limits.rs");
+include!("remote_authority.rs");
 include!("remote.rs");
 include!("remote_ssh.rs");
 include!("remote_terminal.rs");
 include!("remote_routes.rs");
+include!("remote_delta_apply.rs");
 include!("remote_create_proxies.rs");
 include!("remote_codex_proxies.rs");
 include!("remote_session_proxies.rs");

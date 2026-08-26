@@ -12,6 +12,236 @@ use super::remote_delta_replay::local_replay_test_remote;
 use super::*;
 
 #[test]
+fn exact_bounded_tail_replay_retries_dirty_persistence() {
+    let mut state = test_app_state();
+    let original_persistence_path = state.persistence_path.clone();
+    let remote = RemoteConfig {
+        id: "ssh-tail-dirty-retry".to_owned(),
+        name: "Tail Dirty Retry".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/tail-dirty-retry",
+        "Tail Dirty Retry",
+        "remote-project-tail-dirty-retry",
+    );
+    let mut initial_state = sample_remote_orchestrator_state(
+        "remote-project-tail-dirty-retry",
+        "/remote/tail-dirty-retry",
+        3,
+        OrchestratorInstanceStatus::Running,
+    );
+    let remote_session = initial_state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == "remote-session-1")
+        .expect("sample remote session should exist");
+    remote_session.preview = "Persisted tail preview.".to_owned();
+    remote_session.messages = vec![remote_text_message(
+        "remote-message-tail-dirty-retry",
+        "Persisted tail message.",
+    )];
+    remote_session.message_count = 1;
+    remote_session.messages_loaded = true;
+    let remote_session = remote_session.clone();
+    state
+        .apply_remote_state_snapshot(&remote.id, initial_state)
+        .expect("initial remote state should apply");
+    let local_session_id = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_remote_session_index(&remote.id, "remote-session-1")
+            .expect("remote session should be mirrored");
+        inner.sessions[index].session.id.clone()
+    };
+    state.shutdown_persist_blocking();
+
+    let failing_persistence_path =
+        std::env::temp_dir().join(format!("termal-tail-dirty-retry-{}", Uuid::new_v4()));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("a directory at the persistence path should force failure");
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+    let mut peer_state_events = state.subscribe_events();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&local_session_id)
+            .expect("mirrored session should exist");
+        inner
+            .session_mut_by_index(index)
+            .expect("mirrored session index should remain valid")
+            .session
+            .preview = "Dirty bounded-tail preview.".to_owned();
+        inner.note_remote_session_transcript_applied_revision(&remote.id, "remote-session-1", 3);
+        state
+            .commit_remote_localization_locked(&mut inner)
+            .expect_err("the forced persistence failure should arm retry debt");
+        assert!(inner.remote_delta_persist_dirty);
+    }
+    assert!(
+        peer_state_events.try_recv().is_err(),
+        "the failed localization must not publish a snapshot"
+    );
+
+    fs::remove_dir_all(&failing_persistence_path)
+        .expect("failing persistence directory should be removable");
+    state.persistence_path = original_persistence_path.clone();
+    let remote_response = SessionResponse {
+        revision: 3,
+        session: remote_session,
+        server_instance_id: state.server_instance_id.clone(),
+    };
+    let (port, _requests, server) = spawn_remote_session_response_server(remote_response);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
+    let target = state
+        .remote_session_target(&local_session_id)
+        .expect("remote session target should resolve")
+        .expect("session should be remote");
+    let response = state
+        .fetch_remote_session_tail_target(
+            &target,
+            16,
+            Some(3),
+            None,
+            REMOTE_REQUEST_TIMEOUT,
+            None,
+            None,
+            None,
+        )
+        .expect("an exact bounded-tail replay should discharge persistence debt");
+    assert_eq!(response.session.preview, "Dirty bounded-tail preview.");
+    assert!(
+        !state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .remote_delta_persist_dirty
+    );
+    let peer_snapshot: StateResponse = serde_json::from_str(
+        &peer_state_events
+            .try_recv()
+            .expect("the dirty retry should publish the missed snapshot"),
+    )
+    .expect("peer snapshot should decode");
+    assert_eq!(
+        peer_snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == local_session_id)
+            .expect("peer snapshot should include the mirrored session")
+            .preview,
+        "Dirty bounded-tail preview."
+    );
+    let reloaded = load_state(original_persistence_path.as_path())
+        .expect("retried bounded-tail state should load")
+        .expect("retried bounded-tail state should exist");
+    assert_eq!(
+        reloaded
+            .sessions
+            .iter()
+            .find(|record| record.session.id == local_session_id)
+            .expect("mirrored session should survive reload")
+            .session
+            .preview,
+        "Dirty bounded-tail preview."
+    );
+
+    let hydration_failure_path = std::env::temp_dir().join(format!(
+        "termal-hydration-skip-dirty-retry-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&hydration_failure_path)
+        .expect("a directory at the persistence path should force failure");
+    state.persistence_path = Arc::new(hydration_failure_path.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&local_session_id)
+            .expect("mirrored session should remain");
+        inner
+            .session_mut_by_index(index)
+            .expect("mirrored session index should remain valid")
+            .session
+            .preview = "Dirty hydration-skip preview.".to_owned();
+        inner.note_remote_session_transcript_applied_revision(&remote.id, "remote-session-1", 4);
+        state
+            .commit_remote_localization_locked(&mut inner)
+            .expect_err("the second forced failure should re-arm persistence debt");
+        assert!(inner.remote_delta_persist_dirty);
+    }
+    fs::remove_dir_all(&hydration_failure_path)
+        .expect("second failing persistence directory should be removable");
+    state.persistence_path = original_persistence_path.clone();
+    let authority_generation = state
+        .remote_registry
+        .config_generation
+        .load(Ordering::Acquire);
+    let outcome = state
+        .hydrate_unloaded_remote_session_for_delta(
+            &remote.id,
+            "remote-session-1",
+            authority_generation,
+            4,
+            1,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("an applied-revision hydration skip should discharge persistence debt");
+    assert_eq!(outcome, RemoteDeltaHydrationOutcome::SkipApplied);
+    assert!(
+        !state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .remote_delta_persist_dirty
+    );
+    let second_peer_snapshot: StateResponse = serde_json::from_str(
+        &peer_state_events
+            .try_recv()
+            .expect("the hydration skip retry should publish the missed snapshot"),
+    )
+    .expect("second peer snapshot should decode");
+    assert_eq!(
+        second_peer_snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == local_session_id)
+            .expect("second peer snapshot should include the mirrored session")
+            .preview,
+        "Dirty hydration-skip preview."
+    );
+    let reloaded = load_state(original_persistence_path.as_path())
+        .expect("hydration-skip retry should load")
+        .expect("hydration-skip retry should persist state");
+    assert_eq!(
+        reloaded
+            .sessions
+            .iter()
+            .find(|record| record.session.id == local_session_id)
+            .expect("mirrored session should survive the hydration-skip reload")
+            .session
+            .preview,
+        "Dirty hydration-skip preview."
+    );
+
+    join_test_server(server);
+    let _ = fs::remove_file(original_persistence_path.as_path());
+}
+
+#[test]
 fn remote_session_created_delta_republishes_metadata_only_session_summary() {
     let state = test_app_state();
     let remote = RemoteConfig {
@@ -721,7 +951,12 @@ fn get_session_hydrates_unloaded_remote_proxy_from_remote_owner() {
         session: full_remote_session,
         server_instance_id: "remote-instance".to_owned(),
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let response = state
         .get_session(&local_session_id)
@@ -836,7 +1071,12 @@ fn bounded_history_hydrates_unloaded_remote_proxy_before_slicing() {
             session_mutation_stamp: 7,
             server_instance_id: "remote-instance".to_owned(),
         });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let history = state
         .get_session_history(&local_session_id, None, None, None, false, 2)
@@ -947,7 +1187,12 @@ fn conversation_overview_forwards_one_bounded_remote_request() {
             markers: Vec::new(),
             latest_position: 2,
         });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let overview = state
         .get_session_overview(&local_session_id, 2)
@@ -1039,7 +1284,12 @@ fn stale_remote_tail_response_cannot_overwrite_newer_synchronized_metadata() {
         session: stale_remote_session,
         server_instance_id: "remote-instance".to_owned(),
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let error = match state.get_session(&local_session_id) {
         Ok(_) => panic!("stale bounded tail must be rejected"),
@@ -1125,7 +1375,12 @@ fn stale_remote_history_page_is_not_relabelled_with_current_proxy_metadata() {
             session_mutation_stamp: 30,
             server_instance_id: "remote-instance".to_owned(),
         });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let error = match state.get_session_history(&local_session_id, None, None, None, false, 2) {
         Ok(_) => panic!("stale remote history must be rejected"),
@@ -1205,7 +1460,12 @@ fn get_session_adopts_bounded_summary_when_remote_owner_has_no_tail_bytes() {
         session: owner_summary,
         server_instance_id: "remote-instance".to_owned(),
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let response = state
         .get_session(&local_session_id)
@@ -1316,7 +1576,12 @@ fn get_session_hydration_skips_side_fetch_when_remote_revision_is_already_seen()
         session: full_remote_session,
         server_instance_id: "remote-instance".to_owned(),
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let response = state
         .get_session(&local_session_id)
@@ -1436,7 +1701,12 @@ fn get_session_hydration_suppresses_same_revision_delta_for_hydrated_session_onl
         session: hydrated_session,
         server_instance_id: "remote-instance".to_owned(),
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     state
         .get_session(&local_session_id)
@@ -1584,7 +1854,12 @@ fn get_session_propagates_remote_protocol_error_instead_of_cached_summary() {
         session: remote_session,
         server_instance_id: "remote-instance".to_owned(),
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let result = state.get_session(&local_session_id);
     join_test_server(server);
@@ -1707,7 +1982,12 @@ fn get_session_surfaces_remote_tail_transport_failure_without_summary_fallback()
             panic!("unexpected request: {}", request.request_line);
         }
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let err = match state.get_session(&local_session_id) {
         Ok(_) => panic!("remote tail transport failure should surface"),
@@ -1792,7 +2072,12 @@ fn get_session_tail_does_not_fetch_a_broad_remote_state_snapshot() {
         session: stale_full_session,
         server_instance_id: "remote-instance".to_owned(),
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let response = state
         .get_session(&local_session_id)
@@ -1894,7 +2179,12 @@ fn remote_message_delta_hydrates_unloaded_proxy_before_gap_check() {
         session: full_remote_session,
         server_instance_id: "remote-instance".to_owned(),
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let mut delta_receiver = state.subscribe_delta_events();
     state
@@ -2021,7 +2311,12 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
         session: full_remote_session,
         server_instance_id: "remote-instance".to_owned(),
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let mut delta_receiver = state.subscribe_delta_events();
     let replayed_delta = || DeltaEvent::TextDelta {
@@ -2237,7 +2532,7 @@ fn remote_session_create_forwards_configured_default_model() {
         "Remote Default Model",
         "remote-project-default-model",
     );
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(&state, &remote, port, TestRemoteBridgeOwnership::Claimed);
     let server = std::thread::spawn(move || {
         loop {
             let mut stream = accept_test_connection(&listener, "remote session create listener");
@@ -2620,7 +2915,12 @@ fn targeted_remote_hydration_rejects_message_count_length_mismatch() {
         session: full_remote_session,
         server_instance_id: "remote-instance".to_owned(),
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let err = state
         .apply_remote_delta_event(
@@ -2712,7 +3012,12 @@ fn remote_delta_falls_through_when_targeted_hydration_returns_summary() {
         session: upstream_summary,
         server_instance_id: "remote-instance".to_owned(),
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     state
         .apply_remote_delta_event(
@@ -2814,7 +3119,12 @@ fn remote_delta_repair_rejects_newer_targeted_session_revision() {
         session: full_remote_session,
         server_instance_id: "remote-instance".to_owned(),
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let error = state
         .apply_remote_delta_event(

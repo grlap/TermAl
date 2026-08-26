@@ -147,6 +147,11 @@ struct StateMutex<T> {
     inner: Mutex<T>,
     diagnostic_reporter: StateMutexDiagnosticReporter,
     warn_after: Duration,
+    /// Test-only owner tracking distinguishes a callback that re-enters this
+    /// exact mutex on the same thread from harmless contention by a fixture's
+    /// background thread. That makes lock-scope assertions deterministic.
+    #[cfg(test)]
+    owner_thread: Mutex<Option<std::thread::ThreadId>>,
 }
 
 impl<T> StateMutex<T> {
@@ -155,6 +160,8 @@ impl<T> StateMutex<T> {
             inner: Mutex::new(value),
             diagnostic_reporter: default_state_mutex_diagnostic_reporter(),
             warn_after: STATE_MUTEX_WARN_AFTER,
+            #[cfg(test)]
+            owner_thread: Mutex::new(None),
         }
     }
 
@@ -168,6 +175,7 @@ impl<T> StateMutex<T> {
             inner: Mutex::new(value),
             diagnostic_reporter,
             warn_after,
+            owner_thread: Mutex::new(None),
         }
     }
 
@@ -182,6 +190,8 @@ impl<T> StateMutex<T> {
                 caller,
                 self.warn_after,
                 Arc::clone(&self.diagnostic_reporter),
+                #[cfg(test)]
+                &self.owner_thread,
             )),
             Err(err) => Err(std::sync::PoisonError::new(StateMutexGuard::new(
                 err.into_inner(),
@@ -189,7 +199,21 @@ impl<T> StateMutex<T> {
                 caller,
                 self.warn_after,
                 Arc::clone(&self.diagnostic_reporter),
+                #[cfg(test)]
+                &self.owner_thread,
             ))),
+        }
+    }
+
+    #[cfg(test)]
+    fn is_not_held_by_current_thread_for_test(&self) -> bool {
+        let owner = self
+            .owner_thread
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match owner.as_ref() {
+            Some(owner) => owner != &std::thread::current().id(),
+            None => true,
         }
     }
 }
@@ -201,6 +225,8 @@ struct StateMutexGuard<'a, T> {
     diagnostic_reporter: StateMutexDiagnosticReporter,
     waited: Duration,
     warn_after: Duration,
+    #[cfg(test)]
+    owner_thread: &'a Mutex<Option<std::thread::ThreadId>>,
 }
 
 impl<'a, T> StateMutexGuard<'a, T> {
@@ -210,6 +236,7 @@ impl<'a, T> StateMutexGuard<'a, T> {
         caller: &'static std::panic::Location<'static>,
         warn_after: Duration,
         diagnostic_reporter: StateMutexDiagnosticReporter,
+        #[cfg(test)] owner_thread: &'a Mutex<Option<std::thread::ThreadId>>,
     ) -> Self {
         let acquired_at = std::time::Instant::now();
         let waited = acquired_at.saturating_duration_since(requested_at);
@@ -221,6 +248,14 @@ impl<'a, T> StateMutexGuard<'a, T> {
                 column: caller.column(),
             });
         }
+        #[cfg(test)]
+        {
+            let mut owner = owner_thread
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            debug_assert!(owner.is_none());
+            *owner = Some(std::thread::current().id());
+        }
         Self {
             guard: Some(guard),
             acquired_at,
@@ -228,6 +263,8 @@ impl<'a, T> StateMutexGuard<'a, T> {
             diagnostic_reporter,
             waited,
             warn_after,
+            #[cfg(test)]
+            owner_thread,
         }
     }
 }
@@ -257,6 +294,15 @@ impl<T> Drop for StateMutexGuard<'_, T> {
         let file = self.caller.file();
         let line = self.caller.line();
         let column = self.caller.column();
+        #[cfg(test)]
+        {
+            let mut owner = self
+                .owner_thread
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            debug_assert_eq!(owner.as_ref(), Some(&std::thread::current().id()));
+            *owner = None;
+        }
         drop(self.guard.take());
         if held >= self.warn_after {
             (self.diagnostic_reporter)(StateMutexDiagnostic::Held {
@@ -534,8 +580,19 @@ const REMOTE_DELTA_REPLAY_CACHE_LIMIT: usize = 2048;
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct RemoteDeltaReplayKey {
     remote_id: String,
+    /// Identifies the connection/config publication that owned this event.
+    /// The same remote id, revision, and payload from a replacement endpoint
+    /// must never be suppressed by bookkeeping left by its predecessor.
+    authority_generation: u64,
     revision: u64,
     payload: RemoteDeltaReplayPayload,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct RemoteDeltaHydrationKey {
+    remote_id: String,
+    remote_session_id: String,
+    authority_generation: u64,
 }
 
 /// Semantic identity for one remote delta replay key.
@@ -694,9 +751,11 @@ impl RemoteDeltaReplayCache {
         }
     }
 
-    fn remove_remote(&mut self, remote_id: &str) {
+    fn remove_remote(&mut self, remote_id: &str) -> bool {
+        let previous_len = self.keys.len();
         self.keys.retain(|key| key.remote_id != remote_id);
         self.order.retain(|key| key.remote_id != remote_id);
+        self.keys.len() != previous_len
     }
 }
 
@@ -898,12 +957,12 @@ struct AppState {
     /// continuity loss.
     remote_delta_replay_cache: Arc<Mutex<RemoteDeltaReplayCache>>,
     /// Remote session transcript hydrations currently being fetched because a
-    /// delta reached an unloaded proxy session. Keyed by `(remote_id,
-    /// remote_session_id)` so concurrent same-session deltas do not fan out
-    /// duplicate blocking `/api/sessions/{id}` requests; duplicate deltas skip
+    /// delta reached an unloaded proxy session. The key includes the authority
+    /// generation so endpoint B is never blocked by endpoint A's retired
+    /// request for the same remote/session ids. Same-generation duplicates skip
     /// the narrow unloaded-transcript path and are left un-replayed until a
     /// later event or the in-flight fetch repairs the transcript.
-    remote_delta_hydrations_in_flight: Arc<Mutex<HashSet<(String, String)>>>,
+    remote_delta_hydrations_in_flight: Arc<Mutex<HashSet<RemoteDeltaHydrationKey>>>,
     /// Remote register/upgrade lifecycle actions currently running. The UI
     /// disables buttons while pending, but this backend guard is the
     /// correctness boundary for duplicate browser tabs or direct API retries.
@@ -1128,6 +1187,19 @@ fn collect_workspace_layout_summaries<'a>(
 struct StateInner {
     codex: CodexState,
     preferences: AppPreferences,
+    /// Runtime retry marker for settings mutations that changed memory but
+    /// failed synchronous persistence. An identical request must retry the
+    /// write instead of reporting success merely because the values already
+    /// match memory.
+    settings_persist_dirty: bool,
+    /// Tracks whether the dirty settings include remote routing so repeated
+    /// failures keep the operator warning specific and accurate.
+    remote_settings_persist_dirty: bool,
+    /// A remote delta mutated in-memory state but its synchronous persistence
+    /// attempt returned an error. Exact redelivery may now be a semantic no-op,
+    /// so those paths must retry the full snapshot before advancing remote
+    /// revision/replay bookkeeping.
+    remote_delta_persist_dirty: bool,
     revision: u64,
     next_project_number: usize,
     next_session_number: usize,
@@ -1207,6 +1279,9 @@ impl StateInner {
         Self {
             codex: CodexState::default(),
             preferences: AppPreferences::default(),
+            settings_persist_dirty: false,
+            remote_settings_persist_dirty: false,
+            remote_delta_persist_dirty: false,
             revision: 0,
             next_project_number: 1,
             next_session_number: 1,

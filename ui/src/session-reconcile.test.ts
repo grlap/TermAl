@@ -701,6 +701,57 @@ describe("reconcileSessions", () => {
     expect(merged.pendingPrompts).toBeUndefined();
   });
 
+  it("retains a guarded optimistic prompt when an adopted window start cannot be resolved", () => {
+    const optimisticPrompt = {
+      id: "optimistic-1",
+      timestamp: "10:01",
+      text: "continue",
+      localOnly: true,
+      transcriptEndIndexAtEnqueue: 0,
+    };
+    const previous = makeSession("session-a", {
+      messagesLoaded: false,
+      sessionMutationStamp: 10,
+      messages: [
+        {
+          id: "previous-message",
+          type: "text",
+          timestamp: "10:00",
+          author: "assistant",
+          text: "Previous resident message",
+        },
+      ],
+      pendingPrompts: [optimisticPrompt],
+    });
+    const next = makeSession("session-a", {
+      messagesLoaded: false,
+      sessionMutationStamp: 11,
+      messages: [
+        {
+          id: "unfamiliar-assistant-message",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Unfamiliar adopted message",
+        },
+        {
+          id: "unfamiliar-user-message",
+          type: "text",
+          timestamp: "10:02",
+          author: "you",
+          text: "continue",
+        },
+      ],
+    });
+
+    const merged = reconcileSingleSession(previous, next);
+
+    expect(merged.messages).toEqual(next.messages);
+    expect(merged.messageStartIndex).toBeUndefined();
+    expect(merged.messagesLoaded).toBe(false);
+    expect(merged.pendingPrompts).toBe(previous.pendingPrompts);
+  });
+
   it("retains a guarded optimistic prompt when its enqueue boundary is unavailable", () => {
     const optimisticPrompt = {
       id: "optimistic-legacy",

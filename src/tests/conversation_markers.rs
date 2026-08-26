@@ -765,7 +765,12 @@ fn remote_backed_marker_create_proxies_to_owner_and_localizes_response() {
     );
     let (port, requests, server) =
         spawn_remote_marker_create_server(test_marker_response(remote_marker, 7));
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let response = state
         .create_conversation_marker(
@@ -802,6 +807,100 @@ fn remote_backed_marker_create_proxies_to_owner_and_localizes_response() {
 }
 
 #[test]
+fn remote_marker_create_is_rejected_after_post_decode_a_to_b_to_a_cycle() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-marker-post-decode-cycle".to_owned(),
+        name: "SSH Marker Post Decode Cycle".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("old.example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_session_id = remote_proxy_session_with_message(&state, &remote);
+    let remote_marker = test_marker(
+        "marker-post-decode-cycle",
+        "remote-session-1",
+        "remote-message-1",
+        ConversationMarkerKind::Checkpoint,
+    );
+    let (port, _requests, server) =
+        spawn_remote_marker_create_server(test_marker_response(remote_marker, 7));
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
+    let state_for_hook = state.clone();
+    let original_for_hook = remote.clone();
+    let mut replacement = remote.clone();
+    replacement.host = Some("replacement.example.com".to_owned());
+    replacement.port = Some(2222);
+    replacement.user = Some("bob".to_owned());
+    state.remote_registry.set_test_after_json_decode(move || {
+        state_for_hook
+            .update_app_settings(UpdateAppSettingsRequest {
+                default_codex_model: None,
+                default_claude_model: None,
+                default_cursor_model: None,
+                default_gemini_model: None,
+                default_opencode_model: None,
+                default_codex_reasoning_effort: None,
+                default_codex_sandbox_mode: None,
+                default_codex_approval_policy: None,
+                default_claude_approval_mode: None,
+                default_claude_effort: None,
+                remotes: Some(vec![RemoteConfig::local(), replacement]),
+            })
+            .expect("A -> B replacement should succeed");
+        state_for_hook
+            .update_app_settings(UpdateAppSettingsRequest {
+                default_codex_model: None,
+                default_claude_model: None,
+                default_cursor_model: None,
+                default_gemini_model: None,
+                default_opencode_model: None,
+                default_codex_reasoning_effort: None,
+                default_codex_sandbox_mode: None,
+                default_codex_approval_policy: None,
+                default_claude_approval_mode: None,
+                default_claude_effort: None,
+                remotes: Some(vec![RemoteConfig::local(), original_for_hook]),
+            })
+            .expect("B -> A restoration should succeed");
+    });
+
+    let error = state
+        .create_conversation_marker(
+            &local_session_id,
+            CreateConversationMarkerRequest {
+                kind: ConversationMarkerKind::Checkpoint,
+                name: "Checkpoint".to_owned(),
+                body: None,
+                color: "#3b82f6".to_owned(),
+                message_id: "remote-message-1".to_owned(),
+                end_message_id: None,
+            },
+        )
+        .expect_err("a pre-cycle marker response must not apply after A -> B -> A");
+
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.message, REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST);
+    assert!(
+        state
+            .list_conversation_markers(&local_session_id)
+            .expect("local marker list should read")
+            .markers
+            .is_empty()
+    );
+
+    join_test_server(server);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn remote_backed_marker_update_proxies_patch_and_localizes_response() {
     let state = test_app_state();
     let remote = RemoteConfig {
@@ -829,7 +928,12 @@ fn remote_backed_marker_update_proxies_patch_and_localizes_response() {
         StatusCode::OK,
         response_body,
     );
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let response = state
         .update_conversation_marker(
@@ -913,7 +1017,12 @@ fn remote_backed_marker_delete_proxies_delete_and_localizes_response() {
         StatusCode::OK,
         response_body,
     );
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let response = state
         .delete_conversation_marker(&local_session_id, "marker-remote-1")
@@ -973,6 +1082,10 @@ fn remote_marker_proxy_response_carries_localized_stamp_and_dedupes_replayed_eve
         .remote_session_target(&local_session_id)
         .expect("remote target lookup should succeed")
         .expect("session should be remote-backed");
+    let response_lease = state
+        .remote_registry
+        .connection(&target.remote)
+        .expect("remote marker response lease should resolve");
     let remote_marker = test_marker(
         "marker-remote-1",
         "remote-session-1",
@@ -990,6 +1103,7 @@ fn remote_marker_proxy_response_carries_localized_stamp_and_dedupes_replayed_eve
                 server_instance_id: "remote-instance".to_owned(),
                 session_mutation_stamp: Some(9_999),
             },
+            &response_lease,
             true,
             None,
         )
@@ -1051,6 +1165,10 @@ fn remote_marker_proxy_response_returns_current_marker_after_stale_skip() {
         .remote_session_target(&local_session_id)
         .expect("remote target lookup should succeed")
         .expect("session should be remote-backed");
+    let response_lease = state
+        .remote_registry
+        .connection(&target.remote)
+        .expect("remote marker response lease should resolve");
     let mut newer_marker = test_marker(
         "marker-remote-1",
         "remote-session-1",
@@ -1092,6 +1210,7 @@ fn remote_marker_proxy_response_returns_current_marker_after_stale_skip() {
                 server_instance_id: "remote-instance".to_owned(),
                 session_mutation_stamp: Some(11),
             },
+            &response_lease,
             true,
             None,
         )
@@ -1129,6 +1248,10 @@ fn remote_marker_update_response_rejects_mismatched_marker_id() {
         .remote_session_target(&local_session_id)
         .expect("remote target lookup should succeed")
         .expect("session should be remote-backed");
+    let response_lease = state
+        .remote_registry
+        .connection(&target.remote)
+        .expect("remote marker response lease should resolve");
     let remote_marker = test_marker(
         "marker-other",
         "remote-session-1",
@@ -1145,6 +1268,7 @@ fn remote_marker_update_response_rejects_mismatched_marker_id() {
                 server_instance_id: "remote-instance".to_owned(),
                 session_mutation_stamp: Some(11),
             },
+            &response_lease,
             false,
             Some("marker-expected"),
         )
@@ -1188,7 +1312,12 @@ fn remote_marker_update_proxy_rejects_mismatched_marker_id() {
         StatusCode::OK,
         response_body,
     );
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let err = state
         .update_conversation_marker(
@@ -1374,6 +1503,334 @@ fn remote_marker_deltas_localize_publish_and_skip_exact_replays() {
     assert!(markers.markers.is_empty());
 
     let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_marker_delete_persist_failure_does_not_advance_revision_watermark() {
+    let mut state = test_app_state();
+    let original_persistence_path = state.persistence_path.as_path().to_path_buf();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_session_id = remote_proxy_session_with_message(&state, &remote);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerCreated {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                marker: test_marker(
+                    "marker-remote-1",
+                    "remote-session-1",
+                    "remote-message-1",
+                    ConversationMarkerKind::Decision,
+                ),
+                session_mutation_stamp: Some(11),
+            },
+        )
+        .expect("remote marker create delta should apply");
+
+    let failing_persistence_path = std::env::temp_dir().join(format!(
+        "termal-marker-delete-persist-failure-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("a directory at the persistence path should force commit failure");
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerDeleted {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                marker_id: "marker-remote-1".to_owned(),
+                session_mutation_stamp: Some(12),
+            },
+        )
+        .expect_err("marker deletion should surface the forced persistence failure");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(
+        inner.remote_applied_revisions.get(&remote.id),
+        Some(&3),
+        "a failed marker-deletion commit must not advance the remote revision watermark"
+    );
+    assert!(inner.remote_delta_persist_dirty);
+    assert!(
+        inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == local_session_id)
+            .expect("local proxy session should remain")
+            .session
+            .markers
+            .is_empty(),
+        "memory remains authoritative after a persistence error because SQLite may already have committed"
+    );
+    drop(inner);
+
+    let _ = fs::remove_dir_all(failing_persistence_path);
+    state.persistence_path = Arc::new(original_persistence_path.clone());
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerDeleted {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                marker_id: "marker-remote-1".to_owned(),
+                session_mutation_stamp: Some(12),
+            },
+        )
+        .expect("exact replay should retry and durably persist the in-memory deletion");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&4));
+    assert!(!inner.remote_delta_persist_dirty);
+    drop(inner);
+
+    let reloaded = load_state(&original_persistence_path)
+        .expect("the replayed marker deletion should load from SQLite")
+        .expect("the replayed marker deletion should produce persisted state");
+    assert!(
+        reloaded
+            .sessions
+            .iter()
+            .find(|record| record.session.id == local_session_id)
+            .expect("persisted local proxy session should remain")
+            .session
+            .markers
+            .is_empty(),
+        "the successfully replayed deletion must survive restart"
+    );
+    let _ = fs::remove_file(original_persistence_path);
+}
+
+#[test]
+fn equal_remote_snapshot_retries_dirty_delta_persistence_after_failed_recovery() {
+    let mut state = test_app_state();
+    let original_persistence_path = state.persistence_path.as_path().to_path_buf();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_session_id = remote_proxy_session_with_message(&state, &remote);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerCreated {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                marker: test_marker(
+                    "marker-remote-1",
+                    "remote-session-1",
+                    "remote-message-1",
+                    ConversationMarkerKind::Decision,
+                ),
+                session_mutation_stamp: Some(11),
+            },
+        )
+        .expect("remote marker create delta should apply");
+
+    let recovery_snapshot = || {
+        let mut snapshot = sample_remote_orchestrator_state(
+            "remote-project-1",
+            "/remote/repo",
+            4,
+            OrchestratorInstanceStatus::Running,
+        );
+        let remote_session = snapshot
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == "remote-session-1")
+            .expect("sample remote session should exist");
+        remote_session.messages = vec![Message::Text {
+            attachments: Vec::new(),
+            id: "remote-message-1".to_owned(),
+            timestamp: stamp_now(),
+            author: Author::Assistant,
+            text: "Remote message".to_owned(),
+            expanded_text: None,
+            source: None,
+        }];
+        remote_session.messages_loaded = true;
+        remote_session.message_count = 1;
+        remote_session.markers.clear();
+        remote_session.session_mutation_stamp = Some(12);
+        snapshot
+    };
+
+    let failing_persistence_path = std::env::temp_dir().join(format!(
+        "termal-equal-snapshot-persist-failure-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("a directory at the persistence path should force commit failure");
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerDeleted {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                marker_id: "marker-remote-1".to_owned(),
+                session_mutation_stamp: Some(12),
+            },
+        )
+        .expect_err("marker deletion should surface the forced persistence failure");
+    state
+        .apply_remote_state_snapshot(&remote.id, recovery_snapshot())
+        .expect_err("the first recovery snapshot should surface the same persistence failure");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(
+        inner.remote_snapshot_applied_revisions.get(&remote.id),
+        Some(&4),
+        "the failed recovery already consumed the snapshot revision in memory"
+    );
+    assert!(inner.remote_delta_persist_dirty);
+    drop(inner);
+
+    fs::remove_dir_all(&failing_persistence_path)
+        .expect("failing persistence directory should be removable");
+    state.persistence_path = Arc::new(original_persistence_path.clone());
+    state
+        .apply_remote_state_snapshot(&remote.id, recovery_snapshot())
+        .expect("an equal-revision recovery should retry the dirty full-state persistence");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.remote_delta_persist_dirty);
+    drop(inner);
+    let reloaded = load_state(&original_persistence_path)
+        .expect("the recovered full snapshot should load from SQLite")
+        .expect("the recovered full snapshot should be persisted");
+    assert!(
+        reloaded
+            .sessions
+            .iter()
+            .find(|record| record.session.id == local_session_id)
+            .expect("persisted local proxy session should remain")
+            .session
+            .markers
+            .is_empty(),
+        "the equal-revision recovery must make the in-memory deletion durable"
+    );
+    let _ = fs::remove_file(original_persistence_path);
+}
+
+#[test]
+fn ephemeral_remote_delta_retries_dirty_persistence_before_mutation() {
+    let mut state = test_app_state();
+    let original_persistence_path = state.persistence_path.as_path().to_path_buf();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_session_id = remote_proxy_session_with_message(&state, &remote);
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerCreated {
+                revision: 3,
+                session_id: "remote-session-1".to_owned(),
+                marker: test_marker(
+                    "marker-remote-1",
+                    "remote-session-1",
+                    "remote-message-1",
+                    ConversationMarkerKind::Decision,
+                ),
+                session_mutation_stamp: Some(11),
+            },
+        )
+        .expect("remote marker create delta should apply");
+
+    let failing_persistence_path = std::env::temp_dir().join(format!(
+        "termal-ephemeral-delta-dirty-retry-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("a directory at the persistence path should force commit failure");
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::ConversationMarkerDeleted {
+                revision: 4,
+                session_id: "remote-session-1".to_owned(),
+                marker_id: "marker-remote-1".to_owned(),
+                session_mutation_stamp: Some(12),
+            },
+        )
+        .expect_err("marker deletion should arm a dirty persistence retry");
+
+    fs::remove_dir_all(&failing_persistence_path)
+        .expect("failing persistence directory should be removable");
+    state.persistence_path = Arc::new(original_persistence_path.clone());
+    state
+        .apply_remote_delta_event(
+            &remote.id,
+            DeltaEvent::TextDelta {
+                revision: 5,
+                session_id: "remote-session-1".to_owned(),
+                message_id: "remote-message-1".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                text_start_byte: Some("Remote message".len()),
+                delta: " updated".to_owned(),
+                preview: Some("Remote message updated".to_owned()),
+                session_mutation_stamp: Some(13),
+            },
+        )
+        .expect("the next ephemeral delta should first persist the dirty snapshot");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(!inner.remote_delta_persist_dirty);
+    assert!(matches!(
+        &inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == local_session_id)
+            .expect("local proxy session should remain")
+            .session
+            .messages[0],
+        Message::Text { text, .. } if text == "Remote message updated"
+    ));
+    drop(inner);
+
+    let reloaded = load_state(&original_persistence_path)
+        .expect("the dirty retry should load from SQLite")
+        .expect("the dirty retry should persist state");
+    let reloaded_session = reloaded
+        .sessions
+        .iter()
+        .find(|record| record.session.id == local_session_id)
+        .expect("persisted local proxy session should remain");
+    assert!(
+        reloaded_session.session.markers.is_empty(),
+        "the persistence debt must be durable before the ephemeral mutation is applied"
+    );
+    assert!(matches!(
+        &reloaded_session.session.messages[0],
+        Message::Text { text, .. } if text == "Remote message"
+    ));
+    let _ = fs::remove_file(original_persistence_path);
 }
 
 #[test]

@@ -53,9 +53,11 @@ pub use orchestrator::{
 mod peer_messages;
 mod persist;
 mod persist_delta;
+mod project_creation_races;
 mod project_digest;
 mod projects;
 mod remote;
+mod remote_authority_races;
 mod remote_delta_replay;
 mod remote_hydration;
 mod remote_orchestrator;
@@ -978,10 +980,33 @@ fn create_test_remote_project(
         .expect("remote project should exist");
     inner.projects[index].remote_project_id = Some(remote_project_id.to_owned());
     state.commit_locked(&mut inner).unwrap();
+    let remotes = inner.preferences.remotes.clone();
+    let publication = state.remote_registry.publish_configs(&remotes);
+    drop(inner);
+    state.remote_registry.finish_config_publication(publication);
     project.id
 }
 
-fn insert_test_remote_connection(state: &AppState, remote: &RemoteConfig, forwarded_port: u16) {
+#[derive(Clone, Copy)]
+enum TestRemoteBridgeOwnership {
+    RequestOnly,
+    Claimed,
+}
+
+fn insert_test_remote_connection(
+    state: &AppState,
+    remote: &RemoteConfig,
+    forwarded_port: u16,
+    bridge_ownership: TestRemoteBridgeOwnership,
+) {
+    let remotes = state
+        .inner
+        .lock()
+        .expect("state mutex poisoned")
+        .preferences
+        .remotes
+        .clone();
+    state.remote_registry.reconcile(&remotes);
     state
         .remote_registry
         .connections
@@ -990,10 +1015,21 @@ fn insert_test_remote_connection(state: &AppState, remote: &RemoteConfig, forwar
         .insert(
             remote.id.clone(),
             Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
+                config: remote.clone(),
+                authority_generation: 0,
+                retired: AtomicBool::new(false),
+                state_continuity_generation: AtomicU64::new(1),
                 forwarded_port,
                 process: Mutex::new(None),
-                event_bridge_started: AtomicBool::new(true),
+                // Finite request fixtures must not impersonate a live bridge:
+                // settings replacement would otherwise schedule real SSH
+                // retry workers against their fake endpoint. Tests whose
+                // production path explicitly starts a bridge opt into Claimed
+                // ownership solely to suppress that detached worker.
+                event_bridge_started: AtomicBool::new(matches!(
+                    bridge_ownership,
+                    TestRemoteBridgeOwnership::Claimed
+                )),
                 event_bridge_shutdown: AtomicBool::new(false),
                 supports_inline_orchestrator_templates: Mutex::new(None),
             }),

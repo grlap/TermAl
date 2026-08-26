@@ -23,7 +23,59 @@
 // `lookup_remote_config`, `ensure_remote_project_binding`) lives in
 // `remote_routes.rs` and is shared with the proxy files below.
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RemoteCreateMissingProjectStatus {
+    // Preserve each route's established unknown-project contract: session
+    // creation reports 400 while orchestrator creation reports 404.
+    BadRequest,
+    NotFound,
+}
+
+impl RemoteCreateMissingProjectStatus {
+    fn error(self, message: impl Into<String>) -> ApiError {
+        match self {
+            Self::BadRequest => ApiError::bad_request(message),
+            Self::NotFound => ApiError::not_found(message),
+        }
+    }
+}
+
 impl AppState {
+    fn remote_create_binding_rejection(
+        &self,
+        resolution: RemoteProjectBindingResolution,
+        binding: &RemoteProjectBinding,
+        response_lease: &RemoteRequestLease,
+        missing_project_status: RemoteCreateMissingProjectStatus,
+    ) -> ApiError {
+        match resolution {
+            RemoteProjectBindingResolution::Current => {
+                ApiError::internal("current remote binding cannot be rejected")
+            }
+            RemoteProjectBindingResolution::ProjectMissing => {
+                // The remote create already succeeded. Keep the bridge for the
+                // still-current endpoint active so a later snapshot can expose
+                // its remote-owned result without reviving the local project.
+                if let Err(error) = self.start_remote_event_bridge_for_lease(response_lease) {
+                    return remote_create_authority_error(error);
+                }
+                missing_project_status
+                    .error(format!("unknown project `{}`", binding.local_project_id))
+            }
+            RemoteProjectBindingResolution::ProjectChanged => {
+                if let Err(error) = self.start_remote_event_bridge_for_lease(response_lease) {
+                    return remote_create_authority_error(error);
+                }
+                ApiError::conflict(REMOTE_PROJECT_BINDING_CHANGED_DURING_CREATE)
+            }
+            RemoteProjectBindingResolution::RemoteMissing => {
+                ApiError::bad_request(format!("unknown remote `{}`", binding.remote.id))
+            }
+            RemoteProjectBindingResolution::RemoteChanged => {
+                ApiError::conflict(REMOTE_CONNECTION_CHANGED_DURING_CREATE)
+            }
+        }
+    }
 
     /// Reuses any existing local project already bound to the same remote
     /// root path (so repeated project creates are idempotent), otherwise
@@ -47,13 +99,37 @@ impl AppState {
             if existing.remote_project_id.is_none() {
                 let _ = self.ensure_remote_project_binding(&existing.id)?;
             }
+            #[cfg(test)]
+            self.remote_registry
+                .run_test_before_existing_remote_project_revalidation();
+            let (project_id, state) = {
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
+                let current = inner
+                    .find_project(&existing.id)
+                    .filter(|project| {
+                        project.remote_id == remote.id && project.root_path == root_path
+                    })
+                    .ok_or_else(|| {
+                        ApiError::conflict(REMOTE_PROJECT_BINDING_CHANGED_DURING_CREATE)
+                    })?;
+                let project_id = current.id.clone();
+                self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to retry remote project persistence: {err:#}"
+                        ))
+                    })?;
+                (project_id, self.snapshot_from_inner(&inner))
+            };
             return Ok(CreateProjectResponse {
-                project_id: existing.id,
-                state: self.snapshot(),
+                project_id,
+                state,
             });
         }
 
-        let remote_response: CreateProjectResponse = self.remote_registry.request_json(
+        let (remote_response, response_lease): (CreateProjectResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &remote,
             Method::POST,
             "/api/projects",
@@ -63,17 +139,45 @@ impl AppState {
                 "rootPath": root_path,
                 "remoteId": LOCAL_REMOTE_ID,
             })),
-        )?;
+        )
+        .map_err(remote_create_authority_error)?;
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        self.ensure_remote_create_request_current_locked(&inner, &response_lease)?;
+        match resolve_remote_authority_locked(&inner, &remote) {
+            RemoteAuthorityResolution::Current => {}
+            RemoteAuthorityResolution::RemoteMissing => {
+                return Err(ApiError::bad_request(format!(
+                    "unknown remote `{}`",
+                    remote.id
+                )));
+            }
+            RemoteAuthorityResolution::RemoteChanged => {
+                return Err(ApiError::conflict(
+                    REMOTE_CONNECTION_CHANGED_DURING_CREATE,
+                ));
+            }
+        }
         let existing_len = inner.projects.len();
         let project = inner.create_project(request.name, root_path, remote.id.clone());
         let index = inner
             .projects
             .iter()
             .position(|candidate| candidate.id == project.id)
-            .ok_or_else(|| ApiError::not_found("project not found"))?;
+            .ok_or_else(|| ApiError::not_found(format!("unknown project `{}`", project.id)))?;
         let mut changed = inner.projects.len() != existing_len;
+        if inner.projects[index]
+            .remote_project_id
+            .as_deref()
+            .is_some_and(|existing| existing != remote_response.project_id)
+        {
+            // A concurrent request already won authority for this local
+            // project. Keep its binding; never overwrite it with a later POST
+            // response from a duplicate remote create.
+            return Err(ApiError::conflict(
+                REMOTE_PROJECT_BINDING_CHANGED_DURING_CREATE,
+            ));
+        }
         if inner.projects[index].remote_project_id.as_deref()
             != Some(remote_response.project_id.as_str())
         {
@@ -81,8 +185,15 @@ impl AppState {
             changed = true;
         }
         if changed {
-            self.commit_locked(&mut inner)
+            self.commit_remote_localization_locked(&mut inner)
                 .map_err(|err| ApiError::internal(format!("failed to persist project: {err:#}")))?;
+        } else {
+            self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to retry remote project persistence: {err:#}"
+                    ))
+                })?;
         }
         Ok(CreateProjectResponse {
             project_id: project.id,
@@ -104,10 +215,15 @@ impl AppState {
         request: CreateSessionRequest,
         project: Project,
     ) -> Result<CreateSessionResponse, ApiError> {
-        let Some(binding) = self.ensure_remote_project_binding(&project.id)? else {
+        let Some(binding) = self.ensure_remote_project_binding_with_missing_status(
+            &project.id,
+            RemoteCreateMissingProjectStatus::BadRequest,
+        )? else {
             return Err(ApiError::bad_request("remote project binding is missing"));
         };
-        let remote_response: CreateSessionResponse = self.remote_registry.request_json(
+        let (remote_response, response_lease): (CreateSessionResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &binding.remote,
             Method::POST,
             "/api/sessions",
@@ -126,9 +242,11 @@ impl AppState {
                 "claudeEffort": request.claude_effort,
                 "geminiApprovalMode": request.gemini_approval_mode,
             })),
-        )?;
-        self.remote_registry
-            .start_event_bridge(self.clone(), &binding.remote);
+        )
+        .map_err(remote_create_authority_error)?;
+        // A response whose two identity fields disagree cannot be safely
+        // attributed to the requested remote session. Reject it without
+        // starting a bridge solely on the strength of that malformed payload.
         // Reject mismatched session identity on the wire. The wire
         // contract says `session.id === session_id`; if a malformed
         // remote returns otherwise, localizing `remote_session` would
@@ -136,13 +254,33 @@ impl AppState {
         // downstream code refers to the other id, silently opening a
         // proxy for the wrong remote session. Fail closed instead.
         if remote_response.session.id != remote_response.session_id {
-            return Err(ApiError::bad_gateway(
-                "remote session id mismatch: `session.id` does not equal `sessionId`",
+            return Err(self.prefer_current_remote_create_response_error(
+                &response_lease,
+                ApiError::bad_gateway(
+                    "remote session id mismatch: `session.id` does not equal `sessionId`",
+                ),
             ));
         }
+        // The remote-side session now exists. Claim its exact response
+        // connection before local persistence so an internal localization
+        // failure cannot strand that remote-owned result, while an A response
+        // can never claim the current B endpoint after settings replacement.
+        self.start_remote_event_bridge_for_lease(&response_lease)
+            .map_err(remote_create_authority_error)?;
         let remote_session = remote_response.session.clone();
         let (revision, local_session_id, local_session, changed, delta_session) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            self.ensure_remote_create_request_current_locked(&inner, &response_lease)?;
+            let resolution = resolve_remote_project_binding_locked(&inner, &binding);
+            if resolution != RemoteProjectBindingResolution::Current {
+                drop(inner);
+                return Err(self.remote_create_binding_rejection(
+                    resolution,
+                    &binding,
+                    &response_lease,
+                    RemoteCreateMissingProjectStatus::BadRequest,
+                ));
+            }
             // Gate `update_existing` on the remote's applied-revision
             // tracking. If the SSE bridge already applied a later
             // remote revision for this remote (normal when a fork /
@@ -182,13 +320,19 @@ impl AppState {
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let local_session = AppState::wire_session_from_record(&local_record);
             let revision = if changed {
-                self.commit_session_created_locked(&mut inner, &local_record)
+                self.commit_remote_session_created_locked(&mut inner, &local_record)
                     .map_err(|err| {
                         ApiError::internal(format!(
                             "failed to persist remote session proxy: {err:#}"
                         ))
                     })?
             } else {
+                self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to retry remote session proxy persistence: {err:#}"
+                        ))
+                    })?;
                 inner.revision
             };
             let delta_session =
@@ -232,7 +376,10 @@ impl AppState {
         template: &OrchestratorTemplate,
         project: &Project,
     ) -> Result<CreateOrchestratorInstanceResponse, ApiError> {
-        let Some(binding) = self.ensure_remote_project_binding(&project.id)? else {
+        let Some(binding) = self.ensure_remote_project_binding_with_missing_status(
+            &project.id,
+            RemoteCreateMissingProjectStatus::NotFound,
+        )? else {
             return Err(ApiError::bad_request("remote project binding is missing"));
         };
         let mut remote_template = orchestrator_template_to_draft(template);
@@ -247,31 +394,55 @@ impl AppState {
                 "failed to encode remote orchestrator create request: {err}"
             ))
         })?;
-        let remote_response: CreateOrchestratorInstanceResponse = match self.remote_registry.request_json(
+        let (remote_result, response_lease) = self.remote_registry.request_json_result_with_lease(
             &binding.remote,
             Method::POST,
             "/api/orchestrators",
             &[],
             Some(request_body),
-        ) {
+        )
+        .map_err(remote_create_authority_error)?;
+        let remote_response: CreateOrchestratorInstanceResponse = match remote_result {
             Ok(response) => response,
-            Err(err)
-                if err.status == StatusCode::NOT_FOUND
-                    && !matches!(
-                        self.remote_registry
-                            .cached_supports_inline_orchestrator_templates(&binding.remote),
-                        Some(true)
-                    ) =>
-            {
-                return Err(ApiError::bad_gateway(format!(
-                    "remote `{}` must be upgraded before it can launch local orchestrator templates",
-                    binding.remote.name
-                )));
+            Err(err) if err.status == StatusCode::NOT_FOUND => {
+                #[cfg(test)]
+                self.remote_registry
+                    .run_test_before_remote_orchestrator_capability_classification();
+                let capability = self
+                    .remote_registry
+                    .cached_supports_inline_orchestrator_templates_for_lease(&response_lease)
+                    .map_err(remote_create_authority_error)?;
+                if !matches!(capability, Some(true)) {
+                    return Err(ApiError::bad_gateway(format!(
+                        "remote `{}` must be upgraded before it can launch local orchestrator templates",
+                        binding.remote.name
+                    )));
+                }
+                return Err(err);
             }
-            Err(err) => return Err(err),
+            Err(err) => return Err(remote_create_authority_error(err)),
         };
+        // The remote-side orchestrator now exists. Claim the exact response
+        // connection before local persistence for the same reason as remote
+        // session creation.
+        self.start_remote_event_bridge_for_lease(&response_lease)
+            .map_err(remote_create_authority_error)?;
         let (state, local_orchestrator) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            self.ensure_remote_create_request_current_locked(&inner, &response_lease)?;
+            // The remote create is intentionally not compensated on these
+            // abort paths. Its result remains manageable on the remote, while
+            // refusing local localization prevents stale project revival.
+            let resolution = resolve_remote_project_binding_locked(&inner, &binding);
+            if resolution != RemoteProjectBindingResolution::Current {
+                drop(inner);
+                return Err(self.remote_create_binding_rejection(
+                    resolution,
+                    &binding,
+                    &response_lease,
+                    RemoteCreateMissingProjectStatus::NotFound,
+                ));
+            }
             let applied_remote_revision = apply_remote_state_if_newer_locked(
                 &mut inner,
                 &binding.remote.id,
@@ -307,17 +478,21 @@ impl AppState {
                 );
             }
             if applied_remote_revision || changed {
-                self.commit_locked(&mut inner).map_err(|err| {
+                self.commit_remote_localization_locked(&mut inner).map_err(|err| {
                     ApiError::internal(format!(
                         "failed to persist remote orchestrator proxy: {err:#}"
                     ))
                 })?;
+            } else {
+                self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to retry remote orchestrator proxy persistence: {err:#}"
+                        ))
+                    })?;
             }
             (self.snapshot_from_inner(&inner), local_orchestrator)
         };
-        self.remote_registry
-            .start_event_bridge(self.clone(), &binding.remote);
-
         Ok(CreateOrchestratorInstanceResponse {
             orchestrator: local_orchestrator,
             state,

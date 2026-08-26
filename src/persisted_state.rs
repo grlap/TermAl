@@ -196,6 +196,9 @@ impl PersistedState {
             // starts at `0`, so a fresh load has no pending writes.
             last_mutation_stamp: 0,
             removed_session_ids: Vec::new(),
+            settings_persist_dirty: false,
+            remote_settings_persist_dirty: false,
+            remote_delta_persist_dirty: false,
         };
         let persisted_non_running_session_ids = inner
             .sessions

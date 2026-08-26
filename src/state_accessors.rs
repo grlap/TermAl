@@ -764,6 +764,9 @@ impl AppState {
                 None,
                 None,
                 REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT,
+                None,
+                None,
+                None,
             );
         }
 
@@ -1151,6 +1154,17 @@ impl AppState {
             .is_some_and(|last_revision| *last_revision >= fallback_revision)
     }
 
+    fn should_skip_remote_sse_fallback_resync_for_bridge(
+        &self,
+        remote: &RemoteConfig,
+        connection: &RemoteConnection,
+        fallback_revision: u64,
+    ) -> Result<bool, ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        self.ensure_remote_apply_authority_locked(&inner, remote, Some(connection))?;
+        Ok(self.should_skip_remote_sse_fallback_resync(&remote.id, fallback_revision))
+    }
+
     /// Records that a remote fallback-driven /api/state resync recovered the
     /// given fallback revision.
     fn note_remote_sse_fallback_resync(&self, remote_id: &str, fallback_revision: u64) {
@@ -1164,16 +1178,44 @@ impl AppState {
             .or_insert(fallback_revision);
     }
 
+    fn note_remote_sse_fallback_resync_for_bridge(
+        &self,
+        remote: &RemoteConfig,
+        connection: &RemoteConnection,
+        fallback_revision: u64,
+    ) -> Result<(), ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        self.ensure_remote_apply_authority_locked(&inner, remote, Some(connection))?;
+        self.note_remote_sse_fallback_resync(&remote.id, fallback_revision);
+        Ok(())
+    }
+
     /// Clears the latest applied remote revision when event-stream continuity
     /// is lost, such as after a disconnect or restart.
+    #[cfg(test)]
     fn clear_remote_applied_revision(&self, remote_id: &str) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        inner.remote_applied_revisions.remove(remote_id);
-        inner.remote_snapshot_applied_revisions.remove(remote_id);
-        inner
+        let _ = self.clear_remote_applied_revision_locked(&mut inner, remote_id);
+    }
+
+    /// Locked counterpart used when settings publication must clear continuity
+    /// state before releasing the same state guard.
+    fn clear_remote_applied_revision_locked(
+        &self,
+        inner: &mut StateInner,
+        remote_id: &str,
+    ) -> bool {
+        let mut cleared = inner.remote_applied_revisions.remove(remote_id).is_some();
+        cleared |= inner
+            .remote_snapshot_applied_revisions
+            .remove(remote_id)
+            .is_some();
+        cleared |= inner
             .remote_session_transcript_applied_revisions
-            .remove(remote_id);
-        self.remote_delta_replay_cache
+            .remove(remote_id)
+            .is_some();
+        cleared |= self
+            .remote_delta_replay_cache
             .lock()
             .expect("remote delta replay cache mutex poisoned")
             .remove_remote(remote_id);
@@ -1181,15 +1223,41 @@ impl AppState {
         // are owned by RAII guards in the in-flight hydration callers. Removing
         // them during continuity cleanup would allow duplicate fetches while
         // the original request is still running.
+        cleared
     }
 
     /// Clears remote fallback resync tracking when event-stream continuity is
     /// lost, such as after a disconnect or restart.
-    fn clear_remote_sse_fallback_resync(&self, remote_id: &str) {
+    fn clear_remote_sse_fallback_resync(&self, remote_id: &str) -> bool {
         self.remote_sse_fallback_resynced_revision
             .lock()
             .expect("remote fallback resync mutex poisoned")
-            .remove(remote_id);
+            .remove(remote_id)
+            .is_some()
+    }
+
+    /// Clears bridge continuity only while that exact route and connection
+    /// still own the remote id. The application-state guard linearizes this
+    /// cleanup against settings publication, preventing a retiring worker from
+    /// erasing watermarks established by its replacement.
+    fn clear_remote_bridge_continuity_if_current(
+        &self,
+        remote: &RemoteConfig,
+        connection: &RemoteConnection,
+    ) -> bool {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if self
+            .ensure_remote_apply_authority_locked(&inner, remote, Some(connection))
+            .is_err()
+        {
+            return false;
+        }
+        let cleared_revision = self.clear_remote_applied_revision_locked(&mut inner, &remote.id);
+        let cleared_fallback = self.clear_remote_sse_fallback_resync(&remote.id);
+        if cleared_revision || cleared_fallback {
+            connection.invalidate_state_continuity();
+        }
+        true
     }
 
 

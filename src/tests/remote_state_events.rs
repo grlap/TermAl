@@ -81,7 +81,12 @@ fn remote_text_delta_gap_triggers_bounded_authoritative_tail_repair() {
         session: repaired_session,
         server_instance_id: "remote-instance".to_owned(),
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let discontinuous_delta = DeltaEvent::TextDelta {
         revision: 3,
@@ -226,7 +231,12 @@ fn remote_tail_repair_failure_falls_back_to_full_state_resync() {
             }
         }
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let discontinuous_delta = DeltaEvent::TextDelta {
         revision: 3,
@@ -289,6 +299,11 @@ fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         inner.preferences.remotes.push(remote.clone());
+        let publication = state
+            .remote_registry
+            .publish_configs(&inner.preferences.remotes);
+        drop(inner);
+        state.remote_registry.finish_config_publication(publication);
     }
     let (remote_local_session_id, local_session_id) = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -398,7 +413,10 @@ fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
         .insert(
             remote.id.clone(),
             Arc::new(RemoteConnection {
-                config: Mutex::new(remote.clone()),
+                config: remote.clone(),
+                authority_generation: 0,
+                retired: AtomicBool::new(false),
+                state_continuity_generation: AtomicU64::new(1),
                 forwarded_port: port,
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(false),
@@ -833,6 +851,329 @@ fn remote_state_event_applies_non_fallback_empty_snapshot_payload() {
         Some(&1)
     );
     drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn retired_bridge_cannot_apply_buffered_frames_or_clear_current_continuity() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-retired-bridge".to_owned(),
+        name: "Retired Bridge".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("old.example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/retired-bridge",
+        "Retired Bridge Project",
+        "remote-project-retired-bridge",
+    );
+    let old_connection = state
+        .remote_registry
+        .connection(&remote)
+        .expect("current bridge route should resolve")
+        .connection;
+
+    let mut current_state = sample_remote_orchestrator_state(
+        "remote-project-retired-bridge",
+        "/remote/retired-bridge",
+        2,
+        OrchestratorInstanceStatus::Running,
+    );
+    current_state.sessions[0].preview = "Current endpoint preview".to_owned();
+    let mut current_payload =
+        serde_json::to_value(&current_state).expect("current state should encode");
+    current_payload["_sseFallback"] = Value::Bool(false);
+    let current_frame = format!(
+        "event: state\ndata: {}\n\n",
+        serde_json::to_string(&current_payload).expect("current payload should encode")
+    );
+    process_remote_event_stream_reader_with_authority(
+        &state,
+        &remote.id,
+        Some((&remote, &old_connection)),
+        std::io::Cursor::new(current_frame),
+        &mut String::new(),
+        &mut Vec::new(),
+        &mut RemoteEventStreamRecovery::default(),
+    )
+    .expect("the current bridge should apply its frame");
+
+    let mut replacement = remote.clone();
+    replacement.host = Some("new.example.com".to_owned());
+    replacement.port = Some(2222);
+    replacement.user = Some("bob".to_owned());
+    let publication = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let current = inner
+            .preferences
+            .remotes
+            .iter_mut()
+            .find(|candidate| candidate.id == remote.id)
+            .expect("remote settings should contain the bridge route");
+        *current = replacement.clone();
+        let publication = state
+            .remote_registry
+            .publish_configs(&inner.preferences.remotes);
+        for remote_id in &publication.changed_ids {
+            let _ = state.clear_remote_applied_revision_locked(&mut inner, remote_id);
+            let _ = state.clear_remote_sse_fallback_resync(remote_id);
+        }
+        publication
+    };
+    state.remote_registry.finish_config_publication(publication);
+    assert!(old_connection.retired.load(Ordering::SeqCst));
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.note_remote_applied_revision(&remote.id, 9);
+    }
+    state.note_remote_sse_fallback_resync(&remote.id, 9);
+
+    let mut stale_state = sample_remote_orchestrator_state(
+        "remote-project-retired-bridge",
+        "/remote/retired-bridge",
+        10,
+        OrchestratorInstanceStatus::Running,
+    );
+    stale_state.sessions[0].preview = "Stale old endpoint preview".to_owned();
+    let mut stale_payload = serde_json::to_value(&stale_state).expect("stale state should encode");
+    let mut stale_fallback_payload = stale_payload.clone();
+    stale_fallback_payload["_sseFallback"] = Value::Bool(true);
+    let stale_fallback_frame = format!(
+        "event: state\ndata: {}\n\n",
+        serde_json::to_string(&stale_fallback_payload)
+            .expect("stale fallback payload should encode")
+    );
+    let fallback_error = process_remote_event_stream_reader_with_authority(
+        &state,
+        &remote.id,
+        Some((&remote, &old_connection)),
+        std::io::Cursor::new(stale_fallback_frame),
+        &mut String::new(),
+        &mut Vec::new(),
+        &mut RemoteEventStreamRecovery::default(),
+    )
+    .expect_err("a retired bridge must reject its buffered fallback state frame");
+    assert!(
+        fallback_error
+            .to_string()
+            .contains(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST)
+    );
+    assert_eq!(
+        state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .remote_applied_revisions
+            .get(&remote.id),
+        Some(&9)
+    );
+    assert!(state.should_skip_remote_sse_fallback_resync(&remote.id, 9));
+
+    stale_payload["_sseFallback"] = Value::Bool(false);
+    let stale_frame = format!(
+        "event: state\ndata: {}\n\n",
+        serde_json::to_string(&stale_payload).expect("stale payload should encode")
+    );
+    let error = process_remote_event_stream_reader_with_authority(
+        &state,
+        &remote.id,
+        Some((&remote, &old_connection)),
+        std::io::Cursor::new(stale_frame),
+        &mut String::new(),
+        &mut Vec::new(),
+        &mut RemoteEventStreamRecovery::default(),
+    )
+    .expect_err("a retired bridge must reject its buffered frame");
+    assert!(
+        error
+            .to_string()
+            .contains(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST)
+    );
+    let mut stale_delta_session = stale_state.sessions[0].clone();
+    stale_delta_session.id = "remote-session-from-retired-delta".to_owned();
+    let stale_delta = DeltaEvent::SessionCreated {
+        revision: 11,
+        session_id: stale_delta_session.id.clone(),
+        session: stale_delta_session,
+    };
+    let stale_delta_frame = format!(
+        "event: delta\ndata: {}\n\n",
+        serde_json::to_string(&stale_delta).expect("stale delta should encode")
+    );
+    let delta_error = process_remote_event_stream_reader_with_authority(
+        &state,
+        &remote.id,
+        Some((&remote, &old_connection)),
+        std::io::Cursor::new(stale_delta_frame),
+        &mut String::new(),
+        &mut Vec::new(),
+        &mut RemoteEventStreamRecovery::default(),
+    )
+    .expect_err("a retired bridge must reject its buffered delta");
+    assert!(
+        delta_error
+            .to_string()
+            .contains(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST)
+    );
+    assert!(
+        !state.clear_remote_bridge_continuity_if_current(&remote, &old_connection),
+        "retired bridge cleanup must not erase its replacement's watermarks"
+    );
+
+    let snapshot = state.full_snapshot();
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "Current endpoint preview")
+    );
+    assert!(
+        !snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "Stale old endpoint preview")
+    );
+    assert_eq!(
+        state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .remote_applied_revisions
+            .get(&remote.id),
+        Some(&9)
+    );
+    assert!(state.should_skip_remote_sse_fallback_resync(&remote.id, 9));
+    assert!(
+        state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .find_remote_session_index(&remote.id, "remote-session-from-retired-delta")
+            .is_none()
+    );
+
+    let current_connection = state
+        .remote_registry
+        .connection(&replacement)
+        .expect("replacement bridge route should resolve")
+        .connection;
+    assert!(state.clear_remote_bridge_continuity_if_current(&replacement, &current_connection));
+    assert!(
+        !state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .remote_applied_revisions
+            .contains_key(&remote.id)
+    );
+    assert!(!state.should_skip_remote_sse_fallback_resync(&remote.id, 9));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins the same-connection race between request localization and bridge
+// disconnect cleanup. Both leases are issued before cleanup. The newer request
+// applies first, cleanup then clears its revision watermark, and the older
+// request must still fail instead of using the cleared gate to regress state.
+#[test]
+fn bridge_continuity_cleanup_invalidates_pre_cleanup_request_leases() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-bridge-continuity".to_owned(),
+        name: "Bridge Continuity".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/bridge-continuity",
+        "Bridge Continuity Project",
+        "remote-project-bridge-continuity",
+    );
+
+    let newer_lease = state
+        .remote_registry
+        .connection(&remote)
+        .expect("newer request lease should resolve");
+    let stale_lease = state
+        .remote_registry
+        .connection(&remote)
+        .expect("stale request lease should resolve");
+    assert!(Arc::ptr_eq(
+        &newer_lease.connection,
+        &stale_lease.connection
+    ));
+    assert_eq!(
+        newer_lease.state_continuity_generation,
+        stale_lease.state_continuity_generation
+    );
+
+    let mut newer_state = sample_remote_orchestrator_state(
+        "remote-project-bridge-continuity",
+        "/remote/bridge-continuity",
+        8,
+        OrchestratorInstanceStatus::Running,
+    );
+    newer_state.sessions[0].preview = "Newer request preview".to_owned();
+    state
+        .apply_remote_state_snapshot_for_request(
+            &newer_lease,
+            newer_state,
+            RemoteSnapshotApplyMode::GateBySnapshotRevision,
+        )
+        .expect("newer same-connection response should localize before cleanup");
+
+    assert!(state.clear_remote_bridge_continuity_if_current(&remote, &newer_lease.connection));
+    assert_ne!(
+        newer_lease.state_continuity_generation,
+        newer_lease
+            .connection
+            .state_continuity_generation
+            .load(Ordering::SeqCst)
+    );
+
+    let mut stale_state = sample_remote_orchestrator_state(
+        "remote-project-bridge-continuity",
+        "/remote/bridge-continuity",
+        7,
+        OrchestratorInstanceStatus::Running,
+    );
+    stale_state.sessions[0].preview = "Stale request preview".to_owned();
+    let error = state
+        .apply_remote_state_snapshot_for_request(
+            &stale_lease,
+            stale_state,
+            RemoteSnapshotApplyMode::GateBySnapshotRevision,
+        )
+        .expect_err("pre-cleanup request lease must not cross continuity cleanup");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.message, REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST);
+
+    let snapshot = state.full_snapshot();
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "Newer request preview")
+    );
+    assert!(
+        !snapshot
+            .sessions
+            .iter()
+            .any(|session| session.preview == "Stale request preview")
+    );
 
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
@@ -1347,7 +1688,12 @@ fn remote_lagged_marker_force_applies_same_revision_fallback_resync_snapshot() {
     repaired_state.sessions[0].messages_loaded = true;
     repaired_state.sessions[0].message_count = 1;
     let (port, requests, server) = spawn_remote_state_response_server(repaired_state);
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let mut fallback_marker = empty_state_events_response();
     fallback_marker.revision = 2;
@@ -1437,14 +1783,33 @@ fn remote_delta_hydration_skips_duplicate_in_flight_same_session_fetch() {
             .expect("remote summary should persist");
     }
 
+    let authority_generation = state
+        .remote_registry
+        .config_generation
+        .load(Ordering::Acquire);
+    let hydration_key = RemoteDeltaHydrationKey {
+        remote_id: remote.id.clone(),
+        remote_session_id: remote_session.id.clone(),
+        authority_generation,
+    };
     state
         .remote_delta_hydrations_in_flight
         .lock()
         .expect("remote delta hydration mutex poisoned")
-        .insert((remote.id.clone(), remote_session.id.clone()));
+        .insert(hydration_key.clone());
 
     let outcome = state
-        .hydrate_unloaded_remote_session_for_delta(&remote.id, &remote_session.id, 2, 2, None)
+        .hydrate_unloaded_remote_session_for_delta(
+            &remote.id,
+            &remote_session.id,
+            authority_generation,
+            2,
+            2,
+            None,
+            None,
+            None,
+            None,
+        )
         .expect("duplicate in-flight hydration should not fail");
 
     assert_eq!(outcome, RemoteDeltaHydrationOutcome::SkipInFlight);
@@ -1453,7 +1818,7 @@ fn remote_delta_hydration_skips_duplicate_in_flight_same_session_fetch() {
             .remote_delta_hydrations_in_flight
             .lock()
             .expect("remote delta hydration mutex poisoned")
-            .contains(&(remote.id, remote_session.id))
+            .contains(&hydration_key)
     );
 }
 
@@ -1492,11 +1857,19 @@ fn remote_delta_hydration_in_flight_skips_narrow_unloaded_delta_apply() {
         )
         .expect("remote summary session create delta should apply");
 
+    let authority_generation = state
+        .remote_registry
+        .config_generation
+        .load(Ordering::Acquire);
     state
         .remote_delta_hydrations_in_flight
         .lock()
         .expect("remote delta hydration mutex poisoned")
-        .insert((remote.id.clone(), remote_session.id.clone()));
+        .insert(RemoteDeltaHydrationKey {
+            remote_id: remote.id.clone(),
+            remote_session_id: remote_session.id.clone(),
+            authority_generation,
+        });
 
     let mut delta_rx = state.subscribe_delta_events();
     let event = DeltaEvent::MessageCreated {
@@ -1510,7 +1883,8 @@ fn remote_delta_hydration_in_flight_skips_narrow_unloaded_delta_apply() {
         status: SessionStatus::Idle,
         session_mutation_stamp: Some(10),
     };
-    let replay_key = AppState::remote_delta_replay_key(&remote.id, &event);
+    let replay_key =
+        AppState::remote_delta_replay_key_for_generation(&remote.id, authority_generation, &event);
 
     state
         .apply_remote_delta_event(&remote.id, event)
@@ -1638,7 +2012,12 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
             panic!("unexpected request: {}", request.request_line);
         }
     });
-    insert_test_remote_connection(&state, &remote, port);
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
 
     let first_state = state.clone();
     let first_remote_id = remote.id.clone();
@@ -1711,7 +2090,10 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
             .remote_delta_hydrations_in_flight
             .lock()
             .expect("remote delta hydration mutex poisoned")
-            .contains(&(remote.id.clone(), summary_session.id.clone())),
+            .iter()
+            .any(|key| {
+                key.remote_id == remote.id && key.remote_session_id == summary_session.id
+            }),
         "successful hydration should clear the in-flight guard for the remote session",
     );
 

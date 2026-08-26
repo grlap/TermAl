@@ -973,6 +973,22 @@ impl AppState {
         &self,
         request: CreateOrchestratorInstanceRequest,
     ) -> Result<CreateOrchestratorInstanceResponse, ApiError> {
+        self.create_orchestrator_instance_with_agent_setup_validator(
+            request,
+            |agent, workdir| self.validate_agent_session_setup_for_state(agent, workdir),
+        )
+    }
+
+    /// Creates an orchestrator with an injectable unlocked readiness preflight.
+    ///
+    /// Keeping the interleaving point explicit lets lifecycle tests mutate the
+    /// project while validation is in flight without adding test-only behavior
+    /// to the production readiness resolver.
+    fn create_orchestrator_instance_with_agent_setup_validator(
+        &self,
+        request: CreateOrchestratorInstanceRequest,
+        mut validate_agent_session_setup: impl FnMut(Agent, &str) -> Result<(), String>,
+    ) -> Result<CreateOrchestratorInstanceResponse, ApiError> {
         let template_id =
             normalize_required_orchestrator_text(&request.template_id, "template id")?;
 
@@ -1017,16 +1033,37 @@ impl AppState {
         if project.remote_id != LOCAL_REMOTE_ID {
             return self.create_remote_orchestrator_proxy(&template, &project);
         }
+
+        // Readiness resolution may probe PATH and the filesystem. Validate
+        // every distinct agent before entering the state mutation critical
+        // section so a failure cannot leave a partially created instance.
+        let mut validated_agents = Vec::new();
+        for template_session in &template.sessions {
+            if validated_agents.contains(&template_session.agent) {
+                continue;
+            }
+            validate_agent_session_setup(template_session.agent, &project.root_path)
+                .map_err(ApiError::bad_request)?;
+            validated_agents.push(template_session.agent);
+        }
+        let preflight_project_root = project.root_path.clone();
+
         let (state, orchestrator) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            for template_session in &template.sessions {
-                self.validate_agent_session_setup_for_state(
-                    template_session.agent,
-                    &project.root_path,
-                )
-                    .map_err(ApiError::bad_request)?;
+            // Project deletion uses this same mutex for its detach sweep. A
+            // second lookup here makes creation serialize on either side of
+            // that sweep instead of reviving the stale preflight snapshot.
+            let project = inner
+                .find_project(project_id)
+                .cloned()
+                .ok_or_else(|| ApiError::not_found(format!("unknown project `{project_id}`")))?;
+            if project.remote_id != LOCAL_REMOTE_ID
+                || project.root_path != preflight_project_root
+            {
+                return Err(ApiError::conflict(
+                    "project changed while creating the orchestrator",
+                ));
             }
-
             let mut session_instances = Vec::with_capacity(template.sessions.len());
             for template_session in &template.sessions {
                 let record = inner.create_session(

@@ -476,6 +476,9 @@ export function useVirtualizedConversationScrollEvents({
         skipNextMountedPrependRestoreRef.current = false;
         clearPendingDeferredLayoutTimer();
         clearPendingIdleCompactionTimer();
+        // Handle-owned restores install their new deferred anchor after this
+        // synchronous listener returns; this clear removes only stale anchor
+        // authority from the outgoing scroll scope.
         pendingDeferredLayoutAnchorRef.current = null;
         // Mounted-range resolution consults the viewport snapshot during the
         // same render. Publish the restored DOM position first so it cannot

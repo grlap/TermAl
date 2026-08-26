@@ -358,7 +358,10 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let remote_response: ConversationMarkerResponse = self.remote_registry.request_json(
+        let (remote_response, response_lease):
+            (ConversationMarkerResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &target.remote,
             Method::POST,
             &format!(
@@ -370,7 +373,13 @@ impl AppState {
                 ApiError::internal(format!("failed to encode marker create request: {err}"))
             })?),
         )?;
-        self.apply_remote_marker_response(target, remote_response, true, None)
+        self.apply_remote_marker_response(
+            target,
+            remote_response,
+            &response_lease,
+            true,
+            None,
+        )
     }
 
     fn proxy_remote_update_conversation_marker(
@@ -382,7 +391,10 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let remote_response: ConversationMarkerResponse = self.remote_registry.request_json(
+        let (remote_response, response_lease):
+            (ConversationMarkerResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &target.remote,
             Method::PATCH,
             &format!(
@@ -395,7 +407,13 @@ impl AppState {
                 ApiError::internal(format!("failed to encode marker update request: {err}"))
             })?),
         )?;
-        self.apply_remote_marker_response(target, remote_response, false, Some(marker_id))
+        self.apply_remote_marker_response(
+            target,
+            remote_response,
+            &response_lease,
+            false,
+            Some(marker_id),
+        )
     }
 
     fn proxy_remote_delete_conversation_marker(
@@ -406,7 +424,10 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let remote_response: DeleteConversationMarkerResponse = self.remote_registry.request_json(
+        let (remote_response, response_lease):
+            (DeleteConversationMarkerResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
             &target.remote,
             Method::DELETE,
             &format!(
@@ -418,35 +439,45 @@ impl AppState {
             None,
         )?;
         if remote_response.marker_id != marker_id {
-            return Err(ApiError::bad_gateway(format!(
-                "remote deleted marker id `{}` did not match requested marker `{marker_id}`",
-                remote_response.marker_id
-            )));
+            return Err(self.prefer_current_remote_response_error(
+                &response_lease,
+                ApiError::bad_gateway(format!(
+                    "remote deleted marker id `{}` did not match requested marker `{marker_id}`",
+                    remote_response.marker_id
+                )),
+            ));
         }
-        self.apply_remote_marker_delete_response(target, remote_response)
+        self.apply_remote_marker_delete_response(target, remote_response, &response_lease)
     }
 
     fn apply_remote_marker_response(
         &self,
         target: RemoteSessionTarget,
         remote_response: ConversationMarkerResponse,
+        response_lease: &RemoteRequestLease,
         created: bool,
         expected_marker_id: Option<&str>,
     ) -> Result<ConversationMarkerResponse, ApiError> {
         if remote_response.marker.session_id != target.remote_session_id {
-            return Err(ApiError::bad_gateway(format!(
-                "remote marker payload session id `{}` did not match requested session `{}`",
-                remote_response.marker.session_id, target.remote_session_id
-            )));
+            return Err(self.prefer_current_remote_response_error(
+                response_lease,
+                ApiError::bad_gateway(format!(
+                    "remote marker payload session id `{}` did not match requested session `{}`",
+                    remote_response.marker.session_id, target.remote_session_id
+                )),
+            ));
         }
         // Create responses carry a remote-assigned marker id. Only update
         // responses must match the path-bound marker id.
         if let Some(expected_marker_id) = expected_marker_id {
             if remote_response.marker.id != expected_marker_id {
-                return Err(ApiError::bad_gateway(format!(
-                    "remote updated marker id `{}` did not match requested marker `{expected_marker_id}`",
-                    remote_response.marker.id
-                )));
+                return Err(self.prefer_current_remote_response_error(
+                    response_lease,
+                    ApiError::bad_gateway(format!(
+                        "remote updated marker id `{}` did not match requested marker `{expected_marker_id}`",
+                        remote_response.marker.id
+                    )),
+                ));
             }
         }
         let remote_revision = remote_response.revision;
@@ -467,10 +498,12 @@ impl AppState {
                 session_mutation_stamp: remote_session_mutation_stamp,
             }
         };
-        self.apply_remote_delta_event(&target.remote.id, event)
-        .map_err(|err| {
-            ApiError::bad_gateway(format!("failed to apply remote marker response: {err:#}"))
-        })?;
+        self.apply_remote_delta_event_for_request(response_lease, event)
+            .map_err(|err| {
+                remote_authority_apply_error(&err).unwrap_or_else(|| {
+                    ApiError::bad_gateway(format!("failed to apply remote marker response: {err:#}"))
+                })
+            })?;
 
         let inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -498,6 +531,7 @@ impl AppState {
         &self,
         target: RemoteSessionTarget,
         remote_response: DeleteConversationMarkerResponse,
+        response_lease: &RemoteRequestLease,
     ) -> Result<DeleteConversationMarkerResponse, ApiError> {
         let marker_id = remote_response.marker_id.clone();
         let remote_session_mutation_stamp = remote_response.session_mutation_stamp;
@@ -508,9 +542,14 @@ impl AppState {
             marker_id: marker_id.clone(),
             session_mutation_stamp: remote_session_mutation_stamp,
         };
-        self.apply_remote_delta_event(&target.remote.id, event).map_err(|err| {
-            ApiError::bad_gateway(format!("failed to apply remote marker delete response: {err:#}"))
-        })?;
+        self.apply_remote_delta_event_for_request(response_lease, event)
+            .map_err(|err| {
+                remote_authority_apply_error(&err).unwrap_or_else(|| {
+                    ApiError::bad_gateway(format!(
+                        "failed to apply remote marker delete response: {err:#}"
+                    ))
+                })
+            })?;
         let inner = self.inner.lock().expect("state mutex poisoned");
         let session_mutation_stamp = inner
             .find_session_index(&target.local_session_id)
