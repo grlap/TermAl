@@ -77,9 +77,14 @@ export type StateResponse = {
   orchestrators: OrchestratorInstance[];
   workspaces: WorkspaceLayoutSummary[];
   sessions: Session[];
-  delegations?: DelegationSummary[];
+  delegations?: DelegationStateSummary[];
   delegationWaits?: DelegationWaitRecord[];
 };
+
+export type DelegationStateSummary = Pick<
+  DelegationSummary,
+  "id" | "childSessionId" | "mode" | "reviewResultRequired"
+>;
 
 export type CreateSessionResponse = {
   sessionId: string;

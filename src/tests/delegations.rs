@@ -4893,8 +4893,10 @@ fn delegation_public_result_summary_is_capped() {
         .expect("full result should be available");
     assert_eq!(result.result.summary, long_summary);
 
-    let snapshot = state.snapshot();
-    let public_summary = snapshot
+    let list = state
+        .list_delegations(&parent_session_id)
+        .expect("scoped delegation list should be available");
+    let public_summary = list
         .delegations
         .iter()
         .find(|delegation| delegation.id == created.delegation.id)

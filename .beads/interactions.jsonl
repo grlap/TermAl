@@ -346,3 +346,4 @@
 {"id":"int-2a0e4dd0638f2633eed3ee5f4e32b213","kind":"field_change","created_at":"2026-08-25T12:35:19.8459694Z","actor":"Greg Lapinski","issue_id":"tm-sspl","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Fixed and verified by the complete Rust wrapper plus independent dual review."}}
 {"id":"int-2fb2dc265b6e83abf417b4225183ef8a","kind":"field_change","created_at":"2026-08-25T15:20:55.3873956Z","actor":"Greg Lapinski","issue_id":"tm-ya97","extra":{"field":"priority","new_value":"2","old_value":"3"}}
 {"id":"int-015668b9136c2e8b1f5e1b72d1fd0395","kind":"field_change","created_at":"2026-08-25T16:38:20.2951094Z","actor":"Greg Lapinski","issue_id":"tm-fcsc","extra":{"field":"priority","new_value":"1","old_value":"3"}}
+{"id":"int-f62348879e01d0b0c69cb9c4a52c4117","kind":"field_change","created_at":"2026-08-26T13:25:11.6840368Z","actor":"Greg Lapinski","issue_id":"tm-hrfc","extra":{"field":"priority","new_value":"1","old_value":"2"}}

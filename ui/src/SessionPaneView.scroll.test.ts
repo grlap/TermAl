@@ -87,6 +87,32 @@ function params(activeSession: Session) {
   };
 }
 
+function installAnimationFrameHarness() {
+  let nextAnimationFrameId = 1;
+  const animationFrames = new Map<number, FrameRequestCallback>();
+  const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+    const frameId = nextAnimationFrameId;
+    nextAnimationFrameId += 1;
+    animationFrames.set(frameId, callback);
+    return frameId;
+  });
+  vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
+  vi.stubGlobal(
+    "cancelAnimationFrame",
+    vi.fn((frameId: number) => animationFrames.delete(frameId)),
+  );
+  const drainAnimationFrames = () => {
+    while (animationFrames.size > 0) {
+      const callbacks = Array.from(animationFrames.values());
+      animationFrames.clear();
+      act(() => {
+        callbacks.forEach((callback) => callback(performance.now()));
+      });
+    }
+  };
+  return { animationFrames, drainAnimationFrames, requestAnimationFrame };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -627,6 +653,465 @@ describe("session pane historical-window tail state", () => {
 
     expect(scrollNode.scrollTop).toBe(620);
     expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("does not advertise older-history reveal after scrolling away from the live bottom", () => {
+    const { drainAnimationFrames } = installAnimationFrameHarness();
+    let scrollHeight = 1_000;
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    Object.defineProperty(scrollNode, "scrollTo", {
+      configurable: true,
+      value: vi.fn((options: ScrollToOptions) => {
+        if (typeof options.top === "number") {
+          scrollNode.scrollTop = options.top;
+        }
+      }),
+    });
+    const residentTail: Message = {
+      id: "tail-resident",
+      type: "text",
+      timestamp: "12:02",
+      author: "assistant",
+      text: "Already visible at the live bottom",
+    };
+    const initialSession: Session = {
+      ...session(false),
+      messages: [residentTail],
+      messageCount: 1_000,
+      hasOlderHistory: true,
+    };
+    const paneShouldStickToBottomRef = {
+      current: { "pane-1:session-history": true },
+    };
+    const sharedParams = {
+      ...params(initialSession),
+      isActive: true,
+      isSessionTabActive: true,
+      paneShouldStickToBottomRef,
+    };
+    const hook = renderHook(
+      ({ currentSession, contentSignature, messageSignature }) =>
+        useSessionPaneScrollState({
+          ...sharedParams,
+          activeSession: currentSession,
+          visibleContentSignature: contentSignature,
+          visibleMessageContentSignature: messageSignature,
+          visibleLastMessageAuthor:
+            currentSession.messages[currentSession.messages.length - 1]?.author,
+        }),
+      {
+        initialProps: {
+          currentSession: initialSession,
+          contentSignature: "1|tail-resident",
+          messageSignature: "1|tail-resident",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    act(() => {
+      hook.result.current.scrollMessageStackByPage(-1);
+    });
+    drainAnimationFrames();
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    expect(hook.result.current.showNewResponseIndicator).toBe(false);
+
+    scrollHeight = 1_120;
+    const olderMessage: Message = {
+      id: "history-revealed",
+      type: "text",
+      timestamp: "12:01",
+      author: "you",
+      text: "Prompt revealed from older history",
+    };
+    hook.rerender({
+      currentSession: {
+        ...initialSession,
+        messages: [olderMessage, residentTail],
+      },
+      contentSignature: "2|tail-resident",
+      messageSignature: "2|tail-resident",
+    });
+    drainAnimationFrames();
+
+    expect(hook.result.current.showNewResponseIndicator).toBe(false);
+
+    hook.rerender({
+      currentSession: initialSession,
+      contentSignature: "1|tail-resident",
+      messageSignature: "1|tail-resident",
+    });
+    drainAnimationFrames();
+
+    expect(hook.result.current.showNewResponseIndicator).toBe(false);
+
+    const newTail: Message = {
+      id: "tail-new",
+      type: "text",
+      timestamp: "12:03",
+      author: "assistant",
+      text: "Actually unseen response",
+    };
+    hook.rerender({
+      currentSession: {
+        ...initialSession,
+        messages: [olderMessage, residentTail, newTail],
+      },
+      contentSignature: "3|tail-new",
+      messageSignature: "3|tail-new",
+    });
+    drainAnimationFrames();
+
+    expect(hook.result.current.showNewResponseIndicator).toBe(true);
+    expect(hook.result.current.newResponseIndicatorLabel).toBe("New response");
+  });
+
+  it("advertises a queued prompt that arrives with an older-history reveal", () => {
+    const { drainAnimationFrames } = installAnimationFrameHarness();
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    Object.defineProperty(scrollNode, "scrollTo", {
+      configurable: true,
+      value: vi.fn((options: ScrollToOptions) => {
+        if (typeof options.top === "number") {
+          scrollNode.scrollTop = options.top;
+        }
+      }),
+    });
+    const residentTail: Message = {
+      id: "tail-resident",
+      type: "text",
+      timestamp: "12:02",
+      author: "assistant",
+      text: "Already visible at the live bottom",
+    };
+    const initialSession: Session = {
+      ...session(false),
+      messages: [residentTail],
+      pendingPrompts: [
+        {
+          id: "prompt-already-queued",
+          timestamp: "12:03",
+          text: "Already queued",
+        },
+      ],
+    };
+    const paneShouldStickToBottomRef = {
+      current: { "pane-1:session-history": true },
+    };
+    const sharedParams = {
+      ...params(initialSession),
+      isActive: true,
+      isSessionTabActive: true,
+      paneShouldStickToBottomRef,
+      showWaitingIndicator: true,
+    };
+    const hook = renderHook(
+      ({ currentSession, contentSignature, messageSignature }) =>
+        useSessionPaneScrollState({
+          ...sharedParams,
+          activeSession: currentSession,
+          visibleContentSignature: contentSignature,
+          visibleMessageContentSignature: messageSignature,
+          visibleLastMessageAuthor:
+            currentSession.messages[currentSession.messages.length - 1]?.author,
+        }),
+      {
+        initialProps: {
+          currentSession: initialSession,
+          contentSignature: "1|tail-resident|prompt-already-queued",
+          messageSignature: "1|tail-resident",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    act(() => {
+      hook.result.current.scrollMessageStackByPage(-1);
+    });
+    drainAnimationFrames();
+
+    const revealedHistory: Message = {
+      id: "history-revealed",
+      type: "text",
+      timestamp: "12:01",
+      author: "you",
+      text: "Older prompt revealed by history residency",
+    };
+    hook.rerender({
+      currentSession: {
+        ...initialSession,
+        messages: [revealedHistory, residentTail],
+        pendingPrompts: [
+          ...initialSession.pendingPrompts!,
+          {
+            id: "prompt-newly-queued",
+            timestamp: "12:04",
+            text: "New activity while detached",
+          },
+        ],
+      },
+      contentSignature: "2|tail-resident|prompt-newly-queued",
+      messageSignature: "2|tail-resident",
+    });
+    drainAnimationFrames();
+
+    expect(hook.result.current.showNewResponseIndicator).toBe(true);
+    expect(hook.result.current.newResponseIndicatorLabel).toBe("New activity");
+  });
+
+  it("keeps an unseen assistant tail classified as a response when a prompt queues in the same commit", () => {
+    installAnimationFrameHarness();
+    const residentTail: Message = {
+      id: "tail-resident-before-coalesced-update",
+      type: "text",
+      timestamp: "12:02",
+      author: "assistant",
+      text: "Already visible",
+    };
+    const initialSession: Session = {
+      ...session(false),
+      messages: [residentTail],
+      pendingPrompts: [],
+    };
+    const paneShouldStickToBottomRef = {
+      current: { "pane-1:session-history": false },
+    };
+    const sharedParams = {
+      ...params(initialSession),
+      isActive: true,
+      isSessionTabActive: true,
+      paneShouldStickToBottomRef,
+      showWaitingIndicator: true,
+    };
+    const hook = renderHook(
+      ({ currentSession, contentSignature, messageSignature }) =>
+        useSessionPaneScrollState({
+          ...sharedParams,
+          activeSession: currentSession,
+          visibleContentSignature: contentSignature,
+          visibleMessageContentSignature: messageSignature,
+          visibleLastMessageAuthor:
+            currentSession.messages[currentSession.messages.length - 1]?.author,
+        }),
+      {
+        initialProps: {
+          currentSession: initialSession,
+          contentSignature: "tail-resident-before-coalesced-update",
+          messageSignature: "tail-resident-before-coalesced-update",
+        },
+      },
+    );
+    const unseenResponse: Message = {
+      id: "tail-response-coalesced-with-prompt",
+      type: "text",
+      timestamp: "12:03",
+      author: "assistant",
+      text: "New response",
+    };
+
+    hook.rerender({
+      currentSession: {
+        ...initialSession,
+        messages: [residentTail, unseenResponse],
+        pendingPrompts: [
+          {
+            id: "prompt-coalesced-with-response",
+            timestamp: "12:03",
+            text: "Queued at the same time",
+          },
+        ],
+      },
+      contentSignature:
+        "tail-response-coalesced-with-prompt|prompt-coalesced-with-response",
+      messageSignature: "tail-response-coalesced-with-prompt",
+    });
+
+    expect(hook.result.current.showNewResponseIndicator).toBe(true);
+    expect(hook.result.current.newResponseIndicatorLabel).toBe("New response");
+  });
+
+  it("advertises unseen responses after the pane transition record drifts while inactive", () => {
+    installAnimationFrameHarness();
+    const prompt: Message = {
+      id: "prompt-before-inactive",
+      type: "text",
+      timestamp: "12:01",
+      author: "you",
+      text: "Please continue",
+    };
+    const reply: Message = {
+      id: "reply-while-inactive",
+      type: "text",
+      timestamp: "12:02",
+      author: "assistant",
+      text: "Finished while the tab was inactive",
+    };
+    const initialSession: Session = {
+      ...session(false),
+      messages: [prompt],
+      pendingPrompts: [
+        {
+          id: "queued-before-inactive",
+          timestamp: "12:01",
+          text: "Queued before switching tabs",
+        },
+      ],
+    };
+    const paneShouldStickToBottomRef = {
+      current: { "pane-1:session-history": false },
+    };
+    const sharedParams = {
+      ...params(initialSession),
+      isActive: true,
+      paneShouldStickToBottomRef,
+    };
+    const hook = renderHook(
+      ({ currentSession, contentSignature, messageSignature, tabActive }) =>
+        useSessionPaneScrollState({
+          ...sharedParams,
+          activeSession: currentSession,
+          isSessionTabActive: tabActive,
+          visibleContentSignature: contentSignature,
+          visibleMessageContentSignature: messageSignature,
+          visibleLastMessageAuthor:
+            currentSession.messages[currentSession.messages.length - 1]?.author,
+        }),
+      {
+        initialProps: {
+          currentSession: initialSession,
+          contentSignature: "prompt-before-inactive|queued",
+          messageSignature: "prompt-before-inactive",
+          tabActive: true,
+        },
+      },
+    );
+    const repliedSession: Session = {
+      ...initialSession,
+      messages: [prompt, reply],
+    };
+
+    hook.rerender({
+      currentSession: repliedSession,
+      contentSignature: "reply-while-inactive|queued",
+      messageSignature: "reply-while-inactive",
+      tabActive: false,
+    });
+    const settledSession: Session = {
+      ...repliedSession,
+      pendingPrompts: [],
+    };
+    hook.rerender({
+      currentSession: settledSession,
+      contentSignature: "reply-while-inactive|settled",
+      messageSignature: "reply-while-inactive",
+      tabActive: false,
+    });
+    hook.rerender({
+      currentSession: settledSession,
+      contentSignature: "reply-while-inactive|settled",
+      messageSignature: "reply-while-inactive",
+      tabActive: true,
+    });
+
+    expect(hook.result.current.showNewResponseIndicator).toBe(true);
+    expect(hook.result.current.newResponseIndicatorLabel).toBe("New response");
+  });
+
+  it("advertises unseen responses after deferred content effects outlive the response commit", () => {
+    installAnimationFrameHarness();
+    const prompt: Message = {
+      id: "prompt-before-deferred-effects",
+      type: "text",
+      timestamp: "12:01",
+      author: "you",
+      text: "Please continue",
+    };
+    const reply: Message = {
+      id: "reply-during-deferred-effects",
+      type: "text",
+      timestamp: "12:02",
+      author: "assistant",
+      text: "Finished while content effects were deferred",
+    };
+    const initialSession: Session = {
+      ...session(false),
+      messages: [prompt],
+      pendingPrompts: [
+        {
+          id: "queued-before-deferred-effects",
+          timestamp: "12:01",
+          text: "Queued before deferral",
+        },
+      ],
+    };
+    const sharedParams = {
+      ...params(initialSession),
+      isActive: true,
+      isSessionTabActive: true,
+      paneShouldStickToBottomRef: {
+        current: { "pane-1:session-history": false },
+      },
+    };
+    const hook = renderHook(
+      ({ currentSession, contentSignature, messageSignature, deferEffects }) =>
+        useSessionPaneScrollState({
+          ...sharedParams,
+          activeSession: currentSession,
+          deferContentScrollEffects: deferEffects,
+          visibleContentSignature: contentSignature,
+          visibleMessageContentSignature: messageSignature,
+          visibleLastMessageAuthor:
+            currentSession.messages[currentSession.messages.length - 1]?.author,
+        }),
+      {
+        initialProps: {
+          currentSession: initialSession,
+          contentSignature: "prompt-before-deferred-effects|queued",
+          messageSignature: "prompt-before-deferred-effects",
+          deferEffects: false,
+        },
+      },
+    );
+    const repliedSession: Session = {
+      ...initialSession,
+      messages: [prompt, reply],
+    };
+
+    hook.rerender({
+      currentSession: repliedSession,
+      contentSignature: "reply-during-deferred-effects|queued",
+      messageSignature: "reply-during-deferred-effects",
+      deferEffects: true,
+    });
+    const settledSession: Session = {
+      ...repliedSession,
+      pendingPrompts: [],
+    };
+    hook.rerender({
+      currentSession: settledSession,
+      contentSignature: "reply-during-deferred-effects|settled",
+      messageSignature: "reply-during-deferred-effects",
+      deferEffects: true,
+    });
+    hook.rerender({
+      currentSession: settledSession,
+      contentSignature: "reply-during-deferred-effects|settled",
+      messageSignature: "reply-during-deferred-effects",
+      deferEffects: false,
+    });
+
+    expect(hook.result.current.showNewResponseIndicator).toBe(true);
+    expect(hook.result.current.newResponseIndicatorLabel).toBe("New response");
   });
 
   it("repins attached live growth before paint and leaves detached readers alone", () => {

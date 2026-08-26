@@ -2070,6 +2070,7 @@ export function VirtualizedConversationMessageList({
           isActive={isActive}
           page={page}
           preferImmediateHeavyRender={preferImmediateHeavyRender}
+          deferMeasurementUntilNextFrame={shouldUseEstimatedBottomViewport}
           allowDeferredHeavyActivation={allowDeferredHeavyActivation}
           renderMessageCard={renderMessageCard}
           conversationSearchMatchedItemKeys={conversationSearchMatchedItemKeys}

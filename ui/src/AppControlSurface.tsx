@@ -999,6 +999,7 @@ export function AppControlSurface({
                     }
                     className="themed-input session-list-search-input"
                     type="search"
+                    name="session-search"
                     value={controlSurfaceSessionListSearchQuery}
                     placeholder="Search sessions"
                     spellCheck={false}

@@ -401,6 +401,72 @@ mod visible_session_hydration_error_tests {
     }
 
     #[test]
+    fn broad_state_snapshot_carries_delegation_links_and_mcp_capability() {
+        let root = TempStateDir::new("termal-summary-delegation-links");
+        let state = AppState::new_with_paths(
+            root.path().to_string_lossy().into_owned(),
+            root.path().join("state.sqlite"),
+            root.path().join("orchestrators.json"),
+        )
+        .expect("test state should initialize");
+        let record = DelegationRecord {
+            id: "delegation-1".to_owned(),
+            parent_session_id: "parent-session".to_owned(),
+            child_session_id: "child-session".to_owned(),
+            mode: DelegationMode::Reviewer,
+            status: DelegationStatus::Completed,
+            title: "Completed review".to_owned(),
+            prompt: "/review-code".to_owned(),
+            cwd: root.path().to_string_lossy().into_owned(),
+            agent: Agent::Codex,
+            model: None,
+            write_policy: DelegationWritePolicy::ReadOnly,
+            created_at: stamp_now(),
+            started_at: Some(stamp_now()),
+            completed_at: Some(stamp_now()),
+            result: None,
+            submitted_review_result: None,
+            post_submission_transport_error: None,
+            review_result_recovery_probe_attempt: None,
+            review_result_recovery_error: None,
+            review_result_schema_version: None,
+            review_result_required: true,
+            review_result_submission_attempt: 1,
+            result_parser_version: 7,
+        };
+        state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .delegations
+            .push(record.clone());
+
+        let json = serde_json::to_value(state.summary_snapshot())
+            .expect("summary snapshot should serialize");
+        let delegation = json["delegations"][0]
+            .as_object()
+            .expect("delegation link should be an object");
+        assert_eq!(delegation.len(), 4);
+        assert_eq!(delegation["id"], record.id);
+        assert_eq!(delegation["childSessionId"], record.child_session_id);
+        assert_eq!(delegation["mode"], "reviewer");
+        assert_eq!(delegation["reviewResultRequired"], true);
+        assert!(!delegation.contains_key("status"));
+        assert!(!delegation.contains_key("title"));
+        assert!(!delegation.contains_key("result"));
+        assert!(delegation_child_requires_structured_review_result(
+            &json,
+            &record.child_session_id,
+        ));
+
+        let scoped = serde_json::to_value(delegation_summary_from_record(&record))
+            .expect("scoped delegation summary should serialize");
+        assert_eq!(scoped["status"], "completed");
+        assert_eq!(scoped["title"], "Completed review");
+        assert_eq!(scoped["resultParserVersion"], 7);
+    }
+
+    #[test]
     fn summary_snapshot_bounds_live_activity_but_targeted_detail_is_complete() {
         let root = TempStateDir::new("termal-summary-live-activity");
         let state = AppState::new_with_paths(
@@ -1318,7 +1384,7 @@ impl AppState {
             delegations: inner
                 .delegations
                 .iter()
-                .map(delegation_summary_from_record)
+                .map(delegation_state_summary_from_record)
                 .collect(),
             delegation_waits: inner.delegation_waits.clone(),
         }
@@ -1354,7 +1420,7 @@ impl AppState {
             delegations: inner
                 .delegations
                 .iter()
-                .map(delegation_summary_from_record)
+                .map(delegation_state_summary_from_record)
                 .collect(),
             delegation_waits: inner.delegation_waits.clone(),
         }
@@ -1389,7 +1455,7 @@ impl AppState {
             delegations: inner
                 .delegations
                 .iter()
-                .map(delegation_summary_from_record)
+                .map(delegation_state_summary_from_record)
                 .collect(),
             delegation_waits: inner.delegation_waits.clone(),
         }

@@ -20,6 +20,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import {
+  buildMessageListSignature,
   canNestedScrollableConsumeWheel,
   clamp,
   normalizeWheelDelta,
@@ -218,6 +219,29 @@ export function useSessionPaneScrollState({
   >({});
   const latestTurnTailSignatureByKeyRef = useRef<
     Record<string, string | undefined>
+  >({});
+  const latestMessageTailSignatureByKeyRef = useRef<
+    Record<string, string | undefined>
+  >({});
+  const latestMessageContentSignatureByKeyRef = useRef<
+    Record<string, string | undefined>
+  >({});
+  const latestPendingPromptIdsByKeyRef = useRef<
+    Record<string, string[] | undefined>
+  >({});
+  const latestTurnContentTransitionByKeyRef = useRef<
+    Record<
+      string,
+      | {
+          fromMessageContentSignature: string | undefined;
+          latestTurnChanged: boolean;
+          pendingPromptsAdvanced: boolean;
+          promptResidencyChanged: boolean;
+          tailMessageChanged: boolean;
+          toMessageContentSignature: string;
+        }
+      | undefined
+    >
   >({});
   const visibleContentSignatureByKeyRef = useRef<
     Record<string, string | undefined>
@@ -828,6 +852,49 @@ export function useSessionPaneScrollState({
       latestTurnTailSignatureByKeyRef.current[scrollStateKey];
     latestTurnTailSignatureByKeyRef.current[scrollStateKey] =
       currentTurnTailSignature;
+    const tailMessage = messages[messages.length - 1];
+    const currentMessageTailSignature = buildMessageListSignature(
+      tailMessage ? [tailMessage] : [],
+    );
+    const previousMessageTailSignature =
+      latestMessageTailSignatureByKeyRef.current[scrollStateKey];
+    latestMessageTailSignatureByKeyRef.current[scrollStateKey] =
+      currentMessageTailSignature;
+    const previousMessageContentSignature =
+      latestMessageContentSignatureByKeyRef.current[scrollStateKey];
+    latestMessageContentSignatureByKeyRef.current[scrollStateKey] =
+      visibleMessageContentSignature;
+    const currentPendingPromptIds = (activeSession?.pendingPrompts ?? [])
+      .filter((prompt) => !prompt.localOnly)
+      .map((prompt) => prompt.id);
+    const previousPendingPromptIds =
+      latestPendingPromptIdsByKeyRef.current[scrollStateKey];
+    latestPendingPromptIdsByKeyRef.current[scrollStateKey] =
+      currentPendingPromptIds;
+    latestTurnContentTransitionByKeyRef.current[scrollStateKey] = {
+      fromMessageContentSignature: previousMessageContentSignature,
+      latestTurnChanged:
+        previousTurnTailSignature !== undefined &&
+        previousTurnTailSignature !== currentTurnTailSignature,
+      pendingPromptsAdvanced:
+        previousPendingPromptIds !== undefined &&
+        currentPendingPromptIds.some(
+          (promptId) => !previousPendingPromptIds.includes(promptId),
+        ),
+      // Revealing or trimming the prompt at the resident-history boundary can
+      // change the latest-turn signature even though the live tail did not.
+      // Preserve that distinction for the indicator effect below.
+      promptResidencyChanged:
+        previousTurnOutput !== undefined &&
+        previousTurnOutput.promptMessageId !==
+          currentTurnOutput.promptMessageId &&
+        (previousTurnOutput.promptMessageId === null ||
+          currentTurnOutput.promptMessageId === null),
+      tailMessageChanged:
+        previousMessageTailSignature !== undefined &&
+        previousMessageTailSignature !== currentMessageTailSignature,
+      toMessageContentSignature: visibleMessageContentSignature,
+    };
 
     const postLiveMessageTransition = resolvePostLiveMessageFollowTransition({
       awaitingPromptMessageId:
@@ -883,6 +950,7 @@ export function useSessionPaneScrollState({
     repinAttachedLiveContentBeforePaint();
   }, [
     activeSession?.messages,
+    activeSession?.pendingPrompts,
     hasUnloadedNewerHistory,
     isActive,
     isSessionTabActive,
@@ -1827,6 +1895,44 @@ export function useSessionPaneScrollState({
       // The layout-phase restore above owns first activation. Repeating it
       // here after paint creates a second scroll authority and can overwrite a
       // detached position restored during the same commit.
+      return;
+    }
+
+    const latestTurnContentTransition =
+      latestTurnContentTransitionByKeyRef.current[scrollStateKey];
+    const describesConsumedMessageTransition =
+      latestTurnContentTransition !== undefined &&
+      latestTurnContentTransition.fromMessageContentSignature ===
+        previousMessageContentSignature &&
+      latestTurnContentTransition.toMessageContentSignature ===
+        visibleMessageContentSignature;
+    const pendingPromptsAdvanced =
+      paneViewMode === "session" &&
+      showWaitingIndicator &&
+      describesConsumedMessageTransition &&
+      latestTurnContentTransition.tailMessageChanged === false &&
+      latestTurnContentTransition.pendingPromptsAdvanced;
+    if (pendingPromptsAdvanced) {
+      if (getTailFollowIntent()) {
+        setNewResponseIndicator(scrollStateKey, false);
+        repinAttachedLiveContentBeforePaint();
+        return;
+      }
+      setNewResponseIndicator(scrollStateKey, true, "activity");
+      return;
+    }
+    const onlyResidentHistoryChanged =
+      paneViewMode === "session" &&
+      previousMessageContentSignature !== visibleMessageContentSignature &&
+      describesConsumedMessageTransition &&
+      latestTurnContentTransition?.tailMessageChanged === false &&
+      (latestTurnContentTransition.latestTurnChanged === false ||
+        latestTurnContentTransition.promptResidencyChanged);
+    if (onlyResidentHistoryChanged) {
+      // Loading or trimming an older resident prefix is a consequence of the
+      // user's scroll, not unseen live-tail activity. The broad conversation
+      // signature must still advance, but it must not arm the popup or repin
+      // the viewport that initiated the history reveal.
       return;
     }
 

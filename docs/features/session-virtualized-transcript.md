@@ -105,7 +105,11 @@ Older pages are prepended with message-id deduplication. The transcript
 virtualizer is the only owner of scroll anchoring while the page is inserted
 and measured; the history-loading hook does not write `scrollTop`. This avoids
 two independent compensation layers moving the visible messages after a page
-arrives. While the resident window still includes the live tail, live SSE
+arrives. A prepend or trim changes the resident conversation signature, but it
+does not arm **New response** or **New activity**: those affordances describe
+actual live-tail or pending-prompt advancement, not history loaded because the
+reader scrolled away from the bottom. While the resident window still includes
+the live tail, live SSE
 appends remain visible during an older-page request. After explicit
 jump-to-start replaces the tail with a historical window, live state continues
 through session metadata, while live-only transcript cards remain hidden until
@@ -461,6 +465,9 @@ These rules should remain true:
    anchor or saved position is captured. Once bottom-follow is active, delayed
    restores must target the current real DOM bottom; they may not replay a
    previously recorded `scrollTop`.
+10. Resident-prefix reveal or trimming never counts as a new response. The
+    bottom indicator is armed only by live-tail content or pending-prompt
+    advancement while detached.
 
 ## Known Limitations
 

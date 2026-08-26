@@ -19,6 +19,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
   isActive,
   page,
   preferImmediateHeavyRender,
+  deferMeasurementUntilNextFrame,
   allowDeferredHeavyActivation,
   renderMessageCard,
   conversationSearchMatchedItemKeys,
@@ -33,6 +34,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
   isActive: boolean;
   page: MessagePage;
   preferImmediateHeavyRender: boolean;
+  deferMeasurementUntilNextFrame: boolean;
   allowDeferredHeavyActivation: boolean;
   renderMessageCard: RenderMessageCard;
   conversationSearchMatchedItemKeys: ReadonlySet<string>;
@@ -63,6 +65,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
     }
 
     let frameId = 0;
+    let pendingFlushLayout = false;
     const measure = (flushLayout = false) => {
       frameId = 0;
       const slotNodes = Array.from(
@@ -99,15 +102,47 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
       );
     };
 
-    measure();
+    const scheduleMeasure = (
+      flushLayout = false,
+      waitForPriorPaint = false,
+    ) => {
+      pendingFlushLayout ||= flushLayout;
+      if (frameId !== 0) {
+        return;
+      }
+      frameId = window.requestAnimationFrame(() => {
+        frameId = 0;
+        if (waitForPriorPaint) {
+          // A callback registered from a layout effect runs before the next
+          // paint. Queueing the actual measure from that callback guarantees
+          // the estimated cold viewport receives one paint first.
+          scheduleMeasure();
+          return;
+        }
+        const flushPendingLayout = pendingFlushLayout;
+        pendingFlushLayout = false;
+        measure(flushPendingLayout);
+      });
+    };
+
+    if (deferMeasurementUntilNextFrame) {
+      // Cold activation already has an estimated bottom viewport. Measuring
+      // every mounted card in this layout effect forces the browser to finish
+      // the entire transcript layout before the click can paint. Cross one
+      // paint boundary, then synchronously commit the refined spacer and
+      // anchored bottom in the following frame. The estimated-bottom mount
+      // path uses zero page buffers, and the page-height owner flushes only
+      // visible/intersecting bands, so this synchronous correction stays
+      // bounded to the cold viewport rather than the full transcript.
+      scheduleMeasure(true, true);
+    } else {
+      measure();
+    }
     const ResizeObserverCtor = globalThis.ResizeObserver;
     const resizeObserver =
       typeof ResizeObserverCtor === "function"
         ? new ResizeObserverCtor(() => {
-            if (frameId !== 0) {
-              return;
-            }
-            frameId = window.requestAnimationFrame(() => measure(true));
+            scheduleMeasure(true);
           })
         : null;
     resizeObserver?.observe(node);
@@ -121,7 +156,14 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [isActive, onHeightChange, page.hasTrailingGap, page.key, page.pageIndex]);
+  }, [
+    isActive,
+    onHeightChange,
+    page.hasTrailingGap,
+    page.key,
+    page.pageIndex,
+    deferMeasurementUntilNextFrame,
+  ]);
 
   return (
     <div ref={pageRef} className="virtualized-message-page" data-page-key={page.key}>

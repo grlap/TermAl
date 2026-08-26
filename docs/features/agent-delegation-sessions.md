@@ -997,8 +997,14 @@ type DelegationDeltaEvent =
     };
 ```
 
-`/api/state` must include enough delegation summary data to recover missed
-lifecycle deltas after reconnect.
+`/api/state` carries each delegation's `id`, `childSessionId`, `mode`, and
+`reviewResultRequired`. The durable link restores delegated-child ownership
+after reconnect, while the two capability fields let the delegation MCP bridge
+advertise structured result submission only to eligible reviewer children.
+Lifecycle state, titles, and historical results stay out of every broad
+snapshot. Consumers that need to recover missed lifecycle deltas use the
+parent-scoped delegation list/status endpoints, which retain the compact status
+and result summaries.
 
 ## Data Model
 
@@ -1087,6 +1093,11 @@ type DelegationSummary = Omit<DelegationRecord, "prompt" | "cwd" | "result"> & {
   result?: DelegationResultSummary | null;
 };
 
+type DelegationStateSummary = Pick<
+  DelegationSummary,
+  "id" | "childSessionId" | "mode" | "reviewResultRequired"
+>;
+
 type DelegationChildSessionSummary = {
   id: string;
   name: string;
@@ -1166,7 +1177,7 @@ type DelegationWaitRecord = {
 
 type StateResponse = {
   // Other fields omitted.
-  delegations?: DelegationSummary[];
+  delegations?: DelegationStateSummary[];
   delegationWaits?: DelegationWaitRecord[];
 };
 
@@ -1776,7 +1787,9 @@ Backend:
 - persisted records reload with parent and child ids intact
 - cancel stops child session and updates parent card
 - result endpoint returns final packet after child completion
-- SSE deltas are monotonic and recoverable through `/api/state`
+- SSE deltas are monotonic; gap recovery uses `/api/state` for the current
+  revision plus delegation identity/capability links, then parent-scoped
+  list/status APIs when full lifecycle summaries are needed
 
 Frontend:
 - parent card appears after spawn

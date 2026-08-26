@@ -4303,6 +4303,15 @@ fn delegation_summary_from_record(record: &DelegationRecord) -> DelegationSummar
     }
 }
 
+fn delegation_state_summary_from_record(record: &DelegationRecord) -> DelegationStateSummary {
+    DelegationStateSummary {
+        id: record.id.clone(),
+        child_session_id: record.child_session_id.clone(),
+        mode: record.mode,
+        review_result_required: record.review_result_required,
+    }
+}
+
 fn delegation_write_policy_label(write_policy: &DelegationWritePolicy) -> &'static str {
     match write_policy {
         DelegationWritePolicy::ReadOnly => "Read-only",

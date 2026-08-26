@@ -1117,7 +1117,7 @@ impl DelegationReviewCommandStatus {
     }
 }
 
-/// Summary-safe result metadata for broad state/SSE subscribers.
+/// Summary-safe result metadata for parent-scoped APIs and lifecycle deltas.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegationResultSummary {
@@ -1235,7 +1235,7 @@ struct DelegationWaitRecord {
     title: Option<String>,
 }
 
-/// Summary-safe delegation metadata for `/api/state` and broad SSE deltas.
+/// Summary-safe delegation metadata for parent-scoped APIs and lifecycle deltas.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegationSummary {
@@ -1257,7 +1257,9 @@ struct DelegationSummary {
     #[serde(default)]
     result_parser_version: u32,
     /// Whether this child must publish a validated structured reviewer result.
-    /// Broad state exposes only the capability bit, not any provisional result.
+    /// Parent-scoped delegation APIs, lifecycle deltas, and the minimal broad
+    /// state capability summary expose this bit. Broad state still omits the
+    /// delegation's lifecycle and result payloads.
     #[serde(default)]
     review_result_required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1266,6 +1268,24 @@ struct DelegationSummary {
     review_result_recovery_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     result: Option<DelegationResultSummary>,
+}
+
+/// Minimal delegation identity and MCP capability metadata carried by broad
+/// state snapshots.
+///
+/// The frontend and peer-session discovery need the durable link to classify
+/// child sessions. The delegation MCP bridge additionally needs `mode` and
+/// `review_result_required` to advertise the structured review submission tool
+/// only to eligible reviewer children. Full lifecycle/result metadata remains
+/// available from the parent-scoped delegation endpoints and delegation SSE
+/// deltas.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationStateSummary {
+    id: String,
+    child_session_id: String,
+    mode: DelegationMode,
+    review_result_required: bool,
 }
 
 /// Request payload for creating a Phase 1 read-only delegation.
@@ -1888,7 +1908,7 @@ struct StateResponse {
     #[serde(default)]
     sessions: Vec<Session>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    delegations: Vec<DelegationSummary>,
+    delegations: Vec<DelegationStateSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     delegation_waits: Vec<DelegationWaitRecord>,
 }
