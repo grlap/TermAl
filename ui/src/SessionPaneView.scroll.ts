@@ -20,6 +20,12 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import {
+  buildTurnContentTransition,
+  classifyTurnContentTransition,
+  didLatestTurnContentChangeBeyondPromptResidency,
+  type TurnContentTransition,
+} from "./SessionPaneView.content-transition";
+import {
   buildMessageListSignature,
   canNestedScrollableConsumeWheel,
   clamp,
@@ -226,23 +232,22 @@ export function useSessionPaneScrollState({
   const latestMessageContentSignatureByKeyRef = useRef<
     Record<string, string | undefined>
   >({});
+  const latestMessagesByKeyRef = useRef<
+    Record<string, readonly Message[] | undefined>
+  >({});
   const latestPendingPromptIdsByKeyRef = useRef<
     Record<string, string[] | undefined>
   >({});
   const latestTurnContentTransitionByKeyRef = useRef<
-    Record<
-      string,
-      | {
-          fromMessageContentSignature: string | undefined;
-          latestTurnChanged: boolean;
-          pendingPromptsAdvanced: boolean;
-          promptResidencyChanged: boolean;
-          tailMessageChanged: boolean;
-          toMessageContentSignature: string;
-        }
-      | undefined
-    >
+    Record<string, TurnContentTransition | undefined>
   >({});
+  // These per-session baselines intentionally survive scrollStateKey changes.
+  // App-owned pane signatures and scroll positions survive the same A -> B -> A
+  // visit, so clearing the hook-local half on B's activation would make A's
+  // next resident-history trim/reveal look like live activity. The complete
+  // maps are released with this hook instance when its pane is destroyed. The
+  // message baseline retains immutable array references; it does not clone
+  // transcript messages or build per-delta marker maps.
   const visibleContentSignatureByKeyRef = useRef<
     Record<string, string | undefined>
   >({});
@@ -381,6 +386,18 @@ export function useSessionPaneScrollState({
     paneTailFollowDetachedByKeyRef.current[scrollStateKey] = true;
     cancelSettledScrollToBottom();
     setTailFollowIntent(false);
+    const node = messageStackRef.current;
+    if (node) {
+      // Native keyboard scrolling is animated by Blink. Its first scroll event
+      // can move only a fraction of the physical-bottom tolerance, so preserve
+      // the exact pre-animation position now. The scroll handler can then
+      // recognize that first upward frame as reader movement instead of
+      // reattaching tail-follow and bouncing the viewport back down.
+      paneScrollPositions[scrollStateKey] = {
+        shouldStick: false,
+        top: node.scrollTop,
+      };
+    }
   }
 
   function keepPaneScrollPositionPinned(node: HTMLElement) {
@@ -636,19 +653,15 @@ export function useSessionPaneScrollState({
 
   useLayoutEffect(() => {
     const node = messageStackRef.current;
-    if (
-      !node ||
-      !isActive ||
-      !isSessionTabActive ||
-      paneViewMode !== "session"
-    ) {
+    if (!node || !isSessionTabActive || paneViewMode !== "session") {
       return;
     }
 
-    // Composer measurement may need an immediate, same-task correction before
-    // paint. It requests that correction instead of writing scrollTop itself;
-    // this handler remains the authority and rejects the request once explicit
-    // tail-follow intent has been released by user navigation.
+    // Every visible selected session tab owns its transcript's layout authority,
+    // even when another pane has keyboard focus. Composer/page measurement may
+    // need an immediate, same-task correction before paint in that non-focused
+    // pane. Hidden tabs still have no listener, and this handler rejects the
+    // request once explicit tail-follow intent has been released by navigation.
     const handleBottomRepinRequest = (event: Event) => {
       const detail =
         event instanceof CustomEvent
@@ -695,6 +708,9 @@ export function useSessionPaneScrollState({
   }, [
     activeSession?.id,
     hasUnloadedNewerHistory,
+    // Activation resets the programmatic-bottom-follow latch read by this
+    // handler. Re-register after that lifecycle edge so the listener and its
+    // captured scroll callbacks share the current activation epoch.
     isActive,
     isSessionTabActive,
     paneViewMode,
@@ -864,6 +880,8 @@ export function useSessionPaneScrollState({
       latestMessageContentSignatureByKeyRef.current[scrollStateKey];
     latestMessageContentSignatureByKeyRef.current[scrollStateKey] =
       visibleMessageContentSignature;
+    const previousMessages = latestMessagesByKeyRef.current[scrollStateKey];
+    latestMessagesByKeyRef.current[scrollStateKey] = messages;
     const currentPendingPromptIds = (activeSession?.pendingPrompts ?? [])
       .filter((prompt) => !prompt.localOnly)
       .map((prompt) => prompt.id);
@@ -871,30 +889,40 @@ export function useSessionPaneScrollState({
       latestPendingPromptIdsByKeyRef.current[scrollStateKey];
     latestPendingPromptIdsByKeyRef.current[scrollStateKey] =
       currentPendingPromptIds;
-    latestTurnContentTransitionByKeyRef.current[scrollStateKey] = {
-      fromMessageContentSignature: previousMessageContentSignature,
-      latestTurnChanged:
-        previousTurnTailSignature !== undefined &&
-        previousTurnTailSignature !== currentTurnTailSignature,
-      pendingPromptsAdvanced:
-        previousPendingPromptIds !== undefined &&
-        currentPendingPromptIds.some(
-          (promptId) => !previousPendingPromptIds.includes(promptId),
-        ),
-      // Revealing or trimming the prompt at the resident-history boundary can
-      // change the latest-turn signature even though the live tail did not.
-      // Preserve that distinction for the indicator effect below.
-      promptResidencyChanged:
-        previousTurnOutput !== undefined &&
-        previousTurnOutput.promptMessageId !==
-          currentTurnOutput.promptMessageId &&
-        (previousTurnOutput.promptMessageId === null ||
-          currentTurnOutput.promptMessageId === null),
-      tailMessageChanged:
-        previousMessageTailSignature !== undefined &&
-        previousMessageTailSignature !== currentMessageTailSignature,
-      toMessageContentSignature: visibleMessageContentSignature,
-    };
+    const latestTurnChanged =
+      previousTurnTailSignature !== undefined &&
+      previousTurnTailSignature !== currentTurnTailSignature;
+    const promptResidencyChanged =
+      previousTurnOutput !== undefined &&
+      previousTurnOutput.promptMessageId !== currentTurnOutput.promptMessageId &&
+      (previousTurnOutput.promptMessageId === null ||
+        currentTurnOutput.promptMessageId === null);
+    latestTurnContentTransitionByKeyRef.current[scrollStateKey] =
+      buildTurnContentTransition({
+        lastConsumedMessageContentSignature:
+          paneMessageContentSignatures[scrollStateKey],
+        latestTurnChangedBeyondPromptResidency:
+          didLatestTurnContentChangeBeyondPromptResidency({
+            currentMessages: messages,
+            currentPromptMessageId: currentTurnOutput.promptMessageId,
+            latestTurnChanged,
+            previousMessages,
+            previousPromptMessageId: previousTurnOutput?.promptMessageId,
+            promptResidencyChanged,
+          }),
+        pendingPromptsAdvanced:
+          previousPendingPromptIds !== undefined &&
+          currentPendingPromptIds.some(
+            (promptId) => !previousPendingPromptIds.includes(promptId),
+          ),
+        tailMessageChanged:
+          previousMessageTailSignature !== undefined &&
+          previousMessageTailSignature !== currentMessageTailSignature,
+        previousMessageContentSignature,
+        previousTransition:
+          latestTurnContentTransitionByKeyRef.current[scrollStateKey],
+        toMessageContentSignature: visibleMessageContentSignature,
+      });
 
     const postLiveMessageTransition = resolvePostLiveMessageFollowTransition({
       awaitingPromptMessageId:
@@ -1593,8 +1621,12 @@ export function useSessionPaneScrollState({
       typeof previousTop === "number" &&
       previousTop < Number.MAX_SAFE_INTEGER / 2 &&
       node.scrollTop < previousTop - 1;
+    const hasDetachedTailFollow = hasDetachedTailFollowAuthority();
     const movedUpAfterUserEscape =
-      hasDetachedTailFollowAuthority() && movedUpFromRecordedPosition;
+      hasDetachedTailFollow &&
+      typeof previousTop === "number" &&
+      previousTop < Number.MAX_SAFE_INTEGER / 2 &&
+      node.scrollTop < previousTop;
     const shouldStick =
       node.scrollHeight - node.scrollTop - node.clientHeight <
       SESSION_STICKY_BOTTOM_BAND_PX;
@@ -1633,7 +1665,7 @@ export function useSessionPaneScrollState({
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
     } else if (
-      hasDetachedTailFollowAuthority() &&
+      hasDetachedTailFollow &&
       !isAtPhysicalBottom
     ) {
       // A manual gesture owns the viewport until it reaches the real bottom.
@@ -1653,7 +1685,7 @@ export function useSessionPaneScrollState({
       setTailFollowIntent(true);
       setNewResponseIndicator(scrollStateKey, false);
     } else if (
-      hasDetachedTailFollowAuthority() ||
+      hasDetachedTailFollow ||
       movedUpFromRecordedPosition ||
       !getTailFollowIntent()
     ) {
@@ -1891,6 +1923,9 @@ export function useSessionPaneScrollState({
     paneContentSignatures[scrollStateKey] = visibleContentSignature;
     paneMessageContentSignatures[scrollStateKey] =
       visibleMessageContentSignature;
+    const latestTurnContentTransition =
+      latestTurnContentTransitionByKeyRef.current[scrollStateKey];
+    delete latestTurnContentTransitionByKeyRef.current[scrollStateKey];
     if (previousSignature === undefined) {
       // The layout-phase restore above owns first activation. Repeating it
       // here after paint creates a second scroll authority and can overwrite a
@@ -1898,21 +1933,33 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    const latestTurnContentTransition =
-      latestTurnContentTransitionByKeyRef.current[scrollStateKey];
-    const describesConsumedMessageTransition =
-      latestTurnContentTransition !== undefined &&
-      latestTurnContentTransition.fromMessageContentSignature ===
-        previousMessageContentSignature &&
-      latestTurnContentTransition.toMessageContentSignature ===
-        visibleMessageContentSignature;
-    const pendingPromptsAdvanced =
-      paneViewMode === "session" &&
-      showWaitingIndicator &&
-      describesConsumedMessageTransition &&
-      latestTurnContentTransition.tailMessageChanged === false &&
-      latestTurnContentTransition.pendingPromptsAdvanced;
-    if (pendingPromptsAdvanced) {
+    const contentTransitionKind =
+      paneViewMode === "session"
+        ? classifyTurnContentTransition({
+            currentMessageContentSignature: visibleMessageContentSignature,
+            previousMessageContentSignature,
+            showWaitingIndicator,
+            transition: latestTurnContentTransition,
+          })
+        : "live";
+    if (
+      hasSessionFindQuery &&
+      contentTransitionKind !== "residentHistoryOnly"
+    ) {
+      setTailFollowIntent(false);
+      if (paneViewMode === "session") {
+        setNewResponseIndicator(
+          scrollStateKey,
+          true,
+          contentTransitionKind === "pendingPromptsAdvanced" ||
+            visibleLastMessageAuthor !== "assistant"
+            ? "activity"
+            : "response",
+        );
+      }
+      return;
+    }
+    if (contentTransitionKind === "pendingPromptsAdvanced") {
       if (getTailFollowIntent()) {
         setNewResponseIndicator(scrollStateKey, false);
         repinAttachedLiveContentBeforePaint();
@@ -1921,14 +1968,7 @@ export function useSessionPaneScrollState({
       setNewResponseIndicator(scrollStateKey, true, "activity");
       return;
     }
-    const onlyResidentHistoryChanged =
-      paneViewMode === "session" &&
-      previousMessageContentSignature !== visibleMessageContentSignature &&
-      describesConsumedMessageTransition &&
-      latestTurnContentTransition?.tailMessageChanged === false &&
-      (latestTurnContentTransition.latestTurnChanged === false ||
-        latestTurnContentTransition.promptResidencyChanged);
-    if (onlyResidentHistoryChanged) {
+    if (contentTransitionKind === "residentHistoryOnly") {
       // Loading or trimming an older resident prefix is a consequence of the
       // user's scroll, not unseen live-tail activity. The broad conversation
       // signature must still advance, but it must not arm the popup or repin
@@ -1947,18 +1987,6 @@ export function useSessionPaneScrollState({
         return;
       }
       setNewResponseIndicator(scrollStateKey, true, "activity");
-      return;
-    }
-
-    if (hasSessionFindQuery) {
-      setTailFollowIntent(false);
-      if (paneViewMode === "session") {
-        setNewResponseIndicator(
-          scrollStateKey,
-          true,
-          visibleLastMessageAuthor === "assistant" ? "response" : "activity",
-        );
-      }
       return;
     }
 

@@ -1284,8 +1284,18 @@ struct DelegationSummary {
 struct DelegationStateSummary {
     id: String,
     child_session_id: String,
+    #[serde(default = "default_delegation_state_mode")]
     mode: DelegationMode,
+    #[serde(default)]
     review_result_required: bool,
+}
+
+/// Missing capability metadata from an older remote must not make the whole
+/// state snapshot fail to deserialize. Explorer is the fail-closed typed
+/// default; the delegation MCP bridge independently gates review submission
+/// against the raw JSON in `delegation_mcp.rs`.
+fn default_delegation_state_mode() -> DelegationMode {
+    DelegationMode::Explorer
 }
 
 /// Request payload for creating a Phase 1 read-only delegation.

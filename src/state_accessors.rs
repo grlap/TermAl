@@ -434,16 +434,32 @@ mod visible_session_hydration_error_tests {
             review_result_submission_attempt: 1,
             result_parser_version: 7,
         };
-        state
-            .inner
-            .lock()
-            .expect("state mutex poisoned")
-            .delegations
-            .push(record.clone());
+        let mut explorer_record = record.clone();
+        explorer_record.id = "delegation-2".to_owned();
+        explorer_record.child_session_id = "explorer-child-session".to_owned();
+        explorer_record.mode = DelegationMode::Explorer;
+        explorer_record.status = DelegationStatus::Running;
+        explorer_record.title = "Active exploration".to_owned();
+        explorer_record.prompt = "Inspect the implementation".to_owned();
+        explorer_record.completed_at = None;
+        explorer_record.review_result_required = false;
+        explorer_record.review_result_submission_attempt = 0;
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            inner.delegations.push(record.clone());
+            inner.delegations.push(explorer_record.clone());
+        }
 
-        let json = serde_json::to_value(state.summary_snapshot())
+        let snapshot = state.summary_snapshot();
+        let json = serde_json::to_value(&snapshot)
             .expect("summary snapshot should serialize");
-        let delegation = json["delegations"][0]
+        let delegations = json["delegations"]
+            .as_array()
+            .expect("delegation links should be an array");
+        let delegation = delegations
+            .iter()
+            .find(|delegation| delegation["id"] == record.id)
+            .expect("reviewer delegation link should exist")
             .as_object()
             .expect("delegation link should be an object");
         assert_eq!(delegation.len(), 4);
@@ -458,6 +474,40 @@ mod visible_session_hydration_error_tests {
             &json,
             &record.child_session_id,
         ));
+        let explorer_delegation = delegations
+            .iter()
+            .find(|delegation| delegation["id"] == explorer_record.id)
+            .expect("explorer delegation link should exist");
+        assert_eq!(explorer_delegation["mode"], "explorer");
+        assert_eq!(explorer_delegation["reviewResultRequired"], false);
+        assert!(!delegation_child_requires_structured_review_result(
+            &json,
+            &explorer_record.child_session_id,
+        ));
+
+        let mut older_remote_json = json.clone();
+        let older_remote_delegation = older_remote_json["delegations"]
+            .as_array_mut()
+            .expect("delegation links should be mutable")
+            .iter_mut()
+            .find(|delegation| delegation["id"] == record.id)
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("reviewer delegation link should be mutable");
+        older_remote_delegation.remove("mode");
+        older_remote_delegation.remove("reviewResultRequired");
+        assert!(!delegation_child_requires_structured_review_result(
+            &older_remote_json,
+            &record.child_session_id,
+        ));
+        let older_remote_snapshot: StateResponse = serde_json::from_value(older_remote_json)
+            .expect("older remote state should deserialize with hidden capabilities");
+        let older_remote_summary = older_remote_snapshot
+            .delegations
+            .iter()
+            .find(|delegation| delegation.id == record.id)
+            .expect("older remote delegation link should remain available");
+        assert_eq!(older_remote_summary.mode, DelegationMode::Explorer);
+        assert!(!older_remote_summary.review_result_required);
 
         let scoped = serde_json::to_value(delegation_summary_from_record(&record))
             .expect("scoped delegation summary should serialize");

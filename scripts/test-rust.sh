@@ -53,8 +53,60 @@ case "$current_soft_limit" in
 esac
 
 effective_soft_limit=$(ulimit -S -n 2>/dev/null || echo unknown)
-echo "Rust test gate: fd soft limit=$effective_soft_limit, test threads=$test_threads"
 
 RUST_TEST_THREADS=$test_threads
 export RUST_TEST_THREADS
-exec cargo test "$@"
+
+# A caller can pin the toolchain explicitly. Otherwise, a WSL shell operating
+# on a mounted Windows checkout prefers cargo.exe so the gate exercises the
+# same path and permission semantics as the Windows application. Native POSIX
+# and Git Bash keep their ordinary `cargo` resolution.
+cargo_bin=
+uses_windows_interop=false
+if [ -n "${TERMAL_TEST_CARGO:-}" ]; then
+    if ! cargo_bin=$(command -v "$TERMAL_TEST_CARGO" 2>/dev/null); then
+        echo "TERMAL_TEST_CARGO was not found or is not executable: '$TERMAL_TEST_CARGO'." >&2
+        exit 127
+    fi
+else
+    case "$repo_root" in
+        /mnt/[a-zA-Z]/*)
+            if [ -n "${WSL_INTEROP:-}" ] && command -v cargo.exe >/dev/null 2>&1; then
+                cargo_bin=$(command -v cargo.exe)
+                uses_windows_interop=true
+            fi
+            ;;
+    esac
+fi
+if [ -z "$cargo_bin" ] && command -v cargo >/dev/null 2>&1; then
+    cargo_bin=$(command -v cargo)
+fi
+if [ -z "$cargo_bin" ]; then
+    echo "cargo was not found; install Rust or add Cargo to PATH." >&2
+    exit 127
+fi
+
+# Explicit TERMAL_TEST_CARGO overrides must receive the same WSL -> Win32
+# environment forwarding as the auto-detected cargo.exe path.
+if [ -n "${WSL_INTEROP:-}" ]; then
+    case "$cargo_bin" in
+        *.exe|*.EXE) uses_windows_interop=true ;;
+    esac
+fi
+
+if [ "$uses_windows_interop" = true ]; then
+    # WSL only forwards opted-in environment variables to Win32 children.
+    # Preserve the wrapper's deterministic libtest cap across that boundary.
+    case ":${WSLENV:-}:" in
+        *:RUST_TEST_THREADS:*|*:RUST_TEST_THREADS/*:*) ;;
+        *) WSLENV="${WSLENV:+$WSLENV:}RUST_TEST_THREADS" ;;
+    esac
+    export WSLENV
+    fd_limit_note=" (wrapper shell only; not applied to cargo.exe)"
+else
+    fd_limit_note=
+fi
+
+echo "Rust test gate: cargo=$cargo_bin, fd soft limit=$effective_soft_limit$fd_limit_note, test threads=$test_threads"
+
+exec "$cargo_bin" test "$@"

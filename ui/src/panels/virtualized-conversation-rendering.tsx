@@ -142,6 +142,10 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
     const resizeObserver =
       typeof ResizeObserverCtor === "function"
         ? new ResizeObserverCtor(() => {
+            // Page bands report geometry only. The page-height owner resolves
+            // bottom-follow, detached anchors, and the user-scroll cooldown
+            // together after the coalesced measurement; dispatching a pane
+            // repin here would bypass those authority guards.
             scheduleMeasure(true);
           })
         : null;

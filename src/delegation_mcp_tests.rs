@@ -22,12 +22,16 @@ struct TestMcpHttpRequest {
     body: String,
 }
 
-fn serialized_reviewer_child_state(child_session_id: &str) -> Value {
+fn serialized_delegation_child_state(
+    child_session_id: &str,
+    mode: DelegationMode,
+    review_result_required: bool,
+) -> Value {
     let record = DelegationRecord {
         id: "delegation-reviewer-fixture".to_owned(),
         parent_session_id: "session-root".to_owned(),
         child_session_id: child_session_id.to_owned(),
-        mode: DelegationMode::Reviewer,
+        mode,
         status: DelegationStatus::Running,
         title: "Reviewer fixture".to_owned(),
         prompt: "/review-code".to_owned(),
@@ -44,8 +48,8 @@ fn serialized_reviewer_child_state(child_session_id: &str) -> Value {
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
-        review_result_required: true,
-        review_result_submission_attempt: 1,
+        review_result_required,
+        review_result_submission_attempt: u32::from(review_result_required),
         result_parser_version: 0,
     };
     let delegation = serde_json::to_value(delegation_state_summary_from_record(&record))
@@ -759,7 +763,11 @@ fn delegation_mcp_list_sessions_returns_root_sessions_only() {
 
 #[test]
 fn delegation_mcp_hides_and_rejects_peer_tools_for_delegation_child() {
-    let state_snapshot = serialized_reviewer_child_state("session-parent");
+    let state_snapshot = serialized_delegation_child_state(
+        "session-parent",
+        DelegationMode::Reviewer,
+        true,
+    );
     let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |request| {
         assert_eq!(request.method, "GET");
         assert_eq!(request.path, "/api/state");
@@ -864,23 +872,15 @@ fn delegation_mcp_hides_and_rejects_peer_tools_for_unlinked_durable_child() {
 
 #[test]
 fn delegation_mcp_hides_and_rejects_review_submission_for_non_reviewer_child() {
+    let state_snapshot = serialized_delegation_child_state(
+        "session-worker",
+        DelegationMode::Explorer,
+        false,
+    );
     let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |request| {
         assert_eq!(request.method, "GET");
         assert_eq!(request.path, "/api/state");
-        (
-            200,
-            json!({
-                "sessions": [
-                    { "id": "session-worker", "name": "Worker", "parentDelegationId": "delegation-worker" }
-                ],
-                "delegations": [{
-                    "id": "delegation-worker",
-                    "childSessionId": "session-worker",
-                    "mode": "worker",
-                    "reviewResultRequired": false
-                }]
-            }),
-        )
+        (200, state_snapshot.clone())
     });
     let bridge = TermalDelegationMcpBridge::new("session-worker".to_owned(), base_url)
         .expect("bridge should initialize");

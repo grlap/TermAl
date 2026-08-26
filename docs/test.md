@@ -60,8 +60,12 @@ The Rust wrapper raises the inherited Unix file-descriptor soft limit toward
 HTTP, and runtime fixtures from intermittently exhausting macOS's common
 256-descriptor default. Set `TERMAL_TEST_FD_LIMIT` or `TERMAL_TEST_THREADS` to
 positive integers to override those defaults; existing `RUST_TEST_THREADS` is
-also honored when `TERMAL_TEST_THREADS` is unset. Extra arguments are passed
-through to `cargo test`, for example:
+also honored when `TERMAL_TEST_THREADS` is unset. On WSL, a checkout under a
+mounted Windows drive uses `cargo.exe` by default so the gate matches the
+Windows application's path semantics; the diagnostic names the selected Cargo
+and notes that the Unix descriptor limit cannot apply to that Win32 process.
+Set `TERMAL_TEST_CARGO` to an executable name or path to force a different
+toolchain. Extra arguments are passed through to `cargo test`, for example:
 
 ```bash
 scripts/test-rust.sh mailbox_store_tests

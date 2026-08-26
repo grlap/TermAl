@@ -102,7 +102,14 @@ function installAnimationFrameHarness() {
     vi.fn((frameId: number) => animationFrames.delete(frameId)),
   );
   const drainAnimationFrames = () => {
+    let drainCount = 0;
     while (animationFrames.size > 0) {
+      drainCount += 1;
+      if (drainCount > 50) {
+        throw new Error(
+          `animation frame drain exceeded 50 rounds with ${animationFrames.size} callbacks pending`,
+        );
+      }
       const callbacks = Array.from(animationFrames.values());
       animationFrames.clear();
       act(() => {
@@ -139,6 +146,60 @@ describe("session pane historical-window tail state", () => {
       ),
     ).toBe(true);
     expect(detail.authorityPresent).toBe(true);
+  });
+
+  it("lets a visible session pane repin its bottom while another pane has focus", () => {
+    const liveSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    let scrollHeight = 1_000;
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    Object.defineProperty(scrollNode, "scrollTo", {
+      configurable: true,
+      value: vi.fn((options: ScrollToOptions) => {
+        if (typeof options.top === "number") {
+          scrollNode.scrollTop = options.top;
+        }
+      }),
+    });
+    const hook = renderHook(
+      ({ isSessionTabActive }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive: false,
+          isSessionTabActive,
+          paneScrollPositions: {
+            [scrollStateKey]: { top: 800, shouldStick: true },
+          },
+          paneShouldStickToBottomRef: {
+            current: { [scrollStateKey]: true },
+          },
+          scrollStateKey,
+        }),
+      { initialProps: { isSessionTabActive: false } },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+    hook.rerender({ isSessionTabActive: true });
+
+    scrollHeight = 1_040;
+    let authorityPresent = false;
+    act(() => {
+      authorityPresent = requestMessageStackBottomRepin(scrollNode, {
+        beforePaint: true,
+      });
+    });
+
+    expect(authorityPresent).toBe(true);
+    expect(scrollNode.scrollTop).toBe(840);
+
+    hook.rerender({ isSessionTabActive: false });
+    expect(
+      requestMessageStackBottomRepin(scrollNode, { beforePaint: true }),
+    ).toBe(false);
   });
 
   it("smoothly advances live bottom-follow without issuing an upward correction", () => {
@@ -769,6 +830,332 @@ describe("session pane historical-window tail state", () => {
 
     expect(hook.result.current.showNewResponseIndicator).toBe(true);
     expect(hook.result.current.newResponseIndicatorLabel).toBe("New response");
+  });
+
+  it.each(["reveal", "trim"] as const)(
+    "does not advertise an inactive-tab history %s when the tab returns",
+    (historyChange) => {
+      installAnimationFrameHarness();
+      const olderMessage: Message = {
+        id: "history-inactive",
+        type: "text",
+        timestamp: "12:01",
+        author: "you",
+        text: "Older resident history",
+      };
+      const residentTail: Message = {
+        id: "tail-inactive",
+        type: "text",
+        timestamp: "12:02",
+        author: "assistant",
+        text: "Already visible at the tail",
+      };
+      const initialMessages =
+        historyChange === "reveal"
+          ? [residentTail]
+          : [olderMessage, residentTail];
+      const changedMessages =
+        historyChange === "reveal"
+          ? [olderMessage, residentTail]
+          : [residentTail];
+      const initialSignature = initialMessages
+        .map((message) => message.id)
+        .join("|");
+      const changedSignature = changedMessages
+        .map((message) => message.id)
+        .join("|");
+      const initialSession: Session = {
+        ...session(false),
+        messages: initialMessages,
+      };
+      const sharedParams = {
+        ...params(initialSession),
+        isActive: true,
+        paneShouldStickToBottomRef: {
+          current: { "pane-1:session-history": false },
+        },
+      };
+      const hook = renderHook(
+        ({ currentSession, messageSignature, tabActive }) =>
+          useSessionPaneScrollState({
+            ...sharedParams,
+            activeSession: currentSession,
+            isSessionTabActive: tabActive,
+            visibleContentSignature: messageSignature,
+            visibleMessageContentSignature: messageSignature,
+            visibleLastMessageAuthor:
+              currentSession.messages[currentSession.messages.length - 1]
+                ?.author,
+          }),
+        {
+          initialProps: {
+            currentSession: initialSession,
+            messageSignature: initialSignature,
+            tabActive: true,
+          },
+        },
+      );
+      const historyChangedSession = {
+        ...initialSession,
+        messages: changedMessages,
+      };
+
+      hook.rerender({
+        currentSession: historyChangedSession,
+        messageSignature: changedSignature,
+        tabActive: false,
+      });
+      hook.rerender({
+        currentSession: historyChangedSession,
+        messageSignature: changedSignature,
+        tabActive: true,
+      });
+
+      expect(hook.result.current.showNewResponseIndicator).toBe(false);
+      hook.unmount();
+    },
+  );
+
+  it.each(["reveal", "trim"] as const)(
+    "does not advertise a history %s after an A to B to A session switch",
+    (historyChange) => {
+      installAnimationFrameHarness();
+      const olderMessage: Message = {
+        id: "history-after-session-switch",
+        type: "text",
+        timestamp: "12:01",
+        author: "you",
+        text: "Older resident history",
+      };
+      const residentTail: Message = {
+        id: "tail-after-session-switch",
+        type: "text",
+        timestamp: "12:02",
+        author: "assistant",
+        text: "Already visible at the tail",
+      };
+      const initialMessages =
+        historyChange === "reveal"
+          ? [residentTail]
+          : [olderMessage, residentTail];
+      const changedMessages =
+        historyChange === "reveal"
+          ? [olderMessage, residentTail]
+          : [residentTail];
+      const initialSession: Session = {
+        ...session(false),
+        messages: initialMessages,
+      };
+      const otherSession: Session = {
+        ...session(false),
+        id: "session-other",
+        messages: [
+          {
+            id: "other-tail",
+            type: "text",
+            timestamp: "12:03",
+            author: "assistant",
+            text: "Other session",
+          },
+        ],
+      };
+      const paneContentSignatures: Record<string, string> = {};
+      const paneMessageContentSignatures: Record<string, string> = {};
+      const paneShouldStickToBottomRef = {
+        current: {
+          "pane-1:session-history": false,
+          "pane-1:session-other": false,
+        },
+      };
+      const sharedParams = {
+        ...params(initialSession),
+        isActive: true,
+        isSessionTabActive: true,
+        paneContentSignatures,
+        paneMessageContentSignatures,
+        paneShouldStickToBottomRef,
+      };
+      const hook = renderHook(
+        ({ currentSession, messageSignature, activeScrollStateKey }) =>
+          useSessionPaneScrollState({
+            ...sharedParams,
+            activeSession: currentSession,
+            scrollStateKey: activeScrollStateKey,
+            visibleContentSignature: messageSignature,
+            visibleMessageContentSignature: messageSignature,
+            visibleLastMessageAuthor:
+              currentSession.messages[currentSession.messages.length - 1]
+                ?.author,
+          }),
+        {
+          initialProps: {
+            currentSession: initialSession,
+            messageSignature: initialMessages
+              .map((message) => message.id)
+              .join("|"),
+            activeScrollStateKey: "pane-1:session-history",
+          },
+        },
+      );
+
+      hook.rerender({
+        currentSession: otherSession,
+        messageSignature: "other-tail",
+        activeScrollStateKey: "pane-1:session-other",
+      });
+      hook.rerender({
+        currentSession: {
+          ...initialSession,
+          messages: changedMessages,
+        },
+        messageSignature: changedMessages
+          .map((message) => message.id)
+          .join("|"),
+        activeScrollStateKey: "pane-1:session-history",
+      });
+
+      expect(hook.result.current.showNewResponseIndicator).toBe(false);
+      hook.unmount();
+    },
+  );
+
+  it("does not repin queued-prompt activity while transcript search is active", () => {
+    installAnimationFrameHarness();
+    const residentTail: Message = {
+      id: "tail-during-find",
+      type: "text",
+      timestamp: "12:02",
+      author: "assistant",
+      text: "Searchable resident tail",
+    };
+    const initialSession: Session = {
+      ...session(false),
+      messages: [residentTail],
+      pendingPrompts: [],
+    };
+    const paneShouldStickToBottomRef = {
+      current: { "pane-1:session-history": true },
+    };
+    const sharedParams = {
+      ...params(initialSession),
+      hasSessionFindQuery: true,
+      isActive: true,
+      isSessionTabActive: true,
+      paneShouldStickToBottomRef,
+      showWaitingIndicator: true,
+    };
+    const hook = renderHook(
+      ({ currentSession, contentSignature, messageSignature }) =>
+        useSessionPaneScrollState({
+          ...sharedParams,
+          activeSession: currentSession,
+          visibleContentSignature: contentSignature,
+          visibleMessageContentSignature: messageSignature,
+          visibleLastMessageAuthor:
+            currentSession.messages[currentSession.messages.length - 1]
+              ?.author,
+        }),
+      {
+        initialProps: {
+          currentSession: initialSession,
+          contentSignature: "tail-during-find",
+          messageSignature: "tail-during-find",
+        },
+      },
+    );
+
+    hook.rerender({
+      currentSession: {
+        ...initialSession,
+        messages: [
+          {
+            id: "history-during-find",
+            type: "text",
+            timestamp: "12:01",
+            author: "you",
+            text: "Older searchable history",
+          },
+          residentTail,
+        ],
+        pendingPrompts: [
+          {
+            id: "prompt-during-find",
+            timestamp: "12:03",
+            text: "Queued during search",
+          },
+        ],
+      },
+      contentSignature: "history|tail|prompt",
+      messageSignature: "history|tail",
+    });
+
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    expect(hook.result.current.showNewResponseIndicator).toBe(true);
+    expect(hook.result.current.newResponseIndicatorLabel).toBe("New activity");
+  });
+
+  it("does not detach or advertise resident-history reveal during transcript search", () => {
+    installAnimationFrameHarness();
+    const residentTail: Message = {
+      id: "tail-during-history-find",
+      type: "text",
+      timestamp: "12:02",
+      author: "assistant",
+      text: "Searchable resident tail",
+    };
+    const initialSession: Session = {
+      ...session(false),
+      messages: [residentTail],
+    };
+    const paneShouldStickToBottomRef = {
+      current: { "pane-1:session-history": true },
+    };
+    const sharedParams = {
+      ...params(initialSession),
+      hasSessionFindQuery: true,
+      isActive: true,
+      isSessionTabActive: true,
+      paneShouldStickToBottomRef,
+    };
+    const hook = renderHook(
+      ({ currentSession, messageSignature }) =>
+        useSessionPaneScrollState({
+          ...sharedParams,
+          activeSession: currentSession,
+          visibleContentSignature: messageSignature,
+          visibleMessageContentSignature: messageSignature,
+          visibleLastMessageAuthor:
+            currentSession.messages[currentSession.messages.length - 1]
+              ?.author,
+        }),
+      {
+        initialProps: {
+          currentSession: initialSession,
+          messageSignature: "tail-during-history-find",
+        },
+      },
+    );
+
+    hook.rerender({
+      currentSession: {
+        ...initialSession,
+        messages: [
+          {
+            id: "history-during-history-find",
+            type: "text",
+            timestamp: "12:01",
+            author: "you",
+            text: "Older searchable history",
+          },
+          residentTail,
+        ],
+      },
+      messageSignature: "history-during-history-find|tail-during-history-find",
+    });
+
+    expect(hook.result.current.liveTailPinned).toBe(true);
+    expect(hook.result.current.showNewResponseIndicator).toBe(false);
+    hook.unmount();
   });
 
   it("advertises a queued prompt that arrives with an older-history reveal", () => {
@@ -1639,6 +2026,73 @@ describe("session pane historical-window tail state", () => {
       top: 780,
       shouldStick: false,
     });
+    expect(hook.result.current.liveTailPinned).toBe(false);
+  });
+
+  it("keeps the first ArrowUp animation frame detached inside the physical-bottom tolerance", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const activeSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: {
+        top: Number.MAX_SAFE_INTEGER,
+        shouldStick: true,
+      },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: true },
+    };
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
+        ...params(activeSession),
+        paneScrollPositions,
+        paneShouldStickToBottomRef,
+        scrollStateKey,
+      });
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "ArrowUp",
+        metaKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 800,
+      shouldStick: false,
+    });
+
+    act(() => {
+      // Native keyboard scrolling eases away from the boundary. The first
+      // frame is still within the shared 4 px physical-bottom tolerance.
+      scrollNode.scrollTop = 799.5;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 799.5,
+      shouldStick: false,
+    });
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
     expect(hook.result.current.liveTailPinned).toBe(false);
   });
 

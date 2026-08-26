@@ -211,16 +211,30 @@ export function useVirtualizedConversationPageHeightChange({
       if (
         flushLayout &&
         shouldKeepBottom &&
-        !hasUserScrollInteractionRef.current &&
-        !isInUserScrollCooldown()
+        !hasUserScrollInteractionRef.current
       ) {
         // ResizeObserver measurements arrive in an animation frame before
-        // paint. Commit the refined spacer and the layout-effect bottom write
-        // in that same frame; exposing the new spacer for one paint first
-        // creates a visible blank gap followed by an anchor jump.
+        // paint. Commit the refined spacer in that frame, but keep bottom
+        // restoration behind the user-scroll cooldown below. Reaching the
+        // physical bottom intentionally preserves the timestamp because a
+        // later inertial tick may still detach the reader again.
         flushSync(bumpLayoutVersion);
       } else {
         bumpLayoutVersion();
+      }
+      if (
+        shouldKeepBottom &&
+        !hasUserScrollInteractionRef.current &&
+        isInUserScrollCooldown()
+      ) {
+        const remainingCooldown =
+          userScrollAdjustmentCooldownMs -
+          (performance.now() - lastUserScrollInputTimeRef.current);
+        // Re-run the layout-owned bottom restoration once the gesture window
+        // expires. This avoids both a permanent post-measurement gap and a
+        // synchronous recapture between inertial native scroll ticks.
+        scheduleDeferredLayoutVersion(remainingCooldown);
+        return;
       }
       restoreBottomAfterLayout();
       return;
