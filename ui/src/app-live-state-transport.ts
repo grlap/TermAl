@@ -201,13 +201,16 @@ export function useAppLiveStateTransport(
       typeof window.setInterval
     > | null = null;
     let shouldResyncOnResume = false;
-    // These refs are component-scoped, so Strict Mode effect remounts must reset
-    // any stale in-flight resync bookkeeping from the previous mount.
+    // These refs are component-scoped, so Strict Mode and SSE-epoch effect
+    // remounts must reset stale in-flight resync bookkeeping from the previous
+    // transport. Keep the pending session-open refs intact, though: an unknown
+    // cross-instance create/fork response can queue an authoritative resync at
+    // the same time a CLOSED EventSource schedules its own recreation. The new
+    // stream's first state snapshot must still open that materialized session.
+    // A real component unmount discards the refs with the hook instance.
     stateResyncInFlightRef.current = false;
     stateResyncPendingRef.current = false;
     pendingStateResyncOptionsRef.current = null;
-    pendingRecoveryOpenSessionIdRef.current = undefined;
-    pendingRecoveryPaneIdRef.current = undefined;
     // Track transport activity per session so one noisy active session cannot
     // mask another stalled one.
     let lastLiveTransportActivityAtBySessionId = new Map<string, number>();

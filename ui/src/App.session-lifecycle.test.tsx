@@ -3037,6 +3037,112 @@ describe("App session lifecycle", () => {
     });
   });
 
+  it("preserves the pending created-session open across EventSource recreation", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const createSessionDeferred =
+        createDeferred<Awaited<ReturnType<typeof api.createSession>>>();
+      const abandonedActionRecovery =
+        createDeferred<Awaited<ReturnType<typeof api.fetchState>>>();
+      const fetchStateSpy = vi
+        .spyOn(api, "fetchState")
+        .mockImplementation(() => abandonedActionRecovery.promise);
+      const createSessionSpy = vi
+        .spyOn(api, "createSession")
+        .mockImplementation(() => createSessionDeferred.promise);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      try {
+        await renderApp();
+        const initialEventSource = latestEventSource();
+
+        await dispatchOpenedStateEvent(
+          initialEventSource,
+          makeStateResponse({
+            revision: 5,
+            serverInstanceId: "original-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }),
+        );
+
+        await openCreateSessionDialog();
+        await settleAsyncUi();
+        await submitButtonAndSettle(
+          screen.getByRole("button", { name: "Create session" }),
+        );
+        expect(createSessionSpy).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+          createSessionDeferred.resolve({
+            sessionId: "session-after-restart",
+            revision: 6,
+            serverInstanceId: "replacement-instance",
+            session: makeSession("session-after-restart", {
+              name: "Session After Restart",
+            }),
+          });
+          await flushUiWork();
+        });
+        expect(fetchStateSpy).toHaveBeenCalledTimes(1);
+        expect(
+          screen.queryByLabelText("Message Session After Restart"),
+        ).not.toBeInTheDocument();
+
+        vi.useFakeTimers();
+        act(() => {
+          initialEventSource.readyState = 2;
+          initialEventSource.dispatchError();
+        });
+        await advanceTimers(500);
+        await settleAsyncUi();
+
+        const replacementEventSource = latestEventSource();
+        expect(replacementEventSource).not.toBe(initialEventSource);
+        await dispatchOpenedStateEvent(
+          replacementEventSource,
+          makeStateResponse({
+            revision: 7,
+            serverInstanceId: "replacement-instance",
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [
+              makeSession("session-after-restart", {
+                name: "Session After Restart",
+              }),
+            ],
+          }),
+        );
+
+        expect(
+          screen.getByLabelText("Message Session After Restart"),
+        ).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+        window.history.replaceState(window.history.state, "", originalUrl);
+        window.localStorage.clear();
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        createSessionSpy.mockRestore();
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("opens the created session after action-recovery resync adopts a stale create response", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;
