@@ -680,9 +680,8 @@ fn write_test_http_response(
 }
 
 fn test_app_state() -> AppState {
-    let state_root = std::env::temp_dir().join(format!("termal-test-state-{}", Uuid::new_v4()));
-    fs::create_dir_all(&state_root).expect("state root should exist");
-    let persistence_path = state_root.join("termal.sqlite");
+    let test_temp_root = Arc::new(TestTempRoot::create("termal-test-state"));
+    let persistence_path = test_temp_root.path().join("termal.sqlite");
     // Most tests do not exercise mailboxes. Keeping the production-shaped
     // persistent SQLite connection open in every retained test AppState
     // exhausts macOS's default 256-fd limit before the full suite completes.
@@ -700,9 +699,7 @@ fn test_app_state() -> AppState {
         persistence_path: Arc::new(persistence_path),
         mailbox_store,
         coordination_board_store,
-        orchestrator_templates_path: Arc::new(
-            std::env::temp_dir().join(format!("termal-orchestrators-test-{}.json", Uuid::new_v4())),
-        ),
+        orchestrator_templates_path: Arc::new(test_temp_root.path().join("orchestrators.json")),
         orchestrator_templates_lock: Arc::new(Mutex::new(())),
         review_documents_lock: Arc::new(Mutex::new(())),
         state_events: broadcast::channel(16).0,
@@ -743,6 +740,7 @@ fn test_app_state() -> AppState {
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
         stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
         inner: Arc::new(StateMutex::new(StateInner::new())),
+        test_temp_root: Some(test_temp_root),
     }
 }
 

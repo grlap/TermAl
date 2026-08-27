@@ -47,6 +47,10 @@ import { sourceFileStateFromResponse } from "./source-file-state";
 import { normalizeDisplayPath } from "./path-display";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
 import {
+  isMessageStackSelectionExtensionKey,
+  messageStackTargetConsumesKey,
+} from "./message-stack-scroll-sync";
+import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
 } from "./panels/AgentSessionPanel";
@@ -906,6 +910,42 @@ export function SessionPaneView({
       return;
     }
 
+    const isSessionTranscriptTarget =
+      pane.viewMode === "session" &&
+      activeTab?.kind === "session" &&
+      event.target instanceof Node &&
+      Boolean(messageStackRef.current?.contains(event.target));
+    if (
+      isSessionTranscriptTarget &&
+      isMessageStackSelectionExtensionKey(event)
+    ) {
+      // Shift-modified navigation inside transcript content extends the
+      // browser selection. Composer and other pane controls keep their
+      // existing pane-level shortcuts because they are outside this node.
+      return;
+    }
+
+    if (
+      isSessionTranscriptTarget &&
+      messageStackTargetConsumesKey(
+        event.target,
+        messageStackRef.current,
+        event.key,
+      )
+    ) {
+      // The stack-level intent classifier already yielded this key to a native
+      // or ARIA control. Keep the bubbling pane handler from reclassifying it
+      // as transcript Home/End/Page or platform boundary navigation.
+      return;
+    }
+
+    // The message-stack classifier is the sole owner of transcript control
+    // semantics. Once it yields the key to transcript scrolling, resolve the
+    // pane command against the stack itself so the generic pane editor policy
+    // cannot independently reject the deterministic page command.
+    const paneCommandTarget = isSessionTranscriptTarget
+      ? messageStackRef.current
+      : event.target;
     const command = resolvePaneScrollCommand(
       {
         altKey: event.altKey,
@@ -914,7 +954,7 @@ export function SessionPaneView({
         metaKey: event.metaKey,
         shiftKey: event.shiftKey,
       },
-      event.target,
+      paneCommandTarget,
     );
     if (!command) {
       return;

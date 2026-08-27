@@ -79,6 +79,7 @@ describe("mounted prepend restore generation", () => {
         isNativeUserMovement,
         isProgrammaticNavigation: false,
         scrollDelta: -2,
+        scrollHeightDelta: -2,
         tailFollowIntent: true,
       }),
     ).toBe(true);
@@ -99,6 +100,28 @@ describe("mounted prepend restore generation", () => {
         isNativeUserMovement,
         isProgrammaticNavigation: false,
         scrollDelta: -2,
+        scrollHeightDelta: 0,
+        tailFollowIntent: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("transfers tail-follow authority when an upward frame follows content growth", () => {
+    const isNativeUserMovement = nativeScrollAdvancesUserScrollGeneration({
+      currentScrollHeight: 12_040,
+      previousScrollHeight: 12_000,
+      scrollDelta: -40,
+    });
+
+    expect(isNativeUserMovement).toBe(false);
+    expect(
+      nativeScrollKeepsPassiveTailFollow({
+        hadUserScrollInteraction: false,
+        isDetachedFromBottom: false,
+        isNativeUserMovement,
+        isProgrammaticNavigation: false,
+        scrollDelta: -40,
+        scrollHeightDelta: 40,
         tailFollowIntent: true,
       }),
     ).toBe(false);
@@ -112,6 +135,7 @@ describe("mounted prepend restore generation", () => {
         isNativeUserMovement: true,
         isProgrammaticNavigation: true,
         scrollDelta: -600,
+        scrollHeightDelta: 0,
         tailFollowIntent: true,
       }),
     ).toBe(true);

@@ -469,6 +469,7 @@ export type DelegationWaitRecord = {
 
 export type DelegationWaitConsumedReason =
   | "completed"
+  | "parentSessionStopped"
   | "parentSessionUnavailable"
   | "parentSessionRemoved";
 

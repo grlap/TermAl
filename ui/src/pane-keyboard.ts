@@ -1,3 +1,5 @@
+import { detectBrowserPlatform, isApplePlatform } from "./browser-platform";
+
 const TEXT_ENTRY_INPUT_TYPES = new Set([
   "",
   "email",
@@ -56,7 +58,7 @@ export function resolvePaneScrollCommand(
     shiftKey: boolean;
   },
   target: EventTarget | null,
-  platform = detectPlatform(),
+  platform = detectBrowserPlatform(),
 ): PaneScrollCommand | null {
   if (event.key === "Home" || event.key === "End") {
     if (!event.ctrlKey && !event.metaKey && shouldKeepPlainHomeEndInTarget(target)) {
@@ -106,6 +108,20 @@ export function resolvePaneScrollCommand(
     return null;
   }
 
+  if (
+    event.metaKey &&
+    !event.altKey &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    isApplePlatform(platform) &&
+    !shouldKeepPlainHomeEndInTarget(target)
+  ) {
+    return {
+      kind: "boundary",
+      direction: event.key === "ArrowUp" ? "up" : "down",
+    };
+  }
+
   if (event.altKey || event.metaKey || !event.ctrlKey || isApplePlatform(platform)) {
     return null;
   }
@@ -147,20 +163,4 @@ function makePaneScrollCommand(
   shiftKey: boolean,
 ): PaneScrollCommand {
   return shiftKey ? { kind: "boundary", direction } : { kind: "page", direction };
-}
-
-function detectPlatform(): string {
-  if (typeof navigator === "undefined") {
-    return "";
-  }
-
-  const navigatorWithUserAgentData = navigator as Navigator & {
-    userAgentData?: { platform?: string };
-  };
-
-  return navigatorWithUserAgentData.userAgentData?.platform ?? navigator.platform ?? "";
-}
-
-function isApplePlatform(platform: string): boolean {
-  return /mac|iphone|ipad|ipod/i.test(platform);
 }

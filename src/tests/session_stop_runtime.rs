@@ -449,7 +449,6 @@ fn stop_session_detaches_shared_codex_session_when_interrupt_fails() {
     assert!(reloaded.external_session_id.is_none());
     assert!(reloaded.session.external_session_id.is_none());
     assert!(reloaded.session.codex_thread_state.is_none());
-
     assert!(
         !runtime
             .sessions
@@ -470,14 +469,11 @@ fn stop_session_detaches_shared_codex_session_when_interrupt_fails() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
-// pins queued-prompt recovery after a failed shared-codex interrupt: even
-// when turn/interrupt is rejected, the local detach proceeds AND any queued
-// prompt on that session is dispatched as a fresh CodexRuntimeCommand::Prompt
-// (with no resume_thread_id, since the old thread is gone) so the user does
-// not lose the work they had queued. guards against a regression where a
-// failed interrupt strands the queued prompt and the session lands idle.
+// A rejected turn/interrupt still detaches the stale shared Codex thread, but
+// explicit Stop must leave queued work paused. Otherwise the best-effort
+// fallback immediately starts a fresh runtime and appears to ignore Stop.
 #[test]
-fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() {
+fn stop_session_pauses_queued_prompt_after_shared_codex_interrupt_failure() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
@@ -567,7 +563,6 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
     let mut state_events = state.subscribe_events();
     let mut delta_events = state.subscribe_delta_events();
 
-    let queued_session_id = session_id.clone();
     let command_thread = std::thread::spawn(move || {
         let interrupt = input_rx
             .recv_timeout(Duration::from_secs(1))
@@ -585,20 +580,10 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
             _ => panic!("expected Codex turn interrupt command"),
         }
 
-        let prompt = input_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("queued Codex prompt should be dispatched");
-        match prompt {
-            CodexRuntimeCommand::Prompt {
-                session_id,
-                command,
-            } => {
-                assert_eq!(session_id, queued_session_id);
-                assert_eq!(command.prompt, "queued prompt after failed interrupt");
-                assert!(command.resume_thread_id.is_none());
-            }
-            _ => panic!("expected queued Codex prompt dispatch"),
-        }
+        assert!(matches!(
+            input_rx.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
     });
 
     let stopped_snapshot = state.stop_session(&session_id).unwrap();
@@ -612,16 +597,13 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
         .iter()
         .find(|session| session.id == session_id)
         .expect("stopped session should remain present in the action response");
-    assert_eq!(stopped_session.status, SessionStatus::Active);
-    assert_eq!(
-        stopped_session.preview,
-        "queued prompt after failed interrupt"
-    );
+    assert_eq!(stopped_session.status, SessionStatus::Idle);
+    assert_eq!(stopped_session.preview, "Turn stopped by user.");
 
     let published: StateResponse = serde_json::from_str(
         &state_events
             .try_recv()
-            .expect("stop plus queued dispatch should publish one state snapshot"),
+            .expect("Stop should publish one idle state snapshot"),
     )
     .expect("published stop snapshot should decode");
     let published_session = published
@@ -630,11 +612,8 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
         .find(|session| session.id == session_id)
         .expect("published stop snapshot should retain the session");
     assert_eq!(published.revision, baseline_revision + 1);
-    assert_eq!(published_session.status, SessionStatus::Active);
-    assert_eq!(
-        published_session.preview,
-        "queued prompt after failed interrupt"
-    );
+    assert_eq!(published_session.status, SessionStatus::Idle);
+    assert_eq!(published_session.preview, "Turn stopped by user.");
     assert!(matches!(
         state_events.try_recv(),
         Err(broadcast::error::TryRecvError::Empty)
@@ -670,20 +649,7 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(
-        created_deltas.len(),
-        2,
-        "stop and queued successor should each publish exactly one created delta"
-    );
-    assert_eq!(
-        created_deltas
-            .iter()
-            .map(|(_, message_id, ..)| message_id.as_str())
-            .collect::<HashSet<_>>()
-            .len(),
-        created_deltas.len(),
-        "the successor message must not be published twice"
-    );
+    assert_eq!(created_deltas.len(), 1, "only the stop message is appended");
     assert!(matches!(
         created_deltas[0].3,
         Message::Text {
@@ -692,16 +658,7 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
             ..
         } if text == "Turn stopped by user."
     ));
-    assert!(matches!(
-        created_deltas[1].3,
-        Message::Text {
-            author: Author::You,
-            text,
-            ..
-        } if text == "queued prompt after failed interrupt"
-    ));
     assert_eq!(created_deltas[0].2, baseline_message_count + 1);
-    assert_eq!(created_deltas[1].2, baseline_message_count + 2);
     for (revision, _, _, _, preview, status, mutation_stamp) in created_deltas {
         assert_eq!(revision, stopped_snapshot.revision);
         assert_eq!(preview, &stopped_session.preview);
@@ -715,16 +672,23 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
         .iter()
         .find(|session| session.id == session_id)
         .expect("session should remain present");
-    assert_eq!(session.status, SessionStatus::Active);
-    assert_eq!(session.preview, "queued prompt after failed interrupt");
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(session.preview, "Turn stopped by user.");
     assert!(session.external_session_id.is_none());
     assert!(session.codex_thread_state.is_none());
-    assert!(session.pending_prompts.is_empty());
+    assert_eq!(
+        session
+            .pending_prompts
+            .iter()
+            .map(|prompt| prompt.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["queued prompt after failed interrupt"]
+    );
     assert!(session.messages.iter().any(|message| matches!(
         message,
         Message::Text { text, .. } if text == "Turn stopped by user."
     )));
-    assert!(session.messages.iter().any(|message| matches!(
+    assert!(!session.messages.iter().any(|message| matches!(
         message,
         Message::Text {
             author: Author::You,
@@ -739,10 +703,11 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
         .iter()
         .find(|record| record.session.id == session_id)
         .expect("Codex session should exist");
-    assert_eq!(record.session.status, SessionStatus::Active);
-    assert!(matches!(record.runtime, SessionRuntime::Codex(_)));
+    assert_eq!(record.session.status, SessionStatus::Idle);
+    assert!(matches!(record.runtime, SessionRuntime::None));
     assert!(!record.runtime_stop_in_progress);
-    assert!(record.queued_prompts.is_empty());
+    assert!(record.orchestrator_auto_dispatch_blocked);
+    assert_eq!(record.queued_prompts.len(), 1);
     assert!(record.external_session_id.is_none());
     assert!(record.session.external_session_id.is_none());
     assert!(record.session.codex_thread_state.is_none());
@@ -759,6 +724,8 @@ fn stop_session_dispatches_queued_prompt_after_shared_codex_interrupt_failure() 
     assert!(reloaded.external_session_id.is_none());
     assert!(reloaded.session.external_session_id.is_none());
     assert!(reloaded.session.codex_thread_state.is_none());
+    assert!(reloaded.orchestrator_auto_dispatch_blocked);
+    assert_eq!(reloaded.queued_prompts.len(), 1);
     assert!(
         !runtime
             .thread_sessions
@@ -843,7 +810,14 @@ fn stop_session_rolls_back_queued_successor_when_persist_fails() {
     let baseline_revision = state.full_snapshot().revision;
     let mut state_events = state.subscribe_events();
     let mut delta_events = state.subscribe_delta_events();
-    let error = match state.stop_session(&session_id) {
+    let error = match state.stop_session_with_options(
+        &session_id,
+        StopSessionOptions {
+            dispatch_queued_prompts_on_success: true,
+            pause_automatic_resumes_on_success: false,
+            orchestrator_stop_instance_id: None,
+        },
+    ) {
         Ok(_) => panic!("persistence failure should reject stop"),
         Err(error) => error,
     };
@@ -925,6 +899,104 @@ fn stop_session_rolls_back_queued_successor_when_persist_fails() {
     let _ = fs::remove_dir_all(failing_persistence_path);
 }
 
+// A failed Stop commit must not silently consume the parent's pending
+// delegation waits. The runtime cannot be resurrected after it has been
+// interrupted, but every durable coordination record must remain available for
+// a later successful retry.
+#[test]
+fn stop_session_restores_parent_delegation_wait_when_persist_fails() {
+    let mut state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Cursor);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, input_rx) = mpsc::channel();
+    let runtime = AcpRuntimeHandle {
+        agent: AcpAgent::Cursor,
+        runtime_id: "cursor-stop-wait-persist-failure".to_owned(),
+        input_tx,
+        process: process.clone(),
+        turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
+    };
+    let stopped_parent_wait_id = "delegation-wait-stop-persist-failure".to_owned();
+    let baseline_waits = vec![
+        DelegationWaitRecord {
+            id: "delegation-wait-other-parent".to_owned(),
+            parent_session_id: "session-other-parent".to_owned(),
+            delegation_ids: vec!["delegation-other-parent".to_owned()],
+            mode: DelegationWaitMode::All,
+            created_at: stamp_now(),
+            title: Some("Other parent wait".to_owned()),
+        },
+        DelegationWaitRecord {
+            id: stopped_parent_wait_id.clone(),
+            parent_session_id: session_id.clone(),
+            delegation_ids: vec!["delegation-stop-persist-failure".to_owned()],
+            mode: DelegationWaitMode::All,
+            created_at: stamp_now(),
+            title: Some("Stop persistence rollback".to_owned()),
+        },
+        DelegationWaitRecord {
+            id: "delegation-wait-stopped-parent-second".to_owned(),
+            parent_session_id: session_id.clone(),
+            delegation_ids: vec!["delegation-stop-persist-failure-second".to_owned()],
+            mode: DelegationWaitMode::Any,
+            created_at: stamp_now(),
+            title: Some("Second stopped-parent wait".to_owned()),
+        },
+    ];
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Cursor session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.delegation_waits = baseline_waits.clone();
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    let failing_persistence_path =
+        std::env::temp_dir().join(format!("termal-stop-wait-rollback-{}", Uuid::new_v4()));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("failing persistence directory should exist");
+    state.shutdown_persist_blocking();
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+
+    let mut delta_events = state.subscribe_delta_events();
+    let error = match state.stop_session(&session_id) {
+        Ok(_) => panic!("persistence failure should reject stop"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(error.message.contains("failed to persist session state"));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(
+        inner.delegation_waits, baseline_waits,
+        "a failed Stop commit must restore every pending wait in its original order"
+    );
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("stopped parent should remain present");
+    assert_eq!(parent.session.status, SessionStatus::Idle);
+    assert!(parent.orchestrator_auto_dispatch_blocked);
+    drop(inner);
+    assert!(matches!(
+        delta_events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Disconnected)
+    ));
+    process
+        .wait()
+        .expect("original Cursor runtime should be stopped");
+    let _ = fs::remove_dir_all(failing_persistence_path);
+}
+
 // Pins the failure half of the atomic stop-plus-queue transition. If the
 // queued successor cannot start, Stop still publishes one coherent Idle
 // snapshot, keeps the prompt queued, and clears the prospective turn boundary
@@ -978,7 +1050,14 @@ fn stop_session_keeps_queued_prompt_idle_when_successor_start_fails() {
 
     let baseline_revision = state.full_snapshot().revision;
     let mut state_events = state.subscribe_events();
-    let error = match state.stop_session(&session_id) {
+    let error = match state.stop_session_with_options(
+        &session_id,
+        StopSessionOptions {
+            dispatch_queued_prompts_on_success: true,
+            pause_automatic_resumes_on_success: false,
+            orchestrator_stop_instance_id: None,
+        },
+    ) {
         Ok(_) => panic!("unsupported queued attachments should fail successor start"),
         Err(error) => error,
     };

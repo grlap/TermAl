@@ -34,6 +34,7 @@ import {
 import {
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   notifyMessageStackScrollWrite,
+  notifyMessageStackUserScrollIntent,
 } from "../message-stack-scroll-sync";
 import { mountedPrependRestoreIsCurrent } from "./virtualized-conversation-mounted-range";
 import type { Message } from "../types";
@@ -161,7 +162,7 @@ function renderVirtualizedHarness({
           availableWidthPx: clientWidth,
         }),
       ),
-    );
+  );
   let currentMessages = messages;
   let currentMessageStartIndex = messageStartIndex;
   let estimatedLayout = buildEstimatedLayout(currentMessages);
@@ -423,18 +424,14 @@ describe("VirtualizedConversationMessageList foundation", () => {
     const harness = renderVirtualizedHarness({
       messages: makeTextMessages(8),
     });
-    const querySelectorAllSpy = vi.spyOn(
-      Element.prototype,
-      "querySelectorAll",
-    );
+    const querySelectorAllSpy = vi.spyOn(Element.prototype, "querySelectorAll");
     querySelectorAllSpy.mockClear();
 
     try {
       harness.rerenderWithMessages(makeTextMessages(16));
 
       const mountedPageScans = querySelectorAllSpy.mock.calls.filter(
-        ([selector]) =>
-          selector === ".virtualized-message-page[data-page-key]",
+        ([selector]) => selector === ".virtualized-message-page[data-page-key]",
       );
       // The former last page has a real measurement whose trailing-gap
       // identity changed, so it legitimately checks whether that measurement
@@ -747,9 +744,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
       await waitFor(() => {
         expect(
-          harness.container.querySelector(
-            '[data-message-id="message-32"]',
-          ),
+          harness.container.querySelector('[data-message-id="message-32"]'),
         ).not.toBeNull();
       });
 
@@ -839,9 +834,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
       await waitFor(() => {
         expect(
-          harness.container.querySelector(
-            '[data-message-id="message-48"]',
-          ),
+          harness.container.querySelector('[data-message-id="message-48"]'),
         ).not.toBeNull();
       });
 
@@ -1359,12 +1352,12 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
       expect(virtualizerHandleRef.current!.getViewportSnapshot()).toMatchObject(
         {
-        estimatedTotalHeightPx: 1_200,
-        messageCount: messages.length,
-        sessionId: "session-a",
-        viewportHeightPx: 300,
-        viewportTopPx: 900,
-        viewportWidthPx: 640,
+          estimatedTotalHeightPx: 1_200,
+          messageCount: messages.length,
+          sessionId: "session-a",
+          viewportHeightPx: 300,
+          viewportTopPx: 900,
+          viewportWidthPx: 640,
         },
       );
 
@@ -1372,8 +1365,8 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
       expect(virtualizerHandleRef.current!.getViewportSnapshot()).toMatchObject(
         {
-        estimatedTotalHeightPx: 1_200,
-        viewportTopPx: 450,
+          estimatedTotalHeightPx: 1_200,
+          viewportTopPx: 450,
         },
       );
     } finally {
@@ -1460,8 +1453,14 @@ describe("VirtualizedConversationMessageList foundation", () => {
       expect(secondPageResize).toBeDefined();
 
       harness.setScrollTop(1_480);
-      fireEvent.keyDown(harness.scrollNode, { key: "ArrowUp" });
-      fireEvent.scroll(harness.scrollNode);
+      act(() => {
+        notifyMessageStackUserScrollIntent(harness.scrollNode, {
+          direction: "up",
+          scrollKind: "incremental",
+          viewportCanMove: true,
+        });
+        fireEvent.scroll(harness.scrollNode);
+      });
       const anchorTop = anchorSlot.getBoundingClientRect().top;
 
       await act(async () => {
@@ -1751,7 +1750,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
-  it("marks post-activation measuring during the active commit", () => {
+  it("marks post-activation measuring during the active commit and cancels it for a user seek", () => {
     const messages = makeTextMessages(4);
     const OriginalResizeObserver = window.ResizeObserver;
     const originalGetBoundingClientRect =
@@ -1844,7 +1843,16 @@ describe("VirtualizedConversationMessageList foundation", () => {
         expect(rootNode.querySelector(".virtualized-message-list")).toHaveClass(
           "is-measuring-post-activation",
         );
+
+        notifyMessageStackScrollWrite(scrollNode, {
+          scrollKind: "seek",
+          scrollSource: "user",
+        });
       });
+
+      expect(
+        rootNode.querySelector(".virtualized-message-list"),
+      ).not.toHaveClass("is-measuring-post-activation");
     } finally {
       act(() => {
         flushSync(() => {
@@ -2010,6 +2018,179 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
 
       expect(harness.scrollWrites).toContain(480);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("repins after a boundary-only intent that cannot move the viewport", async () => {
+    const messages = makeTextMessages(160);
+    const clientHeight = 240;
+    const harness = renderVirtualizedHarness({
+      clientHeight,
+      messages,
+      preferInitialEstimatedBottomViewport: true,
+      tailFollowIntent: true,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-160")).toBeInTheDocument();
+      });
+
+      act(() => {
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "bottom_follow",
+        });
+        notifyMessageStackUserScrollIntent(harness.scrollNode, {
+          direction: "up",
+          scrollKind: "incremental",
+          viewportCanMove: false,
+        });
+        harness.setScrollTop(harness.scrollTop - 0.5);
+        fireEvent.scroll(harness.scrollNode);
+      });
+      harness.scrollWrites.length = 0;
+
+      act(() => {
+        harness.rerenderWithMessages([
+          ...messages,
+          {
+            author: "assistant",
+            id: "message-161",
+            text: "Message 161 streamed while attached",
+            timestamp: "10:161",
+            type: "text",
+          },
+        ]);
+      });
+
+      const bottomAfterStream = Math.max(
+        harness.estimatedLayout.totalHeight - clientHeight,
+        0,
+      );
+      await waitFor(() => {
+        expect(harness.scrollWrites).toContain(bottomAfterStream);
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("keeps an immovable older-history boundary detached after prepend measurement", async () => {
+    const allMessages = makeTextMessages(9);
+    const residentMessages = allMessages.slice(4, 8);
+    const hydratedMessages = allMessages.slice(0, 8);
+    const clientHeight = 500;
+    const harness = renderVirtualizedHarness({
+      clientHeight,
+      messageStartIndex: 4,
+      messages: residentMessages,
+      preferInitialEstimatedBottomViewport: true,
+      tailFollowIntent: true,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-8")).toBeInTheDocument();
+      });
+
+      act(() => {
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "bottom_follow",
+        });
+        notifyMessageStackUserScrollIntent(harness.scrollNode, {
+          detachFromBottomAtBoundary: true,
+          direction: "up",
+          scrollKind: "incremental",
+          viewportCanMove: false,
+        });
+      });
+      harness.scrollWrites.length = 0;
+
+      act(() => {
+        harness.rerenderWithWindow(hydratedMessages, 0);
+      });
+      await waitFor(() => {
+        expect(screen.getByText("message-1")).toBeInTheDocument();
+      });
+
+      act(() => {
+        harness.rerenderWithMessages(allMessages);
+      });
+      const bottomAfterStream = Math.max(
+        harness.estimatedLayout.totalHeight - clientHeight,
+        0,
+      );
+      await waitFor(() => {
+        expect(screen.getByText("message-9")).toBeInTheDocument();
+        expect(harness.scrollTop).toBeLessThan(bottomAfterStream);
+        expect(harness.scrollWrites).not.toContain(bottomAfterStream);
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("does not let a body-owned ArrowUp frame resume virtualized bottom-follow", async () => {
+    const messages = makeTextMessages(160);
+    const clientHeight = 240;
+    const harness = renderVirtualizedHarness({
+      clientHeight,
+      messages,
+      preferInitialEstimatedBottomViewport: true,
+      tailFollowIntent: true,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-160")).toBeInTheDocument();
+      });
+
+      act(() => {
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "bottom_follow",
+        });
+      });
+      const bottomBeforeInput = harness.scrollTop;
+
+      act(() => {
+        notifyMessageStackUserScrollIntent(harness.scrollNode, {
+          direction: "up",
+          scrollKind: "incremental",
+          viewportCanMove: true,
+        });
+        // Blink's first keyboard-scroll animation frame can remain inside the
+        // one-pixel bottom-follow discriminator.
+        harness.setScrollTop(bottomBeforeInput - 0.5);
+        fireEvent.scroll(harness.scrollNode);
+      });
+      const detachedAfterFirstFrame = harness.scrollTop;
+      harness.scrollWrites.length = 0;
+
+      act(() => {
+        harness.rerenderWithMessages([
+          ...messages,
+          {
+            author: "assistant",
+            id: "message-161",
+            text: "Message 161 streamed after ArrowUp",
+            timestamp: "10:161",
+            type: "text",
+          },
+        ]);
+      });
+
+      const bottomAfterStream = Math.max(
+        harness.estimatedLayout.totalHeight - clientHeight,
+        0,
+      );
+      expect(detachedAfterFirstFrame).toBeLessThan(bottomBeforeInput);
+      await waitFor(() => {
+        expect(screen.getByText("message-161")).toBeInTheDocument();
+        expect(harness.scrollTop).toBeLessThan(bottomAfterStream - 1);
+        expect(harness.scrollWrites).not.toContain(bottomAfterStream);
+      });
     } finally {
       harness.restore();
     }
@@ -2229,10 +2410,11 @@ describe("VirtualizedConversationMessageList foundation", () => {
       await waitFor(() => {
         const mountedMessageIds = Array.from(
           document.querySelectorAll<HTMLElement>("[data-message-id]"),
-          (slot) => Number.parseInt(
-            slot.dataset.messageId?.replace("message-", "") ?? "",
-            10,
-          ),
+          (slot) =>
+            Number.parseInt(
+              slot.dataset.messageId?.replace("message-", "") ?? "",
+              10,
+            ),
         );
         expect(
           mountedMessageIds.some(

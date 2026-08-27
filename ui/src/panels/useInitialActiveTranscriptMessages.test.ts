@@ -3,6 +3,10 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RefObject } from "react";
+import {
+  MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+  notifyMessageStackUserScrollIntent,
+} from "../message-stack-scroll-sync";
 
 import {
   includeUndeferredMessageTail,
@@ -223,30 +227,344 @@ describe("useInitialActiveTranscriptMessages", () => {
     cleanup();
   });
 
-  it("ignores ordinary typing keys but handles composer-focused PageUp", () => {
+  it("consumes body-owned keyboard demand when it reaches the loaded top", () => {
     const { cleanup, node, ref } = makeScrollNodeRef();
-    const input = document.createElement("input");
-    node.append(input);
+    const listener = vi.fn();
+    const removeListener = addSessionHistoryPageDemandListener(listener);
+    renderTranscriptDemandHook({ scrollContainerRef: ref });
+    node.scrollTop = 400;
+
+    act(() => {
+      notifyMessageStackUserScrollIntent(node, {
+        direction: "up",
+        scrollKind: "incremental",
+        viewportCanMove: false,
+      });
+      node.scrollTop = 0;
+      node.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+
+    expect(listener).toHaveBeenCalledWith({
+      sessionId: "session-a",
+      direction: "older",
+    });
+    expect(listener).toHaveBeenCalledTimes(1);
+    removeListener();
+    cleanup();
+  });
+
+  it("requests exactly one older page from the normalized owner", async () => {
+    const { cleanup, node, ref } = makeScrollNodeRef();
+    node.scrollTop = 0;
+    const listener = vi.fn();
+    const removeListener = addSessionHistoryPageDemandListener(listener);
+    renderTranscriptDemandHook({ scrollContainerRef: ref });
+    const publishNormalizedIntent = (event: KeyboardEvent) => {
+      notifyMessageStackUserScrollIntent(node, {
+        direction: "up",
+        scrollKind: "incremental",
+        sourceKeyboardEvent: event,
+        viewportCanMove: false,
+      });
+    };
+    node.addEventListener("keydown", publishNormalizedIntent);
+
+    await act(async () => {
+      node.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, key: "ArrowUp" }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    node.removeEventListener("keydown", publishNormalizedIntent);
+    removeListener();
+    cleanup();
+  });
+
+  it("requests exactly one older page for a body-targeted normalized key", async () => {
+    const { cleanup, node, ref } = makeScrollNodeRef();
+    node.scrollTop = 0;
+    const listener = vi.fn();
+    const removeListener = addSessionHistoryPageDemandListener(listener);
+    renderTranscriptDemandHook({ scrollContainerRef: ref });
+    const publishBodyOwnedIntent = (event: KeyboardEvent) => {
+      if (event.target !== document.body || event.key !== "ArrowUp") {
+        return;
+      }
+      notifyMessageStackUserScrollIntent(node, {
+        detachFromBottomAtBoundary: true,
+        direction: "up",
+        scrollKind: "incremental",
+        sourceKeyboardEvent: event,
+        viewportCanMove: false,
+      });
+    };
+    document.addEventListener("keydown", publishBodyOwnedIntent);
+
+    try {
+      await act(async () => {
+        document.body.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, key: "ArrowUp" }),
+        );
+        await Promise.resolve();
+      });
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener("keydown", publishBodyOwnedIntent);
+      removeListener();
+      cleanup();
+    }
+  });
+
+  it("does not turn bounded start or tail intent into ordinary pagination", () => {
+    const { cleanup, node, ref } = makeScrollNodeRef();
+    Object.defineProperties(node, {
+      clientHeight: { configurable: true, value: 500 },
+      scrollHeight: { configurable: true, value: 1_000 },
+    });
+    node.scrollTop = 0;
+    const demands: SessionHistoryPageDemand[] = [];
+    const removeListener = addSessionHistoryPageDemandListener((demand) => {
+      demands.push(demand);
+    });
+    renderTranscriptDemandHook({
+      hasNewerHistory: true,
+      hasOlderHistory: true,
+      scrollContainerRef: ref,
+    });
+    const homeEvent = new KeyboardEvent("keydown", {
+      bubbles: true,
+      key: "Home",
+    });
+    const endEvent = new KeyboardEvent("keydown", {
+      bubbles: true,
+      key: "End",
+    });
+
+    act(() => {
+      notifyMessageStackUserScrollIntent(node, {
+        direction: "up",
+        scrollKind: "page_jump",
+        sourceKeyboardEvent: homeEvent,
+        viewportCanMove: false,
+      });
+      node.scrollTop = 500;
+      notifyMessageStackUserScrollIntent(node, {
+        direction: "down",
+        scrollKind: "page_jump",
+        sourceKeyboardEvent: endEvent,
+        viewportCanMove: false,
+      });
+    });
+
+    expect(demands).toEqual([]);
+    removeListener();
+    cleanup();
+  });
+
+  it("does not hydrate history for selection or unowned modifier keys", async () => {
+    const { cleanup, node, ref } = makeScrollNodeRef();
+    Object.defineProperties(node, {
+      clientHeight: { configurable: true, value: 500 },
+      scrollHeight: { configurable: true, value: 1_000 },
+    });
+    const demands: SessionHistoryPageDemand[] = [];
+    const removeListener = addSessionHistoryPageDemandListener((demand) => {
+      demands.push(demand);
+      completeSessionHistoryPageDemand(demand.requestId, true);
+    });
+    renderTranscriptDemandHook({
+      hasNewerHistory: true,
+      hasOlderHistory: true,
+      scrollContainerRef: ref,
+    });
+
+    await act(async () => {
+      node.scrollTop = 0;
+      node.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Home",
+          shiftKey: true,
+        }),
+      );
+      node.scrollTop = 500;
+      node.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "End",
+          shiftKey: true,
+        }),
+      );
+      node.scrollTop = 0;
+      node.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "ArrowUp",
+          metaKey: true,
+        }),
+      );
+      node.scrollTop = 500;
+      node.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "ArrowDown",
+          metaKey: true,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(demands).toEqual([]);
+    removeListener();
+    cleanup();
+  });
+
+  it("consumes body-owned downward demand at the loaded bottom", async () => {
+    const { cleanup, node, ref } = makeScrollNodeRef();
+    Object.defineProperties(node, {
+      clientHeight: { configurable: true, value: 500 },
+      scrollHeight: { configurable: true, value: 1_000 },
+    });
+    node.scrollTop = 500;
+    const demands: SessionHistoryPageDemand[] = [];
+    const removeListener = addSessionHistoryPageDemandListener((demand) => {
+      demands.push(demand);
+      completeSessionHistoryPageDemand(demand.requestId, true);
+    });
+    renderTranscriptDemandHook({
+      hasNewerHistory: true,
+      hasOlderHistory: false,
+      scrollContainerRef: ref,
+    });
+
+    await act(async () => {
+      notifyMessageStackUserScrollIntent(node, {
+        direction: "down",
+        scrollKind: "page_jump",
+        viewportCanMove: false,
+      });
+      await Promise.resolve();
+    });
+
+    expect(demands).toHaveLength(1);
+    expect(demands[0]).toMatchObject({
+      sessionId: "session-a",
+      direction: "newer",
+    });
+    removeListener();
+    cleanup();
+  });
+
+  it("defers history demand until every synchronous authority listener runs", async () => {
+    const { cleanup, node, ref } = makeScrollNodeRef();
+    node.scrollTop = 0;
+    const observed: string[] = [];
+    const removeDemandListener = addSessionHistoryPageDemandListener(() => {
+      observed.push("history-demand");
+    });
+    renderTranscriptDemandHook({ scrollContainerRef: ref });
+    const observeAuthority = () => observed.push("scroll-authority");
+    // Register after the hook so this test stays valid even when a layout-effect
+    // listener is later removed and re-added behind the history listener.
+    node.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      observeAuthority,
+    );
+
+    await act(async () => {
+      notifyMessageStackUserScrollIntent(node, {
+        direction: "up",
+        scrollKind: "incremental",
+        viewportCanMove: false,
+      });
+      expect(observed).toEqual(["scroll-authority"]);
+      await Promise.resolve();
+    });
+
+    expect(observed).toEqual(["scroll-authority", "history-demand"]);
+    node.removeEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      observeAuthority,
+    );
+    removeDemandListener();
+    cleanup();
+  });
+
+  it("ignores ordinary typing keys but handles nested-editor PageUp", async () => {
+    const { cleanup, node, ref } = makeScrollNodeRef();
+    const textarea = document.createElement("textarea");
+    node.append(textarea);
     const listener = vi.fn();
     const removeListener = addSessionHistoryPageDemandListener(listener);
     renderTranscriptDemandHook({ scrollContainerRef: ref });
 
-    act(() => {
-      input.dispatchEvent(
+    await act(async () => {
+      textarea.dispatchEvent(
         new KeyboardEvent("keydown", { bubbles: true, key: "ArrowUp" }),
       );
+      await Promise.resolve();
     });
     expect(listener).not.toHaveBeenCalled();
 
-    act(() => {
-      input.dispatchEvent(
+    await act(async () => {
+      textarea.dispatchEvent(
         new KeyboardEvent("keydown", { bubbles: true, key: "PageUp" }),
       );
+      await Promise.resolve();
     });
     expect(listener).toHaveBeenCalledTimes(1);
 
     removeListener();
     cleanup();
+  });
+
+  it("does not paginate when the conversation overview slider owns navigation keys", async () => {
+    const { cleanup, node, ref } = makeScrollNodeRef();
+    const overviewSlider = document.createElement("div");
+    overviewSlider.setAttribute("role", "slider");
+    overviewSlider.dataset.testid = "conversation-overview-rail";
+    node.append(overviewSlider);
+    Object.defineProperties(node, {
+      clientHeight: { configurable: true, value: 500 },
+      scrollHeight: { configurable: true, value: 1_000 },
+    });
+    const listener = vi.fn();
+    const removeListener = addSessionHistoryPageDemandListener(listener);
+    renderTranscriptDemandHook({
+      hasNewerHistory: true,
+      hasOlderHistory: true,
+      scrollContainerRef: ref,
+    });
+
+    try {
+      node.scrollTop = 0;
+      await act(async () => {
+        for (const key of ["ArrowUp", "PageUp"]) {
+          overviewSlider.dispatchEvent(
+            new KeyboardEvent("keydown", { bubbles: true, key }),
+          );
+        }
+        await Promise.resolve();
+      });
+
+      node.scrollTop = 500;
+      await act(async () => {
+        for (const key of ["ArrowDown", "PageDown"]) {
+          overviewSlider.dispatchEvent(
+            new KeyboardEvent("keydown", { bubbles: true, key }),
+          );
+        }
+        await Promise.resolve();
+      });
+
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      removeListener();
+      cleanup();
+    }
   });
 
   it("handles PageUp from a composer beside the transcript in the same workspace pane", () => {

@@ -8,7 +8,42 @@ import {
   requestSessionHistoryPage,
   requestSessionHistoryStartPage,
   requestSessionHistoryTailPage,
+  resolveHasOlderSessionHistory,
 } from "./session-history-demand";
+
+describe("resolveHasOlderSessionHistory", () => {
+  it("uses explicit availability and the same legacy window fallback", () => {
+    expect(
+      resolveHasOlderSessionHistory({
+        hasOlderHistory: false,
+        messageCount: 5_000,
+        messagesLoaded: false,
+        residentMessageCount: 20,
+      }),
+    ).toBe(false);
+    expect(
+      resolveHasOlderSessionHistory({
+        messageCount: 5_000,
+        messagesLoaded: undefined,
+        residentMessageCount: 20,
+      }),
+    ).toBe(true);
+    expect(
+      resolveHasOlderSessionHistory({
+        messageCount: 20,
+        messagesLoaded: false,
+        residentMessageCount: 20,
+      }),
+    ).toBe(true);
+    expect(
+      resolveHasOlderSessionHistory({
+        messageCount: 20,
+        messagesLoaded: true,
+        residentMessageCount: 20,
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("session history page demand bridge", () => {
   it("fails completable demand immediately when no owner is mounted", async () => {

@@ -42,23 +42,17 @@ async fn project_digest_and_action_routes_are_disabled() {
 }
 
 struct HttpRouteTestFiles {
-    persistence_path: std::path::PathBuf,
-    orchestrator_templates_path: std::path::PathBuf,
+    _test_temp_root_path: PathBuf,
 }
 
 impl HttpRouteTestFiles {
     fn capture(state: &AppState) -> Self {
         Self {
-            persistence_path: state.persistence_path.as_ref().clone(),
-            orchestrator_templates_path: state.orchestrator_templates_path.as_ref().clone(),
+            _test_temp_root_path: state
+                .test_temp_root_path()
+                .expect("HTTP route tests should own a shared test temp root")
+                .to_path_buf(),
         }
-    }
-}
-
-impl Drop for HttpRouteTestFiles {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.persistence_path);
-        let _ = fs::remove_file(&self.orchestrator_templates_path);
     }
 }
 
@@ -182,21 +176,11 @@ fn fastest_service_duration(sample_count: usize, mut operation: impl FnMut()) ->
         .expect("positive timing sample count should produce a duration")
 }
 
-struct TempProjectRoot {
-    path: PathBuf,
-}
+struct TempProjectRoot;
 
 impl TempProjectRoot {
-    fn create(prefix: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("{prefix}-{}", Uuid::new_v4()));
-        fs::create_dir_all(&path).expect("temp project root should exist");
-        Self { path }
-    }
-}
-
-impl Drop for TempProjectRoot {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
+    fn create(prefix: &str) -> TestTempRoot {
+        TestTempRoot::create(prefix)
     }
 }
 
@@ -308,7 +292,7 @@ fn push_test_text_message(state: &AppState, session_id: &str, text: impl Into<St
     message_id
 }
 
-fn create_ordered_sse_test_project(state: &AppState) -> TempProjectRoot {
+fn create_ordered_sse_test_project(state: &AppState) -> TestTempRoot {
     let project_root = TempProjectRoot::create("termal-ordered-sse-project");
     state
         .create_project(CreateProjectRequest {
@@ -2260,10 +2244,10 @@ async fn state_events_route_streams_workspace_layout_summary_updates() {
 async fn state_events_route_streams_orchestrator_creation_state_and_live_orchestrator_deltas() {
     let state = test_app_state();
     let _files = HttpRouteTestFiles::capture(&state);
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-orchestrator-events-route-{}",
-        Uuid::new_v4()
-    ));
+    let project_root = state
+        .test_temp_root_path()
+        .expect("HTTP route tests should own a shared test temp root")
+        .join(format!("orchestrator-events-route-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("events project root should exist");
     let project_id = create_test_project(&state, &project_root, "Events Orchestrator Project");
     let template = state
@@ -2362,7 +2346,6 @@ async fn state_events_route_streams_orchestrator_creation_state_and_live_orchest
         created_session_ids.into_iter().collect::<HashSet<_>>()
     );
 
-    let _ = fs::remove_dir_all(project_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 

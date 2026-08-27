@@ -365,13 +365,13 @@ fn project_deletion_cascades_the_coordination_board_scope() {
 fn project_deletion_persist_failure_preserves_board_data_for_restart_recovery() {
     let base = test_app_state();
     let board_temp_root = BoardRouteTempRoot::new("persist-failure");
-    let invalid_primary_path = board_temp_root.0.join("termal.sqlite");
+    let invalid_primary_path = board_temp_root.path().join("termal.sqlite");
     fs::create_dir_all(&invalid_primary_path)
         .expect("a directory at the primary file path should force persist failure");
     let state = AppState {
         persistence_path: Arc::new(invalid_primary_path),
         coordination_board_store: Arc::new(
-            CoordinationBoardStore::open(&board_temp_root.0.join("coordination.sqlite"))
+            CoordinationBoardStore::open(&board_temp_root.path().join("coordination.sqlite"))
                 .expect("board store should open"),
         ),
         ..base
@@ -445,30 +445,15 @@ fn board_scope_rejects_a_hidden_session() {
     assert!(error.message.contains("local root session"));
 }
 
-/// Removes the per-test board temp directory (SQLite main/WAL/SHM files) on
-/// drop, so route tests cannot leak artifacts even on panic (review, mailbox
-/// #240).
-struct BoardRouteTempRoot(PathBuf);
+struct BoardRouteTempRoot;
 
 impl BoardRouteTempRoot {
-    fn new(label: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("termal-board-{label}-{}", Uuid::new_v4()));
-        fs::create_dir_all(&path).expect("board route test root should exist");
-        Self(path)
-    }
-
-    fn database_path(&self) -> PathBuf {
-        self.0.join("termal.sqlite")
+    fn new(label: &str) -> TestTempRoot {
+        TestTempRoot::create(&format!("termal-board-{label}"))
     }
 }
 
-impl Drop for BoardRouteTempRoot {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn board_route_test_state() -> (AppState, String, BoardRouteTempRoot) {
+fn board_route_test_state() -> (TestTempRoot, AppState, String) {
     let base = test_app_state();
     let board_temp_root = BoardRouteTempRoot::new("routes");
     let state = AppState {
@@ -481,12 +466,12 @@ fn board_route_test_state() -> (AppState, String, BoardRouteTempRoot) {
     let session_id = test_session_id(&state, Agent::Claude);
     let project_id = create_test_project(&state, FsPath::new("/tmp"), "Wire Project");
     assign_session_project(&state, &session_id, &project_id);
-    (state, session_id, board_temp_root)
+    (board_temp_root, state, session_id)
 }
 
 #[test]
 fn board_author_snapshot_normalizes_legacy_session_names_without_blocking_writes() {
-    let (state, session_id, _board_temp_root) = board_route_test_state();
+    let (_board_temp_root, state, session_id) = board_route_test_state();
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -527,7 +512,7 @@ fn board_author_snapshot_normalizes_legacy_session_names_without_blocking_writes
 // contract (surface review, mailbox #237).
 #[tokio::test]
 async fn board_set_route_treats_explicit_null_as_a_set_and_delete_as_a_delete() {
-    let (state, session_id, _board_temp_root) = board_route_test_state();
+    let (_board_temp_root, state, session_id) = board_route_test_state();
     let app = app_router(state.clone());
 
     let (status, receipt): (StatusCode, Value) = request_json(
@@ -609,7 +594,7 @@ async fn board_set_route_treats_explicit_null_as_a_set_and_delete_as_a_delete() 
 
 #[tokio::test]
 async fn board_set_route_rejects_ambiguous_value_delete_combinations() {
-    let (state, session_id, _board_temp_root) = board_route_test_state();
+    let (_board_temp_root, state, session_id) = board_route_test_state();
     let app = app_router(state.clone());
 
     let (status, body): (StatusCode, Value) = request_json(
@@ -668,7 +653,7 @@ async fn board_set_route_rejects_ambiguous_value_delete_combinations() {
 
 #[tokio::test]
 async fn board_set_route_reports_authorization_before_mutation_shape() {
-    let (state, session_id, _board_temp_root) = board_route_test_state();
+    let (_board_temp_root, state, session_id) = board_route_test_state();
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -708,7 +693,7 @@ async fn board_set_route_reports_authorization_before_mutation_shape() {
 
 #[tokio::test]
 async fn board_set_route_maps_a_cas_conflict_to_409_with_detail() {
-    let (state, session_id, _board_temp_root) = board_route_test_state();
+    let (_board_temp_root, state, session_id) = board_route_test_state();
     let app = app_router(state.clone());
 
     let (status, _): (StatusCode, Value) = request_json(
@@ -760,7 +745,7 @@ async fn board_set_route_maps_a_cas_conflict_to_409_with_detail() {
 
 #[tokio::test]
 async fn board_get_and_list_routes_pin_pagination_unchanged_and_tombstone_contracts() {
-    let (state, session_id, _board_temp_root) = board_route_test_state();
+    let (_board_temp_root, state, session_id) = board_route_test_state();
     let (project_id, author_name) =
         resolve_board_scope_for_session(&state, &session_id).expect("board scope should resolve");
     for (key, idempotency_key) in [
@@ -879,7 +864,7 @@ async fn board_get_and_list_routes_pin_pagination_unchanged_and_tombstone_contra
 
 #[tokio::test]
 async fn board_list_route_maps_query_rejections_to_api_error_json() {
-    let (state, session_id, _board_temp_root) = board_route_test_state();
+    let (_board_temp_root, state, session_id) = board_route_test_state();
     let app = app_router(state);
 
     for query in ["limit=abc", "unknownField=1"] {
@@ -903,7 +888,7 @@ async fn board_list_route_maps_query_rejections_to_api_error_json() {
 
 #[tokio::test]
 async fn board_set_route_maps_json_rejections_to_api_error_json() {
-    let (state, session_id, _board_temp_root) = board_route_test_state();
+    let (_board_temp_root, state, session_id) = board_route_test_state();
     let app = app_router(state);
     let (status, body): (StatusCode, Value) = request_json(
         &app,
@@ -936,7 +921,7 @@ async fn board_set_route_maps_json_rejections_to_api_error_json() {
 
 #[tokio::test]
 async fn board_set_route_preserves_retryable_503_no_commit_guidance() {
-    let (base_state, session_id, board_temp_root) = board_route_test_state();
+    let (board_temp_root, base_state, session_id) = board_route_test_state();
     let coordination_path = board_temp_root.database_path();
     let state = AppState {
         coordination_board_store: Arc::new(

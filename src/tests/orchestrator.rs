@@ -593,8 +593,6 @@ async fn orchestrator_stop_route_preserves_running_state_when_a_child_stop_fails
 // or leaving stale stopped-id entries after the persist failure.
 #[test]
 fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
-    let mut state = test_app_state();
-    let original_persistence_path = state.persistence_path.clone();
     let project_root = std::env::temp_dir().join(format!(
         "termal-orchestrator-stop-persist-failure-cleanup-{}",
         Uuid::new_v4()
@@ -603,6 +601,9 @@ fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
         "termal-orchestrator-stop-persist-failure-cleanup-state-{}",
         Uuid::new_v4()
     ));
+    let _failing_persistence_temp_root = TestTempRoot::own(failing_persistence_path.clone());
+    let mut state = test_app_state();
+    let original_persistence_path = state.persistence_path.clone();
     fs::create_dir_all(&project_root).expect("project root should exist");
     fs::create_dir_all(&failing_persistence_path)
         .expect("failing persistence directory should exist");
@@ -694,6 +695,7 @@ fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
             &builder_session_id,
             StopSessionOptions {
                 dispatch_queued_prompts_on_success: false,
+                pause_automatic_resumes_on_success: false,
                 orchestrator_stop_instance_id: Some(instance_id.clone()),
             },
         )
@@ -791,8 +793,6 @@ fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
 // session that was left blocked by a failed stop.
 #[test]
 fn aborted_stop_resume_does_not_redispatch_child_after_child_stop_persist_fails() {
-    let mut state = test_app_state();
-    let original_persistence_path = state.persistence_path.clone();
     let project_root = std::env::temp_dir().join(format!(
         "termal-orchestrator-stop-persist-failure-resume-{}",
         Uuid::new_v4()
@@ -801,6 +801,9 @@ fn aborted_stop_resume_does_not_redispatch_child_after_child_stop_persist_fails(
         "termal-orchestrator-stop-persist-failure-resume-state-{}",
         Uuid::new_v4()
     ));
+    let _failing_persistence_temp_root = TestTempRoot::own(failing_persistence_path.clone());
+    let mut state = test_app_state();
+    let original_persistence_path = state.persistence_path.clone();
     fs::create_dir_all(&project_root).expect("project root should exist");
     fs::create_dir_all(&failing_persistence_path)
         .expect("failing persistence directory should exist");
@@ -878,6 +881,7 @@ fn aborted_stop_resume_does_not_redispatch_child_after_child_stop_persist_fails(
             &builder_session_id,
             StopSessionOptions {
                 dispatch_queued_prompts_on_success: false,
+                pause_automatic_resumes_on_success: false,
                 orchestrator_stop_instance_id: Some(instance_id.clone()),
             },
         )
@@ -965,6 +969,7 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
         "termal-orchestrator-stop-persist-failure-restart-state-{}",
         Uuid::new_v4()
     ));
+    let _state_temp_root = TestTempRoot::own(state_root.clone());
     fs::create_dir_all(&project_root).expect("project root should exist");
     fs::create_dir_all(&state_root).expect("state root should exist");
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
@@ -1060,6 +1065,7 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
             &builder_session_id,
             StopSessionOptions {
                 dispatch_queued_prompts_on_success: false,
+                pause_automatic_resumes_on_success: false,
                 orchestrator_stop_instance_id: Some(instance_id.clone()),
             },
         )
@@ -1107,6 +1113,7 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
         assert!(builder.session.pending_prompts.is_empty());
     }
 
+    restarted.shutdown_persist_blocking();
     drop(restarted);
 
     let _ = fs::remove_dir_all(project_root);
@@ -1129,6 +1136,7 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
         "termal-orchestrator-stop-persist-failure-restart-queued-state-{}",
         Uuid::new_v4()
     ));
+    let _state_temp_root = TestTempRoot::own(state_root.clone());
     fs::create_dir_all(&project_root).expect("project root should exist");
     fs::create_dir_all(&state_root).expect("state root should exist");
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
@@ -1214,6 +1222,7 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
             &builder_session_id,
             StopSessionOptions {
                 dispatch_queued_prompts_on_success: false,
+                pause_automatic_resumes_on_success: false,
                 orchestrator_stop_instance_id: Some(instance_id.clone()),
             },
         )
@@ -1261,6 +1270,7 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
         );
     }
 
+    restarted.shutdown_persist_blocking();
     drop(restarted);
 
     let _ = fs::remove_dir_all(state_root);
@@ -1284,6 +1294,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
         "termal-orchestrator-stop-persist-failure-manual-recovery-state-{}",
         Uuid::new_v4()
     ));
+    let _state_temp_root = TestTempRoot::own(state_root.clone());
     fs::create_dir_all(&project_root).expect("project root should exist");
     fs::create_dir_all(&state_root).expect("state root should exist");
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
@@ -1363,6 +1374,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
             &reviewer_session_id,
             StopSessionOptions {
                 dispatch_queued_prompts_on_success: false,
+                pause_automatic_resumes_on_success: false,
                 orchestrator_stop_instance_id: Some(instance_id.clone()),
             },
         )
@@ -1499,6 +1511,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
         ));
     }
 
+    restarted.shutdown_persist_blocking();
     drop(restarted);
 
     let _ = fs::remove_dir_all(state_root);
@@ -1670,16 +1683,11 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
     let _ = fs::remove_dir_all(failing_persistence_path);
 }
 
-// Pins the mixed-queue recovery ordering: with a stale orchestrator
-// prompt queued ahead of a user prompt, manual recovery dispatches the
-// older user prompt first, leaves the stale orchestrator entry in the
-// queue, and slots the fresh recovery prompt ahead of it as a User
-// entry.
-// Guards against stale orchestrator work winning the dispatch race
-// against older queued user work during manual recovery.
+// Pins user Stop recovery ordering: stale automatic orchestrator work is
+// discarded by Stop, while an older explicit user prompt remains queued and
+// wins over the fresh manual recovery prompt.
 #[test]
-fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stale_orchestrator_work()
- {
+fn blocked_session_manual_recovery_drops_stale_orchestrator_and_preserves_user_fifo() {
     let mut state = test_app_state();
     let original_persistence_path = state.persistence_path.clone();
     let failing_persistence_path = std::env::temp_dir().join(format!(
@@ -1773,13 +1781,9 @@ fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stal
             .expect("session should exist after stop failure");
         inner.sessions[index].runtime = SessionRuntime::Claude(recovery_runtime);
         assert!(inner.sessions[index].orchestrator_auto_dispatch_blocked);
-        assert_eq!(inner.sessions[index].queued_prompts.len(), 2);
+        assert_eq!(inner.sessions[index].queued_prompts.len(), 1);
         assert_eq!(
             inner.sessions[index].queued_prompts[0].source,
-            QueuedPromptSource::Orchestrator
-        );
-        assert_eq!(
-            inner.sessions[index].queued_prompts[1].source,
             QueuedPromptSource::User
         );
     }
@@ -1826,20 +1830,12 @@ fn blocked_session_manual_recovery_prioritizes_existing_user_queue_ahead_of_stal
             .expect("session should still exist after mixed recovery dispatch");
         assert_eq!(record.session.status, SessionStatus::Active);
         assert!(!record.orchestrator_auto_dispatch_blocked);
-        assert_eq!(record.queued_prompts.len(), 2);
+        assert_eq!(record.queued_prompts.len(), 1);
         assert_eq!(
             record.queued_prompts[0].pending_prompt.text,
             "new manual recovery prompt should not jump ahead of older queued user work"
         );
         assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::User);
-        assert_eq!(
-            record.queued_prompts[1].pending_prompt.text,
-            "older stale orchestrator prompt"
-        );
-        assert_eq!(
-            record.queued_prompts[1].source,
-            QueuedPromptSource::Orchestrator
-        );
     }
 
     let _ = fs::remove_file(original_persistence_path.as_path());
@@ -1999,6 +1995,7 @@ fn aborted_stop_does_not_relaunch_child_work_completed_during_stop() {
             &builder_session_id,
             StopSessionOptions {
                 dispatch_queued_prompts_on_success: false,
+                pause_automatic_resumes_on_success: false,
                 orchestrator_stop_instance_id: None,
             },
         )
@@ -3237,10 +3234,13 @@ fn start_turn_on_record_rejects_invalid_remote_proxy_identity() {
 #[test]
 fn failed_orchestrator_transition_dispatch_becomes_a_visible_destination_error() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-orchestrator-transition-failure-{}",
-        Uuid::new_v4()
-    ));
+    let project_root = state
+        .test_temp_root_path()
+        .expect("orchestrator tests should own a shared test temp root")
+        .join(format!(
+            "orchestrator-transition-failure-{}",
+            Uuid::new_v4()
+        ));
     fs::create_dir_all(&project_root).expect("transition failure project root should exist");
     let project_id = state
         .create_project(CreateProjectRequest {
@@ -3375,10 +3375,11 @@ fn failed_orchestrator_transition_dispatch_does_not_block_other_instances() {
         .expect("template should be created")
         .template;
 
-    let project_root_a =
-        std::env::temp_dir().join(format!("termal-orchestrator-multi-a-{}", Uuid::new_v4()));
-    let project_root_b =
-        std::env::temp_dir().join(format!("termal-orchestrator-multi-b-{}", Uuid::new_v4()));
+    let state_temp_root = state
+        .test_temp_root_path()
+        .expect("orchestrator tests should own a shared test temp root");
+    let project_root_a = state_temp_root.join(format!("orchestrator-multi-a-{}", Uuid::new_v4()));
+    let project_root_b = state_temp_root.join(format!("orchestrator-multi-b-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root_a).expect("first project root should exist");
     fs::create_dir_all(&project_root_b).expect("second project root should exist");
 
@@ -3537,10 +3538,10 @@ fn failed_orchestrator_transition_dispatch_does_not_block_other_instances() {
 #[test]
 fn stop_session_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-orchestrator-stop-transition-{}",
-        Uuid::new_v4()
-    ));
+    let project_root = state
+        .test_temp_root_path()
+        .expect("orchestrator tests should own a shared test temp root")
+        .join(format!("orchestrator-stop-transition-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("stop project root should exist");
     let project_id = create_test_project(&state, &project_root, "Stop Transition Project");
     let template = state
@@ -3628,8 +3629,10 @@ fn stop_session_does_not_schedule_orchestrator_transitions() {
 #[test]
 fn fail_turn_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
-    let project_root =
-        std::env::temp_dir().join(format!("termal-orchestrator-fail-turn-{}", Uuid::new_v4()));
+    let project_root = state
+        .test_temp_root_path()
+        .expect("orchestrator tests should own a shared test temp root")
+        .join(format!("orchestrator-fail-turn-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("fail-turn project root should exist");
     let project_id = create_test_project(&state, &project_root, "Fail Turn Project");
     let template = state
@@ -3713,8 +3716,10 @@ fn fail_turn_does_not_schedule_orchestrator_transitions() {
 #[test]
 fn mark_turn_error_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
-    let project_root =
-        std::env::temp_dir().join(format!("termal-orchestrator-mark-error-{}", Uuid::new_v4()));
+    let project_root = state
+        .test_temp_root_path()
+        .expect("orchestrator tests should own a shared test temp root")
+        .join(format!("orchestrator-mark-error-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("mark-error project root should exist");
     let project_id = create_test_project(&state, &project_root, "Mark Error Project");
     let template = state
@@ -3801,10 +3806,10 @@ fn mark_turn_error_does_not_schedule_orchestrator_transitions() {
 #[test]
 fn orchestrator_transition_uses_only_messages_from_the_current_turn() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-orchestrator-current-turn-{}",
-        Uuid::new_v4()
-    ));
+    let project_root = state
+        .test_temp_root_path()
+        .expect("orchestrator tests should own a shared test temp root")
+        .join(format!("orchestrator-current-turn-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("current turn project root should exist");
     let project_id = state
         .create_project(CreateProjectRequest {
@@ -3924,10 +3929,10 @@ fn orchestrator_transition_uses_only_messages_from_the_current_turn() {
 #[test]
 fn runtime_exit_does_not_schedule_orchestrator_transitions() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-orchestrator-runtime-exit-{}",
-        Uuid::new_v4()
-    ));
+    let project_root = state
+        .test_temp_root_path()
+        .expect("orchestrator tests should own a shared test temp root")
+        .join(format!("orchestrator-runtime-exit-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("runtime exit project root should exist");
     let project_id = state
         .create_project(CreateProjectRequest {
@@ -4021,10 +4026,10 @@ fn runtime_exit_does_not_schedule_orchestrator_transitions() {
 #[test]
 fn killing_a_session_prunes_its_orchestrator_links() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-orchestrator-kill-cleanup-{}",
-        Uuid::new_v4()
-    ));
+    let project_root = state
+        .test_temp_root_path()
+        .expect("orchestrator tests should own a shared test temp root")
+        .join(format!("orchestrator-kill-cleanup-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("kill cleanup project root should exist");
     let project_id = state
         .create_project(CreateProjectRequest {

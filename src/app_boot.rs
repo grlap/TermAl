@@ -734,6 +734,8 @@ impl AppState {
             stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
             stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
             inner: inner_arc,
+            #[cfg(test)]
+            test_temp_root: None,
         };
         let remote_config_publication = {
             let inner = state.inner.lock().expect("state mutex poisoned");

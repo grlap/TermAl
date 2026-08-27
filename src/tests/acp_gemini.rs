@@ -1072,8 +1072,8 @@ fn disable_gemini_interactive_shell_in_settings_builds_shell_path_from_empty_obj
 // TermAl's own override-file write or auth inspection on Windows.
 #[test]
 fn load_gemini_settings_json_ignores_malformed_input() {
-    let settings_path =
-        std::env::temp_dir().join(format!("termal-gemini-settings-invalid-{}", Uuid::new_v4()));
+    let temp_root = TestTempRoot::create("termal-gemini-settings-invalid");
+    let settings_path = temp_root.path().join("settings.json");
     fs::write(
         &settings_path,
         r#"{"security": { "auth": { "selectedType": "oauth-personal" }"#,
@@ -1086,8 +1086,6 @@ fn load_gemini_settings_json_ignores_malformed_input() {
         gemini_selected_auth_type_from_settings_file(settings_path.as_path()),
         None
     );
-
-    let _ = fs::remove_file(settings_path);
 }
 
 // Pins `gemini_dotenv_env_pairs` returning empty even when a workspace `.env`
@@ -1109,8 +1107,8 @@ fn gemini_dotenv_env_pairs_ignore_workspace_env_files() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    let project_root =
-        std::env::temp_dir().join(format!("termal-gemini-dotenv-env-{}", Uuid::new_v4()));
+    let temp_root = TestTempRoot::create("termal-gemini-dotenv");
+    let project_root = temp_root.path().join("project");
     fs::create_dir_all(&project_root).expect("project root should be created");
     fs::write(
         project_root.join(".env"),
@@ -1118,8 +1116,7 @@ fn gemini_dotenv_env_pairs_ignore_workspace_env_files() {
     )
     .expect("Gemini dotenv file should be written");
 
-    let empty_home =
-        std::env::temp_dir().join(format!("termal-gemini-dotenv-home-{}", Uuid::new_v4()));
+    let empty_home = temp_root.path().join("home");
     fs::create_dir_all(&empty_home).expect("empty home dir should be created");
     let _home_env = ScopedEnvVar::set_home_dir(&empty_home);
 
@@ -1128,9 +1125,6 @@ fn gemini_dotenv_env_pairs_ignore_workspace_env_files() {
         .collect::<HashMap<_, _>>();
 
     assert!(overrides.is_empty());
-
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(empty_home);
 }
 
 // Pins `find_gemini_env_file` preferring `~/.gemini/.env` and falling back to
@@ -1142,7 +1136,8 @@ fn find_gemini_env_file_reads_home_directory_env_files() {
     let _env_lock = TEST_HOME_ENV_MUTEX
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let home_dir = std::env::temp_dir().join(format!("termal-gemini-home-env-{}", Uuid::new_v4()));
+    let temp_root = TestTempRoot::create("termal-gemini-home-env");
+    let home_dir = temp_root.path().to_path_buf();
     let gemini_dir = home_dir.join(".gemini");
     fs::create_dir_all(&gemini_dir).expect("Gemini home directory should be created");
 
@@ -1160,8 +1155,6 @@ fn find_gemini_env_file_reads_home_directory_env_files() {
             .expect("home fallback env should be written");
         assert_eq!(find_gemini_env_file(), Some(fallback_env));
     }
-
-    let _ = fs::remove_dir_all(home_dir);
 }
 
 // Pins `select_acp_auth_method` returning `None` for Gemini when the only
@@ -1182,10 +1175,8 @@ fn select_acp_auth_method_ignores_workspace_dotenv_credentials() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-gemini-auth-method-dotenv-{}",
-        Uuid::new_v4()
-    ));
+    let temp_root = TestTempRoot::create("termal-gemini-auth-method");
+    let project_root = temp_root.path().join("project");
     fs::create_dir_all(&project_root).expect("project root should be created");
     fs::write(
         project_root.join(".env"),
@@ -1195,8 +1186,7 @@ fn select_acp_auth_method_ignores_workspace_dotenv_credentials() {
 
     // Point HOME at an empty tempdir so `dotenv_var_source` cannot walk
     // into the developer's real `~/.gemini/.env` or `~/.env`.
-    let empty_home =
-        std::env::temp_dir().join(format!("termal-gemini-auth-home-{}", Uuid::new_v4()));
+    let empty_home = temp_root.path().join("home");
     fs::create_dir_all(&empty_home).expect("empty home dir should be created");
     let _home_env = ScopedEnvVar::set_home_dir(&empty_home);
 
@@ -1226,9 +1216,6 @@ fn select_acp_auth_method_ignores_workspace_dotenv_credentials() {
         ),
         None
     );
-
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(empty_home);
 }
 
 // Pins `prepare_termal_gemini_system_settings` (Windows only) writing a settings
@@ -1244,13 +1231,10 @@ fn prepare_termal_gemini_system_settings_writes_override_file() {
     let _env_lock = TEST_HOME_ENV_MUTEX
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let project_root =
-        std::env::temp_dir().join(format!("termal-gemini-system-settings-{}", Uuid::new_v4()));
+    let temp_root = TestTempRoot::create("termal-gemini-system-settings");
+    let project_root = temp_root.path().join("project");
     fs::create_dir_all(&project_root).expect("Gemini override project root should be created");
-    let empty_home = std::env::temp_dir().join(format!(
-        "termal-gemini-system-settings-home-{}",
-        Uuid::new_v4()
-    ));
+    let empty_home = temp_root.path().join("home");
     fs::create_dir_all(&empty_home).expect("Gemini override home dir should be created");
     let _home_env = ScopedEnvVar::set_home_dir(&empty_home);
     let workdir = project_root
@@ -1269,9 +1253,6 @@ fn prepare_termal_gemini_system_settings_writes_override_file() {
         written.pointer("/tools/shell/enableInteractiveShell"),
         Some(&Value::Bool(false))
     );
-
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(empty_home);
 }
 
 // Pins `gemini_interactive_shell_warning` (Windows only) producing a TermAl-forces
@@ -1292,10 +1273,8 @@ fn gemini_interactive_shell_warning_respects_workspace_settings() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-gemini-interactive-shell-{}",
-        Uuid::new_v4()
-    ));
+    let temp_root = TestTempRoot::create("termal-gemini-interactive-shell");
+    let project_root = temp_root.path().join("project");
     let settings_dir = project_root.join(".gemini");
     fs::create_dir_all(&settings_dir).expect("Gemini settings directory should be created");
     let settings_path = settings_dir.join("settings.json");
@@ -1313,7 +1292,7 @@ fn gemini_interactive_shell_warning_respects_workspace_settings() {
 
     // Redirect USERPROFILE to an empty temp dir so the developer's real
     // ~/.gemini/settings.json is not consulted either.
-    let empty_home = std::env::temp_dir().join(format!("termal-gemini-home-{}", Uuid::new_v4()));
+    let empty_home = temp_root.path().join("home");
     fs::create_dir_all(&empty_home).expect("empty home dir should be created");
     let _home_env = ScopedEnvVar::set_home_dir(&empty_home);
 
@@ -1333,7 +1312,4 @@ fn gemini_interactive_shell_warning_respects_workspace_settings() {
     )
     .expect("disabled Gemini settings should be written");
     assert_eq!(gemini_interactive_shell_warning(workdir), None);
-
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(empty_home);
 }

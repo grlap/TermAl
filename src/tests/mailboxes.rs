@@ -657,6 +657,50 @@ fn idle_blocked_receiver_coalesces_repeated_mailbox_wakes() {
 }
 
 #[test]
+fn idle_blocked_receiver_queues_its_first_mailbox_wake_without_reactivation() {
+    let (state, codex_id, claude_id) = mailbox_test_state();
+    let (runtime, input_rx, _process) = test_shared_codex_runtime("mailbox-stopped-session-pause");
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let codex_index = inner
+            .find_session_index(&codex_id)
+            .expect("Codex target should exist");
+        let target = inner
+            .session_mut_by_index(codex_index)
+            .expect("Codex target should exist");
+        target.session.status = SessionStatus::Idle;
+        target.orchestrator_auto_dispatch_blocked = true;
+        assert!(target.queued_prompts.is_empty());
+    }
+
+    let mut request = mailbox_send_request(&codex_id);
+    request.idempotency_key = "stopped-session-first-wake".to_owned();
+    let receipt = state
+        .append_mailbox_message_and_notify(&claude_id, request)
+        .expect("the durable message should append without waking the stopped session");
+
+    assert_eq!(receipt.notification_disposition, "queuedBehindActiveTurn");
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == codex_id)
+        .expect("Codex target should remain present");
+    assert_eq!(target.session.status, SessionStatus::Idle);
+    assert!(target.orchestrator_auto_dispatch_blocked);
+    assert_eq!(target.queued_prompts.len(), 1);
+    assert_eq!(target.queued_prompts[0].source, QueuedPromptSource::Mailbox);
+}
+
+#[test]
 fn dispatch_coalescing_never_regresses_to_an_older_sequence() {
     let (state, sender_id, target_id) = mailbox_test_state();
     let first = state

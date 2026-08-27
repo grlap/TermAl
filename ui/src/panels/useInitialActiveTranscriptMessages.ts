@@ -10,6 +10,14 @@ import {
 } from "react";
 import { resolvePaneScrollCommand } from "../pane-keyboard";
 import {
+  MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+  isMessageStackSelectionExtensionKey,
+  messageStackTargetConsumesKey,
+  resolveMessageStackKeyboardScrollIntent,
+  type MessageStackUserScrollIntentDetail,
+} from "../message-stack-scroll-sync";
+import {
+  resolveHasOlderSessionHistory,
   requestSessionHistoryNewerPage,
   requestSessionHistoryPage,
 } from "../session-history-demand";
@@ -127,6 +135,34 @@ function isTranscriptDemandKeyEventInScope(
   return scrollNode.closest(".workspace-pane")?.contains(event.target) ?? false;
 }
 
+function isTranscriptDemandKeyEventFromScrollNode(
+  event: KeyboardEvent,
+  scrollNode: HTMLElement,
+) {
+  const path =
+    typeof event.composedPath === "function" ? event.composedPath() : [];
+  if (path.length > 0) {
+    return path.includes(scrollNode);
+  }
+  return event.target instanceof Node && scrollNode.contains(event.target);
+}
+
+function isNestedEditablePageDemandFallback(
+  event: KeyboardEvent,
+  scrollNode: HTMLElement,
+) {
+  if (event.key !== "PageUp" && event.key !== "PageDown") {
+    return false;
+  }
+  if (!(event.target instanceof Element)) {
+    return false;
+  }
+  const editableTarget = event.target.closest(
+    "input, textarea, [contenteditable]",
+  );
+  return editableTarget !== null && scrollNode.contains(editableTarget);
+}
+
 // The server supplies the recent tail and older pages. This hook only detects
 // user demand for the next page. The virtualizer is the single owner of scroll
 // anchoring while a page is prepended and measured. Each interaction latch is
@@ -157,14 +193,13 @@ export function useInitialActiveTranscriptMessages({
   scrollContainerRef: RefObject<HTMLElement | null>;
   sessionId: string;
 }) {
-  // Take the larger of the summary count and what we actually hold. The summary
-  // count is authoritative while the browser holds only a bounded suffix.
-  const transcriptMessageCount = Math.max(messageCount ?? 0, messages.length);
   const hasMessages = messages.length > 0;
-  const hasOlderHistory =
-    explicitHasOlderHistory ??
-    (messagesLoaded === false ||
-      (messagesLoaded !== true && transcriptMessageCount > messages.length));
+  const hasOlderHistory = resolveHasOlderSessionHistory({
+    hasOlderHistory: explicitHasOlderHistory,
+    messageCount,
+    messagesLoaded,
+    residentMessageCount: messages.length,
+  });
   const hasNewerHistory = explicitHasNewerHistory ?? false;
   const requestOlderTranscriptPage = useCallback(() => {
     if (!hasOlderHistory) {
@@ -235,10 +270,19 @@ export function useInitialActiveTranscriptMessages({
         hasDemandInteraction = true;
       }
     };
-    const handleKeyDown = (event: KeyboardEvent) => {
+    const consumeKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isMessageStackSelectionExtensionKey(event)) {
+        return;
+      }
       if (isTranscriptTopBoundaryDemandKey(event)) {
         // The pane-level boundary command owns the one bounded from=start
         // request. Ordinary page demand must not race it with a backward fetch.
+        return;
+      }
+      if (event.altKey || event.ctrlKey || event.metaKey) {
+        // Platform boundary shortcuts are either normalized by the pane or
+        // owned by the OS/browser. Never let the capture fallback turn an
+        // unrecognized modifier chord into ordinary page demand.
         return;
       }
       if (!isTranscriptDemandKey(event)) {
@@ -256,6 +300,60 @@ export function useInitialActiveTranscriptMessages({
       ) {
         consumeOlderTranscriptPageDemand();
       }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isTranscriptDemandKeyEventFromScrollNode(event, node)) {
+        // Direct transcript keys are owned synchronously by the normalized
+        // message-stack intent publisher. The capture fallback remains only
+        // for nested controls that consume the key and therefore publish no
+        // normalized intent (notably editable PageUp/PageDown).
+        if (resolveMessageStackKeyboardScrollIntent(event, node) !== null) {
+          return;
+        }
+        if (
+          messageStackTargetConsumesKey(event.target, node, event.key) &&
+          !isNestedEditablePageDemandFallback(event, node)
+        ) {
+          return;
+        }
+        consumeKeyDown(event);
+        return;
+      }
+      consumeKeyDown(event);
+    };
+    const handleUserScrollIntent = (event: Event) => {
+      const detail =
+        event instanceof CustomEvent
+          ? (event.detail as MessageStackUserScrollIntentDetail | undefined)
+          : undefined;
+      if (detail?.direction !== "up") {
+        return;
+      }
+      if (
+        detail.sourceKeyboardEvent &&
+          transcriptBoundaryDemandDirection(detail.sourceKeyboardEvent) ===
+            "up"
+      ) {
+        // Start navigation owns its bounded from=start request. Never arm the
+        // ordinary previous-page latch for the same physical key.
+        return;
+      }
+      const wasNearTopAtIntent =
+        node.scrollTop <= INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX;
+      hasDemandInteraction = true;
+      // A page request can synchronously publish new resident state. Defer it
+      // until every listener on this normalized intent has first dropped any
+      // stale scroll authority, regardless of DOM listener registration order.
+      queueMicrotask(() => {
+        if (disposed) {
+          return;
+        }
+        if (wasNearTopAtIntent) {
+          consumeOlderTranscriptPageDemand();
+        } else {
+          hydrateIfNearTop();
+        }
+      });
     };
     const handleTouchStart = (event: TouchEvent) => {
       hasDemandInteraction = true;
@@ -283,6 +381,10 @@ export function useInitialActiveTranscriptMessages({
     node.addEventListener("scroll", hydrateIfNearTop, { passive: true });
     node.addEventListener("wheel", handleWheel, { passive: true });
     node.addEventListener("mousedown", handleMouseDown, { passive: true });
+    node.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      handleUserScrollIntent,
+    );
     document.addEventListener("keydown", handleKeyDown, { capture: true });
     node.addEventListener("touchstart", handleTouchStart, { passive: true });
     node.addEventListener("touchmove", handleTouchMove, { passive: true });
@@ -294,6 +396,10 @@ export function useInitialActiveTranscriptMessages({
       node.removeEventListener("scroll", hydrateIfNearTop);
       node.removeEventListener("wheel", handleWheel);
       node.removeEventListener("mousedown", handleMouseDown);
+      node.removeEventListener(
+        MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+        handleUserScrollIntent,
+      );
       document.removeEventListener("keydown", handleKeyDown, {
         capture: true,
       });
@@ -321,6 +427,7 @@ export function useInitialActiveTranscriptMessages({
     }
     let hasForwardDemandInteraction = false;
     let requestInFlight = false;
+    let disposed = false;
     const requestNewer = () => {
       if (requestInFlight) {
         return;
@@ -346,10 +453,16 @@ export function useInitialActiveTranscriptMessages({
       hasForwardDemandInteraction = true;
       requestIfNearBottom();
     };
-    const handleKeyDown = (event: KeyboardEvent) => {
+    const consumeKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isMessageStackSelectionExtensionKey(event)) {
+        return;
+      }
       if (transcriptBoundaryDemandDirection(event) === "down") {
         // The pane-level boundary command owns the one bounded tail request.
         // Ordinary forward demand must not race it with an after-cursor fetch.
+        return;
+      }
+      if (event.altKey || event.ctrlKey || event.metaKey) {
         return;
       }
       if (
@@ -364,12 +477,69 @@ export function useInitialActiveTranscriptMessages({
       hasForwardDemandInteraction = true;
       requestIfNearBottom();
     };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isTranscriptDemandKeyEventFromScrollNode(event, node)) {
+        if (resolveMessageStackKeyboardScrollIntent(event, node) !== null) {
+          return;
+        }
+        if (
+          messageStackTargetConsumesKey(event.target, node, event.key) &&
+          !isNestedEditablePageDemandFallback(event, node)
+        ) {
+          return;
+        }
+        consumeKeyDown(event);
+        return;
+      }
+      consumeKeyDown(event);
+    };
+    const handleUserScrollIntent = (event: Event) => {
+      const detail =
+        event instanceof CustomEvent
+          ? (event.detail as MessageStackUserScrollIntentDetail | undefined)
+          : undefined;
+      if (detail?.direction !== "down") {
+        return;
+      }
+      if (
+        detail.sourceKeyboardEvent &&
+          transcriptBoundaryDemandDirection(detail.sourceKeyboardEvent) ===
+            "down"
+      ) {
+        // Tail navigation owns its bounded request; ordinary after-cursor
+        // pagination must not race it.
+        return;
+      }
+      const wasNearBottomAtIntent =
+        node.scrollHeight - node.clientHeight - node.scrollTop <=
+        INITIAL_ACTIVE_TRANSCRIPT_TOP_DEMAND_THRESHOLD_PX;
+      hasForwardDemandInteraction = true;
+      queueMicrotask(() => {
+        if (disposed) {
+          return;
+        }
+        if (wasNearBottomAtIntent) {
+          requestNewer();
+        } else {
+          requestIfNearBottom();
+        }
+      });
+    };
     node.addEventListener("scroll", requestIfNearBottom, { passive: true });
     node.addEventListener("wheel", handleWheel, { passive: true });
+    node.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      handleUserScrollIntent,
+    );
     document.addEventListener("keydown", handleKeyDown, { capture: true });
     return () => {
+      disposed = true;
       node.removeEventListener("scroll", requestIfNearBottom);
       node.removeEventListener("wheel", handleWheel);
+      node.removeEventListener(
+        MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+        handleUserScrollIntent,
+      );
       document.removeEventListener("keydown", handleKeyDown, {
         capture: true,
       });

@@ -924,6 +924,7 @@ fn app_state_new_with_paths_normalizes_verbatim_bootstrap_workdirs() {
         "termal-bootstrap-verbatim-state-{}",
         Uuid::new_v4()
     ));
+    let _state_temp_root = TestTempRoot::own(state_root.clone());
     fs::create_dir_all(&state_root).expect("state root should exist");
     let _home = ScopedEnvVar::set_home_dir(&state_root);
     let persistence_path = state_root.join("termal.sqlite");
@@ -1790,9 +1791,8 @@ fn persisted_state_maps_unknown_conversation_marker_kind_to_custom() {
 // correctly routes async.
 fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<PersistRequest>) {
     let (persist_tx, persist_rx) = mpsc::channel::<PersistRequest>();
-    let state_root = std::env::temp_dir().join(format!("termal-test-state-{}", Uuid::new_v4()));
-    fs::create_dir_all(&state_root).expect("state root should exist");
-    let persistence_path = state_root.join("termal.sqlite");
+    let test_temp_root = Arc::new(TestTempRoot::create("termal-test-state"));
+    let persistence_path = test_temp_root.path().join("termal.sqlite");
     let mailbox_store = Arc::new(MailboxStore::disabled_for_tests());
     // Same fd-cascade rule as the mailbox store: retained test AppStates must
     // not hold real SQLite connections.
@@ -1804,9 +1804,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         persistence_path: Arc::new(persistence_path),
         mailbox_store,
         coordination_board_store,
-        orchestrator_templates_path: Arc::new(
-            std::env::temp_dir().join(format!("termal-orchestrators-test-{}.json", Uuid::new_v4())),
-        ),
+        orchestrator_templates_path: Arc::new(test_temp_root.path().join("orchestrators.json")),
         orchestrator_templates_lock: Arc::new(Mutex::new(())),
         review_documents_lock: Arc::new(Mutex::new(())),
         state_events: broadcast::channel(16).0,
@@ -1841,6 +1839,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
         stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
         inner: Arc::new(StateMutex::new(StateInner::new())),
+        test_temp_root: Some(test_temp_root),
     };
     (state, persist_rx)
 }
@@ -2402,6 +2401,7 @@ fn commit_delta_locked_after_shutdown_falls_back_to_synchronous_persist() {
     fs::create_dir_all(&project_root).expect("project root should exist");
     let state_root =
         std::env::temp_dir().join(format!("termal-post-shutdown-commit-state-{unique_suffix}"));
+    let _state_temp_root = TestTempRoot::own(state_root.clone());
     fs::create_dir_all(&state_root).expect("state root should exist");
     let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
@@ -2509,6 +2509,7 @@ fn graceful_shutdown_drain_persists_final_mutation_across_reload() {
     fs::create_dir_all(&project_root).expect("project root should exist");
     let state_root =
         std::env::temp_dir().join(format!("termal-graceful-shutdown-state-{unique_suffix}"));
+    let _state_temp_root = TestTempRoot::own(state_root.clone());
     fs::create_dir_all(&state_root).expect("state root should exist");
     let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
@@ -2722,6 +2723,7 @@ fn make_persist_test_delegation(
 fn sqlite_persist_connection_cache_reuses_matching_connection_until_invalidated() {
     let state_root =
         std::env::temp_dir().join(format!("termal-sqlite-cache-reuse-{}", Uuid::new_v4()));
+    let _state_temp_root = TestTempRoot::own(state_root.clone());
     fs::create_dir_all(&state_root).expect("state root should exist");
     let path = state_root.join("termal.sqlite");
     let mut cache = SqlitePersistConnectionCache::new();
@@ -2770,6 +2772,7 @@ fn sqlite_persist_connection_cache_reuses_matching_connection_until_invalidated(
 #[test]
 fn sqlite_delta_upserts_only_changed_session_rows_and_removes_hidden_or_deleted_rows() {
     let state_root = std::env::temp_dir().join(format!("termal-sqlite-delta-{}", Uuid::new_v4()));
+    let _state_temp_root = TestTempRoot::own(state_root.clone());
     fs::create_dir_all(&state_root).expect("state root should exist");
     let path = state_root.join("termal.sqlite");
     let mut inner = StateInner::new();
@@ -2996,6 +2999,7 @@ fn invalid_in_memory_remote_identity_isolated_from_full_and_delta_persistence() 
 fn sqlite_delta_upserts_changed_delegation_rows_and_removes_deleted_rows() {
     let state_root =
         std::env::temp_dir().join(format!("termal-sqlite-delegation-delta-{}", Uuid::new_v4()));
+    let _state_temp_root = TestTempRoot::own(state_root.clone());
     fs::create_dir_all(&state_root).expect("state root should exist");
     let path = state_root.join("termal.sqlite");
     let mut inner = StateInner::new();
@@ -3089,6 +3093,7 @@ fn sqlite_delta_upserts_changed_delegation_rows_and_removes_deleted_rows() {
 fn sqlite_delta_metadata_only_update_does_not_rewrite_session_rows() {
     let state_root =
         std::env::temp_dir().join(format!("termal-sqlite-metadata-only-{}", Uuid::new_v4()));
+    let _state_temp_root = TestTempRoot::own(state_root.clone());
     fs::create_dir_all(&state_root).expect("state root should exist");
     let path = state_root.join("termal.sqlite");
     let mut inner = StateInner::new();
@@ -3743,6 +3748,7 @@ fn sqlite_legacy_embedded_delegations_are_requeued_for_table_migration() {
         "termal-sqlite-legacy-delegations-{}",
         Uuid::new_v4()
     ));
+    let _state_temp_root = TestTempRoot::own(state_root.clone());
     fs::create_dir_all(&state_root).expect("state root should exist");
     let path = state_root.join("termal.sqlite");
     let mut inner = StateInner::new();

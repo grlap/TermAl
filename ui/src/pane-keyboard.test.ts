@@ -71,7 +71,7 @@ describe("shouldHandlePanePageKey", () => {
 });
 
 describe("resolvePaneScrollCommand", () => {
-  it("maps Shift+PageUp to a boundary jump", () => {
+  it("maps Shift+PageUp outside the transcript to a boundary jump", () => {
     expect(
       resolvePaneScrollCommand(
         {
@@ -177,8 +177,7 @@ describe("resolvePaneScrollCommand", () => {
 
   it("does not intercept Ctrl+PageUp on macOS", () => {
     // Ctrl+PageUp/PageDown is a Windows/Linux boundary-jump
-    // shortcut. macOS's equivalent is Cmd-arrow (already rejected
-    // by the `metaKey` gate on this function). The pane must not
+    // shortcut. macOS's equivalent is Cmd-arrow. The pane must not
     // fall through to a one-page scroll on Apple — that would be
     // a platform-specific shortcut capture the user didn't ask
     // for, and is inconsistent with the `Ctrl+ArrowUp/Down`
@@ -289,6 +288,55 @@ describe("resolvePaneScrollCommand", () => {
           shiftKey: false,
         },
         document.createElement("div"),
+        "MacIntel",
+      ),
+    ).toBeNull();
+  });
+
+  it("maps macOS Command+Arrow to conversation boundaries", () => {
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "ArrowUp",
+          metaKey: true,
+          shiftKey: false,
+        },
+        document.createElement("div"),
+        "MacIntel",
+      ),
+    ).toEqual({ kind: "boundary", direction: "up" });
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "ArrowDown",
+          metaKey: true,
+          shiftKey: false,
+        },
+        document.createElement("div"),
+        "macOS",
+      ),
+    ).toEqual({ kind: "boundary", direction: "down" });
+  });
+
+  it("keeps macOS Command+Arrow inside text editors", () => {
+    const textarea = document.createElement("textarea");
+    textarea.value = "prompt";
+    textarea.setSelectionRange(0, 0);
+
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "ArrowUp",
+          metaKey: true,
+          shiftKey: false,
+        },
+        textarea,
         "MacIntel",
       ),
     ).toBeNull();

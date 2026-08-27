@@ -2249,7 +2249,8 @@ describe("AgentSessionPanel virtualization", () => {
     // Regression guard for the "near-bottom streaming re-pins the
     // viewport and fights user scroll-up" symptom. Inside
     // `VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS` (200 ms) of a `wheel` /
-    // `touchmove` / `keydown` event on the scroll container, a
+    // `touchmove` event or normalized keyboard-intent event on the scroll
+    // container, a
     // streaming-driven height measurement must not snap `scrollTop`
     // back to the bottom — even when the user is still within the
     // 72 px near-bottom band. After the cooldown expires (or when no
@@ -2462,7 +2463,7 @@ describe("AgentSessionPanel virtualization", () => {
     }
   });
 
-  it("treats native scroll events as user input when they do not match a programmatic write", async () => {
+  it("does not repin after a height-changing first upward native frame", async () => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
@@ -2553,11 +2554,18 @@ describe("AgentSessionPanel virtualization", () => {
       });
 
       scrollWrites.length = 0;
+      // Simulate a deferred page mount between the last bottom scroll frame
+      // and the reader's ArrowUp frame. There is deliberately no keydown,
+      // wheel, pointer, or normalized-intent prelude; the native frame is the
+      // virtualizer's final authority fallback.
+      measuredSlotHeight = 220;
       act(() => {
         scrollTop = 360;
         fireEvent.scroll(scrollNode);
       });
 
+      // A later measurement commit must not use the stale attached authority
+      // to write the physical bottom over the reader's new position.
       measuredSlotHeight = 340;
       await act(async () => {
         resizeCallbacks.get(slot)?.([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);

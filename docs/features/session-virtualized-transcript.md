@@ -380,15 +380,48 @@ Session transcript page navigation is custom.
 
 Ownership split:
 
-- `SessionPaneView.tsx` intercepts `PageUp` / `PageDown`
-- it applies a fixed `scrollTop` delta itself
-- it emits `MESSAGE_STACK_SCROLL_WRITE_EVENT` with optional explicit
-  `scrollKind` metadata so the virtualizer can classify the write correctly
+- `SessionPaneView` is the single keyboard-intent producer. It classifies the
+  real key once, including keys that target `document.body` while the browser's
+  active scroller remains the transcript.
+- `session-pane-body-keyboard-ownership.ts` tracks which mounted pane owns those
+  body-targeted scroll keys without granting ownership to the composer/dialogs.
+- Before native motion, the pane emits the node-scoped, non-bubbling
+  `MESSAGE_STACK_USER_SCROLL_INTENT_EVENT`. The virtualizer consumes it when
+  `viewportCanMove` is true. An immovable upward intent may also carry
+  `detachFromBottomAtBoundary` when older history will hydrate, preventing the
+  prepend measurement from replaying stale bottom authority. History demand
+  consumes boundary intent and defers any page request to a microtask so every
+  synchronous authority listener observes the gesture first.
+- `SessionPaneView.scroll.ts` applies deterministic `PageUp` / `PageDown` deltas and
+  emits `MESSAGE_STACK_SCROLL_WRITE_EVENT` with `scrollSource: "user"` plus
+  explicit `scrollKind` metadata. The virtualizer has no independent keydown
+  listener; adding a second producer would double-detach and double-request.
+- Pane boundary commands (`Home` / `End`, macOS `Command+ArrowUp/ArrowDown`,
+  and Windows/Linux control-key shortcuts) own
+  their single bounded start/tail request and publish the user-owned seek write,
+  rather than also publishing ordinary normalized pagination intent.
+- Shift selection-extension chords inside the transcript—including
+  `Shift+PageUp/PageDown` and Ctrl/Cmd+Shift boundary variants—stay
+  browser-owned, whether focus is on transcript content or `document.body`;
+  the pane neither prevents them nor publishes scroll authority. Composer
+  shortcuts remain pane-owned because the composer is outside the message
+  stack.
+
+`Home` requests the bounded start page whenever
+`resolveHasOlderSessionHistory` reports older content: an explicit
+`hasOlderHistory` value wins; otherwise `messagesLoaded === false` or an
+authoritative summary count larger than the resident message suffix indicates a
+windowed transcript. The pane gives up tail-follow immediately, then applies the
+top seek after that request settles so stale restore work cannot win the write.
+The completion is guarded by a pane-local navigation generation both before it
+schedules and inside its animation frame. Any later manual transcript gesture
+or opposite boundary command invalidates the older completion, so out-of-order
+start/tail responses cannot overwrite the reader's newer viewport intent.
 
 The jump is a fixed fraction of the viewport height:
 
-- `SESSION_PAGE_JUMP_VIEWPORT_FACTOR`
-- current value: `0.45`
+- `SESSION_PAGE_SCROLL_VIEWPORT_FACTOR`
+- current value: `0.85` (with a minimum 160 px jump)
 
 This avoids browser-defined page-jump behavior and keeps keyboard page
 navigation closer to the wheel-scroll model.
@@ -468,6 +501,9 @@ These rules should remain true:
 10. Resident-prefix reveal or trimming never counts as a new response. The
     bottom indicator is armed only by live-tail content or pending-prompt
     advancement while detached.
+11. Keyboard scroll intent has one producer (`SessionPaneView`). All consumers
+    listen on the exact scroll node; virtualizer authority changes synchronously,
+    while history page requests wait until the current event dispatch completes.
 
 ## Known Limitations
 

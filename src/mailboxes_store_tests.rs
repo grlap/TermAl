@@ -7,24 +7,11 @@
 
 use super::*;
 
-struct MailboxTestRoot(PathBuf);
+struct MailboxTestRoot;
 
 impl MailboxTestRoot {
-    fn new() -> Self {
-        let path =
-            std::env::temp_dir().join(format!("termal-mailbox-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&path).expect("mailbox test root should exist");
-        Self(path)
-    }
-
-    fn database_path(&self) -> PathBuf {
-        self.0.join("termal.sqlite")
-    }
-}
-
-impl Drop for MailboxTestRoot {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+    fn new() -> TestTempRoot {
+        TestTempRoot::create("termal-mailbox-test")
     }
 }
 

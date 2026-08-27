@@ -638,6 +638,8 @@ include!("remote_create_proxies.rs");
 include!("remote_codex_proxies.rs");
 include!("remote_session_proxies.rs");
 include!("remote_sync.rs");
+#[cfg(test)]
+include!("test_temp_root.rs");
 include!("state.rs");
 include!("delegation_mcp.rs");
 include!("session_runtime.rs");

@@ -64,8 +64,10 @@ import { collectRestoredGitDiffDocumentContentRefreshes } from "./git-diff-refre
 import { resolveSettledScrollMinimumAttempts } from "./scroll-position";
 import {
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
+  MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
   requestMessageStackBottomRepin,
 } from "./message-stack-scroll-sync";
+import { addSessionHistoryPageDemandListener } from "./session-history-demand";
 import {
   resolveAdoptedStateSlices,
   resolveRecoveredWorkspaceLayoutRequestError,
@@ -79,7 +81,12 @@ import {
   LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
   LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,
 } from "./live-updates";
-import type { AgentReadiness, OrchestratorInstance, Session } from "./types";
+import type {
+  AgentReadiness,
+  McpElicitationRequestMessage,
+  OrchestratorInstance,
+  Session,
+} from "./types";
 import * as workspaceStorage from "./workspace-storage";
 import { WORKSPACE_LAYOUT_STORAGE_KEY } from "./workspace-storage";
 import type { WorkspaceState, WorkspaceTab } from "./workspace";
@@ -402,6 +409,15 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         expect(messageStack.scrollTop).toBe(0);
+
+        // Plain Home takes the same real pane -> virtualizer user-owned seek
+        // path; keep one end-to-end producer check alongside Ctrl+PageUp.
+        messageStack.scrollTop = 800;
+        await act(async () => {
+          fireEvent.keyDown(messageStack, { key: "Home", code: "Home" });
+        });
+        await settleAsyncUi();
+        expect(messageStack.scrollTop).toBe(0);
       } finally {
         context.cleanup();
         restoreScrollGeometry();
@@ -409,6 +425,126 @@ describe("App scroll behaviour", () => {
           Object.defineProperty(window.navigator, "platform", originalPlatform);
         } else {
           Reflect.deleteProperty(window.navigator, "platform");
+        }
+      }
+    });
+  });
+
+  it("routes direct macOS Command+Arrow keys through bounded start and tail history", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const originalPlatform = Object.getOwnPropertyDescriptor(
+        window.navigator,
+        "platform",
+      );
+      const navigatorWithUserAgentData = window.navigator as Navigator & {
+        userAgentData?: { platform?: string };
+      };
+      const originalUserAgentData = Object.getOwnPropertyDescriptor(
+        navigatorWithUserAgentData,
+        "userAgentData",
+      );
+      Object.defineProperty(window.navigator, "platform", {
+        configurable: true,
+        value: "MacIntel",
+      });
+      Object.defineProperty(navigatorWithUserAgentData, "userAgentData", {
+        configurable: true,
+        value: { platform: "macOS" },
+      });
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+      const windowedSession = makeSession("session-1", {
+        name: "Session 1",
+        projectId: "project-termal",
+        workdir: "/projects/termal",
+        messagesLoaded: false,
+        hasOlderHistory: true,
+        hasNewerHistory: true,
+        messageCount: 1_000,
+      });
+      const fetchHistorySpy = vi
+        .spyOn(api, "fetchSessionHistory")
+        .mockImplementation(async (_sessionId, options) => ({
+          messages: windowedSession.messages,
+          nextBefore: null,
+          hasMore: false,
+          nextAfter: options.from === "start" ? "message-tail" : null,
+          hasNewer: options.from === "start",
+          messageStartIndex: options.from === "start" ? 0 : 999,
+          messageCount: 1_000,
+          revision: options.from === "start" ? 2 : 3,
+          sessionMutationStamp: options.from === "start" ? 2 : 3,
+          serverInstanceId: "test-instance",
+        }));
+      const context = await renderAppWithProjectAndSession();
+
+      try {
+        await act(async () => {
+          upsertSessionStoreSession({
+            committedDraft: "",
+            draftAttachments: [],
+            session: windowedSession,
+          });
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+        expect(fetchHistorySpy).not.toHaveBeenCalled();
+
+        const messageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+
+        messageStack.scrollTop = 800;
+        await act(async () => {
+          fireEvent.keyDown(messageStack, {
+            key: "ArrowUp",
+            code: "ArrowUp",
+            metaKey: true,
+          });
+        });
+        await waitFor(() => {
+          expect(fetchHistorySpy).toHaveBeenCalledTimes(1);
+        });
+        expect(fetchHistorySpy.mock.calls[0]?.[1]).toMatchObject({
+          from: "start",
+        });
+
+        fetchHistorySpy.mockClear();
+        messageStack.scrollTop = 0;
+        await act(async () => {
+          fireEvent.keyDown(messageStack, {
+            key: "ArrowDown",
+            code: "ArrowDown",
+            metaKey: true,
+          });
+        });
+        await waitFor(() => {
+          expect(fetchHistorySpy).toHaveBeenCalledTimes(1);
+        });
+        expect(fetchHistorySpy.mock.calls[0]?.[1].from).toBeUndefined();
+        expect(fetchHistorySpy.mock.calls[0]?.[1].before).toBeUndefined();
+        expect(fetchHistorySpy.mock.calls[0]?.[1].after).toBeUndefined();
+      } finally {
+        context.cleanup();
+        restoreScrollGeometry();
+        if (originalPlatform) {
+          Object.defineProperty(window.navigator, "platform", originalPlatform);
+        } else {
+          Reflect.deleteProperty(window.navigator, "platform");
+        }
+        if (originalUserAgentData) {
+          Object.defineProperty(
+            navigatorWithUserAgentData,
+            "userAgentData",
+            originalUserAgentData,
+          );
+        } else {
+          Reflect.deleteProperty(navigatorWithUserAgentData, "userAgentData");
         }
       }
     });
@@ -480,6 +616,186 @@ describe("App scroll behaviour", () => {
     });
   });
 
+  it("keeps focused transcript selection-extension keys browser-owned", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+
+      try {
+        const messageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+
+        messageStack.scrollTop = 800;
+        messageStack.focus();
+        let ctrlShiftHomeContinues = false;
+        let shiftPageUpContinues = false;
+        await act(async () => {
+          ctrlShiftHomeContinues = fireEvent.keyDown(messageStack, {
+            key: "Home",
+            code: "Home",
+            ctrlKey: true,
+            shiftKey: true,
+          });
+          shiftPageUpContinues = fireEvent.keyDown(messageStack, {
+            key: "PageUp",
+            code: "PageUp",
+            shiftKey: true,
+          });
+        });
+        await settleAsyncUi();
+
+        expect(ctrlShiftHomeContinues).toBe(true);
+        expect(shiftPageUpContinues).toBe(true);
+        expect(messageStack.scrollTop).toBe(800);
+        expect(filterScrollToCallsAt(scrollToMock, 0, "auto")).toEqual([]);
+      } finally {
+        context.cleanup();
+        restoreScrollGeometry();
+      }
+    });
+  });
+
+  it("keeps pane boundary keys inside transcript-native controls", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+      const elicitationMessage: McpElicitationRequestMessage = {
+        id: "message-mcp-scroll-control",
+        type: "mcpElicitationRequest",
+        author: "assistant",
+        timestamp: "10:05",
+        title: "Codex needs MCP input",
+        detail: "deployment-helper requested structured input.",
+        state: "pending",
+        request: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          serverName: "deployment-helper",
+          mode: "form",
+          message: "Choose the replica count.",
+          requestedSchema: {
+            type: "object",
+            properties: {
+              replicas: {
+                type: "integer",
+                title: "Replicas",
+              },
+              note: {
+                type: "string",
+                title: "Deployment note",
+              },
+            },
+            required: ["replicas", "note"],
+          },
+        },
+      };
+
+      try {
+        await act(async () => {
+          upsertSessionStoreSession({
+            committedDraft: "",
+            draftAttachments: [],
+            session: makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              messages: [elicitationMessage],
+              messagesLoaded: true,
+              messageCount: 1,
+            }),
+          });
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+
+        const messageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        if (!(messageStack instanceof HTMLElement)) {
+          throw new Error("Message stack not found");
+        }
+        const numberInput = await screen.findByRole("spinbutton");
+        const textInput = messageStack.querySelector(
+          'input.user-input-text[type="text"]',
+        );
+        if (!(textInput instanceof HTMLInputElement)) {
+          throw new Error("MCP text input not found");
+        }
+
+        messageStack.scrollTop = 800;
+        const intentListener = vi.fn();
+        messageStack.addEventListener(
+          MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+          intentListener,
+        );
+        let shiftedPageUpContinues = false;
+        await act(async () => {
+          fireEvent.change(textInput, { target: { value: "selection text" } });
+          textInput.focus();
+          textInput.setSelectionRange(4, 4);
+          shiftedPageUpContinues = fireEvent.keyDown(textInput, {
+            key: "PageUp",
+            code: "PageUp",
+            shiftKey: true,
+          });
+        });
+        await settleAsyncUi();
+        expect(shiftedPageUpContinues).toBe(true);
+        expect(intentListener).not.toHaveBeenCalled();
+        expect(messageStack.scrollTop).toBe(800);
+
+        numberInput.focus();
+        let homeContinues = false;
+        let endContinues = false;
+        let pageUpContinues = true;
+        await act(async () => {
+          homeContinues = fireEvent.keyDown(numberInput, {
+            key: "Home",
+            code: "Home",
+          });
+          endContinues = fireEvent.keyDown(numberInput, {
+            key: "End",
+            code: "End",
+          });
+          pageUpContinues = fireEvent.keyDown(numberInput, {
+            key: "PageUp",
+            code: "PageUp",
+          });
+        });
+        await settleAsyncUi();
+
+        expect(homeContinues).toBe(true);
+        expect(endContinues).toBe(true);
+        expect(pageUpContinues).toBe(false);
+        expect(intentListener).toHaveBeenCalledTimes(1);
+        expect(
+          (intentListener.mock.calls[0]?.[0] as CustomEvent).detail,
+        ).toMatchObject({ direction: "up", scrollKind: "page_jump" });
+        expect(messageStack.scrollTop).toBe(630);
+        expect(filterScrollToCallsAt(scrollToMock, 0, "auto")).toEqual([]);
+        messageStack.removeEventListener(
+          MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+          intentListener,
+        );
+      } finally {
+        context.cleanup();
+        restoreScrollGeometry();
+      }
+    });
+  });
+
   it("keeps plain PageDown inside the composer textarea when the caret is not at the start", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -524,12 +840,57 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("uses the current session when the nested editable PageDown fallback fires after a tab switch", async () => {
+  it("requests current-session history after pane-captured nested Page keys", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
         scrollHeight: 1000,
       });
+      const session1 = makeSession("session-1", {
+        name: "Session 1",
+        projectId: "project-termal",
+        workdir: "/projects/termal",
+        hasOlderHistory: true,
+        messages: [
+          {
+            id: "session-1-resident-message",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Resident historical window",
+          },
+        ],
+      });
+      const session2 = makeSession("session-2", {
+        name: "Session 2",
+        projectId: "project-termal",
+        workdir: "/projects/termal",
+        hasNewerHistory: true,
+        messages: [
+          {
+            id: "session-2-resident-message",
+            type: "text",
+            timestamp: "10:00",
+            author: "assistant",
+            text: "Resident historical window",
+          },
+        ],
+      });
+      const fetchHistorySpy = vi
+        .spyOn(api, "fetchSessionHistory")
+        .mockImplementation(async (sessionId) => ({
+          messages:
+            sessionId === "session-1" ? session1.messages : session2.messages,
+          nextBefore: null,
+          hasMore: false,
+          nextAfter: null,
+          hasNewer: false,
+          messageStartIndex: 0,
+          messageCount: session2.messages.length,
+          revision: 2,
+          sessionMutationStamp: 2,
+          serverInstanceId: "test-instance",
+        }));
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const requestUrl = new URL(String(input), "http://localhost");
         if (requestUrl.pathname === "/api/state") {
@@ -542,18 +903,7 @@ describe("App scroll behaviour", () => {
                 rootPath: "/projects/termal",
               },
             ],
-            sessions: [
-              makeSession("session-1", {
-                name: "Session 1",
-                projectId: "project-termal",
-                workdir: "/projects/termal",
-              }),
-              makeSession("session-2", {
-                name: "Session 2",
-                projectId: "project-termal",
-                workdir: "/projects/termal",
-              }),
-            ],
+            sessions: [session1, session2],
           });
         }
         throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
@@ -611,6 +961,9 @@ describe("App scroll behaviour", () => {
         "ResizeObserver",
         ResizeObserverMock as unknown as typeof ResizeObserver,
       );
+      const historyDemandListener = vi.fn();
+      const removeHistoryDemandListener =
+        addSessionHistoryPageDemandListener(historyDemandListener);
 
       try {
         await renderApp();
@@ -642,6 +995,41 @@ describe("App scroll behaviour", () => {
           throw new Error("Active message stack not found");
         }
 
+        const session1Composer = await screen.findByLabelText(
+          "Message Session 1",
+        );
+        if (!(session1Composer instanceof HTMLTextAreaElement)) {
+          throw new Error("Session 1 composer not found");
+        }
+        session1Composer.focus();
+        session1Composer.setSelectionRange(0, 0);
+        const stopSession1Propagation = (event: KeyboardEvent) => {
+          event.stopPropagation();
+        };
+        session1Composer.addEventListener("keydown", stopSession1Propagation);
+        messageStack.scrollTop = 0;
+        await act(async () => {
+          try {
+            fireEvent.keyDown(session1Composer, {
+              key: "PageUp",
+              code: "PageUp",
+            });
+          } finally {
+            session1Composer.removeEventListener(
+              "keydown",
+              stopSession1Propagation,
+            );
+          }
+        });
+        await waitFor(() => {
+          expect(historyDemandListener).toHaveBeenCalledWith({
+            direction: "older",
+            sessionId: "session-1",
+          });
+        });
+        expect(fetchHistorySpy).not.toHaveBeenCalled();
+        fetchHistorySpy.mockClear();
+
         messageStack.scrollTop = 150;
         act(() => {
           fireEvent.scroll(messageStack);
@@ -649,7 +1037,7 @@ describe("App scroll behaviour", () => {
 
         await clickAndSettle(session2Tab);
         expect(messageStack.scrollTop).toBe(800);
-        messageStack.scrollTop = 400;
+        messageStack.scrollTop = 800;
         act(() => {
           fireEvent.scroll(messageStack);
         });
@@ -680,7 +1068,11 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        expect(messageStack.scrollTop).toBe(570);
+        await waitFor(() => {
+          expect(fetchHistorySpy).toHaveBeenCalledTimes(1);
+        });
+        expect(fetchHistorySpy.mock.calls[0]?.[0]).toBe("session-2");
+        expect(messageStack.scrollTop).toBe(800);
 
         const currentTablist = screen
           .getAllByRole("tablist", { name: "Tile tabs" })
@@ -698,6 +1090,7 @@ describe("App scroll behaviour", () => {
         );
         expect(messageStack.scrollTop).toBe(150);
       } finally {
+        removeHistoryDemandListener();
         restoreScrollGeometry();
       }
     });
@@ -856,9 +1249,7 @@ describe("App scroll behaviour", () => {
             } as DOMRect;
           }
           const messageId = this.dataset.messageId;
-          const session2Match = messageId?.match(
-            /^session-2-message-(\d+)$/,
-          );
+          const session2Match = messageId?.match(/^session-2-message-(\d+)$/);
           if (
             session2Match &&
             this.classList.contains("virtualized-message-slot")
@@ -888,17 +1279,57 @@ describe("App scroll behaviour", () => {
         ).not.toBeNull();
         expect(messageStack.scrollTop).toBe(9800);
 
+        const bodyOwnedIntentListener = vi.fn();
+        messageStack.addEventListener(
+          MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+          bodyOwnedIntentListener,
+        );
+        const nonInteractiveMessageSlot = messageStack.querySelector(
+          ".virtualized-message-slot",
+        );
+        expect(nonInteractiveMessageSlot).not.toBeNull();
+
+        act(() => {
+          // A body-targeted key is not transcript input until the reader has
+          // interacted with this stack. This prevents sidebar/dialog keys from
+          // silently detaching the active transcript.
+          fireEvent.mouseDown(document.body);
+          fireEvent.keyDown(document.body, { key: "ArrowUp" });
+        });
+        expect(bodyOwnedIntentListener).not.toHaveBeenCalled();
+
+        act(() => {
+          // Wheel/touch movement detaches the viewport but does not make the
+          // transcript Chromium's body-keyboard scroll owner.
+          fireEvent.wheel(messageStack, { deltaY: -20 });
+          fireEvent.keyDown(document.body, { key: "ArrowUp" });
+        });
+        expect(bodyOwnedIntentListener).not.toHaveBeenCalled();
+
         act(() => {
           // Clicking non-focusable transcript content can leave focus on the
           // document body even though Chromium routes ArrowUp to this scroll
-          // container. Exercise that exact path: intent arrives outside the
-          // React message-stack handler, followed by the browser-owned native
-          // scroll event.
+          // container. Exercise that body-owned intent before the browser's
+          // native scroll event, then keep the existing middle-transcript
+          // geometry that makes the A -> B -> A anchor assertion exact.
+          fireEvent.mouseDown(nonInteractiveMessageSlot!);
           messageStack.scrollTop = 5001;
           fireEvent.keyDown(document.body, { key: "ArrowUp" });
           messageStack.scrollTop = 5000;
           fireEvent.scroll(messageStack);
         });
+        expect(bodyOwnedIntentListener).toHaveBeenCalledTimes(1);
+        act(() => {
+          // Once an outside pointer interaction revokes ownership, another
+          // body-targeted key must not publish transcript intent.
+          fireEvent.mouseDown(document.body);
+          fireEvent.keyDown(document.body, { key: "ArrowUp" });
+        });
+        expect(bodyOwnedIntentListener).toHaveBeenCalledTimes(1);
+        messageStack.removeEventListener(
+          MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+          bodyOwnedIntentListener,
+        );
         // Commit the keyboard/detach update before advancing timers. Keeping
         // flushUiWork inside one async act lets jsdom run an old activation
         // timeout before React can apply the cancellation, an ordering the
@@ -1236,7 +1667,9 @@ describe("App scroll behaviour", () => {
           !(targetStack instanceof HTMLElement) ||
           !(targetTablist instanceof HTMLElement)
         ) {
-          throw new Error("Expected both session panes and the target tab rail");
+          throw new Error(
+            "Expected both session panes and the target tab rail",
+          );
         }
 
         sourceStack.scrollTop = 5_001;
@@ -1411,7 +1844,8 @@ describe("App scroll behaviour", () => {
         expect(edgeScrollKinds).toContain("position_restore");
         expect(edgeScrollKinds).not.toContain("bottom_pin");
         const edgeScrollToCalls = scrollToMock.mock.calls.filter(
-          (_call, index) => scrollToMock.mock.contexts[index] === edgeMovedStack,
+          (_call, index) =>
+            scrollToMock.mock.contexts[index] === edgeMovedStack,
         );
         expect(edgeScrollToCalls.length).toBeGreaterThan(0);
         expect(
@@ -1443,8 +1877,8 @@ describe("App scroll behaviour", () => {
             edgeMovedPane?.querySelector(".conversation-with-overview"),
           ).not.toBeNull(),
         );
-        const edgeScrollKindsAfterOverview = dispatchEventSpy.mock.calls.flatMap(
-          (call, index) => {
+        const edgeScrollKindsAfterOverview =
+          dispatchEventSpy.mock.calls.flatMap((call, index) => {
             const event = call[0];
             return dispatchEventSpy.mock.contexts[index] === edgeMovedStack &&
               event instanceof CustomEvent &&
@@ -1454,8 +1888,7 @@ describe("App scroll behaviour", () => {
                     ?.scrollKind,
                 ]
               : [];
-          },
-        );
+          });
         expect(edgeScrollKindsAfterOverview).not.toContain("bottom_pin");
         expect((edgeMovedStack as HTMLElement).scrollTop).toBe(4_000);
 
@@ -1867,10 +2300,14 @@ describe("App scroll behaviour", () => {
           throw new Error("Message stack not found");
         }
 
+        // Establish an attached near-bottom position through a browser clamp,
+        // not through an unannounced upward frame (which is reader movement).
+        scrollHeight = 960;
         messageStack.scrollTop = 760;
         act(() => {
           fireEvent.scroll(messageStack);
         });
+        expect(messageStack).toHaveClass("is-tail-following");
 
         const composer = await screen.findByLabelText("Message Session 1");
         if (!(composer instanceof HTMLTextAreaElement)) {
@@ -2375,7 +2812,9 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         expect(screen.getByText("Live turn")).toBeInTheDocument();
-        expect(document.querySelector(".activity-card-live")).toBeInTheDocument();
+        expect(
+          document.querySelector(".activity-card-live"),
+        ).toBeInTheDocument();
 
         const messageStack = Array.from(
           document.querySelectorAll(".message-stack"),
@@ -2454,7 +2893,9 @@ describe("App scroll behaviour", () => {
           within(messageStack).getByText("Final response"),
         ).toBeInTheDocument();
         expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
-        expect(document.querySelector(".activity-card-live")).not.toBeInTheDocument();
+        expect(
+          document.querySelector(".activity-card-live"),
+        ).not.toBeInTheDocument();
 
         const replacementTops = scrollToTopsForElementWithBehavior(
           scrollToMock,
@@ -2936,16 +3377,22 @@ describe("App scroll behaviour", () => {
           filterScrollToCallsAt(scrollToMock, 1100, "auto").length,
         ).toBeGreaterThan(0);
 
+        // The measured command card collapses and the browser clamps the
+        // attached viewport to the new physical bottom. F5 deliberately yields
+        // a non-shrinking upward frame to the reader, so model the shrink before
+        // publishing its native scroll event.
+        scrollHeight = 960;
         messageStack.scrollTop = 760;
         expect(
           messageStack.scrollHeight -
             messageStack.scrollTop -
             messageStack.clientHeight,
-        ).toBeGreaterThan(0);
+        ).toBe(0);
         await act(async () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
+        expect(messageStack).toHaveClass("is-tail-following");
         scrollToMock.mockClear();
 
         scrollHeight = 1200;
@@ -3641,6 +4088,20 @@ describe("App scroll behaviour", () => {
           await flushUiWork();
         });
 
+        messageStack.scrollTop = 800;
+        await act(async () => {
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+
+        act(() => {
+          fireEvent.keyDown(messageStack, { key: "ArrowUp" });
+        });
+        // This is the production React onKeyDown -> normalized intent ->
+        // virtualizer bridge. Detachment must happen before the browser's first
+        // animated native scroll frame.
+        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
         messageStack.scrollTop = 800;
         await act(async () => {
           fireEvent.scroll(messageStack);

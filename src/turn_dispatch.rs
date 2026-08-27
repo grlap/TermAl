@@ -855,7 +855,20 @@ impl AppState {
             .any(|queued| queued.source == QueuedPromptSource::User);
         let orchestrator_auto_dispatch_blocked =
             inner.sessions[index].orchestrator_auto_dispatch_blocked;
-        if session_is_busy || has_queued_prompts {
+        let queued_prompt_source = if source
+            .as_ref()
+            .is_some_and(|message_source| message_source.is_mailbox())
+        {
+            QueuedPromptSource::Mailbox
+        } else {
+            QueuedPromptSource::User
+        };
+        // Stop leaves a persisted explicit-resume latch. Routine mailbox
+        // notifications must join the durable queue even when it was empty at
+        // the moment of Stop; only a later user prompt may lift the latch.
+        let blocked_automatic_prompt = orchestrator_auto_dispatch_blocked
+            && queued_prompt_source == QueuedPromptSource::Mailbox;
+        if session_is_busy || has_queued_prompts || blocked_automatic_prompt {
             if let Some(mailbox_id) = source
                 .as_ref()
                 .and_then(|source| source.mailbox.as_ref())
@@ -904,10 +917,7 @@ impl AppState {
                             "failed to persist mailbox notification: {err:#}"
                         ))
                     })?;
-                    if session_is_busy
-                        || (orchestrator_auto_dispatch_blocked
-                            && !blocked_queue_contains_user_prompt)
-                    {
+                    if session_is_busy || orchestrator_auto_dispatch_blocked {
                         return Ok(DispatchTurnResult::Queued);
                     }
                     if blocked_queue_contains_user_prompt {
@@ -959,22 +969,16 @@ impl AppState {
                 }
             }
         }
-        let queued_prompt_source = if source
-            .as_ref()
-            .is_some_and(|message_source| message_source.is_mailbox())
-        {
-            QueuedPromptSource::Mailbox
-        } else {
-            QueuedPromptSource::User
-        };
         let recover_blocked_queue_with_existing_user_prompt = !session_is_busy
             && has_queued_prompts
             && orchestrator_auto_dispatch_blocked
-            && blocked_queue_contains_user_prompt;
+            && blocked_queue_contains_user_prompt
+            && queued_prompt_source == QueuedPromptSource::User;
         let prioritize_manual_dispatch_over_blocked_queue = !session_is_busy
             && has_queued_prompts
             && orchestrator_auto_dispatch_blocked
-            && !blocked_queue_contains_user_prompt;
+            && !blocked_queue_contains_user_prompt
+            && queued_prompt_source == QueuedPromptSource::User;
 
         if recover_blocked_queue_with_existing_user_prompt {
             let message_id = inner.next_message_id();
@@ -1036,7 +1040,7 @@ impl AppState {
             return Ok(DispatchTurnResult::Dispatched(started.dispatch));
         }
 
-        if session_is_busy || has_queued_prompts {
+        if session_is_busy || has_queued_prompts || blocked_automatic_prompt {
             let message_id = inner.next_message_id();
             queue_prompt_on_record_with_source(
                 inner
@@ -1059,7 +1063,7 @@ impl AppState {
             self.commit_locked(&mut inner).map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
-            if session_is_busy {
+            if session_is_busy || blocked_automatic_prompt {
                 return Ok(DispatchTurnResult::Queued);
             }
 

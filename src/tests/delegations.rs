@@ -1085,7 +1085,8 @@ fn canceling_delegation_preserves_pending_child_interaction_reason() {
 
 #[test]
 fn delegation_records_persist_and_reload_with_child_link() {
-    let (project_root, persistence_path, templates_path) = temp_delegation_state_paths();
+    let (_temp_root, project_root, persistence_path, templates_path) =
+        temp_delegation_state_paths();
     let delegation_id;
     let child_session_id;
     {
@@ -1177,7 +1178,8 @@ fn delegation_records_persist_and_reload_with_child_link() {
 
 #[test]
 fn delegation_full_output_pages_survive_restart_via_child_transcript() {
-    let (project_root, persistence_path, templates_path) = temp_delegation_state_paths();
+    let (_temp_root, project_root, persistence_path, templates_path) =
+        temp_delegation_state_paths();
     let parent_session_id;
     let delegation_id;
     let output = format!(
@@ -1255,7 +1257,8 @@ fn delegation_full_output_pages_survive_restart_via_child_transcript() {
 
 #[test]
 fn persisted_delegation_records_repair_missing_child_parent_link_on_reload() {
-    let (project_root, persistence_path, templates_path) = temp_delegation_state_paths();
+    let (_temp_root, project_root, persistence_path, templates_path) =
+        temp_delegation_state_paths();
     let delegation_id;
     let child_session_id;
     {

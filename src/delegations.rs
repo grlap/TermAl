@@ -1152,6 +1152,7 @@ impl AppState {
             &child_session_id,
             StopSessionOptions {
                 dispatch_queued_prompts_on_success: false,
+                pause_automatic_resumes_on_success: false,
                 orchestrator_stop_instance_id: None,
             },
         ) {
@@ -2186,6 +2187,32 @@ fn refresh_delegation_waits_for_delegation_locked(
     refresh_delegation_waits_matching_locked(inner, |wait| {
         wait.delegation_ids.iter().any(|id| id == delegation_id)
     })
+}
+
+/// Consumes every pending wait owned by a parent whose active turn was
+/// explicitly stopped. A stopped parent must not be reactivated later when a
+/// child reaches a terminal state; the child result remains available through
+/// the delegation record for an explicit user-driven follow-up.
+fn consume_delegation_waits_for_stopped_parent_locked(
+    inner: &mut StateInner,
+    parent_session_id: &str,
+) -> DelegationWaitRefresh {
+    if inner.delegation_waits.is_empty() {
+        return DelegationWaitRefresh::default();
+    }
+
+    let waits = std::mem::take(&mut inner.delegation_waits);
+    let mut remaining = Vec::new();
+    let mut refresh = DelegationWaitRefresh::default();
+    for wait in waits {
+        if wait.parent_session_id == parent_session_id {
+            refresh.consume_wait(wait, DelegationWaitConsumedReason::ParentSessionStopped);
+        } else {
+            remaining.push(wait);
+        }
+    }
+    inner.delegation_waits = remaining;
+    refresh
 }
 
 fn refresh_delegation_waits_matching_locked(

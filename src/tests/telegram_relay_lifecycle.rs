@@ -19,12 +19,6 @@ fn telegram_relay_runtime_reports_lifecycle_transitions_as_running_until_idle() 
 #[test]
 fn telegram_config_update_reflects_in_process_relay_runtime_status() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-runtime-status-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let initial_revision = state.snapshot().revision;
@@ -89,18 +83,11 @@ fn telegram_config_update_reflects_in_process_relay_runtime_status() {
             TelegramRelayRuntimeActionForTest::Stop,
         ]
     );
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_startup_from_saved_settings_starts_relay_with_single_subscribed_fallback() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-startup-single-fallback-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -150,18 +137,11 @@ fn telegram_startup_from_saved_settings_starts_relay_with_single_subscribed_fall
     );
     assert_eq!(value["config"]["defaultProjectId"], json!(project_id));
     assert_eq!(value["chatId"], json!(123));
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_startup_with_multiple_subscribed_projects_and_no_default_stops_relay() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-startup-no-default-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_1, _session_1) = create_telegram_settings_project_and_session(&state);
     let (project_2, _session_2) = create_telegram_settings_project_and_session(&state);
@@ -209,18 +189,11 @@ fn telegram_startup_with_multiple_subscribed_projects_and_no_default_stops_relay
     );
     assert!(value["config"].get("defaultProjectId").is_none());
     assert_eq!(value["chatId"], json!(123));
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_startup_from_saved_settings_stops_running_relay_when_token_missing() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-startup-missing-token-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
 
@@ -255,18 +228,11 @@ fn telegram_startup_from_saved_settings_stops_running_relay_when_token_missing()
             TelegramRelayRuntimeActionForTest::Stop,
         ]
     );
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_config_save_restarts_running_relay_with_new_default_project() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-config-save-restart-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_1, _session_1) = create_telegram_settings_project_and_session(&state);
     let (project_2, _session_2) = create_telegram_settings_project_and_session(&state);
@@ -317,18 +283,11 @@ fn telegram_config_save_restarts_running_relay_with_new_default_project() {
             },
         ]
     );
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_graceful_shutdown_stops_running_in_process_relay() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-graceful-shutdown-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
 
@@ -361,5 +320,4 @@ fn telegram_graceful_shutdown_stops_running_in_process_relay() {
             TelegramRelayRuntimeActionForTest::Stop,
         ]
     );
-    let _ = fs::remove_dir_all(&home);
 }

@@ -972,6 +972,18 @@ struct AppState {
     stopping_orchestrator_ids: Arc<Mutex<HashSet<String>>>,
     stopping_orchestrator_session_ids: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     inner: Arc<StateMutex<StateInner>>,
+    /// Test directories live until the final AppState clone drops. This field
+    /// stays last so every store, SQLite connection, and state handle above is
+    /// closed before Windows attempts recursive removal.
+    #[cfg(test)]
+    test_temp_root: Option<Arc<TestTempRoot>>,
+}
+
+#[cfg(test)]
+impl AppState {
+    fn test_temp_root_path(&self) -> Option<&FsPath> {
+        self.test_temp_root.as_deref().map(TestTempRoot::path)
+    }
 }
 
 const SESSION_NOT_RUNNING_CONFLICT_MESSAGE: &str = "session is not currently running";
@@ -1010,13 +1022,15 @@ fn fresh_agent_readiness_cache(default_workdir: &str) -> AgentReadinessCache {
 #[derive(Clone)]
 struct StopSessionOptions {
     dispatch_queued_prompts_on_success: bool,
+    pause_automatic_resumes_on_success: bool,
     orchestrator_stop_instance_id: Option<String>,
 }
 impl Default for StopSessionOptions {
     /// Builds the default value.
     fn default() -> Self {
         Self {
-            dispatch_queued_prompts_on_success: true,
+            dispatch_queued_prompts_on_success: false,
+            pause_automatic_resumes_on_success: true,
             orchestrator_stop_instance_id: None,
         }
     }
@@ -1451,8 +1465,9 @@ struct SessionRecord {
     remote_session_id: Option<String>,
     runtime: SessionRuntime,
     runtime_reset_required: bool,
-    /// Persisted guard for sessions whose runtime was stopped but whose updated session state
-    /// failed to persist cleanly; blocks auto-dispatch until an explicit user/manual turn resets it.
+    /// Persisted explicit-resume guard. User Stop and failed stop persistence
+    /// both block mailbox/workflow auto-dispatch until a manual user turn
+    /// resets the latch in `start_turn_on_record`.
     orchestrator_auto_dispatch_blocked: bool,
     runtime_stop_in_progress: bool,
     /// Terminal callbacks deferred while `runtime_stop_in_progress` was true. Replayed in arrival

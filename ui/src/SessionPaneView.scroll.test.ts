@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, fireEvent, renderHook } from "@testing-library/react";
 import type {
   FocusEvent as ReactFocusEvent,
   KeyboardEvent as ReactKeyboardEvent,
@@ -26,6 +26,7 @@ import {
 } from "./SessionPaneView.scroll";
 import {
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
+  MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
   requestMessageStackBottomRepin,
 } from "./message-stack-scroll-sync";
 import {
@@ -126,6 +127,826 @@ afterEach(() => {
 });
 
 describe("session pane historical-window tail state", () => {
+  it("records transcript ownership before an inactive pane becomes active", async () => {
+    const liveSession = session(false);
+    const scrollNode = document.createElement("section");
+    const messageCard = document.createElement("article");
+    scrollNode.append(messageCard);
+    document.body.append(scrollNode);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const intentListener = vi.fn();
+    scrollNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      intentListener,
+    );
+    const hook = renderHook(
+      ({ isActive, scrollStateKey }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive,
+          isSessionTabActive: true,
+          scrollStateKey,
+        }),
+      {
+        initialProps: {
+          isActive: false,
+          scrollStateKey: "pane-1:session-history",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    try {
+      act(() => {
+        // This pointer event occurs while the pane is still inactive, exactly
+        // as it does before the pane root's onMouseDown activates the pane.
+        fireEvent.mouseDown(messageCard);
+      });
+      const clipboardTextarea = document.createElement("textarea");
+      document.body.append(clipboardTextarea);
+      await act(async () => {
+        clipboardTextarea.focus();
+        clipboardTextarea.remove();
+        await Promise.resolve();
+      });
+      const transientOutsideTarget = document.createElement("div");
+      document.body.append(transientOutsideTarget);
+      const activeElementSpy = vi
+        .spyOn(document, "activeElement", "get")
+        .mockReturnValue(null);
+      try {
+        await act(async () => {
+          fireEvent.focusIn(transientOutsideTarget);
+          await Promise.resolve();
+        });
+      } finally {
+        activeElementSpy.mockRestore();
+        transientOutsideTarget.remove();
+      }
+      hook.rerender({
+        isActive: true,
+        scrollStateKey: "pane-1:session-history",
+      });
+      act(() => {
+        fireEvent.keyDown(document.body, { key: "ArrowUp" });
+      });
+
+      expect(intentListener).toHaveBeenCalledTimes(1);
+      scrollNode.scrollTop = 0;
+      act(() => {
+        // Boundary intent still hydrates older history even though this
+        // resident window cannot move. Downward body-owned intent uses the
+        // same normalized bridge.
+        fireEvent.keyDown(document.body, { key: "ArrowUp" });
+        fireEvent.keyDown(document.body, { key: "PageDown" });
+      });
+      expect(intentListener).toHaveBeenCalledTimes(3);
+      expect(
+        intentListener.mock.calls.map(
+          ([event]) =>
+            (event as CustomEvent).detail as {
+              direction: string;
+              viewportCanMove: boolean;
+            },
+        ),
+      ).toMatchObject([
+        { direction: "up", viewportCanMove: true },
+        { direction: "up", viewportCanMove: false },
+        { direction: "down", viewportCanMove: true },
+      ]);
+      expect(scrollNode.scrollTop).toBe(170);
+
+      hook.rerender({
+        isActive: true,
+        scrollStateKey: "pane-1:session-other",
+      });
+      act(() => {
+        fireEvent.keyDown(document.body, { key: "ArrowUp" });
+      });
+      expect(intentListener).toHaveBeenCalledTimes(3);
+    } finally {
+      hook.unmount();
+      scrollNode.remove();
+    }
+  });
+
+  it("does not treat an active embedded editor as body-keyboard ownership", async () => {
+    const scrollNode = document.createElement("section");
+    const input = document.createElement("textarea");
+    scrollNode.append(input);
+    document.body.append(scrollNode);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const intentListener = vi.fn();
+    scrollNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      intentListener,
+    );
+    const hook = renderHook(() =>
+      useSessionPaneScrollState({
+        ...params(session(false)),
+        isActive: true,
+        isSessionTabActive: true,
+      }),
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    try {
+      await act(async () => {
+        fireEvent.mouseDown(input);
+        input.focus();
+        await Promise.resolve();
+      });
+      act(() => {
+        fireEvent.keyDown(document.body, { key: "ArrowUp" });
+      });
+      expect(document.activeElement).toBe(input);
+      expect(intentListener).not.toHaveBeenCalled();
+    } finally {
+      hook.unmount();
+      scrollNode.remove();
+    }
+  });
+
+  it("keeps body-keyboard ownership exclusive when an inactive pane is activated", () => {
+    const liveSession = session(false);
+    const firstNode = document.createElement("section");
+    const firstMessage = document.createElement("article");
+    firstNode.append(firstMessage);
+    const secondNode = document.createElement("section");
+    const secondMessage = document.createElement("article");
+    secondNode.append(secondMessage);
+    document.body.append(firstNode, secondNode);
+    for (const node of [firstNode, secondNode]) {
+      Object.defineProperties(node, {
+        clientHeight: { configurable: true, value: 200 },
+        scrollHeight: { configurable: true, value: 1_000 },
+        scrollTop: { configurable: true, writable: true, value: 800 },
+      });
+    }
+    const firstIntentListener = vi.fn();
+    const secondIntentListener = vi.fn();
+    firstNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      firstIntentListener,
+    );
+    secondNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      secondIntentListener,
+    );
+    const firstHook = renderHook(
+      ({ isActive }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive,
+          isSessionTabActive: true,
+          scrollStateKey: "pane-1:session-history",
+        }),
+      { initialProps: { isActive: true } },
+    );
+    const secondHook = renderHook(
+      ({ isActive }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive,
+          isSessionTabActive: true,
+          scrollStateKey: "pane-2:session-history",
+        }),
+      { initialProps: { isActive: false } },
+    );
+    firstHook.result.current.messageStackRef.current = firstNode;
+    secondHook.result.current.messageStackRef.current = secondNode;
+
+    try {
+      act(() => {
+        fireEvent.mouseDown(firstMessage);
+        fireEvent.mouseDown(secondMessage);
+      });
+      firstHook.rerender({ isActive: false });
+      secondHook.rerender({ isActive: true });
+      act(() => {
+        fireEvent.keyDown(document.body, { key: "ArrowUp" });
+      });
+
+      expect(firstIntentListener).not.toHaveBeenCalled();
+      expect(secondIntentListener).toHaveBeenCalledTimes(1);
+    } finally {
+      firstHook.unmount();
+      secondHook.unmount();
+      firstNode.remove();
+      secondNode.remove();
+    }
+  });
+
+  it("restores pointer ownership after a focused transcript control unmounts", async () => {
+    const liveSession = session(false);
+    const scrollNode = document.createElement("section");
+    const button = document.createElement("button");
+    scrollNode.append(button);
+    document.body.append(scrollNode);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const intentListener = vi.fn();
+    scrollNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      intentListener,
+    );
+    const hook = renderHook(() =>
+      useSessionPaneScrollState({
+        ...params(liveSession),
+        isActive: true,
+        isSessionTabActive: true,
+      }),
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    try {
+      act(() => {
+        // Safari/Firefox on macOS may leave focus on body after this click.
+        fireEvent.mouseDown(button);
+        fireEvent.keyDown(document.body, { key: "ArrowUp" });
+      });
+      expect(intentListener).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        button.focus();
+        await Promise.resolve();
+      });
+      act(() => {
+        fireEvent.keyDown(document.body, { key: "ArrowUp" });
+      });
+      expect(intentListener).toHaveBeenCalledTimes(1);
+
+      const activeElementSpy = vi
+        .spyOn(document, "activeElement", "get")
+        .mockReturnValue(null);
+      try {
+        act(() => {
+          button.remove();
+          fireEvent.keyDown(document.body, { key: "ArrowUp" });
+        });
+      } finally {
+        activeElementSpy.mockRestore();
+      }
+      expect(intentListener).toHaveBeenCalledTimes(2);
+    } finally {
+      hook.unmount();
+      scrollNode.remove();
+    }
+  });
+
+  it("does not restore transcript ownership after focus deliberately moves outside", async () => {
+    const scrollNode = document.createElement("section");
+    const messageCard = document.createElement("article");
+    const composer = document.createElement("textarea");
+    scrollNode.append(messageCard);
+    document.body.append(scrollNode, composer);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const intentListener = vi.fn();
+    scrollNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      intentListener,
+    );
+    const hook = renderHook(() =>
+      useSessionPaneScrollState({
+        ...params(session(false)),
+        isActive: true,
+        isSessionTabActive: true,
+      }),
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    try {
+      act(() => {
+        fireEvent.mouseDown(messageCard);
+      });
+      await act(async () => {
+        composer.focus();
+        await Promise.resolve();
+      });
+      act(() => {
+        composer.remove();
+        fireEvent.keyDown(document.body, { key: "ArrowUp" });
+      });
+      expect(intentListener).not.toHaveBeenCalled();
+    } finally {
+      hook.unmount();
+      composer.remove();
+      scrollNode.remove();
+    }
+  });
+
+  it("routes body-owned Home and End through one bounded history demand", () => {
+    const exerciseBoundary = (
+      activeSession: Session,
+      key: "Home" | "End",
+      expectedDirection: "start" | "tail",
+    ) => {
+      const scrollNode = document.createElement("section");
+      const messageCard = document.createElement("article");
+      scrollNode.append(messageCard);
+      document.body.append(scrollNode);
+      Object.defineProperties(scrollNode, {
+        clientHeight: { configurable: true, value: 200 },
+        scrollHeight: { configurable: true, value: 1_000 },
+        scrollTop: {
+          configurable: true,
+          writable: true,
+          value: key === "Home" ? 800 : 0,
+        },
+      });
+      scrollNode.scrollTo = vi.fn(
+        (optionsOrX?: ScrollToOptions | number, y?: number) => {
+          scrollNode.scrollTop =
+            typeof optionsOrX === "number"
+              ? (y ?? scrollNode.scrollTop)
+              : (optionsOrX?.top ?? scrollNode.scrollTop);
+        },
+      ) as typeof scrollNode.scrollTo;
+      const normalizedIntentListener = vi.fn();
+      scrollNode.addEventListener(
+        MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+        normalizedIntentListener,
+      );
+      const demands: SessionHistoryPageDemand[] = [];
+      const removeDemandListener = addSessionHistoryPageDemandListener(
+        (demand) => demands.push(demand),
+      );
+      const hook = renderHook(() =>
+        useSessionPaneScrollState({
+          ...params(activeSession),
+          isActive: true,
+          isSessionTabActive: true,
+        }),
+      );
+      hook.result.current.messageStackRef.current = scrollNode;
+
+      try {
+        act(() => {
+          fireEvent.mouseDown(messageCard);
+          fireEvent.keyDown(document.body, { key });
+        });
+
+        expect(normalizedIntentListener).not.toHaveBeenCalled();
+        expect(demands).toHaveLength(1);
+        expect(demands[0]).toMatchObject({
+          direction: expectedDirection,
+          sessionId: "session-history",
+        });
+      } finally {
+        act(() => {
+          completeSessionHistoryPageDemand(demands[0]?.requestId, false);
+        });
+        hook.unmount();
+        removeDemandListener();
+        scrollNode.remove();
+      }
+    };
+
+    exerciseBoundary(session(false), "Home", "start");
+    exerciseBoundary(session(true), "End", "tail");
+    exerciseBoundary(
+      { ...session(true), hasOlderHistory: undefined },
+      "Home",
+      "start",
+    );
+    exerciseBoundary(
+      {
+        ...session(true),
+        hasOlderHistory: undefined,
+        messagesLoaded: undefined,
+        messageCount: 2,
+      },
+      "Home",
+      "start",
+    );
+  });
+
+  it("honors preventDefault before body-owned boundary navigation", () => {
+    const scrollNode = document.createElement("section");
+    const messageCard = document.createElement("article");
+    scrollNode.append(messageCard);
+    document.body.append(scrollNode);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const demands: SessionHistoryPageDemand[] = [];
+    const removeDemandListener = addSessionHistoryPageDemandListener(
+      (demand) => demands.push(demand),
+    );
+    const preventBoundary = (event: KeyboardEvent) => {
+      if (event.key === "Home") {
+        event.preventDefault();
+      }
+    };
+    document.addEventListener("keydown", preventBoundary);
+    const hook = renderHook(() =>
+      useSessionPaneScrollState({
+        ...params(session(false)),
+        isActive: true,
+        isSessionTabActive: true,
+      }),
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    try {
+      act(() => {
+        fireEvent.mouseDown(messageCard);
+        fireEvent.keyDown(document.body, { key: "Home" });
+      });
+      expect(demands).toEqual([]);
+      expect(scrollNode.scrollTop).toBe(800);
+    } finally {
+      hook.unmount();
+      document.removeEventListener("keydown", preventBoundary);
+      removeDemandListener();
+      scrollNode.remove();
+    }
+  });
+
+  it("keeps body-owned selection-extension keys out of scroll intent", () => {
+    const scrollNode = document.createElement("section");
+    const messageCard = document.createElement("article");
+    scrollNode.append(messageCard);
+    document.body.append(scrollNode);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const intentListener = vi.fn();
+    scrollNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      intentListener,
+    );
+    const demands: SessionHistoryPageDemand[] = [];
+    const removeDemandListener = addSessionHistoryPageDemandListener(
+      (demand) => demands.push(demand),
+    );
+    const hook = renderHook(() =>
+      useSessionPaneScrollState({
+        ...params(session(false)),
+        isActive: true,
+        isSessionTabActive: true,
+      }),
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    try {
+      let ctrlShiftHomeContinues = false;
+      let shiftPageUpContinues = false;
+      act(() => {
+        fireEvent.mouseDown(messageCard);
+        fireEvent.keyDown(document.body, { key: "Home", shiftKey: true });
+        fireEvent.keyDown(document.body, { key: "ArrowUp", shiftKey: true });
+        ctrlShiftHomeContinues = fireEvent.keyDown(document.body, {
+          key: "Home",
+          ctrlKey: true,
+          shiftKey: true,
+        });
+        shiftPageUpContinues = fireEvent.keyDown(document.body, {
+          key: "PageUp",
+          shiftKey: true,
+        });
+      });
+      expect(ctrlShiftHomeContinues).toBe(true);
+      expect(shiftPageUpContinues).toBe(true);
+      expect(intentListener).not.toHaveBeenCalled();
+      expect(demands).toEqual([]);
+      expect(scrollNode.scrollTop).toBe(800);
+      expect(hook.result.current.liveTailPinned).toBe(true);
+    } finally {
+      hook.unmount();
+      removeDemandListener();
+      scrollNode.remove();
+    }
+  });
+
+  it("blocks body-owned scroll keys only for visible open dialogs", () => {
+    const scrollNode = document.createElement("section");
+    const messageCard = document.createElement("article");
+    scrollNode.append(messageCard);
+    document.body.append(scrollNode);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const intentListener = vi.fn();
+    scrollNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      intentListener,
+    );
+    const hook = renderHook(() =>
+      useSessionPaneScrollState({
+        ...params(session(false)),
+        isActive: true,
+        isSessionTabActive: true,
+      }),
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+    const hiddenDialogParent = document.createElement("div");
+    hiddenDialogParent.style.display = "none";
+    const hiddenDialog = document.createElement("section");
+    hiddenDialog.setAttribute("aria-modal", "true");
+    hiddenDialogParent.append(hiddenDialog);
+    const nonModalPopover = document.createElement("section");
+    nonModalPopover.setAttribute("role", "dialog");
+    const dialog = document.createElement("section");
+    dialog.setAttribute("aria-modal", "true");
+
+    try {
+      act(() => {
+        fireEvent.mouseDown(messageCard);
+        // The hidden dialog comes first in DOM order. It must neither block
+        // transcript keys itself nor mask the visible modal after it.
+        document.body.append(hiddenDialogParent);
+        document.body.append(nonModalPopover);
+        document.body.append(dialog);
+        fireEvent.keyDown(document.body, { key: "ArrowUp" });
+      });
+
+      expect(intentListener).not.toHaveBeenCalled();
+      expect(hook.result.current.liveTailPinned).toBe(true);
+      expect(scrollNode.scrollTop).toBe(800);
+
+      act(() => {
+        dialog.remove();
+        fireEvent.keyDown(document.body, { key: "ArrowUp" });
+      });
+      expect(intentListener).toHaveBeenCalledTimes(1);
+      expect(hook.result.current.liveTailPinned).toBe(false);
+    } finally {
+      hook.unmount();
+      dialog.remove();
+      nonModalPopover.remove();
+      hiddenDialogParent.remove();
+      scrollNode.remove();
+    }
+  });
+
+  it("keeps body-owned keys with the last-clicked nested scroller while it can move", () => {
+    const scrollNode = document.createElement("section");
+    const nestedScroller = document.createElement("div");
+    const nestedContent = document.createElement("span");
+    const focusedMessage = document.createElement("article");
+    focusedMessage.tabIndex = -1;
+    nestedScroller.style.overflowY = "auto";
+    nestedScroller.append(nestedContent);
+    scrollNode.append(nestedScroller, focusedMessage);
+    document.body.append(scrollNode);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    Object.defineProperties(nestedScroller, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, writable: true, value: 120 },
+    });
+    const intentListener = vi.fn();
+    scrollNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      intentListener,
+    );
+    const hook = renderHook(() =>
+      useSessionPaneScrollState({
+        ...params(session(false)),
+        isActive: true,
+        isSessionTabActive: true,
+      }),
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    try {
+      act(() => {
+        fireEvent.mouseDown(nestedContent);
+        fireEvent.keyDown(document.body, { key: "ArrowUp" });
+      });
+      expect(intentListener).not.toHaveBeenCalled();
+      expect(hook.result.current.liveTailPinned).toBe(true);
+
+      act(() => {
+        focusedMessage.focus();
+        // A focus-based ownership grant supersedes the earlier pointer target.
+        // The still-scrollable nested block must no longer suppress this key.
+        fireEvent.keyDown(document.body, { key: "ArrowUp" });
+      });
+      expect(intentListener).toHaveBeenCalledTimes(1);
+      expect(hook.result.current.liveTailPinned).toBe(false);
+
+      act(() => {
+        fireEvent.mouseDown(nestedContent);
+        nestedScroller.scrollTop = 0;
+        fireEvent.keyDown(document.body, { key: "ArrowUp" });
+      });
+      expect(intentListener).toHaveBeenCalledTimes(2);
+    } finally {
+      hook.unmount();
+      scrollNode.remove();
+    }
+  });
+
+  it("routes macOS body-owned Command+Arrow through bounded history demand", () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(
+      window.navigator,
+      "platform",
+    );
+    const navigatorWithUserAgentData = window.navigator as Navigator & {
+      userAgentData?: { platform?: string };
+    };
+    const originalUserAgentData = Object.getOwnPropertyDescriptor(
+      navigatorWithUserAgentData,
+      "userAgentData",
+    );
+    Object.defineProperty(window.navigator, "platform", {
+      configurable: true,
+      value: "MacIntel",
+    });
+    Object.defineProperty(navigatorWithUserAgentData, "userAgentData", {
+      configurable: true,
+      value: { platform: "macOS" },
+    });
+    try {
+      const exerciseBoundary = (
+        activeSession: Session,
+        key: "ArrowUp" | "ArrowDown",
+        expectedDirection: "start" | "tail",
+      ) => {
+        const scrollNode = document.createElement("section");
+        const messageCard = document.createElement("article");
+        scrollNode.append(messageCard);
+        document.body.append(scrollNode);
+        Object.defineProperties(scrollNode, {
+          clientHeight: { configurable: true, value: 200 },
+          scrollHeight: { configurable: true, value: 1_000 },
+          scrollTop: {
+            configurable: true,
+            writable: true,
+            value: key === "ArrowUp" ? 800 : 0,
+          },
+        });
+        scrollNode.scrollTo = vi.fn() as typeof scrollNode.scrollTo;
+        const normalizedIntentListener = vi.fn();
+        scrollNode.addEventListener(
+          MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+          normalizedIntentListener,
+        );
+        const demands: SessionHistoryPageDemand[] = [];
+        const removeDemandListener = addSessionHistoryPageDemandListener(
+          (demand) => demands.push(demand),
+        );
+        const hook = renderHook(() =>
+          useSessionPaneScrollState({
+            ...params(activeSession),
+            isActive: true,
+            isSessionTabActive: true,
+          }),
+        );
+        hook.result.current.messageStackRef.current = scrollNode;
+
+        try {
+          let browserDefaultContinues = true;
+          act(() => {
+            fireEvent.mouseDown(messageCard);
+            browserDefaultContinues = fireEvent.keyDown(document.body, {
+              key,
+              metaKey: true,
+            });
+          });
+
+          expect(browserDefaultContinues).toBe(false);
+          expect(normalizedIntentListener).not.toHaveBeenCalled();
+          expect(demands).toHaveLength(1);
+          expect(demands[0]).toMatchObject({
+            direction: expectedDirection,
+            sessionId: "session-history",
+          });
+        } finally {
+          act(() => {
+            completeSessionHistoryPageDemand(demands[0]?.requestId, false);
+          });
+          hook.unmount();
+          removeDemandListener();
+          scrollNode.remove();
+        }
+      };
+
+      exerciseBoundary(session(false), "ArrowUp", "start");
+      exerciseBoundary(session(true), "ArrowDown", "tail");
+    } finally {
+      if (originalPlatform) {
+        Object.defineProperty(window.navigator, "platform", originalPlatform);
+      } else {
+        Reflect.deleteProperty(window.navigator, "platform");
+      }
+      if (originalUserAgentData) {
+        Object.defineProperty(
+          navigatorWithUserAgentData,
+          "userAgentData",
+          originalUserAgentData,
+        );
+      } else {
+        Reflect.deleteProperty(navigatorWithUserAgentData, "userAgentData");
+      }
+    }
+  });
+
+  it("detaches immovable upward keys only when older history can hydrate", () => {
+    const exerciseBoundary = (
+      canHydrateOlderHistory: boolean,
+      key: "ArrowUp" | "PageUp",
+    ) => {
+      const activeSession = canHydrateOlderHistory
+        ? session(false)
+        : {
+            ...session(false),
+            hasOlderHistory: false,
+            hasNewerHistory: false,
+            messagesLoaded: true,
+          };
+      const scrollNode = document.createElement("section");
+      const messageCard = document.createElement("article");
+      scrollNode.append(messageCard);
+      document.body.append(scrollNode);
+      Object.defineProperties(scrollNode, {
+        clientHeight: { configurable: true, value: 200 },
+        scrollHeight: { configurable: true, value: 200 },
+        scrollTop: { configurable: true, writable: true, value: 0 },
+      });
+      const intentListener = vi.fn();
+      scrollNode.addEventListener(
+        MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+        intentListener,
+      );
+      const hook = renderHook(() =>
+        useSessionPaneScrollState({
+          ...params(activeSession),
+          isActive: true,
+          isSessionTabActive: true,
+        }),
+      );
+      hook.result.current.messageStackRef.current = scrollNode;
+
+      act(() => {
+        fireEvent.mouseDown(messageCard);
+        fireEvent.keyDown(document.body, { key });
+      });
+
+      const result = {
+        detail: (intentListener.mock.calls[0]?.[0] as CustomEvent | undefined)
+          ?.detail,
+        liveTailPinned: hook.result.current.liveTailPinned,
+      };
+      hook.unmount();
+      scrollNode.remove();
+      return result;
+    };
+
+    expect(exerciseBoundary(true, "ArrowUp")).toMatchObject({
+      detail: {
+        detachFromBottomAtBoundary: true,
+        direction: "up",
+        viewportCanMove: false,
+      },
+      liveTailPinned: false,
+    });
+    expect(exerciseBoundary(false, "ArrowUp")).toMatchObject({
+      detail: {
+        detachFromBottomAtBoundary: false,
+        direction: "up",
+        viewportCanMove: false,
+      },
+      liveTailPinned: true,
+    });
+    expect(exerciseBoundary(true, "PageUp")).toMatchObject({
+      detail: {
+        detachFromBottomAtBoundary: true,
+        direction: "up",
+        scrollKind: "page_jump",
+        viewportCanMove: false,
+      },
+      liveTailPinned: false,
+    });
+  });
+
   it("does not let a stale scroll-state listener claim bottom-repin authority", () => {
     const detail = { authorityPresent: false };
 
@@ -1951,6 +2772,260 @@ describe("session pane historical-window tail state", () => {
     expect(hook.result.current.liveTailPinned).toBe(false);
   });
 
+  it.each([
+    ["a real recorded bottom", false],
+    ["the pinned-bottom sentinel", true],
+  ])(
+    "detaches an unannounced upward native scroll from %s before a repin",
+    (_recordedPosition, usePinnedBottomSentinel) => {
+      vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+      vi.stubGlobal("cancelAnimationFrame", vi.fn());
+      const activeSession = session(false);
+      const scrollStateKey = "pane-1:session-history";
+      const paneScrollPositions = {
+        [scrollStateKey]: { top: 800, shouldStick: true },
+      };
+      const paneShouldStickToBottomRef = {
+        current: { [scrollStateKey]: true },
+      };
+      const scrollNode = document.createElement("section");
+      Object.defineProperties(scrollNode, {
+        clientHeight: { configurable: true, value: 200 },
+        scrollHeight: { configurable: true, value: 1_000 },
+        scrollTop: { configurable: true, writable: true, value: 800 },
+      });
+      Object.defineProperty(scrollNode, "scrollTo", {
+        configurable: true,
+        value: vi.fn((options: ScrollToOptions) => {
+          if (typeof options.top === "number") {
+            scrollNode.scrollTop = options.top;
+          }
+        }),
+      });
+      const userScrollIntents: Array<Record<string, unknown>> = [];
+      scrollNode.addEventListener(
+        MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+        (event) => {
+          userScrollIntents.push(
+            (event as CustomEvent<Record<string, unknown>>).detail,
+          );
+        },
+      );
+
+      const hook = renderHook(() => {
+        const state = useSessionPaneScrollState({
+          ...params(activeSession),
+          isSessionTabActive: true,
+          paneScrollPositions,
+          paneShouldStickToBottomRef,
+          scrollStateKey,
+        });
+        // Publish the DOM node during render so the hook's layout listeners
+        // observe it on their first commit, matching a mounted message stack.
+        state.messageStackRef.current = scrollNode;
+        return state;
+      });
+
+      act(() => {
+        // Prime the attached geometry exactly as a wheel-to-bottom scroll
+        // frame does in production. The upward frame below deliberately has
+        // no keydown, wheel, pointer, or normalized-intent predecessor.
+        hook.result.current.handleMessageStackScroll({
+          currentTarget: scrollNode,
+        } as ReactUIEvent<HTMLElement>);
+      });
+      if (usePinnedBottomSentinel) {
+        paneScrollPositions[scrollStateKey].top = Number.MAX_SAFE_INTEGER;
+      }
+
+      act(() => {
+        scrollNode.scrollTop = 760;
+        hook.result.current.handleMessageStackScroll({
+          currentTarget: scrollNode,
+        } as ReactUIEvent<HTMLElement>);
+      });
+
+      expect(paneScrollPositions[scrollStateKey]).toEqual({
+        top: 760,
+        shouldStick: false,
+      });
+      expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
+      expect(hook.result.current.liveTailPinned).toBe(false);
+      expect(userScrollIntents).toEqual([
+        {
+          detachFromBottomAtBoundary: false,
+          direction: "up",
+          scrollKind: "incremental",
+          viewportCanMove: true,
+        },
+      ]);
+
+      act(() => {
+        expect(
+          requestMessageStackBottomRepin(scrollNode, { beforePaint: true }),
+        ).toBe(true);
+      });
+      expect(scrollNode.scrollTop).toBe(760);
+    },
+  );
+
+  it.each([
+    ["upward", 1_040, 800, 810, false],
+    ["downward", 1_080, 850, 880, true],
+  ] as const)(
+    "%s native motion during a programmatic bottom-follow window yields only to reader movement",
+    (_direction, nextScrollHeight, nextScrollTop, expectedTop, expectedPinned) => {
+      vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+      vi.stubGlobal("cancelAnimationFrame", vi.fn());
+      const activeSession = session(false);
+      const scrollStateKey = "pane-1:session-history";
+      const paneScrollPositions = {
+        [scrollStateKey]: { top: 800, shouldStick: true },
+      };
+      const paneShouldStickToBottomRef = {
+        current: { [scrollStateKey]: true },
+      };
+      let scrollHeight = 1_000;
+      const scrollNode = document.createElement("section");
+      Object.defineProperties(scrollNode, {
+        clientHeight: { configurable: true, value: 200 },
+        scrollHeight: { configurable: true, get: () => scrollHeight },
+        scrollTop: { configurable: true, writable: true, value: 800 },
+      });
+      Object.defineProperty(scrollNode, "scrollTo", {
+        configurable: true,
+        value: vi.fn((options: ScrollToOptions) => {
+          if (typeof options.top === "number") {
+            scrollNode.scrollTop = options.top;
+          }
+        }),
+      });
+
+      const hook = renderHook(() => {
+        const state = useSessionPaneScrollState({
+          ...params(activeSession),
+          isSessionTabActive: true,
+          paneScrollPositions,
+          paneShouldStickToBottomRef,
+          scrollStateKey,
+        });
+        state.messageStackRef.current = scrollNode;
+        return state;
+      });
+
+      act(() => {
+        hook.result.current.handleMessageStackScroll({
+          currentTarget: scrollNode,
+        } as ReactUIEvent<HTMLElement>);
+      });
+      scrollHeight = 1_040;
+      act(() => {
+        expect(
+          requestMessageStackBottomRepin(scrollNode, { beforePaint: true }),
+        ).toBe(true);
+      });
+      expect(scrollNode.scrollTop).toBe(840);
+
+      scrollHeight = nextScrollHeight;
+      act(() => {
+        scrollNode.scrollTop = nextScrollTop;
+        hook.result.current.handleMessageStackScroll({
+          currentTarget: scrollNode,
+        } as ReactUIEvent<HTMLElement>);
+      });
+
+      if (!expectedPinned) {
+        // A later downward frame proves the old programmatic window was
+        // cancelled rather than merely skipped for one event.
+        act(() => {
+          scrollNode.scrollTop = expectedTop;
+          hook.result.current.handleMessageStackScroll({
+            currentTarget: scrollNode,
+          } as ReactUIEvent<HTMLElement>);
+        });
+      }
+      expect(paneScrollPositions[scrollStateKey]).toEqual({
+        top: expectedTop,
+        shouldStick: expectedPinned,
+      });
+      expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(
+        expectedPinned,
+      );
+      expect(hook.result.current.liveTailPinned).toBe(expectedPinned);
+    },
+  );
+
+  it.each([
+    ["live content growth", 1_040, 800, 840],
+    ["a browser clamp after content shrink", 960, 760, 760],
+  ])(
+    "keeps tail-follow attached through %s",
+    (_transition, nextScrollHeight, nextScrollTop, expectedBottom) => {
+      vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+      vi.stubGlobal("cancelAnimationFrame", vi.fn());
+      const activeSession = session(false);
+      const scrollStateKey = "pane-1:session-history";
+      const paneScrollPositions = {
+        [scrollStateKey]: { top: 800, shouldStick: true },
+      };
+      const paneShouldStickToBottomRef = {
+        current: { [scrollStateKey]: true },
+      };
+      let scrollHeight = 1_000;
+      const scrollNode = document.createElement("section");
+      Object.defineProperties(scrollNode, {
+        clientHeight: { configurable: true, value: 200 },
+        scrollHeight: { configurable: true, get: () => scrollHeight },
+        scrollTop: { configurable: true, writable: true, value: 800 },
+      });
+      Object.defineProperty(scrollNode, "scrollTo", {
+        configurable: true,
+        value: vi.fn((options: ScrollToOptions) => {
+          if (typeof options.top === "number") {
+            scrollNode.scrollTop = options.top;
+          }
+        }),
+      });
+
+      const hook = renderHook(() => {
+        const state = useSessionPaneScrollState({
+          ...params(activeSession),
+          isSessionTabActive: true,
+          paneScrollPositions,
+          paneShouldStickToBottomRef,
+          scrollStateKey,
+        });
+        state.messageStackRef.current = scrollNode;
+        return state;
+      });
+
+      act(() => {
+        hook.result.current.handleMessageStackScroll({
+          currentTarget: scrollNode,
+        } as ReactUIEvent<HTMLElement>);
+        scrollHeight = nextScrollHeight;
+        scrollNode.scrollTop = nextScrollTop;
+        hook.result.current.handleMessageStackScroll({
+          currentTarget: scrollNode,
+        } as ReactUIEvent<HTMLElement>);
+      });
+
+      expect(paneScrollPositions[scrollStateKey]).toEqual({
+        top: nextScrollTop,
+        shouldStick: true,
+      });
+      expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(true);
+      expect(hook.result.current.liveTailPinned).toBe(true);
+
+      act(() => {
+        expect(
+          requestMessageStackBottomRepin(scrollNode, { beforePaint: true }),
+        ).toBe(true);
+      });
+      expect(scrollNode.scrollTop).toBe(expectedBottom);
+    },
+  );
+
   it("persists detached intent after an upward native scrollbar drag inside the near-bottom band", () => {
     let nextAnimationFrameId = 1;
     const animationFrames = new Map<number, FrameRequestCallback>();
@@ -2288,11 +3363,19 @@ describe("session pane historical-window tail state", () => {
     expect(hook.result.current.liveTailPinned).toBe(true);
   });
 
-  it("does not detach live follow for navigation keys owned by transcript controls", () => {
+  it("keeps control-owned keys attached but detaches unhandled link scroll keys", () => {
     const activeSession = session(false);
     const scrollNode = document.createElement("section");
     const button = document.createElement("button");
-    scrollNode.append(button);
+    const textarea = document.createElement("textarea");
+    const anchor = document.createElement("a");
+    anchor.href = "#docs";
+    scrollNode.append(button, textarea, anchor);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
     const sharedParams = {
       ...params(activeSession),
       paneShouldStickToBottomRef: {
@@ -2310,6 +3393,22 @@ describe("session pane historical-window tail state", () => {
         defaultPrevented: false,
         key: " ",
         metaKey: false,
+        shiftKey: false,
+        target: textarea,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    expect(hook.result.current.liveTailPinned).toBe(true);
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: " ",
+        metaKey: false,
+        shiftKey: false,
         target: button,
         type: "keydown",
       } as unknown as ReactKeyboardEvent<HTMLElement>);
@@ -2324,10 +3423,115 @@ describe("session pane historical-window tail state", () => {
         defaultPrevented: false,
         key: "PageDown",
         metaKey: false,
+        shiftKey: false,
         target: scrollNode,
         type: "keydown",
       } as unknown as ReactKeyboardEvent<HTMLElement>);
     });
+    expect(hook.result.current.liveTailPinned).toBe(true);
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "ArrowUp",
+        metaKey: false,
+        shiftKey: false,
+        target: anchor,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    expect(hook.result.current.liveTailPinned).toBe(false);
+  });
+
+  it("keeps direct transcript keys with a nested scroller that can move", () => {
+    const activeSession = session(false);
+    const scrollNode = document.createElement("section");
+    const nestedScroller = document.createElement("div");
+    const nestedContent = document.createElement("span");
+    nestedScroller.tabIndex = 0;
+    nestedScroller.style.overflowY = "auto";
+    nestedScroller.append(nestedContent);
+    scrollNode.append(nestedScroller);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    Object.defineProperties(nestedScroller, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, writable: true, value: 100 },
+    });
+    const hook = renderHook(() => useSessionPaneScrollState(params(activeSession)));
+    hook.result.current.messageStackRef.current = scrollNode;
+    const intentListener = vi.fn();
+    scrollNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      intentListener,
+    );
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "PageUp",
+        metaKey: false,
+        shiftKey: false,
+        target: nestedContent,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+
+    expect(intentListener).not.toHaveBeenCalled();
+    expect(hook.result.current.liveTailPinned).toBe(true);
+  });
+
+  it("uses stack semantics for PageDown from a transcript text input", () => {
+    const activeSession = session(false);
+    const scrollNode = document.createElement("section");
+    const textInput = document.createElement("input");
+    textInput.type = "text";
+    textInput.value = "selection text";
+    textInput.setSelectionRange(4, 4);
+    scrollNode.append(textInput);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 500 },
+    });
+    const hook = renderHook(() => useSessionPaneScrollState(params(activeSession)));
+    hook.result.current.messageStackRef.current = scrollNode;
+    const intentListener = vi.fn();
+    scrollNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      intentListener,
+    );
+    const nativeEvent = new KeyboardEvent("keydown", {
+      bubbles: true,
+      key: "PageDown",
+    });
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "PageDown",
+        metaKey: false,
+        nativeEvent,
+        shiftKey: false,
+        target: textInput,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+
+    expect(intentListener).toHaveBeenCalledTimes(1);
     expect(hook.result.current.liveTailPinned).toBe(true);
   });
 
@@ -3731,7 +4935,10 @@ describe("session pane historical-window tail state", () => {
       demands.push(demand);
     });
     const historicalSession = session(true);
-    const sharedParams = params(historicalSession);
+    const sharedParams = {
+      ...params(historicalSession),
+      isSessionTabActive: true,
+    };
     const hook = renderHook(
       ({ activeSession }) =>
         useSessionPaneScrollState({
@@ -3801,7 +5008,10 @@ describe("session pane historical-window tail state", () => {
       demands.push(demand);
     });
     const initialHistoricalWindow = session(true);
-    const sharedParams = params(initialHistoricalWindow);
+    const sharedParams = {
+      ...params(initialHistoricalWindow),
+      isSessionTabActive: true,
+    };
     const hook = renderHook(
       ({ activeSession }) =>
         useSessionPaneScrollState({
@@ -3860,7 +5070,10 @@ describe("session pane historical-window tail state", () => {
       demands.push(demand);
     });
     const activeSession = session(false);
-    const sharedParams = params(activeSession);
+    const sharedParams = {
+      ...params(activeSession),
+      isSessionTabActive: true,
+    };
     const hook = renderHook(
       ({ scrollStateKey }) =>
         useSessionPaneScrollState({
@@ -3908,5 +5121,139 @@ describe("session pane historical-window tail state", () => {
       completeSessionHistoryPageDemand(demands[2]?.requestId, false);
     });
     removeListener();
+  });
+
+  it("keeps the newer tail boundary when a start request completes last", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", ((
+      callback: FrameRequestCallback,
+    ) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    }) as typeof requestAnimationFrame);
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const scrollNode = document.createElement("section");
+    scrollNode.innerHTML = '<div class="virtualized-message-list"></div>';
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    scrollNode.scrollTo = vi.fn(
+      (optionsOrX?: ScrollToOptions | number, y?: number) => {
+        scrollNode.scrollTop =
+          typeof optionsOrX === "number"
+            ? (y ?? scrollNode.scrollTop)
+            : (optionsOrX?.top ?? scrollNode.scrollTop);
+      },
+    ) as typeof scrollNode.scrollTo;
+    const demands: SessionHistoryPageDemand[] = [];
+    const removeListener = addSessionHistoryPageDemandListener((demand) => {
+      demands.push(demand);
+    });
+    const windowedSession = {
+      ...session(true),
+      hasOlderHistory: true,
+    };
+    const hook = renderHook(() =>
+      useSessionPaneScrollState({
+        ...params(windowedSession),
+        isSessionTabActive: true,
+      }),
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    try {
+      act(() => {
+        hook.result.current.scrollMessageStackToBoundary("top");
+        hook.result.current.scrollMessageStackToBoundary("bottom");
+      });
+      expect(demands.map((demand) => demand.direction)).toEqual([
+        "start",
+        "tail",
+      ]);
+
+      await act(async () => {
+        completeSessionHistoryPageDemand(demands[1]?.requestId, true);
+        await Promise.resolve();
+      });
+      expect(animationFrames).toHaveLength(1);
+
+      await act(async () => {
+        completeSessionHistoryPageDemand(demands[0]?.requestId, true);
+        await Promise.resolve();
+      });
+      expect(
+        animationFrames,
+        "the stale start completion must not enqueue a second boundary write",
+      ).toHaveLength(1);
+
+      act(() => {
+        animationFrames.shift()?.(0);
+      });
+      expect(scrollNode.scrollTop).toBe(800);
+    } finally {
+      hook.unmount();
+      removeListener();
+    }
+  });
+
+  it("does not apply a start boundary after intervening manual paging", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", ((
+      callback: FrameRequestCallback,
+    ) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    }) as typeof requestAnimationFrame);
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    scrollNode.scrollTo = vi.fn(
+      (optionsOrX?: ScrollToOptions | number, y?: number) => {
+        scrollNode.scrollTop =
+          typeof optionsOrX === "number"
+            ? (y ?? scrollNode.scrollTop)
+            : (optionsOrX?.top ?? scrollNode.scrollTop);
+      },
+    ) as typeof scrollNode.scrollTo;
+    const demands: SessionHistoryPageDemand[] = [];
+    const removeListener = addSessionHistoryPageDemandListener((demand) => {
+      demands.push(demand);
+    });
+    const historicalSession = session(false);
+    const hook = renderHook(() =>
+      useSessionPaneScrollState({
+        ...params(historicalSession),
+        isSessionTabActive: true,
+      }),
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    try {
+      act(() => {
+        hook.result.current.scrollMessageStackToBoundary("top");
+      });
+      expect(demands).toHaveLength(1);
+
+      act(() => {
+        hook.result.current.scrollMessageStackByPage(-1);
+      });
+      expect(scrollNode.scrollTop).toBe(630);
+
+      await act(async () => {
+        completeSessionHistoryPageDemand(demands[0]?.requestId, false);
+        await Promise.resolve();
+      });
+      expect(animationFrames).toHaveLength(0);
+      expect(scrollNode.scrollTop).toBe(630);
+    } finally {
+      hook.unmount();
+      removeListener();
+    }
   });
 });

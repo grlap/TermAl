@@ -13,19 +13,11 @@
 
 use super::*;
 
-struct TempDirCleanup {
-    path: PathBuf,
-}
+struct TempDirCleanup;
 
 impl TempDirCleanup {
-    fn new(path: PathBuf) -> Self {
-        Self { path }
-    }
-}
-
-impl Drop for TempDirCleanup {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
+    fn new(path: PathBuf) -> TestTempRoot {
+        TestTempRoot::own(path)
     }
 }
 
@@ -741,6 +733,7 @@ fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
         "termal-agent-commands-claude-native-{}",
         Uuid::new_v4()
     ));
+    let _cleanup = TestTempRoot::own(root.clone());
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
     fs::write(
@@ -822,7 +815,6 @@ fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
     drop(response);
     drop(created);
     drop(state);
-    let _ = fs::remove_dir_all(&root);
 }
 
 // Pins `AppState::sync_session_agent_commands` to bumping both the global

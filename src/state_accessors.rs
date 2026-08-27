@@ -186,25 +186,19 @@ fn is_recoverable_remote_tail_miss(err: &ApiError) -> bool {
 mod visible_session_hydration_error_tests {
     use super::*;
 
-    struct TempStateDir {
-        path: PathBuf,
-    }
+    struct TempStateDir;
 
     impl TempStateDir {
-        fn new(prefix: &str) -> Self {
-            let path = std::env::temp_dir().join(format!("{prefix}-{}", Uuid::new_v4()));
-            std::fs::create_dir_all(&path).expect("test root should be created");
-            Self { path }
-        }
-
-        fn path(&self) -> &FsPath {
-            &self.path
+        fn new(prefix: &str) -> TestTempRoot {
+            TestTempRoot::create(prefix)
         }
     }
 
-    impl Drop for TempStateDir {
+    struct PersistWorkerShutdown<'a>(&'a AppState);
+
+    impl Drop for PersistWorkerShutdown<'_> {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.path);
+            self.0.shutdown_persist_blocking();
         }
     }
 
@@ -219,6 +213,7 @@ mod visible_session_hydration_error_tests {
             templates_path,
         )
         .expect("test state should initialize");
+        let _persist_shutdown = PersistWorkerShutdown(&state);
 
         let local_session_id = state
             .create_session(CreateSessionRequest {
@@ -334,6 +329,7 @@ mod visible_session_hydration_error_tests {
             templates_path,
         )
         .expect("test state should initialize");
+        let _persist_shutdown = PersistWorkerShutdown(&state);
         let session_id = state
             .create_session(CreateSessionRequest {
                 name: Some("Queued Session".to_owned()),
@@ -409,6 +405,7 @@ mod visible_session_hydration_error_tests {
             root.path().join("orchestrators.json"),
         )
         .expect("test state should initialize");
+        let _persist_shutdown = PersistWorkerShutdown(&state);
         let record = DelegationRecord {
             id: "delegation-1".to_owned(),
             parent_session_id: "parent-session".to_owned(),
@@ -525,6 +522,7 @@ mod visible_session_hydration_error_tests {
             root.path().join("orchestrators.json"),
         )
         .expect("test state should initialize");
+        let _persist_shutdown = PersistWorkerShutdown(&state);
         let session_id = state
             .create_session(CreateSessionRequest {
                 name: Some("Active Session".to_owned()),

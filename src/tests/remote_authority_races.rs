@@ -1021,6 +1021,7 @@ fn registry_refuses_unknown_remote_without_inserting_connection() {
 fn app_boot_seeds_registry_authority_from_persisted_remote_settings() {
     let unique = Uuid::new_v4();
     let state_root = std::env::temp_dir().join(format!("termal-registry-boot-{unique}"));
+    let _state_temp_root = TestTempRoot::own(state_root.clone());
     let persistence_path = state_root.join("termal.sqlite");
     let templates_path = state_root.join("orchestrators.json");
     fs::create_dir_all(&state_root).expect("state root should exist");

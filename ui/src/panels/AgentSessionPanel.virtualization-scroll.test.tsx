@@ -1870,8 +1870,8 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
       },
     });
     // Wrap addEventListener / removeEventListener to count scroll
-    // registrations specifically. Other listeners (wheel, touchmove,
-    // keydown) pass through unchanged.
+    // registrations specifically. Other listeners (wheel, touchmove, and the
+    // normalized keyboard-intent event) pass through unchanged.
     const originalAdd = scrollNode.addEventListener.bind(scrollNode);
     const originalRemove = scrollNode.removeEventListener.bind(scrollNode);
     scrollNode.addEventListener = ((

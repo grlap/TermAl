@@ -27,6 +27,7 @@ use super::*;
 #[test]
 fn discover_codex_threads_from_home_reads_latest_database() {
     let codex_home = std::env::temp_dir().join(format!("termal-codex-home-{}", Uuid::new_v4()));
+    let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::write(codex_home.join("state.db"), b"").unwrap_or_default();
     write_test_codex_threads_db(
         &codex_home,
@@ -59,8 +60,6 @@ fn discover_codex_threads_from_home_reads_latest_database() {
             title: "Review local repo".to_owned(),
         }]
     );
-
-    let _ = fs::remove_dir_all(&codex_home);
 }
 
 // pins that Codex thread discovery treats `model` and `reasoning_effort` as
@@ -70,6 +69,7 @@ fn discover_codex_threads_from_home_reads_latest_database() {
 fn discover_codex_threads_from_home_tolerates_missing_optional_columns() {
     let codex_home =
         std::env::temp_dir().join(format!("termal-codex-home-legacy-{}", Uuid::new_v4()));
+    let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
         rusqlite::Connection::open(codex_home.join("state_5.sqlite")).expect("db should open");
@@ -109,8 +109,6 @@ fn discover_codex_threads_from_home_tolerates_missing_optional_columns() {
     assert_eq!(threads[0].id, "thread-legacy");
     assert_eq!(threads[0].model, None);
     assert_eq!(threads[0].reasoning_effort, None);
-
-    let _ = fs::remove_dir_all(&codex_home);
 }
 
 // pins that `resolve_codex_threads_database_path` only matches filenames of
@@ -121,6 +119,7 @@ fn discover_codex_threads_from_home_tolerates_missing_optional_columns() {
 fn resolve_codex_threads_database_path_skips_unrelated_entries() {
     let codex_home =
         std::env::temp_dir().join(format!("termal-codex-home-scan-{}", Uuid::new_v4()));
+    let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     fs::write(codex_home.join("state_9.sqlite"), b"sqlite").expect("valid state db should exist");
     fs::write(codex_home.join("state_preview.sqlite"), b"broken")
@@ -133,8 +132,6 @@ fn resolve_codex_threads_database_path_skips_unrelated_entries() {
         path.file_name().and_then(|value| value.to_str()),
         Some("state_9.sqlite")
     );
-
-    let _ = fs::remove_dir_all(&codex_home);
 }
 
 // pins the candidate-home priority: the `shared-app-server` home wins over
@@ -145,6 +142,7 @@ fn resolve_codex_threads_database_path_skips_unrelated_entries() {
 #[test]
 fn discover_codex_threads_from_sources_skips_repl_home_and_uses_shared_runtime_home() {
     let root = std::env::temp_dir().join(format!("termal-codex-discovery-{}", Uuid::new_v4()));
+    let _temp_root = TestTempRoot::own(root.clone());
     let source_home = root.join(".codex");
     let termal_root = root.join(".termal").join("codex-home");
     let shared_home = termal_root.join("shared-app-server");
@@ -232,8 +230,6 @@ fn discover_codex_threads_from_sources_skips_repl_home_and_uses_shared_runtime_h
         }) if title == "Shared runtime thread"
     ));
     assert!(threads.iter().all(|thread| thread.id != "thread-repl"));
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 // A stale top-level-looking copy can be encountered before a newer home copy
@@ -245,6 +241,7 @@ fn discover_codex_threads_from_homes_retains_delegation_classification_across_du
         "termal-codex-cross-home-delegation-{}",
         Uuid::new_v4()
     ));
+    let _temp_root = TestTempRoot::own(root.clone());
     let stale_home = root.join("stale");
     let classified_home = root.join("classified");
     let delegated_child_prompt = format!(
@@ -294,8 +291,6 @@ fn discover_codex_threads_from_homes_retains_delegation_classification_across_du
         discovery.delegation_thread_ids,
         BTreeSet::from(["thread-cross-home".to_owned()])
     );
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 // pins the scope-before-limit ordering: with 101 unrelated threads plus one
@@ -307,6 +302,7 @@ fn discover_codex_threads_from_homes_retains_delegation_classification_across_du
 fn discover_codex_threads_from_home_filters_scopes_before_limiting_results() {
     let codex_home =
         std::env::temp_dir().join(format!("termal-codex-home-large-{}", Uuid::new_v4()));
+    let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
         rusqlite::Connection::open(codex_home.join("state_5.sqlite")).expect("db should open");
@@ -370,8 +366,6 @@ fn discover_codex_threads_from_home_filters_scopes_before_limiting_results() {
 
     assert_eq!(threads.len(), 1);
     assert_eq!(threads[0].id, "thread-target");
-
-    let _ = fs::remove_dir_all(&codex_home);
 }
 
 // pins the per-home cap at `MAX_DISCOVERED_CODEX_THREADS_PER_HOME` and the
@@ -383,6 +377,7 @@ fn discover_codex_threads_from_home_filters_scopes_before_limiting_results() {
 fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
     let codex_home =
         std::env::temp_dir().join(format!("termal-codex-home-limited-{}", Uuid::new_v4()));
+    let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
         rusqlite::Connection::open(codex_home.join("state_7.sqlite")).expect("db should open");
@@ -439,8 +434,6 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
         threads.last().map(|thread| thread.id.as_str()),
         Some(last_expected_id.as_str()),
     );
-
-    let _ = fs::remove_dir_all(&codex_home);
 }
 
 // Pins the current Codex schema's nested-agent markers. Subagent threads are
@@ -455,6 +448,7 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
 fn discover_codex_threads_from_home_excludes_subagents_before_limit_and_reports_ids() {
     let codex_home =
         std::env::temp_dir().join(format!("termal-codex-home-subagents-{}", Uuid::new_v4()));
+    let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
         rusqlite::Connection::open(codex_home.join("state_8.sqlite")).expect("db should open");
@@ -604,7 +598,6 @@ fn discover_codex_threads_from_home_excludes_subagents_before_limit_and_reports_
     );
 
     drop(connection);
-    let _ = fs::remove_dir_all(&codex_home);
 }
 
 // The SQL prefix is only a candidate accelerator. Rust owns the authoritative
@@ -616,6 +609,7 @@ fn discover_codex_threads_from_home_retains_invalid_delegation_prefixes_and_null
         "termal-codex-home-delegation-marker-{}",
         Uuid::new_v4()
     ));
+    let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
         rusqlite::Connection::open(codex_home.join("state_8.sqlite")).expect("db should open");
@@ -710,7 +704,6 @@ fn discover_codex_threads_from_home_retains_invalid_delegation_prefixes_and_null
     );
 
     drop(connection);
-    let _ = fs::remove_dir_all(&codex_home);
 }
 
 // Current Codex stores the complete first user prompt as `threads.title`, but
@@ -724,6 +717,7 @@ fn discover_codex_threads_from_home_rejects_delegation_marker_outside_normalized
         "termal-codex-home-delegation-outside-scope-{}",
         Uuid::new_v4()
     ));
+    let _temp_root = TestTempRoot::own(root.clone());
     let codex_home = root.join("codex");
     let project_scope = root.join("project");
     let outside_repo = root.join("outside").join("repo");
@@ -782,7 +776,6 @@ fn discover_codex_threads_from_home_rejects_delegation_marker_outside_normalized
     assert!(discovery.threads.is_empty());
 
     drop(connection);
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -801,6 +794,7 @@ fn codex_discovery_like_prefix_pattern_escapes_sql_wildcards() {
 fn discover_codex_threads_from_home_retains_null_source_without_thread_source_column() {
     let codex_home =
         std::env::temp_dir().join(format!("termal-codex-home-null-source-{}", Uuid::new_v4()));
+    let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
         rusqlite::Connection::open(codex_home.join("state_8.sqlite")).expect("db should open");
@@ -881,7 +875,6 @@ fn discover_codex_threads_from_home_retains_null_source_without_thread_source_co
     );
 
     drop(connection);
-    let _ = fs::remove_dir_all(&codex_home);
 }
 
 // Pins restart cleanup for the already-persisted bad rows. Only an empty,
@@ -1087,6 +1080,7 @@ fn app_state_restart_prunes_persisted_codex_subagent_ghost() {
         .expect("test home env mutex poisoned");
     let root =
         std::env::temp_dir().join(format!("termal-codex-subagent-restart-{}", Uuid::new_v4()));
+    let _temp_root = TestTempRoot::own(root.clone());
     let project_root = root.join("project");
     let test_home = root.join("home");
     let shared_codex_home = test_home
@@ -1384,7 +1378,6 @@ fn app_state_restart_prunes_persisted_codex_subagent_ghost() {
 
     drop(_codex_home);
     drop(_home);
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -1679,6 +1672,7 @@ fn import_discovered_codex_threads_normalizes_legacy_local_verbatim_paths() {
         "termal-discovered-verbatim-path-{}",
         Uuid::new_v4()
     ));
+    let _temp_root = TestTempRoot::own(project_root.clone());
     fs::create_dir_all(&project_root).expect("project root should exist");
     let normalized_root = normalize_user_facing_path(&fs::canonicalize(&project_root).unwrap())
         .to_string_lossy()
@@ -1717,8 +1711,6 @@ fn import_discovered_codex_threads_normalizes_legacy_local_verbatim_paths() {
         record.session.project_id.as_deref(),
         Some(project.id.as_str())
     );
-
-    let _ = fs::remove_dir_all(project_root);
 }
 
 // pins that `disable_socket_inheritance` clears `HANDLE_FLAG_INHERIT` on the

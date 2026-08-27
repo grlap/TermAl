@@ -65,13 +65,14 @@ pub(super) fn test_app_state_with_drained_delegation_codex_runtime(runtime_id: &
     state
 }
 
-pub(super) fn temp_delegation_state_paths() -> (PathBuf, PathBuf, PathBuf) {
-    let unique = Uuid::new_v4();
-    let project_root = std::env::temp_dir().join(format!("termal-delegation-root-{unique}"));
-    let state_root = std::env::temp_dir().join(format!("termal-delegation-state-{unique}"));
+pub(super) fn temp_delegation_state_paths() -> (TestTempRoot, PathBuf, PathBuf, PathBuf) {
+    let temp_root = TestTempRoot::create("termal-delegation");
+    let project_root = temp_root.path().join("project");
+    let state_root = temp_root.path().join("state");
     fs::create_dir_all(&project_root).expect("project root should exist");
     fs::create_dir_all(&state_root).expect("state root should exist");
     (
+        temp_root,
         project_root,
         state_root.join("termal.sqlite"),
         state_root.join("orchestrators.json"),

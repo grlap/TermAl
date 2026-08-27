@@ -393,10 +393,10 @@ fn projectless_session_survives_unrelated_project_deletion_during_preflight() {
 #[test]
 fn inferred_project_deletion_during_preflight_falls_back_to_projectless() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
-        "termal-inferred-project-delete-preflight-{}",
-        Uuid::new_v4()
-    ));
+    let project_root = state
+        .test_temp_root_path()
+        .expect("project race tests should own a shared test temp root")
+        .join("inferred-project-delete-preflight");
     let workdir = project_root.join("nested");
     fs::create_dir_all(&workdir).expect("nested workdir should exist");
     let project_id = create_test_project(&state, &project_root, "Inferred Project");
@@ -437,9 +437,6 @@ fn inferred_project_deletion_during_preflight_falls_back_to_projectless() {
     let inner = state.inner.lock().expect("state mutex poisoned");
     assert!(inner.find_project(&project_id).is_none());
     drop(inner);
-
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 #[test]

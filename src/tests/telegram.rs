@@ -2523,12 +2523,6 @@ fn telegram_bot_token_native_credential_store_round_trips() {
 #[test]
 fn telegram_config_update_stores_token_only_in_credential_store() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-token-at-rest-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let token = "123456:secret-at-rest";
@@ -2561,19 +2555,11 @@ fn telegram_config_update_stores_token_only_in_credential_store() {
         json!([project_id.clone()])
     );
     assert_eq!(value["config"]["defaultProjectId"], json!(project_id));
-
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_status_migrates_legacy_plaintext_token_out_of_settings_file() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-token-migration-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let path = state.telegram_bot_file_path();
     let token = "123456:legacy-secret";
@@ -2608,19 +2594,11 @@ fn telegram_status_migrates_legacy_plaintext_token_out_of_settings_file() {
     let value = read_telegram_settings_file_without_plaintext_token(&path, token);
     assert_eq!(value["configMigratedToAppState"], json!(true));
     assert_eq!(value["chatId"], json!(123));
-
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_config_update_keyring_write_failure_does_not_persist_plaintext_token() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-keyring-write-failure-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let token = "123456:write-failure-secret";
@@ -2663,19 +2641,11 @@ fn telegram_config_update_keyring_write_failure_does_not_persist_plaintext_token
         state.snapshot().preferences.telegram,
         TelegramUiConfig::default()
     );
-
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_config_update_keyring_write_failure_preserves_existing_settings() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-keyring-write-existing-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -2729,19 +2699,11 @@ fn telegram_config_update_keyring_write_failure_preserves_existing_settings() {
             .as_deref(),
         Some("123456:existing-secret")
     );
-
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_config_update_post_validation_hook_error_aborts_before_persist() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-post-validation-error-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
@@ -2771,19 +2733,11 @@ fn telegram_config_update_post_validation_hook_error_aborts_before_persist() {
         state.snapshot().preferences.telegram,
         TelegramUiConfig::default()
     );
-
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_status_keyring_read_failure_surfaces_without_unconfigured_fallback() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-keyring-read-failure-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     state
         .save_telegram_bot_token("123456:read-failure-secret")
@@ -2816,8 +2770,6 @@ fn telegram_status_keyring_read_failure_surfaces_without_unconfigured_fallback()
             .as_deref(),
         Some("123456:read-failure-secret")
     );
-
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
@@ -3142,6 +3094,7 @@ fn telegram_state_load_quarantines_corrupt_file_with_hardened_backup() {
         "termal-telegram-corrupt-backup-home-{}",
         Uuid::new_v4()
     ));
+    let _temp_root = TestTempRoot::own(root.clone());
     fs::create_dir(&root).expect("fixture directory should create");
     let path = root.join("telegram-bot.json");
     fs::write(&path, b"{").expect("fixture should write");
@@ -3186,8 +3139,6 @@ fn telegram_state_load_quarantines_corrupt_file_with_hardened_backup() {
             & 0o777;
         assert_eq!(mode, 0o600);
     }
-
-    fs::remove_dir_all(&root).ok();
 }
 
 #[test]
@@ -3679,12 +3630,6 @@ fn telegram_settings_validation_rejects_too_many_subscribed_projects() {
 #[test]
 fn telegram_config_update_rejects_too_many_subscribed_projects() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-too-many-projects-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
 
     let err = state
@@ -3704,18 +3649,11 @@ fn telegram_config_update_rejects_too_many_subscribed_projects() {
 
     assert_eq!(err.status, StatusCode::BAD_REQUEST);
     assert!(err.message.contains("Telegram subscribed projects"));
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_config_update_rejects_delegated_default_session() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-delegated-default-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     {
@@ -3747,18 +3685,11 @@ fn telegram_config_update_rejects_delegated_default_session() {
         err.message
             .contains("default Telegram session cannot be a delegated child session")
     );
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_config_update_allows_enabled_without_token_or_project_target() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-enabled-unconfigured-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let initial_revision = state.snapshot().revision;
 
@@ -3794,18 +3725,11 @@ fn telegram_config_update_allows_enabled_without_token_or_project_target() {
     assert_eq!(value["config"]["enabled"], json!(true));
     assert!(value["config"].get("botToken").is_none());
     assert!(value["config"].get("subscribedProjectIds").is_none());
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_config_update_blank_token_clears_saved_token_before_project_target_check() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-blank-token-clears-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("settings path should have a parent"))
@@ -3851,18 +3775,11 @@ fn telegram_config_update_blank_token_clears_saved_token_before_project_target_c
             .expect("cleared token should read"),
         None
     );
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
 fn telegram_config_update_rejects_saved_token_without_project_target() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let home = std::env::temp_dir().join(format!(
-        "termal-telegram-saved-token-no-project-home-{}",
-        Uuid::new_v4()
-    ));
-    fs::create_dir_all(&home).expect("test home should exist");
-    let _home = ScopedEnvVar::set_home_dir(&home);
     let state = test_app_state();
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("settings path should have a parent"))
@@ -3906,7 +3823,6 @@ fn telegram_config_update_rejects_saved_token_without_project_target() {
             .as_deref(),
         Some("123456:secret")
     );
-    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]

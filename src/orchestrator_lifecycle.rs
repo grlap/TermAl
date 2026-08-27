@@ -404,6 +404,7 @@ impl AppState {
                     &session_id,
                     StopSessionOptions {
                         dispatch_queued_prompts_on_success: false,
+                        pause_automatic_resumes_on_success: false,
                         orchestrator_stop_instance_id: Some(instance_id.to_owned()),
                     },
                 ) {

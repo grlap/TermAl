@@ -474,7 +474,8 @@ fn removing_delegation_parent_consumes_already_satisfied_wait_with_parent_remove
 
 #[test]
 fn boot_reconciliation_drops_unsatisfied_wait_with_missing_parent_and_running_target() {
-    let (project_root, persistence_path, templates_path) = temp_delegation_state_paths();
+    let (_temp_root, project_root, persistence_path, templates_path) =
+        temp_delegation_state_paths();
     let wait_id = "delegation-wait-removed-parent-unsatisfied".to_owned();
     let delegation_id;
     {
@@ -592,6 +593,10 @@ fn legacy_delegation_wait_consumed_delta_defaults_reason_to_completed() {
 fn delegation_wait_consumed_delta_serializes_reason() {
     for (reason, expected_reason) in [
         (DelegationWaitConsumedReason::Completed, "completed"),
+        (
+            DelegationWaitConsumedReason::ParentSessionStopped,
+            "parentSessionStopped",
+        ),
         (
             DelegationWaitConsumedReason::ParentSessionRemoved,
             "parentSessionRemoved",
@@ -1018,8 +1023,189 @@ fn delegation_wait_dispatches_resume_prompt_to_idle_parent_runtime() {
 }
 
 #[test]
+fn stop_session_keeps_queued_work_idle_and_cancels_late_delegation_resume() {
+    let (state, input_rx) =
+        test_app_state_with_delegation_codex_runtime("delegation-wait-parent-stop");
+    let parent_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Review work that the parent may stop waiting for.".to_owned(),
+                title: Some("Cancelable review".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation should be created");
+
+    match input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("delegation child prompt should be delivered first")
+    {
+        CodexRuntimeCommand::Prompt { session_id, .. } => {
+            assert_eq!(session_id, created.delegation.child_session_id);
+        }
+        _ => panic!("delegation should dispatch the child review prompt first"),
+    }
+
+    let wait = state
+        .create_delegation_wait(
+            &parent_session_id,
+            CreateDelegationWaitRequest {
+                delegation_ids: vec![created.delegation.id.clone()],
+                mode: DelegationWaitMode::All,
+                title: Some("Canceled parent fan-in".to_owned()),
+            },
+        )
+        .expect("wait should be scheduled");
+    let mut delta_events = state.subscribe_delta_events();
+
+    let runtime = state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned")
+        .as_ref()
+        .expect("shared Codex runtime should be installed")
+        .clone();
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            parent_session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("thread-parent-stop".to_owned()),
+                turn_id: Some("turn-parent-stop".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("thread-parent-stop".to_owned(), parent_session_id.clone());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let parent_index = inner
+            .find_session_index(&parent_session_id)
+            .expect("parent should exist");
+        let parent = inner
+            .session_mut_by_index(parent_index)
+            .expect("parent should exist");
+        parent.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: runtime.process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: parent_session_id.clone(),
+            }),
+        });
+        parent.session.status = SessionStatus::Active;
+        queue_prompt_on_record(
+            parent,
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: "queued-before-stop".to_owned(),
+                timestamp: stamp_now(),
+                text: "Do not run after Stop.".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+            Vec::new(),
+        );
+    }
+
+    let stop_state = state.clone();
+    let stop_parent_session_id = parent_session_id.clone();
+    let stop_handle = std::thread::spawn(move || stop_state.stop_session(&stop_parent_session_id));
+    match input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("parent interrupt should be delivered")
+    {
+        CodexRuntimeCommand::InterruptTurn { response_tx, .. } => {
+            response_tx
+                .send(Ok(()))
+                .expect("stop acknowledgement should be accepted");
+        }
+        _ => panic!("expected the parent turn interrupt"),
+    }
+    let stopped = stop_handle
+        .join()
+        .expect("stop thread should join")
+        .expect("stop should succeed");
+    let stopped_parent = stopped
+        .sessions
+        .iter()
+        .find(|session| session.id == parent_session_id)
+        .expect("stopped parent should remain present");
+    assert_eq!(stopped_parent.status, SessionStatus::Idle);
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    let mut saw_stopped_wait = false;
+    while let Ok(payload) = delta_events.try_recv() {
+        let event: DeltaEvent =
+            serde_json::from_str(&payload).expect("stop delta should deserialize");
+        if matches!(
+            event,
+            DeltaEvent::DelegationWaitConsumed {
+                wait_id,
+                parent_session_id: delta_parent_session_id,
+                reason: DelegationWaitConsumedReason::ParentSessionStopped,
+                ..
+            } if wait_id == wait.wait.id && delta_parent_session_id == parent_session_id
+        ) {
+            saw_stopped_wait = true;
+        }
+    }
+    assert!(
+        saw_stopped_wait,
+        "Stop should publish why the wait was consumed"
+    );
+
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &created.delegation.child_session_id,
+        "## Result\n\nStatus: completed\n\nSummary:\nLate review result.",
+    );
+    state
+        .refresh_delegation_for_child_session(&created.delegation.child_session_id)
+        .expect("late child completion should reconcile without resuming the parent");
+
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .delegation_waits
+            .iter()
+            .all(|wait| wait.parent_session_id != parent_session_id),
+        "Stop must consume waits that could later resume the parent"
+    );
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_session_id)
+        .expect("parent should remain present");
+    assert_eq!(parent.session.status, SessionStatus::Idle);
+    assert!(parent.orchestrator_auto_dispatch_blocked);
+    assert_eq!(parent.queued_prompts.len(), 1);
+    assert_eq!(parent.queued_prompts[0].source, QueuedPromptSource::User);
+}
+
+#[test]
 fn delegation_wait_reconciles_after_restart_recovery() {
-    let (project_root, persistence_path, templates_path) = temp_delegation_state_paths();
+    let (_temp_root, project_root, persistence_path, templates_path) =
+        temp_delegation_state_paths();
     let parent_session_id;
     let delegation_id;
     let mailbox_id;
@@ -1170,7 +1356,8 @@ fn delegation_wait_reconciles_after_restart_recovery() {
 
 #[test]
 fn delegation_wait_reconciles_missing_parent_after_restart() {
-    let (project_root, persistence_path, templates_path) = temp_delegation_state_paths();
+    let (_temp_root, project_root, persistence_path, templates_path) =
+        temp_delegation_state_paths();
     let wait_id = "delegation-wait-restart-missing-parent".to_owned();
     {
         let state = AppState::new_with_paths(

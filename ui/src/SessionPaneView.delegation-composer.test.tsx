@@ -1,5 +1,12 @@
 import type { ComponentProps } from "react";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CreateDelegationRequest } from "./api";
@@ -14,6 +21,7 @@ import {
   resetSessionStoreForTesting,
   syncComposerSessionsStore,
 } from "./session-store";
+import { addSessionHistoryPageDemandListener } from "./session-history-demand";
 import type {
   AgentCommand,
   DelegationSummary,
@@ -721,5 +729,63 @@ describe("SessionPaneView composer delegation click-through", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+  });
+
+  it("keeps shifted pane boundary navigation active outside session transcripts", async () => {
+    const session = makeSession({
+      hasNewerHistory: true,
+      hasOlderHistory: true,
+      messageCount: 12_000,
+      messagesLoaded: false,
+    });
+    const pane: WorkspacePane = {
+      ...makePane(session.id),
+      tabs: [
+        { id: "tab-session", kind: "session", sessionId: session.id },
+        {
+          id: "tab-source",
+          kind: "source",
+          path: "src/main.rs",
+          originSessionId: session.id,
+          originProjectId: session.projectId,
+        },
+      ],
+      activeTabId: "tab-source",
+      viewMode: "source",
+      sourcePath: "src/main.rs",
+    };
+
+    const historyDemands = vi.fn();
+    const removeHistoryDemandListener = addSessionHistoryPageDemandListener(
+      historyDemands,
+    );
+    try {
+      renderSessionPaneView({
+        session,
+        draft: "",
+        expectComposer: false,
+        pane,
+      });
+      await settleAsyncUi();
+
+      const sourcePanel = screen.getByTestId("source-panel");
+      const messageStack = sourcePanel.closest(".message-stack");
+      expect(messageStack).toBeInstanceOf(HTMLElement);
+      const scrollTo = vi.fn();
+      Object.defineProperty(messageStack, "scrollTo", {
+        configurable: true,
+        value: scrollTo,
+      });
+      expect(
+        fireEvent.keyDown(sourcePanel, {
+          key: "PageUp",
+          shiftKey: true,
+        }),
+      ).toBe(false);
+      expect(scrollTo).toHaveBeenCalledWith({ behavior: "auto", top: 0 });
+      expect(historyDemands).not.toHaveBeenCalled();
+    } finally {
+      removeHistoryDemandListener();
+    }
   });
 });

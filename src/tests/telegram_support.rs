@@ -352,6 +352,7 @@ pub(super) fn telegram_state_sessions_with_project_session(
 
 pub(super) struct TelegramTestConfig {
     pub(super) config: TelegramBotConfig,
+    _temp_root: TestTempRoot,
 }
 
 impl std::ops::Deref for TelegramTestConfig {
@@ -368,13 +369,8 @@ impl std::ops::DerefMut for TelegramTestConfig {
     }
 }
 
-impl Drop for TelegramTestConfig {
-    fn drop(&mut self) {
-        fs::remove_file(&self.config.state_path).ok();
-    }
-}
-
 pub(super) fn telegram_test_config() -> TelegramTestConfig {
+    let temp_root = TestTempRoot::create("termal-telegram");
     TelegramTestConfig {
         config: TelegramBotConfig {
             bot_username: Some("termal_bot".to_owned()),
@@ -383,10 +379,10 @@ pub(super) fn telegram_test_config() -> TelegramTestConfig {
             project_digests_enabled: true,
             project_id: "project-1".to_owned(),
             public_base_url: None,
-            state_path: std::env::temp_dir()
-                .join(format!("termal-telegram-{}.json", Uuid::new_v4())),
+            state_path: temp_root.path().join("state.json"),
             subscribed_project_ids: vec!["project-1".to_owned()],
         },
+        _temp_root: temp_root,
     }
 }
 
@@ -406,7 +402,10 @@ pub(super) fn telegram_text_message(
 }
 
 pub(super) fn create_telegram_settings_project_and_session(state: &AppState) -> (String, String) {
-    let root = std::env::temp_dir().join(format!("termal-telegram-project-{}", Uuid::new_v4()));
+    let root = state
+        .test_temp_root_path()
+        .expect("Telegram tests should own a shared test temp root")
+        .join(format!("telegram-project-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("project root should exist");
     let project = state
         .create_project(CreateProjectRequest {

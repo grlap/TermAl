@@ -2,6 +2,8 @@
 // conversation list.
 // Does not own page measurement, rendering, or layout snapshot construction.
 // Split from: ui/src/panels/VirtualizedConversationMessageList.tsx.
+// Keyboard authority arrives as MESSAGE_STACK_USER_SCROLL_INTENT_EVENT from the
+// pane host; this hook owns wheel/touch/native-scroll observation on the node.
 import { useLayoutEffect, type MutableRefObject, type RefObject } from "react";
 import {
   canNestedScrollableConsumeWheel,
@@ -11,7 +13,9 @@ import { SESSION_STICKY_BOTTOM_BAND_PX } from "../scroll-position";
 import {
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
+  MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
   type MessageStackScrollWriteDetail,
+  type MessageStackUserScrollIntentDetail,
 } from "../message-stack-scroll-sync";
 import {
   DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
@@ -71,6 +75,7 @@ export function nativeScrollKeepsPassiveTailFollow({
   isNativeUserMovement,
   isProgrammaticNavigation,
   scrollDelta,
+  scrollHeightDelta,
   tailFollowIntent,
 }: {
   hadUserScrollInteraction: boolean;
@@ -78,13 +83,16 @@ export function nativeScrollKeepsPassiveTailFollow({
   isNativeUserMovement: boolean;
   isProgrammaticNavigation: boolean;
   scrollDelta: number;
+  scrollHeightDelta: number;
   tailFollowIntent: boolean;
 }) {
   return (
     tailFollowIntent &&
     !hadUserScrollInteraction &&
     !isDetachedFromBottom &&
-    (isProgrammaticNavigation || scrollDelta >= 0 || !isNativeUserMovement)
+    (isProgrammaticNavigation ||
+      scrollDelta >= 0 ||
+      (!isNativeUserMovement && scrollHeightDelta < 0))
   );
 }
 
@@ -146,7 +154,9 @@ export function useVirtualizedConversationScrollEvents({
   advanceUserScrollGeneration: () => void;
   buildBottomMountedRange: (clientHeight: number) => VirtualizedRange;
   cancelPostActivationBottomRestore: () => void;
-  captureLatestVisibleMessageAnchor: (node: HTMLElement) => VisibleMessageAnchor | null;
+  captureLatestVisibleMessageAnchor: (
+    node: HTMLElement,
+  ) => VisibleMessageAnchor | null;
   clearPendingDeferredBottomRestore: () => void;
   clearPendingDeferredLayoutTimer: () => void;
   clearPendingIdleCompactionTimer: () => void;
@@ -171,7 +181,10 @@ export function useVirtualizedConversationScrollEvents({
   pendingProgrammaticBottomFollowUntilRef: MutableRefObject<number>;
   pendingProgrammaticNavigationUntilRef: MutableRefObject<number>;
   pendingProgrammaticScrollTopRef: MutableRefObject<number | null>;
-  prewarmMountedRangeForUpwardWheel: (node: HTMLElement, wheelDeltaY: number) => void;
+  prewarmMountedRangeForUpwardWheel: (
+    node: HTMLElement,
+    wheelDeltaY: number,
+  ) => void;
   reconcileMountedRangeForNativeScroll: (
     node: HTMLElement,
     scrollDelta: number,
@@ -224,7 +237,8 @@ export function useVirtualizedConversationScrollEvents({
       if (options.isNativeScrollEvent) {
         const previousNativeScrollHeight = lastNativeScrollHeightRef.current;
         lastNativeScrollHeightRef.current = node.scrollHeight;
-        const pendingProgrammaticScrollTop = pendingProgrammaticScrollTopRef.current;
+        const pendingProgrammaticScrollTop =
+          pendingProgrammaticScrollTopRef.current;
         const isProgrammaticScrollEvent =
           pendingProgrammaticScrollTop !== null &&
           Math.abs(node.scrollTop - pendingProgrammaticScrollTop) < 1;
@@ -247,15 +261,24 @@ export function useVirtualizedConversationScrollEvents({
           clearPendingDeferredLayoutTimer();
           pendingDeferredLayoutAnchorRef.current = null;
           const scrollDelta = node.scrollTop - lastNativeScrollTopRef.current;
+          const scrollHeightDelta =
+            node.scrollHeight - previousNativeScrollHeight;
           lastNativeScrollTopRef.current = node.scrollTop;
           const isProgrammaticNavigation =
             pendingProgrammaticNavigationUntilRef.current >= performance.now();
-          const isNativeUserMovement =
+          const isStableHeightNativeUserMovement =
             nativeScrollAdvancesUserScrollGeneration({
               currentScrollHeight: node.scrollHeight,
               previousScrollHeight: previousNativeScrollHeight,
               scrollDelta,
             });
+          // A deferred mount or remeasurement can increase content height
+          // between native scroll events. An upward scrollTop delta across
+          // non-shrinking content is still reader movement; prepend/compaction
+          // restores move with their height delta and shrink clamps are below.
+          const isNativeUserMovement =
+            isStableHeightNativeUserMovement ||
+            (scrollDelta < 0 && scrollHeightDelta >= 0);
           if (isNativeUserMovement && !isProgrammaticNavigation) {
             // Scrollbar drags and touch inertia can arrive without an input
             // prelude. A height-changing native event can instead be caused by
@@ -265,15 +288,15 @@ export function useVirtualizedConversationScrollEvents({
           if (Math.abs(scrollDelta) >= 0.5) {
             pendingPrependedBottomGapRef.current = null;
           }
-          const isPassiveTailFollowScroll =
-            nativeScrollKeepsPassiveTailFollow({
-              hadUserScrollInteraction,
-              isDetachedFromBottom: isDetachedFromBottomRef.current,
-              isNativeUserMovement,
-              isProgrammaticNavigation,
-              scrollDelta,
-              tailFollowIntent,
-            });
+          const isPassiveTailFollowScroll = nativeScrollKeepsPassiveTailFollow({
+            hadUserScrollInteraction,
+            isDetachedFromBottom: isDetachedFromBottomRef.current,
+            isNativeUserMovement,
+            isProgrammaticNavigation,
+            scrollDelta,
+            scrollHeightDelta,
+            tailFollowIntent,
+          });
           if (lastUserScrollKindRef.current === null) {
             lastUserScrollKindRef.current = resolveNativeScrollKind(
               lastUserScrollKindRef.current,
@@ -309,18 +332,14 @@ export function useVirtualizedConversationScrollEvents({
           // native-scroll range change paint-safe in both directions; the
           // reconciler still retains only its bounded working band.
           const shouldFlushActiveNativeScroll =
-            !isPassiveTailFollowScroll &&
-            !isScrollContainerNearBottom(node);
+            !isPassiveTailFollowScroll && !isScrollContainerNearBottom(node);
           reconcileMountedRangeForNativeScroll(
             node,
             scrollDelta,
             lastUserScrollKindRef.current,
             { flush: shouldFlushActiveNativeScroll },
           );
-          if (
-            scrollDelta >= 0 &&
-            isScrollContainerAtPhysicalBottom(node)
-          ) {
+          if (scrollDelta >= 0 && isScrollContainerAtPhysicalBottom(node)) {
             // The user just scrolled DOWN to (or stayed at) the
             // bottom. Re-arm the bottom-follow flags so subsequent
             // layout changes can keep the view pinned, and clear the
@@ -373,7 +392,10 @@ export function useVirtualizedConversationScrollEvents({
       }
     };
 
-    const markUserScroll = (event?: WheelEvent | TouchEvent | KeyboardEvent) => {
+    const markUserScroll = (
+      event?: WheelEvent | TouchEvent,
+      explicitIntent?: MessageStackUserScrollIntentDetail,
+    ) => {
       let wheelDeltaY: number | null = null;
       let touchDeltaY: number | null = null;
       if (event?.type === "wheel" && "deltaY" in event) {
@@ -386,7 +408,10 @@ export function useVirtualizedConversationScrollEvents({
         ) {
           return;
         }
-      } else if (typeof TouchEvent !== "undefined" && event instanceof TouchEvent) {
+      } else if (
+        typeof TouchEvent !== "undefined" &&
+        event instanceof TouchEvent
+      ) {
         const touch = event.touches[0] ?? event.changedTouches[0] ?? null;
         if (touch) {
           const previousTouchClientY = lastTouchClientYRef.current;
@@ -423,7 +448,8 @@ export function useVirtualizedConversationScrollEvents({
             ? {
                 ...visibleAnchorBeforeNativeScroll,
                 viewportOffsetPx:
-                  visibleAnchorBeforeNativeScroll.viewportOffsetPx - wheelDeltaY,
+                  visibleAnchorBeforeNativeScroll.viewportOffsetPx -
+                  wheelDeltaY,
               }
             : visibleAnchorBeforeNativeScroll;
       }
@@ -445,19 +471,12 @@ export function useVirtualizedConversationScrollEvents({
       // below only when this gesture actually detaches the reader.
       clearPendingDeferredLayoutTimer();
       pendingDeferredLayoutAnchorRef.current = null;
-      const isSeekKeyboardNavigation =
-        event instanceof KeyboardEvent &&
-        (event.key === "Home" || event.key === "End");
       const isPageJumpKeyboardNavigation =
-        event instanceof KeyboardEvent &&
-        (event.key === "PageUp" || event.key === "PageDown");
+        explicitIntent?.scrollKind === "page_jump";
       const isExplicitUpwardScrollIntent =
+        explicitIntent?.direction === "up" ||
         (wheelDeltaY !== null && wheelDeltaY < 0) ||
-        (touchDeltaY !== null && touchDeltaY < 0) ||
-        (event instanceof KeyboardEvent &&
-          (event.key === "PageUp" ||
-            event.key === "ArrowUp" ||
-            event.key === "Home"));
+        (touchDeltaY !== null && touchDeltaY < 0);
       if (isExplicitUpwardScrollIntent) {
         clearPendingDeferredBottomRestore();
         if (isLikelyBottomEscape) {
@@ -478,11 +497,9 @@ export function useVirtualizedConversationScrollEvents({
         shouldKeepBottomAfterLayoutRef.current = false;
         isDetachedFromBottomRef.current = true;
       }
-      lastUserScrollKindRef.current = isSeekKeyboardNavigation
-        ? "seek"
-        : isPageJumpKeyboardNavigation
-          ? "page_jump"
-          : "incremental";
+      lastUserScrollKindRef.current = isPageJumpKeyboardNavigation
+        ? "page_jump"
+        : "incremental";
       setHasUserScrollInteraction(true);
       lastUserScrollInputTimeRef.current = performance.now();
       scheduleIdleMountedRangeCompaction(userScrollAdjustmentCooldownMs);
@@ -490,10 +507,31 @@ export function useVirtualizedConversationScrollEvents({
         prewarmMountedRangeForUpwardWheel(node, inputScrollDeltaY);
       }
     };
+    const syncExternalUserScrollIntent = (event: Event) => {
+      const detail =
+        event instanceof CustomEvent
+          ? (event.detail as MessageStackUserScrollIntentDetail | undefined)
+          : undefined;
+      if (!detail) {
+        return;
+      }
+      if (!detail.viewportCanMove && !detail.detachFromBottomAtBoundary) {
+        // An ordinary boundary-only intent belongs to history demand and must
+        // not create virtualizer movement authority. The producer opts into the
+        // exception only when an immovable upward gesture will hydrate older
+        // history; in that case retained bottom authority could hide the prepend.
+        return;
+      }
+      // Reuse the exact node-owned intent path. This clears programmatic
+      // bottom-follow authority, advances restore generations, and records the
+      // user cooldown before the body-targeted key produces native motion.
+      markUserScroll(undefined, detail);
+    };
     const syncProgrammaticScrollWrite = (event: Event) => {
       const explicitScrollKind =
         event instanceof CustomEvent
-          ? ((event.detail as MessageStackScrollWriteDetail | undefined)?.scrollKind ?? null)
+          ? ((event.detail as MessageStackScrollWriteDetail | undefined)
+              ?.scrollKind ?? null)
           : null;
       const explicitScrollSource =
         event instanceof CustomEvent
@@ -502,13 +540,20 @@ export function useVirtualizedConversationScrollEvents({
           : "programmatic";
       if (explicitScrollSource === "user") {
         advanceUserScrollGeneration();
+        if (isMeasuringPostActivation) {
+          // Pane-owned seek/page writes replace the old node-keydown prelude.
+          // Cancel activation restore before its pending bottom write can undo
+          // an explicit Home/End/PageUp/PageDown navigation.
+          cancelPostActivationBottomRestore();
+        }
         // Direct pane-owned page/seek writes have no native wheel/touch
         // prelude. Transfer scroll ownership here as well so residual native
         // events from a canceled smooth bottom-follow animation cannot be
         // mistaken for continuation of that animation.
         pendingProgrammaticBottomFollowUntilRef.current =
           Number.NEGATIVE_INFINITY;
-        pendingProgrammaticNavigationUntilRef.current = Number.NEGATIVE_INFINITY;
+        pendingProgrammaticNavigationUntilRef.current =
+          Number.NEGATIVE_INFINITY;
       }
 
       if (explicitScrollKind === "position_restore") {
@@ -640,10 +685,7 @@ export function useVirtualizedConversationScrollEvents({
       ) {
         shouldKeepBottomAfterLayoutRef.current = false;
       }
-      if (
-        explicitScrollSource === "user" &&
-        !hasBottomAuthorityAfterWrite
-      ) {
+      if (explicitScrollSource === "user" && !hasBottomAuthorityAfterWrite) {
         clearPendingDeferredBottomRestore();
         isDetachedFromBottomRef.current = true;
         setHasUserScrollInteraction(true);
@@ -659,10 +701,7 @@ export function useVirtualizedConversationScrollEvents({
       clearPendingDeferredLayoutTimer();
       pendingDeferredLayoutAnchorRef.current = null;
       if (Math.abs(scrollDelta) >= 0.5) {
-        if (
-          explicitScrollKind === "seek" &&
-          hasBottomAuthorityAfterWrite
-        ) {
+        if (explicitScrollKind === "seek" && hasBottomAuthorityAfterWrite) {
           shouldKeepBottomAfterLayoutRef.current = true;
           isDetachedFromBottomRef.current = false;
         }
@@ -709,7 +748,8 @@ export function useVirtualizedConversationScrollEvents({
     // content costs nothing (no native scroll fires), and a click on the
     // scrollbar correctly hands control back to the user.
     const cancelBottomFollowOnMouseDown = (event: MouseEvent) => {
-      pendingProgrammaticBottomFollowUntilRef.current = Number.NEGATIVE_INFINITY;
+      pendingProgrammaticBottomFollowUntilRef.current =
+        Number.NEGATIVE_INFINITY;
       pendingProgrammaticNavigationUntilRef.current = Number.NEGATIVE_INFINITY;
       if (event.target === node) {
         advanceUserScrollGeneration();
@@ -734,13 +774,19 @@ export function useVirtualizedConversationScrollEvents({
       syncViewport({ isNativeScrollEvent: true });
     };
     node.addEventListener("scroll", onNativeScroll, { passive: true });
-    node.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, syncProgrammaticScrollWrite);
+    node.addEventListener(
+      MESSAGE_STACK_SCROLL_WRITE_EVENT,
+      syncProgrammaticScrollWrite,
+    );
+    node.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      syncExternalUserScrollIntent,
+    );
     node.addEventListener("wheel", markUserScroll, { passive: true });
     node.addEventListener("touchstart", recordTouchStart, { passive: true });
     node.addEventListener("touchmove", markUserScroll, { passive: true });
     node.addEventListener("touchend", recordTouchEnd, { passive: true });
     node.addEventListener("touchcancel", recordTouchEnd, { passive: true });
-    node.addEventListener("keydown", markUserScroll);
     node.addEventListener("mousedown", cancelBottomFollowOnMouseDown);
     const ResizeObserverCtor = globalThis.ResizeObserver;
     const resizeObserver =
@@ -753,13 +799,19 @@ export function useVirtualizedConversationScrollEvents({
 
     return () => {
       node.removeEventListener("scroll", onNativeScroll);
-      node.removeEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, syncProgrammaticScrollWrite);
+      node.removeEventListener(
+        MESSAGE_STACK_SCROLL_WRITE_EVENT,
+        syncProgrammaticScrollWrite,
+      );
+      node.removeEventListener(
+        MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+        syncExternalUserScrollIntent,
+      );
       node.removeEventListener("wheel", markUserScroll);
       node.removeEventListener("touchstart", recordTouchStart);
       node.removeEventListener("touchmove", markUserScroll);
       node.removeEventListener("touchend", recordTouchEnd);
       node.removeEventListener("touchcancel", recordTouchEnd);
-      node.removeEventListener("keydown", markUserScroll);
       node.removeEventListener("mousedown", cancelBottomFollowOnMouseDown);
       resizeObserver?.disconnect();
     };

@@ -109,8 +109,16 @@ impl TelegramStatusResponse {
 }
 
 impl AppState {
+    fn telegram_data_dir(&self) -> PathBuf {
+        #[cfg(test)]
+        if let Some(root) = self.test_temp_root_path() {
+            return root.join(".termal");
+        }
+        resolve_termal_data_dir(&self.default_workdir)
+    }
+
     fn telegram_bot_file_path(&self) -> PathBuf {
-        resolve_termal_data_dir(&self.default_workdir).join("telegram-bot.json")
+        self.telegram_data_dir().join("telegram-bot.json")
     }
 
     fn telegram_status(&self) -> Result<TelegramStatusResponse, ApiError> {
@@ -372,7 +380,7 @@ impl AppState {
     }
 
     fn telegram_bot_token_keyring_user(&self) -> String {
-        let data_dir = resolve_termal_data_dir(&self.default_workdir);
+        let data_dir = self.telegram_data_dir();
         let mut hasher = Sha256::new();
         hasher.update(data_dir.to_string_lossy().as_bytes());
         let digest = hasher.finalize();

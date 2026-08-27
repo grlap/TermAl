@@ -4,12 +4,12 @@
 //   kill_session                > stop_session                > cancel_queued_prompt
 //   (tears runtime + record)      (stops turn, keeps record)    (drops one queued prompt)
 //
-// `stop_session` has a `_with_options` variant because orchestrator cleanup
-// paths need to suppress auto-dispatch of queued prompts (so the orchestrator
-// transition can take priority) and tag the stop as part of an instance's
-// cleanup wave (so transition scheduling skips the session while cleanup is in
-// flight). Callers outside orchestrator cleanup use the default options and go
-// through the plain `stop_session` wrapper. See
+// `stop_session` has a `_with_options` variant because the user-facing default
+// suppresses every automatic continuation after Stop, while narrowly scoped
+// internal callers may opt into queue dispatch. Orchestrator cleanup also tags
+// the stop as part of an instance's cleanup wave so transition scheduling skips
+// the session while cleanup is in flight. Callers outside orchestrator cleanup
+// use the default options and go through the plain `stop_session` wrapper. See
 // `src/tests/orchestrator.rs::aborted_stop_*` for orchestrator-stop invariants.
 //
 // Each route branches on the session's runtime: Claude dedicated runtimes are
@@ -193,8 +193,8 @@ impl AppState {
     /// Public entry point for stopping a session's current turn while
     /// keeping the session alive. Convenience wrapper around
     /// `stop_session_with_options` with `StopSessionOptions::default()`
-    /// (auto-dispatch the next queued prompt on success, not part of an
-    /// orchestrator cleanup wave).
+    /// (leave queued work paused on success, not part of an orchestrator
+    /// cleanup wave).
     fn stop_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
         self.stop_session_with_options(session_id, StopSessionOptions::default())
     }
@@ -209,10 +209,14 @@ impl AppState {
     /// `session.remote_target` is set.
     ///
     /// Options:
-    /// - `dispatch_queued_prompts_on_success`: if `true` (the default),
-    ///   the next queued prompt is auto-dispatched once the stop
-    ///   completes; orchestrator cleanup paths set this to `false` so the
-    ///   orchestrator's own transition can take priority.
+    /// - `dispatch_queued_prompts_on_success`: if `true`, the next queued
+    ///   prompt is auto-dispatched once the stop completes. The default is
+    ///   `false`.
+    /// - `pause_automatic_resumes_on_success`: if `true` (the default),
+    ///   explicit Stop pauses automatic mailbox/workflow wakes and consumes
+    ///   outstanding delegation waits until a new user prompt explicitly
+    ///   resumes the session. Internal orchestrator cleanup sets this to
+    ///   `false` so aborted cleanup can preserve its durable work queue.
     /// - `orchestrator_stop_instance_id`: if `Some`, tags the stop as part
     ///   of that orchestrator instance's cleanup wave so transition
     ///   scheduling skips the session while cleanup is in flight (the
@@ -331,6 +335,7 @@ impl AppState {
             }
         };
         let orchestrator_stop_instance_id = options.orchestrator_stop_instance_id.clone();
+        let suppress_automatic_resume = options.pause_automatic_resumes_on_success;
         let transition = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -349,6 +354,15 @@ impl AppState {
                 record.runtime_reset_required = false;
                 record.runtime_stop_in_progress = false;
                 record.deferred_stop_callbacks.clear();
+                if suppress_automatic_resume {
+                    record.orchestrator_auto_dispatch_blocked = true;
+                    // A wait may already have completed and queued its fan-in
+                    // before Stop acquired the state lock. Drop all automatic
+                    // workflow continuations here; user and mailbox prompts
+                    // remain durable but paused behind the explicit-resume
+                    // latch.
+                    clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
+                }
                 let pending_interaction_indices =
                     cancel_pending_interaction_messages(&mut record.session.messages);
                 let mut created_message_indices = Vec::new();
@@ -393,6 +407,19 @@ impl AppState {
             if let Some(ref thread_id) = thread_id_to_suppress {
                 inner.ignore_discovered_codex_thread(Some(thread_id));
             }
+
+            // Stop itself remains authoritative in memory if persistence
+            // fails because the interrupted runtime cannot be resurrected.
+            // Delegation waits are different: consuming them is only valid as
+            // part of the durable Stop commit, so retain their exact ordering
+            // for the commit-error rollback below.
+            let delegation_waits_before_stop =
+                suppress_automatic_resume.then(|| inner.delegation_waits.clone());
+            let stopped_wait_refresh = if suppress_automatic_resume {
+                consume_delegation_waits_for_stopped_parent_locked(&mut inner, session_id)
+            } else {
+                DelegationWaitRefresh::default()
+            };
 
             let mut stopped_orchestrator_instance_index = None;
             let mut added_stopped_session_id = false;
@@ -481,9 +508,13 @@ impl AppState {
                     queued_turn_result,
                     pending_interaction_updates,
                     created_messages,
+                    stopped_wait_refresh,
                     revision,
                 )),
                 Err(err) => {
+                    if let Some(delegation_waits_before_stop) = delegation_waits_before_stop {
+                        inner.delegation_waits = delegation_waits_before_stop;
+                    }
                     if added_stopped_session_id {
                         if let Some(instance_index) = stopped_orchestrator_instance_index {
                             inner.orchestrator_instances[instance_index]
@@ -529,8 +560,13 @@ impl AppState {
                 }
             }
         };
-        let (queued_turn_result, pending_interaction_updates, created_messages, revision) =
-            match transition {
+        let (
+            queued_turn_result,
+            pending_interaction_updates,
+            created_messages,
+            stopped_wait_refresh,
+            revision,
+        ) = match transition {
                 Ok(transition) => transition,
                 Err((error, queued_runtime_to_shutdown)) => {
                     if let Some(runtime) = queued_runtime_to_shutdown {
@@ -548,6 +584,10 @@ impl AppState {
         };
         self.publish_message_created_delta_parts(revision, created_messages);
         self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
+        self.publish_delegation_wait_consumed_deltas(
+            revision,
+            &stopped_wait_refresh.consumed_waits,
+        );
 
         if let Some(orchestrator_instance_id) = orchestrator_stop_instance_id.as_deref() {
             self.note_stopped_orchestrator_session(orchestrator_instance_id, session_id);

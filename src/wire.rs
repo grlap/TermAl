@@ -1413,6 +1413,7 @@ struct DelegationWaitResponse {
 #[serde(rename_all = "camelCase")]
 enum DelegationWaitConsumedReason {
     Completed,
+    ParentSessionStopped,
     ParentSessionUnavailable,
     ParentSessionRemoved,
 }
