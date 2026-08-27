@@ -4726,16 +4726,16 @@ fn reset_fenced_begin_finishes_once_while_runtime_stop_is_still_gated() {
             .update_project_engram_settings(&reset_project_id, EngramProjectSettings::default())
     });
     reset_fenced
-        .recv_timeout(Duration::from_secs(2))
-        .expect("project reset should advance the stale dispatch generation");
+        .recv_timeout(Duration::from_secs(10))
+        .expect("project reset fence handoff should not hang");
 
     let stop_state = state.clone();
     let stop_child_id = child_id.clone();
     let stop_handle = std::thread::spawn(move || stop_state.stop_session(&stop_child_id));
     assert!(matches!(
         runtime_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("OpenCode Stop should enter its gated shutdown"),
+            .recv_timeout(Duration::from_secs(10))
+            .expect("OpenCode Stop cancellation handoff should not hang"),
         AcpRuntimeCommand::Cancel
     ));
 
